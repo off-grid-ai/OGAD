@@ -1,4 +1,4 @@
-// Off Grid as an MCP *server*: exposes the on-device models as MCP tools so any
+// Off Grid AI as an MCP *server*: exposes the on-device models as MCP tools so any
 // MCP client (Claude Desktop, IDEs, other local apps) can route inference through
 // this machine. Mounted at POST /mcp on the :7878 gateway via the MCP SDK's
 // Streamable HTTP transport in stateless JSON mode (one server+transport per
@@ -15,13 +15,27 @@ import path from 'path'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { llm } from './llm'
 import { generateImage, imageGenStatus } from './imagegen'
 import * as tts from './tts'
 import { embeddings } from './embeddings'
 import { desktopExtraction } from './rag/extractors'
 import { parseDataUrl } from './mcp-parse-data-url'
+import { runTool, getToolExtensions } from './tools'
+import { NATIVE_TOOL_SPECS } from './tools/nativeActionToolExtension-logic'
+import { jsonSchemaToZodShape } from './mcp-tool-schema'
+import { authorizeActionRequest } from './mcp-auth'
+import { taskOriginFromRequestMeta } from '@offgrid/sync'
+import { mayRunRemoteTask } from './remote-task-permission'
+import { getTaskExecutionDevice } from './tasks/task-history'
+import { promptMessages } from './desktop-generation'
+import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
+import {
+  generateWithDesktopModels,
+  refreshDesktopModels
+} from './composition/application-access'
 
+const EXECUTION_DEVICE_DESCRIPTION =
+  'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
 async function materialize(ref: string, fallbackExt: string): Promise<string> {
@@ -60,8 +74,35 @@ const TEXT = (t: string): { content: { type: 'text'; text: string }[] } => ({
   content: [{ type: 'text', text: t }]
 })
 
-/** Build a fresh MCP server with all on-device tools registered. */
-function buildMcpServer(): McpServer {
+async function generateMcpText(
+  requestId: string | number,
+  signal: AbortSignal,
+  prompt: string,
+  images: string[],
+  maxTokens: number,
+  operation: { type: 'text' } | { type: 'vision' }
+): Promise<string> {
+  await refreshDesktopModels()
+  const turnId = `mcp:${String(requestId)}`
+  const result = await generateWithDesktopModels({
+    operation,
+    messages: promptMessages(prompt, images),
+    identity: { conversationId: turnId, turnId },
+    profile: 'gateway-request',
+    // The external client's own cap; the profile applies no other.
+    maxTokens,
+    signal
+  })
+  return result.content
+}
+
+/** Build a fresh MCP server. Model/inference tools are always registered (open);
+ *  the ACTION tools are registered ONLY when the request is authorized with the
+ *  desktop's action token, so an unpaired LAN device can't see or run them. */
+export function buildMcpServer(
+  actionsAllowed: boolean,
+  authenticatedDeviceId: string | null = null
+): McpServer {
   const server = new McpServer(
     { name: 'Off Grid AI Desktop', version: '1.0.0' },
     {
@@ -77,16 +118,23 @@ function buildMcpServer(): McpServer {
     {
       title: 'Generate text',
       description:
-        'Generate text with the local LLM (Off Grid). Supports an optional system prompt.',
+        'Generate text with the local LLM (Off Grid AI). Supports an optional system prompt.',
       inputSchema: {
         prompt: z.string().describe('The user prompt.'),
         system: z.string().optional().describe('Optional system instruction.'),
         max_tokens: z.number().int().positive().optional()
       }
     },
-    async ({ prompt, system, max_tokens }) => {
+    async ({ prompt, system, max_tokens }, extra) => {
       const msg = system ? `${system}\n\n${prompt}` : prompt
-      const text = await llm.chat(msg, [], 300000, max_tokens ?? 2048, { disableThinking: true })
+      const text = await generateMcpText(
+        extra.requestId,
+        extra.signal,
+        msg,
+        [],
+        max_tokens ?? 2_048,
+        { type: 'text' }
+      )
       return TEXT(text)
     }
   )
@@ -105,11 +153,16 @@ function buildMcpServer(): McpServer {
           .describe('What to ask about the image. Defaults to a general description.')
       }
     },
-    async ({ image, prompt }) => {
+    async ({ image, prompt }, extra) => {
       const p = await materialize(image, 'png')
-      const text = await llm.chat(prompt || 'Describe this image in detail.', [p], 300000, 1024, {
-        disableThinking: true
-      })
+      const text = await generateMcpText(
+        extra.requestId,
+        extra.signal,
+        prompt || 'Describe this image in detail.',
+        [p],
+        1_024,
+        { type: 'vision' }
+      )
       return TEXT(text)
     }
   )
@@ -142,7 +195,7 @@ function buildMcpServer(): McpServer {
         model
       })
       const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
-      return { content: [{ type: 'image', data: b64, mimeType: 'image/png' }] }
+      return { content: [{ type: 'image', data: b64, mimeType: DEFAULT_IMAGE_MIME }] }
     }
   )
 
@@ -170,7 +223,7 @@ function buildMcpServer(): McpServer {
       try {
         const out = await generateImage({ prompt, initImage, strength })
         const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
-        return { content: [{ type: 'image', data: b64, mimeType: 'image/png' }] }
+        return { content: [{ type: 'image', data: b64, mimeType: DEFAULT_IMAGE_MIME }] }
       } finally {
         if (initImage.includes('offgrid-mcp-')) fs.promises.unlink(initImage).catch(() => {})
       }
@@ -235,7 +288,92 @@ function buildMcpServer(): McpServer {
     }
   )
 
+  if (actionsAllowed) {
+    registerActionTools(server, authenticatedDeviceId)
+  }
   return server
+}
+
+/** Expose the desktop's ACTION tools (calendar, reminders, contacts, messages,
+ *  mail, open_url, web_use, computer_use) over MCP, so a paired client (the
+ *  mobile app) can LIST them and RUN them ON THIS DESKTOP. Each call goes through
+ *  the same runTool dispatch the local chat uses - so the rails run here and the
+ *  approval gate applies (computer-use asks on this machine; in-app runs
+ *  through). The NATIVE_TOOL_SPECS catalog is the single source of truth for the
+ *  names/descriptions/schemas; nothing is re-declared. */
+function registerActionTools(server: McpServer, authenticatedDeviceId: string | null): void {
+  for (const spec of NATIVE_TOOL_SPECS) {
+    const baseProperties =
+      typeof spec.parameters.properties === 'object' && spec.parameters.properties !== null
+        ? (spec.parameters.properties as Record<string, unknown>)
+        : {}
+    const parameters =
+      spec.kind === 'task'
+        ? {
+            ...spec.parameters,
+            properties: {
+              ...baseProperties,
+              execution_device: { type: 'string', description: EXECUTION_DEVICE_DESCRIPTION }
+            }
+          }
+        : spec.parameters
+    server.registerTool(
+      spec.name,
+      {
+        title: spec.name,
+        description: spec.description,
+        inputSchema: jsonSchemaToZodShape(parameters)
+      },
+      async (args, extra) => {
+        const origin = taskOriginFromRequestMeta(extra._meta)
+        if (spec.kind === 'task' && authenticatedDeviceId !== null) {
+          if (!origin || origin.deviceId !== authenticatedDeviceId) {
+            return {
+              content: [{ type: 'text', text: 'The authenticated task origin is invalid.' }],
+              isError: true
+            }
+          }
+          const executionDevice = getTaskExecutionDevice()
+          if (origin.executionDeviceId !== executionDevice.id) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `This task was routed to ${executionDevice.name}, not its selected Desktop.`
+                }
+              ],
+              isError: true
+            }
+          }
+          if (!mayRunRemoteTask(authenticatedDeviceId)) {
+            return {
+              content: [{ type: 'text', text: 'Remote task access is disabled for this device.' }],
+              isError: true
+            }
+          }
+        }
+        const toolArgs = { ...(args as Record<string, unknown>) }
+        delete toolArgs.execution_device
+        const result = await runTool(
+          spec.name,
+          toolArgs,
+          {
+            conversationId: origin?.conversationId ?? 'mcp',
+            ...(origin?.deviceId
+              ? {
+                  taskLaunch: {
+                    launchId: origin.launchId,
+                    requestingDeviceId: origin.deviceId
+                  }
+                }
+              : {})
+          },
+          getToolExtensions()
+        )
+        return TEXT(result.text)
+      }
+    )
+  }
 }
 
 /** Handle a single MCP HTTP request (stateless). `body` is the parsed JSON for POST. */
@@ -244,7 +382,10 @@ export async function handleMcpRequest(
   res: http.ServerResponse,
   body: unknown
 ): Promise<void> {
-  const server = buildMcpServer()
+  // Action tools are exposed only to a request carrying the desktop's action
+  // token; unauthenticated callers still get the open model tools.
+  const authorization = authorizeActionRequest(req)
+  const server = buildMcpServer(authorization.allowed, authorization.deviceId)
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless
     enableJsonResponse: true

@@ -27,6 +27,22 @@ export interface VitestProjectDefinition {
   }
 }
 
+const coreProductTestFiles = [
+  'integration-tests/*.test.ts',
+  'src/**/*.test.ts',
+  'src/**/*.test.tsx'
+]
+
+const proProductTestFiles = ['pro/**/*.test.ts', 'pro/**/*.test.tsx']
+
+/**
+ * Desktop core and Desktop Pro always join the same product project. The canonical `npm test`
+ * also selects the database project in that same Vitest invocation.
+ */
+export function createProductTestFiles(hasPro: boolean): string[] {
+  return [...coreProductTestFiles, ...(hasPro ? proProductTestFiles : [])]
+}
+
 export function createVitestProjects(
   productTestFiles: string[],
   commonExcludes: string[]
@@ -48,7 +64,7 @@ export function createVitestProjects(
         include: modelPortIntegrationTests,
         exclude: commonExcludes,
         fileParallelism: false,
-        sequence: { groupOrder: 1 }
+        sequence: { groupOrder: 2 }
       }
     },
     {
@@ -58,7 +74,7 @@ export function createVitestProjects(
         include: packagingIntegrationTests,
         exclude: commonExcludes,
         fileParallelism: false,
-        sequence: { groupOrder: 2 }
+        sequence: { groupOrder: 3 }
       }
     }
   ]

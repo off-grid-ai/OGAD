@@ -240,39 +240,65 @@ afterAll(async () => {
 
 describe('model port ownership', () => {
   it('preserves the first live engine and falls back to a free port for the second (#146)', async () => {
-    const [{ llm }, { getSystemHealth }, { modelPortConflictReason }] = await Promise.all([
+    const [
+      { llm },
+      { getSystemHealth },
+      { modelPortConflictReason },
+      { createOffGridApplication },
+      { desktopModelWorkspacePorts },
+      { registerDesktopApplication }
+    ] = await Promise.all([
       import('../llm'),
       import('../setup'),
-      import('../llama-error')
+      import('../llama-error'),
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
     ])
+    const application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+    const releaseApplication = registerDesktopApplication(application)
     const conflict = modelPortConflictReason(LLAMA_SERVER_PORT)
-
-    // The preferred port is held by the first live engine. Rather than dead-ending on a
-    // single-owner conflict, the second instance scans upward and starts its own engine on a
-    // free port — the app just works even when something else holds :8439.
-    await llm.init()
-    expect(llm.isReady()).toBe(true)
-    expect(llm.getPort()).not.toBe(LLAMA_SERVER_PORT)
-    // The conflict reason is NOT surfaced — we moved instead of refusing.
-    expect(llm.lastError()).not.toBe(conflict)
-
-    // The FIRST engine is untouched: still alive, still the sole owner of the preferred port.
-    expect(processIsAlive(enginePid)).toBe(true)
-    expect(await engineIsReady()).toBe(true)
-    if (liveOwner) {
-      expect(fs.readFileSync(fixture.engineLog, 'utf8').trim().split(/\r?\n/)).toEqual([
-        `${String(enginePid)}:${String(LLAMA_SERVER_PORT)}`
-      ])
-    }
-
-    // Chat health reports UP, on the fallback port — not down with a port-conflict detail.
-    const chatHealth = (await getSystemHealth()).components.find(
-      (component) => component.id === 'chat'
+    const lifecycle: Array<{ ready: boolean; starting: boolean }> = []
+    const offHealth = llm.onHealthInvalidated(() =>
+      lifecycle.push({ ready: llm.isReady(), starting: llm.isStarting() })
     )
-    expect(chatHealth).toMatchObject({ status: 'ready', port: llm.getPort() })
-    expect(chatHealth?.detail).not.toBe(conflict)
 
-    // Tear down the second engine this test started (the first owner is cleaned up in afterAll).
-    await llm.unload()
+    try {
+      // The preferred port is held by the first live engine. Rather than dead-ending on a
+      // single-owner conflict, the second instance scans upward and starts its own engine on a
+      // free port — the app just works even when something else holds :8439.
+      await llm.init()
+      expect(llm.isReady()).toBe(true)
+      expect(llm.getPort()).not.toBe(LLAMA_SERVER_PORT)
+      // The conflict reason is NOT surfaced — we moved instead of refusing.
+      expect(llm.lastError()).not.toBe(conflict)
+      expect(lifecycle).toContainEqual({ ready: false, starting: true })
+      expect(lifecycle).toContainEqual({ ready: true, starting: false })
+
+      // The FIRST engine is untouched: still alive, still the sole owner of the preferred port.
+      expect(processIsAlive(enginePid)).toBe(true)
+      expect(await engineIsReady()).toBe(true)
+      if (liveOwner) {
+        expect(fs.readFileSync(fixture.engineLog, 'utf8').trim().split(/\r?\n/)).toEqual([
+          `${String(enginePid)}:${String(LLAMA_SERVER_PORT)}`
+        ])
+      }
+
+      // Chat health reports UP, on the fallback port — not down with a port-conflict detail.
+      const chatHealth = (await getSystemHealth()).components.find(
+        (component) => component.id === 'chat'
+      )
+      expect(chatHealth).toMatchObject({ status: 'ready', port: llm.getPort() })
+      expect(chatHealth?.detail).not.toBe(conflict)
+
+      // Tear down the second engine this test started (the first owner is cleaned up in afterAll).
+      await llm.unload()
+      expect(lifecycle.at(-1)).toEqual({ ready: false, starting: false })
+    } finally {
+      offHealth()
+      await llm.unload()
+      releaseApplication()
+      await application.stop()
+    }
   })
 })

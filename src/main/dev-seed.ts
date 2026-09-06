@@ -2,7 +2,7 @@
 // surface (text, image, markdown/HTML/React artifacts, voice/speech, skills,
 // connectors). When OFFGRID_SEED=force it generates LIVE via the local models
 // (LLM for artifacts, image-gen for the picture); otherwise it falls back to
-// curated content so it always completes. Idempotent. On-brand, Off Grid only.
+// curated content so it always completes. Idempotent. On-brand, Off Grid AI only.
 
 import { app } from 'electron'
 import path from 'path'
@@ -19,9 +19,10 @@ import { createProject, deleteProject } from './rag/store'
 import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts'
 import { saveSkill } from './skills'
 import { addConnector, listConnectors } from './mcp'
-import { llm } from './llm'
+import { desktopRag } from './composition/application-access'
+import { requireApplicationOutcome } from './composition/application-outcome'
+import { generateDesktopText } from './desktop-generation'
 import { generateImage, listImageModels } from './imagegen'
-import { ragService } from './rag/index'
 
 const PROJECT_ID = 'offgrid-demo'
 
@@ -31,7 +32,7 @@ const MD = `# Off Grid AI — overview
 **Run open models entirely on your device.** One local, OpenAI-compatible gateway
 serves text, vision, image, voice, and speech — no cloud, no accounts, no API keys.
 
-## Why Off Grid
+## Why Off Grid AI
 - **Private by default** — nothing leaves your machine.
 - **Every modality, one endpoint** — \`http://127.0.0.1:7878/v1\`.
 - **Bring any GGUF** — download from the catalog or Hugging Face.
@@ -62,10 +63,10 @@ function extractCode(text: string): string | null {
 
 async function gen(prompt: string): Promise<string | null> {
   try {
-    const out = await llm.chat(prompt, [], 120_000, 1500, { disableThinking: true })
-    return out.trim() || null
+    const out = await generateDesktopText(prompt, { profile: 'long-form' })
+    return out.content.trim() || null
   } catch (e) {
-    console.error('[seed] llm.chat failed', e)
+    console.error('[seed] generation failed', e)
     return null
   }
 }
@@ -134,19 +135,24 @@ async function seedKnowledge(): Promise<void> {
         )
     }
   ]
+  const failures: unknown[] = []
   for (const f of files) {
     try {
       f.write()
       const p = path.join(dir, f.name)
-      await ragService.indexDocument(
-        { projectId: PROJECT_ID, path: p, fileName: f.name, size: fs.statSync(p).size },
-        () => {}
+      requireApplicationOutcome(
+        await desktopRag.addDocument(
+          { projectId: PROJECT_ID, path: p, fileName: f.name, size: fs.statSync(p).size },
+          () => undefined
+        )
       )
       console.log('[seed] indexed', f.name)
     } catch (e) {
       console.error('[seed] index failed', f.name, e)
+      failures.push(e)
     }
   }
+  if (failures.length) throw new AggregateError(failures, 'Demo knowledge indexing failed.')
 }
 
 function cleanup(): void {
@@ -159,12 +165,28 @@ function cleanup(): void {
   }
 }
 
-export async function seedDemo(live = false): Promise<void> {
-  if (!live && getSetting<boolean>('demo:seeded', false)) {
+/**
+ * @param force Re-seed even if this profile is already seeded. What `OFFGRID_SEED=force` means.
+ * @param modelReady Whether the ONE startup text prepare settled successfully. Decides whether
+ *   artifacts are generated live or written from their curated fallbacks - it never re-seeds less.
+ */
+export async function seedDemo(force = false, modelReady = false): Promise<void> {
+  if (!force && getSetting<boolean>('demo:seeded', false)) {
     console.log('[seed] already seeded — skipping')
     return
   }
+  // Live generation needs BOTH: the caller asked to re-seed, and the model actually became
+  // resident. The seeder never prepares one itself - startup owns the single prepare, and a
+  // duplicate here claimed the newest-wins lane and refused startup's own request.
+  const generateLive = force && modelReady
+  console.log(
+    generateLive
+      ? '[seed] model ready — generating demo artifacts live'
+      : `[seed] curated demo artifacts (${force ? 'model not ready' : 'seed-once mode'})`
+  )
   try {
+    // A failed forced replacement must not leave the prior success marker over partial data.
+    saveSetting('demo:seeded', false)
     cleanup()
     createProject({
       id: PROJECT_ID,
@@ -172,14 +194,6 @@ export async function seedDemo(live = false): Promise<void> {
       description: 'Demo workspace showcasing Off Grid AI.',
       icon: '🟢'
     })
-    if (live) {
-      try {
-        await llm.init()
-      } catch (e) {
-        console.error('[seed] llm init', e)
-      }
-    }
-
     // Knowledge base: index a few docs (md + txt + pdf) into the project.
     await seedKnowledge()
 
@@ -194,7 +208,7 @@ export async function seedDemo(live = false): Promise<void> {
       fallback: string
     ): Promise<void> => {
       let code = fallback
-      if (live) {
+      if (generateLive) {
         const out = await gen(prompt)
         const c = out && extractCode(out)
         if (c) code = c
@@ -205,7 +219,7 @@ export async function seedDemo(live = false): Promise<void> {
 
     await artifactChat(
       'overview',
-      'Off Grid overview',
+      'Off Grid AI overview',
       'Write a short overview doc for Off Grid AI.',
       'Write a concise Markdown overview of "Off Grid AI" — a private, on-device AI that runs open models (text, vision, image, voice) via one local OpenAI-compatible gateway, no cloud. Return ONLY a ```markdown code block.',
       'text',
@@ -237,24 +251,24 @@ export async function seedDemo(live = false): Promise<void> {
     chatTurn(
       'voice',
       'Voice & speech',
-      'Say one line about Off Grid I can listen to.',
+      'Say one line about Off Grid AI I can listen to.',
       'Off Grid AI is private, on-device AI — your models and your data never leave your machine. Tap the speaker to hear this, or hold the mic to talk back.'
     )
 
     // Skills — a manual /skill pack + a chat using it.
     saveSkill({
       name: 'offgrid-pitch',
-      description: 'Rewrite text as a crisp Off Grid one-liner.',
+      description: 'Rewrite text as a crisp Off Grid AI one-liner.',
       instructions:
-        'Rewrite the input as a single confident sentence in the Off Grid voice: private, on-device, no cloud. No hype, no emojis.'
+        'Rewrite the input as a single confident sentence in the Off Grid AI voice: private, on-device, no cloud. No hype, no emojis.'
     })
     {
       const u = 'we run AI models on your computer without the internet'
       let a =
         'Off Grid AI runs open models entirely on your device — no cloud, no accounts, nothing ever leaves your machine.'
-      if (live) {
+      if (generateLive) {
         const out = await gen(
-          `Rewrite as one confident Off Grid sentence (private, on-device, no cloud; no hype, no emojis): "${u}"`
+          `Rewrite as one confident Off Grid AI sentence (private, on-device, no cloud; no hype, no emojis): "${u}"`
         )
         if (out) a = out.replace(/^["']|["']$/g, '')
       }
@@ -295,17 +309,19 @@ export async function seedDemo(live = false): Promise<void> {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .slice(0, 28)
-    const models = live
+    // Image generation has its own models and does not use the text prepare, so this follows the
+    // caller's live INTENT rather than text readiness - a curated text seed can still render images.
+    const models = force
       ? listImageModels().filter((m) => /\.(gguf|safetensors)$/i.test(m) && !/^ae\./i.test(m))
       : []
     let madeAny = false
     for (const model of models) {
       try {
-        const out = await generateImage({ prompt, model, width: 768, height: 512, steps: 18 })
+        const out = await generateImage({ prompt, model, width: 768, height: 512 })
         const id = chatTurn(
           `image-${slugify(model)}`,
           `Image · ${pretty(model)}`,
-          `Generate an Off Grid scene with ${pretty(model)}.`,
+          `Generate an Off Grid AI scene with ${pretty(model)}.`,
           `Generated for: ${prompt}\n\nModel: ${model}`,
           { image: out.path }
         )
@@ -351,8 +367,9 @@ export async function seedDemo(live = false): Promise<void> {
     }
 
     saveSetting('demo:seeded', true)
-    console.log(`[seed] demo project seeded ✓ (live=${live})`)
+    console.log(`[seed] demo project seeded ✓ (force=${force} generateLive=${generateLive})`)
   } catch (e) {
     console.error('[seed] failed', e)
+    throw e
   }
 }

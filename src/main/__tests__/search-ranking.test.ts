@@ -83,12 +83,12 @@ describe('kindBoost — own deliberate content surfaces', () => {
 describe('matchScore — literal term overlap for the Match sort', () => {
   it('counts occurrences of each term, case-insensitive', () => {
     expect(matchScore('Praveen and Mac, Praveen again', ['praveen'])).toBe(2)
-    expect(matchScore('Off Grid sync plan', ['off', 'grid'])).toBe(2)
+    expect(matchScore('Off Grid AI sync plan', ['off', 'grid'])).toBe(2)
   })
 
   it('ranks a denser match above a sparse one', () => {
     const terms = ['off', 'grid']
-    const dense = matchScore('Off Grid — Off Grid roadmap', terms)
+    const dense = matchScore('Off Grid AI — Off Grid AI roadmap', terms)
     const sparse = matchScore('a grid of icons', terms)
     expect(dense).toBeGreaterThan(sparse)
   })
@@ -120,7 +120,7 @@ describe('queryTerms — the single tokeniser', () => {
 
 describe('ftsExpr — FTS5 prefix-match expression', () => {
   it('wraps each of up to 12 tokens as a quoted prefix term', () => {
-    expect(ftsExpr('off grid')).toBe('"off"* "grid"*')
+    expect(ftsExpr('Off Grid AI')).toBe('"off"* "grid"* "ai"*')
   })
 
   it('drops punctuation so user input can never be an FTS syntax error', () => {
@@ -230,7 +230,7 @@ describe('rankResults — filter then sort', () => {
       key: 'obs:1',
       kind: 'screen' as const,
       refId: 1,
-      title: 'Off Grid plan',
+      title: 'Off Grid AI plan',
       snippet: 'grid grid',
       surface: 'Slack',
       url: null,
@@ -265,7 +265,7 @@ describe('rankResults — filter then sort', () => {
   ]
 
   it('relevance (default) sorts by descending score', () => {
-    const out = rankResults(results(), { query: 'off grid' })
+    const out = rankResults(results(), { query: 'Off Grid AI' })
     expect(out.map((r) => r.key)).toEqual(['chat:1', 'mem:1', 'obs:1'])
   })
 
@@ -276,7 +276,7 @@ describe('rankResults — filter then sort', () => {
 
   it('match sorts by literal term overlap in title+snippet, score breaks ties', () => {
     // "grid" appears twice in obs:1 snippet + once in its title -> densest match.
-    const out = rankResults(results(), { query: 'off grid', sort: 'match' })
+    const out = rankResults(results(), { query: 'Off Grid AI', sort: 'match' })
     expect(out[0]!.key).toBe('obs:1')
   })
 
@@ -332,10 +332,30 @@ describe('rankResults — filter then sort', () => {
     expect(out.map((r) => r.key)).toEqual(['obs:1'])
   })
 
+  it('kind filter gives Replay only captured screen results', () => {
+    const out = rankResults(results(), { query: 'x', kinds: ['screen'] })
+    expect(out.map((r) => r.key)).toEqual(['obs:1'])
+  })
+
   it('excludeChatId drops that exact chat and nothing else', () => {
     const out = rankResults(results(), { query: 'x', excludeChatId: '1' })
     expect(out.map((r) => r.key)).not.toContain('chat:1')
     expect(out.map((r) => r.key)).toContain('obs:1')
+  })
+
+  it('applies a half-open absolute time range and excludes older records', () => {
+    const out = rankResults(results(), {
+      query: 'x',
+      timeRange: { startMs: NOW - 6 * DAY, endMs: NOW }
+    })
+
+    expect(out.map((result) => result.key)).toEqual(['chat:1', 'mem:1'])
+  })
+
+  it('rejects an invalid time range instead of silently dropping the constraint', () => {
+    expect(() =>
+      rankResults(results(), { query: 'x', timeRange: { startMs: NOW, endMs: NOW } })
+    ).toThrow('Invalid search time range')
   })
 
   it('empty input → empty output', () => {

@@ -1,3 +1,4 @@
+import { IMAGE_MIME_BY_EXTENSION } from '@offgrid/models'
 // Single source of truth: file-extension -> MIME type.
 //
 // Three call sites used to keep their own divergent copies of this map — the
@@ -20,15 +21,12 @@ const EXT_MIME: Record<string, string> = {
   wav: 'audio/wav',
   aac: 'audio/aac',
   ogg: 'audio/ogg',
-  // image — must cover every ext files-classify's IMAGE_EXT accepts, or an
+  // image — must cover every ext the shared attachment classifier accepts, or an
   // accepted upload gets mislabelled (the webp bug this map was created to fix).
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
+  ...IMAGE_MIME_BY_EXTENSION,
   heic: 'image/heic',
+  heif: 'image/heif',
+  tiff: 'image/tiff',
   // document — a PDF served as the octet-stream fallback is DOWNLOADED by Chromium rather than
   // rendered, so an attachment that opened correctly on Android arrived on desktop as a file save
   // prompt. The kinds here match the ones @offgrid/sync's describeAttachment can name.

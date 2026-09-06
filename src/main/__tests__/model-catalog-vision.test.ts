@@ -8,8 +8,7 @@ import { CATALOG } from '@offgrid/models'
 // That's exactly what happened to Gemma 4 E2B — a multimodal model catalogued as
 // kind:'text' with no projector. These guards tie the capability to the data.
 
-type Entry = { id: string; name?: string; kind: string; files: { role?: string }[] }
-const entries = CATALOG as unknown as Entry[]
+const entries = CATALOG
 
 describe('model catalog — vision capability matches the mmproj data', () => {
   it('Gemma 4 E2B is a vision model with a projector (regression)', () => {
@@ -19,23 +18,27 @@ describe('model catalog — vision capability matches the mmproj data', () => {
     expect(e2b!.files.some((f) => f.role === 'mmproj')).toBe(true)
   })
 
-  it('every vision model ships an mmproj, and no text model carries one', () => {
-    // The invariant the engine relies on: kind==='vision' ⇔ a role:'mmproj' file. If a
-    // future entry breaks it, the model would either claim vision it can't do or hide
-    // vision it can — both are the bug this test exists to catch.
+  it('every image-reading model ships an mmproj, and text-only models do not', () => {
+    // Computer Use models also read screenshots. The capability invariant is therefore
+    // vision-or-computer_use ⇔ a projector, while text-only families must not carry one.
     for (const m of entries) {
       const hasMmproj = m.files.some((f) => f.role === 'mmproj')
-      if (m.kind === 'vision') {
-        expect(hasMmproj, `${m.id} is vision but has no mmproj`).toBe(true)
+      if (m.kind === 'vision' || m.kind === 'computer_use') {
+        expect(hasMmproj, `${m.id} is ${m.kind} but has no mmproj`).toBe(true)
       } else {
         expect(hasMmproj, `${m.id} is ${m.kind} but carries an mmproj`).toBe(false)
       }
     }
   })
 
-  it('every model has exactly one primary weight file', () => {
+  it('every catalog-delivered model has exactly one primary weight file', () => {
     for (const m of entries) {
-      expect(m.files.filter((f) => f.role === 'primary').length, `${m.id}`).toBe(1)
+      const primaryCount = m.files.filter((f) => f.role === 'primary').length
+      if (m.artifactDelivery === 'runtime') {
+        expect(primaryCount, `${m.id} is native-runtime managed`).toBe(0)
+      } else {
+        expect(primaryCount, `${m.id}`).toBe(1)
+      }
     }
   })
 })

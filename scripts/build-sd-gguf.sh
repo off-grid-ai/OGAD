@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Convert a full SDXL .safetensors checkpoint into sd.cpp-loadable GGUFs (q8_0 + q4_K)
-# and emit an attributed, OpenRAIL model card — ready to publish under an Off Grid
+# and emit an attributed, OpenRAIL model card — ready to publish under an Off Grid AI
 # HF org. The mis-exported community GGUFs of these finetunes don't load; converting
 # the official webui .safetensors with our bundled sd-cli produces correctly-named
 # GGUFs that DO load on-device.
@@ -75,7 +75,7 @@ pipeline_tag: text-to-image
 tags: [gguf, stable-diffusion, sdxl, image-generation, quantized, off-grid]
 ---
 
-# $NAME — GGUF (Off Grid build)
+# $NAME — GGUF (Off Grid AI build)
 
 GGUF conversions of [$NAME]($ORIG_URL) for **on-device** image generation with
 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp). Converted with

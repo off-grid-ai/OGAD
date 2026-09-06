@@ -12,6 +12,7 @@
 export interface HistoryTurn {
   role: string
   content: string
+  context?: { taskGuidance?: unknown } | null
 }
 
 /** Build the last `limit` turns of history for a send.
@@ -25,7 +26,11 @@ export function buildSendHistory<T extends HistoryTurn>(
   newUserText: string,
   limit = 20
 ): HistoryTurn[] {
-  const flat = convMsgs.map((m) => ({ role: m.role, content: m.content }))
+  // Task guidance is shown in Chat for continuity, but the operator already
+  // consumed it. Do not replay it as another user prompt to the resident LLM.
+  const flat = convMsgs
+    .filter((message) => !message.context?.taskGuidance)
+    .map((m) => ({ role: m.role, content: m.content }))
   let base: HistoryTurn[]
   if (regen) {
     const lastUserIdx = flat.map((m) => m.role).lastIndexOf('user')

@@ -35,8 +35,8 @@ function NotificationHarness(): React.JSX.Element {
   const { notifications, unreadCount, addNotification } = useNotifications()
   const add = (message: string, dedupeKey: string): void => {
     addNotification({
-      type: 'approval',
-      title: 'Approval needed',
+      type: 'info',
+      title: 'File received',
       message,
       dedupeKey,
       target: { namespace: 'synthetic.domain', kind: 'record', recordId: 42 }
@@ -110,17 +110,14 @@ describe('NotificationProvider target deduplication', () => {
   })
 
   it('collapses persisted duplicates while keeping the newest target record', () => {
-    // 'approval', not 'todo': a todo is deliberately not kept as a notification at all - restore and add
-    // both drop it (notification-state.ts), because a to-do lives in the to-do list and mirroring it into
-    // the bell would tell the user the same thing twice. Seeding todos made this read as "persisted
-    // notifications are lost", when what it proved was that todos are never persisted.
+    // Informational records are the notification-owned kind. To-dos and approvals stay in their own lists.
     localStorage.setItem(
       NOTIFICATION_STORAGE_KEY,
       JSON.stringify([
         {
           id: 'new',
-          type: 'approval',
-          title: 'Approval',
+          type: 'info',
+          title: 'File received',
           message: 'newest persisted payload',
           timestamp: '2026-07-17T12:00:00.000Z',
           read: false,
@@ -128,8 +125,8 @@ describe('NotificationProvider target deduplication', () => {
         },
         {
           id: 'old',
-          type: 'approval',
-          title: 'Approval',
+          type: 'info',
+          title: 'File received',
           message: 'stale persisted payload',
           timestamp: '2026-07-17T11:00:00.000Z',
           read: true,

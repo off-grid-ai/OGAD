@@ -8,7 +8,7 @@
  * when choosing models and capabilities.
  *
  * Host RAM is the only fake because it is an uncontrollable machine boundary. All
- * Off Grid services, filesystem persistence, catalog decisions, and plan assembly
+ * Off Grid AI services, filesystem persistence, catalog decisions, and plan assembly
  * stay real.
  */
 
@@ -16,7 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import os from 'os'
 import * as path from 'path'
-import type { PerformanceMode } from '../../model-sizing'
+import type { PerformanceMode } from '@offgrid/models'
+import type { OffGridApplication } from '@offgrid/application'
 
 function argValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag)
@@ -25,6 +26,8 @@ function argValue(args: string[], flag: string): string | undefined {
 
 describe('resource mode settings -> restart -> setup plan', () => {
   let dataDir: string
+  let application: OffGridApplication | undefined
+  let releaseApplication: (() => void) | undefined
   const previousDataDir = process.env.OFFGRID_DATA_DIR
 
   beforeEach(() => {
@@ -35,7 +38,11 @@ describe('resource mode settings -> restart -> setup plan', () => {
     vi.resetModules()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await application?.stop()
+    releaseApplication?.()
+    application = undefined
+    releaseApplication = undefined
     vi.restoreAllMocks()
     if (previousDataDir === undefined) {
       delete process.env.OFFGRID_DATA_DIR
@@ -46,21 +53,44 @@ describe('resource mode settings -> restart -> setup plan', () => {
   })
 
   it('applies every preset to persisted launch limits and settings-driven model plans', async () => {
-    const [{ llm, LLMService }, { MODE_PRESETS }, setupLogic, setup] = await Promise.all([
+    const [
+      { llm, LLMService },
+      {
+        TEXT_RUNTIME_MODE_PRESETS: MODE_PRESETS,
+        GUIDED_SETUP_STT_MODEL_BY_MODE: STT_MODEL_BY_MODE
+      },
+      setup,
+      { createOffGridApplication },
+      { desktopModelWorkspacePorts },
+      { createDesktopGuidedSetupPorts },
+      applicationAccess
+    ] = await Promise.all([
       import('../../llm'),
-      import('../settings-math'),
-      import('../../models/setup-logic'),
-      import('../../setup')
+      import('@offgrid/models'),
+      import('../../setup'),
+      import('@offgrid/application'),
+      import('../../model-services'),
+      import('../../composition/guided-setup'),
+      import('../../composition/application-access')
     ])
+
+    application = createOffGridApplication({
+      models: {
+        ...desktopModelWorkspacePorts,
+        guidedSetup: createDesktopGuidedSetupPorts(desktopModelWorkspacePorts.guidedSetupRuntime)
+      }
+    })
+    releaseApplication = applicationAccess.registerDesktopApplication(application)
+    await application.start()
 
     const recommendations = new Map<PerformanceMode, string>()
 
     for (const mode of ['conservative', 'balanced', 'extreme'] as const) {
-      // With no model installed, the launch-time change persists before init reports
-      // "Models not downloaded". That is the expected external-runtime boundary here.
-      await expect(llm.setSettings({ performanceMode: mode })).rejects.toThrow(
-        'Models not downloaded'
-      )
+      // The engine settings owner persists launch arguments without starting or restarting the
+      // runtime. The application settings command owns the separate restart decision.
+      await expect(llm.setSettings({ performanceMode: mode })).resolves.toEqual({
+        launchChanged: true
+      })
 
       const selected = llm.getSettings()
       expect(selected.performanceMode).toBe(mode)
@@ -92,7 +122,7 @@ describe('resource mode settings -> restart -> setup plan', () => {
       expect(plan.mode).toBe(mode)
       expect(plan.items.find((item) => item.kind === 'chat')?.id).toBe(recommendation?.id)
       expect(plan.items.find((item) => item.kind === 'transcription')?.id).toBe(
-        setupLogic.STT_MODEL_BY_MODE[mode]
+        STT_MODEL_BY_MODE[mode]
       )
       expect(plan.items.some((item) => item.kind === 'image')).toBe(mode !== 'conservative')
       recommendations.set(mode, recommendation?.id ?? '')

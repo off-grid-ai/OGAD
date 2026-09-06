@@ -4,7 +4,7 @@
  * The only fake is the native llama-server executable/HTTP boundary. MemoryChat,
  * navigation, preload, IPC, the streaming transport, SQLite, and both Electron
  * processes are production code. The fake binds loopback only and audits the actual
- * request, making the local-only model path explicit without mocking Off Grid code.
+ * request, making the local-only model path explicit without mocking Off Grid AI code.
  */
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import type { ChildProcess } from 'node:child_process'

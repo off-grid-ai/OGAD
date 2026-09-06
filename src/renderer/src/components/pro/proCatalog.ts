@@ -13,8 +13,9 @@ import {
   Devices as DevicesIcon
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
-import { deviceNoun, primaryModifier } from '@renderer/lib/device'
+import { deviceNoun, primaryModifier, shortcutLabel } from '@renderer/lib/device'
 import { isMac, type DevicePlatform } from '@offgrid/core/shared/device'
+import { DEFAULT_DICTATION_ACCELERATOR } from '@offgrid/core/shared/dictation-defaults'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 
 // Static catalogue of the Pro features. This ships in the OPEN build so the free
@@ -23,7 +24,7 @@ import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 // pro/ submodule is present and activated, the real screens (registered via
 // screenRegistry/navRegistry) take over these same routes.
 
-/** Buy Pro — live now, $49/year or $69 once, one license across up to 5 devices. */
+/** Buy Pro - live now, $49/year or $69 once, one license across your licensed devices. */
 export const PRO_PAY_URL = PRO_PURCHASE_URL
 
 export interface ProFeature {
@@ -50,6 +51,33 @@ export interface ProFeature {
   platforms: DevicePlatform[]
 }
 
+function dictationCopy(
+  accelerator: string | null,
+  source: 'configured' | 'default' = 'configured'
+): Pick<ProFeature, 'description' | 'highlights'> {
+  const shortcut = accelerator
+    ? `the ${source} ${shortcutLabel(accelerator)} shortcut`
+    : 'your Voice shortcut'
+  return {
+    description: `Use ${shortcut} and speak. Off Grid AI Desktop transcribes on-device and pastes text into the app you are using. Set hold or toggle mode in Voice. Recordings and transcripts stay in a searchable library on this ${deviceNoun()}.`,
+    highlights: [
+      accelerator
+        ? `${source === 'default' ? 'Default' : 'Configured'} shortcut: ${shortcutLabel(accelerator)}`
+        : 'Choose your shortcut in Voice',
+      'Paste at your cursor and search saved recordings',
+      'Transcribe audio and video files on-device'
+    ]
+  }
+}
+
+/** Runtime copy is a projection; the static catalogue still describes the canonical default. */
+export function projectConfiguredShortcut(
+  feature: ProFeature,
+  accelerator: string | null
+): ProFeature {
+  return feature.route === 'voice' ? { ...feature, ...dictationCopy(accelerator) } : feature
+}
+
 export const PRO_FEATURES: ProFeature[] = [
   {
     route: 'day',
@@ -57,7 +85,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: CalendarBlank,
     tagline: 'Your day, planned for you.',
     description:
-      'Off Grid reads your calendar and what you’ve been working on and lays out your day — what’s next, who you’re meeting, and what’s still open — so you start every morning oriented instead of scrambling.',
+      'Off Grid AI reads your calendar and what you’ve been working on and lays out your day — what’s next, who you’re meeting, and what’s still open — so you start every morning oriented instead of scrambling.',
     highlights: [
       'A morning briefing built from your real activity',
       'Per-meeting prep: who’s in it and your open items',
@@ -118,7 +146,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: CheckSquare,
     tagline: 'To-dos and actions, handled.',
     description:
-      'Off Grid extracts the commitments out of your day and your secretary proposes the next step — every action waits in an approval queue, so nothing happens without your say-so.',
+      'Off Grid AI extracts the commitments out of your day and your secretary proposes the next step — every action waits in an approval queue, so nothing happens without your say-so.',
     highlights: [
       'Auto-extracted to-dos',
       'Secretary-proposed actions',
@@ -156,7 +184,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: Broadcast,
     tagline: 'Approvals & to-dos, surfaced.',
     description:
-      'Off Grid reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
+      'Off Grid AI reaches out first — a morning briefing, a heads-up before meetings, approvals waiting on your decision, and to-dos it pulled from your day — even when the window is closed.',
     highlights: [
       'Proactive briefings & meeting prep',
       'Approval queue for actions',
@@ -169,12 +197,7 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Voice',
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
-    description: `Hold Option+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
-    highlights: [
-      'Option+Space push-to-talk or toggle, anywhere',
-      'Paste-at-cursor + a searchable recordings library',
-      'Transcribe any audio/video file, all on-device'
-    ],
+    ...dictationCopy(DEFAULT_DICTATION_ACCELERATOR, 'default'),
     platforms: ['darwin']
   },
   {
@@ -183,7 +206,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: ShieldCheck,
     tagline: 'Passwords and secrets, encrypted on this device.',
     description:
-      'An encrypted KDBX4 vault for web logins, app passwords, API keys, secure notes, and secret files (.env and the like). Your master password and a device-specific key together lock the vault - the file alone is unreadable. Back up the file anywhere; it stays opaque without both factors. Sync to other devices in your Off Grid mesh via EasyShare when you are ready.',
+      'An encrypted KDBX4 vault for web logins, app passwords, API keys, secure notes, and secret files (.env and the like). Your master password and a device-specific key together lock the vault - the file alone is unreadable. Back up the file anywhere; it stays opaque without both factors. Sync to other devices in your Off Grid AI mesh via EasyShare when you are ready.',
     highlights: [
       'AES-256 + Argon2id, device-key bound',
       'Logins, app passwords, API keys, notes, and files',
@@ -216,7 +239,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: DevicesIcon,
     tagline: 'Your chats and settings, on every device.',
     description:
-      'Pair your Mac and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid server.',
+      'Pair your Mac and phone over your local network to keep chats, projects and model settings in step. Data moves through a direct encrypted connection between your devices. Nothing is uploaded to an Off Grid AI server.',
     highlights: [
       'Chats, projects and model settings stay in step across devices',
       'Known devices reconnect when they return to the network',

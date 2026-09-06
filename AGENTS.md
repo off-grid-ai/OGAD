@@ -1,8 +1,8 @@
 # Off Grid AI Desktop — agent guide
 
-This is **Off Grid AI Desktop** — an Electron (macOS) desktop app. The product name is always **"Off Grid AI Desktop"** (never "Off Grid Desktop", "My Memories", etc.) — in window titles, OAuth client names, about screens, everywhere.
+This is **Off Grid AI Desktop** — an Electron (macOS) desktop app. The product name is always **"Off Grid AI Desktop"** (never "Off Grid AI Desktop", "My Memories", etc.) — in window titles, OAuth client names, about screens, everywhere.
 
-## Design — DESKTOP-FIRST, Off Grid brand
+## Design — DESKTOP-FIRST, Off Grid AI brand
 
 Full design doc: **`docs/DESIGN.md`**. The essentials, which OVERRIDE any mobile-first or monochrome assumptions:
 
@@ -53,6 +53,9 @@ Two process rules, learned from the same incident — they matter as much as the
 ## Conventions
 
 - Verify changes with `npx tsc --noEmit` (main: `tsconfig.node.json`, web: `tsconfig.web.json`) before declaring done.
+- Run Vitest through the repository scripts, never with `npx vitest` directly. Use `npm test -- <files>`
+  for product tests and `npm run test:db -- <dbtest files>` for real database journeys. The scripts run
+  Vitest through Electron's embedded Node runtime so native SQLite keeps the production Electron ABI.
 - Main-process changes need an app restart; renderer changes hot-reload.
 - Don't over-restart — it interrupts capture.
 - **Local packaged builds:** commands for building the `.app` on a dev Mac (signing, unsigned, fresh-profile) live in `local-build.local.md` (gitignored, machine-specific). Check it before running `build:unpack`/`build:mac` locally — keychain cert setup varies per machine. Real release signing is CI-only (`release.yml`).
@@ -100,7 +103,7 @@ When iterating (a request, a fix, a tweak the user just confirmed), add a test t
 
 - **Coverage bar — 85% is the standard, enforced by a rising floor.** The goal is **85% on every metric — statements, branches (which subsume conditions), functions, lines** — across the testable surface. The repo is not there yet (much of it is Electron/native I/O shell that requires a running integration harness), so `npm run test:coverage` gates a **ratchet floor** set just under current coverage: the pre-push hook blocks any REGRESSION and the floor only rises. Every change that adds logic adds tests, nudges the number up, and the floor follows it toward 85 (raise the `thresholds` in `vitest.config.ts` as coverage climbs; never lower them). New code never ships uncovered — add a branch or an error path, add the user-visible case.
 - **Never add unit tests. User-behavior integration tests only.** A new test must enter through a real product boundary (rendered UI, IPC, HTTP/API, CLI, service interface, database, packaged app) and exercise the actual owning layers together. Do not test an isolated helper, class, hook, reducer, or source string. Existing unit tests may remain until their code is touched; when extending behavior they cover, replace or supersede them with integration coverage instead of adding another unit case.
-- **Real collaborators, not mocks.** Use the actual implementation and real collaborators wherever execution is possible: a temp SQLite DB, a temp `OFFGRID_USER_DATA` dir, the real renderer/main IPC bridge, a local HTTP server, real crypto/WASM, or a packaged Electron app. Fakes are allowed only at an uncontrollable external boundary such as a third-party network, native OS dialog, or hardware ID, and a fake-boundary test is not sufficient acceptance evidence when a real end-to-end path can run. A mock that stands in for Off Grid code hides the behavior under test and lets it rot green.
+- **Real collaborators, not mocks.** Use the actual implementation and real collaborators wherever execution is possible: a temp SQLite DB, a temp `OFFGRID_USER_DATA` dir, the real renderer/main IPC bridge, a local HTTP server, real crypto/WASM, or a packaged Electron app. Fakes are allowed only at an uncontrollable external boundary such as a third-party network, native OS dialog, or hardware ID, and a fake-boundary test is not sufficient acceptance evidence when a real end-to-end path can run. A mock that stands in for Off Grid AI code hides the behavior under test and lets it rot green.
 - **Prompt and contract fixes are behavior too.** Exercise the real prompt composer/consumer or contract owner through its public boundary and assert the resulting user-visible or downstream behavior. Do not read source files and regex-match implementation text as the primary regression test.
 - **Tests guard the architecture too (SOLID + DRY).** Prove the seam through a real second implementation or integration harness so a test fails the moment a caller starts branching on a concrete type (`kind === 'x'`, `instanceof`) instead of the interface. Guard DRY by driving the public owner rather than re-hardcoding its mapping or rule in the test.
 - **E2E** — Playwright Electron tour in `e2e/` (`npm run test:e2e`), DOM-driven, fresh temp profile, `OFFGRID_PRO=0`. Assert new surfaces render. Screenshot key states via `page.screenshot({ path: 'e2e/screenshots/<name>.png' })`; include those screenshots in the PR body.

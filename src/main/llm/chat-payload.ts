@@ -7,21 +7,22 @@
 // takes ALREADY-decoded image data (base64 + mime) so it is fully pure.
 
 import { mimeForExt } from '../mime'
-import { toWellFormedText } from './well-formed-text'
 import {
-  thinkingFragmentFor,
-  type ThinkingDialect,
-  type ThinkingFragment
-} from './thinking-dialect'
+  applyRequestedLlamaServerThinking,
+  llamaServerThinkingPayload,
+  openAICompatibleContentParts,
+  openAICompatibleMessages,
+  requestedLlamaServerThinking,
+  type DecodedImagePayload,
+  type ModelReasoningMetadata,
+  type OpenAICompatibleContentPart,
+  type OpenAICompatibleMessage
+} from '@offgrid/models'
+import { DEFAULT_IMAGE_MIME } from '@offgrid/models'
 
-export type ContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } }
-
-export interface DecodedImage {
-  base64: string
-  mime: string // e.g. 'image/png' | 'image/jpeg' | 'image/webp'
-}
+export type ContentPart = OpenAICompatibleContentPart
+export type DecodedImage = DecodedImagePayload
+export type ChatMessage = OpenAICompatibleMessage
 
 /** MIME type for an image path by extension, via the shared ext->MIME map (image/png
  *  fallback). Previously forced everything non-.png to image/jpeg, which mislabelled
@@ -29,19 +30,13 @@ export interface DecodedImage {
  *  reject a declared type that doesn't match the bytes). */
 export function imageMime(imgPath: string): string {
   const ext = imgPath.split('.').pop() ?? ''
-  return mimeForExt(ext, 'image/png')
+  return mimeForExt(ext, DEFAULT_IMAGE_MIME)
 }
 
 /** Build the OpenAI-style multimodal content array: the text part first, then one
  *  image_url data-URI part per decoded image (in order). */
 export function buildContentParts(message: string, images: DecodedImage[]): ContentPart[] {
-  // Repair unpaired surrogates HERE, at the one place every request body is assembled: a lone
-  // surrogate anywhere in the text makes the whole body unparseable to the model server.
-  const content: ContentPart[] = [{ type: 'text', text: toWellFormedText(message) }]
-  for (const img of images) {
-    content.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.base64}` } })
-  }
-  return content
+  return openAICompatibleContentParts(message, images)
 }
 
 /** Build the messages array: the user turn (multimodal content), with an optional
@@ -51,14 +46,8 @@ export function buildMessages(
   message: string,
   images: DecodedImage[],
   systemPrompt: string
-): { role: 'system' | 'user'; content: string | ContentPart[] }[] {
-  const messages: { role: 'system' | 'user'; content: string | ContentPart[] }[] = [
-    { role: 'user', content: buildContentParts(message, images) }
-  ]
-  if (systemPrompt.trim()) {
-    messages.unshift({ role: 'system', content: toWellFormedText(systemPrompt) })
-  }
-  return messages
+): ChatMessage[] {
+  return openAICompatibleMessages(message, images, systemPrompt)
 }
 
 /** The chat_template_kwargs / reasoning_format fragment for the thinking control.
@@ -69,17 +58,14 @@ export function buildMessages(
  *  exactly as before. */
 export function thinkingPayload(
   thinking: boolean,
-  dialect: ThinkingDialect = 'enable-thinking'
-): ThinkingFragment {
-  return thinkingFragmentFor(dialect, thinking)
+  dialect: ModelReasoningMetadata['control'] = 'enable-thinking'
+): ReturnType<typeof llamaServerThinkingPayload> {
+  return llamaServerThinkingPayload(thinking, dialect)
 }
 
 /** What a client asked for, or undefined when it said nothing about thinking. */
 export function requestedThinking(body: Record<string, unknown>): boolean | undefined {
-  const kwargs = body.chat_template_kwargs
-  if (typeof kwargs !== 'object' || kwargs === null) return undefined
-  const asked = (kwargs as Record<string, unknown>).enable_thinking
-  return typeof asked === 'boolean' ? asked : undefined
+  return requestedLlamaServerThinking(body)
 }
 
 /**
@@ -98,14 +84,5 @@ export function requestedThinking(body: Record<string, unknown>): boolean | unde
  * Returns whether the body changed.
  */
 export function applyThinkingPayload(body: Record<string, unknown>): boolean {
-  const asked = requestedThinking(body)
-  if (asked === undefined) return false
-  const resolved = thinkingPayload(asked)
-  body.chat_template_kwargs = resolved.chat_template_kwargs
-  if (resolved.reasoning_format !== undefined) {
-    body.reasoning_format = resolved.reasoning_format
-  } else {
-    delete body.reasoning_format
-  }
-  return true
+  return applyRequestedLlamaServerThinking(body)
 }

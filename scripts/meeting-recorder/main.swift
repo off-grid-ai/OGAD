@@ -130,8 +130,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
             }
             return content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays[0]
         }()
-        let selfApps = content.applications.filter { $0.applicationName.lowercased().contains("off grid") }
-        errLog("[rec] capturing display \(display.displayID) \(display.width)x\(display.height); excluding \(selfApps.count) Off Grid app(s)")
+        let selfApps = content.applications.filter { $0.applicationName.lowercased().contains("Off Grid AI") }
+        errLog("[rec] capturing display \(display.displayID) \(display.width)x\(display.height); excluding \(selfApps.count) Off Grid AI app(s)")
         let filter = SCContentFilter(display: display, excludingApplications: selfApps, exceptingWindows: [])
         let outW = width ?? display.width
         let outH = height ?? display.height

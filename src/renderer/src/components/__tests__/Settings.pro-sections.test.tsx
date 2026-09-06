@@ -15,44 +15,66 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 function stubApi(platform = 'darwin'): void {
-  const api = new Proxy(
-    {},
-    {
-      get: (_t, prop) => {
-        if (prop === 'isPro') return true
-        if (prop === 'platform') return platform
-        if (prop === 'license') return { status: () => Promise.resolve({}) }
-        if (prop === 'getAppVersion') return () => Promise.resolve('')
-        if (prop === 'getPermissionStatus') {
-          return () =>
-            Promise.resolve({
-              accessibility: true,
-              screenRecording: false,
-              localNetwork: true,
-              allGranted: false
-            })
-        }
-        if (prop === 'getLlmSettings') {
-          return () => Promise.resolve({ performanceMode: 'balanced' })
-        }
-        if (prop === 'setupPlan') return () => Promise.resolve(null)
-        if (prop === 'systemHealth') {
-          return () => Promise.resolve({ components: [], ramGb: 0, activeModel: null })
-        }
-        if (prop === 'getStorageInfo') return () => Promise.resolve(null)
-        if (prop === 'listDownloads') return () => Promise.resolve([])
-        if (prop === 'onSetupProgress' || prop === 'onModelProgress') return () => () => {}
-        if (prop === 'queueConfigGet') {
-          return () => Promise.resolve({ enabled: true, tier1Coexists: true })
-        }
-        if (prop === 'queueState') return () => Promise.resolve({ running: [], queued: [] })
-        if (prop === 'residencyGet') return () => Promise.resolve({})
-        return () => Promise.resolve({})
+  const modelControl = modelControlBoundary({
+    kinds: [],
+    models: [] as Array<{ id: string }>
+  })
+  const api = new Proxy(modelControl, {
+    get: (target, prop) => {
+      const modelControlMember = Reflect.get(target, prop)
+      if (modelControlMember !== undefined) return modelControlMember
+      if (prop === 'isPro') return true
+      if (prop === 'platform') return platform
+      if (prop === 'license') return { status: () => Promise.resolve({}) }
+      if (prop === 'getAppVersion') return () => Promise.resolve('')
+      if (prop === 'getPermissionStatus') {
+        return () =>
+          Promise.resolve({
+            accessibility: true,
+            screenRecording: false,
+            localNetwork: true,
+            allGranted: false
+          })
       }
+      if (prop === 'getLlmSettings') {
+        return () => Promise.resolve({ performanceMode: 'balanced' })
+      }
+      if (prop === 'getRemoteVisionServer') {
+        return () =>
+          // The shape main returns today (v4): the renderer no longer migrates a legacy record.
+          Promise.resolve({
+            provider: 'local',
+            endpoint: '',
+            model: '',
+            hasApiKey: false,
+            activeServerId: null,
+            servers: []
+          })
+      }
+      if (prop === 'setupPlan') return () => Promise.resolve(null)
+      if (prop === 'systemHealth') {
+        return () => Promise.resolve({ components: [], ramGb: 0, activeModel: null })
+      }
+      if (prop === 'getStorageInfo') return () => Promise.resolve(null)
+      if (prop === 'listDownloads') return () => Promise.resolve([])
+      if (
+        prop === 'onSetupProgress' ||
+        prop === 'onModelProgress' ||
+        prop === 'onChatHealthChanged'
+      ) {
+        return () => () => {}
+      }
+      if (prop === 'queueConfigGet') {
+        return () => Promise.resolve({ enabled: true, tier1Coexists: true })
+      }
+      if (prop === 'queueState') return () => Promise.resolve({ running: [], queued: [] })
+      if (prop === 'residencyGet') return () => Promise.resolve({})
+      return () => Promise.resolve({})
     }
-  )
+  })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(window as any).api = api
   vi.stubGlobal('__OFFGRID_PRO__', true)
@@ -79,6 +101,19 @@ describe('Settings pro-section registry seam (D31)', () => {
     expect(screen.getByText('Processing priority')).toBeTruthy()
     expect(screen.getByText('Chat and capture model')).toBeTruthy()
     expect(screen.queryByTestId('fake-capture')).toBeNull()
+  })
+
+  it('shows remote model server settings in the main Settings screen', async () => {
+    vi.resetModules()
+    stubApi()
+    const { Settings } = await import('../Settings')
+    const user = userEvent.setup()
+    render(<Settings />)
+
+    await user.click(screen.getByText('Remote model server'))
+    expect(await screen.findByRole('switch', { name: 'Use remote server' })).toBeTruthy()
+    expect(screen.getByText('Local model is active.')).toBeTruthy()
+    expect(screen.queryByText(/OpenRouter/i)).toBeNull()
   })
 
   it('pro build composes the registered capture owner with shared processing controls', async () => {

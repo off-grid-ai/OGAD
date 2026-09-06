@@ -103,7 +103,7 @@ test('APP-119 and APP-121: capture requires opt-in, then pause stops it everywhe
   test.setTimeout(90_000)
   await gotoCaptureSettings()
 
-  // A new device is paused by Off Grid even though the controlled OS boundary says permission is
+  // A new device is paused by Off Grid AI even though the controlled OS boundary says permission is
   // granted. Waiting past a full scheduler interval proves this is not a first-paint race.
   const settingsStatus = page.getByRole('status').filter({ hasText: 'Paused' }).first()
   await expect(settingsStatus).toBeVisible()

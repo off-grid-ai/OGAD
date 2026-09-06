@@ -22,3 +22,7 @@ export function registerSettingsSection(section: SettingsSection): void {
 export function getRegisteredSettingsSections(): SettingsSection[] {
   return [...sections].sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
 }
+
+export function clearRegisteredSettingsSections(): void {
+  sections.length = 0
+}

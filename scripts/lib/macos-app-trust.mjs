@@ -15,6 +15,7 @@ export const CRITICAL_SIGNED_CODE = Object.freeze([
   'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework',
   'Contents/Resources/bin/llama/llama-server',
   'Contents/Resources/bin/meeting-recorder',
+  'Contents/Resources/bin/computer-use-capture',
   'Contents/Resources/bin/dictation-hotkey'
 ])
 
@@ -71,7 +72,7 @@ export function releaseTeamIdForEnvironment(environment) {
   }
   if (teamId !== OFFGRID_APPLE_TEAM_ID) {
     throw new Error(
-      `APPLE_TEAM_ID must match Off Grid's pinned signing team ${OFFGRID_APPLE_TEAM_ID}`
+      `APPLE_TEAM_ID must match Off Grid AI's pinned signing team ${OFFGRID_APPLE_TEAM_ID}`
     )
   }
   return OFFGRID_APPLE_TEAM_ID

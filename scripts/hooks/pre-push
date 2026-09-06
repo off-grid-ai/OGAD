@@ -19,6 +19,17 @@ if ! npm run --silent typecheck; then
   exit 1
 fi
 
+# Model-architecture gate: the AST guard in scripts/verify-model-architecture.mjs is a REQUIRED
+# code gate (import direction, source order, boundary rules), not a substitute for behavioural
+# tests. CI runs it through `npm run depcruise`; the hook runs it here so a push cannot arrive red.
+# Fast (AST only, no build), so it blocks.
+echo "[pre-push] model architecture — npm run test:architecture:models"
+if ! npm run --silent test:architecture:models; then
+  echo ""
+  echo "[pre-push] BLOCKED: the model-architecture gate failed. Fix the violations above before pushing."
+  exit 1
+fi
+
 # Coverage is measured across EVERY suite and gated on the code this branch ADDS, not on whole files it
 # happened to touch. Three things were wrong with gating `npm run test:coverage` against vitest.config.ts's
 # thresholds:

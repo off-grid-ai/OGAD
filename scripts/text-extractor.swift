@@ -82,8 +82,64 @@ func selectPrimaryScrollArea(from areas: [AXUIElement]) -> AXUIElement? {
 }
 func runTextExtractor() {
     let args = CommandLine.arguments
+    if args.count == 2 && args[1] == "--foreground-app" {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let bundleID = app.bundleIdentifier,
+              let data = try? JSONSerialization.data(withJSONObject: ["bundleId": bundleID]),
+              let json = String(data: data, encoding: .utf8) else {
+            print("{\"status\":\"error\"}")
+            return
+        }
+        print(json)
+        return
+    }
+    // A missing on-screen capture source can also be minimized or on another Space.
+    // Query all WindowServer windows before reporting a confirmed call window closed.
+    if args.count >= 2 && args[1] == "--window-exists" {
+        guard args.count == 3, let windowID = UInt32(args[2]), windowID > 0 else {
+            print("{\"status\":\"error\",\"message\":\"Invalid window ID\"}")
+            return
+        }
+        guard CGPreflightScreenCaptureAccess(),
+              let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else {
+            print("{\"status\":\"error\",\"message\":\"Window observation unavailable\"}")
+            return
+        }
+        let window = windows.first { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID }
+        var response: [String: Any] = ["status": window == nil ? "absent" : "present", "windowId": windowID]
+        if let window = window,
+           let ownerPID = (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+           ownerPID > 0,
+           let foreground = NSWorkspace.shared.frontmostApplication, foreground.processIdentifier > 0 {
+            response["away"] = foreground.processIdentifier != ownerPID
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: response),
+              let json = String(data: data, encoding: .utf8) else {
+            print("{\"status\":\"error\",\"message\":\"Window observation could not be encoded\"}")
+            return
+        }
+        print(json)
+        return
+    }
+    // R5 T1c: `--elements <app>` emits the structured interactive-element list
+    // for the accessibility driving rail instead of the text blob.
+    if args.count >= 3 && args[1] == "--elements" {
+        runElementsExtractor(args[2])
+        return
+    }
+    // R5 T1d: the foreground running-app list for target resolution.
+    if args.count >= 2 && args[1] == "--apps" {
+        runAppsList()
+        return
+    }
+    // Screenshot-only vision asks only whether the focused native field is safe.
+    // The helper never reads or emits the field value.
+    if args.count >= 2 && args[1] == "--focused-element" {
+        runFocusedElementInspector()
+        return
+    }
     if args.count < 2 {
-        print("Usage: text-extractor <app-name>")
+        print("Usage: text-extractor <app-name> | --elements <app-name> | --focused-element")
         exit(1)
     }
 

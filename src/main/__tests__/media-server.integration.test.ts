@@ -4,7 +4,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-vi.mock('electron', () => ({ app: { getPath: () => '' } }))
+// The electron fake must point userData at the throwaway profile, never at '' or the repo root,
+// so nothing the server touches through app.getPath can land in the tree.
+vi.mock('electron', () => ({ app: { getPath: () => profile } }))
 
 import { LoopbackMediaServer } from '../media-server'
 import { localMediaRoots } from '../media-roots'
@@ -126,6 +128,36 @@ describe('LoopbackMediaServer — free-port fallback', () => {
     } finally {
       await media.close()
       await new Promise<void>((r) => blocker.close(() => r()))
+    }
+  })
+
+  it('fails closed when its port window is exhausted, then starts after the boundary is released', async () => {
+    const net = await import('node:net')
+    // 65535 is the final TCP port, so the real candidate window contains exactly this one port.
+    const blocker = net.createServer()
+    await new Promise<void>((resolve, reject) => {
+      blocker.once('error', reject)
+      blocker.listen(65535, '127.0.0.1', resolve)
+    })
+    const media = new LoopbackMediaServer({
+      roots: localMediaRoots(profile),
+      port: 65535,
+      token: 'exhausted'
+    })
+    try {
+      await expect(media.start()).rejects.toThrow(
+        'No loopback media port is available from 65535 on 127.0.0.1.'
+      )
+      await new Promise<void>((resolve) => blocker.close(() => resolve()))
+
+      await expect(media.start()).resolves.toBeUndefined()
+      const url = await media.urlFor(fixturePath('image'))
+      expect(url).toContain('http://127.0.0.1:65535/')
+    } finally {
+      await media.close()
+      if (blocker.listening) {
+        await new Promise<void>((resolve) => blocker.close(() => resolve()))
+      }
     }
   })
 })

@@ -1,8 +1,29 @@
+import { internalTabRoutes, isInternalTabView } from './internal-tab-route'
+
 /** A screen ⌘K can jump to. Supplied by the shell from the sidebar it already builds. */
 export interface PaletteScreen {
   label: string
   view: string
+  subroute?: string
   locked?: boolean
+}
+
+/** Project every named internal tab from the route SSOT into Command-K. */
+export function internalTabPaletteScreens(
+  roots: readonly Pick<PaletteScreen, 'view' | 'locked'>[]
+): PaletteScreen[] {
+  return roots.flatMap(({ view, locked }) =>
+    isInternalTabView(view)
+      ? internalTabRoutes(view)
+          .filter((route) => route.slug !== null)
+          .map((route) => ({
+            label: route.label,
+            view,
+            subroute: route.slug ?? undefined,
+            locked
+          }))
+      : []
+  )
 }
 
 /**

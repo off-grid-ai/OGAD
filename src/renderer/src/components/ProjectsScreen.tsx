@@ -14,65 +14,9 @@ import {
   IconSettings,
   IconLayoutGrid
 } from '@tabler/icons-react'
-import { ArtifactCanvas, type Artifact } from './ArtifactCanvas'
-import { artifactKindLabel } from '@renderer/lib/artifact-labels'
 import { timeAgo } from '@renderer/lib/time'
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
-
-// Artifacts saved within a project — listed (and openable) from the project view.
-function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElement {
-  const [items, setItems] = useState<(Artifact & { id: string; title: string; created: number })[]>(
-    []
-  )
-  const [open, setOpen] = useState<Artifact | null>(null)
-  useEffect(() => {
-    ;(async () => {
-      try {
-        setItems((await api.listArtifacts?.({ projectId })) || [])
-      } catch {
-        /* ignore */
-      }
-    })()
-  }, [projectId])
-  return (
-    <div className="w-full px-8 py-6">
-      <div className="mb-5 text-[11px] uppercase tracking-widest text-neutral-600">
-        {items.length} {items.length === 1 ? 'artifact' : 'artifacts'}
-      </div>
-      {items.length === 0 ? (
-        <p className="py-10 text-center text-sm text-neutral-600">
-          No artifacts yet — generate HTML, React, SVG, Mermaid, or docs in a chat scoped to this
-          project and they’ll appear here.
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {items.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => setOpen(a)}
-              className="group flex flex-col gap-2 rounded-lg border border-neutral-800/80 bg-neutral-900/30 p-4 text-left transition-colors hover:border-green-500/50 hover:bg-neutral-900/60"
-            >
-              <div className="flex items-center justify-between">
-                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-400">
-                  {artifactKindLabel(a.kind)}
-                </span>
-                <span className="text-[10px] text-neutral-600">
-                  {a.created ? timeAgo(new Date(a.created).toISOString()) : ''}
-                </span>
-              </div>
-              <span className="min-w-0 truncate text-sm text-neutral-200 group-hover:text-white">
-                {a.title}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      {open && <ArtifactCanvas artifact={open} onClose={() => setOpen(null)} />}
-    </div>
-  )
-}
+import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { ProjectArtifacts } from './ProjectArtifacts'
 
 interface Project {
   id: string
@@ -119,27 +63,44 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
+/**
+ * The reason a delete was refused, without the IPC plumbing around it: Electron wraps a
+ * main-process error as "Error invoking remote method '...': Error: <reason>", and the reason is
+ * the only part that means anything to the user.
+ */
+function deleteFailureMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  const reason = raw.split('Error: ').pop()?.trim()
+  return reason && reason.length > 0 ? reason : 'This project could not be deleted.'
+}
+
 export function ProjectsScreen({
   onOpenChat,
   selectedProjectId,
   onSelectProject
-}: ProjectsScreenProps) {
+}: ProjectsScreenProps): React.ReactElement {
   const [projects, setProjects] = useState<Project[]>([])
   const [localActiveId, setLocalActiveId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [view, setView] = useState<'chat' | 'artifacts' | 'config'>('chat')
+  const [deleteFailure, setDeleteFailure] = useState('')
 
-  const refreshProjects = useCallback(async () => {
-    const list = (await api.listProjects?.()) ?? []
+  const applyProjects = useCallback((list: Project[]): Project[] => {
     setProjects(list)
     setLocalActiveId((cur) => cur ?? list[0]?.id ?? null)
-    return list as Project[]
+    return list
   }, [])
+  const loadProjects = useCallback(async (): Promise<Project[]> => {
+    return ((await window.api.listProjects()) ?? []) as Project[]
+  }, [])
+  const refreshProjects = useCallback(async (): Promise<Project[]> => {
+    return applyProjects(await loadProjects())
+  }, [applyProjects, loadProjects])
 
   useEffect(() => {
-    refreshProjects()
-  }, [refreshProjects])
+    void loadProjects().then(applyProjects)
+  }, [applyProjects, loadProjects])
 
   const activeId = selectedProjectId ?? localActiveId
   const selectProject = (projectId: string | null): void => {
@@ -154,7 +115,7 @@ export function ProjectsScreen({
       setCreating(false)
       return
     }
-    const id = await api.createProject?.({ name })
+    const id = await window.api.createProject({ name })
     setNewName('')
     setCreating(false)
     await refreshProjects()
@@ -172,7 +133,16 @@ export function ProjectsScreen({
     ) {
       return
     }
-    await api.deleteProject?.(id)
+    setDeleteFailure('')
+    try {
+      await window.api.deleteProject(id)
+    } catch (error) {
+      // The delete is refused when the project's knowledge base or its sync cleanup only partly
+      // succeeded: the project is still there, deliberately, and the user has to be told why
+      // rather than watching the row survive a delete that reported nothing.
+      setDeleteFailure(deleteFailureMessage(error))
+      return
+    }
     selectProject(null)
     await refreshProjects()
   }
@@ -191,6 +161,11 @@ export function ProjectsScreen({
             <IconPlus className="h-4 w-4" />
           </button>
         </div>
+        {deleteFailure ? (
+          <p role="alert" className="mx-4 mb-2 text-[11px] text-red-400">
+            {deleteFailure}
+          </p>
+        ) : null}
         <div className="flex-1 overflow-y-auto px-2">
           {creating && (
             <input
@@ -306,21 +281,21 @@ function ProjectChats({
 }: {
   project: Project
   onOpenChat: (target: { conversationId?: string; projectId?: string }) => void
-}) {
+}): React.ReactElement {
   const [chats, setChats] = useState<RagConvo[]>([])
 
   useEffect(() => {
     let alive = true
     const refresh = (): void => {
-      void api
-        .getRagConversations?.(project.id)
+      void window.api
+        .getRagConversations(project.id)
         .then((c: RagConvo[]) => {
           if (alive) setChats(c)
         })
         .catch(() => {})
     }
     refresh()
-    const offChanged = api.onRagConversationsChanged?.(() => {
+    const offChanged = window.api.onRagConversationsChanged?.(() => {
       refresh()
     })
     return () => {
@@ -383,14 +358,14 @@ function ProjectConfig({
   project: Project
   onSaved: () => void
   onDelete: () => void
-}) {
+}): React.ReactElement {
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description)
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt)
   const [includeMemory, setIncludeMemory] = useState(project.includeMemory)
   const [saving, setSaving] = useState(false)
   // Captured-memory retrieval is a Pro feature — core projects use uploaded docs only.
-  const isPro = !!api?.isPro
+  const { isPro } = useRendererEntitlement()
   const [savedAt, setSavedAt] = useState<string | null>(null)
 
   const dirty =
@@ -402,7 +377,7 @@ function ProjectConfig({
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
-      await api.updateProject?.(project.id, { name, description, systemPrompt, includeMemory })
+      await window.api.updateProject(project.id, { name, description, systemPrompt, includeMemory })
       setSavedAt('Saved')
       onSaved()
     } finally {
@@ -482,7 +457,7 @@ function ProjectConfig({
                 Include captured memory
                 <span className="block text-[11px] text-neutral-600">
                   Retrieval spans uploaded documents
-                  {includeMemory ? ' + everything Off Grid has captured' : ' only'}.
+                  {includeMemory ? ' + everything Off Grid AI has captured' : ' only'}.
                 </span>
               </span>
             </button>
@@ -497,7 +472,15 @@ function ProjectConfig({
   )
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Field({
+  label,
+  hint,
+  children
+}: {
+  label: string
+  hint?: string
+  children: ReactNode
+}): React.ReactElement {
   return (
     <div>
       <div className="mb-1.5 text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
@@ -509,34 +492,30 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 // --- Knowledge base manager -------------------------------------------------
 
-function KnowledgeBase({ projectId }: { projectId: string }) {
+function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement {
   const [docs, setDocs] = useState<RagDoc[]>([])
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const refresh = useCallback(async () => {
-    setDocs((await api.listProjectDocuments?.(projectId)) ?? [])
+  const refresh = useCallback(async (): Promise<void> => {
+    setDocs((await window.api.listProjectDocuments(projectId)) ?? [])
   }, [projectId])
 
   useEffect(() => {
     refresh()
-    const off = api.onProjectIndexProgress?.(
-      (d: { name: string; stage: string; error?: string }) => {
-        if (d.stage === 'error') setStatus(`${d.name}: ${d.error}`)
-        else if (d.stage === 'done') {
-          setStatus(`${d.name}: indexed`)
-          refresh()
-        } else setStatus(`${d.name}: ${d.stage}…`)
-      }
-    )
-    const offChanged = api.onProjectDocumentsChanged?.(
-      ({ projectId: changedProjectId }: { projectId: string }) => {
-        if (changedProjectId === projectId) refresh()
-      }
-    )
+    const off = window.api.onProjectIndexProgress((progress) => {
+      if (progress.stage === 'error') setStatus(`${progress.name}: ${progress.error}`)
+      else if (progress.stage === 'done') {
+        setStatus(`${progress.name}: indexed`)
+        refresh()
+      } else setStatus(`${progress.name}: ${progress.stage}…`)
+    })
+    const offChanged = window.api.onProjectDocumentsChanged(({ projectId: changedProjectId }) => {
+      if (changedProjectId === projectId) refresh()
+    })
     return () => {
-      off?.()
-      offChanged?.()
+      off()
+      offChanged()
     }
   }, [projectId, refresh])
 
@@ -544,7 +523,7 @@ function KnowledgeBase({ projectId }: { projectId: string }) {
     setBusy(true)
     setStatus('Choose files…')
     try {
-      await api.addProjectDocuments?.(projectId)
+      await window.api.addProjectDocuments(projectId)
     } finally {
       setBusy(false)
       refresh()
@@ -592,7 +571,7 @@ function KnowledgeBase({ projectId }: { projectId: string }) {
               </div>
               <button
                 onClick={async () => {
-                  await api.toggleProjectDocument?.(d.id, !d.enabled)
+                  await window.api.toggleProjectDocument(d.id, !d.enabled)
                   setDocs((cur) =>
                     cur.map((x) => (x.id === d.id ? { ...x, enabled: !x.enabled } : x))
                   )
@@ -607,7 +586,7 @@ function KnowledgeBase({ projectId }: { projectId: string }) {
               </button>
               <button
                 onClick={async () => {
-                  await api.deleteProjectDocument?.(d.id)
+                  await window.api.deleteProjectDocument(d.id)
                   setDocs((cur) => cur.filter((x) => x.id !== d.id))
                 }}
                 aria-label={`Delete ${d.name}`}

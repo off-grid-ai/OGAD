@@ -1,6 +1,6 @@
 /**
  * Brand-token guard for the chat-list markdown renderer. Links are an accent
- * surface and must use the emerald token, not cyan (which isn't in the Off Grid
+ * surface and must use the emerald token, not cyan (which isn't in the Off Grid AI
  * palette at all — DESIGN.md). ChatList.tsx is a coverage-excluded .tsx, so guard
  * the contract by reading the source (§D). Fails-before (cyan) / passes-after.
  */

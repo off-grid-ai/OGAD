@@ -22,7 +22,7 @@ import * as db from '../database'
 import { PROMPT_REGISTRY } from '../prompts'
 import { getPrompt, getPromptTemplate, resetPrompt } from '../prompt-store'
 import { getResidency, getResidencyMode, setResidencyMode } from '../runtime-residency'
-import { DEFAULT_RESIDENCY } from '../runtime-residency-logic'
+import { DEFAULT_RUNTIME_RESIDENCY as DEFAULT_RESIDENCY } from '@offgrid/models'
 
 const RESIDENCY_KEY = 'runtime:residency'
 

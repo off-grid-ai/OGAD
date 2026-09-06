@@ -16,6 +16,7 @@ import {
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { githubReleasesUnavailableReason } from './helpers/network'
 
 const DEFAULT_APP = path.resolve(
   'dist/mac-arm64/Off Grid AI Desktop.app/Contents/MacOS/Off Grid AI Desktop'
@@ -29,6 +30,8 @@ let userDataDir: string
 test.beforeAll(async () => {
   test.skip(process.platform !== 'darwin', 'packaged rollback acceptance currently targets macOS')
   test.skip(!fs.existsSync(APP_EXECUTABLE), `packaged app not found at ${APP_EXECUTABLE}`)
+  const feedReason = await githubReleasesUnavailableReason()
+  test.skip(feedReason !== null, feedReason ?? '')
 
   userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-update-rollback-'))
   app = await electron.launch({
@@ -47,7 +50,7 @@ test.beforeAll(async () => {
   await page.waitForLoadState('domcontentloaded')
 
   for (let step = 0; step < 8; step++) {
-    const button = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const button = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await button.isVisible().catch(() => false))) break
     await button.click()
   }

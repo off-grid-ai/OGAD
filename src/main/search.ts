@@ -1,10 +1,13 @@
-// Universal search — the single front door over everything Off Grid has seen.
+// Universal search — the single front door over everything Off Grid AI has seen.
 // Hybrid: FTS5 keyword (exact words you saw) + LanceDB semantic (NLP recall),
 // fused with reciprocal-rank fusion. Plus a background backfill that embeds the
 // observation/frame/transcript backlog (using the in-app MiniLM model) so the
 // semantic half actually covers your captured life. All local, all offline.
+import { reportDesktopApplicationDegraded } from './composition/application-access'
 import { getDB } from './database'
+import { writeDiagnosticLog } from './diagnostics-log'
 import { embeddings } from './embeddings'
+import { ensureRagStoreSchema } from './rag/store'
 import { addChunks, searchVectors, vectorCount, type VecChunk } from './vectors'
 import {
   applyBoosts,
@@ -141,6 +144,7 @@ export async function searchStatus(): Promise<{ vectors: number; pending: number
 
 /** Data sources available to filter by (surfaces seen, busiest first, + meetings). */
 export function searchSources(): { source: string; count: number }[] {
+  ensureRagStoreSchema()
   const db = getDB()
   const rows = db
     .prepare(
@@ -162,6 +166,7 @@ export function searchSources(): { source: string; count: number }[] {
  *  the numbers reflect the current search (Chat: 1, Knowledge base: 0, …). Empty
  *  query → total counts (searchSources). Only sources with ≥1 match are returned. */
 export function searchFacets(query: string): { source: string; count: number }[] {
+  ensureRagStoreSchema()
   const q = query.trim()
   if (!q) return searchSources()
   const db = getDB()
@@ -202,6 +207,95 @@ export function searchFacets(query: string): { source: string; count: number }[]
     if (mtg.c) out.push({ source: 'Meeting', count: mtg.c })
   }
   return out
+}
+
+// ---------------------------------------------------------------------------
+// Superseding a query stream
+// ---------------------------------------------------------------------------
+
+/**
+ * A search box issues one request per settled query, and the newest one is the only answer anybody
+ * will ever look at. Dropping the older ANSWER (which the renderer already does) still pays for it:
+ * the embedding, the vector search, one source-of-truth probe per semantic hit, the fusion and
+ * ranking, and one thumbnail query per result all run to completion and compete for the same CPU
+ * that has to paint the next keystroke. So the older WORK stops instead.
+ *
+ * Superseding is per stream, and a stream is one surface's typing: the Search screen's box must not
+ * cancel a retrieval a chat turn is waiting on, and vice versa. A caller that is not a stream of
+ * queries (a one-shot tool call, a RAG retrieval) passes no stream and is never superseded.
+ */
+export class SupersededSearchError extends Error {
+  constructor(stream: string) {
+    super(`Search on "${stream}" stopped: a newer query superseded it.`)
+    this.name = 'SupersededSearchError'
+  }
+}
+
+/** Asserts, at each point work could be abandoned, that this request is still the newest one. */
+export interface SearchStreamClaim {
+  readonly check: () => void
+  /** Drop this request's entry once it is finished, so the map holds only in-flight streams. */
+  readonly release: () => void
+}
+
+/**
+ * The stream identity for one typing surface in ONE window.
+ *
+ * A stream is "one surface's typing", and with more than one renderer window open the surface name
+ * alone does not say that: two windows both searching would share the identity `search`, so one
+ * window's newer keystroke would supersede a live query in the other, and each would be cancelling
+ * work the other is still waiting for. The window is therefore part of the identity.
+ *
+ * `senderId` is the invoking `WebContents.id`, which the IPC boundary already has on its event and
+ * which is how the rest of this process scopes per-window state (`artifact-preview-ipc.ts` keys
+ * previews by `event.sender.id`; `voice-transcription-ipc.ts` keys a request by sender AND request
+ * id). Deriving it here rather than at the boundary keeps the identity in the same file as the map
+ * that consumes it, so the two cannot drift - and needs no registry of windows.
+ */
+export function searchStreamId(surface: string, senderId: number): string {
+  return `${surface}#${String(senderId)}`
+}
+
+let issuedSearches = 0
+/**
+ * Newest token per stream. Keyed by (surface, window), so it is bounded by the number of streams
+ * with a request IN FLIGHT: `release` removes the entry when the newest holder finishes. Window ids
+ * are monotonic, so without the release a long session that opens and closes windows would grow
+ * this map forever.
+ */
+const newestPerStream = new Map<string, number>()
+
+/** No stream named: nothing can supersede this request, so every checkpoint passes. */
+const NEVER_SUPERSEDED: SearchStreamClaim = { check: () => undefined, release: () => undefined }
+
+function claimStream(stream: string | undefined): SearchStreamClaim {
+  if (!stream) return NEVER_SUPERSEDED
+  issuedSearches += 1
+  const mine = issuedSearches
+  newestPerStream.set(stream, mine)
+  return {
+    check: (): void => {
+      if (newestPerStream.get(stream) !== mine) throw new SupersededSearchError(stream)
+    },
+    release: (): void => {
+      // Only the newest holder clears the entry. An older request releasing would erase the token a
+      // live newer request is still checking against, and that request would stop being cancellable.
+      if (newestPerStream.get(stream) === mine) newestPerStream.delete(stream)
+    }
+  }
+}
+
+/**
+ * Hand the event loop back for one macrotask before starting expensive work.
+ *
+ * A newer `search:universal` message can already be sitting in the IPC queue while this request is
+ * running its (synchronous) keyword pass. Yielding lets that message be handled first, so the token
+ * moves and the next checkpoint abandons this request BEFORE it asks the embedding model for a
+ * vector nobody will use. Without the yield the older request reaches the model first and, because
+ * embeddings are serialized onto one worker, makes the newest query wait behind it.
+ */
+function yieldToQueuedRequests(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve))
 }
 
 // ---------------------------------------------------------------------------
@@ -380,8 +474,16 @@ function semanticSourceExists(hit: VecChunk): boolean {
 /** Query the semantic index while treating SQLite as the source of truth.
  * Stale vectors are harmless cache entries and never become user-visible hits.
  */
-export async function searchSemanticSources(vector: number[], limit: number): Promise<RawHit[]> {
+export async function searchSemanticSources(
+  vector: number[],
+  limit: number,
+  claim: SearchStreamClaim = NEVER_SUPERSEDED
+): Promise<RawHit[]> {
   const hits = await searchVectors(vector, limit)
+  // One source-of-truth probe per hit follows, and `searchVectors` is an await - the query can have
+  // been typed past while it ran. Stopping here is what keeps obsolete work bounded: it is the
+  // difference between abandoning a dead query and running N SQLite probes for nobody.
+  claim.check()
   return hits.filter(semanticSourceExists).map((h) => ({
     key: h.key,
     kind: h.kind as SearchKind,
@@ -394,9 +496,109 @@ export async function searchSemanticSources(vector: number[], limit: number): Pr
   }))
 }
 
-async function semanticHits(query: string, limit: number): Promise<RawHit[]> {
+/** One reporter, one key, so a standing "semantic search is not running" clears when it runs again. */
+export const SEMANTIC_SEARCH_DEGRADATION_SOURCE = 'search-semantic'
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Report what the semantic half of a search just did: `reason` names a fault, `null` clears a
+ * standing one because the pass ran.
+ *
+ * ONE guard wraps the whole body, and it deliberately swallows. Observation must never change the
+ * outcome of the work it observes: the caller is a search that still holds good keyword hits, and
+ * turning those hits into a rejection because REPORTING failed would invert the entire point of
+ * this function. Every path in here can fail - shared application health can be unavailable before
+ * the application root is registered, and the diagnostic's stderr mirror can throw on a dead pipe.
+ * Silent is the same conclusion `guardConsoleStreams` reaches for the same reason
+ * (`stream-guards.ts:12`): when the logger is what is broken, there is by definition nowhere to log
+ * it, and a second reporting channel invented here would just be a second thing that can fail.
+ *
+ * The degradation report goes FIRST, before the diagnostic, precisely so a throwing logger cannot
+ * cost the user the visible signal - the projection is the half a surface actually paints.
+ *
+ * What this guarantees: the caller always gets its result. What it merely ATTEMPTS: the report and
+ * the log line. If both fail, the degradation is genuinely lost, and that is the accepted trade -
+ * the alternative is failing a search that was perfectly answerable.
+ */
+function reportSemanticStatus(reason: string | null): void {
+  try {
+    reportDesktopApplicationDegraded({
+      domain: 'rag',
+      source: SEMANTIC_SEARCH_DEGRADATION_SOURCE,
+      reason
+    })
+    // The reason only. NEVER the query: this log is written to disk, and a person's search terms are
+    // among the most sensitive strings this application holds.
+    if (reason !== null) writeDiagnosticLog('search', 'semantic.failed', { reason }, 'error')
+  } catch {
+    /* swallow: reporting a degradation must not be able to fail the search it observed */
+  }
+}
+
+/**
+ * The semantic list for a query, and the policy for when there isn't one.
+ *
+ * Three outcomes land here and they are NOT the same thing:
+ *
+ * - Superseded means this request was told to stop. That is not a failure - it is a query the user
+ *   typed past - so it propagates untouched and the whole search ends. Nothing is reported.
+ * - A pass that ran returns its hits, and clears this reporter's degradation entry. Zero hits is a
+ *   real answer here: the query genuinely had no semantic neighbours.
+ * - Any other fault - the embedding model unavailable, a vector-store or I/O error, a malformed
+ *   response, a bug - means the semantic half DID NOT RUN. The keyword half is still a good answer,
+ *   so this returns an empty list and the search continues on keywords alone; that fallback is the
+ *   point and must not regress into a failed search. But the empty list is then indistinguishable
+ *   from "no semantic matches existed", which is the defect this exists to prevent: the fault is
+ *   recorded in the diagnostics log AND published on the `rag` degradation projection, so a surface
+ *   can say the semantic half of search is not running, and why, instead of silently showing half
+ *   the results as if they were all of them.
+ */
+async function semanticHitsOrDegrade(
+  query: string,
+  limit: number,
+  claim: SearchStreamClaim
+): Promise<RawHit[]> {
+  try {
+    const hits = await semanticHits(query, limit, claim)
+    // Checked HERE, not only inside the callee. The callee checks before it resolves, but this
+    // caller resumes in a later microtask - and another request can claim the stream in that gap,
+    // so a check that passed there can already be stale by the time we publish. The same reason the
+    // failure path checks before reporting: nothing about a query nobody is waiting for may reach
+    // application health, and clearing a degradation that is still true for the LIVE query is the
+    // worst version of that.
+    claim.check()
+    reportSemanticStatus(null)
+    return hits
+  } catch (error) {
+    if (error instanceof SupersededSearchError) throw error
+    // An answer from a query nobody is waiting for must not publish anything. A fault raised for a
+    // query the user has already typed past says nothing about the one now in flight, and reporting
+    // it would leave a "semantic search is not running" standing that the live query may contradict.
+    // Superseded takes precedence over the fault, so this rethrows rather than reports.
+    claim.check()
+    reportSemanticStatus(`Semantic search did not run: ${describe(error)}`)
+    return []
+  }
+}
+
+async function semanticHits(
+  query: string,
+  limit: number,
+  claim: SearchStreamClaim
+): Promise<RawHit[]> {
+  await yieldToQueuedRequests()
+  claim.check() // don't embed for a query the user has already typed past
   const vector = await embeddings.generateEmbedding(query)
-  return searchSemanticSources(vector, limit)
+  claim.check() // don't search vectors, or probe SQLite per hit, for a dead query
+  const hits = await searchSemanticSources(vector, limit, claim)
+  // The last await has returned, so this is where a reply belonging to a query the user typed past
+  // would otherwise look like a success. Checking BEFORE the caller reports is what stops an
+  // obsolete reply clearing a degradation that is still true for the query actually in flight.
+  claim.check()
+  return hits
 }
 
 // Best thumbnail for a hit: a frame's own image, or an observation's linked frame.
@@ -425,30 +627,57 @@ function thumbFor(hit: RawHit): string | null {
 // artifact viewer), so clicking one used to jump to a meaningless Replay moment.
 // Re-add an `artifactHits` source here once artifacts have an openable target.
 
+export interface UniversalSearchOptions {
+  limit?: number
+  semantic?: boolean
+  sources?: string[]
+  kinds?: SearchKind[]
+  collapseScreenMoments?: boolean
+  sort?: SearchSort
+  excludeChatId?: string
+  /** Shared policy resolves relative language; this adapter applies its absolute interval. */
+  timeRange?: Parameters<typeof rankResults>[1]['timeRange']
+  /**
+   * Names this caller's stream of queries, so a newer one abandons this one. Build it with
+   * `searchStreamId(surface, senderId)` so the identity is per WINDOW as well as per surface - a
+   * bare surface name lets two windows supersede each other. A caller that is not a stream of
+   * queries (a one-shot tool call, a RAG retrieval) passes nothing and is never superseded.
+   */
+  stream?: string
+}
+
 export async function universalSearch(
   query: string,
-  opts: {
-    limit?: number
-    semantic?: boolean
-    sources?: string[]
-    sort?: SearchSort
-    excludeChatId?: string
-  } = {}
+  opts: UniversalSearchOptions = {}
 ): Promise<SearchResult[]> {
+  const claim = claimStream(opts.stream)
+  try {
+    return await runUniversalSearch(query, opts, claim)
+  } finally {
+    claim.release()
+  }
+}
+
+async function runUniversalSearch(
+  query: string,
+  opts: UniversalSearchOptions,
+  claim: SearchStreamClaim
+): Promise<SearchResult[]> {
+  ensureRagStoreSchema()
   const q = query.trim()
   if (!q) return []
   const limit = opts.limit ?? 30
   // When filtering by source, cast a wider net per source so enough survive the filter.
   const perSource = opts.sources?.length ? 80 : Math.min(40, limit + 10)
 
+  // The keyword pass is synchronous SQL: it cannot be abandoned part-way and nothing newer can
+  // arrive while it runs, so the first checkpoint that can fire is inside the semantic pass.
   const lists = keywordHits(q, perSource)
-  if (opts.semantic !== false) {
-    try {
-      lists.push(await semanticHits(q, perSource))
-    } catch {
-      /* embedding model not ready — keyword results still fine */
-    }
-  }
+  if (opts.semantic !== false) lists.push(await semanticHitsOrDegrade(q, perSource, claim))
+
+  // Fusion, ranking and one thumbnail query per result are the rest of the bill. Nothing below
+  // awaits, so this is the last point at which a query the user has moved on from can be dropped.
+  claim.check()
 
   // Reciprocal-rank fusion across all lists, keyed by the unique chunk key.
   const fused = fuseHits(lists)
@@ -462,11 +691,30 @@ export async function universalSearch(
   const ordered = rankResults(Array.from(fused.values()), {
     query: q,
     sources: opts.sources,
+    kinds: opts.kinds,
     excludeChatId: opts.excludeChatId,
-    sort: opts.sort
+    sort: opts.sort,
+    timeRange: opts.timeRange
   })
-  const ranked = ordered.slice(0, limit)
-  for (const r of ranked)
+  for (const r of ordered)
     r.imagePath = thumbFor({ key: r.key, kind: r.kind, refId: r.refId } as RawHit)
-  return ranked
+
+  if (!opts.collapseScreenMoments) return ordered.slice(0, limit)
+
+  // One captured moment is indexed twice: its raw OCR frame and its distilled
+  // observation. Replay shows moments, not index records, so collapse both forms
+  // after ranking and thumbnail resolution. General search keeps both records.
+  const seenMoments = new Set<string>()
+  const moments: SearchResult[] = []
+  for (const result of ordered) {
+    const identity =
+      result.kind === 'screen'
+        ? result.imagePath || `${String(result.ts)}:${result.surface}`
+        : result.key
+    if (seenMoments.has(identity)) continue
+    seenMoments.add(identity)
+    moments.push(result)
+    if (moments.length === limit) break
+  }
+  return moments
 }

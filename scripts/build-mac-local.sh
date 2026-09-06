@@ -55,11 +55,14 @@ stage_native_helpers() {
   MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
   MACOS_DEPLOYMENT_TARGET=13.0 WHISPER_REF=v1.7.4 bash scripts/build-whisper-cli.sh
   bash scripts/build-meeting-recorder.sh
+  MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-computer-use-capture.sh resources/bin
   bash scripts/build-dictation-hotkey.sh
+  bash scripts/build-actions-helper.sh
   mkdir -p resources/bin
   cp scripts/meeting-recorder/meeting-recorder resources/bin/meeting-recorder
   cp scripts/dictation-hotkey/dictation-hotkey resources/bin/dictation-hotkey
-  chmod +x resources/bin/meeting-recorder resources/bin/dictation-hotkey
+  cp scripts/actions-helper/actions-helper resources/bin/actions-helper
+  chmod +x resources/bin/meeting-recorder resources/bin/computer-use-capture resources/bin/dictation-hotkey resources/bin/actions-helper
   bash scripts/fetch-parakeet.sh
 }
 
@@ -76,6 +79,7 @@ verify_packaged_helpers() {
 
 build_core() {
   echo "==> Building CORE (free) macOS DMG  v$VERSION"
+  npm run prepare:speech-defaults
   OFFGRID_FORCE_CORE=1 npx electron-vite build
   npx electron-builder --mac \
     -c.mac.notarize=false \
@@ -89,6 +93,7 @@ build_core() {
 
 build_pro() {
   echo "==> Building PRO macOS DMG  v$VERSION"
+  npm run prepare:speech-defaults
   npx electron-vite build
   npx electron-builder --mac \
     -c.mac.notarize=false \

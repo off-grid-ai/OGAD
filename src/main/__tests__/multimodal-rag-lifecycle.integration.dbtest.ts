@@ -1,7 +1,7 @@
 /**
  * Multimodal knowledge journey through the production IPC, extraction router, native adapters,
  * RAG engine, SQLite store, scoped chat prompt, deletion, and profile reopen. The local embedding,
- * vision, and speech executables are controlled at their process boundaries; Off Grid code stays real.
+ * vision, and speech executables are controlled at their process boundaries; Off Grid AI code stays real.
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -10,7 +10,11 @@ import path from 'node:path'
 import JSZip from 'jszip'
 import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
+import {
+  installFakeActiveTextModel,
+  startFakeLlamaServer,
+  type FakeLlamaServer
+} from './harness/fake-llama-server'
 import { SYNTHETIC_PDF } from './fixtures/synthetic-pdf'
 
 interface IpcEvent {
@@ -170,6 +174,7 @@ function createNativeFixtures(): void {
 }
 
 beforeAll(async () => {
+  installFakeActiveTextModel(PROFILE_DIR)
   fs.mkdirSync(FIXTURES_DIR, { recursive: true })
   fs.mkdirSync(path.join(BIN_DIR, 'whisper'), { recursive: true })
   fs.mkdirSync(path.join(PROFILE_DIR, 'models'), { recursive: true })
@@ -181,11 +186,6 @@ beforeAll(async () => {
   )
   fs.chmodSync(whisper, 0o755)
   fs.writeFileSync(path.join(PROFILE_DIR, 'models', 'ggml-base.bin'), 'synthetic model boundary')
-  fs.writeFileSync(path.join(PROFILE_DIR, 'models', 'mmproj.gguf'), Buffer.from('gguf'))
-  fs.writeFileSync(
-    path.join(PROFILE_DIR, 'models', 'active-model.json'),
-    JSON.stringify({ primary: 'vision-model.gguf', mmproj: 'mmproj.gguf' })
-  )
 
   const { configureRuntime } = await import('../runtime-env')
   configureRuntime({ dataDir: PROFILE_DIR, binRoots: [BIN_DIR] })

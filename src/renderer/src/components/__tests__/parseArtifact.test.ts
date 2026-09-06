@@ -1,13 +1,12 @@
-// Tests for parseArtifact (components/ArtifactCanvas.tsx) - the PURE function that
+// Tests for parseArtifact (lib/artifact-parser.ts) - the PURE function that
 // decides which renderable artifact (if any) a model response contains. It is the
 // single source of truth for artifact detection, so each detection branch and the
 // precedence between them is exercised here. One case per branch.
 //
-// parseArtifact is a pure string -> Artifact|null function; importing the .tsx pulls
-// React/react-markdown but neither touches the DOM at import time, so it loads in the
-// default (node) test environment without a window/document.
+// parseArtifact is a pure string -> Artifact|null function, so it loads in the default
+// (node) test environment without a window/document.
 import { describe, it, expect } from 'vitest'
-import { parseArtifact } from '../ArtifactCanvas'
+import { parseArtifact } from '../../lib/artifact-parser'
 
 describe('parseArtifact - React blocks (highest precedence)', () => {
   it('detects a single jsx fence as a react artifact', () => {

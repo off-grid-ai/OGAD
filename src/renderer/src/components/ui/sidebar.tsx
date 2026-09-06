@@ -1,7 +1,7 @@
 'use client'
 import { cn } from '@renderer/lib/utils'
 import React, { useState, createContext, useContext } from 'react'
-import { motion } from 'motion/react'
+import { motion, useReducedMotion } from 'motion/react'
 
 interface Links {
   label: string
@@ -17,7 +17,7 @@ interface SidebarContextProps {
 
 const SidebarContext = createContext<SidebarContextProps | undefined>(undefined)
 
-export const useSidebar = () => {
+const useSidebar = (): SidebarContextProps => {
   const context = useContext(SidebarContext)
   if (!context) {
     throw new Error('useSidebar must be used within a SidebarProvider')
@@ -35,7 +35,7 @@ export const SidebarProvider = ({
   open?: boolean
   setOpen?: React.Dispatch<React.SetStateAction<boolean>>
   animate?: boolean
-}) => {
+}): React.JSX.Element => {
   const [openState, setOpenState] = useState(false)
 
   const open = openProp !== undefined ? openProp : openState
@@ -58,7 +58,7 @@ export const Sidebar = ({
   open?: boolean
   setOpen?: React.Dispatch<React.SetStateAction<boolean>>
   animate?: boolean
-}) => {
+}): React.JSX.Element => {
   return (
     <SidebarProvider open={open} setOpen={setOpen} animate={animate}>
       {children}
@@ -66,7 +66,7 @@ export const Sidebar = ({
   )
 }
 
-export const SidebarBody = (props: React.ComponentProps<typeof motion.div>) => {
+export const SidebarBody = (props: React.ComponentProps<typeof motion.div>): React.JSX.Element => {
   return (
     <>
       <DesktopSidebar {...props} />
@@ -79,8 +79,9 @@ export const DesktopSidebar = ({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof motion.div>) => {
+}: React.ComponentProps<typeof motion.div>): React.JSX.Element => {
   const { open, animate } = useSidebar()
+  const reduceMotion = useReducedMotion()
   return (
     <>
       <motion.div
@@ -91,10 +92,14 @@ export const DesktopSidebar = ({
           'h-full px-4 py-4 flex flex-col bg-neutral-100 dark:bg-neutral-800 shrink-0',
           className
         )}
-        // Constant — width is driven by an explicit open/close toggle, NOT hover.
+        // App owns hover and keyboard-focus intent; this primitive owns only the
+        // smooth width transition between the rail and expanded navigation.
         animate={{
           width: animate ? (open ? '220px' : '60px') : '220px'
         }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+        data-state={open ? 'expanded' : 'collapsed'}
+        data-motion={reduceMotion ? 'reduced' : 'full'}
         {...props}
       >
         {children}
@@ -107,7 +112,14 @@ export const DesktopSidebar = ({
 // so a narrow window never strands the user without navigation.
 export const MobileSidebar = (_props: React.ComponentProps<'div'>): null => null
 
-export const SidebarLink = ({ link, className, ...props }: { link: Links; className?: string }) => {
+export const SidebarLink = ({
+  link,
+  className,
+  ...props
+}: {
+  link: Links
+  className?: string
+}): React.JSX.Element => {
   const { open, animate } = useSidebar()
   return (
     <a

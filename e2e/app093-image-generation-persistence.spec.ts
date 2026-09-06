@@ -125,11 +125,15 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
   await page.evaluate(() => {
     const state = window as typeof window & {
       __app093Progress?: string[]
+      __app093PreparingObserved?: boolean
       __app093Observer?: MutationObserver
     }
     state.__app093Progress = []
+    state.__app093PreparingObserved = false
     state.__app093Observer = new MutationObserver(() => {
-      const step = document.body.innerText.match(/Step \d+\/4/)?.[0]
+      const content = document.body.textContent ?? ''
+      if (content.includes('Preparing image…')) state.__app093PreparingObserved = true
+      const step = content.match(/Generating image · Step \d+ of 4/)?.[0]
       if (step && !state.__app093Progress?.includes(step)) state.__app093Progress?.push(step)
     })
     state.__app093Observer.observe(document.body, {
@@ -140,19 +144,23 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
   })
   await page.getByTitle('Send').click()
 
-  await expect(page.getByText('Loading model…')).toBeVisible()
   const generated = page.getByRole('img', { name: 'Generated', exact: true })
   await expect(generated).toHaveCount(1, { timeout: 15_000 })
-  const renderedProgress = await page.evaluate(() => {
+  const renderedLifecycle = await page.evaluate(() => {
     const state = window as typeof window & {
       __app093Progress?: string[]
+      __app093PreparingObserved?: boolean
       __app093Observer?: MutationObserver
     }
     state.__app093Observer?.disconnect()
-    return state.__app093Progress ?? []
+    return {
+      preparing: state.__app093PreparingObserved ?? false,
+      progress: state.__app093Progress ?? []
+    }
   })
-  expect(renderedProgress).toContain('Step 1/4')
-  expect(renderedProgress).toContain('Step 4/4')
+  expect(renderedLifecycle.preparing).toBe(true)
+  expect(renderedLifecycle.progress).toContain('Generating image · Step 1 of 4')
+  expect(renderedLifecycle.progress).toContain('Generating image · Step 4 of 4')
   await expect(
     page.locator('p').getByText(`Generated for: ${PROMPT}`, { exact: true }).last()
   ).toBeVisible()
@@ -198,6 +206,12 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
   await expect(page.getByText(PROMPT, { exact: true })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Generated', exact: true })).toHaveCount(1)
 
+  const theme = page.getByRole('button', { name: /Theme:/ })
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await page.evaluate(() => document.documentElement.dataset.theme === 'dark')) break
+    await theme.click()
+  }
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
   await page.getByTitle('Generated images').click()
   const gallery = page.getByText('Gallery', { exact: true }).locator('..').locator('..')
   await expect(gallery.getByRole('button', { name: 'images (1)' })).toBeVisible()
@@ -205,12 +219,6 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
   await expect(galleryImage).toHaveCount(1)
   await galleryImage.click()
   await expect(page.getByRole('dialog', { name: 'Generated image preview' })).toBeVisible()
-  const theme = page.getByRole('button', { name: /Theme:/ })
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (await page.evaluate(() => document.documentElement.dataset.theme === 'dark')) break
-    await theme.click()
-  }
-  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
   await page.screenshot({
     path: path.join(evidenceDir, 'app093-relaunch-gallery-dark.png'),
     fullPage: true

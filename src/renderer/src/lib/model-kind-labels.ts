@@ -6,6 +6,7 @@
 export const MODEL_KIND_LABELS: Record<string, string> = {
   text: 'Text',
   vision: 'Vision',
+  computer_use: 'Computer Use',
   image: 'Image',
   voice: 'Voice',
   transcription: 'Transcription',

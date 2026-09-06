@@ -3,26 +3,63 @@ import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import { MemoryChat } from '../../MemoryChat'
 import { TooltipProvider } from '../../ui/tooltip'
-import type { RagChatResultContract } from '../../../../../shared/ipc-contracts'
+import type {
+  ActiveChatStreamContract,
+  RagChatResultContract
+} from '../../../../../shared/ipc-contracts'
+import { modelControlSnapshot } from './model-control-snapshot'
+import type { WorkflowFailure } from '@offgrid/application'
+import type { AskByVoiceEvent } from '@offgrid/application'
+import type { AskByVoiceEventMessage } from '../../../../../shared/ask-by-voice-contract'
+import type { VoiceTurnHostMessage } from '../../../../../shared/voice-turn-contract'
+
+type VoiceQuestionEvent = AskByVoiceEvent extends infer Event
+  ? Event extends { readonly operationId: string }
+    ? Omit<Event, 'operationId'>
+    : never
+  : never
 
 export type StreamEvent = {
   streamId: string
   type: 'content' | 'reasoning' | 'step' | 'tool_result'
   text?: string
   step?: unknown
-  call?: { name: string; result: string }
+  call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
 }
 type ThinkSplitter = { push: (text: string) => void; answer: () => string }
 export type ThinkSplitterFactory = (
   emit: (event: { text: string; kind: 'content' | 'reasoning' }) => void
 ) => ThinkSplitter
-type RagResult = RagChatResultContract
+type RagResult = RagChatResultContract & {
+  unified?: unknown[]
+  toolCalls?: Array<{
+    name: string
+    result: string
+    status?: 'completed' | 'failed' | 'pending'
+  }>
+}
 type StoredMessage = {
-  id: number
+  id: number | string
+  uuid?: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   context?: unknown
   created_at?: string
+}
+type TaskSnapshot = {
+  taskId: string
+  journeyId?: string
+  kind: 'web_use' | 'computer_use'
+  title: string
+  status: 'running' | 'paused' | 'waiting' | 'reconnecting' | 'done' | 'failed' | 'stopped'
+  summary?: string
+  steps: string[]
+  currentAction?: string
+  currentReasoning?: string
+  reasoningLive?: boolean
+  currentStep?: number
+  startedAt: number
+  updatedAt: number
 }
 
 /**
@@ -66,6 +103,46 @@ function deferred<T>(): {
   return { promise, resolve, reject }
 }
 
+/**
+ * The capability reads the production preload contract requires at Chat mount time.
+ *
+ * One owner for the fail-closed default: every fixture that installs a hand-built
+ * `window.api` spreads this in, so a new required preload read is added here once
+ * instead of failing each journey with "is not a function". A journey that needs a
+ * capability on installs its own boundary after the spread.
+ */
+function boundaryFactory<T>(factory: () => T): () => T {
+  return factory
+}
+
+export const preloadCapabilityFakes = boundaryFactory(() => {
+  const modelControl = modelControlSnapshot({ kinds: [], models: [] })
+  return {
+    chatVisionAvailable: vi.fn(async () => false),
+    getModelControlProjection: vi.fn(async () => modelControl),
+    onModelControlProjection: vi.fn(() => () => {}),
+    onImageGenJobState: vi.fn(() => () => {}),
+    onImageGenConversationUpdated: vi.fn(() => () => {}),
+    imageGenJobStatus: vi.fn(async () => []),
+    getTranscriptionInfo: vi.fn(async () => null),
+    speechCommands: {
+      transcribe: vi.fn(),
+      cancelTranscription: vi.fn(),
+      speak: vi.fn(async () => ({ ok: true, value: { operationId: 'test-speech' } })),
+      feedStream: vi.fn(async () => {}),
+      finishStream: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    askByVoice: {
+      start: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    voiceTurn: { onRequest: vi.fn(() => () => {}), respond: vi.fn() }
+  }
+})
+
 export class ChatBoundary {
   constructor(private readonly createSplitter?: ThinkSplitterFactory) {}
 
@@ -97,13 +174,28 @@ export class ChatBoundary {
   }[] = []
 
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
+  readonly manualSpeechTurns: ReturnType<
+    typeof deferred<{ ok: true; value: { operationId: string } }>
+  >[] = []
+  readonly activeRagStreams: ActiveChatStreamContract[] = []
 
   private streamCallback: ((event: StreamEvent) => void) | null = null
+  private taskChangedCallback: ((task: TaskSnapshot) => void) | null = null
+  private conversationChangedCallback:
+    | ((change: { conversationId: string; projectId?: string | null }) => void)
+    | null = null
+  private askByVoiceEventCallback: ((message: AskByVoiceEventMessage) => void) | null = null
+  private voiceTurnRequestCallback: ((message: VoiceTurnHostMessage) => void) | null = null
+  private nextVoiceQuestionOperation = 0
+  readonly voiceQuestionOperations: string[] = []
   private readonly rawSplitters = new Map<number, ThinkSplitter>()
   private nextMessageId = 10
   private pendingUserWrite: ReturnType<typeof deferred<void>> | null = null
 
   readonly cancelRag = vi.fn()
+  readonly listTasks = vi.fn(async () => [] as TaskSnapshot[])
+  readonly stopComputerTask = vi.fn(async () => true)
+  readonly guideTask = vi.fn(async () => ({ available: true, accepted: true }))
   readonly saveArtifact = vi.fn(async () => 'artifact-id')
   readonly addRagMessage = vi.fn(
     async (
@@ -114,12 +206,14 @@ export class ChatBoundary {
     ) => {
       if (role === 'user' && this.pendingUserWrite) {
         const gate = this.pendingUserWrite
-        this.pendingUserWrite = null
         await gate.promise
+        if (this.pendingUserWrite === gate) this.pendingUserWrite = null
       }
       this.messages[conversationId] ??= []
+      const id = this.nextMessageId++
+      const uuid = `message-${id}`
       this.messages[conversationId]!.push({
-        id: this.nextMessageId++,
+        id: uuid,
         role,
         content,
         context,
@@ -127,28 +221,113 @@ export class ChatBoundary {
       })
       const conversation = this.conversations.find((item) => item.id === conversationId)
       if (conversation) conversation.message_count = this.messages[conversationId]!.length
-      return this.nextMessageId - 1
+      return { id, uuid }
     }
   )
 
-  readonly truncateRagMessages = vi.fn(async (conversationId: string, keepCount: number) => {
-    this.messages[conversationId] = (this.messages[conversationId] ?? []).slice(0, keepCount)
-    const conversation = this.conversations.find((item) => item.id === conversationId)
-    if (conversation) conversation.message_count = this.messages[conversationId]!.length
-  })
+  readonly truncateRagMessages = vi.fn(
+    async (conversationId: string, anchor: { messageId: string; keepAnchor: boolean }) => {
+      const rows = this.messages[conversationId] ?? []
+      const index = rows.findIndex((row) => String(row.uuid ?? row.id) === anchor.messageId)
+      if (index < 0) return
+      this.messages[conversationId] = rows.slice(0, anchor.keepAnchor ? index + 1 : index)
+      const conversation = this.conversations.find((item) => item.id === conversationId)
+      if (conversation) conversation.message_count = this.messages[conversationId]!.length
+    }
+  )
+
+  private async modelControlSnapshot(): Promise<unknown> {
+    const boundary = this.api as unknown as Record<string, (...args: never[]) => Promise<unknown>>
+    const catalog = (await boundary.getModelCatalog?.()) as
+      | { kinds?: string[]; models?: unknown[] }
+      | undefined
+    const activeText = (await boundary.getActiveModel?.()) as string | null | undefined
+    const activeIds = (await boundary.getActiveModelIds?.()) as string[] | undefined
+    const active = (await boundary.getActiveModalities?.()) as
+      | Record<string, string | null>
+      | undefined
+    return modelControlSnapshot({
+      kinds: catalog?.kinds ?? [],
+      models: catalog?.models ?? [],
+      installed: [],
+      activeIds: activeIds ?? (activeText ? [activeText] : []),
+      active: {
+        text: activeText ?? null,
+        image: active?.image ?? null,
+        speech: active?.speech ?? null,
+        transcription: active?.transcription ?? null,
+        computer_use: active?.computer_use ?? null
+      },
+      computerUse: null
+    })
+  }
 
   readonly api = {
     isPro: false,
-    imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
+    ...preloadCapabilityFakes(),
+    // Canonical model-control evidence for Chat journeys. Thinking is visible only
+    // because the active catalog model explicitly publishes that capability.
+    getModelCatalog: vi.fn(async () => ({
+      kinds: ['text'],
+      models: [
+        {
+          id: 'chat-boundary-text',
+          name: 'Chat boundary text model',
+          kind: 'text',
+          files: [],
+          capabilities: { thinking: true }
+        }
+      ]
+    })),
+    getActiveModel: vi.fn(async () => 'chat-boundary-text'),
+    getActiveModelIds: vi.fn(async () => ['chat-boundary-text']),
+    getActiveModalities: vi.fn(async () => ({
+      text: 'chat-boundary-text',
+      image: null,
+      speech: null,
+      transcription: null,
+      computer_use: null
+    })),
+    imageGenStatus: vi.fn(async () => ({
+      available: false,
+      models: [],
+      active: '',
+      defaultModel: null
+    })),
     cancelImageGen: vi.fn(),
     cancelRag: this.cancelRag,
+    tasks: {
+      list: this.listTasks,
+      guideTask: this.guideTask,
+      onChanged: vi.fn((callback: (task: TaskSnapshot) => void) => {
+        this.taskChangedCallback = callback
+        return () => {
+          if (this.taskChangedCallback === callback) this.taskChangedCallback = null
+        }
+      })
+    },
+    vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => {}),
+    onImageGenJobState: vi.fn(() => () => {}),
+    onImageGenConversationUpdated: vi.fn(() => () => {}),
+    imageGenJobStatus: vi.fn(async () => []),
+    onRagConversationsChanged: vi.fn(
+      (callback: (change: { conversationId: string; projectId?: string | null }) => void) => {
+        this.conversationChangedCallback = callback
+        return () => {
+          if (this.conversationChangedCallback === callback) {
+            this.conversationChangedCallback = null
+          }
+        }
+      }
+    ),
     onRagStream: vi.fn((callback: (event: StreamEvent) => void) => {
       this.streamCallback = callback
       return () => {
         this.streamCallback = null
       }
     }),
+    getActiveRagStreams: vi.fn(async () => this.activeRagStreams.map((stream) => ({ ...stream }))),
     getRagConversations: vi.fn(async () => this.conversations.map((item) => ({ ...item }))),
     getRagConversation: vi.fn(async (id: string) => {
       const found = this.conversations.find((item) => item.id === id)
@@ -181,11 +360,76 @@ export class ChatBoundary {
       this.speechTurns.push(turn)
       return turn.promise
     }),
+    ttsVoices: vi.fn(async () => [
+      { id: 'af_heart', label: 'Heart', language: 'en-US' },
+      { id: 'bf_emma', label: 'Emma', language: 'en-GB' }
+    ]),
+    prepareTtsVoice: vi.fn(async () => ({ ready: true })),
+    onTtsVoiceProgress: vi.fn(() => () => {}),
+    speechCommands: {
+      transcribe: vi.fn(),
+      cancelTranscription: vi.fn(),
+      speak: vi.fn((command: { operationId: string }) => {
+        void command
+        const turn = deferred<{ ok: true; value: { operationId: string } }>()
+        this.manualSpeechTurns.push(turn)
+        return turn.promise
+      }),
+      feedStream: vi.fn(async () => {}),
+      finishStream: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    // Namespaced preload doors Chat and the settings panel it hosts subscribe to on mount. A
+    // namespace has to be named: a missing one fails inside a mount effect as
+    // "window.api.<name>.<door> is not a function" and tears the render down before any
+    // assertion is reached.
+    askByVoice: {
+      start: vi.fn(async () => {
+        const operationId = `voice-question-${++this.nextVoiceQuestionOperation}`
+        this.voiceQuestionOperations.push(operationId)
+        return { operationId }
+      }),
+      cancel: vi.fn(async () => {}),
+      onEvent: vi.fn((callback: (message: AskByVoiceEventMessage) => void) => {
+        this.askByVoiceEventCallback = callback
+        return () => {
+          if (this.askByVoiceEventCallback === callback) this.askByVoiceEventCallback = null
+        }
+      })
+    },
+    voiceTurn: {
+      onRequest: vi.fn((callback: (message: VoiceTurnHostMessage) => void) => {
+        this.voiceTurnRequestCallback = callback
+        return () => {
+          if (this.voiceTurnRequestCallback === callback) this.voiceTurnRequestCallback = null
+        }
+      }),
+      respond: vi.fn()
+    },
+    getTranscriptionInfo: vi.fn(async () => null),
     getSettings: vi.fn(async () => ({})),
+    getLlmSettings: vi.fn(async () => ({})),
+    listTools: vi.fn(async () => []),
+    mcpList: vi.fn(async () => []),
+    getModelControlProjection: vi.fn(() => this.modelControlSnapshot()),
+    controlModel: vi.fn(async (intent: { operationId?: string }) => ({
+      ok: true as const,
+      value: {
+        status: 'completed' as const,
+        operationId: intent.operationId ?? 'chat-boundary-control',
+        projection: await this.modelControlSnapshot()
+      }
+    })),
+    getComputerUseActiveModels: vi.fn(async () => ({
+      strategy: 'same_as_chat' as const,
+      strategyLabel: 'Same as Chat',
+      models: []
+    })),
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),
     styleThumbs: vi.fn(async () => ({})),
-    listSkills: vi.fn(async () => []),
+    listSkills: vi.fn(async (): Promise<{ name: string; description: string }[]> => []),
     ragChat: vi.fn(
       async (
         query: string,
@@ -220,6 +464,11 @@ export class ChatBoundary {
     this.pendingUserWrite?.resolve()
   }
 
+  /** Main announced that this conversation's rows changed (a task result, a synced row). */
+  changeConversation(conversationId: string): void {
+    this.conversationChangedCallback?.({ conversationId })
+  }
+
   emit(callIndex: number, text: string): void {
     const call = this.calls[callIndex]!
     this.streamCallback?.({ streamId: call.streamId, type: 'content', text })
@@ -228,6 +477,38 @@ export class ChatBoundary {
   emitReasoning(callIndex: number, text: string): void {
     const call = this.calls[callIndex]!
     this.streamCallback?.({ streamId: call.streamId, type: 'reasoning', text })
+  }
+
+  failVoiceQuestion(failure: WorkflowFailure): void {
+    const operationId = this.voiceQuestionOperations.at(-1)
+    if (!operationId) throw new Error('No voice question is active')
+    this.askByVoiceEventCallback?.({
+      operationId,
+      event: { type: 'failed', operationId, failure }
+    })
+  }
+
+  emitVoiceQuestion(event: VoiceQuestionEvent): void {
+    const operationId = this.voiceQuestionOperations.at(-1)
+    if (!operationId) throw new Error('No voice question is active')
+    this.askByVoiceEventCallback?.({
+      operationId,
+      event: { ...event, operationId } as AskByVoiceEvent
+    })
+  }
+
+  requestVoiceTurn(text: string, conversationId = 'conversation-a'): void {
+    const operationId = this.voiceQuestionOperations.at(-1)
+    if (!operationId) throw new Error('No voice question is active')
+    this.voiceTurnRequestCallback?.({
+      type: 'run',
+      requestId: `request-${operationId}`,
+      operationId,
+      turnId: `turn-${operationId}`,
+      conversationId,
+      projectId: null,
+      text
+    })
   }
 
   emitToolStep(callIndex: number, name: string): void {
@@ -239,9 +520,18 @@ export class ChatBoundary {
     })
   }
 
-  emitToolResult(callIndex: number, name: string, result: string): void {
+  emitToolResult(
+    callIndex: number,
+    name: string,
+    result: string,
+    status: 'completed' | 'failed' | 'pending' = 'completed'
+  ): void {
     const call = this.calls[callIndex]!
-    this.streamCallback?.({ streamId: call.streamId, type: 'tool_result', call: { name, result } })
+    this.streamCallback?.({
+      streamId: call.streamId,
+      type: 'tool_result',
+      call: { name, result, status }
+    })
   }
 
   emitRaw(callIndex: number, text: string): void {
@@ -274,6 +564,14 @@ export class ChatBoundary {
     this.calls[callIndex]!.turn.reject(error)
   }
 
+  emitTask(task: TaskSnapshot): void {
+    this.taskChangedCallback?.(task)
+  }
+
+  emitConversationChanged(conversationId: string): void {
+    this.conversationChangedCallback?.({ conversationId })
+  }
+
   private conversation(id: string, title: string, projectId: string | null): Conversation {
     return {
       id,
@@ -293,6 +591,7 @@ export function installBoundary(boundary: ChatBoundary): void {
 export function renderChat(target: {
   conversationId?: string
   projectId?: string
+  draftPrompt?: string
 }): ReturnType<typeof render> {
   return render(
     <TooltipProvider>

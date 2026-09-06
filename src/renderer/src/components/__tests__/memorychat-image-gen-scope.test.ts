@@ -27,7 +27,9 @@ describe('MemoryChat image-gen state is per-conversation (D9)', () => {
     expect(src).toMatch(/const generatingImage = imageGenConv[\s\S]*?=== activeConversationId/)
   })
 
-  it('stopGeneration cancels the image job only when THIS conversation owns it', () => {
-    expect(src).toMatch(/if \(imageGenConv === convId\)[\s\S]*?cancelImageGen/)
+  it('delegates scoped cancellation to the one chat-session boundary', () => {
+    expect(src).toMatch(/desktopChatSession\.stopConversation\(convId/)
+    expect(src).not.toMatch(/window\.api\.cancelImageGen/)
+    expect(src).not.toMatch(/window\.api\.cancelRag/)
   })
 })

@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { SidePanel } from './SidePanel'
 
 // Right-side panel to view, create, edit, and delete Skills — reusable
 // instruction packs invoked from chat with /skill-name. Mirrors the ArtifactCanvas
@@ -49,8 +51,9 @@ function flattenTrigger(
       action,
       connectors
     }
-  if (t.kind === 'event' && (t.on === 'calendar' || t.on === 'approval'))
+  if (t.kind === 'event') {
     return { triggerKind: 'event', triggerConfig: t.on, action, connectors }
+  }
   return { triggerKind: '', triggerConfig: '', action: '', connectors: true }
 }
 
@@ -81,13 +84,15 @@ function buildTrigger(
 
 export function SkillsPanel({
   onClose,
-  onChanged
+  onChanged,
+  initialSkillName
 }: {
   onClose: () => void
   onChanged?: () => void
+  initialSkillName?: string
 }): React.JSX.Element {
   // Skill automation (triggers) is Pro; the free build shows manual packs only.
-  const isProBuild = !!window.api.isPro
+  const { isPro: isProBuild } = useRendererEntitlement()
   const [skills, setSkills] = useState<{ name: string; description: string }[]>([])
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
@@ -100,7 +105,7 @@ export function SkillsPanel({
   }
   useEffect(refresh, [])
 
-  const openSkill = async (name: string): Promise<void> => {
+  const openSkill = useCallback(async (name: string): Promise<void> => {
     const full = await window.api.getSkill(name)
     if (full)
       setDraft({
@@ -110,7 +115,11 @@ export function SkillsPanel({
         originalName: full.name,
         ...flattenTrigger(full)
       })
-  }
+  }, [])
+
+  useEffect(() => {
+    if (initialSkillName) void openSkill(initialSkillName)
+  }, [initialSkillName, openSkill])
 
   const save = async (): Promise<void> => {
     if (!draft || !draft.name.trim()) return
@@ -150,7 +159,7 @@ export function SkillsPanel({
   }
 
   return (
-    <div className="fixed right-0 top-0 bottom-0 z-50 flex w-[30vw] min-w-[420px] flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl">
+    <SidePanel ariaLabel="Skills" onClose={onClose} className="w-[30vw] min-w-[420px]">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
@@ -341,6 +350,6 @@ export function SkillsPanel({
           </div>
         )}
       </div>
-    </div>
+    </SidePanel>
   )
 }

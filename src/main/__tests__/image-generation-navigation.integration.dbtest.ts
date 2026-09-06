@@ -8,6 +8,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import type { OffGridApplication } from '@offgrid/application'
+import { CATALOG, primaryFileName } from '@offgrid/models'
 
 const fixture = (() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-image-navigation-'))
@@ -32,18 +34,32 @@ vi.mock('electron', () => ({
   }
 }))
 
-const IMAGE_MODEL = 'navigation-image-fixture.safetensors'
+const IMAGE_MODEL_ID = 'mzwing/SDXL-Lightning-GGUF'
+const IMAGE_MODEL = primaryFileName(CATALOG.find((model) => model.id === IMAGE_MODEL_ID)!)!
+const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111'
+const MESSAGE_ID = '22222222-2222-4222-8222-222222222222'
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 let jobs: typeof import('../imagegen/job-service').imageGenerationJobs
+let application: OffGridApplication | undefined
+let releaseApplication: (() => void) | undefined
 
 beforeAll(async () => {
   process.env.OFFGRID_DATA_DIR = fixture.dataDir
   process.env.OFFGRID_BIN_DIR = fixture.binDir
+  vi.spyOn(os, 'totalmem').mockReturnValue(64_000_000_000)
+  vi.spyOn(os, 'freemem').mockReturnValue(48_000_000_000)
   const models = path.join(fixture.dataDir, 'models')
   fs.mkdirSync(models, { recursive: true })
-  fs.writeFileSync(path.join(models, IMAGE_MODEL), 'image checkpoint')
+  fs.writeFileSync(
+    path.join(models, IMAGE_MODEL),
+    'GGUF fixture first_stage_model cond_stage_model'
+  )
+  fs.writeFileSync(
+    path.join(models, 'active-modalities.json'),
+    JSON.stringify({ image: IMAGE_MODEL_ID })
+  )
 
   const executable = path.join(fixture.binDir, 'sd', 'sd-cli')
   fs.mkdirSync(path.dirname(executable), { recursive: true })
@@ -58,12 +74,25 @@ setTimeout(() => fs.writeFileSync(output, Buffer.from('${PNG_BASE64}', 'base64')
   )
   fs.chmodSync(executable, 0o755)
 
-  const database = await import('../database')
+  const [database, applicationModule, applicationAccess, modelServices] = await Promise.all([
+    import('../database'),
+    import('@offgrid/application'),
+    import('../composition/application-access'),
+    import('../model-services')
+  ])
   database.saveSetting('enhanceImagePrompts', false)
+  application = applicationModule.createOffGridApplication({
+    models: modelServices.desktopModelWorkspacePorts
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
   jobs = (await import('../imagegen/job-service')).imageGenerationJobs
 })
 
 afterAll(async () => {
+  await application?.stop()
+  releaseApplication?.()
+  vi.restoreAllMocks()
   const { getDB } = await import('../database')
   if (getDB().open) getDB().close()
   delete process.env.OFFGRID_DATA_DIR
@@ -79,8 +108,8 @@ describe('image generation across feature navigation', () => {
 
     const generation = jobs.start({
       prompt: 'A green cabin rendered while navigating',
-      model: IMAGE_MODEL,
-      conversationId: 'conversation-navigation',
+      model: IMAGE_MODEL_ID,
+      conversationId: CONVERSATION_ID,
       projectId: 'project-navigation',
       seed: 91,
       width: 512,
@@ -89,7 +118,7 @@ describe('image generation across feature navigation', () => {
     })
     expect(jobs.status()).toMatchObject({
       phase: 'running',
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       projectId: 'project-navigation'
     })
 
@@ -103,7 +132,7 @@ describe('image generation across feature navigation', () => {
     expect(returnedScreen).toContain('succeeded')
     expect(jobs.status()).toMatchObject({
       phase: 'succeeded',
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       outputPath: image.path
     })
 
@@ -111,8 +140,8 @@ describe('image generation across feature navigation', () => {
     const detachRefresh = jobs.onConversationUpdated((conversationId) =>
       refreshed.push(conversationId)
     )
-    expect(jobs.acknowledgeConversation('conversation-navigation')).toBe(true)
-    expect(refreshed).toEqual(['conversation-navigation'])
+    expect(jobs.acknowledgeConversation(CONVERSATION_ID, MESSAGE_ID)).toBe(true)
+    expect(refreshed).toEqual([CONVERSATION_ID])
     detachRefresh()
     detachReturned()
   }, 15_000)

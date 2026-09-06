@@ -1,0 +1,773 @@
+/**
+ * The browser rail's visible fallback hands: navigate / click / type / key over
+ * raw CDP. Playwright MCP owns the normal semantic path. The transport is a seam so the driver's decisions - what
+ * gets dispatched, what is refused - are testable against a fake; Electron's
+ * webContents.debugger attach lives in the pane host, not here.
+ *
+ * One hard rule is enforced at this layer, not left to the agent's judgment:
+ * typing into an identity field (password / one-time-code) is REFUSED with a
+ * takeover signal. Clicking one is allowed - focusing a login form is how the
+ * human takes over - but credentials never flow through the agent.
+ */
+import { randomUUID } from 'node:crypto'
+import {
+  BROWSER_POINTER_VISUAL,
+  browserPointerBackgroundImage
+} from '../../shared/browser-pointer-visual'
+import {
+  WEB_USE_BLOCKED_CHROME_CHORDS,
+  WEB_USE_BLOCKED_CHROME_HINT,
+  WEB_USE_SHORTCUTS,
+  type WebUseChromeCommand
+} from '@offgrid/automation'
+import type { VisionAction } from '../vision/vision-action'
+
+export interface CdpTransport {
+  send<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>
+  /** Subscribe to CDP events; returns unsubscribe. */
+  on(listener: (method: string, params: unknown) => void): () => void
+}
+
+export type DriverResult =
+  | { ok: true }
+  | { ok: false; reason: 'takeover' | 'recoverable' | 'error'; detail: string }
+
+export interface BrowserPointerEvent {
+  phase: 'moved' | 'pressed' | 'released'
+  x: number
+  y: number
+}
+
+export interface BrowserViewportSize {
+  width: number
+  height: number
+}
+
+export const DEFAULT_BROWSER_POINTER: BrowserPointerEvent = {
+  phase: 'released',
+  x: 32,
+  y: 32
+}
+
+interface BrowserDriverOptions {
+  onPointer?: (event: BrowserPointerEvent) => void
+  initialPointer?: BrowserPointerEvent
+  pageReadyTimeoutMs?: number
+  /**
+   * The page's current Electron zoom factor, read fresh each time the cursor is drawn.
+   *
+   * The cursor lives INSIDE the zoomed page, so a 20px cursor drawn at zoom 0.5 appears 10px on
+   * screen. Counter-scaling by 1/zoom keeps it the size the design specifies no matter how small
+   * the pane is - which is why the old renderer overlay looked right and this one looked shrunken.
+   */
+  zoomFactor?: () => number
+}
+
+export interface BrowserPointerMotion {
+  durationMs: number
+  points: ReadonlyArray<{ x: number; y: number }>
+}
+
+export interface BrowserPageState {
+  url: string
+  readyState: string
+  documentId: string
+}
+
+interface BrowserNavigationHistory {
+  currentIndex: number
+  entries: ReadonlyArray<{ id: number; url: string }>
+}
+
+const NAVIGATION_TIMEOUT_MS = 20_000
+/** A single CDP command should return in well under a second on a live page.
+ *  When the WebContents/network service is wedged (e.g. after a "Network
+ *  service crashed" event), `debugger.sendCommand` can hang FOREVER with no
+ *  rejection - which froze the whole web task at setup with no step, no result,
+ *  no error. Bound every command so a wedged transport fails fast and visibly
+ *  instead of hanging. */
+const CDP_COMMAND_TIMEOUT_MS = 15_000
+const POINTER_FRAME_MS = 16
+const POINTER_MIN_DURATION_MS = 120
+const POINTER_MAX_DURATION_MS = 240
+
+/** Build one short, deterministic pointer path. The driver remains the single
+ * owner of both the visible pointer and the CDP pointer coordinates. */
+export function browserPointerMotion(
+  from: { x: number; y: number },
+  to: { x: number; y: number }
+): BrowserPointerMotion {
+  const distance = Math.hypot(to.x - from.x, to.y - from.y)
+  if (distance < 2) {
+    return { durationMs: 0, points: [{ x: Math.round(to.x), y: Math.round(to.y) }] }
+  }
+  const durationMs = Math.round(
+    Math.min(POINTER_MAX_DURATION_MS, Math.max(POINTER_MIN_DURATION_MS, 105 + distance * 0.16))
+  )
+  const steps = Math.max(2, Math.ceil(durationMs / POINTER_FRAME_MS))
+  const points = Array.from({ length: steps }, (_, index) => {
+    const progress = (index + 1) / steps
+    const eased =
+      progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2
+    return {
+      x: Math.round(from.x + (to.x - from.x) * eased),
+      y: Math.round(from.y + (to.y - from.y) * eased)
+    }
+  }).filter(
+    (point, index, all) =>
+      index === 0 || point.x !== all[index - 1]!.x || point.y !== all[index - 1]!.y
+  )
+  return { durationMs, points }
+}
+
+/** Models commonly spell chords with either spaces or plus signs. CDP needs
+ * separate key values, and browser-history chords need semantic handling. */
+export function browserHotkeyTokens(keys: string): string[] {
+  return keys
+    .trim()
+    .split(/[+\s]+/)
+    .map((key) => key.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Every named key the agent may press, in ONE table.
+ *
+ * Chromium needs a virtual key code to treat a key as that key: `key: 'Enter'` with no keyCode
+ * reaches the page as an unrecognised keydown and submits nothing. The two dispatch paths had
+ * drifted apart - `pressKey` carried a three-entry map with proper codes, while a vision `press`
+ * went through `dispatchKeyPhase`, which merely capitalized whatever it was given and sent no code
+ * at all. So the model saying "press return" produced `key: 'Return'` with no keyCode: a keystroke
+ * the page could not act on, reported as a success.
+ *
+ * Aliases are part of the table because the model's vocabulary is not ours - it says return, esc,
+ * up, del - and a name we do not recognise must fail loudly rather than be title-cased into a key
+ * that does not exist.
+ */
+const NAMED_BROWSER_KEYS: Record<string, { key: string; code: string; keyCode: number }> = {
+  enter: { key: 'Enter', code: 'Enter', keyCode: 13 },
+  tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+  escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+  delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
+  space: { key: ' ', code: 'Space', keyCode: 32 },
+  arrowup: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+  arrowdown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+  arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+  arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  home: { key: 'Home', code: 'Home', keyCode: 36 },
+  end: { key: 'End', code: 'End', keyCode: 35 },
+  pageup: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+  pagedown: { key: 'PageDown', code: 'PageDown', keyCode: 34 }
+}
+
+const NAMED_BROWSER_KEY_ALIASES: Record<string, string> = {
+  return: 'enter',
+  esc: 'escape',
+  del: 'delete',
+  spacebar: 'space',
+  up: 'arrowup',
+  down: 'arrowdown',
+  left: 'arrowleft',
+  right: 'arrowright'
+}
+
+export function namedBrowserKey(
+  raw: string
+): { key: string; code: string; keyCode: number } | undefined {
+  const lower = raw.trim().toLowerCase()
+  return NAMED_BROWSER_KEYS[NAMED_BROWSER_KEY_ALIASES[lower] ?? lower]
+}
+
+export type BrowserShortcutCommand = WebUseChromeCommand | 'blocked_chrome' | 'page'
+
+function canonicalShortcutTokens(keys: readonly string[]): Set<string> {
+  const aliases: Record<string, string> = {
+    control: 'ctrl',
+    command: 'cmd',
+    meta: 'cmd',
+    option: 'alt',
+    opt: 'alt',
+    esc: 'escape',
+    return: 'enter'
+  }
+  return new Set(keys.map((key) => aliases[key.toLowerCase()] ?? key.toLowerCase()))
+}
+
+function shortcutSignature(keys: readonly string[]): string {
+  return [...canonicalShortcutTokens(keys)]
+    .sort((left, right) => left.localeCompare(right))
+    .join('+')
+}
+
+// The chord registry lives in the shared Web Use control contract, so the
+// intercepted chords and the phrasing shown to the model cannot drift apart.
+const browserShortcutCommands = new Map<string, BrowserShortcutCommand>()
+for (const [command, entry] of Object.entries(WEB_USE_SHORTCUTS)) {
+  for (const chord of entry.chords) {
+    browserShortcutCommands.set(shortcutSignature(chord), command as WebUseChromeCommand)
+  }
+}
+for (const chord of WEB_USE_BLOCKED_CHROME_CHORDS) {
+  browserShortcutCommands.set(shortcutSignature(chord), 'blocked_chrome')
+}
+
+/** Resolve shortcuts that belong to browser chrome. Page-level keys remain
+ * ordinary CDP input. Invisible or unsafe chrome commands fail explicitly. */
+export function browserShortcutCommand(keys: readonly string[]): BrowserShortcutCommand {
+  return browserShortcutCommands.get(shortcutSignature(keys)) ?? 'page'
+}
+
+export class BrowserDriver {
+  private pointer: BrowserPointerEvent
+  private lastClick: { x: number; y: number } | null = null
+  private readonly documentIdentityProperty = `__offgrid_document_${randomUUID()}`
+  private readonly zoomFactor: () => number
+  private readonly onPointer?: (event: BrowserPointerEvent) => void
+  private readonly pageReadyTimeoutMs: number
+
+  constructor(
+    private readonly cdp: CdpTransport,
+    private readonly commandTimeoutMs = CDP_COMMAND_TIMEOUT_MS,
+    options: BrowserDriverOptions = {}
+  ) {
+    this.onPointer = options.onPointer
+    this.pointer = options.initialPointer ?? DEFAULT_BROWSER_POINTER
+    this.pageReadyTimeoutMs = options.pageReadyTimeoutMs ?? 10_000
+    this.zoomFactor = options.zoomFactor ?? (() => 1)
+  }
+
+  /** The ONE choke point every CDP command goes through: race the transport
+   *  send against a timeout so no single command can hang the rail. */
+  private send<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`CDP ${method} timed out after ${this.commandTimeoutMs}ms`)),
+        this.commandTimeoutMs
+      )
+      timer.unref()
+    })
+    return Promise.race([this.cdp.send<T>(method, params), timeout]).finally(() =>
+      clearTimeout(timer)
+    )
+  }
+
+  /** Draw the agent pointer inside the Chromium page itself. Electron places a
+   * WebContentsView above renderer DOM, so a React overlay cannot appear over
+   * the live page. CDP evaluation keeps the visual at the exact viewport
+   * coordinates used by Input.dispatchMouseEvent. */
+  private async showPointer(
+    event: BrowserPointerEvent,
+    onlyIfMissing = false,
+    transitionMs = 0
+  ): Promise<boolean> {
+    const pointerImage = browserPointerBackgroundImage()
+    // Guard the divide: a zero or missing zoom must not produce an invisible or infinite cursor.
+    const zoom = this.zoomFactor()
+    const counterScale = zoom > 0 ? 1 / zoom : 1
+    const expression = `(() => {
+      const id = '__offgrid_agent_pointer__';
+      const markerId = '__offgrid_agent_click_marker__';
+      const observerKey = '__offgrid_agent_pointer_observer__';
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let cursor = document.getElementById(id);
+      if (!cursor) {
+        cursor = document.createElement('div');
+        cursor.id = id;
+        cursor.setAttribute('aria-hidden', 'true');
+        cursor.style.cssText = 'position:fixed;left:0;top:0;width:${BROWSER_POINTER_VISUAL.width * counterScale}px;height:${BROWSER_POINTER_VISUAL.height * counterScale}px;pointer-events:none;z-index:2147483647;will-change:transform;background-repeat:no-repeat;background-size:100% 100%;background-image:${pointerImage};filter:drop-shadow(0 0 ${5 * counterScale}px ${BROWSER_POINTER_VISUAL.glow}) drop-shadow(0 ${counterScale}px ${counterScale}px rgba(0,0,0,.5));';
+      }
+      const lastClick = ${JSON.stringify(this.lastClick)};
+      let marker = document.getElementById(markerId);
+      if (lastClick && !marker) {
+        marker = document.createElement('div');
+        marker.id = markerId;
+        marker.setAttribute('aria-hidden', 'true');
+        marker.style.cssText = 'position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;border:2px solid ${BROWSER_POINTER_VISUAL.action};border-radius:9999px;pointer-events:none;z-index:2147483646;box-sizing:border-box;box-shadow:0 0 0 2px rgba(255,255,255,.9),0 0 7px ${BROWSER_POINTER_VISUAL.glow};';
+      }
+      const mount = () => {
+        const root = document.body || document.documentElement;
+        if (!root) return;
+        if (!cursor.isConnected) root.appendChild(cursor);
+        if (marker && !marker.isConnected) root.appendChild(marker);
+      };
+      mount();
+      const observerRoot = document.body || document.documentElement;
+      if (observerRoot && !window[observerKey]) {
+        const observer = new MutationObserver(mount);
+        observer.observe(observerRoot, { childList: true });
+        window[observerKey] = observer;
+      }
+      cursor.style.transition = reduceMotion || ${transitionMs} <= 0
+        ? 'none'
+        : 'transform ${transitionMs}ms cubic-bezier(.45,0,.55,1)';
+      if (!${JSON.stringify(onlyIfMissing)} || !cursor.dataset.positioned) {
+        cursor.style.transform = 'translate3d(${Math.round(event.x - BROWSER_POINTER_VISUAL.hotspotX)}px,${Math.round(event.y - BROWSER_POINTER_VISUAL.hotspotY)}px,0)';
+        cursor.dataset.positioned = 'true';
+      }
+      if (marker && lastClick) {
+        marker.style.transform = 'translate3d(' + Math.round(lastClick.x) + 'px,' + Math.round(lastClick.y) + 'px,0)';
+      }
+      if (${JSON.stringify(event.phase)} === 'pressed') {
+        const pulse = document.createElement('div');
+        pulse.style.cssText = 'position:fixed;width:8px;height:8px;margin:-4px 0 0 -4px;border:1.5px solid;border-radius:9999px;pointer-events:none;z-index:2147483646;';
+        pulse.style.borderColor = ${JSON.stringify(BROWSER_POINTER_VISUAL.action)};
+        pulse.style.left = ${Math.round(event.x)} + 'px';
+        pulse.style.top = ${Math.round(event.y)} + 'px';
+        document.documentElement.appendChild(pulse);
+        if (reduceMotion) {
+          window.setTimeout(() => pulse.remove(), 80);
+        } else {
+          const animation = pulse.animate(
+            [{ transform: 'scale(.55)', opacity: 1 }, { transform: 'scale(2)', opacity: 0 }],
+            { duration: 320, easing: 'ease-out' }
+          );
+          animation.finished.finally(() => pulse.remove());
+        }
+      }
+      return reduceMotion;
+    })()`
+    // Report BOTH failure paths. Pointer feedback stays best-effort - a page that blocks evaluation
+    // must not prevent the already-authorized action - but silence is what hid a total failure of
+    // the cursor for days: Runtime.evaluate RESOLVES on a page exception, returning
+    // exceptionDetails, so swallowing the rejection and ignoring that field left no trace anywhere.
+    const response = await this.send<{
+      result?: { value?: boolean }
+      exceptionDetails?: { exception?: { description?: string }; text?: string }
+    }>('Runtime.evaluate', { expression, returnByValue: true }).catch((error: unknown) => {
+      console.warn('[browser] pointer evaluation failed', error)
+      return undefined
+    })
+    const thrown = response?.exceptionDetails
+    if (thrown) {
+      console.warn(
+        '[browser] pointer injection threw',
+        thrown.exception?.description ?? thrown.text
+      )
+    }
+    return response?.result?.value === true
+  }
+
+  private async movePointerTo(
+    x: number,
+    y: number,
+    button?: 'left' | 'right' | 'middle'
+  ): Promise<void> {
+    const destination = { phase: 'moved' as const, x, y }
+    const motion = browserPointerMotion(this.pointer, destination)
+    const reduceMotion = await this.showPointer(destination, false, motion.durationMs)
+    const points = reduceMotion ? [motion.points.at(-1)!] : motion.points
+    const frameDelayMs = reduceMotion ? 0 : motion.durationMs / Math.max(1, points.length)
+    for (const point of points) {
+      this.pointer = { phase: 'moved', ...point }
+      await this.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        ...point,
+        ...(button ? { button } : {})
+      })
+      this.onPointer?.(this.pointer)
+      if (frameDelayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, frameDelayMs))
+      }
+    }
+  }
+
+  /** Keep one semantic Off Grid AI pointer visible for the full Web Use session.
+   * Native navigation replaces the page DOM, so the host calls this again at
+   * every document boundary and before it publishes a terminal task state. */
+  async ensurePointer(onlyIfMissing = true): Promise<void> {
+    await this.showPointer(this.pointer, onlyIfMissing)
+    this.onPointer?.(this.pointer)
+  }
+
+  /** Chromium input uses CSS pixels, which can differ from capturePage pixels on Retina. */
+  async viewportSize(): Promise<BrowserViewportSize> {
+    const response = await this.send<{ result?: { value?: BrowserViewportSize } }>(
+      'Runtime.evaluate',
+      {
+        expression: '({ width: window.innerWidth, height: window.innerHeight })',
+        returnByValue: true
+      }
+    )
+    const value = response.result?.value
+    return value && value.width > 0 && value.height > 0 ? value : { width: 1, height: 1 }
+  }
+
+  /** Read only document-lifecycle state. Visual content belongs to the
+   * screenshot boundary and semantic action approval belongs to the model. */
+  async pageState(): Promise<BrowserPageState> {
+    const response = await this.send<{ result?: { value?: BrowserPageState } }>(
+      'Runtime.evaluate',
+      {
+        expression: `(() => {
+          const key = ${JSON.stringify(this.documentIdentityProperty)};
+          if (!globalThis[key]) globalThis[key] = Math.random().toString(36).slice(2);
+          return { url: location.href, readyState: document.readyState, documentId: globalThis[key] };
+        })()`,
+        returnByValue: true
+      }
+    )
+    return (
+      response.result?.value ?? {
+        url: '',
+        readyState: 'loading',
+        documentId: ''
+      }
+    )
+  }
+
+  private pageIsReady(state: BrowserPageState): boolean {
+    return /^https?:\/\//i.test(state.url) && state.readyState !== 'loading'
+  }
+
+  private async waitForReadyDocument(): Promise<BrowserPageState | null> {
+    const deadline = Date.now() + this.pageReadyTimeoutMs
+    while (Date.now() <= deadline) {
+      const state = await this.pageState()
+      if (this.pageIsReady(state)) return state
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 100)
+        timer.unref()
+      })
+    }
+    return null
+  }
+
+  /** Wait for a committed document, then reload once if it remains at a
+   * document boundary. Pixel evidence is validated by the capture owner. */
+  async ensurePageReady(recover = true): Promise<BrowserPageState> {
+    const ready = await this.waitForReadyDocument()
+    if (ready) return ready
+    if (recover) {
+      await this.send('Page.reload', { ignoreCache: false })
+      const recovered = await this.waitForReadyDocument()
+      if (recovered) return recovered
+    }
+    throw new Error('The browser page did not finish loading after guarded recovery.')
+  }
+
+  async reloadAndWait(ignoreCache = false): Promise<BrowserPageState> {
+    await this.send('Page.reload', { ignoreCache })
+    const recovered = await this.waitForReadyDocument()
+    if (recovered) return recovered
+    throw new Error('The browser page did not finish loading after reload.')
+  }
+
+  /** Move the watched-page pointer to a Playwright accessibility reference.
+   * Playwright boxes and CDP input share viewport CSS coordinates, so this is
+   * presentation only: Playwright remains the single semantic actuator. */
+  async projectSemanticTarget(ref: string, snapshot: string): Promise<boolean> {
+    const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const line = snapshot
+      .split('\n')
+      .find((candidate) => new RegExp(`\\[ref=${escaped}\\]`).test(candidate))
+    const box = line?.match(
+      /\[box=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)\]/
+    )
+    if (!box) return false
+    const x = Number(box[1])
+    const y = Number(box[2])
+    const width = Number(box[3])
+    const height = Number(box[4])
+    if (![x, y, width, height].every(Number.isFinite)) return false
+    await this.ensurePointer(true)
+    await this.movePointerTo(x + width / 2, y + height / 2)
+    return true
+  }
+
+  /** Navigates and resolves on the load event (or the timeout - slow pages
+   *  still get a snapshot of whatever rendered). */
+  async navigate(url: string): Promise<DriverResult> {
+    await this.send('Page.enable')
+    const loaded = new Promise<void>((resolve) => {
+      const off = this.cdp.on((method) => {
+        if (method === 'Page.loadEventFired') {
+          off()
+          resolve()
+        }
+      })
+      setTimeout(() => {
+        off()
+        resolve()
+      }, NAVIGATION_TIMEOUT_MS).unref()
+    })
+    const reply = await this.send<{ errorText?: string }>('Page.navigate', { url })
+    if (reply.errorText) {
+      return { ok: false, reason: 'error', detail: reply.errorText }
+    }
+    await loaded
+    await this.ensurePointer(true)
+    return { ok: true }
+  }
+
+  private async moveThroughHistory(delta: -1 | 1): Promise<DriverResult> {
+    const history = await this.send<BrowserNavigationHistory>('Page.getNavigationHistory')
+    const target = history.entries[history.currentIndex + delta]
+    if (!target) {
+      return {
+        ok: false,
+        reason: 'recoverable',
+        detail: delta < 0 ? 'There is no earlier browser page.' : 'There is no later browser page.'
+      }
+    }
+    await this.send('Page.navigateToHistoryEntry', { entryId: target.id })
+    const deadline = Date.now() + this.pageReadyTimeoutMs
+    do {
+      const state = await this.pageState()
+      if (state.url === target.url && state.readyState !== 'loading') {
+        await this.ensurePointer(true)
+        return { ok: true }
+      }
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 100)
+        timer.unref()
+      })
+    } while (Date.now() <= deadline)
+    return {
+      ok: false,
+      reason: 'recoverable',
+      detail: 'The browser did not finish moving through its history.'
+    }
+  }
+
+  private async clickPoint(
+    x: number,
+    y: number,
+    button: 'left' | 'right' | 'middle',
+    clickCount: number
+  ): Promise<DriverResult> {
+    await this.movePointerTo(x, y)
+    this.lastClick = { x, y }
+    const phases = [
+      { type: 'mousePressed', phase: 'pressed' },
+      { type: 'mouseReleased', phase: 'released' }
+    ] as const
+    for (const { type, phase } of phases) {
+      const pointer = { phase, x, y }
+      this.pointer = pointer
+      await this.showPointer(pointer)
+      await this.send('Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        button,
+        clickCount
+      })
+      this.onPointer?.(pointer)
+    }
+    return { ok: true }
+  }
+
+  private async focusedFieldIsPrivate(): Promise<boolean> {
+    const reply = await this.send<{
+      result?: { value?: boolean }
+    }>('Runtime.evaluate', {
+      expression: `(() => {
+        const el = document.activeElement;
+        const input = el instanceof HTMLInputElement;
+        return Boolean(input && (el.type === 'password' || el.autocomplete === 'one-time-code'));
+      })()`,
+      returnByValue: true
+    })
+    return reply.result?.value === true
+  }
+
+  private async typeFocused(text: string): Promise<DriverResult> {
+    if (await this.focusedFieldIsPrivate()) {
+      return {
+        ok: false,
+        reason: 'takeover',
+        detail: 'The focused field contains private sign-in information.'
+      }
+    }
+    await this.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'a',
+      code: 'KeyA',
+      commands: ['selectAll']
+    })
+    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA' })
+    await this.send('Input.insertText', { text })
+    return { ok: true }
+  }
+
+  private async actuateShortcut(keys: readonly string[], chord: boolean): Promise<DriverResult> {
+    const command = browserShortcutCommand(keys)
+    if (command === 'back') return this.moveThroughHistory(-1)
+    if (command === 'forward') return this.moveThroughHistory(1)
+    if (command === 'reload' || command === 'hard_reload') {
+      await this.reloadAndWait(command === 'hard_reload')
+      await this.ensurePointer(true)
+      return { ok: true }
+    }
+    if (command === 'blocked_chrome') {
+      return { ok: false, reason: 'recoverable', detail: WEB_USE_BLOCKED_CHROME_HINT }
+    }
+    return this.dispatchKeys(keys, chord)
+  }
+
+  /** Execute the shared visual action space against this isolated browser page. */
+  async actuate(action: VisionAction): Promise<DriverResult> {
+    switch (action.type) {
+      case 'click':
+        return this.clickPoint(action.point.x, action.point.y, 'left', 1)
+      case 'double_click':
+        return this.clickPoint(action.point.x, action.point.y, 'left', 2)
+      case 'triple_click':
+        return this.clickPoint(action.point.x, action.point.y, 'left', 3)
+      case 'right_click':
+        return this.clickPoint(action.point.x, action.point.y, 'right', 1)
+      case 'middle_click':
+        return this.clickPoint(action.point.x, action.point.y, 'middle', 1)
+      case 'mouse_move': {
+        await this.movePointerTo(action.point.x, action.point.y)
+        return { ok: true }
+      }
+      case 'drag':
+      case 'drag_to': {
+        const from = action.type === 'drag' ? action.from : this.pointer
+        const to = action.to
+        await this.movePointerTo(from.x, from.y)
+        this.pointer = { phase: 'pressed', x: from.x, y: from.y }
+        await this.showPointer(this.pointer)
+        await this.send('Input.dispatchMouseEvent', {
+          type: 'mousePressed',
+          x: from.x,
+          y: from.y,
+          button: 'left',
+          clickCount: 1
+        })
+        this.onPointer?.(this.pointer)
+        await this.movePointerTo(to.x, to.y, 'left')
+        await this.send('Input.dispatchMouseEvent', {
+          type: 'mouseReleased',
+          x: to.x,
+          y: to.y,
+          button: 'left',
+          clickCount: 1
+        })
+        this.pointer = { phase: 'released', x: to.x, y: to.y }
+        await this.showPointer(this.pointer)
+        this.onPointer?.(this.pointer)
+        return { ok: true }
+      }
+      case 'type':
+        return this.typeFocused(action.content)
+      case 'scroll':
+      case 'scroll_by': {
+        const horizontal =
+          action.type === 'scroll_by'
+            ? action.axis === 'horizontal'
+            : action.direction === 'left' || action.direction === 'right'
+        const amount =
+          action.type === 'scroll_by'
+            ? horizontal
+              ? action.amount
+              : -action.amount
+            : action.direction === 'up' || action.direction === 'left'
+              ? -600
+              : 600
+        await this.send('Input.dispatchMouseEvent', {
+          type: 'mouseWheel',
+          x: this.pointer.x,
+          y: this.pointer.y,
+          deltaX: horizontal ? amount : 0,
+          deltaY: horizontal ? 0 : amount
+        })
+        return { ok: true }
+      }
+      case 'navigate':
+        return this.navigate(action.url)
+      case 'hotkey': {
+        const keys = browserHotkeyTokens(action.keys)
+        return this.actuateShortcut(keys, true)
+      }
+      case 'press':
+        return this.actuateShortcut(action.keys, false)
+      case 'key_down':
+        return this.dispatchKeyPhase(action.keys, 'rawKeyDown')
+      case 'key_up':
+        return this.dispatchKeyPhase([...action.keys].reverse(), 'keyUp')
+      case 'wait':
+      case 'call_user':
+      case 'finished':
+        return { ok: false, reason: 'error', detail: `control action ${action.type} is not input` }
+      default:
+        return { ok: false, reason: 'error', detail: 'unsupported browser action' }
+    }
+  }
+
+  private async dispatchKeyPhase(
+    keys: readonly string[],
+    type: 'rawKeyDown' | 'keyUp',
+    initialModifiers = 0
+  ): Promise<DriverResult> {
+    let modifiers = initialModifiers
+    for (const rawKey of keys) {
+      const key = rawKey.toLowerCase()
+      const modifier =
+        key === 'alt' || key === 'option'
+          ? 1
+          : key === 'ctrl' || key === 'control'
+            ? 2
+            : key === 'meta' || key === 'cmd' || key === 'command'
+              ? 4
+              : key === 'shift'
+                ? 8
+                : 0
+      if (type === 'rawKeyDown') modifiers |= modifier
+      const modifierName =
+        modifier === 1
+          ? 'Alt'
+          : modifier === 2
+            ? 'Control'
+            : modifier === 4
+              ? 'Meta'
+              : modifier === 8
+                ? 'Shift'
+                : null
+      // A named key carries its code and virtual key code, or the page cannot act on it. Only a
+      // single character falls back to being sent as itself.
+      const named = modifierName ? undefined : namedBrowserKey(rawKey)
+      await this.send('Input.dispatchKeyEvent', {
+        type,
+        key: modifierName ?? named?.key ?? rawKey,
+        ...(named
+          ? {
+              code: named.code,
+              windowsVirtualKeyCode: named.keyCode,
+              nativeVirtualKeyCode: named.keyCode
+            }
+          : rawKey.length === 1
+            ? { code: `Key${rawKey.toUpperCase()}` }
+            : {}),
+        modifiers
+      })
+      if (type === 'keyUp') modifiers &= ~modifier
+    }
+    return { ok: true }
+  }
+
+  private async dispatchKeys(keys: readonly string[], chord: boolean): Promise<DriverResult> {
+    if (!keys.length) return { ok: false, reason: 'error', detail: 'no keys supplied' }
+    if (chord) {
+      let modifiers = 0
+      for (const key of keys) {
+        const lower = key.toLowerCase()
+        if (lower === 'alt' || lower === 'option') modifiers |= 1
+        if (lower === 'ctrl' || lower === 'control') modifiers |= 2
+        if (lower === 'meta' || lower === 'cmd' || lower === 'command') modifiers |= 4
+        if (lower === 'shift') modifiers |= 8
+      }
+      await this.dispatchKeyPhase(keys, 'rawKeyDown')
+      await this.dispatchKeyPhase([...keys].reverse(), 'keyUp', modifiers)
+      return { ok: true }
+    }
+    for (const key of keys) {
+      await this.dispatchKeyPhase([key], 'rawKeyDown')
+      await this.dispatchKeyPhase([key], 'keyUp')
+    }
+    return { ok: true }
+  }
+}

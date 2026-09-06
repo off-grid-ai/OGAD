@@ -62,7 +62,7 @@ Three things in one app:
    Claude/LM-Studio/Ollama with everything on-device.
 2. **A gateway** — one local OpenAI-compatible API (`http://127.0.0.1:7878/v1`, no key)
    for chat, vision, image, audio, and embeddings. Run it headless as just the gateway.
-3. **Off Grid Pro** — an always-on private layer that _sees_ your work (screen → OCR),
+3. **Off Grid AI Pro** — an always-on private layer that _sees_ your work (screen → OCR),
    _remembers_ it, helps you _reflect_, and _acts_ with your approval. On-device, opt-in.
 
 ## A look inside
@@ -81,7 +81,7 @@ Three things in one app:
 <td width="50%"><strong>Artifacts</strong> — HTML, React, SVG &amp; Mermaid in a local sandbox<br><img src="docs/screenshots/09-artifacts.png" width="100%" alt="Artifacts" /></td>
 </tr>
 <tr>
-<td width="50%"><strong>Off Grid Pro</strong> — the sees/remembers/reflects/acts layer<br><img src="docs/screenshots/07-pro-upgrade.png" width="100%" alt="Pro" /></td>
+<td width="50%"><strong>Off Grid AI Pro</strong> — the sees/remembers/reflects/acts layer<br><img src="docs/screenshots/07-pro-upgrade.png" width="100%" alt="Pro" /></td>
 <td width="50%"><strong>Private by default</strong> — runs on your machine, no account<br><img src="docs/screenshots/08-onboarding.png" width="100%" alt="Private by default" /></td>
 </tr>
 </table>
@@ -174,7 +174,7 @@ curl -X POST http://127.0.0.1:7878/v1/models/activate \
   -H 'Content-Type: application/json' -d '{"id":"unsloth/gemma-4-E4B-it-GGUF"}'
 ```
 
-## Off Grid Pro — available now
+## Off Grid AI Pro — available now
 
 The free app **runs** models. **Pro** adds the always-on layer that turns your own work
 into private, on-device memory — and an assistant that helps you act on it. Everything is

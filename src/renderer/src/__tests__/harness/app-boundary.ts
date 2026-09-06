@@ -1,4 +1,24 @@
 import { vi } from 'vitest'
+import type { UseSnapshot } from '@offgrid/application'
+import { modelControlBoundary } from '../../components/__tests__/harness/model-control-snapshot'
+
+const EMPTY_ACTION_PROJECTION: UseSnapshot = {
+  actions: [],
+  active: [],
+  terminal: [],
+  recoverable: [],
+  running: false
+}
+
+export function appActionsBoundary(): NonNullable<Window['api']['actions']> {
+  return {
+    getProjection: async () => EMPTY_ACTION_PROJECTION,
+    onProjection: () => () => undefined,
+    retry: async () => ({ ok: true, value: true }),
+    resolveGate: async () => true,
+    undo: async () => ({ ok: true })
+  }
+}
 
 export const APP_PROJECTS = Array.from({ length: 12 }, (_, index) => {
   const suffix = index === 0 ? 'Alpha' : index === 1 ? 'Beta' : String(index + 1).padStart(2, '0')
@@ -14,6 +34,11 @@ export const APP_PROJECTS = Array.from({ length: 12 }, (_, index) => {
 
 export function installAppBoundary(overrides: Record<string, unknown> = {}): void {
   const eventSubscription = (): (() => void) => () => {}
+  // One owner for the model-control read AND write doors. The Proxy default below answers an
+  // unknown method with `async () => undefined`, which is the wrong shape for `controlModel`:
+  // ModelsScreen reads `outcome.ok` off the result, so the default made every App journey that
+  // mounts a model surface throw an unhandled "Cannot read properties of undefined (reading 'ok')".
+  const modelControl = modelControlBoundary({ kinds: ['text'], models: [] })
   const values: Record<string, unknown> = {
     isPro: false,
     platform: 'darwin',
@@ -24,6 +49,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
       allGranted: true
     }),
     checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
+    chatHealth: async () => ({ id: 'chat', label: 'Chat model', status: 'ready' }),
     systemHealth: async () => ({ ramGb: 16, components: [{ id: 'chat', status: 'ready' }] }),
     getStagedUpdateVersion: async () => null,
     meetingGetState: async () => ({
@@ -35,12 +61,14 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
       error: ''
     }),
     getModelCatalog: async () => ({ kinds: ['text'], models: [] }),
+    getModelControlProjection: modelControl.getModelControlProjection,
+    onModelControlProjection: eventSubscription,
+    controlModel: modelControl.controlModel,
     getInstalledModels: async () => [],
     getActiveModelIds: async () => [],
     listProjects: async () => APP_PROJECTS.map((project) => ({ ...project })),
     getRagConversations: async () => [],
     getSettings: async () => ({}),
-    onNewApproval: eventSubscription,
     onNewAction: eventSubscription,
     onUpdateDownloaded: eventSubscription,
     onReprocessProgress: eventSubscription,
@@ -48,6 +76,26 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     onMeetingState: eventSubscription,
     onModelProgress: eventSubscription,
     proOn: eventSubscription,
+    // Namespaced preload doors. The Proxy default returns a FUNCTION, so a caller reaching for
+    // `window.api.speechCommands.onEvent` gets "is not a function" rather than a subscription. A
+    // namespace has to be named here; a bare method does not.
+    speechCommands: {
+      transcribe: async () => undefined,
+      cancelTranscription: async () => undefined,
+      speak: async () => ({ kind: 'spoken' as const }),
+      feedStream: async () => undefined,
+      finishStream: async () => undefined,
+      interrupt: async () => undefined,
+      onEvent: eventSubscription
+    },
+    askByVoice: {
+      start: async () => undefined,
+      cancel: async () => undefined,
+      onEvent: eventSubscription
+    },
+    voiceTurn: { onRequest: eventSubscription, respond: () => undefined },
+    getTranscriptionInfo: async () => null,
+    actions: appActionsBoundary(),
     ...overrides
   }
   const api = new Proxy(values, {

@@ -65,12 +65,15 @@ function CommandInput({
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>): React.JSX.Element {
   return (
-    <div data-slot="command-input-wrapper" className="flex h-9 items-center gap-2 border-b px-3">
+    <div
+      data-slot="command-input-wrapper"
+      className="flex h-12 items-center gap-2 border-b px-3 focus-within:outline focus-within:outline-2 focus-within:outline-offset-[-2px] focus-within:outline-ring"
+    >
       <SearchIcon className="size-4 shrink-0 opacity-50" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          'flex h-10 w-full rounded-md bg-transparent py-3 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 text-sm !outline-none !ring-0 placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
           className
         )}
         {...props}

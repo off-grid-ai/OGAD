@@ -1,7 +1,7 @@
 /**
  * RELEASE_TEST_CHECKLIST #134 at the owning main-process seam. Electron's cache
  * store is the only controlled boundary; the production cleanup receives no path
- * to any durable Off Grid store.
+ * to any durable Off Grid AI store.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 

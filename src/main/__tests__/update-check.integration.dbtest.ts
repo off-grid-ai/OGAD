@@ -92,6 +92,7 @@ function installRendererTransport(): void {
       isPro: false,
       platform: 'darwin',
       updateGetPrefs: () => handler('update:get-prefs')(),
+      updateDownloadProgress: () => handler('update:download-progress')(),
       checkForUpdates: () => handler('update:check')(),
       updateDownload: (version: string) => handler('update:download')(version),
       updateSkipVersion: (version: string) => handler('update:skip-version')(version),
@@ -111,6 +112,7 @@ function installRendererTransport(): void {
 }
 
 async function renderUpdateCard(): Promise<HTMLElement> {
+  cleanup()
   const settingsModule = '../../renderer/src/components/Settings'
   const { Settings } = (await import(/* @vite-ignore */ settingsModule)) as {
     Settings: React.ComponentType
@@ -191,6 +193,34 @@ describe('manual update check', () => {
     })
     expect(quitAndInstall).not.toHaveBeenCalled()
     expect(checkForUpdates).toHaveBeenCalledTimes(3)
+  }, 15_000)
+
+  it('restores finite update download progress with bytes, rate and terminal state', async () => {
+    const updater = await import('../updater')
+    updater.registerUpdateIpc()
+    updater.startAutoUpdates()
+    updaterEvents.emit('update-available', { version: '0.0.104' })
+    updaterEvents.emit('download-progress', {
+      bytesPerSecond: 2 * 1024 * 1024,
+      percent: 25,
+      total: 100 * 1024 * 1024,
+      transferred: 25 * 1024 * 1024,
+      delta: 1024
+    })
+    installRendererTransport()
+    vi.useRealTimers()
+
+    const card = await renderUpdateCard()
+    expect(await within(card).findByText('Downloading v0.0.104')).toBeTruthy()
+    expect(within(card).getByText('25%')).toBeTruthy()
+    expect(within(card).getByText(/26 MB of 105 MB/)).toBeTruthy()
+    expect(within(card).getByText(/2\.0 MB\/s/)).toBeTruthy()
+
+    updaterEvents.emit('update-downloaded', { version: '0.0.104' })
+    const restored = await renderUpdateCard()
+    expect(await within(restored).findByText('v0.0.104 ready to install')).toBeTruthy()
+    expect(within(restored).getByText('100%')).toBeTruthy()
+    expect(restored.textContent).not.toContain('NaN')
   })
 
   it('lets a manual-update user choose when an available version starts downloading', async () => {

@@ -65,7 +65,7 @@ describe('docsHtml', () => {
     expect(docsHtml(7878)).toContain('data-url="http://127.0.0.1:7878/openapi.json"')
   })
 
-  it('applies the Off Grid brand tokens (Menlo + emerald)', () => {
+  it('applies the Off Grid AI brand tokens (Menlo + emerald)', () => {
     const html = docsHtml(8439)
     expect(html).toContain('#34D399') // emerald accent
     expect(html).toContain('Menlo')

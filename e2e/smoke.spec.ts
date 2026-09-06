@@ -84,15 +84,15 @@ test('opens filling the screen, not in a small window', async () => {
 })
 
 test('shows onboarding on a fresh install', async () => {
-  await expect(page.getByText(/Off Grid/i).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid/i })).toBeVisible()
+  await expect(page.getByText(/Off Grid AI/i).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })).toBeVisible()
 })
 
 test('onboarding surfaces the Pro capability grid', async () => {
   // Advance until the Pro step renders its capability cards, then assert a few
   // capabilities are shown by name (Replay, Meetings, Vault). Regression guard
   // for the onboarding redesign that showcases the Pro layer.
-  const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+  const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
   for (let i = 0; i < 6; i++) {
     if (
       await page
@@ -112,9 +112,9 @@ test('onboarding surfaces the Pro capability grid', async () => {
 })
 
 test('completes onboarding and lands in the app shell', async () => {
-  // Click through every onboarding step (Continue × N, then "Start using Off Grid").
+  // Click through every onboarding step (Continue × N, then "Start using Off Grid AI").
   for (let i = 0; i < 6; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click()
     await page.waitForTimeout(400)

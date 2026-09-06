@@ -4,20 +4,27 @@
 // ffmpeg 16 kHz-mono re-encode are defined once and reused by dictation interim
 // ticks, final passes, file ingest, and meeting transcription alike.
 
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { getActiveModal } from '../active-models'
+import { activeDesktopModelId } from '../desktop-generation'
 import { binRoots, modelsDir, exe } from '../runtime-env'
-import { modelsByKind } from '@offgrid/models'
+import {
+  parseWhisperSegments,
+  resolveActiveWhisperFilename,
+  resolveTranscriptionDecode,
+  selectWhisperModelFilename,
+  strongerMultilingualWhisperFilename,
+  transcriptLanguage,
+  transcribeWithQualityRecovery,
+  modelsByKind
+} from '@offgrid/models'
 import { existing } from './bin-resolution'
-import { catalogEngine } from './classify'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
-import type { TranscriptionService, Transcript, TranscribeOptions, Seg } from './types'
+import type { TranscriptionService, Transcript, TranscribeOptions } from './types'
+import { runNativeTranscriptionProcess } from './native-process'
 
-const execFileAsync = promisify(execFile)
+const HINDI_DEVANAGARI_PROMPT = 'यह ऑडियो हिंदी में है। हिंदी को केवल देवनागरी लिपि में लिखें।'
 
 /** Resolve the bundled whisper-cli across dev / packaged layouts. System Health
  * reuses this exact runtime resolver so its Installed claim cannot drift from
@@ -50,27 +57,7 @@ function whisperModelFiles(): string[] {
  *  Models UI stores the id) - map the id to its primary file. Parakeet ids resolve to
  *  null so their ONNX files are never handed to whisper. */
 function activeWhisperFile(chosen: string): string | null {
-  if (/ggml-.*\.bin$/i.test(chosen)) return chosen
-  const entry = modelsByKind('transcription').find((m) => m.id === chosen)
-  // Only whisper entries feed the whisper model path — a Parakeet id (or no match)
-  // resolves to null so its ONNX files are never handed to whisper. Classification is
-  // the single source of truth in select.catalogEngine, not a local engine check.
-  if (!entry || catalogEngine(entry) !== 'whisper') return null
-  const primary = (entry.files.find((f) => f.role === 'primary') ?? entry.files[0])?.name
-  return primary && /ggml-.*\.bin$/i.test(primary) ? primary : null
-}
-
-/** Rank a model filename by capability/size (bigger = more accurate, slower). */
-function sizeRank(f: string): number {
-  return /large/i.test(f)
-    ? 4
-    : /medium/i.test(f)
-      ? 3
-      : /small/i.test(f)
-        ? 2
-        : /base/i.test(f)
-          ? 1
-          : 0
+  return resolveActiveWhisperFilename(chosen, modelsByKind('transcription'))
 }
 
 /** Find the model to use for accurate (final) transcription. Prefers a
@@ -81,14 +68,12 @@ export function whisperModel(): string | null {
     // User-chosen transcription model wins, when it's a whisper ggml file present on disk.
     // (The active-transcription slot is shared with Parakeet, whose ONNX files must never
     // be handed to whisper — hence the ggml guard.)
-    const chosen = getActiveModal('transcription')
+    const chosen = activeDesktopModelId('transcription')
     const chosenFile = chosen ? activeWhisperFile(chosen) : null
     if (chosenFile && fs.existsSync(path.join(dir, chosenFile))) return path.join(dir, chosenFile)
     const files = whisperModelFiles()
     if (!files.length) return null
-    const multi = files.filter((f) => !/\.en\.bin$/i.test(f))
-    const pool = multi.length ? multi : files
-    const pick = [...pool].sort((a, b) => sizeRank(b) - sizeRank(a))[0]! // pool non-empty (files.length checked)
+    const pick = selectWhisperModelFilename(files, 'quality')!
     return path.join(dir, pick)
   } catch {
     return null // transient fs/store error → "no model", not a thrown exception
@@ -101,7 +86,7 @@ export function whisperModel(): string | null {
 export function smallWhisperModel(): string | null {
   const dir = modelsDir()
   try {
-    const chosen = getActiveModal('transcription')
+    const chosen = activeDesktopModelId('transcription')
     const chosenFile = chosen ? activeWhisperFile(chosen) : null
     if (chosenFile && fs.existsSync(path.join(dir, chosenFile))) return path.join(dir, chosenFile)
   } catch {
@@ -109,9 +94,7 @@ export function smallWhisperModel(): string | null {
   }
   const files = whisperModelFiles()
   if (!files.length) return null
-  const multi = files.filter((f) => !/\.en\.bin$/i.test(f))
-  const pool = multi.length ? multi : files
-  const pick = [...pool].sort((a, b) => sizeRank(a) - sizeRank(b))[0]! // smallest first; pool non-empty (files.length checked)
+  const pick = selectWhisperModelFilename(files, 'speed')!
   return path.join(dir, pick)
 }
 
@@ -140,19 +123,21 @@ class WhisperCliTranscription implements TranscriptionService {
     if (!model)
       throw new Error('No transcription model found — download Whisper from Models first.')
 
-    const language = opts.language ?? 'auto'
-    const suppress = opts.suppressNonSpeech !== false
+    const decode = resolveTranscriptionDecode(opts)
 
     let wav = input.path
     let tmp: string | null = null
-    if (!opts.alreadyWav16k) {
+    if (!decode.alreadyWav16k) {
       const ff = ffmpegBin()
       if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
       tmp = path.join(os.tmpdir(), `offgrid-stt-${Date.now()}-${process.pid}.wav`)
       // 16 kHz mono PCM WAV; -vn drops any video track so A/V files work too.
       // Cap the decode so a malformed/streaming input can't hang the process forever.
       try {
-        await execFileAsync(ff, decodeToWavArgs(input.path, tmp), { timeout: DECODE_TIMEOUT_MS })
+        await runNativeTranscriptionProcess(ff, decodeToWavArgs(input.path, tmp), {
+          timeout: DECODE_TIMEOUT_MS,
+          signal: opts.signal
+        })
       } catch (e) {
         fs.promises.unlink(tmp).catch(() => {})
         throw e
@@ -163,20 +148,38 @@ class WhisperCliTranscription implements TranscriptionService {
     try {
       // -nt strips timestamps (plain text). Keep them when the caller wants
       // per-utterance segments (meetings interleave two speakers by time).
-      const args = ['-m', model, '-f', wav, '-l', language, '-np']
-      if (!opts.timestamps) args.push('-nt')
+      const args = ['-m', model, '-f', wav, '-l', decode.language, '-np']
+      if (!decode.timestamps) args.push('-nt')
       // -mc 0 + -sns: kill the repetition/hallucination loop + non-speech tokens.
-      if (suppress) args.push('-mc', '0', '-sns')
+      if (decode.suppressNonSpeech) args.push('-mc', '0', '-sns')
       // Bias toward custom vocabulary (names/jargon) via the initial prompt.
-      const prompt = (opts.prompt ?? '').trim()
+      const prompt =
+        decode.language === 'hi'
+          ? [HINDI_DEVANAGARI_PROMPT, decode.prompt].filter(Boolean).join(' ')
+          : decode.prompt
       if (prompt) args.push('--prompt', prompt.slice(0, 800))
-      const { stdout } = await execFileAsync(bin, args, {
-        maxBuffer: 64 * 1024 * 1024,
-        timeout: 30 * 60_000
+      const retryFilename = strongerMultilingualWhisperFilename(
+        path.basename(model),
+        whisperModelFiles()
+      )
+      const stdout = await transcribeWithQualityRecovery({
+        language: decode.language,
+        selectedModel: model,
+        retryModel: retryFilename ? path.join(modelsDir(), retryFilename) : null,
+        run: async (modelPath) => {
+          const runArgs = [...args]
+          runArgs[1] = modelPath
+          const result = await runNativeTranscriptionProcess(bin, runArgs, {
+            maxBuffer: 64 * 1024 * 1024,
+            timeout: 30 * 60_000,
+            signal: opts.signal
+          })
+          return result.stdout
+        }
       })
-      const lang = language === 'auto' ? undefined : language
-      if (!opts.timestamps) return { text: stdout.trim(), language: lang }
-      const segments = parseSegments(stdout)
+      const lang = transcriptLanguage(decode.language)
+      if (!decode.timestamps) return { text: stdout.trim(), language: lang }
+      const segments = parseWhisperSegments(stdout)
       return {
         text: segments
           .map((s) => s.text)
@@ -189,23 +192,6 @@ class WhisperCliTranscription implements TranscriptionService {
       if (tmp) fs.promises.unlink(tmp).catch(() => {})
     }
   }
-}
-
-/** Parse whisper's timestamped output (`[hh:mm:ss.mmm --> hh:mm:ss.mmm]  text`)
- *  into segments. The single source of truth for this format — callers that need
- *  timestamps consume Transcript.segments instead of re-parsing it. */
-function parseSegments(stdout: string): Seg[] {
-  const re = /\[(\d+):(\d+):(\d+(?:\.\d+)?)\s*-->\s*(\d+):(\d+):(\d+(?:\.\d+)?)\]\s*(.*)/
-  const hms = (h: string, m: string, s: string): number => +h * 3600 + +m * 60 + +s
-  const out: Seg[] = []
-  for (const line of stdout.split('\n')) {
-    const m = re.exec(line)
-    if (!m) continue
-    const text = m[7]!.trim()
-    if (!text) continue
-    out.push({ start: hms(m[1]!, m[2]!, m[3]!), end: hms(m[4]!, m[5]!, m[6]!), text })
-  }
-  return out
 }
 
 /** Shared singleton — callers depend on this, not on the class. */

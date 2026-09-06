@@ -1,0 +1,120 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
+import { GENERAL_STEP_SYSTEM_PROMPT } from './canonical-vision-contract'
+import { WEB_USE_CONTROL_INSTRUCTIONS } from '../../../shared/web-use-control'
+import { NORMALIZED_COORDINATE_GRID_INSTRUCTION } from '../../../shared/vision-coordinate-grid'
+import {
+  GENERAL_VISION_TOOLS,
+  generalVisionPolicyFailure,
+  parseGeneralVisionToolResponse
+} from './general-vision-tools'
+import type { VisionModelAdapter, VisionPolicyInput } from './types'
+
+export { generalVisionPolicyFailure } from './general-vision-tools'
+
+function browserControlContext(input: VisionPolicyInput): string {
+  if (input.operatorEnvironment !== 'embedded_browser') return ''
+  return [
+    'Web Use control limits:',
+    ...WEB_USE_CONTROL_INSTRUCTIONS.map((instruction) => `- ${instruction}`)
+  ].join('\n')
+}
+
+function desktopLaunchContext(input: VisionPolicyInput): string {
+  if (input.operatorEnvironment !== 'desktop') return ''
+  return [
+    'Desktop application launch rule:',
+    '- Do not identify an application from icon color or position alone.',
+    '- Click a Dock or taskbar icon only when the target application identity is visibly verified.',
+    '- If the target application is not visibly identified, open the operating system application launcher or search with a supported hotkey, type the application name, and continue after the application is visible.'
+  ].join('\n')
+}
+
+function previousActionContext(input: VisionPolicyInput): string {
+  if (!input.previousClickMarker) return ''
+  return `Previous action to judge:\n${input.verifiedActions?.at(-1) ?? 'click'}\nThe emerald-green marker at (${input.previousClickMarker.x}, ${input.previousClickMarker.y}) shows where that click landed in the current screenshot. Verify its visible result before choosing the next tool.`
+}
+
+function policyHistoryContext(input: VisionPolicyInput): string {
+  if (!input.history.length) return ''
+  return `Prior validated decisions:\n${input.history
+    .slice(-12)
+    .map((step) => step.response)
+    .join('\n')}`
+}
+
+function taskContext(input: VisionPolicyInput): string {
+  const encoded = input.coordinateFrame?.encoded
+  return [
+    `Task brief:\n${input.goal}`,
+    browserControlContext(input),
+    desktopLaunchContext(input),
+    input.currentMilestone ? `Current milestone:\n${input.currentMilestone}` : '',
+    input.verifiedActions?.length
+      ? `Recent verified actions:\n${input.verifiedActions.slice(-12).join('\n')}`
+      : 'Recent verified actions:\nNone yet.',
+    previousActionContext(input),
+    policyHistoryContext(input),
+    input.recentSteps.length ? `Recent task events:\n${input.recentSteps.join('\n')}` : '',
+    input.olderVisualFacts.length
+      ? `Older task outcomes. These can be stale:\n${input.olderVisualFacts.join('\n')}`
+      : '',
+    encoded
+      ? `Screenshot coordinate space:\nThe supplied screenshot is ${encoded.width} pixels wide and ${encoded.height} pixels high. Return every action point in the model's 0-1000 normalized coordinate space: x=0 is the left edge, x=1000 is the right edge, y=0 is the top edge, and y=1000 is the bottom edge. ${NORMALIZED_COORDINATE_GRID_INSTRUCTION}`
+      : '',
+    'Inspect the screenshot and call exactly one transition tool.'
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+export function buildCanonicalVisionOperatorRequest(
+  input: VisionPolicyInput
+): ReturnType<VisionModelAdapter['buildRequest']> {
+  const encoded = input.coordinateFrame?.encoded
+  return {
+    messages: [
+      { role: 'system', content: GENERAL_STEP_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: taskContext(input) },
+          { type: 'image_url', image_url: { url: input.currentScreenshotDataUrl } }
+        ]
+      }
+    ],
+    ...computerUseAdapterProfile('general-vision'),
+    tools: [...GENERAL_VISION_TOOLS],
+    toolChoice: 'required',
+    separateReasoning: true,
+    validateResponse: (response) =>
+      encoded ? generalVisionPolicyFailure(response, encoded) === undefined : false,
+    responseValidationError: (response) =>
+      encoded ? generalVisionPolicyFailure(response, encoded) : 'screenshot bounds were missing'
+  }
+}
+
+export const generalVisionOperatorAdapter: VisionModelAdapter = {
+  id: 'general-vision-operator',
+  /**
+   * The DEFAULT operator, not a family. Any vision model with a projector can be driven by native
+   * tool calling on the shared 0-1000 coordinate protocol, so listing names (gemma-4, qwen3.x) only
+   * decided which models got sent down a text-DSL path they could not speak. Specialists above this
+   * one in the registry claim their own models first; everything else belongs here.
+   */
+  matches: () => true,
+  assertCapabilities(model) {
+    if (!model.projectorFile || !model.availableFiles.includes(model.projectorFile)) {
+      throw new Error('The active general vision model has no installed vision projector.')
+    }
+  },
+  buildRequest: buildCanonicalVisionOperatorRequest,
+  parseResponse() {
+    return {
+      kind: 'invalid',
+      actionText: '',
+      error: 'The general vision model did not return a native tool decision.'
+    }
+  },
+  // The policy runner already passes the encoded coordinate frame as bounds.
+  parsePolicyResponse: parseGeneralVisionToolResponse
+}

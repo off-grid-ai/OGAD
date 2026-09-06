@@ -1,4 +1,4 @@
-// Off Grid design tokens, shared across desktop (my-memories), mobile, and sync.
+// Off Grid AI design tokens, shared across desktop (my-memories), mobile, and sync.
 // Mirrors the canonical React Native tokens in:
 //   mobile/src/theme/palettes.ts        (COLORS_LIGHT / COLORS_DARK)
 //   mobile/src/constants/index.ts       (TYPOGRAPHY / SPACING / FONTS)
@@ -69,7 +69,7 @@ export const COLORS_DARK = {
 export type ThemeColors = typeof COLORS_LIGHT
 export type ColorToken = keyof ThemeColors
 
-// Monospace font stack. Menlo is the canonical Off Grid face; the rest are
+// Monospace font stack. Menlo is the canonical Off Grid AI face; the rest are
 // graceful fallbacks for non-macOS web environments.
 export const FONT_MONO =
   "'Menlo', ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Liberation Mono', monospace"

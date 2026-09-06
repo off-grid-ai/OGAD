@@ -5,6 +5,7 @@ import { SetupPanel } from './setup/SetupPanel'
 import { StoragePanel } from './setup/StoragePanel'
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel'
 import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
+import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
 import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 // Shared card chrome, in its own light module so the pro package can reuse it without
 // importing this whole god-file (which pulls SetupPanel/etc. + their window.api types).
@@ -16,15 +17,18 @@ import { SoftwareUpdateSection } from './SoftwareUpdateSection'
 import { ProcessingControls } from './ProcessingControls'
 import { BackupRestoreSection } from './BackupRestoreSection'
 import { SettingsPermissionsPanel } from './PermissionsPanel'
+import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 export { ModelPipelineSection } from './ProcessingControls'
 
 const SETTINGS_SECTION_TITLES: Record<string, string> = {
   setup: 'Setup & health',
   permissions: 'Setup & health',
   capture: 'Capture & processing',
+  'computer-use': 'Computer use',
+  remote: 'Remote model server',
   sync: 'Device sync',
   identity: 'You',
-  secretary: 'What Off Grid has learned',
+  secretary: 'What Off Grid AI has learned',
   'pro-plan': 'Your Pro plan',
   privacy: 'Data & privacy',
   backup: 'Backup & restore',
@@ -37,6 +41,10 @@ const SETTINGS_TITLE_IDS = Object.fromEntries(
     .filter(([id]) => id !== 'permissions')
     .map(([id, title]) => [title, id])
 ) as Record<string, string>
+
+export const SETTINGS_DESTINATIONS = Object.entries(SETTINGS_TITLE_IDS).map(
+  ([label, subroute]) => ({ label, view: 'settings', subroute })
+)
 
 export function Settings({
   initialSection,
@@ -54,8 +62,7 @@ export function Settings({
   // plan) render only when the pro package has registered them (section registry);
   // the free build shows the catalogued placeholders. isPro still drives the header
   // subtitle copy.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isPro = !!(window as any).api?.isPro
+  const { isPro } = useRendererEntitlement()
   const proComingSoon = proComingSoonHere(currentPlatform(), isPro)
   // Pro sections registered by the pro renderer at activation (empty in free build).
   const registeredSections = getRegisteredSettingsSections()
@@ -114,7 +121,7 @@ export function Settings({
           <h2 className="text-lg font-semibold text-white">Settings</h2>
           <p className="text-sm text-neutral-500">
             {isPro
-              ? 'Who you are, what Off Grid has learned, and your devices'
+              ? 'Who you are, what Off Grid AI has learned, and your devices'
               : 'Personalization & automation unlock with Pro'}
           </p>
         </div>
@@ -146,7 +153,7 @@ export function Settings({
             {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
             <SettingsCard
               title="Setup & health"
-              summary="Set up your local AI, manage storage, and see live component health."
+          summary="See or change your resource mode, set up local AI, and manage storage."
               delay={0.13}
             >
               <SetupPanel />
@@ -182,7 +189,15 @@ export function Settings({
               <ProcessingControls />
             </SettingsCard>
 
-            {/* Remaining Pro Settings sections (You / What Off Grid has learned /
+            <SettingsCard
+              title="Remote model server"
+              summary="Connect to a model server on your network or another trusted host."
+              delay={0.16}
+            >
+              <RemoteVisionSettingsTab />
+            </SettingsCard>
+
+            {/* Remaining Pro Settings sections (You / What Off Grid AI has learned /
               Your Pro plan). The pro package registers the real section
               components via the section registry; the free build shows the catalogued
               placeholders. Slot list, order, and placeholder copy live in

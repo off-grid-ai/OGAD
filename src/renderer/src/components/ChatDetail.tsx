@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { cn } from '@renderer/lib/utils'
@@ -8,6 +8,7 @@ import { parseSqliteUtc } from '@renderer/lib/time'
 import { parseSessionId } from '@renderer/lib/session-id'
 import { BorderBeam } from './ui/border-beam'
 import { ProgressiveBlur } from './ui/progressive-blur'
+import { openChatLink } from '@renderer/lib/chat-link'
 
 interface Memory {
   id: number
@@ -37,16 +38,18 @@ interface ChatDetailProps {
 type ExpandedSection = 'summary' | 'memories' | 'entities' | null
 
 // Markdown components for summary display
-const markdownComponents: any = {
+const markdownComponents: Components = {
   p: ({ children }: { children?: React.ReactNode }) => (
     <p className="mb-2 last:mb-0 text-neutral-200 text-sm">{children}</p>
   ),
   a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
     <a
       href={href}
-      target="_blank"
-      rel="noreferrer"
       className="text-neutral-300 underline hover:text-white"
+      onClick={(event) => {
+        event.preventDefault()
+        openChatLink(href)
+      }}
     >
       {children}
     </a>
@@ -87,7 +90,13 @@ const markdownComponents: any = {
 }
 
 // Memory card - full version for expanded view
-function MemoryCardFull({ memory, onClick }: { memory: Memory; onClick: () => void }) {
+function MemoryCardFull({
+  memory,
+  onClick
+}: {
+  memory: Memory
+  onClick: () => void
+}): React.JSX.Element {
   const formatTime = (dateStr: string): string => parseSqliteUtc(dateStr).toLocaleString()
 
   return (
@@ -113,7 +122,13 @@ function MemoryCardFull({ memory, onClick }: { memory: Memory; onClick: () => vo
 }
 
 // Compact memory card for bento view
-function MemoryCard({ memory, onClick }: { memory: Memory; onClick: () => void }) {
+function MemoryCard({
+  memory,
+  onClick
+}: {
+  memory: Memory
+  onClick: () => void
+}): React.JSX.Element {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -136,7 +151,13 @@ function MemoryCard({ memory, onClick }: { memory: Memory; onClick: () => void }
 }
 
 // Entity card - full version for expanded view
-function EntityCardFull({ entity, onClick }: { entity: Entity; onClick: () => void }) {
+function EntityCardFull({
+  entity,
+  onClick
+}: {
+  entity: Entity
+  onClick: () => void
+}): React.JSX.Element {
   const formatTime = (dateStr: string): string => parseSqliteUtc(dateStr).toLocaleString()
 
   return (
@@ -173,7 +194,13 @@ function EntityCardFull({ entity, onClick }: { entity: Entity; onClick: () => vo
 }
 
 // Compact entity card for bento view
-function EntityCard({ entity, onClick }: { entity: Entity; onClick: () => void }) {
+function EntityCard({
+  entity,
+  onClick
+}: {
+  entity: Entity
+  onClick: () => void
+}): React.JSX.Element {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -218,7 +245,7 @@ function SectionHeader({
   colorClass: string
   onExpand: () => void
   isExpanded?: boolean
-}) {
+}): React.JSX.Element {
   return (
     <div className="flex items-center gap-2 mb-3">
       <div className={cn('w-7 h-7 rounded-lg flex items-center justify-center', colorClass)}>
@@ -257,7 +284,12 @@ function SectionHeader({
   )
 }
 
-export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }: ChatDetailProps) {
+export function ChatDetail({
+  sessionId,
+  onBack,
+  onSelectEntity,
+  onSelectMemory
+}: ChatDetailProps): React.JSX.Element {
   const [memories, setMemories] = useState<Memory[]>([])
   const [entities, setEntities] = useState<Entity[]>([])
   const [summary, setSummary] = useState<string | null>(null)
@@ -291,7 +323,7 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }
   }, [handleKeyDown])
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchData = async (): Promise<void> => {
       setLoading(true)
       try {
         const [memoriesData, entitiesData, sessionsData] = await Promise.all([
@@ -302,7 +334,7 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }
         setMemories(memoriesData)
         setEntities(entitiesData)
 
-        const thisSession = sessionsData.find((s: any) => s.session_id === sessionId)
+        const thisSession = sessionsData.find((session) => session.session_id === sessionId)
         setSummary(thisSession?.summary || null)
       } catch (e) {
         console.error('Failed to load session data', e)
@@ -313,7 +345,7 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }
     fetchData()
   }, [sessionId])
 
-  const handleExpand = (section: ExpandedSection) => {
+  const handleExpand = (section: ExpandedSection): void => {
     setExpandedSection(expandedSection === section ? null : section)
   }
 

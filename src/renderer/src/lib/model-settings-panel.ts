@@ -1,17 +1,38 @@
 export const OPEN_MODEL_SETTINGS_PANEL_EVENT = 'og:open-model-settings-panel'
-export type ModelSettingsPanelTab = 'model' | 'image' | 'voice' | 'tools' | 'connectors'
+export const OPEN_ACTIVE_MODELS_PANEL_EVENT = 'og:open-active-models-panel'
+export type ModelSettingsPanelTab =
+  | 'model'
+  | 'image'
+  | 'voice'
+  | 'transcription'
+  | 'remote'
+  | 'tasks'
+  | 'tools'
+  | 'connectors'
 
 export function modelSettingsTabForKind(kind?: string): ModelSettingsPanelTab {
   if (kind === 'image') return 'image'
   if (kind === 'voice') return 'voice'
+  if (kind === 'transcription') return 'transcription'
   return 'model'
 }
 
 export function supportsModelSettings(kind?: string): boolean {
-  return kind === 'text' || kind === 'vision' || kind === 'image' || kind === 'voice'
+  return (
+    kind === 'text' ||
+    kind === 'vision' ||
+    kind === 'image' ||
+    kind === 'voice' ||
+    kind === 'transcription'
+  )
 }
 
 /** Open the one shared model-settings drawer over the current screen. */
 export function openModelSettingsPanel(tab: ModelSettingsPanelTab = 'model'): void {
   window.dispatchEvent(new CustomEvent(OPEN_MODEL_SETTINGS_PANEL_EVENT, { detail: { tab } }))
+}
+
+/** Open the Active models drawer through the chat surface that owns it. */
+export function openActiveModelsPanel(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_ACTIVE_MODELS_PANEL_EVENT))
 }

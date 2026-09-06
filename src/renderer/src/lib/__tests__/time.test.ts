@@ -37,7 +37,7 @@ afterEach(() => {
 })
 
 describe('timeAgo — relative label buckets', () => {
-  function freeze() {
+  function freeze(): void {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
   }
@@ -93,7 +93,7 @@ describe('timeAgo — relative label buckets', () => {
 })
 
 describe('timeAgo — input types', () => {
-  function freeze() {
+  function freeze(): void {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
   }

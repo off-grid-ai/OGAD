@@ -7,7 +7,7 @@
  * every variable a PromptDef declares actually appears as {{NAME}} in its template, so a
  * declared var can never silently go unused — the registry is the single source of truth.
  *
- * The template engine and registry are exercised without replacing any Off Grid module.
+ * The template engine and registry are exercised without replacing any Off Grid AI module.
  * Persistence behavior runs against real SQLite in settings-consumers.dbtest.ts.
  */
 import { describe, it, expect } from 'vitest'

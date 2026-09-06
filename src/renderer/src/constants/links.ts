@@ -11,8 +11,7 @@ export const OFF_GRID_MOBILE_URL = 'https://getoffgridai.co/mobile'
 
 /** Open a URL in the user's default browser (falls back to window.open). */
 export function openExternal(url: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const api = (window as any).api
+  const api = window.api
   if (api?.openExternal) api.openExternal(url)
   else window.open(url, '_blank')
 }

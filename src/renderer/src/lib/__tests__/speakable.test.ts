@@ -27,6 +27,12 @@ describe('toSpeakableText — markdown to speech via the real AST', () => {
     expect(toSpeakableText('![a red square](blob:xyz)')).toBe('a red square')
   })
 
+  it('does not pronounce or crash on reference definitions', () => {
+    expect(
+      toSpeakableText('Read this answer.\n\n[private-source]: https://secret.invalid/token')
+    ).toBe('Read this answer.')
+  })
+
   it('separates list items and headings so speech does not run together', () => {
     expect(toSpeakableText('# Title\n\n- first item\n- second item')).toBe(
       'Title\nfirst item\nsecond item'

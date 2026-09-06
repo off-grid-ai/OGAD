@@ -4,7 +4,7 @@ type UserProfile = import('../../shared/ipc-contracts').UserProfileContract
 
 interface ProLicenseInfo {
   isPro: boolean
-  tier: 'lifetime' | 'monthly' | null
+  tier: 'lifetime' | 'monthly' | 'annual' | 'subscription' | null
   expiry: string | null
   verifiedAt: number
 }
@@ -120,6 +120,122 @@ interface RendererAPIOverrides {
   // Host OS (process.platform), bridged at preload time. Used by lib/device.ts
   // to name the machine ('Mac' on darwin, else 'device').
   platform?: string
+  /** Approval UX v2: the inline gate card + outcome/undo feed. */
+  actions?: {
+    getProjection: () => Promise<import('@offgrid/application').UseSnapshot>
+    onProjection: (cb: (snapshot: import('@offgrid/application').UseSnapshot) => void) => () => void
+    retry: (
+      actionId: string
+    ) => Promise<
+      import('@offgrid/application').Outcome<boolean, import('@offgrid/application').UseFailure>
+    >
+    resolveGate: (actionId: string, decision: unknown) => Promise<boolean>
+    undo: (record: unknown) => Promise<{ ok: boolean; detail?: string }>
+  }
+  tasks?: {
+    list: (limit?: number) => Promise<
+      Array<{
+        taskId: string
+        journeyId?: string
+        modelId?: string
+        modelName?: string
+        kind: 'web_use' | 'computer_use'
+        title: string
+        status: 'running' | 'paused' | 'waiting' | 'reconnecting' | 'done' | 'failed' | 'stopped'
+        summary?: string
+        steps: string[]
+        startedAt: number
+        finishedAt?: number
+        updatedAt: number
+        executionDeviceId?: string
+        executionDeviceName?: string
+        phase?: import('./lib/task-session-store').ComputerUsePhase
+        currentStep?: number
+        currentAction?: string
+        currentReasoning?: string
+        reasoningLive?: boolean
+        lastUrl?: string
+        lastTitle?: string
+        screenshotPath?: string
+        screenshotDeviceId?: string
+        stepDetails?: import('./lib/task-session-store').ComputerUseStepDetail[]
+      }>
+    >
+    retryAvailability: (taskId: string) => Promise<{
+      available: boolean
+      reason?: string
+      executionDeviceId?: string
+      executionDeviceName?: string
+    }>
+    retry: (taskId: string) => Promise<{
+      available: boolean
+      reason?: string
+      taskId?: string
+      journeyId?: string
+      executionDeviceId?: string
+      executionDeviceName?: string
+    }>
+    guideAvailability: (taskId: string) => Promise<{ available: boolean; reason?: string }>
+    guideTask: (
+      taskId: string,
+      input: import('../../shared/task-guidance').TaskGuideInput
+    ) => Promise<{ available: boolean; accepted?: boolean; reason?: string }>
+    onChanged: (cb: (task: import('./lib/task-session-store').TaskSession) => void) => () => void
+  }
+  browser?: {
+    /** Report where one surface can host the live page. Main paints the highest-priority owner. */
+    setRegion: (
+      owner: 'docked' | 'floating',
+      rect: { x: number; y: number; width: number; height: number } | null
+    ) => void
+    newTab: (journeyId?: string) => Promise<{ sessionId: string }>
+    openUrl: (url: string, journeyId?: string) => Promise<{ sessionId: string } | null>
+    getSessions: () => Promise<{
+      activeSessionId: string | null
+      sessions: Array<{
+        sessionId: string
+        historyId?: string
+        kind: 'manual' | 'task'
+        journeyId?: string
+        parentSessionId?: string
+        taskId?: string
+        status: import('../../shared/browser-session').BrowserTaskStatus | 'open'
+        url: string
+        title: string
+        canGoBack: boolean
+        canGoForward: boolean
+        isLoading: boolean
+      }>
+    }>
+    activateSession: (sessionId: string) => Promise<boolean>
+    closeSession: (sessionId: string) => Promise<boolean>
+    control: (
+      action: 'back' | 'forward' | 'reload' | 'stop',
+      sessionId?: string
+    ) => Promise<boolean>
+    navigate: (address: string, sessionId?: string) => Promise<{ ok: boolean; detail?: string }>
+    reopen: (taskId?: string) => Promise<boolean>
+    listManualHistory: () => Promise<
+      Array<{ historyId: string; title: string; url: string; updatedAt: number }>
+    >
+    reopenManual: (historyId: string) => Promise<{ sessionId: string } | null>
+    onSessionsState: (cb: (state: unknown) => void) => () => void
+    onNavigationState: (cb: (state: unknown) => void) => () => void
+    onStep: (cb: (step: unknown) => void) => () => void
+    onTaskState: (cb: (state: unknown) => void) => () => void
+  }
+  vision?: {
+    control: (
+      command: 'stop' | 'pause' | 'takeover' | 'resume',
+      taskId?: string
+    ) => Promise<boolean>
+    showSupervisor: () => Promise<boolean>
+    dismissSupervisor: () => Promise<boolean>
+    getCurrent: () => Promise<{ state: unknown; steps: string[] } | null>
+    onStep: (cb: (step: unknown) => void) => () => void
+    onTaskState: (cb: (state: unknown) => void) => () => void
+    onNotice: (cb: (notice: unknown) => void) => () => void
+  }
   proInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
   proOn?: (channel: string, cb: (...a: unknown[]) => void) => () => void
   proOff?: (channel: string) => void
@@ -127,7 +243,7 @@ interface RendererAPIOverrides {
   // Keygen licensing (activation + status for the upgrade/settings UI)
   license?: {
     status: () => Promise<ProLicenseInfo>
-    activate: (key: string) => Promise<import('@offgrid/sync').PersonalMeshActivationResult>
+    activate: (key: string) => Promise<import('@offgrid/application').PersonalMeshActivationResult>
     listDevices: () => Promise<
       Array<{
         id: string
@@ -184,7 +300,7 @@ interface RendererAPIOverrides {
       type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
       text?: string
       step?: unknown
-      call?: { name: string; result: string }
+      call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
     }) => void
   ) => () => void
   getActiveRagStreams?: () => Promise<
@@ -194,26 +310,45 @@ interface RendererAPIOverrides {
 
   // RAG Conversations
   createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
-  getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
+  getRagConversations: (
+    projectId?: string | null,
+    page?: { limit?: number; updatedBefore?: string }
+  ) => Promise<RagConversation[]>
   onRagConversationsChanged?: (
     callback: (data: { conversationId: string; projectId: string | null }) => void
   ) => () => void
   setRagConversationProject: (id: string, projectId: string | null) => Promise<boolean>
   getRagConversation: (id: string) => Promise<RagConversation | null>
   getRagMessages: (conversationId: string) => Promise<RagMessage[]>
+  readChatSessionTurns: (
+    conversationId: string
+  ) => Promise<import('@offgrid/application').ChatTurn[]>
+  writeChatSessionTurns: (
+    conversationId: string,
+    turns: readonly import('@offgrid/application').ChatTurn[]
+  ) => Promise<void>
   addRagMessage: (
     conversationId: string,
     role: 'user' | 'assistant',
     content: string,
     context?: unknown
   ) => Promise<{ id: number; uuid: string }>
-  truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
+  truncateRagMessages: (
+    conversationId: string,
+    anchor: { messageId: string; keepAnchor: boolean }
+  ) => Promise<number>
   updateRagConversationTitle: (id: string, title: string) => Promise<RagConversation>
   deleteRagConversation: (id: string) => Promise<void>
 
   // App Settings
   getSettings: () => Promise<AppSettings>
   saveSetting: (key: string, value: unknown) => Promise<void>
+  getComputerUseSettings: () => Promise<
+    import('../../shared/computer-use-settings').ComputerUseSettingsPortResult
+  >
+  patchComputerUseSettings: (
+    patch: import('../../shared/computer-use-settings').ComputerUseSettingsPatch
+  ) => Promise<import('../../shared/computer-use-settings').ComputerUseSettingsPortResult>
   consoleEnroll: (
     url: string,
     token: string
@@ -310,14 +445,6 @@ interface RendererAPIOverrides {
   saveUserProfile: (profile: UserProfile) => Promise<boolean>
 
   // Events
-  onNewApproval: (
-    callback: (data: {
-      approvalId: number
-      title: string
-      detail: string
-      entityName: string | null
-    }) => void
-  ) => () => void
   onNewAction: (
     callback: (data: {
       actionId: number
@@ -328,7 +455,12 @@ interface RendererAPIOverrides {
     }) => void
   ) => () => void
   onReprocessProgress: (callback: (data: ReprocessProgress) => void) => () => void
-  onUpdateDownloaded: (callback: (data: { version: string }) => void) => () => void
+  onUpdateDownloaded: (
+    callback: (data: import('../../shared/ipc-contracts').UpdateDownloadedContract) => void
+  ) => () => void
+  onSetupProgress: (
+    callback: (data: import('../../shared/ipc-contracts').SetupProgressContract) => void
+  ) => () => void
   getStagedUpdateVersion: () => Promise<string | null>
   installUpdate: () => Promise<void>
 

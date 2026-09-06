@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import { HardDrives, Trash, ArrowsClockwise, X, Broom } from '@phosphor-icons/react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { HardDrives, Trash, ArrowsClockwise, Broom } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
-import { companionDownloadLabel } from '@renderer/lib/download-label'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -10,13 +9,24 @@ import {
 } from '@renderer/lib/model-settings-panel'
 import { CacheCleanupControl } from './CacheCleanupControl'
 import { formatStorageBytes } from './storage-format'
+import {
+  isActiveDownloadStatus,
+  isFailedDownloadStatus,
+  modelsFailureMessage,
+  type DownloadDurabilityHealth,
+  type ModelControlProjection
+} from '@offgrid/application'
+import { modelControlClient } from '@renderer/lib/model-control-client'
+import { modelControlSurfaceForKind } from '@offgrid/application'
+import { ModelDownloadRows, type DownloadEntry } from './ModelDownloadRows'
 
 interface ModelDiskEntry {
   id: string
   name: string
   kind?: string
   bytes: number
-  active: boolean
+  /** Legacy storage projection. Active identity comes from Shared model control. */
+  active?: boolean
 }
 interface StorageInfo {
   dir: string
@@ -25,14 +35,17 @@ interface StorageInfo {
   models: ModelDiskEntry[]
   orphans: { name: string; bytes: number }[]
 }
-interface DownloadEntry {
-  modelId: string
-  percent?: number
-  status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
-  currentFile?: string
-  downloadedMB?: string
-  totalMB?: string
-  error?: string
+interface OrphanCleanupResult {
+  success: boolean
+  count: number
+  freedBytes: number
+  retainedBytes: number
+  failures: Array<{ name: string; bytes: number; error: string }>
+}
+interface ModelActionNotice {
+  type: 'confirmation' | 'error'
+  message: string
+  confirmationId?: string
 }
 
 // Group order for the by-type storage layout. Display labels come from the shared
@@ -45,35 +58,104 @@ export function StoragePanel(): React.ReactElement {
   const api = window.api
   const [info, setInfo] = useState<StorageInfo | null>(null)
   const [downloads, setDownloads] = useState<DownloadEntry[]>([])
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
+  const [storageError, setStorageError] = useState<string | null>(null)
+  const [recoveryHealth, setRecoveryHealth] = useState<DownloadDurabilityHealth>({
+    status: 'healthy'
+  })
+  const [cleanupFailure, setCleanupFailure] = useState<OrphanCleanupResult | null>(null)
+  const [modelActionNotice, setModelActionNotice] = useState<ModelActionNotice | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [retryBusy, setRetryBusy] = useState<ReadonlySet<string>>(new Set())
+  const [cancelBusy, setCancelBusy] = useState<ReadonlySet<string>>(new Set())
+  const retrying = useRef(new Set<string>())
+  const changingDownloads = useRef(new Set<string>())
+  const refreshVersion = useRef(0)
+
+  const applyModelControlProjection = useCallback((projection: ModelControlProjection): void => {
+    setActiveIds(new Set(projection.activeIds))
+    setDownloads(
+      projection.downloads.map(
+        (entry): DownloadEntry => ({
+          downloadId: entry.downloadId,
+          modelId: entry.modelId,
+          status: entry.status,
+          currentFile: entry.currentFile ?? entry.fileName,
+          currentFileRole: entry.currentFileRole,
+          downloadedBytes: entry.bytesDownloaded,
+          totalBytes: entry.totalBytes,
+          downloadedMB: (entry.bytesDownloaded / 1024 / 1024).toFixed(1),
+          totalMB: (entry.totalBytes / 1024 / 1024).toFixed(1),
+          ...(entry.totalBytes > 0
+            ? {
+                percent: Math.min(100, Math.round((entry.bytesDownloaded / entry.totalBytes) * 100))
+              }
+            : {}),
+          error: entry.reason,
+          bytesPerSecond: entry.bytesPerSecond
+        })
+      )
+    )
+    setRecoveryHealth(projection.downloadDurability)
+  }, [])
 
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current
+    const currentRead = (): boolean => version === refreshVersion.current
     try {
-      const [s, d] = await Promise.all([api.getStorageInfo(), api.listDownloads()])
+      const s = await api.getStorageInfo()
+      if (!currentRead()) return
       if (s) setInfo(s as StorageInfo)
-      if (Array.isArray(d)) setDownloads(d as DownloadEntry[])
-    } catch {
-      /* keep last */
+      setStorageError(null)
+    } catch (error) {
+      if (!currentRead()) return
+      setStorageError(
+        error instanceof Error ? error.message : 'Your model library could not be read.'
+      )
     }
   }, [api])
 
   useEffect(() => {
     refresh()
     const t = setInterval(refresh, 3000)
-    const off = (
-      api as unknown as { onModelProgress?: (cb: () => void) => () => void }
-    ).onModelProgress?.(refresh)
     return () => {
       clearInterval(t)
-      off?.()
+      ++refreshVersion.current
     }
   }, [refresh, api])
+
+  useEffect(() => {
+    let disposed = false
+    let observed = false
+    const unsubscribe = modelControlClient.observe((projection) => {
+      observed = true
+      if (!disposed) applyModelControlProjection(projection)
+    })
+    void modelControlClient
+      .projection()
+      .then((projection) => {
+        if (!disposed && !observed) applyModelControlProjection(projection)
+      })
+      .catch(() => {
+        if (disposed || observed) return
+        setActiveIds(new Set())
+        setRecoveryHealth({
+          status: 'degraded',
+          reason: 'Download recovery status is unavailable.'
+        })
+      })
+    return () => {
+      disposed = true
+      unsubscribe()
+    }
+  }, [applyModelControlProjection])
 
   const del = async (id: string, name: string): Promise<void> => {
     if (!window.confirm(`Delete "${name}"? This removes its files from disk.`)) return
     setBusy(id)
     try {
-      await api.deleteModel(id)
+      const outcome = await modelControlClient.control({ type: 'remove', modelId: id })
+      if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
       await refresh()
     } finally {
       setBusy(null)
@@ -81,11 +163,39 @@ export function StoragePanel(): React.ReactElement {
   }
   // Activate a downloaded model straight from Storage. One call — the main process
   // routes by kind (chat LLM vs image/voice/STT default). The UI never branches.
-  const use = async (id: string): Promise<void> => {
+  const use = async (id: string, kind?: string, confirmationId?: string): Promise<void> => {
     setBusy(id)
     try {
-      await api.activateModel(id)
+      const surface = modelControlSurfaceForKind(kind ?? '')
+      if (!confirmationId && !surface) {
+        throw new Error(`Unsupported model control kind: ${kind ?? 'unknown'}`)
+      }
+      const outcome = await modelControlClient.control(
+        confirmationId
+          ? { type: 'confirm-activation', confirmationId }
+          : { type: 'activate', modelId: id, surface: surface! }
+      )
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      const result = outcome.value
+      if (result.status === 'confirmation_required') {
+        setModelActionNotice({
+          type: 'confirmation',
+          message: result.confirmation.message,
+          confirmationId: result.confirmation.confirmationId
+        })
+        return
+      }
+      applyModelControlProjection(result.projection)
+      setModelActionNotice(null)
       await refresh()
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The model could not be activated.'
+      })
     } finally {
       setBusy(null)
     }
@@ -93,35 +203,89 @@ export function StoragePanel(): React.ReactElement {
   const cleanOrphans = async (): Promise<void> => {
     setBusy('orphans')
     try {
-      await api.deleteOrphans()
+      const result = (await api.deleteOrphans()) as OrphanCleanupResult
+      setCleanupFailure(result.success ? null : result)
       await refresh()
+    } catch (error) {
+      setCleanupFailure({
+        success: false,
+        count: 0,
+        freedBytes: 0,
+        retainedBytes: 0,
+        failures: [
+          {
+            name: 'cleanup',
+            bytes: 0,
+            error: error instanceof Error ? error.message : 'Unused files could not be removed.'
+          }
+        ]
+      })
     } finally {
       setBusy(null)
     }
   }
   const retry = async (id: string): Promise<void> => {
-    setBusy(id)
+    if (retrying.current.has(id)) return
+    retrying.current.add(id)
+    setRetryBusy(new Set(retrying.current))
     try {
-      await api.retryDownload(id)
-      await refresh()
+      const outcome = await modelControlClient.control({ type: 'retry-download', modelId: id })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      applyModelControlProjection(outcome.value.projection)
+      setModelActionNotice(null)
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The download could not be retried.'
+      })
     } finally {
-      setBusy(null)
+      retrying.current.delete(id)
+      setRetryBusy(new Set(retrying.current))
     }
   }
-  const cancel = async (id: string): Promise<void> => {
-    setBusy(id)
+  const changeDownload = async (
+    id: string,
+    type: 'cancel-download' | 'pause-download' | 'resume-download'
+  ): Promise<void> => {
+    if (changingDownloads.current.has(id)) return
+    changingDownloads.current.add(id)
+    setCancelBusy(new Set(changingDownloads.current))
     try {
-      await api.cancelModelDownload(id)
-      await refresh()
+      const outcome = await modelControlClient.control({ type, modelId: id })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      applyModelControlProjection(outcome.value.projection)
+      setModelActionNotice(null)
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The download could not be changed.'
+      })
     } finally {
-      setBusy(null)
+      changingDownloads.current.delete(id)
+      setCancelBusy(new Set(changingDownloads.current))
     }
   }
   const clearOne = async (id: string): Promise<void> => {
     setBusy(id)
     try {
-      await api.clearDownload(id)
-      await refresh()
+      const outcome = await modelControlClient.control({ type: 'clear-download', modelId: id })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      applyModelControlProjection(outcome.value.projection)
+      setModelActionNotice(null)
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The download could not be cleared.'
+      })
     } finally {
       setBusy(null)
     }
@@ -129,8 +293,18 @@ export function StoragePanel(): React.ReactElement {
   const clearAllIncomplete = async (): Promise<void> => {
     setBusy('clear-dl')
     try {
-      await api.clearDownloads()
-      await refresh()
+      const outcome = await modelControlClient.control({ type: 'clear-inactive-downloads' })
+      if (!outcome.ok) {
+        setModelActionNotice({ type: 'error', message: modelsFailureMessage(outcome.failure) })
+        return
+      }
+      applyModelControlProjection(outcome.value.projection)
+      setModelActionNotice(null)
+    } catch (error) {
+      setModelActionNotice({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'The downloads could not be cleared.'
+      })
     } finally {
       setBusy(null)
     }
@@ -138,10 +312,10 @@ export function StoragePanel(): React.ReactElement {
   const openModelSettings = (kind?: string): void => {
     openModelSettingsPanel(modelSettingsTabForKind(kind))
   }
-  const active = downloads.filter((d) => d.status === 'downloading' || d.status === 'queued')
-  const runningCount = active.filter((d) => d.status === 'downloading').length
-  const queuedCount = active.filter((d) => d.status === 'queued').length
-  const incomplete = downloads.filter((d) => d.status === 'failed' || d.status === 'cancelled')
+  const active = downloads.filter((d) => isActiveDownloadStatus(d.status))
+  const incomplete = downloads.filter(
+    (download) => isFailedDownloadStatus(download.status) || download.status === 'cancelled'
+  )
   const orphanBytes = (info?.orphans ?? []).reduce((s, o) => s + o.bytes, 0)
   const usedFrac =
     info && info.totalBytes + info.freeBytes > 0
@@ -162,6 +336,59 @@ export function StoragePanel(): React.ReactElement {
         </button>
       </div>
 
+      {storageError && (
+        <div role="alert" className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400">
+          <div>Your model library could not be read.</div>
+          <div className="mt-0.5 text-[10px] text-neutral-500">{storageError}</div>
+          <button type="button" onClick={refresh} className="mt-1 underline hover:text-red-300">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {recoveryHealth.status === 'degraded' && (
+        <div
+          role="status"
+          className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400"
+        >
+          Current downloads can continue, but interrupted downloads cannot resume after restart.
+          <div className="mt-0.5 text-[10px] text-neutral-500">{recoveryHealth.reason}</div>
+        </div>
+      )}
+
+      {cleanupFailure && (
+        <div role="alert" className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400">
+          {cleanupFailure.failures.map((failure) => failure.name).join(', ')} could not be removed.
+          {cleanupFailure.retainedBytes > 0
+            ? ` ${formatStorageBytes(cleanupFailure.retainedBytes)} remains.`
+            : ''}
+        </div>
+      )}
+
+      {modelActionNotice && (
+        <div role="alert" className="border-b border-red-900/60 px-4 py-2 text-[11px] text-red-400">
+          <div>{modelActionNotice.message}</div>
+          {modelActionNotice.type === 'confirmation' && modelActionNotice.confirmationId && (
+            <div className="mt-1 flex gap-3">
+              <button
+                type="button"
+                onClick={() => use('', undefined, modelActionNotice.confirmationId)}
+                className="underline hover:text-red-300"
+              >
+                Load anyway
+              </button>
+              <button
+                type="button"
+                onClick={() => setModelActionNotice(null)}
+                className="underline hover:text-neutral-300"
+              >
+                Keep current model
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="px-4 py-2">
         <div className="mb-1 flex items-center justify-between">
           <span className="text-[11px] text-neutral-400">
@@ -181,90 +408,19 @@ export function StoragePanel(): React.ReactElement {
         </div>
       </div>
 
-      {/* Active + interrupted downloads */}
-      {(active.length > 0 || incomplete.length > 0) && (
-        <div className="border-t border-neutral-800/40 px-4 py-2">
-          <div className="mb-1 flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-widest text-neutral-600">
-              Downloads
-            </span>
-            {active.length > 0 && (
-              <span className="text-[10px] text-neutral-600">
-                {runningCount} running · {queuedCount} queued
-              </span>
-            )}
-            {incomplete.length > 0 && (
-              <button
-                onClick={clearAllIncomplete}
-                disabled={busy === 'clear-dl'}
-                className="text-[10px] text-neutral-500 transition-colors hover:text-white disabled:opacity-50"
-              >
-                {busy === 'clear-dl' ? 'Clearing…' : `Clear ${incomplete.length} interrupted`}
-              </button>
-            )}
-          </div>
-          {active.map((d) => (
-            <div key={d.modelId} className="flex items-center gap-3 py-1.5">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[11px] text-neutral-300">
-                  {d.modelId}
-                  {companionDownloadLabel(d.currentFile) && (
-                    // A companion-only fetch (e.g. adding a vision projector to a model
-                    // already on disk) — say so, or it reads as a full re-download.
-                    <span className="ml-1.5 rounded-sm border border-emerald-300/40 px-1 py-px text-[9px] uppercase tracking-wide text-emerald-300">
-                      {companionDownloadLabel(d.currentFile)} only
-                    </span>
-                  )}
-                </div>
-                {d.status === 'queued' ? (
-                  <div className="mt-0.5 text-[10px] text-neutral-500">Queued</div>
-                ) : (
-                  <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
-                    <div
-                      className="h-full rounded-full bg-green-500 transition-all"
-                      style={{ width: `${d.percent ?? 0}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-              {d.status === 'downloading' && (
-                <span className="font-mono text-[10px] text-neutral-500">{d.percent ?? 0}%</span>
-              )}
-              <button
-                onClick={() => cancel(d.modelId)}
-                className="rounded-md p-1 text-neutral-500 hover:text-white"
-                aria-label={`Cancel ${d.modelId}`}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-          {incomplete.map((d) => (
-            <div key={d.modelId} className="flex items-center gap-3 py-1.5">
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[11px] text-neutral-300">{d.modelId}</div>
-                <div className="truncate text-[10px] text-neutral-500">{d.error ?? d.status}</div>
-              </div>
-              <button
-                onClick={() => retry(d.modelId)}
-                disabled={busy === d.modelId}
-                className="rounded-md border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500/60 hover:text-white disabled:opacity-50"
-              >
-                {busy === d.modelId ? '…' : 'Retry'}
-              </button>
-              <button
-                onClick={() => clearOne(d.modelId)}
-                disabled={busy === d.modelId}
-                aria-label="Dismiss"
-                title="Dismiss and delete the partial file"
-                className="rounded-md p-1 text-neutral-500 transition-colors hover:text-red-400 disabled:opacity-50"
-              >
-                <Trash className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <ModelDownloadRows
+        active={active}
+        incomplete={incomplete}
+        busy={busy}
+        retryBusy={retryBusy}
+        cancelBusy={cancelBusy}
+        onCancel={(id) => changeDownload(id, 'cancel-download')}
+        onPause={(id) => changeDownload(id, 'pause-download')}
+        onResume={(id) => changeDownload(id, 'resume-download')}
+        onRetry={retry}
+        onClear={clearOne}
+        onClearAll={clearAllIncomplete}
+      />
 
       {/* Installed models — grouped by type, each group a width-filling grid so
           the type and the active model per type are easy to spot. */}
@@ -279,7 +435,7 @@ export function StoragePanel(): React.ReactElement {
               (info?.models ?? []).some((m) => (m.kind || 'other') === k)
             ).map((kind) => {
               const group = (info?.models ?? []).filter((m) => (m.kind || 'other') === kind)
-              const active = group.find((m) => m.active)
+              const activeModel = group.find((model) => activeIds.has(model.id))
               return (
                 <div key={kind}>
                   <div className="mb-1.5 flex items-center gap-2">
@@ -287,23 +443,25 @@ export function StoragePanel(): React.ReactElement {
                       {modelKindLabel(kind)}
                     </span>
                     <span className="text-[9px] text-neutral-700">{group.length}</span>
-                    {active && (
+                    {activeModel && (
                       <span className="flex items-center gap-1 text-[9px] text-green-500">
-                        <span className="h-1 w-1 rounded-full bg-green-500" /> {active.name} active
+                        <span className="h-1 w-1 rounded-full bg-green-500" /> {activeModel.name}{' '}
+                        active
                       </span>
                     )}
                     <div className="h-px flex-1 bg-neutral-800/50" />
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                     {group.map((m) => {
+                      const modelActive = activeIds.has(m.id)
                       // Every model type has an "active" pick — activate any non-active one.
-                      const activatable = !m.active
+                      const activatable = !modelActive
                       return (
                         <div
                           key={m.id}
-                          className={`group flex h-7 items-center gap-2 rounded border px-2.5 transition-colors duration-150 hover:border-neutral-700 ${m.active ? 'border-green-500/50 bg-green-500/5' : 'border-neutral-800/60 bg-neutral-900/30'}`}
+                          className={`group flex h-7 items-center gap-2 rounded border px-2.5 transition-colors duration-150 hover:border-neutral-700 ${modelActive ? 'border-green-500/50 bg-green-500/5' : 'border-neutral-800/60 bg-neutral-900/30'}`}
                         >
-                          {m.active && supportsModelSettings(m.kind) && (
+                          {modelActive && supportsModelSettings(m.kind) && (
                             <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
                           )}
                           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-neutral-200">
@@ -312,7 +470,7 @@ export function StoragePanel(): React.ReactElement {
                           {/* Hover actions: activate (text/vision) + delete. Size shows when idle. */}
                           {activatable && (
                             <button
-                              onClick={() => use(m.id)}
+                              onClick={() => use(m.id, m.kind)}
                               disabled={busy === m.id}
                               className="hidden shrink-0 rounded border border-neutral-700 px-1.5 text-[9px] leading-4 text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-40 group-hover:block"
                             >
@@ -324,7 +482,7 @@ export function StoragePanel(): React.ReactElement {
                           >
                             {formatStorageBytes(m.bytes)}
                           </span>
-                          {m.active && (
+                          {modelActive && (
                             <button
                               type="button"
                               onClick={() => openModelSettings(m.kind)}
@@ -337,9 +495,9 @@ export function StoragePanel(): React.ReactElement {
                           )}
                           <button
                             onClick={() => del(m.id, m.name)}
-                            disabled={busy === m.id || m.active}
+                            disabled={busy === m.id || modelActive}
                             aria-label={`Delete ${m.name}`}
-                            title={m.active ? 'Deactivate before deleting' : 'Delete'}
+                            title={modelActive ? 'Deactivate before deleting' : 'Delete'}
                             className="shrink-0 rounded p-0.5 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
                           >
                             <Trash className="h-3 w-3" />

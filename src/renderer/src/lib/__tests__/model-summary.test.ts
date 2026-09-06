@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { formatContextWindow, resolveModelName } from '../model-summary'
+import {
+  admitThinkingRequest,
+  formatContextWindow,
+  resolveActiveTextModel,
+  resolveModelName
+} from '../model-summary'
 
 describe('formatContextWindow', () => {
   it('formats power-of-two token windows as compact K labels', () => {
@@ -31,5 +36,62 @@ describe('resolveModelName', () => {
     expect(resolveModelName(models, 'just-imported.gguf')).toBe('just-imported.gguf')
     expect(resolveModelName(models, null)).toBeNull()
     expect(resolveModelName(models, undefined)).toBeNull()
+  })
+})
+
+describe('admitThinkingRequest', () => {
+  it('admits thinking only when the active runtime explicitly supports it', () => {
+    expect(admitThinkingRequest(true, 'Qwen', true)).toBe(true)
+    expect(admitThinkingRequest(true, 'SmolVLM', false)).toBe(false)
+    expect(admitThinkingRequest(true, 'Unknown model', null)).toBe(false)
+    expect(admitThinkingRequest(true, null, true)).toBe(false)
+  })
+
+  it('keeps a disabled preference disabled', () => {
+    expect(admitThinkingRequest(false, 'Qwen', true)).toBe(false)
+  })
+})
+
+describe('resolveActiveTextModel', () => {
+  const models = [
+    { id: 'gemma', name: 'Gemma 4 E4B', capabilities: { thinking: false } },
+    {
+      id: 'remote:openrouter:stealth/ox-alpha',
+      name: 'stealth/ox-alpha',
+      remoteServerId: 'openrouter',
+      capabilities: { thinking: true }
+    }
+  ]
+
+  it('projects the active remote text model over the loaded local model', () => {
+    expect(resolveActiveTextModel(models, 'remote:openrouter:stealth/ox-alpha')).toEqual({
+      name: 'stealth/ox-alpha',
+      remote: true,
+      thinking: true
+    })
+  })
+
+  it('uses the local model when no remote text model is active', () => {
+    expect(resolveActiveTextModel(models, 'gemma')).toEqual({
+      name: 'Gemma 4 E4B',
+      remote: false,
+      thinking: false
+    })
+  })
+
+  it('keeps missing thinking evidence unknown', () => {
+    expect(resolveActiveTextModel([{ id: 'smol', name: 'SmolVLM' }], 'smol')).toEqual({
+      name: 'SmolVLM',
+      remote: false,
+      thinking: null
+    })
+  })
+
+  it('uses only the canonical selected text identity when local and remote models are active', () => {
+    expect(resolveActiveTextModel(models, 'gemma')).toEqual({
+      name: 'Gemma 4 E4B',
+      remote: false,
+      thinking: false
+    })
   })
 })

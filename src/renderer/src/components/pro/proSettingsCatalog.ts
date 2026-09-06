@@ -40,6 +40,15 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
     }
   },
   {
+    id: 'computer-use',
+    delay: 0.15,
+    placeholder: {
+      title: 'Computer use',
+      description:
+        'Let Off Grid AI complete supervised work in a browser or on your screen while you stay in control.'
+    }
+  },
+  {
     id: 'sync',
     delay: 0.16,
     placeholder: {
@@ -54,7 +63,7 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
     placeholder: {
       title: 'You',
       description:
-        'Tell Off Grid who you are so it can attribute your messages, commitments, and calendar - part of the Pro intelligence layer.'
+        'Tell Off Grid AI who you are so it can attribute your messages, commitments, and calendar - part of the Pro intelligence layer.'
     }
   },
   {
@@ -76,7 +85,7 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
     comingSoonDescription:
       'Learned preferences are available on Mac and phone today. Support for this device is coming soon.',
     placeholder: {
-      title: 'What Off Grid has learned',
+      title: 'What Off Grid AI has learned',
       description:
         'Preferences distilled from the suggestions you dismiss, fed back to your assistant so it gets sharper over time.'
     }

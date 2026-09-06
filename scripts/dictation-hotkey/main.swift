@@ -1,4 +1,4 @@
-// Off Grid dictation hotkey helper. Watches the configured chord (default
+// Off Grid AI dictation hotkey helper. Watches the configured chord (default
 // Option+Space) globally via a CGEventTap and prints "down" / "up" on stdout so
 // the Electron main process can drive push-to-talk (Electron's globalShortcut
 // only sees key-DOWN; this gives us key-UP). Needs Accessibility permission —

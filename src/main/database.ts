@@ -1,3 +1,4 @@
+import { toWireTimestamp } from '@offgrid/sync'
 // better-sqlite3-multiple-ciphers is a drop-in superset of better-sqlite3 that
 // adds SQLCipher-style `PRAGMA key` encryption. Same API surface + types.
 import Database from 'better-sqlite3-multiple-ciphers'
@@ -6,12 +7,28 @@ import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
 import { createSettingsStore, initializeSettingsStore } from './settings-store'
-import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
+import { CORE_SYNC_ENTITIES } from '@offgrid/application'
+import type { ChatTurn } from '@offgrid/models'
+import { emitSyncMutation } from './sync-mutation'
 import type {
   RagConversationContract,
   RagMessageContract,
   UserProfileContract
 } from '../shared/ipc-contracts'
+
+/**
+ * The full-text schema this build expects. Bump it when an FTS table, its columns or its triggers
+ * change: that is what makes every existing profile rebuild its indexes exactly once, on the next
+ * launch, instead of on every launch.
+ */
+const FTS_SCHEMA_VERSION = 1
+
+/** Conversation-list page size when a caller does not ask for one, and the ceiling it may ask for. */
+const DEFAULT_CONVERSATION_PAGE = 500
+const MAX_CONVERSATION_PAGE = 2_000
+/** Content-search result cap. Bounded because the caller renders a list, not a report. */
+const DEFAULT_SEARCH_LIMIT = 200
+const MAX_SEARCH_LIMIT = 1_000
 
 let db: Database.Database | null = null
 
@@ -77,6 +94,41 @@ function cosineSimilarity(v1Str: string, v2Str: string): number {
   } catch {
     return 0
   }
+}
+
+/**
+ * Chat rows carry the ONE wire timestamp form shared sync defines (`toWireTimestamp`). SQLite's
+ * CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS"; as strings a space sorts before "T", so a locally
+ * written row landed ABOVE every synced row before it - a task result appeared at the top of the
+ * conversation instead of the end. One emitter, here, for every local write.
+ */
+export function nowIso(): string {
+  return toWireTimestamp(new Date()) as string
+}
+
+/** One-time repair of rows written with CURRENT_TIMESTAMP. Idempotent; cheap when nothing is left. */
+export function normalizeLegacyTimestamps(db: Database.Database): number {
+  let changed = 0
+  const fix = (table: string, column: string): void => {
+    const rows = db
+      .prepare(
+        `SELECT rowid AS rowid, ${column} AS value FROM ${table} WHERE ${column} NOT LIKE '%T%'`
+      )
+      .all() as Array<{ rowid: number; value: string | null }>
+    const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE rowid = ?`)
+    for (const row of rows) {
+      if (typeof row.value !== 'string') continue
+      const next = toWireTimestamp(row.value) ?? row.value
+      if (next !== row.value) {
+        update.run(next, row.rowid)
+        changed += 1
+      }
+    }
+  }
+  fix('rag_messages', 'created_at')
+  fix('rag_conversations', 'created_at')
+  fix('rag_conversations', 'updated_at')
+  return changed
 }
 
 export function getDB(): Database.Database {
@@ -151,6 +203,17 @@ export function getDB(): Database.Database {
       content,
       conversation_id UNINDEXED,
       content='messages',
+      content_rowid='id'
+    );
+
+    -- Chat message content, searchable. The chat-list content search used to be a
+    -- lower(content) LIKE match per term over rag_messages, which no index can serve: every
+    -- keystroke's search read every message ever stored. External-content FTS5, same shape as
+    -- message_fts above, so the index holds terms and the rows stay in rag_messages.
+    CREATE VIRTUAL TABLE IF NOT EXISTS rag_message_fts USING fts5(
+      content,
+      conversation_id UNINDEXED,
+      content='rag_messages',
       content_rowid='id'
     );
 
@@ -274,6 +337,15 @@ export function getDB(): Database.Database {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(conversation_id) REFERENCES rag_conversations(id) ON DELETE CASCADE
     );
+
+    -- Provider-neutral Shared chat lifecycle state. Message rows remain the portable transcript;
+    -- this local checkpoint makes admitted work recoverable after the renderer or app restarts.
+    CREATE TABLE IF NOT EXISTS chat_session_turns (
+      conversation_id TEXT PRIMARY KEY,
+      turns_json TEXT NOT NULL,
+      updated_at DATETIME NOT NULL,
+      FOREIGN KEY(conversation_id) REFERENCES rag_conversations(id) ON DELETE CASCADE
+    );
   `)
 
   initializeSettingsStore(db)
@@ -300,6 +372,17 @@ export function getDB(): Database.Database {
     `CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
       INSERT INTO message_fts(message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
       INSERT INTO message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
+    END;`,
+
+    `CREATE TRIGGER IF NOT EXISTS rag_messages_ai AFTER INSERT ON rag_messages BEGIN
+      INSERT INTO rag_message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
+    END;`,
+    `CREATE TRIGGER IF NOT EXISTS rag_messages_ad AFTER DELETE ON rag_messages BEGIN
+      INSERT INTO rag_message_fts(rag_message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
+    END;`,
+    `CREATE TRIGGER IF NOT EXISTS rag_messages_au AFTER UPDATE ON rag_messages BEGIN
+      INSERT INTO rag_message_fts(rag_message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
+      INSERT INTO rag_message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
     END;`,
 
     `CREATE TRIGGER IF NOT EXISTS summaries_ai AFTER INSERT ON chat_summaries BEGIN
@@ -340,13 +423,39 @@ export function getDB(): Database.Database {
     db.exec(trigger)
   }
 
-  try {
-    db.exec("INSERT INTO message_fts(message_fts) VALUES('rebuild')")
-    db.exec("INSERT INTO summary_fts(summary_fts) VALUES('rebuild')")
-    db.exec("INSERT INTO entity_fts(entity_fts) VALUES('rebuild')")
-    db.exec("INSERT INTO entity_fact_fts(entity_fact_fts) VALUES('rebuild')")
-  } catch {
-    // Ignore rebuild errors
+  // The search index that makes the conversation list's content search an index lookup instead of
+  // a table scan, and the one that serves the list's "last message in this conversation" reads.
+  // rag_messages had NO index at all: every preview and every count was a full scan.
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_rag_messages_conversation ON rag_messages(conversation_id, created_at DESC, id DESC)'
+  )
+
+  /**
+   * FTS backfill, versioned so it happens once per profile instead of once per launch.
+   *
+   * Rebuilding five full-text indexes reads every message, summary, entity and fact in the
+   * database, synchronously, on Electron's main thread. It ran on EVERY startup - so the bigger a
+   * user's history got, the longer their app took to become usable, for work that had already been
+   * done. `PRAGMA user_version` is the gate: bumping FTS_SCHEMA_VERSION is how a future change to
+   * an FTS table or trigger repairs every existing profile exactly once.
+   *
+   * Nothing is trimmed or dropped here. This only rebuilds a derived index from rows that stay
+   * exactly as they are.
+   */
+  const installedFtsVersion = Number(db.pragma('user_version', { simple: true }) ?? 0)
+  if (installedFtsVersion < FTS_SCHEMA_VERSION) {
+    try {
+      db.exec("INSERT INTO message_fts(message_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO rag_message_fts(rag_message_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO summary_fts(summary_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO entity_fts(entity_fts) VALUES('rebuild')")
+      db.exec("INSERT INTO entity_fact_fts(entity_fact_fts) VALUES('rebuild')")
+      db.pragma(`user_version = ${FTS_SCHEMA_VERSION}`)
+    } catch (error) {
+      // The version is deliberately NOT advanced: a failed rebuild must be retried on the next
+      // launch, not remembered as done. Search degrades to whatever the triggers have indexed.
+      console.error('[database] full-text index rebuild failed; will retry next launch', error)
+    }
   }
 
   // Migration: Add timestamp column to messages if it doesn't exist
@@ -405,6 +514,7 @@ export function getDB(): Database.Database {
       // Column already exists, ignore
     }
   }
+  normalizeLegacyTimestamps(db)
   // Backfill rows that predate the column. Done in JS because SQLite has no uuid() function.
   try {
     const needsUuid = db
@@ -699,7 +809,6 @@ export function upsertEntitySession(entityId: number, sessionId: string): void {
   stmt.run(entityId, sessionId)
 }
 
-
 export interface EntityRecord {
   id: number
   name: string
@@ -728,7 +837,6 @@ export interface EntityDetailsRecord {
   entity: (EntityRecord & Record<string, unknown>) | undefined
   facts: EntityFactRecord[]
 }
-
 
 export function getEntities(appName?: string): EntityListRecord[] {
   const db = getDB()
@@ -795,7 +903,6 @@ export function getEntitiesForSession(sessionId: string): SessionEntityRecord[] 
     `)
   return stmt.all(sessionId) as SessionEntityRecord[]
 }
-
 
 // === DELETE FUNCTIONS ===
 
@@ -1095,35 +1202,95 @@ export function createRagConversation(
   return id
 }
 
-export function getRagConversations(projectId?: string | null): RagConversation[] {
+/** One bounded page of the conversation list. `updatedBefore` continues from the last row seen. */
+export interface RagConversationPage {
+  readonly limit?: number
+  /** `updated_at` of the last row the caller already has. Omit for the newest page. */
+  readonly updatedBefore?: string
+}
+
+function conversationPageLimit(page?: RagConversationPage): number {
+  const requested = page?.limit ?? DEFAULT_CONVERSATION_PAGE
+  if (!Number.isFinite(requested) || requested <= 0) return DEFAULT_CONVERSATION_PAGE
+  return Math.min(Math.floor(requested), MAX_CONVERSATION_PAGE)
+}
+
+/**
+ * The conversation list, newest first, one bounded page at a time.
+ *
+ * It used to return EVERY conversation with three correlated subqueries per row - a count and two
+ * ordered LIMIT 1 reads for the preview - against a `rag_messages` table with no index at all. So
+ * the cost was conversations x messages, on Electron's main thread, every time the list refreshed.
+ *
+ * Now: the preview and the count come from two index-driven passes over
+ * `idx_rag_messages_conversation` instead of 3N subqueries, and the page has an explicit limit
+ * with a cursor. The limit bounds what this RETURNS - nothing is trimmed or deleted, and a caller
+ * that wants older conversations asks for them with `updatedBefore`.
+ */
+export function getRagConversations(
+  projectId?: string | null,
+  page?: RagConversationPage
+): RagConversation[] {
   const db = getDB()
-  const where =
-    projectId === undefined
-      ? ''
-      : projectId === null
-        ? 'WHERE rc.project_id IS NULL'
-        : 'WHERE rc.project_id = ?'
+  const conditions: string[] = []
+  const parameters: unknown[] = []
+  if (projectId === null) conditions.push('rc.project_id IS NULL')
+  else if (projectId !== undefined) {
+    conditions.push('rc.project_id = ?')
+    parameters.push(projectId)
+  }
+  if (page?.updatedBefore) {
+    conditions.push('rc.updated_at < ?')
+    parameters.push(page.updatedBefore)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  parameters.push(conversationPageLimit(page))
+  // The page is chosen FIRST, then the message reads are restricted to it. Aggregating every
+  // message in the database to describe 500 conversations would have replaced one bad shape with
+  // another; both joins below are index lookups over the page's conversations only.
   const stmt = db.prepare(`
+        WITH page AS (
+            SELECT rc.id, rc.title, rc.project_id, rc.origin_device_id, rc.origin_device_name,
+                   rc.created_at, rc.updated_at
+            FROM rag_conversations rc
+            ${where}
+            ORDER BY rc.updated_at DESC
+            LIMIT ?
+        )
         SELECT
-            rc.id,
-            rc.title,
-            rc.project_id,
-            rc.origin_device_id,
-            rc.origin_device_name,
-            rc.created_at,
-            rc.updated_at,
-            (SELECT COUNT(*) FROM rag_messages rm WHERE rm.conversation_id = rc.id) as message_count,
+            page.id,
+            page.title,
+            page.project_id,
+            page.origin_device_id,
+            page.origin_device_name,
+            page.created_at,
+            page.updated_at,
+            COALESCE(counts.message_count, 0) as message_count,
             -- The last turn, for the list's one-line preview. A conversation synced from a phone
-            -- otherwise listed as a title with nothing under it.
-            (SELECT rm.role FROM rag_messages rm WHERE rm.conversation_id = rc.id
-               ORDER BY rm.created_at DESC, rm.id DESC LIMIT 1) as last_role,
-            (SELECT rm.content FROM rag_messages rm WHERE rm.conversation_id = rc.id
-               ORDER BY rm.created_at DESC, rm.id DESC LIMIT 1) as last_content
-        FROM rag_conversations rc
-        ${where}
-        ORDER BY rc.updated_at DESC
+            -- otherwise listed as a title with nothing under it. One ordered pass over
+            -- idx_rag_messages_conversation picks it, instead of two ordered subqueries per row.
+            last.role as last_role,
+            last.content as last_content
+        FROM page
+        LEFT JOIN (
+            SELECT conversation_id, COUNT(*) as message_count
+            FROM rag_messages
+            WHERE conversation_id IN (SELECT id FROM page)
+            GROUP BY conversation_id
+        ) counts ON counts.conversation_id = page.id
+        LEFT JOIN (
+            SELECT conversation_id, role, content FROM (
+                SELECT conversation_id, role, content,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY conversation_id ORDER BY created_at DESC, id DESC
+                       ) as recency
+                FROM rag_messages
+                WHERE conversation_id IN (SELECT id FROM page)
+            ) WHERE recency = 1
+        ) last ON last.conversation_id = page.id
+        ORDER BY page.updated_at DESC
     `)
-  return (projectId ? stmt.all(projectId) : stmt.all()) as RagConversation[]
+  return stmt.all(...parameters) as RagConversation[]
 }
 
 export function getRagConversation(id: string): RagConversation | null {
@@ -1151,16 +1318,46 @@ export function setRagConversationProject(id: string, projectId: string | null):
   }
 }
 
-/** Conversation ids whose MESSAGE CONTENT matches a query (all terms, AND) — so the
- *  chat-list search can match what was said, not just the title. */
-export function searchRagConversationIds(query: string): string[] {
-  const terms = (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).slice(0, 6)
-  if (!terms.length) return []
-  const where = terms.map(() => 'lower(content) LIKE ?').join(' AND ')
+/**
+ * The FTS5 MATCH expression for a user's search box, or null when there is nothing to match.
+ *
+ * Pure and separately testable, because this is where a user's typing becomes query syntax. Terms
+ * are extracted as letters and digits only and each is quoted, so a stray quote, a hyphen or an
+ * FTS operator like NEAR or OR is data rather than syntax. The trailing `*` keeps the
+ * search-as-you-type behaviour the old LIKE had for the last, partial word.
+ */
+export function ragMessageMatchExpression(query: string): string | null {
+  const terms = (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 6)
+  if (!terms.length) return null
+  return terms.map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ')
+}
+
+/**
+ * Conversation ids whose MESSAGE CONTENT matches a query (all terms, AND) — so the chat-list
+ * search can match what was said, not just the title.
+ *
+ * This was `lower(content) LIKE '%term%'` per term, with no LIMIT, over a `rag_messages` table
+ * with no index: a leading wildcard cannot use one, so every keystroke's search read every message
+ * ever stored, synchronously, on the main thread. It is an FTS5 MATCH against
+ * `rag_message_fts` now, and it returns a bounded page - the caller renders a list, not a report.
+ */
+export function searchRagConversationIds(query: string, limit?: number): string[] {
+  const match = ragMessageMatchExpression(query)
+  if (!match) return []
+  const requested = limit ?? DEFAULT_SEARCH_LIMIT
+  const bounded = Math.min(
+    Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : DEFAULT_SEARCH_LIMIT,
+    MAX_SEARCH_LIMIT
+  )
   const rows = getDB()
-    .prepare(`SELECT DISTINCT conversation_id FROM rag_messages WHERE ${where}`)
-    .all(...terms.map((t) => `%${t}%`)) as { conversation_id: string }[]
-  return rows.map((r) => r.conversation_id)
+    .prepare(
+      `SELECT DISTINCT conversation_id
+         FROM rag_message_fts
+        WHERE rag_message_fts MATCH ?
+        LIMIT ?`
+    )
+    .all(match, bounded) as { conversation_id: string }[]
+  return rows.map((row) => row.conversation_id)
 }
 
 /**
@@ -1225,6 +1422,7 @@ export function deleteRagConversation(id: string): boolean {
   // FKs are off (no PRAGMA foreign_keys), so rag_messages' ON DELETE CASCADE never
   // fires — delete the conversation's messages explicitly or they orphan (D23).
   db.prepare('DELETE FROM rag_messages WHERE conversation_id = ?').run(id)
+  db.prepare('DELETE FROM chat_session_turns WHERE conversation_id = ?').run(id)
   const info = db.prepare('DELETE FROM rag_conversations WHERE id = ?').run(id)
   if (info.changes === 0) return false
   for (const message of messages) {
@@ -1275,17 +1473,17 @@ export function addRagMessage(
     .prepare(
       `
         INSERT INTO rag_messages (uuid, conversation_id, role, content, context, created_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?)
     `
     )
-    .run(uuid, conversationId, role, content, contextJson)
+    .run(uuid, conversationId, role, content, contextJson, nowIso())
 
   // Update conversation updated_at timestamp
   db.prepare(
     `
-        UPDATE rag_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        UPDATE rag_conversations SET updated_at = ? WHERE id = ?
     `
-  ).run(conversationId)
+  ).run(nowIso(), conversationId)
 
   emitSyncMutation({ entity: CORE_SYNC_ENTITIES.message, entityId: uuid, kind: 'put' })
   emitSyncMutation({
@@ -1296,14 +1494,77 @@ export function addRagMessage(
   return { id: Number(info.lastInsertRowid), uuid }
 }
 
+export function readChatSessionTurns(conversationId: string): ChatTurn[] {
+  const row = getDB()
+    .prepare('SELECT turns_json FROM chat_session_turns WHERE conversation_id = ?')
+    .get(conversationId) as { turns_json: string } | undefined
+  if (!row) return []
+  try {
+    const value: unknown = JSON.parse(row.turns_json)
+    return Array.isArray(value) ? (value as ChatTurn[]) : []
+  } catch {
+    return []
+  }
+}
+
+export function writeChatSessionTurns(
+  conversationId: string,
+  turns: readonly ChatTurn[]
+): void {
+  getDB()
+    .prepare(
+      `INSERT INTO chat_session_turns (conversation_id, turns_json, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(conversation_id) DO UPDATE SET
+         turns_json = excluded.turns_json,
+         updated_at = excluded.updated_at`
+    )
+    .run(conversationId, JSON.stringify(turns), nowIso())
+}
+
 // Keep the first `keepCount` messages of a conversation (chronological) and
 // delete the rest — used by regenerate/edit so old answers don't pile up.
-export function truncateRagMessages(conversationId: string, keepCount: number): number {
+export interface RagTruncationAnchor {
+  /** The uuid (or legacy numeric id, as text) of the message the cut is measured from. */
+  messageId: string
+  /** Regenerate keeps the question and drops what came after; edit drops the question too. */
+  keepAnchor: boolean
+}
+
+/**
+ * Retire every row after one message - the old answer, its tool rounds, its thought processes,
+ * whichever device wrote them. The anchor is the message's identity, never a count: a count taken
+ * from a rendered list (time-ordered, with hidden rows, with rows synced from a phone) does not
+ * match insert order, and that is how a resend once left the earlier run standing.
+ */
+export function truncateRagMessages(conversationId: string, anchor: RagTruncationAnchor): number {
   const db = getDB()
-  const rows = db
-    .prepare(`SELECT id, uuid FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`)
-    .all(conversationId) as Array<{ id: number; uuid: string }>
-  const toDelete = rows.slice(Math.max(0, keepCount))
+  const anchorRow = db
+    .prepare(
+      `SELECT id, created_at FROM rag_messages
+       WHERE conversation_id = ? AND (uuid = ? OR CAST(id AS TEXT) = ?) LIMIT 1`
+    )
+    .get(conversationId, anchor.messageId, anchor.messageId) as
+    | { id: number; created_at: string }
+    | undefined
+  if (!anchorRow) {
+    console.warn(`[RAG] truncate: anchor ${anchor.messageId} not found in ${conversationId}`)
+    return 0
+  }
+  const after = db
+    .prepare(
+      `SELECT id, uuid FROM rag_messages
+       WHERE conversation_id = ?
+         AND (created_at > ? OR (created_at = ? AND id > ?) ${anchor.keepAnchor ? '' : 'OR id = ?'})`
+    )
+    .all(
+      conversationId,
+      anchorRow.created_at,
+      anchorRow.created_at,
+      anchorRow.id,
+      ...(anchor.keepAnchor ? [] : [anchorRow.id])
+    ) as Array<{ id: number; uuid: string }>
+  const toDelete = after
   if (!toDelete.length) return 0
   const ph = toDelete.map(() => '?').join(',')
   const result = db
@@ -1328,7 +1589,7 @@ export function getRagMessages(conversationId: string): RagMessage[] {
                origin_device_id, origin_device_name, created_at
         FROM rag_messages
         WHERE conversation_id = ?
-        ORDER BY created_at ASC
+        ORDER BY created_at ASC, id ASC
     `
     )
     .all(conversationId) as RagMessage[]

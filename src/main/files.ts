@@ -1,5 +1,6 @@
-// Turn an uploaded/pasted file into text the chat can reason over. Routes by
-// extension to the existing on-device extractors: plain text/code/md is read
+// Turn an uploaded/pasted file into text the chat can reason over. The shared
+// attachment classifier (@offgrid/sync) decides the kind; this routes each kind
+// to the existing on-device extractors: plain text/code/md is read
 // as-is, PDFs/DOCX are parsed, images are captioned by the vision model, audio
 // is transcribed by whisper, and video is sampled (~1 frame/sec) then each frame
 // captioned. Everything runs locally — nothing leaves the machine.
@@ -9,7 +10,8 @@ import os from 'os'
 import fs from 'fs'
 import { app } from 'electron'
 import { desktopExtraction as ex } from './rag/extractors'
-import { IMAGE_EXT, AUDIO_EXT, VIDEO_EXT, sanitizeUploadName } from './files-classify'
+import { attachmentKindFor, type AttachmentKind } from '@offgrid/sync'
+import { sanitizeUploadName } from './files-upload-name'
 // sharp is NOT imported here. It is a native module, and a top-level import let a
 // module that only validates images refuse every attachment of every type when it
 // could not load — which is exactly what happened on Windows. See files-image-probe.
@@ -17,21 +19,29 @@ import { verifyImageDecodable } from './files-image-probe'
 
 export interface ProcessedFile {
   name: string
-  kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'
+  kind: AttachmentKind
   text: string
   path?: string // for images: a persisted copy so it can be sent to the vision model
 }
 
+export interface ProcessUploadOptions {
+  /** Chat attachments need a durable preview path. Ephemeral task guidance does not. */
+  persistPreview?: boolean
+  /** Task guidance needs useful image context without retaining the source image. */
+  captionImage?: boolean
+}
+
 export async function processUpload(
   name: string,
-  bytes: ArrayBuffer | Uint8Array
+  bytes: ArrayBuffer | Uint8Array,
+  options: ProcessUploadOptions = {}
 ): Promise<ProcessedFile> {
-  const ext = path.extname(name).slice(1).toLowerCase()
+  const kind = attachmentKindFor({ fileName: name })
   const safe = sanitizeUploadName(name)
   const tmp = path.join(os.tmpdir(), `offgrid-upload-${Date.now()}-${safe}`)
   await fs.promises.writeFile(tmp, Buffer.from(bytes as ArrayBuffer))
   try {
-    if (IMAGE_EXT.includes(ext)) {
+    if (kind === 'image') {
       // An image extension is not evidence that the bytes are decodable. Validate at
       // the upload owner before persisting or marking the attachment ready, so a
       // damaged image produces a specific recoverable error in the composer instead
@@ -43,6 +53,13 @@ export async function processUpload(
       if ((await verifyImageDecodable(tmp)) === 'undecodable') {
         throw new Error('Unsupported or damaged image data.')
       }
+      if (options.captionImage) {
+        if (!ex.captionImage) throw new Error('Image reading is not available for this model.')
+        return { name, kind: 'image', text: await ex.captionImage(tmp) }
+      }
+      if (options.persistPreview === false) {
+        return { name, kind: 'image', text: '' }
+      }
       // Persist the image so the chat can pass the ACTUAL image to the multimodal
       // model. Return as soon as it's saved — do NOT block the attachment on a
       // vision-model caption (that ran the model synchronously and left the chip
@@ -53,11 +70,11 @@ export async function processUpload(
       await fs.promises.copyFile(tmp, dest)
       return { name, kind: 'image', text: '', path: dest }
     }
-    if (AUDIO_EXT.includes(ext)) {
+    if (kind === 'audio') {
       if (!ex.transcribeAudio) throw new Error('Transcription runtime not available.')
       return { name, kind: 'audio', text: await ex.transcribeAudio(tmp) }
     }
-    if (VIDEO_EXT.includes(ext)) {
+    if (kind === 'video') {
       if (!ex.sampleVideoFrames) throw new Error('Video sampling not available.')
       // ~1 frame/second, capped so a long clip doesn't run the vision model forever.
       const frames = await ex.sampleVideoFrames(tmp, { everySeconds: 1, maxFrames: 12 })
@@ -71,13 +88,16 @@ export async function processUpload(
       }
       return { name, kind: 'video', text: caps.join('\n') }
     }
-    if (ext === 'pdf') {
+    if (kind === 'pdf') {
       // Persist the PDF so the chat viewer can render the ACTUAL file (Chromium's
       // built-in viewer), in addition to extracting text for the model context.
-      const dir = path.join(app.getPath('userData'), 'uploads')
-      await fs.promises.mkdir(dir, { recursive: true })
-      const dest = path.join(dir, `${Date.now()}-${safe}`)
-      await fs.promises.copyFile(tmp, dest)
+      let dest: string | undefined
+      if (options.persistPreview !== false) {
+        const dir = path.join(app.getPath('userData'), 'uploads')
+        await fs.promises.mkdir(dir, { recursive: true })
+        dest = path.join(dir, `${Date.now()}-${safe}`)
+        await fs.promises.copyFile(tmp, dest)
+      }
       // Text extraction is best-effort: the PDF is already persisted and viewable,
       // so a parse failure must NOT make the file unattachable — fall back to ''.
       let text = ''
@@ -91,7 +111,7 @@ export async function processUpload(
       }
       return { name, kind: 'pdf', text, path: dest }
     }
-    if (ext === 'docx')
+    if (kind === 'docx')
       return { name, kind: 'docx', text: ex.extractDocx ? await ex.extractDocx(tmp, 200_000) : '' }
     // Everything else is treated as text — .txt/.md and every programming
     // language file (.js/.ts/.py/.go/.rs/.json/.csv/…) is just text.

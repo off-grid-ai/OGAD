@@ -1,26 +1,33 @@
-// Transcription engine selection. Whisper (one-shot whisper-cli) is the default and
-// the terminal fallback. Two opt-in engines degrade to it when their runtime isn't
-// installed, so a missing/not-yet-staged binary never breaks dictation or file
-// transcription:
-//   - 'parakeet'         — higher-accuracy sherpa-onnx model (opt-in in dictation).
-//   - 'whisper-resident' — the resident whisper-server (model stays warm) for live
-//                          interim, so ticks don't reload the model each call.
-// Everything that turns audio into text depends on this seam, never on a concrete
-// engine module: adding an engine is a new entry here + a new TranscriptionService.
-import type { TranscriptionService } from './types'
-import { transcriptionService as whisper } from './whisper-cli'
-import { parakeetTranscription as parakeet } from './parakeet-cli'
-import { whisperServerTranscription as whisperResident, whisperServer } from './whisper-server'
-import { getActiveModal } from '../active-models'
+import {
+  buildTranscriptionModelOptions,
+  catalogTranscriptionEngine,
+  residentAwareTranscriptionEngine,
+  resolveSupportedTranscriptionLanguage,
+  selectTranscriptionRoute,
+  selectAvailableTranscriptionEngine,
+  transcriptionEngineForActiveModel,
+  transcriptionEntryMatches,
+  transcriptionProvenance,
+  type CatalogTranscriptionEngine,
+  type TranscriptionCatalogEntry,
+  type TranscriptionEngine,
+  type PersistedResidencyPreference
+} from '@offgrid/models'
+import path from 'node:path'
+import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
+import { getSetting } from '../database'
+import { activeDesktopModelId, generateDesktopOperation } from '../desktop-generation'
+import { desktopModels, refreshDesktopModels } from '../composition/application-access'
+import type { DesktopManagedRuntime } from '../model-runtime-port'
 import { modelsByKind } from '@offgrid/models'
-import type { ManagedRuntime } from '../runtime-manager'
-// The pure engine classifiers live in a LEAF module (classify.ts) so the CLIs can import
-// them without forming a load-time cycle back through select (which reads the CLI
-// singletons at module scope). Re-exported here so existing importers/tests keep working.
-import { catalogEngine, modelsByEngine, type CatalogTranscriptionEngine } from './classify'
-export { catalogEngine, modelsByEngine, type CatalogTranscriptionEngine }
+import { parakeetTranscription as parakeet } from './parakeet-cli'
+import type { TranscriptionService, TranscribeOptions } from './types'
+import { transcriptionService as whisper } from './whisper-cli'
+import { whisperServer } from './whisper-server'
+import { whisperServerTranscription as whisperResident } from './whisper-server-transcription'
 
-export type TranscriptionEngine = 'whisper' | 'parakeet' | 'whisper-resident'
+export type { CatalogTranscriptionEngine, TranscriptionEngine }
+export const residentAwareEngine = residentAwareTranscriptionEngine
 
 interface Services {
   whisper: TranscriptionService
@@ -28,203 +35,227 @@ interface Services {
   whisperResident: TranscriptionService
 }
 
-/**
- * Pick the engine to use. Pure: takes the candidate services so the fallback logic is
- * testable without touching disk. An opt-in engine is honored only when available;
- * anything else (including an opt-in engine whose runtime isn't installed) resolves to
- * the one-shot whisper.
- */
+const ALL: Services = { whisper, parakeet, whisperResident }
+
+/** Select a Desktop execution adapter after shared engine fallback policy runs. */
 export function pickTranscription(
   engine: TranscriptionEngine,
   services: Services
 ): { service: TranscriptionService; engine: TranscriptionEngine; fellBack: boolean } {
-  if (engine === 'parakeet') {
-    if (services.parakeet.isAvailable())
-      return { service: services.parakeet, engine: 'parakeet', fellBack: false }
-    return { service: services.whisper, engine: 'whisper', fellBack: true }
-  }
-  if (engine === 'whisper-resident') {
-    if (services.whisperResident.isAvailable())
-      return { service: services.whisperResident, engine: 'whisper-resident', fellBack: false }
-    return { service: services.whisper, engine: 'whisper', fellBack: true }
-  }
-  return { service: services.whisper, engine: 'whisper', fellBack: false }
+  const selected = selectAvailableTranscriptionEngine(engine, {
+    whisper: services.whisper.isAvailable(),
+    parakeet: services.parakeet.isAvailable(),
+    'whisper-resident': services.whisperResident.isAvailable()
+  })
+  const service =
+    selected.engine === 'parakeet'
+      ? services.parakeet
+      : selected.engine === 'whisper-resident'
+        ? services.whisperResident
+        : services.whisper
+  return { service, ...selected }
 }
 
-const ALL: Services = { whisper, parakeet, whisperResident }
-
-/**
- * The single dispatcher every real (non-test) caller goes through to resolve an engine
- * choice against the live service singletons + whisper fallback. `mode` folds in the STT
- * residency choice (resident routes a whisper pick to the warm whisper-server) before the
- * availability fallback runs, so residency + fallback are decided in ONE place. Returns
- * the chosen service, the engine actually used (post-fallback, for provenance), and
- * whether it fell back. Callers pick the field they need instead of each re-invoking
- * `pickTranscription(engine, ALL)`.
- */
 export function resolveTranscription(
   engine: TranscriptionEngine,
-  mode?: ResidencyMode
+  mode?: PersistedResidencyPreference
 ): { service: TranscriptionService; engine: TranscriptionEngine; fellBack: boolean } {
-  // Residency only upgrades a plain whisper request to the resident server; every other
-  // engine (parakeet, an already-resident request) is unaffected. Fold it in first so the
-  // availability fallback below still applies to the resulting engine.
-  const requested: TranscriptionEngine =
-    mode === 'resident' && engine === 'whisper' ? 'whisper-resident' : engine
+  const requested =
+    mode == null || engine === 'whisper-resident'
+      ? engine
+      : residentAwareTranscriptionEngine(engine, mode)
   return pickTranscription(requested, ALL)
 }
 
-type ResidencyMode = 'resident' | 'on-demand'
-
-/** Resolve the real singleton for an engine, with the whisper fallback wired in. */
-export function getTranscription(engine: TranscriptionEngine = 'whisper'): TranscriptionService {
+function getTranscription(engine: TranscriptionEngine = 'whisper'): TranscriptionService {
   return resolveTranscription(engine).service
 }
 
-/**
- * The engine implied by the user's active transcription model. Pure: takes the active
- * value + catalog entries so it's testable. Core call sites (voice:transcribe, RAG audio)
- * have no pro dictation settings to read, so the active model's catalog `engine` field is
- * the single source of truth for which engine they should use. The active value may be a
- * catalog id or a primary filename — match either. (whisper-resident is a runtime choice,
- * not a catalog model, so it never comes from here.)
- */
-export function engineForActiveModel(
-  active: string | null,
-  // engine is the raw catalog field (a free string, only 'parakeet' is meaningful) - not the
-  // resolved TranscriptionEngine union. catalogEngine() narrows it. Typed to match what the
-  // live catalog (modelsByKind('transcription')) actually provides.
-  entries: Array<{ id: string; engine?: string; files: Array<{ name: string }> }>
-): TranscriptionEngine {
-  if (!active) return 'whisper'
-  const entry = entries.find((e) => e.id === active || e.files.some((f) => f.name === active))
-  return catalogEngine(entry)
+export function transcriptionEngineForRoute(model: {
+  id: string
+  providerId?: string
+}): CatalogTranscriptionEngine {
+  const catalogEntry = modelsByKind('transcription').find((entry) => entry.id === model.id)
+  return catalogEntry
+    ? catalogTranscriptionEngine(catalogEntry)
+    : model.providerId === 'parakeet'
+      ? 'parakeet'
+      : 'whisper'
+}
+
+async function routeForTranscription(
+  engine: TranscriptionEngine,
+  nativeModelId?: string,
+  preferSmallModel: boolean = false
+): Promise<string | undefined> {
+  await refreshDesktopModels()
+  const requestedModel = nativeModelId ? path.basename(nativeModelId) : undefined
+  const explicitRoute = requestedModel
+    ? (desktopModels.resolveRoute('transcription', requestedModel) ?? undefined)
+    : undefined
+  if (explicitRoute) return explicitRoute
+
+  const requestedEngine: CatalogTranscriptionEngine = engine === 'parakeet' ? 'parakeet' : 'whisper'
+  const active = desktopModels.snapshot().active.transcription?.model
+  const candidates = desktopModels
+    .snapshot()
+    .inventory.filter((model) => model.modality === 'transcription')
+    .filter((model): model is typeof model & { routeId: string } => Boolean(model.routeId))
+    .map((model) => ({
+      routeId: model.routeId,
+      engine: transcriptionEngineForRoute(model),
+      ready: model.ready,
+      residentSizeMB: model.residentSizeMB
+    }))
+  return selectTranscriptionRoute({
+    engine: requestedEngine,
+    candidates,
+    explicitRouteId: explicitRoute,
+    activeRouteId: active?.routeId,
+    preferSmallModel
+  })
 }
 
 /**
- * Resolve the transcription service implied by the active model choice, honoring the
- * whisper fallback when Parakeet isn't installed. This is what core, engine-agnostic
- * paths (generic mic transcription, file/RAG ingestion) call so a Parakeet selection is
- * actually used instead of always running whisper.
+ * Run a caller-selected Desktop transcription engine through the shared generation owner.
+ * The native engine remains a platform port; shared routing, admission, cancellation,
+ * recovery, and result validation stay on the GenerationService path.
  */
-export function getActiveTranscription(): TranscriptionService {
-  const engine = engineForActiveModel(
-    getActiveModal('transcription'),
-    modelsByKind('transcription')
+export function getGenerationTranscription(
+  engine: TranscriptionEngine = 'whisper',
+  preferences: { preferSmallModel?: boolean } = {}
+): TranscriptionService {
+  return {
+    isAvailable: () => resolveTranscription(engine).service.isAvailable(),
+    async transcribe(input, options = {}) {
+      const selected = resolveTranscription(engine).engine
+      const routeId = await routeForTranscription(
+        selected,
+        options.model,
+        preferences.preferSmallModel === true
+      )
+      const result = await generateDesktopOperation(
+        {
+          type: 'transcription',
+          audio: { type: 'audio', uri: input.path },
+          modelId: options.model,
+          language: options.language,
+          suppressNonSpeech: options.suppressNonSpeech,
+          alreadyWav16k: options.alreadyWav16k,
+          prompt: options.prompt,
+          timestamps: options.timestamps
+        },
+        {
+          profile: 'transcription',
+          routeId,
+          signal: options.signal
+        }
+      )
+      if (result.output.type !== 'transcription') {
+        throw new Error('The transcription engine returned no transcript.')
+      }
+      return {
+        text: result.output.text,
+        language: result.output.language,
+        segments: result.output.segments
+      }
+    }
+  }
+}
+
+export type TranscriptionSettingReader = (key: string, fallback: string) => string
+
+export function getActiveTranscription(
+  readSetting: TranscriptionSettingReader = getSetting
+): TranscriptionService {
+  const active = activeDesktopModelId('transcription')
+  const engine = transcriptionEngineForActiveModel(active, modelsByKind('transcription'))
+  const language = resolveSupportedTranscriptionLanguage(
+    readSetting('sttLanguage', 'auto'),
+    transcriptionLanguages(engine, active)
   )
-  return getTranscription(engine)
+  return withConfiguredTranscriptionLanguage(getGenerationTranscription(engine), language)
 }
 
-/** The engine actually used for a requested one, after the whisper fallback. Single
- *  source of truth for labeling a recording so provenance matches what really ran
- *  (e.g. a Parakeet request labels 'whisper' when Parakeet isn't installed). */
+export function getNativeTranscriptionForRoute(
+  model: { id: string; providerId?: string; residencyLifecycle?: string },
+  readSetting: TranscriptionSettingReader = getSetting
+): TranscriptionService {
+  const engine = transcriptionEngineForRoute(model)
+  const selected = resolveTranscription(
+    engine,
+    model.residencyLifecycle === 'persistent' ? 'resident' : 'on-demand'
+  ).engine
+  const language = resolveSupportedTranscriptionLanguage(
+    readSetting('sttLanguage', 'auto'),
+    transcriptionLanguages(engine, model.id)
+  )
+  return withConfiguredTranscriptionLanguage(getTranscription(selected), language)
+}
+
+export function withConfiguredTranscriptionLanguage(
+  service: TranscriptionService,
+  language: string
+): TranscriptionService {
+  return {
+    isAvailable: () => service.isAvailable(),
+    transcribe: (input: { path: string }, options?: TranscribeOptions) =>
+      service.transcribe(input, { language, ...options })
+  }
+}
+
+export interface ActiveTranscriptionInfo {
+  engine: TranscriptionEngine
+  modelId: string | null
+  label: string
+}
+
+export interface InstalledTranscriptionEntry extends TranscriptionCatalogEntry {}
+
+export function transcriptionActiveInfo(
+  info: ActiveTranscriptionInfo,
+  installed: readonly InstalledTranscriptionEntry[],
+  configuredLanguage: string
+): ActiveTranscriptionInfo & {
+  language: string
+  languages: readonly SpeechLanguage[]
+  options: ReturnType<typeof buildTranscriptionModelOptions>
+} {
+  const activeEntry = installed.find((entry) => transcriptionEntryMatches(entry, info.modelId))
+  const languages = transcriptionLanguages(info.engine, activeEntry?.familyId ?? info.modelId)
+  return {
+    ...info,
+    language: resolveSupportedTranscriptionLanguage(configuredLanguage, languages),
+    languages,
+    options: buildTranscriptionModelOptions(info.modelId, installed)
+  }
+}
+
 export function effectiveEngine(engine: TranscriptionEngine): TranscriptionEngine {
   return resolveTranscription(engine).engine
 }
 
-export interface ActiveTranscriptionInfo {
-  /** The engine that actually runs (after the whisper fallback). */
-  engine: TranscriptionEngine
-  /** The active transcription model id/filename, or null when none is explicitly selected. */
-  modelId: string | null
-  /** Human-readable provenance, e.g. "Whisper · Whisper Medium". */
-  label: string
-}
-
-const ENGINE_LABEL: Record<TranscriptionEngine, string> = {
-  whisper: 'Whisper',
-  'whisper-resident': 'Whisper',
-  parakeet: 'Parakeet'
-}
-
-/** Pure provenance label for an ALREADY-resolved engine + active model choice. Kept pure
- *  (no disk) so it is unit-testable; the live read below supplies the effective engine.
- *  Single source of truth for any surface that shows "which model transcribed this" — never
- *  re-derive the engine/model decision in the renderer. */
-export function transcriptionProvenance(
-  engine: TranscriptionEngine,
-  active: string | null,
-  entries: Array<{ id: string; name?: string; files: Array<{ name: string }> }>
-): ActiveTranscriptionInfo {
-  const entry = active
-    ? entries.find((e) => e.id === active || e.files.some((f) => f.name === active))
-    : undefined
-  const modelLabel = entry?.name ?? active ?? 'built-in'
-  return { engine, modelId: active, label: `${ENGINE_LABEL[engine]} · ${modelLabel}` }
-}
-
-/** Live provenance: the engine that would actually run for the active model, plus a display
- *  label. Read from the same active-model source of truth the transcription path uses. */
 export function getActiveTranscriptionInfo(): ActiveTranscriptionInfo {
-  const active = getActiveModal('transcription')
+  const active = activeDesktopModelId('transcription')
   const entries = modelsByKind('transcription')
-  const engine = effectiveEngine(engineForActiveModel(active, entries))
+  const engine = effectiveEngine(transcriptionEngineForActiveModel(active, entries))
   return transcriptionProvenance(engine, active, entries)
 }
 
-export interface TranscriptionModelOption {
-  /** Catalog id to activate, or null for the built-in whisper default (no explicit selection). */
-  id: string | null
-  name: string
-  active: boolean
-}
-
-/** Pure: the switchable transcription models for a picker — the built-in whisper default plus
- *  every INSTALLED transcription catalog model — with the active one flagged. Matches the active
- *  value by catalog id OR primary filename (active-models stores either). Selecting an option
- *  goes through the existing setActiveModalModel('transcription', id) — this only lists. */
-export function transcriptionModelOptions(
-  active: string | null,
-  installed: Array<{ id: string; name?: string; files: Array<{ name: string }> }>
-): TranscriptionModelOption[] {
-  return [
-    { id: null, name: 'Whisper (built-in)', active: active == null },
-    ...installed.map((e) => ({
-      id: e.id,
-      name: e.name ?? e.id,
-      active: e.id === active || e.files.some((f) => f.name === active)
-    }))
-  ]
-}
-
-/** Map a chosen dictation engine + the STT residency mode to the engine to actually
- *  request. Pure. Residency only affects the whisper path: 'resident' routes whisper
- *  to the warm whisper-server ('whisper-resident'), which itself degrades to one-shot
- *  whisper-cli when its binary isn't built. Parakeet has no resident server, so it
- *  stays the one-shot CLI regardless of mode (honest — no false "resident"). This is the
- *  pure engine-picking half of resolveTranscription's `mode` fold, exported for callers
- *  (pro dictation) that need the requested engine without touching the service singletons. */
-export function residentAwareEngine(
-  chosen: 'whisper' | 'parakeet',
-  mode: ResidencyMode
-): TranscriptionEngine {
-  if (chosen === 'whisper' && mode === 'resident') return 'whisper-resident'
-  return chosen
-}
-
-/** Is the Parakeet runtime installed (binary + model present)? */
 export function parakeetAvailable(): boolean {
   return parakeet.isAvailable()
 }
 
-/** Is the resident whisper-server runtime installed (binary + a model present)? */
 export function residentWhisperAvailable(): boolean {
   return whisperResident.isAvailable()
 }
 
-/** STT as a ManagedRuntime for the shared residency seam. The only resident STT
- *  holder is the whisper-server; the whisper-cli and Parakeet paths are one-shot
- *  CLIs that free their model on exit. So evict stops the server; warm/release are
- *  no-ops (it lazily re-spawns via ensureUp on the next resident transcription). */
-export const sttRuntime: ManagedRuntime = {
+export const sttRuntime: DesktopManagedRuntime = {
   modality: 'stt',
-  evict: () => {
-    whisperServer.stop()
-  },
-  warm: () => {
-    /* lazily re-spawned by whisper-server ensureUp on next use */
-  },
+  // The resident whisper server's answer, verbatim - it waited for the process to exit.
+  evict: () => whisperServer.stop(),
+  warm: () => {},
   release: () => {
-    whisperServer.stop()
+    void whisperServer.stop()
   }
 }

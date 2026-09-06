@@ -10,8 +10,8 @@
 // `generateImage`. Unlike the sibling image-params-wiring.test.ts — which replays a
 // hand-written replica of the composer's state machine — nothing here re-implements the
 // component: if the send path reads a stale local `imgSteps`, if the `[imgModel]` effect
-// stops resolving the override, or if the dropdown's onChange stops routing through
-// `setActiveModalModel`, this test goes RED because the REAL component produced the
+// stops resolving the override, or if the dropdown's onChange stops routing through the one
+// model-control write door, this test goes RED because the REAL component produced the
 // wrong payload.
 //
 // The two bugs this guards (both were user-visible):
@@ -31,6 +31,8 @@ import {
   imageMemoryGuardErrorMessage,
   type ImageGenerationJobContract
 } from '../../../../shared/image-generation-contract'
+import { modelControlBoundary, type ModelControlBoundary } from './harness/model-control-snapshot'
+import { invalidateLlmSettings } from '../../lib/settings-invalidation'
 
 // The real app mounts MemoryChat inside a global TooltipProvider (App shell). Mirror
 // that here so the composer's tooltip-wrapped controls render — this wraps the REAL
@@ -87,6 +89,8 @@ type TestConversation = {
   created_at: string
   updated_at: string
   message_count: number
+  last_role?: string | null
+  last_content?: string | null
 }
 
 type Deferred<T> = {
@@ -103,13 +107,18 @@ type ProcessImage = (
 type InstallApiOptions = {
   active: string
   models: string[]
+  isPro?: boolean
   settings?: Record<string, unknown>
   styleThumbs?: Record<string, string>
   conversations?: TestConversation[]
   generate?: (payload: GenPayload) => Promise<ImageResult>
   chatVision?: boolean
+  chatVisionError?: Error
+  thinking?: boolean
   processFile?: Mock<ProcessImage>
   ragAnswer?: string
+  persistMessage?: (...args: unknown[]) => Promise<{ id: number; uuid: string }>
+  announceImageMessage?: (...args: unknown[]) => Promise<void>
   /** Main-owned image job snapshot that imageGenJobStatus() reports on mount (reattach path). */
   jobStatus?: ImageGenerationJobContract
   /** Seed per-conversation persisted messages (getRagMessages), keyed by conversation id. */
@@ -126,7 +135,13 @@ type InstalledApi = {
   generateImage: Mock<(payload: GenPayload) => Promise<ImageResult>>
   emitConversationUpdated: (conversationId: string) => void
   emitJobState: (job: ImageGenerationJobContract) => void
-  setActiveModalModel: Mock<(kind: string, model: string) => Promise<void>>
+  /**
+   * The one model-control write door. `setActiveModalModel` was deleted by the model-control
+   * cutover; the composer dropdown now issues `control({ type: 'select', surface: 'image' })`.
+   * The boundary APPLIES that intent, so a test asserts the route the composer really reached
+   * instead of asserting that a since-deleted function was called.
+   */
+  modelControl: ModelControlBoundary<{ id: string }>
   toolChat: Mock<
     (...args: unknown[]) => Promise<{
       answer: string
@@ -141,6 +156,7 @@ type InstalledApi = {
   getRagMessages: Mock<(id: string) => Promise<unknown[]>>
   cancelImageGen: Mock<() => void>
   chatVisionAvailable: Mock<() => Promise<boolean>>
+  saveSetting: Mock<(key: string, value: unknown) => Promise<void>>
   processFile: Mock<ProcessImage>
   ragChat: Mock<(...args: unknown[]) => Promise<{ answer: string; context: { unified: never[] } }>>
   listGeneratedImages: Mock<() => Promise<GalleryImage[]>>
@@ -161,8 +177,8 @@ function deferred<T>(): Deferred<T> {
 
 /** Build a full in-process fake of the preload `window.api` bridge. Every method the
  *  component touches on mount / send is stubbed at the TRUE boundary (the IPC bridge),
- *  so the component code under test is 100% real. `generateImage` + `setActiveModalModel`
- *  are the assertion subjects; the rest resolve to inert defaults. */
+ *  so the component code under test is 100% real. `generateImage` and the model-control
+ *  boundary are the assertion subjects; the rest resolve to inert defaults. */
 function installApi(opts: InstallApiOptions): InstalledApi {
   const settings: Record<string, unknown> = { ...(opts.settings ?? {}) }
   const conversations = [...(opts.conversations ?? [])]
@@ -197,7 +213,24 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     })
     return result
   })
-  const setActiveModalModel = vi.fn<(kind: string, model: string) => Promise<void>>(async () => {})
+  // One owner for the model-control read AND write. The image runtime filenames are also the
+  // catalog ids in this focused renderer fixture.
+  const modelControl = modelControlBoundary({
+    kinds: ['image'],
+    models: opts.models.map((model) => ({
+      id: model,
+      name: model,
+      kind: 'image',
+      files: [{ name: model, role: 'primary' }],
+      capabilities: opts.thinking === undefined ? undefined : { thinking: opts.thinking }
+    })),
+    installed: [...opts.models],
+    activeIds: [opts.active],
+    active: {
+      text: opts.thinking === undefined ? null : opts.active,
+      image: opts.active
+    }
+  })
   // The agentic path's single entry point. Returns a benign text answer with no
   // imageRequest, so if the turn reaches the agent no generateImage call follows —
   // making "generateImage was/ wasn't called" an unambiguous terminal artifact.
@@ -209,11 +242,14 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   const cancelImageGen = vi.fn<() => void>()
   const exportGeneratedImage = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {})
   let nextStoredMessageId = 1
-  const addRagMessage = vi.fn(async () => {
-    const id = nextStoredMessageId++
-    return { id, uuid: `stored-message-${id}` }
-  })
-  const imageGenConversationPersisted = vi.fn(async () => {})
+  const addRagMessage = vi.fn(
+    opts.persistMessage ??
+      (async () => {
+        const id = nextStoredMessageId++
+        return { id, uuid: `stored-message-${id}` }
+      })
+  )
+  const imageGenConversationPersisted = vi.fn(opts.announceImageMessage ?? (async () => {}))
   // Timestamps are filled in where a seed omitted one. The renderer projects each row through
   // projectSyncedMessageTurn, which returns null for a message it cannot order, so an untimestamped
   // row is silently dropped and the conversation renders empty. The table this stands for always has
@@ -224,7 +260,10 @@ function installApi(opts: InstallApiOptions): InstalledApi {
       ...(row as Record<string, unknown>)
     }))
   )
-  const chatVisionAvailable = vi.fn(async () => opts.chatVision ?? true)
+  const chatVisionAvailable = vi.fn(async () => {
+    if (opts.chatVisionError) throw opts.chatVisionError
+    return opts.chatVision ?? true
+  })
   const processFile =
     opts.processFile ??
     vi.fn<ProcessImage>(async (_bytes: ArrayBuffer, name: string) => ({
@@ -238,16 +277,21 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     context: { unified: [] as never[] }
   }))
   const listGeneratedImages = vi.fn(async () => generatedGallery.map((image) => ({ ...image })))
+  const saveSetting = vi.fn(async (k: string, v: unknown) => {
+    settings[k] = v
+  })
   const api = {
-    isPro: false,
+    isPro: opts.isPro ?? false,
     // --- assertion subjects ---
     generateImage,
-    setActiveModalModel,
+    controlModel: modelControl.controlModel,
+    getModelControlProjection: modelControl.getModelControlProjection,
     // --- image engine probe (drives imgModels + imgModel on mount) ---
     imageGenStatus: vi.fn(async () => ({
       available: true,
       models: opts.models,
-      active: opts.active
+      active: opts.active,
+      defaultModel: opts.active
     })),
     cancelImageGen,
     // --- main-owned image job (the reattach-on-remount path) ---
@@ -300,10 +344,26 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     exportGeneratedImage,
     // --- settings round-trip (per-model override persistence) ---
     getSettings: vi.fn(async () => settings),
-    saveSetting: vi.fn(async (k: string, v: unknown) => {
-      settings[k] = v
-    }),
+    saveSetting,
     // --- misc mount-time calls (inert) ---
+    // Namespaced preload doors Chat subscribes to on mount. These have to be objects: a missing
+    // namespace fails as "window.api.speechCommands.onEvent is not a function" inside a mount
+    // effect, which tears down the whole render before any image assertion is reached.
+    speechCommands: {
+      transcribe: vi.fn(),
+      cancelTranscription: vi.fn(),
+      speak: vi.fn(async () => ({ kind: 'spoken' as const })),
+      feedStream: vi.fn(async () => {}),
+      finishStream: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    askByVoice: {
+      start: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {})
+    },
+    voiceTurn: { onRequest: vi.fn(() => () => {}), respond: vi.fn() },
     listProjects: vi.fn(async () => []),
     listArtifacts: vi.fn(async () => []),
     listGeneratedImages,
@@ -318,7 +378,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
   return {
     generateImage,
-    setActiveModalModel,
+    modelControl,
     toolChat,
     exportGeneratedImage,
     getRagMessages,
@@ -326,6 +386,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     imageGenConversationPersisted,
     cancelImageGen,
     chatVisionAvailable,
+    saveSetting,
     processFile,
     ragChat,
     listGeneratedImages,
@@ -484,7 +545,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
   it('reloads a received image while Gallery is open, then Escape restores trigger focus', async () => {
     const user = userEvent.setup()
-    const api = installApi({ active: FULL, models: [FULL] })
+    const api = installApi({ active: FULL, models: [FULL], isPro: true })
     renderChat()
 
     const trigger = await screen.findByTitle('Generated images')
@@ -527,10 +588,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     await user.click(trigger)
     expect(await screen.findByRole('dialog', { name: 'Gallery' })).toBeTruthy()
 
-    const scrim = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]')
+    const scrim = document.querySelector<HTMLElement>('[data-testid="side-panel-backdrop"]')
     expect(scrim).not.toBeNull()
-    // Radix defers its outside-pointer listener by one task so the opening click cannot close it.
-    await new Promise((resolve) => setTimeout(resolve, 0))
     await user.click(scrim!)
 
     await waitFor(() => {
@@ -566,10 +625,34 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(screen.queryByTitle('Show conversations')).toBeNull()
   })
 
+  it('shows a clean enhanced-prompt preview without model protocol in the conversation list', async () => {
+    installApi({
+      active: FULL,
+      models: [FULL],
+      conversations: [
+        {
+          id: 'enhanced-prompt-chat',
+          title: 'Draw a dog',
+          project_id: null,
+          created_at: '2026-08-21T08:00:00.000Z',
+          updated_at: '2026-08-21T08:00:00.000Z',
+          message_count: 2,
+          last_role: 'assistant',
+          last_content:
+            '<think>__LABEL:Enhanced prompt__\nA sleek black dog in soft morning light.</think>'
+        }
+      ]
+    })
+    renderChat()
+
+    expect(await screen.findByText('A sleek black dog in soft morning light.')).toBeTruthy()
+    expect(screen.queryByText(/<think>|__LABEL:/)).toBeNull()
+  })
+
   it('carries the USER-typed steps (10), not the model default (28), and the picked model', async () => {
     const user = userEvent.setup()
     // Engine reports the full checkpoint (default 28) active, plus the few-step one.
-    const { generateImage, setActiveModalModel } = installApi({
+    const { generateImage, modelControl } = installApi({
       active: FULL,
       models: [FULL, FEW_STEP]
     })
@@ -596,8 +679,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     // The model is the active/picked one, carried through to the engine.
     expect(payload.model).toBe(FULL)
     // Bug (b): the composer binds to the shared owner. On mount it reads active; a
-    // dropdown change writes through setActiveModalModel (asserted in the next test).
-    expect(setActiveModalModel).toBeTruthy()
+    // dropdown change writes through the one model-control door (asserted in the next test).
+    expect(modelControl).toBeTruthy()
   })
 
   it('reattaches an in-flight image job on remount and shows the progress panel (survives navigation)', async () => {
@@ -645,9 +728,9 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(await screen.findByText('Generating image · Step 3 of 20')).toBeTruthy()
   })
 
-  it('picking a different model in the dropdown routes through setActiveModalModel and reaches the payload', async () => {
+  it('picking a different model in the dropdown routes through the one model-control door and reaches the payload', async () => {
     const user = userEvent.setup()
-    const { generateImage, setActiveModalModel } = installApi({
+    const { generateImage, modelControl } = installApi({
       active: FULL,
       models: [FULL, FEW_STEP]
     })
@@ -664,7 +747,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
     // Divergence fix: the dropdown MUST write through the same owner as the
     // Active-models panel, or the two silently disagree on which model runs.
-    await waitFor(() => expect(setActiveModalModel).toHaveBeenCalledWith('image', FEW_STEP))
+    await waitFor(() => expect(modelControl.projection().active.image.modelId).toBe(FEW_STEP))
 
     await sendPrompt(user, 'a mountain lake')
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
@@ -684,9 +767,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     const modelSelect = screen.getByLabelText('Model') as HTMLSelectElement
     await firstUser.selectOptions(modelSelect, FEW_STEP)
     await firstUser.selectOptions(modelSelect, FULL)
-    await waitFor(() =>
-      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FULL)
-    )
+    await waitFor(() => expect(boundary.modelControl.projection().active.image.modelId).toBe(FULL))
 
     const sizeSelect = screen.getByLabelText('Size') as HTMLSelectElement
     await firstUser.selectOptions(sizeSelect, '768')
@@ -791,6 +872,33 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(generateImage).not.toHaveBeenCalled()
   })
 
+  it('keeps a completed tool answer visible and reports when Chat cannot save it', async () => {
+    let storedId = 0
+    installApi({
+      active: FULL,
+      models: [FULL],
+      settings: { composerToolsOn: true },
+      toolResult: {
+        answer: 'The task is complete.',
+        toolCalls: [{ name: 'search_memory', result: 'Found the result' }],
+        unified: []
+      },
+      persistMessage: async (_conversationId, role) => {
+        if (role === 'assistant') throw new Error('database unavailable')
+        storedId += 1
+        return { id: storedId, uuid: `stored-message-${storedId}` }
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'Find the result')
+
+    expect(await screen.findByText('The task is complete.')).toBeTruthy()
+    const warnings = await screen.findAllByText(/answer is visible, but chat could not save it/i)
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
+  })
+
   it('with tools OFF, the same "draw ..." turn auto-routes to direct image generation', async () => {
     const user = userEvent.setup()
     const { generateImage, toolChat } = installApi({ active: FULL, models: [FULL] })
@@ -803,6 +911,99 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(toolChat).not.toHaveBeenCalled()
     const payload = generateImage.mock.calls[0]![0] as GenPayload
     expect(payload.prompt).toBe('a dog') // cleanImagePrompt stripped the verb
+  })
+
+  it('keeps a generated artifact visible but reports that its Chat message was not saved', async () => {
+    let storedId = 0
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      persistMessage: async (_conversationId, role, _content, context) => {
+        if (
+          role === 'assistant' &&
+          typeof context === 'object' &&
+          context !== null &&
+          'imageRef' in context
+        ) {
+          throw new Error('database unavailable')
+        }
+        storedId += 1
+        return { id: storedId, uuid: `stored-message-${storedId}` }
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'draw a dog')
+
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    const warnings = await screen.findAllByText(
+      /image was created, but chat could not save its message/i
+    )
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
+    expect(boundary.imageGenConversationPersisted).not.toHaveBeenCalled()
+  })
+
+  it('reports a sync-link failure without claiming the durable Chat message was lost', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      announceImageMessage: async () => {
+        throw new Error('sync link unavailable')
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'draw a dog')
+
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    const warnings = await screen.findAllByText(
+      /image was saved in chat, but it could not be linked for device sync/i
+    )
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
+    expect(screen.queryByText(/image was created, but chat could not save its message/i)).toBeNull()
+    expect(boundary.addRagMessage).toHaveBeenCalled()
+    expect(boundary.imageGenConversationPersisted).toHaveBeenCalledOnce()
+  })
+
+  it('keeps successful image tool work complete when its Chat image row cannot be saved', async () => {
+    let storedId = 0
+    installApi({
+      active: FULL,
+      models: [FULL],
+      settings: { composerToolsOn: true },
+      toolResult: {
+        answer: 'I made the image.',
+        toolCalls: [{ name: 'generate_image', result: 'Image generation completed' }],
+        unified: [],
+        imageRequests: [{ prompt: 'a dog' }]
+      },
+      persistMessage: async (_conversationId, role, _content, context) => {
+        if (
+          role === 'assistant' &&
+          typeof context === 'object' &&
+          context !== null &&
+          'imageRef' in context
+        ) {
+          throw new Error('database unavailable')
+        }
+        storedId += 1
+        return { id: storedId, uuid: `stored-message-${storedId}` }
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'make an image of a dog')
+
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    expect(await screen.findByText('Work done')).toBeTruthy()
+    expect(screen.queryByText('Work failed')).toBeNull()
+    const warnings = await screen.findAllByText(
+      /image was created, but chat could not save its message/i
+    )
+    expect(warnings.some((warning) => warning.getAttribute('role') === 'alert')).toBe(true)
   })
 
   it('generates, associates, and renders one distinct image for every completed image tool call', async () => {
@@ -1126,6 +1327,53 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     expect(ragArgs[8]).toEqual(['/uploads/bicycle.png'])
   })
 
+  it('keeps an idle Chat event-driven and does not write hydrated preferences back', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      chatVision: true,
+      settings: {
+        composerToolsOn: true,
+        composerThinking: true,
+        imgSeed: '42',
+        enhanceImagePrompts: false
+      }
+    })
+    renderChat()
+
+    await waitFor(() => expect(boundary.chatVisionAvailable).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(boundary.saveSetting).not.toHaveBeenCalled()
+
+    invalidateLlmSettings()
+    await waitFor(() => expect(boundary.chatVisionAvailable).toHaveBeenCalledTimes(2))
+    expect(boundary.saveSetting).not.toHaveBeenCalled()
+  })
+
+  it('persists a composer preference only after the user changes it', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      settings: { composerThinking: true },
+      thinking: true
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await waitFor(() => expect(boundary.chatVisionAvailable).toHaveBeenCalledTimes(1))
+    const thinkingButton = await screen.findByRole('button', { name: 'Thinking' })
+    await waitFor(() => expect(thinkingButton.className).toContain('border-green-500'))
+    expect(boundary.saveSetting).not.toHaveBeenCalled()
+
+    await user.click(thinkingButton)
+    await waitFor(() =>
+      expect(boundary.saveSetting).toHaveBeenCalledWith('composerThinking', false)
+    )
+  })
+
   it('explains why a text-only model rejects an image and sends no unsupported content (#69)', async () => {
     const boundary = installApi({ active: FULL, models: [FULL], chatVision: false })
     const user = userEvent.setup()
@@ -1142,6 +1390,31 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     await sendChat(user, 'Continue with text only')
     expect(await screen.findByText('A red fox is standing in snow.')).toBeTruthy()
     expect(boundary.ragChat.mock.calls[0]![8]).toEqual([])
+  })
+
+  it('fails closed and exposes a warning when vision capability projection fails', async () => {
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      chatVisionError: new Error('vision status unavailable')
+    })
+    const user = userEvent.setup()
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    renderChat()
+
+    expect(
+      await screen.findByText(
+        'Chat could not verify image support. Image attachments stay off until model status is available.'
+      )
+    ).toBeTruthy()
+    await user.upload(imageInput(), new File(['png'], 'blocked.png', { type: 'image/png' }))
+
+    expect(boundary.processFile).not.toHaveBeenCalled()
+    expect(screen.queryByText('blocked.png')).toBeNull()
+    expect(console.error).toHaveBeenCalledWith(
+      '[ModelControl] Chat vision capability projection failed.',
+      expect.any(Error)
+    )
   })
 
   it('shows a damaged-image error and keeps the conversation usable (#70)', async () => {

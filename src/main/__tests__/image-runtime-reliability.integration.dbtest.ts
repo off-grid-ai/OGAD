@@ -1,7 +1,7 @@
 /**
  * Real multimodal-runtime reliability integration.
  *
- * Production LLMService, imagegen, TTS, ModalityQueue, runtime-manager, SQLite
+ * Production LLMService, imagegen, TTS, shared residency, SQLite
  * residency, argument building, process lifecycle, and HTTP transports remain real.
  * Only the bundled native executables and reported host RAM are controlled.
  */
@@ -12,6 +12,9 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { createOfflineFetchBoundary, type OfflineFetchBoundary } from './harness/offline-fetch'
+import { buildMessages } from '../llm/chat-payload'
+import { readImages } from '../llm/read-images'
+import { EXECUTORCH_KOKORO_MODEL_ID } from '@offgrid/models'
 
 const hostFetch = globalThis.fetch.bind(globalThis)
 
@@ -24,6 +27,7 @@ const fixture = (() => {
     resourceDir: path.join(root, 'resources'),
     llamaLog: path.join(root, 'llama-starts.log'),
     imageLog: path.join(root, 'image-runs.log'),
+    imageMode: path.join(root, 'image-mode.json'),
     ttsFailureMarker: path.join(root, 'fail-next-tts'),
     ttsInputLog: path.join(root, 'tts-inputs.log')
   }
@@ -44,17 +48,25 @@ vi.mock('electron', () => ({
 }))
 
 const CHAT_MODEL = 'chat-runtime-fixture.gguf'
+const CHAT_MODEL_ID = `local:${CHAT_MODEL}`
 const IMAGE_MODEL = 'image-runtime-fixture.safetensors'
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 let llm: typeof import('../llm').llm
 let generateImage: typeof import('../imagegen').generateImage
+let desktopImageApplication: typeof import('../imagegen/application-service').desktopImageApplication
 let synthesize: typeof import('../tts').synthesize
 let startModelServer: typeof import('../model-server').startModelServer
 let stopModelServer: typeof import('../model-server').stopModelServer
 let gatewayPort: number
 let offlineNetwork: OfflineFetchBoundary
+let unregisterApplication: (() => void) | undefined
+
+async function rawLocalText(prompt: string, images: string[] = []): Promise<string> {
+  const messages = buildMessages(prompt, readImages(images), llm.getSettings().systemPrompt ?? '')
+  return (await llm.streamChatLocal(messages, () => {})).content
+}
 
 function executablePath(...parts: string[]): string {
   return path.join(fixture.binDir, ...parts)
@@ -88,8 +100,15 @@ const server = http.createServer((req, res) => {
     return
   }
   if (req.method === 'POST' && req.url === '/v1/chat/completions') {
-    req.resume()
+    let body = ''
+    req.setEncoding('utf8')
+    req.on('data', chunk => { body += chunk })
     req.on('end', () => {
+      if (JSON.parse(body).stream === true) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+        res.end('data: {"choices":[{"delta":{"content":"chat recovered"},"finish_reason":"stop"}]}\\n\\ndata: [DONE]\\n\\n')
+        return
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end('{"choices":[{"message":{"content":"chat recovered"}}],"usage":{"total_tokens":2}}')
     })
@@ -114,32 +133,60 @@ const fs = require('node:fs')
 const args = process.argv.slice(2)
 const value = (flag) => args[args.indexOf(flag) + 1]
 fs.appendFileSync(process.env.OFFGRID_TEST_IMAGE_LOG, 'run\\n')
-fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
+let mode = { kind: 'ok', delayMs: 0 }
+try { mode = JSON.parse(fs.readFileSync(process.env.OFFGRID_TEST_IMAGE_MODE, 'utf8')) } catch {}
+const finish = () => {
+  if (mode.kind === 'memory') {
+    process.stderr.write('ggml_metal alloc failed OFFGRID_IMAGE_MEMORY_LIMIT:native image weights do not fit\\n')
+    process.exit(1)
+  }
+  if (mode.kind === 'no-output') process.exit(0)
+  if (mode.kind === 'progress') {
+    process.stderr.write('seed 4242\\n')
+    process.stderr.write('1/4 - 0.50s/it\\n')
+    process.stderr.write('4/4 - 0.50s/it\\n')
+    process.stderr.write('1/2 - 0.10s/it\\n')
+  }
+  fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
+}
+setTimeout(finish, mode.delayMs || 0)
 `
   )
   fs.chmodSync(executable, 0o755)
 }
 
+function setImageBoundaryMode(mode: { kind: string; delayMs?: number } | null): void {
+  if (!mode) {
+    fs.rmSync(fixture.imageMode, { force: true })
+    return
+  }
+  fs.writeFileSync(fixture.imageMode, JSON.stringify(mode))
+}
+
 function installFakeTtsBoundary(): void {
-  fs.mkdirSync(fixture.resourceDir, { recursive: true })
+  const executable = path.join(fixture.resourceDir, 'bin', 'executorch-speech')
+  fs.mkdirSync(path.dirname(executable), { recursive: true })
   fs.writeFileSync(
-    path.join(fixture.resourceDir, 'tts-worker.mjs'),
-    `import fs from 'node:fs'
-const [, , command, output] = process.argv
+    executable,
+    `#!/usr/bin/env node
+const fs = require('node:fs')
+const args = process.argv.slice(2)
+const value = flag => args[args.indexOf(flag) + 1]
 let input = ''
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', chunk => { input += chunk })
 process.stdin.on('end', () => {
-  if (command !== 'speak' || !output) return
   if (fs.existsSync(process.env.OFFGRID_TEST_TTS_FAILURE_MARKER || '')) {
     fs.rmSync(process.env.OFFGRID_TEST_TTS_FAILURE_MARKER, { force: true })
     process.stderr.write('synthetic native TTS failure')
+    process.exitCode = 23
     return
   }
   fs.appendFileSync(process.env.OFFGRID_TEST_TTS_INPUT_LOG, input + '\\n')
-  fs.writeFileSync(output, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))
+  fs.writeFileSync(value('--output'), Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))
 })
-`
+`,
+    { mode: 0o755 }
   )
 }
 
@@ -214,6 +261,7 @@ beforeAll(async () => {
   process.env.OFFGRID_RESOURCE_DIR = fixture.resourceDir
   process.env.OFFGRID_TEST_LLAMA_LOG = fixture.llamaLog
   process.env.OFFGRID_TEST_IMAGE_LOG = fixture.imageLog
+  process.env.OFFGRID_TEST_IMAGE_MODE = fixture.imageMode
   process.env.OFFGRID_TEST_TTS_FAILURE_MARKER = fixture.ttsFailureMarker
   process.env.OFFGRID_TEST_TTS_INPUT_LOG = fixture.ttsInputLog
 
@@ -223,7 +271,25 @@ beforeAll(async () => {
   fs.writeFileSync(path.join(modelsDir, IMAGE_MODEL), 'image checkpoint')
   fs.writeFileSync(
     path.join(modelsDir, 'active-model.json'),
-    JSON.stringify({ id: 'runtime-fixture', primary: CHAT_MODEL })
+    JSON.stringify({ id: CHAT_MODEL_ID, primary: CHAT_MODEL })
+  )
+  fs.writeFileSync(
+    path.join(modelsDir, 'local-models.json'),
+    JSON.stringify([
+      {
+        id: CHAT_MODEL_ID,
+        name: 'Chat runtime fixture',
+        primary: CHAT_MODEL,
+        kind: 'text',
+        sizeBytes: fs.statSync(path.join(modelsDir, CHAT_MODEL)).size
+      }
+    ])
+  )
+  fs.writeFileSync(
+    path.join(modelsDir, 'active-modalities.json'),
+    // The speech selection must name the catalog voice route: the registered application resolves
+    // the active voice through the models facade, which only knows catalog ids.
+    JSON.stringify({ image: IMAGE_MODEL, speech: EXECUTORCH_KOKORO_MODEL_ID })
   )
   installFakeLlamaBoundary()
   installFakeImageBoundary()
@@ -234,23 +300,31 @@ beforeAll(async () => {
   const [
     { llm: productionLlm },
     { generateImage: productionGenerateImage },
-    { synthesize: productionSynthesize, ttsRuntime },
-    runtimeManager,
-    modelServer
+    { synthesize: productionSynthesize },
+    modelServer,
+    imageApplication
   ] = await Promise.all([
     import('../llm'),
     import('../imagegen'),
     import('../tts'),
-    import('../runtime-manager'),
-    import('../model-server')
+    import('../model-server'),
+    import('../imagegen/application-service')
   ])
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  unregisterApplication = applicationAccess.registerDesktopApplication(
+    createOffGridApplication({ models: desktopModelWorkspacePorts })
+  )
   llm = productionLlm
   generateImage = productionGenerateImage
+  desktopImageApplication = imageApplication.desktopImageApplication
   synthesize = productionSynthesize
   startModelServer = modelServer.startModelServer
   stopModelServer = modelServer.stopModelServer
-  runtimeManager.registerRuntime(llm.runtime)
-  runtimeManager.registerRuntime(ttsRuntime)
   await llm.init()
   gatewayPort = await unusedPort()
 })
@@ -269,20 +343,41 @@ afterAll(async () => {
     'native model processes to exit'
   )
   expect(offlineNetwork.blockedRequests).toEqual(['https://example.invalid/health'])
+  unregisterApplication?.()
   vi.unstubAllGlobals()
   delete process.env.OFFGRID_DATA_DIR
   delete process.env.OFFGRID_BIN_DIR
   delete process.env.OFFGRID_RESOURCE_DIR
   delete process.env.OFFGRID_TEST_LLAMA_LOG
   delete process.env.OFFGRID_TEST_IMAGE_LOG
+  delete process.env.OFFGRID_TEST_IMAGE_MODE
   delete process.env.OFFGRID_TEST_TTS_FAILURE_MARKER
   delete process.env.OFFGRID_TEST_TTS_INPUT_LOG
   fs.rmSync(fixture.root, { recursive: true, force: true })
 })
 
 describe('multimodal runtime reliability', () => {
-  it('evicts a resident chat runtime for image generation and reloads it for the next chat', async () => {
-    expect(await llm.chat('before image')).toBe('chat recovered')
+  it('rejects a blank prompt in Shared before native execution and admits the next request', async () => {
+    const imageRunsBefore = lineCount(fixture.imageLog)
+    await expect(generateImage({ prompt: '   ', model: IMAGE_MODEL })).rejects.toThrow(
+      'A prompt is required.'
+    )
+    expect(lineCount(fixture.imageLog)).toBe(imageRunsBefore)
+
+    const image = await generateImage({
+      prompt: 'A real prompt after admission refusal',
+      model: IMAGE_MODEL,
+      seed: 313,
+      width: 512,
+      height: 512,
+      steps: 4
+    })
+    expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+    expect(lineCount(fixture.imageLog)).toBe(imageRunsBefore + 1)
+  })
+
+  it('keeps small text and image work within the balanced budget without restarting chat', async () => {
+    expect(await rawLocalText('before image')).toBe('chat recovered')
     expect(lineCount(fixture.llamaLog)).toBe(1)
 
     const image = await generateImage({
@@ -295,8 +390,8 @@ describe('multimodal runtime reliability', () => {
     })
     expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
 
-    expect(await llm.chat('after image')).toBe('chat recovered')
-    expect(lineCount(fixture.llamaLog)).toBe(2)
+    expect(await rawLocalText('after image')).toBe('chat recovered')
+    expect(lineCount(fixture.llamaLog)).toBe(1)
   })
 
   it('refuses an over-budget image before native execution and runs only after explicit override', async () => {
@@ -334,7 +429,7 @@ describe('multimodal runtime reliability', () => {
       fs.writeFileSync(imagePath, 'safe image checkpoint')
     }
 
-    expect(await llm.chat('after guarded refusal and explicit override')).toBe('chat recovered')
+    expect(await rawLocalText('after guarded refusal and explicit override')).toBe('chat recovered')
   }, 20_000)
 
   it('keeps local chat usable when external network reachability is unavailable', async () => {
@@ -399,7 +494,7 @@ describe('multimodal runtime reliability', () => {
         content: expect.stringContaining('LOCAL_SESSION_AURORA')
       })
     ])
-    expect(await llm.chat(localRag.formatForPrompt(retrieval))).toBe('chat recovered')
+    expect(await rawLocalText(localRag.formatForPrompt(retrieval))).toBe('chat recovered')
 
     const image = await generateImage({
       prompt: 'An emerald privacy diagram',
@@ -413,9 +508,9 @@ describe('multimodal runtime reliability', () => {
     fs.writeFileSync(path.join(modelDir, 'mmproj.gguf'), 'gguf')
     fs.writeFileSync(
       path.join(modelDir, 'active-model.json'),
-      JSON.stringify({ id: 'runtime-fixture', primary: CHAT_MODEL, mmproj: 'mmproj.gguf' })
+      JSON.stringify({ id: CHAT_MODEL_ID, primary: CHAT_MODEL, mmproj: 'mmproj.gguf' })
     )
-    expect(await llm.chat('Describe the private diagram.', [image.path])).toBe('chat recovered')
+    expect(await rawLocalText('Describe the private diagram.', [image.path])).toBe('chat recovered')
 
     const artifacts = await import('../artifacts')
     const saved = artifacts.saveArtifact({
@@ -443,7 +538,7 @@ describe('multimodal runtime reliability', () => {
   })
 
   it('recovers chat and TTS after native runtime failures', async () => {
-    const initialAnswer = await llm.chat('Give me a reply that can be spoken')
+    const initialAnswer = await rawLocalText('Give me a reply that can be spoken')
     expect(initialAnswer).toBe('chat recovered')
 
     const startsBefore = lineCount(fixture.llamaLog)
@@ -493,7 +588,7 @@ describe('multimodal runtime reliability', () => {
   }, 10_000)
 
   it('persists, scopes, exports, reopens, and fully deletes a generated image artifact', async () => {
-    const image = await generateImage({
+    const generated = await generateImage({
       prompt: 'An emerald release map',
       model: IMAGE_MODEL,
       seed: 405,
@@ -501,6 +596,10 @@ describe('multimodal runtime reliability', () => {
       height: 512,
       steps: 4
     })
+    const { persistImageGenerationOutput } = await import('../imagegen/application-service')
+    // Enter the image library through its canonical ownership boundary. The native
+    // runtime path is an input artifact, not permission to bypass library scoping.
+    const image = await persistImageGenerationOutput(generated)
     const imageBytes = Buffer.from(PNG_BASE64, 'base64')
     const exportPath = path.join(fixture.root, 'exports', 'release-map.png')
     fs.mkdirSync(path.dirname(exportPath), { recursive: true })
@@ -554,4 +653,96 @@ describe('multimodal runtime reliability', () => {
     expect(reopenedArtifacts.listArtifacts({ projectId: 'image-release-project' })).toEqual([])
     expect(fs.readFileSync(exportPath)).toEqual(imageBytes)
   }, 20_000)
+})
+
+describe('desktop image application live pipeline', () => {
+  const baseRequest = { model: IMAGE_MODEL, width: 512, height: 512, steps: 4 }
+
+  it('maps native progress into the preparing → generating → decoding update sequence', async () => {
+    setImageBoundaryMode({ kind: 'progress' })
+    const updates: Array<{ stage: string; phase?: string; step?: number; secPerStep?: number }> = []
+    try {
+      const output = await generateImage(
+        { ...baseRequest, prompt: 'progress mapping', seed: 7 },
+        (update) =>
+          updates.push({
+            stage: update.stage,
+            phase: update.progress?.phase,
+            step: update.progress?.step,
+            secPerStep: update.progress?.secPerStep
+          })
+      )
+      expect(output.seed).toBe(4242)
+      expect(output.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    expect(updates[0]).toMatchObject({ stage: 'preparing', phase: undefined })
+    // The fake emits `1/4 - 0.50s/it`, `4/4 - 0.50s/it`, then `1/2 - 0.10s/it`; Shared's
+    // reduceImageProgress parses the s/it value and flips to decoding when the step counter restarts.
+    expect(updates).toContainEqual({
+      stage: 'generating',
+      phase: 'sampling',
+      step: 1,
+      secPerStep: 0.5
+    })
+    expect(updates).toContainEqual({
+      stage: 'generating',
+      phase: 'sampling',
+      step: 4,
+      secPerStep: 0.5
+    })
+    expect(updates).toContainEqual({
+      stage: 'decoding',
+      phase: 'decoding',
+      step: 1,
+      secPerStep: 0.1
+    })
+    expect(updates.some((update) => update.stage === 'enhancing')).toBe(true)
+  }, 20_000)
+
+  it('refuses a second request while one is in flight and cancels the running one', async () => {
+    setImageBoundaryMode({ kind: 'slow', delayMs: 4_000 })
+    const runsBefore = lineCount(fixture.imageLog)
+    try {
+      const first = generateImage({ ...baseRequest, prompt: 'first in flight' })
+      await waitFor(
+        () => lineCount(fixture.imageLog) > runsBefore,
+        'first image to reach the native runtime'
+      )
+      expect(desktopImageApplication.isRunning()).toBe(true)
+      await expect(generateImage({ ...baseRequest, prompt: 'second while busy' })).rejects.toThrow(
+        'An image is already generating — please wait for it to finish.'
+      )
+      await waitFor(() => desktopImageApplication.status().phase === 'generating', 'native run')
+      await desktopImageApplication.cancel()
+      await expect(first).rejects.toThrow('Image generation cancelled.')
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    await waitFor(() => !desktopImageApplication.isRunning(), 'application to settle')
+    const recovered = await generateImage({ ...baseRequest, prompt: 'after cancel' })
+    expect(recovered.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+  }, 30_000)
+
+  it('surfaces a native memory-guard failure and a missing output file as real errors', async () => {
+    setImageBoundaryMode({ kind: 'memory' })
+    try {
+      await expect(generateImage({ ...baseRequest, prompt: 'memory refused' })).rejects.toThrow(
+        'OFFGRID_IMAGE_MEMORY_LIMIT:native image weights do not fit'
+      )
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    setImageBoundaryMode({ kind: 'no-output' })
+    try {
+      await expect(generateImage({ ...baseRequest, prompt: 'no output' })).rejects.toThrow(
+        'Image generation produced no output file.'
+      )
+    } finally {
+      setImageBoundaryMode(null)
+    }
+    const recovered = await generateImage({ ...baseRequest, prompt: 'after failures' })
+    expect(recovered.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+  }, 30_000)
 })

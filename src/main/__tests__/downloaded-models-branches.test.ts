@@ -1,6 +1,6 @@
 // Branch fill for the downloaded-models registry against a real temp dir. Covers the
 // paths downloaded-models.test.ts leaves out: a registry file whose JSON is a non-array
-// (rejected -> []), a model with an empty files list (never counts as installed), and a
+// (reported explicitly), a model with an empty files list (never counts as installed), and a
 // zero-byte file on disk (present but empty -> not installed). No mocks; real fs.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
@@ -25,14 +25,14 @@ afterEach(() => {
 })
 
 describe('downloaded-models branch cases', () => {
-  it('rejects a registry whose parsed JSON is not an array (object -> [])', () => {
+  it('reports a registry whose parsed JSON is an object instead of an array', () => {
     fs.writeFileSync(path.join(dir, REG), JSON.stringify({ not: 'an array' }))
-    expect(readDownloaded(dir)).toEqual([])
+    expect(() => readDownloaded(dir)).toThrow('Downloaded-model registry must contain an array.')
   })
 
-  it('rejects a registry whose parsed JSON is a bare number (-> [])', () => {
+  it('reports a registry whose parsed JSON is a bare number instead of an array', () => {
     fs.writeFileSync(path.join(dir, REG), '42')
-    expect(readDownloaded(dir)).toEqual([])
+    expect(() => readDownloaded(dir)).toThrow('Downloaded-model registry must contain an array.')
   })
 
   it('a model with an empty files list is never reported installed', () => {

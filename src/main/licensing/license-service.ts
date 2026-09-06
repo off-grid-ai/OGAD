@@ -5,7 +5,7 @@ export const PRO_PAY_PAGE_URL = PRO_PURCHASE_URL
 
 export type ActivateResult = PersonalMeshActivationResult
 
-export type ProTier = 'lifetime' | 'monthly'
+export type ProTier = 'lifetime' | 'monthly' | 'annual' | 'subscription'
 
 export interface ProLicenseInfo {
   isPro: boolean
@@ -30,6 +30,7 @@ export interface ProLicensedDevice {
  */
 export interface ProEntitlementProvider {
   initialize(): void
+  refreshCachedState(): void
   revalidate(reason: PersonalMeshReconciliationReason): Promise<void>
   isEntitled(): boolean
   getInfo(): ProLicenseInfo
@@ -63,12 +64,23 @@ export function initLicensing(): void {
   provider?.initialize()
 }
 
+export function refreshCachedProEntitlement(): void {
+  provider?.refreshCachedState()
+}
+
 export function revalidateProEntitlement(reason: PersonalMeshReconciliationReason): Promise<void> {
   return provider?.revalidate(reason) ?? Promise.resolve()
 }
 
 export function isProEntitled(): boolean {
-  return provider?.isEntitled() ?? false
+  if (provider?.isEntitled()) return true
+  // A real license remains the production owner. Electron E2E can fake this external boundary
+  // only in an unpackaged development process with both explicit test guards present.
+  return (
+    process.defaultApp === true &&
+    process.env.OFFGRID_E2E_HEADLESS === '1' &&
+    process.env.OFFGRID_E2E_PRO_TASKS === '1'
+  )
 }
 
 export function getProLicenseInfo(): ProLicenseInfo {

@@ -17,20 +17,40 @@ describe('portCandidates — gradual +1 increments', () => {
 
 describe('pickFreePort — first free at/after preferred (fake probe)', () => {
   it('returns the preferred port when it is free', async () => {
-    expect(await pickFreePort(8439, async () => true)).toBe(8439)
+    expect(await pickFreePort(8439, { host: '127.0.0.1', isFree: async () => true })).toBe(8439)
+  })
+  it('probes the exact host the listener will bind', async () => {
+    const hosts: string[] = []
+    await pickFreePort(7878, {
+      host: '0.0.0.0',
+      isFree: async (_port, host) => {
+        hosts.push(host)
+        return true
+      }
+    })
+    expect(hosts).toEqual(['0.0.0.0'])
   })
   it('increments past busy ports to the first free one', async () => {
     const busy = new Set([8439, 8440])
     const tried: number[] = []
-    const got = await pickFreePort(8439, async (p) => {
-      tried.push(p)
-      return !busy.has(p)
+    const got = await pickFreePort(8439, {
+      host: '127.0.0.1',
+      isFree: async (p) => {
+        tried.push(p)
+        return !busy.has(p)
+      }
     })
     expect(got).toBe(8441)
     expect(tried).toEqual([8439, 8440, 8441]) // scanned upward in single steps
   })
   it('returns null when the whole window is busy', async () => {
-    expect(await pickFreePort(7878, async () => false, 5)).toBeNull()
+    expect(
+      await pickFreePort(7878, {
+        host: '127.0.0.1',
+        isFree: async () => false,
+        maxTries: 5
+      })
+    ).toBeNull()
   })
 })
 
@@ -42,7 +62,7 @@ describe('isPortFree — real socket probe', () => {
     try {
       expect(await isPortFree(taken)).toBe(false)
       // The next port up is almost certainly free on a test host; scan a small window to be safe.
-      const free = await pickFreePort(taken + 1, (p) => isPortFree(p), 50)
+      const free = await pickFreePort(taken + 1, { host: '127.0.0.1', maxTries: 50 })
       expect(free).not.toBeNull()
       expect(await isPortFree(free as number)).toBe(true)
     } finally {
@@ -59,7 +79,7 @@ describe('isPortFree — real socket probe', () => {
     await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r))
     const taken = (srv.address() as net.AddressInfo).port
     try {
-      const chosen = await pickFreePort(taken, (p) => isPortFree(p), 50)
+      const chosen = await pickFreePort(taken, { host: '127.0.0.1', maxTries: 50 })
       expect(chosen).not.toBeNull()
       expect(chosen).not.toBe(taken)
       expect(await isPortFree(chosen as number)).toBe(true)

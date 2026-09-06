@@ -136,6 +136,9 @@ beforeAll(async () => {
   executable(ffmpegPath, "process.stdout.write('ffmpeg version integration\\n')")
   executable(whisperPath, "process.stdout.write('usage: whisper-cli [options]\\n')")
 
+  // The system health snapshot reads the active model from the composition root, as the app does
+  // after boot; load it before the IPC surface.
+  await import('../../../../../main/model-services')
   setupSystemStatusIpc(boundary)
   ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
     systemHealth: async () => {
@@ -171,7 +174,11 @@ describe('<HealthPanel/> production status integration', () => {
     const user = userEvent.setup()
     render(<HealthPanel />)
 
-    await screen.findByRole('status', { name: 'Chat model (llama-server)' })
+    await screen.findByRole(
+      'status',
+      { name: 'Chat model (llama-server)' },
+      { timeout: 5_000 }
+    )
     await expect(boundary.invoke('permissions:get-status')).resolves.toEqual({
       accessibility: true,
       screenRecording: false,

@@ -10,6 +10,20 @@
 //   buildAssistantContext(baseCtx, { reasoning }) → ctx   (write path)
 //   readReasoning(ctx) → string | undefined              (read path)
 import type { ResponseCutoffContract } from '../../../shared/ipc-contracts'
+import type { GenerationMetrics } from '../../../shared/generation-metrics'
+import {
+  isChatTurnStatus,
+  type ChatTurnStatus,
+  type GenerationMessage
+} from '@offgrid/models'
+
+export interface PersistedChatSessionTurn {
+  turnId: string
+  status: ChatTurnStatus
+  responseMessages: readonly GenerationMessage[]
+  /** Shared turn intent projected for durable UI recovery. */
+  reasoningRequested?: boolean
+}
 
 /** Extra assistant-turn fields that ride in the persisted `context` blob. */
 export interface AssistantContextExtras {
@@ -17,6 +31,10 @@ export interface AssistantContextExtras {
   reasoning?: string
   /** Why the model stopped before completing the response, if applicable. */
   cutoff?: ResponseCutoffContract
+  /** How the generation performed - rates, token counts, time to first token. */
+  metrics?: GenerationMetrics
+  /** Canonical Shared chat transcript. Legacy content remains the display/read projection. */
+  session?: PersistedChatSessionTurn
 }
 
 /**
@@ -32,11 +50,51 @@ export function buildAssistantContext(
   extras: AssistantContextExtras = {}
 ): Record<string, unknown> | undefined {
   const reasoning = extras.reasoning?.trim() ? extras.reasoning : undefined
-  if (!baseCtx && reasoning === undefined && extras.cutoff === undefined) return undefined
+  if (
+    !baseCtx &&
+    reasoning === undefined &&
+    extras.cutoff === undefined &&
+    extras.metrics === undefined &&
+    extras.session === undefined
+  ) {
+    return undefined
+  }
   const ctx: Record<string, unknown> = { ...(baseCtx ?? {}) }
   if (reasoning !== undefined) ctx.reasoning = reasoning
   if (extras.cutoff !== undefined) ctx.cutoff = extras.cutoff
+  if (extras.metrics !== undefined) ctx.metrics = extras.metrics
+  if (extras.session !== undefined) ctx.chatSession = extras.session
   return ctx
+}
+
+/** Read the canonical transcript when present. Old rows have no chatSession field and remain valid. */
+export function readPersistedChatSessionTurn(ctx: unknown): PersistedChatSessionTurn | undefined {
+  if (!ctx || typeof ctx !== 'object') return undefined
+  const raw = (ctx as { chatSession?: unknown }).chatSession
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Record<string, unknown>
+  if (typeof value.turnId !== 'string' || !isChatTurnStatus(value.status)) return undefined
+  if (
+    !Array.isArray(value.responseMessages) ||
+    !value.responseMessages.every(isGenerationMessage)
+  ) {
+    return undefined
+  }
+  return {
+    turnId: value.turnId,
+    status: value.status,
+    responseMessages: value.responseMessages,
+    ...(typeof value.reasoningRequested === 'boolean'
+      ? { reasoningRequested: value.reasoningRequested }
+      : {})
+  }
+}
+
+function isGenerationMessage(value: unknown): value is GenerationMessage {
+  if (!value || typeof value !== 'object') return false
+  const message = value as Record<string, unknown>
+  if (!['system', 'user', 'assistant', 'tool'].includes(String(message.role))) return false
+  return typeof message.content === 'string' || Array.isArray(message.content)
 }
 
 /**
@@ -67,4 +125,32 @@ export function readResponseCutoff(ctx: unknown): ResponseCutoffContract | undef
     return undefined
   }
   return { reason: value.reason, maxTokens: value.maxTokens }
+}
+
+/**
+ * Restore persisted generation metrics.
+ *
+ * Every field is read independently and only kept when it is a positive finite number. Context is
+ * durable user data written by older builds, so a partial or malformed blob must degrade to fewer
+ * numbers rather than render NaN under someone's message.
+ */
+export function readGenerationMetrics(ctx: unknown): GenerationMetrics | undefined {
+  if (!ctx || typeof ctx !== 'object') return undefined
+  const raw = (ctx as { metrics?: unknown }).metrics
+  if (!raw || typeof raw !== 'object') return undefined
+  const source = raw as Record<string, unknown>
+  const keys = [
+    'timeToFirstTokenSeconds',
+    'totalSeconds',
+    'decodeTokensPerSecond',
+    'prefillTokensPerSecond',
+    'promptTokens',
+    'completionTokens'
+  ] as const
+  const metrics: Record<string, number> = {}
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) metrics[key] = value
+  }
+  return Object.keys(metrics).length ? (metrics as GenerationMetrics) : undefined
 }

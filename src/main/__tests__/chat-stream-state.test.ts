@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { registerHook, HOOKS } from '../bootstrap/hookRegistry'
 import {
+  activeChatStreamSnapshots,
   beginChatImageStream,
   bindChatStream,
   continueChatStreamWithImage,
@@ -88,7 +89,7 @@ describe('the reply being generated, as published to anything that follows it', 
   })
 
   it('keeps thinking apart from the answer', () => {
-    bindChatStream('stream-a', 'conversation-1')
+    bindChatStream('stream-a', 'conversation-1', 'thinking')
     noteChatStreamDelta('stream-a', 'let me think', 'reasoning')
     noteChatStreamDelta('stream-a', 'the answer', 'content')
     noteChatStreamDelta('stream-a', ' — more thought', 'reasoning')
@@ -102,6 +103,13 @@ describe('the reply being generated, as published to anything that follows it', 
       phase: 'thinking',
       messageId: expect.any(String)
     })
+    expect(activeChatStreamSnapshots()).toEqual([
+      expect.objectContaining({
+        streamId: 'stream-a',
+        reasoningRequested: true,
+        phase: 'thinking'
+      })
+    ])
   })
 
   it('ends with an explicit record-pending terminal rather than falling silent', () => {
@@ -198,12 +206,40 @@ describe('the reply being generated, as published to anything that follows it', 
     noteChatStreamToolStarted('stream-a', 'generate_image')
     expect(published.at(-1)?.tools).toEqual([{ name: 'generate_image', status: 'running' }])
 
-    noteChatStreamToolCompleted('stream-a', 'generate_image', 'Image generation started')
+    noteChatStreamToolCompleted('stream-a', 'generate_image', 'Image generation started', 'pending')
     expect(published.at(-1)?.tools).toEqual([
       {
         name: 'generate_image',
-        status: 'completed',
+        status: 'pending',
         result: 'Image generation started'
+      }
+    ])
+
+    expect(continueChatStreamWithImage('stream-a')).toBe(true)
+    expect(published.at(-1)?.tools).toEqual([
+      {
+        name: 'generate_image',
+        status: 'running',
+        result: 'Image generation started'
+      }
+    ])
+  })
+
+  it('publishes a tool-owned needs-attention result as pending', () => {
+    bindChatStream('stream-a', 'conversation-1')
+    noteChatStreamToolStarted('stream-a', 'web_use')
+    noteChatStreamToolCompleted(
+      'stream-a',
+      'web_use',
+      'Please answer the missing questions.',
+      'pending'
+    )
+
+    expect(published.at(-1)?.tools).toEqual([
+      {
+        name: 'web_use',
+        status: 'pending',
+        result: 'Please answer the missing questions.'
       }
     ])
   })

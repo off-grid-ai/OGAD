@@ -17,14 +17,25 @@ import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
+import { preloadCapabilityFakes } from './harness/chat-boundary'
 
 type AddRag = ReturnType<typeof vi.fn>
 
 function installApi(): { addRagMessage: AddRag } {
-  const addRagMessage = vi.fn(async () => {})
+  let nextMessageId = 0
+  const addRagMessage = vi.fn(async () => {
+    nextMessageId += 1
+    return { id: nextMessageId, uuid: `tool-image-message-${nextMessageId}` }
+  })
   const api = {
     isPro: false,
-    imageGenStatus: vi.fn(async () => ({ available: true, models: ['sd'], active: 'sd' })),
+    ...preloadCapabilityFakes(),
+    imageGenStatus: vi.fn(async () => ({
+      available: true,
+      models: ['sd'],
+      active: 'sd',
+      defaultModel: 'sd'
+    })),
     cancelImageGen: vi.fn(),
     cancelRag: vi.fn(),
     onImageGenProgress: vi.fn(() => () => {}),

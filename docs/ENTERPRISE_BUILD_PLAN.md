@@ -1,11 +1,11 @@
-# Off Grid for Organizations — full build plan
+# Off Grid AI for Organizations — full build plan
 
 This plan **inherits the entire 5-plane agentic architecture** from the stack navigator
 (`wednesdayai/knowledge-base/agentic-ai-stack-navigator.md` = the canonical text of
 `cro/proposals/final/agentic-ai-stack-navigator.html`). Every component A1→E6, plus the
-Physical plane, is accounted for below and mapped to Off Grid.
+Physical plane, is accounted for below and mapped to Off Grid AI.
 
-The navigator was written for a multi-tenant regulated bank on cloud/on-prem. Off Grid is
+The navigator was written for a multi-tenant regulated bank on cloud/on-prem. Off Grid AI is
 **local-first, on-device, single-org-per-deployment, on-prem.** That changes _how_ each
 layer is realized, not _whether_ it exists. Six rules drive every mapping:
 
@@ -110,10 +110,10 @@ _and_ the org's real data** — not observation alone:
 
 ## Phase A — DATA PLANE
 
-> Bank version: get data out of source systems, prep, govern, land. Off Grid version: the
+> Bank version: get data out of source systems, prep, govern, land. Off Grid AI version: the
 > work itself is the source; it lands on-device and (distilled) in Brain.
 
-| #    | Navigator component            | Off Grid realization                                                                                                                                                                                                                | Owner                                       | Status                                                                                                |
+| #    | Navigator component            | Off Grid AI realization                                                                                                                                                                                                                | Owner                                       | Status                                                                                                |
 | ---- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | A1   | Source systems                 | **Two first-class sources.** (1) **Capture** (screen→OCR, messages, calls) — the work itself, on the node. (2) **Org digital data** — databases, warehouses, SaaS, document stores — via connectors on the org-side ingest service. | Personal AI capture · Brain-side connectors | ✅ capture (`watcher.ts`, `vision.ts`, `ocr.swift`, meeting recorder); ❌ enterprise connectors build |
 | A3   | CDC / ingestion                | Node: continuous on-device ingest of capture. Org: CDC/connector pulls from DBs & warehouses → ETL → mask → Brain.                                                                                                                  | Personal AI ingest · Brain ingest service   | ✅ `watcher.ts`, `ingest.ts`; ❌ org ingest service                                                   |
@@ -132,7 +132,7 @@ _and_ the org's real data** — not observation alone:
 
 > The engine. This is largely **already built** — it's what `model-server.ts` is.
 
-| #   | Navigator component         | Off Grid realization                                                                                                                           | Owner                         | Status                                        |
+| #   | Navigator component         | Off Grid AI realization                                                                                                                           | Owner                         | Status                                        |
 | --- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | --------------------------------------------- |
 | B1  | Doc parsing + chunking      | OCR + audio transcription + doc extractors.                                                                                                    | Gateway (AI plane)            | ✅ `rag/extractors`, whisper, vision          |
 | B2a | Reranking + hybrid search   | Retrieval over captured + Brain content; BM25 + vector + rerank.                                                                               | Gateway                       | ⚠️ embeddings exist; hybrid + rerank build    |
@@ -140,7 +140,7 @@ _and_ the org's real data** — not observation alone:
 | B5a | Provenance + citation       | **Every SOP/answer traces to the captured source** (which screen, which call, when). The auditability beam. _(This is the "SANN-equivalent.")_ | Brain · Gateway output policy | ❌ build                                      |
 | B7  | Tool layer (MCP)            | `/mcp` — on-device models + actions + org connectors as scoped, audited tools.                                                                 | Gateway                       | ✅ `mcp-server.ts`, extend with scope+audit   |
 | B9  | Sandboxed code execution    | Agents run untrusted code in isolation (microVM), never the host.                                                                              | Gateway                       | ❌ build (later)                              |
-| B11 | Memory (sidecar, 4 flavors) | Exactly Off Grid's memory: short-term, long-term vector, entity graph, file-based markdown. **Personal memory** + **org memory (Brain)**.      | Personal AI · Brain           | ✅ strong (`crm/*`, observations, memory)     |
+| B11 | Memory (sidecar, 4 flavors) | Exactly Off Grid AI's memory: short-term, long-term vector, entity graph, file-based markdown. **Personal memory** + **org memory (Brain)**.      | Personal AI · Brain           | ✅ strong (`crm/*`, observations, memory)     |
 | B15 | Model serving / inference   | Bundled llama-server, whisper, TTS, diffusion — unified at `:7878`.                                                                            | Gateway                       | ✅ strong (`model-server.ts`)                 |
 | B16 | Fine-tuning + privacy ML    | Adapt the local SLM to the org's domain & SOPs (LoRA), on-device or in Brain.                                                                  | Brain                         | ❌ build (later)                              |
 
@@ -151,7 +151,7 @@ _and_ the org's real data** — not observation alone:
 > The gateway spine. Wraps the AI plane we already have. **This is the bulk of the new
 > build**, and where Fleet Control plugs in.
 
-| #   | Navigator component          | Off Grid realization                                                                                              | Owner                   | Status                                       |
+| #   | Navigator component          | Off Grid AI realization                                                                                              | Owner                   | Status                                       |
 | --- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------- | -------------------------------------------- |
 | C1  | AI gateway                   | `:7878` becomes a real chokepoint: routing local + **leashed cloud** (rule 5).                                    | Gateway                 | ⚠️ started — single local model, add routing |
 | C2  | Input policy / guardrails    | Injection scan — **especially of captured content** (hostile indirect input).                                     | Gateway pre-hook        | ❌ build                                     |
@@ -173,7 +173,7 @@ _and_ the org's real data** — not observation alone:
 
 > Where humans meet it. Mostly **already built** on the Personal AI side.
 
-| #   | Navigator component            | Off Grid realization                                                          | Owner                       | Status                                  |
+| #   | Navigator component            | Off Grid AI realization                                                          | Owner                       | Status                                  |
 | --- | ------------------------------ | ----------------------------------------------------------------------------- | --------------------------- | --------------------------------------- |
 | D1  | Agent runtime / orchestration  | The agents that do the work + the **learning-loop batch jobs** (observe→SOP). | Personal AI · Brain         | ⚠️ partial (`crm/agent.ts`); loop build |
 | D2  | Human-in-the-loop              | Approval-gated actions on anything consequential.                             | Personal AI                 | ✅ `crm/approvals.ts`                   |
@@ -188,7 +188,7 @@ _and_ the org's real data** — not observation alone:
 
 > Functions, not just tools. Realized mostly inside **Fleet Control** (the DPO's product).
 
-| #   | Navigator component   | Off Grid realization                                                                   | Owner                    | Status   |
+| #   | Navigator component   | Off Grid AI realization                                                                   | Owner                    | Status   |
 | --- | --------------------- | -------------------------------------------------------------------------------------- | ------------------------ | -------- |
 | E1  | Framework mapping     | Map controls → DPDP/etc clauses. **The DPO single compliant view + one-click export.** | Fleet Control            | ❌ build |
 | E2  | AI use policy         | What staff may do; authored and **pushed to every device** by Fleet Control.           | Fleet Control            | ❌ build |
@@ -199,7 +199,7 @@ _and_ the org's real data** — not observation alone:
 
 ## Phase 0 — PHYSICAL PLANE
 
-| Navigator                  | Off Grid realization                                                                                                                                           | Status     |
+| Navigator                  | Off Grid AI realization                                                                                                                                           | Status     |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
 | GPUs / nodes / power / K8s | The **devices themselves** (laptops, phones) run inference on-device. Optional **on-prem org server** hosts Fleet Control + Brain. No hyperscaler in the path. | deployment |
 

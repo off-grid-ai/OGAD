@@ -1,4 +1,4 @@
-// MCP connectors — Off Grid acts as an MCP *client*. Each connector is an MCP
+// MCP connectors — Off Grid AI acts as an MCP *client*. Each connector is an MCP
 // server the user authorizes (stdio command or HTTP/SSE endpoint, e.g. a Gmail
 // or Google Calendar MCP). We discover its tools, and skills propose tool calls
 // that run ONLY after approval (see crm/approvals.ts). Secrets (tokens) live in
@@ -6,12 +6,22 @@
 // closed — we don't hold long-lived child processes.
 
 import { getDB } from './database'
-import { deleteSecretsByPrefix, getSecret } from './secrets'
+import { deleteSecretsByPrefix, ensureSecretsStorage, getSecret, setSecret } from './secrets'
 import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
-import { callHook } from './bootstrap/hookRegistry'
+import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
+import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import {
+  DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS,
+  type McpConnectorCreateCommand,
+  type McpConnectorConnectionResult,
+  type McpConnectorSnapshot,
+  type McpConnectorApplicationService,
+  type McpConnectorStatus
+} from '@offgrid/models'
+import { mcpConnectorApplication, registerDesktopMcpConnectorPorts } from './composition/mcp'
 
 // Provider-specific quirks (e.g. Google's MCP endpoints) are a Pro concern and
 // register these hooks; in the free build they return undefined → generic MCP.
@@ -21,6 +31,29 @@ const googleConfigForUrl = (url: string | null): any => callHook('mcp:googleConf
 const googleProbeTool = (url: string | null): any => callHook('mcp:googleProbeTool', url)
 const googleQuotaProject = (url: string | null): string | undefined =>
   callHook('mcp:googleQuotaProject', url)
+
+export interface ConnectorToolDefinition {
+  name: string
+  description?: string
+  inputSchema?: unknown
+}
+
+export interface ConnectorToolCallResult {
+  ok: boolean
+  result?: unknown
+  error?: string
+}
+
+/**
+ * A provider-owned connector can verify through its supported protocol while keeping generic MCP
+ * discovery disabled. The provider owns execution too, so a published REST-backed tool never falls
+ * through to an unavailable preview MCP endpoint.
+ */
+export interface ConnectorToolSource {
+  tools: ConnectorToolDefinition[]
+  verify: () => Promise<void>
+  callTool: (tool: string, args: unknown) => Promise<ConnectorToolCallResult>
+}
 
 let ready = false
 function ensure(): void {
@@ -93,39 +126,32 @@ export function addConnector(c: NewConnector): number {
 }
 
 export function setConnectorEnabled(id: number, enabled: boolean): void {
-  ensure()
-  getDB()
-    .prepare('UPDATE connectors SET enabled = ? WHERE id = ?')
-    .run(enabled ? 1 : 0, id)
+  const connectorApplication = mcpConnectorApplication()
+  connectorApplication.setEnabled(id, enabled)
 }
 
-/** Single writer for a connector's health status — so testConnector and the chat
- *  tool loader can't diverge on how a failure is recorded. When a background load
- *  can't reach a connector (expired token / server down), this flips its status to
- *  'error' so the UI shows it needs reconnecting instead of silently going dark. */
+/** Compatibility wrapper. Shared owns the status transition; Desktop persists it. */
 export function setConnectorStatus(
   id: number,
-  status: 'ok' | 'error' | 'unknown',
+  status: McpConnectorStatus,
   detail?: string | null
 ): void {
-  ensure()
-  getDB()
-    .prepare('UPDATE connectors SET status = ?, status_detail = ? WHERE id = ?')
-    .run(status, detail ?? null, id)
+  const connectorApplication = mcpConnectorApplication()
+  connectorApplication.setStatus(id, status, detail ?? undefined)
 }
 
 export function removeConnector(id: number): void {
-  ensure()
-  const database = getDB()
-  database.transaction(() => {
-    deleteSecretsByPrefix(`connector:${id}:`)
-    database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
-  })()
+  const connectorApplication = mcpConnectorApplication()
+  connectorApplication.remove(id)
 }
 
 function getConnector(id: number): Connector | undefined {
   ensure()
   return getDB().prepare('SELECT * FROM connectors WHERE id = ?').get(id) as Connector | undefined
+}
+
+function connectorToolSource(c: Connector): ConnectorToolSource | undefined {
+  return callHook<ConnectorToolSource>(HOOKS.mcpConnectorToolSource, c.id, c.url)
 }
 
 // Build a connected MCP client for a connector. Caller MUST close().
@@ -213,16 +239,20 @@ async function connect(
     // Runs the OAuth handshake after the SDK opened the browser: wait for the code,
     // exchange it (saves tokens), reconnect with a fresh client + transport.
     const finishOAuth = async (): Promise<void> => {
-      const code = await authProvider.getCodePromise()
-      console.log('[oauth] got code, exchanging for tokens…')
-      await transport.finishAuth(code)
-      console.log(
-        '[oauth] token exchange done; tokens saved =',
-        authProvider.tokens() ? 'yes' : 'NO'
-      )
-      client = new Client({ name: 'Off Grid AI Desktop', version: '1.0.0' }, { capabilities: {} })
-      transport = mkTransport()
-      await client.connect(transport)
+      try {
+        const code = await authProvider.getCodePromise()
+        console.log('[oauth] got code, exchanging for tokens…')
+        await transport.finishAuth(code)
+        console.log(
+          '[oauth] token exchange done; tokens saved =',
+          authProvider.tokens() ? 'yes' : 'NO'
+        )
+        client = new Client({ name: 'Off Grid AI Desktop', version: '1.0.0' }, { capabilities: {} })
+        transport = mkTransport()
+        await client.connect(transport)
+      } finally {
+        authProvider.finishAuthorization()
+      }
     }
     try {
       await client.connect(transport)
@@ -255,70 +285,124 @@ async function connect(
   }
 }
 
+async function discoverConnectorTools(
+  connector: Connector,
+  interactive: boolean
+): Promise<ConnectorToolDefinition[]> {
+  const source = connectorToolSource(connector)
+  if (source) {
+    if (interactive) {
+      // A fresh account still needs the generic OAuth adapter before provider verification.
+      if (!hasOAuthTokens(connector.id)) {
+        const session = await connect(connector, true)
+        await session.close()
+      }
+      await source.verify()
+    }
+    return [...source.tools]
+  }
+  const { client, close } = await connect(connector, interactive)
+  try {
+    const result = await client.listTools()
+    return result.tools as ConnectorToolDefinition[]
+  } finally {
+    await close()
+  }
+}
+
+type McpConnectorPorts = ConstructorParameters<typeof McpConnectorApplicationService<Connector>>[0]
+
+/** SQLite repository, OAuth cancellation, and MCP transport. I/O only; shared owns the lifecycle. */
+export function desktopMcpConnectorPorts(): McpConnectorPorts {
+  return {
+    repository: {
+      find: getConnector,
+      setEnabled(id, enabled) {
+        ensure()
+        getDB()
+          .prepare('UPDATE connectors SET enabled = ? WHERE id = ?')
+          .run(enabled ? 1 : 0, id)
+      },
+      setStatus(id, status, detail) {
+        ensure()
+        getDB()
+          .prepare('UPDATE connectors SET status = ?, status_detail = ? WHERE id = ?')
+          .run(status, detail ?? null, id)
+      },
+      cacheDiscovery(id, tools) {
+        ensure()
+        getDB()
+          .prepare("UPDATE connectors SET status='ok', status_detail=NULL, tools=? WHERE id=?")
+          .run(JSON.stringify(tools), id)
+      },
+      removeWithCredentials(id) {
+        ensure()
+        ensureSecretsStorage()
+        const database = getDB()
+        database.transaction(() => {
+          deleteSecretsByPrefix(`connector:${id}:`, database)
+          database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
+        })()
+      }
+    },
+    authorization: {
+      cancel: cancelOAuthAuthorization
+    },
+    transport: {
+      discover: discoverConnectorTools
+    },
+    connection: {
+      create(connector) {
+        return addConnector({
+          name: connector.name,
+          transport: connector.transport,
+          command: connector.command,
+          args: connector.args,
+          url: connector.url,
+          envKeys: connector.credentialKeys
+        })
+      },
+      async persistCredentials(id, credentials) {
+        for (const [key, value] of Object.entries(credentials)) {
+          if (value && !setSecret(`connector:${id}:${key}`, value)) {
+            throw new Error('Secure credential storage is unavailable.')
+          }
+        }
+      }
+    }
+  }
+}
+
+registerDesktopMcpConnectorPorts(desktopMcpConnectorPorts())
+
 /** Connect, list tools, cache them + status. Returns the discovered tools. */
 export async function testConnector(
   id: number
 ): Promise<{ ok: boolean; tools: { name: string; description?: string }[]; error?: string }> {
-  ensure()
-  const c = getConnector(id)
-  if (!c) return { ok: false, tools: [], error: 'not found' }
-  try {
-    const { client, close } = await connect(c, true) // user-initiated → allow browser OAuth
-    const res = await client.listTools()
-    const tools = res.tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description
-    }))
-    await close()
-    getDB()
-      .prepare("UPDATE connectors SET status='ok', status_detail=NULL, tools=? WHERE id=?")
-      .run(JSON.stringify(tools), id)
-    return { ok: true, tools }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    setConnectorStatus(id, 'error', msg)
-    return { ok: false, tools: [], error: msg }
-  }
+  const connectorApplication = mcpConnectorApplication()
+  return connectorApplication.verifyAndDiscover(id)
+}
+
+/** One Desktop application entry point for Shared-owned connection and recovery transactions. */
+export async function connectConnector(
+  command: McpConnectorCreateCommand
+): Promise<{ result: McpConnectorConnectionResult; snapshot: McpConnectorSnapshot }> {
+  const connectorApplication = mcpConnectorApplication()
+  const result = await connectorApplication.connect(command)
+  return { result, snapshot: connectorApplication.snapshot() }
 }
 
 // A background tool load must never hang the chat turn it runs inside: one dead or
 // unreachable connector (no server / stalled OAuth) would otherwise block every
 // send. Bound each connect+list; on timeout the caller drops that connector's tools
 // (and marks it errored) and the turn proceeds.
-export const FETCH_TOOLS_TIMEOUT_MS = 8000
+export const FETCH_TOOLS_TIMEOUT_MS = DEFAULT_CONNECTOR_OPERATION_TIMEOUT_MS
 
 /** Full tool definitions (incl. inputSchema) for a connected connector. Rejects if
  *  the connect+list exceeds FETCH_TOOLS_TIMEOUT_MS. */
-export async function fetchTools(
-  id: number
-): Promise<{ name: string; description?: string; inputSchema?: unknown }[]> {
-  ensure()
-  const c = getConnector(id)
-  if (!c) throw new Error('connector not found')
-  const op = (async (): Promise<
-    { name: string; description?: string; inputSchema?: unknown }[]
-  > => {
-    const { client, close } = await connect(c, false)
-    try {
-      const res = await client.listTools()
-      return res.tools as { name: string; description?: string; inputSchema?: unknown }[]
-    } finally {
-      await close()
-    }
-  })()
-  let timer: ReturnType<typeof setTimeout>
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`listing tools for ${c.name} timed out`)),
-      FETCH_TOOLS_TIMEOUT_MS
-    )
-    timer.unref()
-  })
-  try {
-    return await Promise.race([op, timeout])
-  } finally {
-    clearTimeout(timer!)
-  }
+export async function fetchTools(id: number): Promise<ConnectorToolDefinition[]> {
+  const connectorApplication = mcpConnectorApplication()
+  return connectorApplication.discoverInBackground(id)
 }
 
 export function getConnectorMeta(
@@ -345,41 +429,62 @@ export function resolveConnectorId(reference: string | null | undefined): number
   )?.id
 }
 
+type ConnectorToolCaller = (tool: string, args: unknown) => Promise<ConnectorToolCallResult>
+
+/**
+ * Resolve the background (saved-tokens-only) tool caller for a connector: the
+ * registered provider source when Pro serves it, otherwise ONE live MCP session.
+ * Single rule for every background call path. Caller MUST close().
+ */
+async function openToolCaller(
+  c: Connector
+): Promise<{ call: ConnectorToolCaller; close: () => Promise<void> }> {
+  const source = connectorToolSource(c)
+  if (source) {
+    return { call: (tool, args) => source.callTool(tool, args), close: async () => {} }
+  }
+  const { client, close } = await connect(c, false)
+  return {
+    call: async (tool, args) => ({
+      ok: true,
+      result: await client.callTool({
+        name: tool,
+        arguments: (args ?? {}) as Record<string, unknown>
+      })
+    }),
+    close
+  }
+}
+
+async function guardedCall(
+  call: ConnectorToolCaller,
+  tool: string,
+  args: unknown
+): Promise<ConnectorToolCallResult> {
+  try {
+    return await call(tool, args)
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 /**
  * Open ONE connection (one stdio process / one HTTP session) and run multiple
  * tool calls over it. Essential for multi-step adapters (e.g. Slack: users →
  * channels → history) — otherwise each call would cold-spawn npx and hang.
+ * A connector served by a registered provider source is routed to that source.
  */
 export async function withConnector<T>(
   id: number,
-  fn: (
-    call: (
-      tool: string,
-      args: unknown
-    ) => Promise<{ ok: boolean; result?: unknown; error?: string }>
-  ) => Promise<T>
+  fn: (call: ConnectorToolCaller) => Promise<T>
 ): Promise<T> {
   ensure()
   const c = getConnector(id)
   if (!c) throw new Error('connector not found')
   if (!c.enabled) throw new Error('connector disabled')
-  const { client, close } = await connect(c, false)
+  const { call, close } = await openToolCaller(c)
   try {
-    const call = async (
-      tool: string,
-      args: unknown
-    ): Promise<{ ok: boolean; result?: unknown; error?: string }> => {
-      try {
-        const result = await client.callTool({
-          name: tool,
-          arguments: (args ?? {}) as Record<string, unknown>
-        })
-        return { ok: true, result }
-      } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
-      }
-    }
-    return await fn(call)
+    return await fn((tool, args) => guardedCall(call, tool, args))
   } finally {
     await close()
   }
@@ -390,19 +495,18 @@ export async function callConnectorTool(
   id: number,
   tool: string,
   args: unknown
-): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+): Promise<ConnectorToolCallResult> {
   ensure()
   const c = getConnector(id)
   if (!c) return { ok: false, error: 'connector not found' }
   if (!c.enabled) return { ok: false, error: 'connector disabled' }
   try {
-    const { client, close } = await connect(c, false) // background → saved tokens only
-    const result = await client.callTool({
-      name: tool,
-      arguments: (args ?? {}) as Record<string, unknown>
-    })
-    await close()
-    return { ok: true, result }
+    const { call, close } = await openToolCaller(c)
+    try {
+      return await call(tool, args)
+    } finally {
+      await close()
+    }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

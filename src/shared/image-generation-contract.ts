@@ -67,25 +67,11 @@ export interface ImageGenerationJobContract {
   finishedAt: number | null
 }
 
-export const IMAGE_MEMORY_GUARD_ERROR_CODE = 'OFFGRID_IMAGE_MEMORY_LIMIT'
-
-export interface ImageMemoryGuardErrorContract {
-  code: typeof IMAGE_MEMORY_GUARD_ERROR_CODE
-  message: string
-}
-
-/** IPC preserves Error.message but not custom Error subclasses or properties. */
-export function imageMemoryGuardErrorMessage(message: string): string {
-  return `${IMAGE_MEMORY_GUARD_ERROR_CODE}:${message}`
-}
-
-export function parseImageMemoryGuardError(error: unknown): ImageMemoryGuardErrorContract | null {
-  const raw = error instanceof Error ? error.message : String(error ?? '')
-  const marker = `${IMAGE_MEMORY_GUARD_ERROR_CODE}:`
-  const markerIndex = raw.indexOf(marker)
-  if (markerIndex < 0) return null
-  return {
-    code: IMAGE_MEMORY_GUARD_ERROR_CODE,
-    message: raw.slice(markerIndex + marker.length).trim()
-  }
-}
+/** Wire contract owned by @offgrid/models so Mobile recognises the same refusal. */
+export {
+  IMAGE_MEMORY_GUARD_ERROR_CODE,
+  imageMemoryGuardErrorMessage,
+  imageModelAdmissionMessage,
+  parseImageMemoryGuardError,
+  type ImageMemoryGuardErrorContract
+} from '@offgrid/models'

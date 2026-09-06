@@ -22,7 +22,7 @@ describe('Vitest exclusive model-port scheduling', () => {
 
     expect(modelPort.include).toEqual(modelPortIntegrationTests)
     expect(modelPort.fileParallelism).toBe(false)
-    expect(modelPort.sequence?.groupOrder).toBe(1)
+    expect(modelPort.sequence?.groupOrder).toBe(2)
     expect(product.exclude).toEqual(expect.arrayContaining(modelPortIntegrationTests))
     expect(packaging.include).toEqual(packagingIntegrationTests)
     expect(packaging.fileParallelism).toBe(false)

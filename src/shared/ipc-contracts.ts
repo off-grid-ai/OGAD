@@ -1,4 +1,13 @@
 /** Electron IPC payloads shared by main, preload, and renderer type-checks. */
+import type { GuidedSetupProgress, RuntimeModel } from '@offgrid/models'
+import type { IndexStage, SetupReadiness } from '@offgrid/application'
+
+export interface ModelSetupStatusContract extends SetupReadiness {
+  readonly downloaded: boolean
+  readonly modelsDir: string
+}
+import type { GenerationMetrics } from './generation-metrics'
+
 export interface UserProfileContract {
   role?: string
   companySize?: string
@@ -47,6 +56,40 @@ export interface RagChatResultContract {
   answer: string
   context?: Record<string, unknown>
   cutoff?: ResponseCutoffContract
+  /** How the generation performed, when the run was measured. */
+  metrics?: GenerationMetrics
+  /** The route that produced the answer, after any fallback. */
+  model?: RuntimeModel
+}
+
+export const PROJECT_INDEX_PROGRESS_CHANNEL = 'projects:index-progress'
+
+/**
+ * Payload of `projects:index-progress`, sent once per indexing stage while a knowledge-base
+ * document is added. `stage` is the `@offgrid/rag` IndexStage; `error` exists only on the
+ * terminal `error` stage the main process adds when indexing throws.
+ */
+export type ProjectIndexProgressContract =
+  | { projectId: string; name: string; stage: IndexStage }
+  | { projectId: string; name: string; stage: 'error'; error: string }
+
+export const PROJECT_DOCUMENTS_CHANGED_CHANNEL = 'projects:documents-changed'
+
+/** Payload of `projects:documents-changed`: a knowledge-base project whose document list changed. */
+export interface ProjectDocumentsChangedContract {
+  projectId: string
+}
+
+export const SETUP_PROGRESS_CHANNEL = 'setup:progress'
+
+/** Payload of `setup:progress`: one guided-setup step, sent to the surface that started setup. */
+export type SetupProgressContract = GuidedSetupProgress
+
+export const UPDATE_DOWNLOADED_CHANNEL = 'update:downloaded'
+
+/** Payload of `update:downloaded`: the app version staged and ready to install on next quit. */
+export interface UpdateDownloadedContract {
+  version: string
 }
 
 /** One reply still owned by the main process, used to reattach chat UI after navigation. */
@@ -56,6 +99,8 @@ export interface ActiveChatStreamContract {
   messageId?: string
   content: string
   reasoning: string
+  /** The caller asked the remote/local model for thinking, even if no readable token arrived yet. */
+  reasoningRequested: boolean
   phase:
     | 'waiting'
     | 'thinking'
@@ -65,7 +110,7 @@ export interface ActiveChatStreamContract {
     | 'generating_image'
   tools?: Array<{
     name: string
-    status: 'running' | 'completed'
+    status: 'running' | 'completed' | 'failed' | 'pending'
     result?: string
   }>
 }
@@ -125,5 +170,24 @@ export interface CacheCleanupResultContract {
 }
 
 export const CACHE_CLEANUP_CHANNEL = 'storage:clear-cache'
+
+/**
+ * Result of `models:import` (file picker -> validate -> copy -> register).
+ * Exclusive union: the picker was dismissed, the GGUF was registered, or import failed.
+ */
+export type ModelImportResultContract =
+  | {
+      readonly canceled: true
+      readonly success?: never
+      readonly error?: never
+      readonly id?: never
+    }
+  | { readonly canceled?: never; readonly success: true; readonly id: string }
+  | {
+      readonly canceled?: never
+      readonly success: false
+      readonly error: string
+      readonly id?: never
+    }
 
 export type ArtifactKindContract = 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'

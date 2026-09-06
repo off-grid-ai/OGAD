@@ -44,13 +44,13 @@ describe('LLM settings sync contract', () => {
         entity: 'model_setting',
         entityId: 'temperature',
         kind: 'put',
-        fields: { value: 0.35 }
+        fields: { value: 0.35, version: 1 }
       },
       {
         entity: 'model_setting',
         entityId: 'topP',
         kind: 'put',
-        fields: { value: 0.8 }
+        fields: { value: 0.8, version: 1 }
       }
     ])
     expect(
@@ -60,5 +60,34 @@ describe('LLM settings sync contract', () => {
     await settings.setSettings({ temperature: 0.55 }, { emitSync: false })
     expect(settings.getSettings().temperature).toBe(0.55)
     expect(mutations).toHaveLength(2)
+  })
+
+  it('defaults, clamps, persists, and syncs the maximum tool-call setting', async () => {
+    const mutations: SyncMutation[] = []
+    const [{ registerHook, HOOKS }, { LLMService }] = await Promise.all([
+      import('../../bootstrap/hookRegistry'),
+      import('../../llm')
+    ])
+    registerHook(HOOKS.syncRecordLocalMutation, (mutation: SyncMutation) => {
+      mutations.push(mutation)
+    })
+    const settings = new LLMService()
+
+    expect(settings.getSettings().maxToolCalls).toBe(25)
+
+    await settings.setSettings({ maxToolCalls: 120 })
+
+    expect(settings.getSettings().maxToolCalls).toBe(100)
+    expect(
+      JSON.parse(fs.readFileSync(path.join(dataDir, 'models', 'llm-settings.json'), 'utf8'))
+    ).toMatchObject({ maxToolCalls: 100 })
+    expect(mutations).toEqual([
+      {
+        entity: 'model_setting',
+        entityId: 'maxToolCalls',
+        kind: 'put',
+        fields: { value: 100, version: 1 }
+      }
+    ])
   })
 })

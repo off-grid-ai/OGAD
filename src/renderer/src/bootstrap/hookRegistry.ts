@@ -15,3 +15,7 @@ export function callHook<R = unknown>(name: string, ...args: unknown[]): R | und
   const fn = hooks[name]
   return fn ? (fn(...args) as R) : undefined
 }
+
+export function clearRegisteredHooks(): void {
+  for (const name of Object.keys(hooks)) delete hooks[name]
+}

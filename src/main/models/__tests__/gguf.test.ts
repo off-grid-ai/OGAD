@@ -7,22 +7,23 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { isValidGgufHeader, isValidGgufFile, GGUF_MIN_BYTES } from '../gguf'
+import { GGUF_MIN_BYTES, verifyArtifactFacts } from '@offgrid/models'
+import { verifyArtifactFile } from '../gguf'
 
 describe('isValidGgufHeader — pure size + magic judgement', () => {
   it('accepts a big-enough file whose first four bytes are the GGUF magic', () => {
-    expect(isValidGgufHeader(GGUF_MIN_BYTES, Buffer.from('GGUF', 'ascii'))).toBe(true)
-    expect(isValidGgufHeader(10_000_000, Buffer.from('GGUF', 'ascii'))).toBe(true)
+    expect(verifyArtifactFacts({ request: { path: 'x', name: 'x.gguf', origin: 'runtime' }, stat: { exists: true, isFile: true, sizeBytes: GGUF_MIN_BYTES }, prefix: Buffer.from('GGUF') }).valid).toBe(true)
+    expect(verifyArtifactFacts({ request: { path: 'x', name: 'x.gguf', origin: 'runtime' }, stat: { exists: true, isFile: true, sizeBytes: 10_000_000 }, prefix: Buffer.from('GGUF') }).valid).toBe(true)
   })
 
   it('rejects a file under the minimum size even with the right magic', () => {
-    expect(isValidGgufHeader(GGUF_MIN_BYTES - 1, Buffer.from('GGUF', 'ascii'))).toBe(false)
-    expect(isValidGgufHeader(0, Buffer.from('GGUF', 'ascii'))).toBe(false)
+    expect(verifyArtifactFacts({ request: { path: 'x', name: 'x.gguf', origin: 'runtime' }, stat: { exists: true, isFile: true, sizeBytes: GGUF_MIN_BYTES - 1 }, prefix: Buffer.from('GGUF') }).valid).toBe(false)
+    expect(verifyArtifactFacts({ request: { path: 'x', name: 'x.gguf', origin: 'runtime' }, stat: { exists: true, isFile: true, sizeBytes: 0 }, prefix: Buffer.from('GGUF') }).valid).toBe(false)
   })
 
   it('rejects a big-enough file with the wrong magic', () => {
-    expect(isValidGgufHeader(10_000_000, Buffer.from('ELF\0', 'ascii'))).toBe(false)
-    expect(isValidGgufHeader(10_000_000, Buffer.from('\0\0\0\0', 'binary'))).toBe(false)
+    expect(verifyArtifactFacts({ request: { path: 'x', name: 'x.gguf', origin: 'runtime' }, stat: { exists: true, isFile: true, sizeBytes: 10_000_000 }, prefix: Buffer.from('ELF\0') }).valid).toBe(false)
+    expect(verifyArtifactFacts({ request: { path: 'x', name: 'x.gguf', origin: 'runtime' }, stat: { exists: true, isFile: true, sizeBytes: 10_000_000 }, prefix: Buffer.alloc(4) }).valid).toBe(false)
   })
 })
 
@@ -41,21 +42,21 @@ describe('isValidGgufFile — real files in a temp dir', () => {
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  it('accepts a real file with the GGUF magic and enough padding', () => {
+  it('accepts a real file with the GGUF magic and enough padding', async () => {
     const buf = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(GGUF_MIN_BYTES)])
-    expect(isValidGgufFile(write('good.gguf', buf), fs)).toBe(true)
+    expect((await verifyArtifactFile(write('good.gguf', buf), fs, 'runtime')).valid).toBe(true)
   })
 
-  it('rejects a truncated file (right magic but under the size floor)', () => {
-    expect(isValidGgufFile(write('tiny.gguf', Buffer.from('GGUF', 'ascii')), fs)).toBe(false)
+  it('rejects a truncated file (right magic but under the size floor)', async () => {
+    expect((await verifyArtifactFile(write('tiny.gguf', Buffer.from('GGUF', 'ascii')), fs, 'runtime')).valid).toBe(false)
   })
 
-  it('rejects a big file with the wrong magic (corrupt/other format)', () => {
+  it('rejects a big file with the wrong magic (corrupt/other format)', async () => {
     const buf = Buffer.concat([Buffer.from('%PDF', 'ascii'), Buffer.alloc(GGUF_MIN_BYTES)])
-    expect(isValidGgufFile(write('wrong.gguf', buf), fs)).toBe(false)
+    expect((await verifyArtifactFile(write('wrong.gguf', buf), fs, 'runtime')).valid).toBe(false)
   })
 
-  it('returns false (never throws) for a nonexistent file', () => {
-    expect(isValidGgufFile(path.join(dir, 'nope.gguf'), fs)).toBe(false)
+  it('returns false (never throws) for a nonexistent file', async () => {
+    expect((await verifyArtifactFile(path.join(dir, 'nope.gguf'), fs, 'runtime')).valid).toBe(false)
   })
 })

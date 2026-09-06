@@ -1,4 +1,6 @@
-import { useEffect, useState, useCallback, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, type ReactElement } from 'react'
+import { ConnectorPullQueryField } from './ConnectorPullQueryField'
+import { ConnectorSecretsForm } from './ConnectorSecretsForm'
 import {
   IconLoader2,
   IconPlug,
@@ -9,8 +11,10 @@ import {
   IconCircleCheck,
   IconRefresh,
   IconChevronRight,
-  IconChevronLeft
+  IconChevronLeft,
+  IconX
 } from '@tabler/icons-react'
+import { connectorFailureReason } from '@offgrid/application'
 import {
   CONNECTOR_CATALOG,
   CATEGORY_ORDER,
@@ -28,18 +32,23 @@ const LOGO_OVERRIDE: Record<string, string> = { slack: slackLogo }
 // client is configured so the card can gate its Connect button.
 function ConnectorSetup({
   entry,
+  connectorId,
+  compact,
   onReadyChange
 }: {
   entry: CatalogEntry
-  onReadyChange: (ready: boolean) => void
+  connectorId?: number
+  compact?: boolean
+  onReadyChange?: (ready: boolean) => void
 }): ReactElement | null {
   const Slot = getSlot(SLOTS.connectorSetup)
   if (entry.oauthClient !== 'byo' || !Slot) return null
-  return <Slot entry={entry} onReadyChange={onReadyChange} />
+  // The Pro slot is registered at runtime after the core bundle loads, so it must be resolved here.
+  return (
+    // eslint-disable-next-line react-hooks/static-components
+    <Slot entry={entry} connectorId={connectorId} compact={compact} onReadyChange={onReadyChange} />
+  )
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
 
 interface Connector {
   id: number
@@ -102,18 +111,6 @@ const LOGO_SLUGS: Record<string, string> = {
 
 // How to obtain credentials for token-based connectors (shown in the connect form).
 
-// Turn raw transport errors into something human.
-function cleanError(detail: string): string {
-  const d = detail || ''
-  if (
-    /invalid_token|Missing or invalid access token|401|unauthorized|Authorization required/i.test(d)
-  )
-    return 'Sign-in required — click Test to authorize in your browser.'
-  if (/<!DOCTYPE html|<html|404|not found/i.test(d)) return 'Endpoint not reachable.'
-  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(d)) return 'Could not reach the server.'
-  return d.length > 140 ? d.slice(0, 140) + '…' : d
-}
-
 function Badge({
   id,
   color,
@@ -145,23 +142,115 @@ function Badge({
   )
 }
 
-export function ConnectorsScreen() {
+interface ConnectorConnectControlsProps {
+  entry: CatalogEntry
+  byoReady: boolean
+  connecting: boolean
+  error: string
+  onConnect: () => void
+  onCancel: () => void
+}
+
+function ConnectorConnectControls({
+  entry,
+  byoReady,
+  connecting,
+  error,
+  onConnect,
+  onCancel
+}: Readonly<ConnectorConnectControlsProps>): ReactElement {
+  const byoBlocked = entry.oauthClient === 'byo' && !byoReady
+  const isAuthorizing = connecting && entry.auth === 'oauth'
+  const progressLabel = isAuthorizing ? 'Authorize in browser…' : 'Connecting…'
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-1.5">
+        <button
+          onClick={onConnect}
+          disabled={byoBlocked || connecting}
+          title={byoBlocked ? 'Set up your Google client first' : undefined}
+          className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-neutral-700 py-1.5 text-xs text-neutral-200 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:text-neutral-200"
+        >
+          {connecting ? (
+            <>
+              <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> {progressLabel}
+            </>
+          ) : (
+            <>
+              <IconPlugConnected className="h-3.5 w-3.5" /> Connect
+              {entry.auth === 'oauth' ? ' with OAuth' : ''}
+            </>
+          )}
+        </button>
+        {isAuthorizing && (
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="Cancel authorization"
+            title="Cancel authorization"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md border border-neutral-700 text-neutral-400 transition-colors hover:border-red-500 hover:text-red-400"
+          >
+            <IconX className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      {error && <p className="text-[11px] leading-relaxed text-red-400/80">{error}</p>}
+    </div>
+  )
+}
+
+async function removePendingConnector(id: number | undefined): Promise<void> {
+  if (id == null) return
+  await window.api.mcpRemove(id)
+}
+
+async function persistConnectorSecrets(
+  id: number | undefined,
+  secretValues: Record<string, string>
+): Promise<void> {
+  if (id == null) return
+  for (const [key, value] of Object.entries(secretValues)) {
+    if (value) await window.api.secretsSet(`connector:${id}:${key}`, value)
+  }
+}
+
+interface ConnectionOutcome {
+  connected: boolean
+  error?: string
+}
+
+async function settleConnectionAttempt(
+  id: number | undefined,
+  cancelled: boolean,
+  result: { ok?: boolean; error?: string } | undefined
+): Promise<ConnectionOutcome> {
+  if (cancelled) {
+    await removePendingConnector(id)
+    return { connected: false }
+  }
+  if (result?.ok) return { connected: true }
+  await removePendingConnector(id)
+  return { connected: false, error: connectorFailureReason(result?.error ?? 'Could not connect') }
+}
+
+export function ConnectorsScreen(): ReactElement {
   const [items, setItems] = useState<Connector[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
   const [testingId, setTestingId] = useState<number | null>(null)
   const [syncingId, setSyncingId] = useState<number | null>(null)
   const [syncMsg, setSyncMsg] = useState<string>('')
-  const [queries, setQueries] = useState<Record<number, string>>({})
   const [detailId, setDetailId] = useState<number | null>(null)
   const [tab, setTab] = useState<'all' | 'connected' | 'disconnected'>('all')
   const [syncedItems, setSyncedItems] = useState<
     { id: number; summary: string; ts: string; url: string | null }[]
   >([])
   const [connecting, setConnecting] = useState<string | null>(null)
+  const pendingConnectorIds = useRef(new Map<string, number>())
+  const cancelledConnections = useRef(new Set<string>())
   const [errorFor, setErrorFor] = useState<Record<string, string>>({})
   const [tokenFor, setTokenFor] = useState<CatalogEntry | null>(null)
-  const [tokenVals, setTokenVals] = useState<Record<string, string>>({})
   // Whether a BYO-OAuth connector has its client configured yet (reported by the
   // setup slot). Connect stays gated until it's true — no OAuth without a client.
   const [byoReady, setByoReady] = useState<Record<string, boolean>>({})
@@ -176,7 +265,7 @@ export function ConnectorsScreen() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setItems((await api.mcpList?.()) ?? [])
+      setItems((await window.api.mcpList()) ?? [])
     } finally {
       setLoading(false)
     }
@@ -185,18 +274,25 @@ export function ConnectorsScreen() {
     void load()
   }, [load])
 
-  const installed = new Set(items.map((i) => i.name.toLowerCase()))
-  const gallery = CONNECTOR_CATALOG.filter((e) => !installed.has(e.name.toLowerCase()))
+  // The gallery is every catalog connector that is not installed. It changes only when the
+  // installed list changes, so it is not rebuilt on every keystroke or sync tick.
+  const gallery = useMemo(() => {
+    const installed = new Set(items.map((i) => i.name.toLowerCase()))
+    return CONNECTOR_CATALOG.filter(
+      (e) => e.oauthClient === 'byo' || !installed.has(e.name.toLowerCase())
+    )
+  }, [items])
 
   const doConnect = async (
     entry: CatalogEntry,
     secretVals: Record<string, string>
   ): Promise<void> => {
     setConnecting(entry.id)
+    cancelledConnections.current.delete(entry.id)
     setErrorFor((p) => ({ ...p, [entry.id]: '' }))
     let id: number | undefined
     try {
-      id = await api.mcpAdd?.({
+      id = await window.api.mcpAdd({
         name: entry.name,
         transport: entry.transport,
         url: entry.url,
@@ -204,35 +300,56 @@ export function ConnectorsScreen() {
         args: entry.args,
         envKeys: entry.secrets?.map((s) => s.key)
       })
-      for (const [k, v] of Object.entries(secretVals)) {
-        if (v && id != null) await api.secretsSet?.(`connector:${id}:${k}`, v)
+      if (id == null) throw new Error('Connector was not created')
+      pendingConnectorIds.current.set(entry.id, id)
+      if (cancelledConnections.current.has(entry.id)) {
+        await removePendingConnector(id)
+        return
       }
-      const res = await api.mcpTest?.(id)
-      if (res?.ok) {
+      await persistConnectorSecrets(id, secretVals)
+      const res = await window.api.mcpTest(id)
+      const outcome = await settleConnectionAttempt(
+        id,
+        cancelledConnections.current.has(entry.id),
+        res
+      )
+      if (outcome.connected) {
         // Truly connected → it moves into "Connected" and out of the gallery.
+        // The secrets form closes with the card, and the typed secrets go with it.
         setTokenFor(null)
-        setTokenVals({})
-      } else {
-        // Not connected — roll back so it doesn't litter "Connected"; show error here.
-        if (id != null) await api.mcpRemove?.(id)
-        setErrorFor((p) => ({ ...p, [entry.id]: cleanError(res?.error ?? 'Could not connect') }))
+      } else if (outcome.error) {
+        setErrorFor((p) => ({ ...p, [entry.id]: outcome.error ?? '' }))
       }
     } catch (e) {
-      if (id != null) await api.mcpRemove?.(id)
-      setErrorFor((p) => ({
-        ...p,
-        [entry.id]: e instanceof Error ? e.message : 'Could not connect'
-      }))
+      await removePendingConnector(id)
+      if (!cancelledConnections.current.has(entry.id)) {
+        setErrorFor((p) => ({
+          ...p,
+          [entry.id]: e instanceof Error ? e.message : 'Could not connect'
+        }))
+      }
     } finally {
+      pendingConnectorIds.current.delete(entry.id)
+      cancelledConnections.current.delete(entry.id)
       setConnecting(null)
       load()
+    }
+  }
+
+  const cancelConnect = async (entryId: string): Promise<void> => {
+    cancelledConnections.current.add(entryId)
+    const connectorId = pendingConnectorIds.current.get(entryId)
+    if (connectorId == null) return
+    try {
+      await window.api.mcpRemove(connectorId)
+    } catch {
+      // The in-flight connect owns final cleanup and will restore the card state.
     }
   }
 
   const onConnect = (entry: CatalogEntry): void => {
     if (entry.auth === 'token' && entry.secrets?.length) {
       setTokenFor(entry)
-      setTokenVals({})
     } else {
       void doConnect(entry, {})
     }
@@ -240,7 +357,7 @@ export function ConnectorsScreen() {
 
   const addCustom = async (): Promise<void> => {
     if (!name.trim()) return
-    await api.mcpAdd?.({
+    await window.api.mcpAdd({
       name: name.trim(),
       transport,
       url: transport === 'http' ? url.trim() : undefined,
@@ -258,25 +375,25 @@ export function ConnectorsScreen() {
   const test = async (id: number): Promise<void> => {
     setTestingId(id)
     try {
-      await api.mcpTest?.(id)
+      await window.api.mcpTest(id)
     } finally {
       setTestingId(null)
       load()
     }
   }
   const toggle = async (id: number, enabled: boolean): Promise<void> => {
-    await api.mcpSetEnabled?.(id, enabled)
+    await window.api.mcpSetEnabled(id, enabled)
     load()
   }
   const remove = async (id: number): Promise<void> => {
-    await api.mcpRemove?.(id)
+    await window.api.mcpRemove(id)
     load()
   }
   const sync = async (id: number, query?: string): Promise<void> => {
     setSyncingId(id)
     setSyncMsg('')
     try {
-      const res = await api.mcpIngest?.(id, query)
+      const res = await window.api.mcpIngest(id, query)
       if (res && !res.ok) setSyncMsg(res.error ?? 'Sync failed')
       else if (res && res.count === 0) setSyncMsg('Synced — nothing new found.')
       else if (res) setSyncMsg(`Synced ${res.count} item${res.count === 1 ? '' : 's'}.`)
@@ -284,12 +401,12 @@ export function ConnectorsScreen() {
       setSyncingId(null)
       load()
       const c = items.find((x) => x.id === id)
-      if (c) setSyncedItems((await api.mcpItems?.(c.name)) ?? [])
+      if (c) setSyncedItems((await window.api.mcpItems(c.name)) ?? [])
     }
   }
   const openDetail = async (c: Connector): Promise<void> => {
     setDetailId(c.id)
-    setSyncedItems((await api.mcpItems?.(c.name)) ?? [])
+    setSyncedItems((await window.api.mcpItems(c.name)) ?? [])
   }
   const fmtAgo = (ms: number | null): string => {
     if (!ms) return 'never'
@@ -349,6 +466,7 @@ export function ConnectorsScreen() {
               : []
             return (
               <div className="mx-auto max-w-[1500px] space-y-5">
+                {dcat && <ConnectorSetup entry={dcat} connectorId={detail.id} />}
                 <button
                   onClick={() => {
                     setDetailId(null)
@@ -426,7 +544,9 @@ export function ConnectorsScreen() {
                   </p>
                 )}
                 {!dNotReady && detail.status === 'error' && detail.status_detail && (
-                  <p className="text-[11px] text-red-400/80">{cleanError(detail.status_detail)}</p>
+                  <p className="text-[11px] text-red-400/80">
+                    {connectorFailureReason(detail.status_detail)}
+                  </p>
                 )}
 
                 {!dNotReady && detail.status === 'ok' && (
@@ -443,23 +563,12 @@ export function ConnectorsScreen() {
                       )}{' '}
                       Sync recent
                     </button>
-                    <input
-                      value={queries[detail.id] ?? ''}
-                      onChange={(e) => setQueries((p) => ({ ...p, [detail.id]: e.target.value }))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && queries[detail.id]?.trim())
-                          sync(detail.id, queries[detail.id])
-                      }}
-                      placeholder={`Ask ${detail.name} for… (e.g. ABSLI)`}
-                      className="flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-neutral-600"
+                    <ConnectorPullQueryField
+                      key={detail.id}
+                      connectorName={detail.name}
+                      disabled={syncingId === detail.id}
+                      onPull={(query) => void sync(detail.id, query)}
                     />
-                    <button
-                      onClick={() => sync(detail.id, queries[detail.id])}
-                      disabled={syncingId === detail.id || !queries[detail.id]?.trim()}
-                      className="shrink-0 rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:opacity-40"
-                    >
-                      Pull
-                    </button>
                   </div>
                 )}
                 {syncMsg && (
@@ -643,73 +752,21 @@ export function ConnectorsScreen() {
                                     )}
                                   </p>
                                 )}
-                                {e.secrets?.map((s) => (
-                                  <input
-                                    key={s.key}
-                                    type="password"
-                                    value={tokenVals[s.key] ?? ''}
-                                    onChange={(ev) =>
-                                      setTokenVals((p) => ({ ...p, [s.key]: ev.target.value }))
-                                    }
-                                    placeholder={
-                                      s.label + (s.placeholder ? ` (${s.placeholder})` : '')
-                                    }
-                                    className="w-full rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-neutral-600"
-                                  />
-                                ))}
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => doConnect(e, tokenVals)}
-                                    className="rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400"
-                                  >
-                                    Connect
-                                  </button>
-                                  <button
-                                    onClick={() => setTokenFor(null)}
-                                    className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-400"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
+                                <ConnectorSecretsForm
+                                  secrets={e.secrets ?? []}
+                                  onConnect={(secrets) => void doConnect(e, secrets)}
+                                  onCancel={() => setTokenFor(null)}
+                                />
                               </div>
                             ) : (
-                              (() => {
-                                // A BYO-OAuth connector can't authorize until its client is
-                                // set up — gate Connect on the slot's readiness instead of
-                                // letting the user hit an OAuth flow that would fail.
-                                const byoBlocked = e.oauthClient === 'byo' && !byoReady[e.id]
-                                return (
-                                  <div className="space-y-1.5">
-                                    <button
-                                      onClick={() => onConnect(e)}
-                                      disabled={connecting === e.id || byoBlocked}
-                                      title={
-                                        byoBlocked ? 'Set up your Google client first' : undefined
-                                      }
-                                      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-neutral-700 py-1.5 text-xs text-neutral-200 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:text-neutral-200"
-                                    >
-                                      {connecting === e.id ? (
-                                        <>
-                                          <IconLoader2 className="h-3.5 w-3.5 animate-spin" />{' '}
-                                          {e.auth === 'oauth'
-                                            ? 'Authorize in browser…'
-                                            : 'Connecting…'}
-                                        </>
-                                      ) : (
-                                        <>
-                                          <IconPlugConnected className="h-3.5 w-3.5" /> Connect
-                                          {e.auth === 'oauth' ? ' with OAuth' : ''}
-                                        </>
-                                      )}
-                                    </button>
-                                    {errorFor[e.id] && (
-                                      <p className="text-[11px] leading-relaxed text-red-400/80">
-                                        {errorFor[e.id]}
-                                      </p>
-                                    )}
-                                  </div>
-                                )
-                              })()
+                              <ConnectorConnectControls
+                                entry={e}
+                                byoReady={Boolean(byoReady[e.id])}
+                                connecting={connecting === e.id}
+                                error={errorFor[e.id] ?? ''}
+                                onConnect={() => onConnect(e)}
+                                onCancel={() => void cancelConnect(e.id)}
+                              />
                             )}
                           </div>
                         ))}
@@ -754,6 +811,7 @@ export function ConnectorsScreen() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-neutral-100">{c.name}</span>
+                                {cat && <ConnectorSetup entry={cat} connectorId={c.id} compact />}
                                 {notReady ? (
                                   <span className="rounded-sm bg-neutral-800 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500">
                                     disabled · preview

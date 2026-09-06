@@ -123,7 +123,7 @@ describe('rag/store.ts - VectorStore documents + chunks', () => {
     store.updateProject(projectId, { includeMemory: false })
 
     // MiniLM is an uncontrollable local-model boundary in this suite. This faithful
-    // deterministic provider preserves semantic separation while all Off Grid
+    // deterministic provider preserves semantic separation while all Off Grid AI
     // extraction, chunking, storage, and retrieval code stays real.
     const service = new RagService({
       store: store.desktopVectorStore,

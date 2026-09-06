@@ -2,7 +2,8 @@
  * MCP tool extension integration over the real connector database. Only the remote
  * MCP transport and private pro approval hook are faked boundaries.
  */
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createUseApplication, parseActionProposal, type UseApplication } from '@offgrid/use'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -25,6 +26,11 @@ import {
   type McpConnectorToolBoundary
 } from '../tools/mcpConnectorToolExtension'
 import type { ConnectorToolDefinition } from '../tools/mcpConnectorToolExtension-logic'
+import { makeUseDriver } from '../actions/use-driver'
+import { makeConnectorRailExecutor } from '../actions/connector-rail'
+import type { ChatConnectorActionsPort } from '../actions/chat-connector-action'
+import { gateHost, onActionParked } from '../actions/gate-host'
+import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 
 interface ToolExecution {
   connectorId: number
@@ -38,8 +44,7 @@ class FakeMcpBoundary implements McpConnectorToolBoundary {
   readonly tools = new Map<number, ConnectorToolDefinition[] | Error>()
   readonly results = new Map<string, ToolResult | Error>()
   readonly executions: ToolExecution[] = []
-  readonly approvals: Record<string, unknown>[] = []
-  approveWrites = false
+  actions?: ChatConnectorActionsPort
 
   async fetchTools(connectorId: number): Promise<ConnectorToolDefinition[]> {
     const tools = this.tools.get(connectorId) ?? []
@@ -61,21 +66,65 @@ class FakeMcpBoundary implements McpConnectorToolBoundary {
     }
     return result
   }
+}
 
-  proposeApproval(request: Record<string, unknown>): boolean {
-    this.approvals.push(request)
-    return this.approveWrites
+function realActionsPort(boundary: FakeMcpBoundary): ChatConnectorActionsPort {
+  const execute = makeConnectorRailExecutor((connectorId, tool, args) =>
+    boundary.callTool(connectorId, tool, args)
+  )
+  const application = createUseApplication({
+    driver: makeUseDriver(getDB()),
+    handlers: [
+      {
+        type: 'connector',
+        rail: 'connector',
+        defaultRisk: 'mutate',
+        verification: 'none_fuzzy'
+      }
+    ],
+    gate: gateHost,
+    device: { execute },
+    park: { onParked: () => () => {}, onActionParked: () => () => {} },
+    scheduler: {
+      every: (intervalMs, listener) => {
+        const timer = setInterval(listener, intervalMs)
+        timer.unref()
+        return () => clearInterval(timer)
+      },
+      after: (delayMs, listener) => {
+        const timer = setTimeout(listener, delayMs)
+        timer.unref()
+        return () => clearTimeout(timer)
+      }
+    },
+    attemptTimeoutMs: 1_000
+  })
+  applications.push(application)
+  return {
+    async propose(input, meta) {
+      const parsed = parseActionProposal(input)
+      if (!parsed.ok) return { accepted: false, reason: parsed.error }
+      return application.run({ proposal: parsed.value, ...meta })
+    },
+    waitForOutcome: (id, timeoutMs) => application.waitForOutcome(id, timeoutMs),
+    onParked: onActionParked,
+    kick: () => application.kick()
   }
 }
 
 let boundary: FakeMcpBoundary
 let extension: McpConnectorToolExtension
+const applications: UseApplication[] = []
 
 beforeEach(() => {
   listConnectors()
   getDB().exec('DELETE FROM connectors')
   boundary = new FakeMcpBoundary()
   extension = new McpConnectorToolExtension(boundary)
+})
+
+afterEach(async () => {
+  await Promise.all(applications.splice(0).map((application) => application.stop()))
 })
 
 afterAll(() => {
@@ -118,7 +167,7 @@ describe('McpConnectorToolExtension with real connector state', () => {
     ])
   })
 
-  it('persists an error for a failed connector while retaining healthy schemas', async () => {
+  it('omits a failed connector while retaining healthy schemas', async () => {
     const failedId = addHttpConnector('Notion')
     const healthyId = addHttpConnector('Files')
     boundary.tools.set(failedId, new Error('Authorization required'))
@@ -128,8 +177,9 @@ describe('McpConnectorToolExtension with real connector state', () => {
 
     expect(schemas.map((schema) => schema.function.name)).toEqual([`mcp__${healthyId}__read_file`])
     const failed = listConnectors().find((connector) => connector.id === failedId)
-    expect(failed?.status).toBe('error')
-    expect(failed?.status_detail).toContain('Authorization required')
+    // The application service behind the production boundary owns discovery
+    // persistence. This extension only projects the tools returned by its port.
+    expect(failed?.status).toBe('unknown')
   })
 
   it('returns an error for a tool that was not registered by schema discovery', async () => {
@@ -138,23 +188,48 @@ describe('McpConnectorToolExtension with real connector state', () => {
     )
   })
 
-  it('queues write tools for pro approval without changing the remote system', async () => {
+  it('runs a Chat connector mutation through the durable engine while the Pro approval hook is active', async () => {
     const connectorId = addHttpConnector('Slack')
     boundary.tools.set(connectorId, [{ name: 'send_message' }])
-    boundary.approveWrites = true
+    boundary.results.set('send_message', { ok: true, result: { messageId: 'slack-1' } })
+    boundary.actions = realActionsPort(boundary)
+    const proposeApproval = vi.fn(() => true)
+    registerHook(HOOKS.actionsProposeApproval, proposeApproval)
     await extension.schemas()
 
-    const output = await extension.execute(`mcp__${connectorId}__send_message`, { text: 'hi' })
+    try {
+      const output = await extension.execute(
+        `mcp__${connectorId}__send_message`,
+        { text: 'hi' },
+        { conversationId: 'chat-slack-1' }
+      )
 
-    expect(output).toContain('Queued for the user')
-    expect(boundary.approvals).toEqual([
-      expect.objectContaining({
-        connectorId,
-        tool: 'send_message',
-        connector: 'Slack',
-        args: { text: 'hi' }
-      })
-    ])
+      expect(output).toContain('"messageId":"slack-1"')
+      expect(output).toContain('Action reference:')
+      expect(output).not.toMatch(/queued|approval/i)
+      expect(proposeApproval).not.toHaveBeenCalled()
+      expect(boundary.executions).toEqual([
+        { connectorId, tool: 'send_message', args: { text: 'hi' } }
+      ])
+    } finally {
+      unregisterHook(HOOKS.actionsProposeApproval, proposeApproval)
+    }
+  })
+
+  it('fails honestly when a Chat connector mutation has no durable engine', async () => {
+    const connectorId = addHttpConnector('Slack')
+    boundary.tools.set(connectorId, [{ name: 'send_message' }])
+    await extension.schemas()
+
+    const output = await extension.execute(
+      `mcp__${connectorId}__send_message`,
+      { text: 'hi' },
+      { conversationId: 'chat-slack-2' }
+    )
+
+    expect(output).toContain('action engine')
+    expect(output).toContain('No approval was created')
+    expect(output).not.toContain('Queued')
     expect(boundary.executions).toEqual([])
   })
 
@@ -167,7 +242,6 @@ describe('McpConnectorToolExtension with real connector state', () => {
     expect(await extension.execute(`mcp__${connectorId}__list_channels`, {})).toBe(
       '{"channels":["general"]}'
     )
-    expect(boundary.approvals).toEqual([])
     expect(boundary.executions).toEqual([{ connectorId, tool: 'list_channels', args: {} }])
   })
 

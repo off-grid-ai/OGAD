@@ -1,23 +1,26 @@
 /**
  * RELEASE_TEST_CHECKLIST #105 - the rendered Speak action reaches the production
  * TTS path, strips markdown for speech, returns playable local WAV audio, and can
- * be stopped. The heavyweight ONNX worker is the only replaced boundary.
+ * be stopped. The native ExecuTorch speech executable and its model assets are
+ * the only replaced boundary.
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 
 let app: ElectronApplication
 let page: Page
 let userDataDir: string
 let resourceDir: string
 let spokenTextPath: string
+let diagnosticLogPath: string
 
 async function finishOnboarding(): Promise<void> {
   for (let step = 0; step < 8; step += 1) {
-    const button = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const button = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await button.isVisible().catch(() => false))) return
     await button.click()
   }
@@ -28,14 +31,43 @@ async function dismissCapturePrompt(): Promise<void> {
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click()
 }
 
-function writeWorkerFixture(): void {
-  fs.mkdirSync(resourceDir, { recursive: true })
+function bundledAssetName(assetName: string, url: string): string {
+  const sourceId = createHash('sha256').update(url).digest('hex').slice(0, 12)
+  return `${assetName}-${sourceId}-${path.basename(new URL(url).pathname)}`
+}
+
+function writeSpeechBoundary(): void {
+  const speechCapabilities = JSON.parse(
+    fs.readFileSync(
+      path.resolve('node_modules/@offgrid/executorch-speech/generated/capabilities.json'),
+      'utf8'
+    )
+  ) as { voices: Array<{ assets: Record<string, string> }> }
+  const executableDir = path.join(resourceDir, 'bin')
+  const assetsDir = path.join(resourceDir, 'speech-assets')
+  fs.mkdirSync(executableDir, { recursive: true })
+  fs.mkdirSync(assetsDir, { recursive: true })
+  const index: Record<string, { url: string; bytes: number }> = {}
+  for (const voice of speechCapabilities.voices) {
+    for (const [assetName, url] of Object.entries(voice.assets)) {
+      if (typeof url !== 'string') continue
+      const fileName = bundledAssetName(assetName, url)
+      if (index[fileName]) continue
+      const bytes = Buffer.from(`e2e-${assetName}`)
+      fs.writeFileSync(path.join(assetsDir, fileName), bytes)
+      index[fileName] = { url, bytes: bytes.length }
+    }
+  }
+  fs.writeFileSync(path.join(assetsDir, 'index.json'), JSON.stringify(index))
   fs.writeFileSync(
-    path.join(resourceDir, 'tts-worker.mjs'),
+    path.join(executableDir, 'executorch-speech'),
     [
-      "import fs from 'node:fs'",
-      'const [, , command, output] = process.argv',
-      "if (command !== 'speak' || !output) process.exit(2)",
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs')",
+      'const args = process.argv.slice(2)',
+      "const outputIndex = args.indexOf('--output')",
+      'const output = outputIndex >= 0 ? args[outputIndex + 1] : null',
+      'if (!output) process.exit(2)',
       "let input = ''",
       "process.stdin.setEncoding('utf8')",
       "process.stdin.on('data', chunk => { input += chunk })",
@@ -73,7 +105,8 @@ test.beforeAll(async () => {
   userDataDir = path.join(root, 'profile')
   resourceDir = path.join(root, 'resources')
   spokenTextPath = path.join(root, 'spoken.txt')
-  writeWorkerFixture()
+  diagnosticLogPath = path.join(root, 'diagnostic.log')
+  writeSpeechBoundary()
 
   app = await launchOffGrid({
     env: {
@@ -81,6 +114,7 @@ test.beforeAll(async () => {
       OFFGRID_USER_DATA: userDataDir,
       OFFGRID_RESOURCE_DIR: resourceDir,
       OFFGRID_TTS_CAPTURE: spokenTextPath,
+      OFFGRID_DIAGNOSTIC_LOG: diagnosticLogPath,
       OFFGRID_PRO: '1',
       NODE_ENV: 'production'
     }
@@ -107,24 +141,41 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await app?.close()
-  fs.rmSync(path.dirname(userDataDir), { recursive: true, force: true })
+  if (process.env.OFFGRID_KEEP_E2E_PROFILE !== '1') {
+    fs.rmSync(path.dirname(userDataDir), { recursive: true, force: true })
+  }
 })
 
 test('Speak sends clean text through production TTS and plays local WAV audio (#105)', async () => {
-  await expect(page.getByText('A local reply with code', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'A local reply with code' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Speak', exact: true }).click()
-  // Generous for the PACKAGED build: first synthesis spawns the TTS worker from inside the
+  // Generous for the PACKAGED build: first synthesis starts the speech executable from inside the
   // signed bundle, which is slower to start than the dev path (the same cold-start effect that
   // makes the packaged gateway need ~25s in smoke.spec.ts).
-  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible({
-    timeout: 45_000
-  })
-  // The markdown-stripping assertion relies on the FAKE tts-worker injected via
+  const stop = page.getByRole('button', { name: 'Stop', exact: true })
+  const failure = page.getByRole('alert')
+  const speechState = await Promise.race([
+    stop.waitFor({ state: 'visible', timeout: 45_000 }).then(() => 'ready' as const),
+    failure.waitFor({ state: 'visible', timeout: 45_000 }).then(() => 'failed' as const)
+  ])
+  if (speechState === 'failed') {
+    const diagnostics = fs.existsSync(diagnosticLogPath)
+      ? fs
+          .readFileSync(diagnosticLogPath, 'utf8')
+          .trim()
+          .split('\n')
+          .filter((line) => /\[(?:tts|generation)\]|voice/i.test(line))
+          .slice(-8)
+          .join(' | ')
+      : 'no diagnostics'
+    throw new Error(`Speech boundary failed: ${diagnostics}`)
+  }
+  // The markdown-stripping assertion relies on the scripted ExecuTorch-compatible boundary injected via
   // OFFGRID_RESOURCE_DIR. A packaged host deliberately ignores that override for executable
   // code (runtime-env.ts applicationCodeFile: honouring it would let external JavaScript bypass
   // the integrity-checked ASAR — the anti-tamper lever behind the ASAR fuses). So on the
-  // packaged target the REAL Kokoro worker runs and no capture file is written. Assert the real
+  // packaged target the real Kokoro runtime runs and no capture file is written. Assert the real
   // path there rather than weakening that control; the dev target keeps the text-cleanup check.
   if (!targetIsPackaged()) {
     await expect.poll(() => fs.existsSync(spokenTextPath)).toBe(true)

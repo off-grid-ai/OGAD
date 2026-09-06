@@ -2,7 +2,7 @@
  * Hugging Face delivery boundary for APP-025.
  *
  * The first response is a complete-but-corrupt staged payload. The retry receives a real GGUF
- * from the host's verified local fixture. Off Grid still owns catalog resolution, download queue,
+ * from the host's verified local fixture. Off Grid AI still owns catalog resolution, download queue,
  * progress, Range retry, integrity checks, filesystem promotion, activation, and the model runtime.
  */
 /* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/explicit-function-return-type -- Electron loads this CommonJS bootstrap before the production bundle. */
@@ -83,6 +83,7 @@ function fileBody(filePath, attempt, chunkSize, delayMs) {
 
 const originalFetch = globalThis.fetch.bind(globalThis)
 let requestCount = 0
+let primaryRequestCount = 0
 globalThis.fetch = async (input, init) => {
   const target = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const isPrimary = target.includes('/Qwen3.5-2B-Q4_K_M.gguf')
@@ -93,10 +94,11 @@ globalThis.fetch = async (input, init) => {
 
   requestCount += 1
   const attempt = requestCount
+  if (isPrimary) primaryRequestCount += 1
   const range = new Headers(init?.headers).get('range')
   record('model-request', { attempt, target, range })
 
-  if (isPrimary && attempt === 1) {
+  if (isPrimary && primaryRequestCount === 1) {
     const corrupt = Buffer.alloc(256 * 1024, 0xa5)
     corrupt.write('NOPE', 0, 'ascii')
     record('model-response', { attempt, kind: 'corrupt', totalBytes: corrupt.length })

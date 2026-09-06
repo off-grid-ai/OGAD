@@ -17,7 +17,8 @@ import {
   type ChatStreamCompletion,
   type ChatStreamPhase,
   type ChatStreamProgress,
-  type ChatStreamTool
+  type ChatStreamTool,
+  type ChatStreamToolResultStatus
 } from '@offgrid/sync'
 import type { ActiveChatStreamContract } from '../shared/ipc-contracts'
 
@@ -25,6 +26,7 @@ interface ActiveStream {
   conversationId: string
   content: string
   reasoning: string
+  reasoningRequested: boolean
   phase: ChatStreamPhase
   progress?: ChatStreamProgress
   tools?: ChatStreamTool[]
@@ -48,6 +50,7 @@ export function activeChatStreamSnapshots(): ActiveChatStreamContract[] {
     messageId: stream.messageId,
     content: stream.content,
     reasoning: stream.reasoning,
+    reasoningRequested: stream.reasoningRequested,
     phase: stream.phase,
     ...(stream.tools?.length ? { tools: stream.tools.map((tool) => ({ ...tool })) } : {})
   }))
@@ -85,7 +88,14 @@ export function bindChatStream(
   // cancelled or failed before it ever became a record, so nothing is going to claim it.
   const messageId = crypto.randomUUID()
   pendingMessageIds.set(conversationId, messageId)
-  active.set(streamId, { conversationId, content: '', reasoning: '', phase, messageId })
+  active.set(streamId, {
+    conversationId,
+    content: '',
+    reasoning: '',
+    reasoningRequested: phase === 'thinking',
+    phase,
+    messageId
+  })
   publish(streamId)
 }
 
@@ -149,12 +159,13 @@ export function noteChatStreamToolStarted(streamId: string | undefined, name: st
 export function noteChatStreamToolCompleted(
   streamId: string | undefined,
   name: string,
-  result: string
+  result: string,
+  status: ChatStreamToolResultStatus = 'completed'
 ): void {
   if (!streamId || !name) return
   const stream = active.get(streamId)
   if (!stream) return
-  stream.tools = completeChatStreamTool(stream.tools, name, result)
+  stream.tools = completeChatStreamTool(stream.tools, name, result, status)
   publish(streamId)
 }
 
@@ -198,6 +209,7 @@ export function beginChatImageStream(conversationId: string | null | undefined):
     conversationId,
     content: '',
     reasoning: '',
+    reasoningRequested: false,
     phase: 'loading_image_model',
     messageId
   })
@@ -216,6 +228,17 @@ export function continueChatStreamWithImage(streamId: string | undefined): boole
   if (!streamId) return false
   const stream = active.get(streamId)
   if (!stream) return false
+  // The model loop has accepted the deferred image request, but the native image job now owns the
+  // work. Keep the same tool row live until that job produces its terminal session outcome.
+  if (stream.tools) {
+    for (let index = stream.tools.length - 1; index >= 0; index -= 1) {
+      const tool = stream.tools[index]
+      if (tool?.name === 'generate_image' && tool.status === 'pending') {
+        stream.tools[index] = { ...tool, status: 'running' }
+        break
+      }
+    }
+  }
   stream.phase = 'loading_image_model'
   delete stream.progress
   publish(streamId)

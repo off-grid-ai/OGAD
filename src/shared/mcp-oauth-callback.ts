@@ -1,0 +1,2 @@
+export const MCP_OAUTH_REDIRECT_PORT = 33418
+export const MCP_OAUTH_CALLBACK_URL = `http://127.0.0.1:${MCP_OAUTH_REDIRECT_PORT}/callback`

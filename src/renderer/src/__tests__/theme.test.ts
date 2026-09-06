@@ -11,7 +11,7 @@ const listeners: Array<() => void> = []
 // jsdom does not expose a usable bare `localStorage` global (Node's experimental one
 // shadows it and throws), so stub an in-memory Store the module's bare `localStorage`
 // calls resolve against. `document` from jsdom is used as-is for the <html> dataset.
-function makeLocalStorage() {
+function makeLocalStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'clear'> {
   const map = new Map<string, string>()
   return {
     getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
@@ -22,7 +22,7 @@ function makeLocalStorage() {
 }
 let store = makeLocalStorage()
 
-function installMatchMedia() {
+function installMatchMedia(): void {
   vi.stubGlobal(
     'matchMedia',
     vi.fn((query: string) => ({
@@ -36,7 +36,7 @@ function installMatchMedia() {
 
 // Import fresh per test so the KEY-backed getThemeMode reads the current localStorage and
 // the module-load listener registration is deterministic.
-async function loadTheme() {
+async function loadTheme(): Promise<typeof import('../theme')> {
   vi.resetModules()
   installMatchMedia()
   vi.stubGlobal('localStorage', store)
@@ -99,6 +99,19 @@ describe('setThemeMode', () => {
     setThemeMode('light')
     expect(localStorage.getItem('og-theme')).toBe('light')
     expect(document.documentElement.dataset.theme).toBe('light')
+  })
+
+  it('notifies mounted controls when another surface changes the mode', async () => {
+    const { onThemeModeChanged, setThemeMode } = await loadTheme()
+    const modes: string[] = []
+    const unsubscribe = onThemeModeChanged((mode) => modes.push(mode))
+
+    setThemeMode('light')
+    setThemeMode('dark')
+    unsubscribe()
+    setThemeMode('system')
+
+    expect(modes).toEqual(['light', 'dark'])
   })
 })
 

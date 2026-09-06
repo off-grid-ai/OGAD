@@ -32,7 +32,7 @@ import {
   updateRagConversationTitle
 } from '../database'
 import { createProject, deleteProject, updateProject } from '../rag/store'
-import type { SyncMutation } from '../sync-mutation'
+import { CORE_SYNC_ENTITIES, type SyncMutation } from '../sync-mutation'
 
 const mutations: SyncMutation[] = []
 
@@ -49,6 +49,10 @@ afterAll(() => {
 })
 
 describe('core sync mutation contract', () => {
+  it('uses the shared task launch wire identity', () => {
+    expect(CORE_SYNC_ENTITIES.taskLaunch).toBe('task_launch')
+  })
+
   it('reports committed chat and project writes with stable cross-device ids', () => {
     createProject({ id: 'project-1', name: 'Shared project' })
     createRagConversation('conversation-1', 'First title', 'project-1')
@@ -74,12 +78,14 @@ describe('core sync mutation contract', () => {
     mutations.length = 0
     createProject({ id: 'project-delete', name: 'Delete me' })
     createRagConversation('conversation-delete', 'Delete me', 'project-delete')
-    addRagMessage('conversation-delete', 'user', 'one')
+    const first = addRagMessage('conversation-delete', 'user', 'one')
     addRagMessage('conversation-delete', 'assistant', 'two')
     addRagMessage('conversation-delete', 'user', 'three')
 
     mutations.length = 0
-    expect(truncateRagMessages('conversation-delete', 1)).toBe(2)
+    expect(
+      truncateRagMessages('conversation-delete', { messageId: first.uuid, keepAnchor: true })
+    ).toBe(2)
     expect(mutations).toHaveLength(2)
     expect(mutations.every(({ entity, kind }) => entity === 'message' && kind === 'delete')).toBe(
       true

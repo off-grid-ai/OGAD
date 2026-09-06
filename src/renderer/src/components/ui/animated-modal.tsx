@@ -12,13 +12,13 @@ interface ModalContextType {
 const ModalContext = createContext<ModalContextType | undefined>(undefined)
 const openModalStack: symbol[] = []
 
-export const ModalProvider = ({ children }: { children: ReactNode }) => {
+export const ModalProvider = ({ children }: { children: ReactNode }): React.JSX.Element => {
   const [open, setOpen] = useState(false)
 
   return <ModalContext.Provider value={{ open, setOpen }}>{children}</ModalContext.Provider>
 }
 
-export const useModal = () => {
+const useModal = (): ModalContextType => {
   const context = useContext(ModalContext)
   if (!context) {
     throw new Error('useModal must be used within a ModalProvider')
@@ -26,7 +26,7 @@ export const useModal = () => {
   return context
 }
 
-export function Modal({ children }: { children: ReactNode }) {
+export function Modal({ children }: { children: ReactNode }): React.JSX.Element {
   return <ModalProvider>{children}</ModalProvider>
 }
 
@@ -36,7 +36,7 @@ export const ModalTrigger = ({
 }: {
   children: ReactNode
   className?: string
-}) => {
+}): React.JSX.Element => {
   const { setOpen } = useModal()
   return (
     <button
@@ -51,7 +51,13 @@ export const ModalTrigger = ({
   )
 }
 
-export const ModalBody = ({ children, className }: { children: ReactNode; className?: string }) => {
+export const ModalBody = ({
+  children,
+  className
+}: {
+  children: ReactNode
+  className?: string
+}): React.ReactPortal => {
   const { open, setOpen } = useModal()
   const modalRef = useRef<HTMLDivElement>(null)
   const modalId = useRef(Symbol('animated-modal'))
@@ -154,7 +160,7 @@ export const ModalContent = ({
 }: {
   children: ReactNode
   className?: string
-}) => {
+}): React.JSX.Element => {
   return <div className={cn('flex flex-col flex-1 p-8 md:p-10', className)}>{children}</div>
 }
 
@@ -164,7 +170,7 @@ export const ModalFooter = ({
 }: {
   children: ReactNode
   className?: string
-}) => {
+}): React.JSX.Element => {
   return (
     <div className={cn('flex justify-end p-4 bg-gray-100 dark:bg-neutral-900', className)}>
       {children}
@@ -172,7 +178,7 @@ export const ModalFooter = ({
   )
 }
 
-const Overlay = ({ className }: { className?: string }) => {
+const Overlay = ({ className }: { className?: string }): React.JSX.Element => {
   return (
     <motion.div
       initial={{
@@ -191,7 +197,7 @@ const Overlay = ({ className }: { className?: string }) => {
   )
 }
 
-const CloseIcon = () => {
+const CloseIcon = (): React.JSX.Element => {
   const { setOpen } = useModal()
   return (
     <button onClick={() => setOpen(false)} className="absolute top-4 right-4 group">
@@ -217,12 +223,12 @@ const CloseIcon = () => {
 
 // Hook to detect clicks outside of a component.
 // Add it in a separate file, I've added here for simplicity
-export const useOutsideClick = (
+const useOutsideClick = (
   ref: React.RefObject<HTMLDivElement | null>,
   callback: (event: MouseEvent | TouchEvent) => void
-) => {
+): void => {
   useEffect(() => {
-    const listener = (event: MouseEvent | TouchEvent) => {
+    const listener = (event: MouseEvent | TouchEvent): void => {
       // DO NOTHING if the element being clicked is the target element or their children
       if (!ref.current || !(event.target instanceof Node) || ref.current.contains(event.target)) {
         return

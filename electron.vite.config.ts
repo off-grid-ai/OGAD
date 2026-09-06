@@ -41,13 +41,13 @@ export default defineConfig({
     define: proDefine,
     build: {
       sourcemap: coverageSourcemap,
+      // The embedding worker is a SECOND main-process entry, bundled beside index.js so
+      // embeddings.ts can spawn it by path. It must not be folded into the main chunk: the point
+      // is that its ONNX/WASM inference runs off the thread that owns the window.
       rollupOptions: {
-        // The TTS worker must live inside app.asar beside its JavaScript
-        // dependencies. Copying the raw source into Resources makes ESM resolve
-        // from that external directory, where kokoro-js does not exist.
         input: {
           index: resolve('src/main/index.ts'),
-          'tts-worker': resolve('resources/tts-worker.mjs')
+          'embeddings-worker': resolve('src/main/embeddings-worker.ts')
         }
       }
     },
@@ -59,11 +59,7 @@ export default defineConfig({
     // vault recovery-phrase feature (pro/main/vault/vault-recovery.ts).
     plugins: [
       externalizeDepsPlugin({
-        // Kokoro owns Transformers v3 transitively. The worker imports its env
-        // directly so cache configuration and Kokoro share one module instance;
-        // keep that native Node package external instead of bundling browser shims.
-        include: ['@huggingface/transformers'],
-        exclude: ['@scure/bip39', '@noble/hashes']
+        exclude: ['@scure/bip39', '@noble/hashes', '@offgrid/executorch-speech']
       })
     ],
     resolve: {

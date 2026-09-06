@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
 import type Database from 'better-sqlite3-multiple-ciphers'
 import type { BackupDataPort } from '@offgrid/sync/portable'
-import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
+import { CORE_SYNC_ENTITIES } from '@offgrid/application'
+import { emitSyncMutation } from '../sync-mutation'
 import {
   validateDesktopBackupData,
   type DesktopBackupConversation,

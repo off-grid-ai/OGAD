@@ -5,7 +5,7 @@
  * boundaries. Model accounting, filesystem traversal, SQLite-backed category counts,
  * and personal-data directory accounting all use the production owners.
  */
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -35,6 +35,9 @@ const database = await import('../database')
 const { getDataSummary } = await import('../data-privacy')
 const modelManager = await import('../models-manager')
 const { CATALOG } = await import('@offgrid/models')
+const { createDesktopModelApplication } =
+  await import('../../../pro/main/__tests__/helpers/desktop-application')
+let modelApplication: Awaited<ReturnType<typeof createDesktopModelApplication>>
 
 function writeFixture(relativePath: string, bytes: number): void {
   const target = path.join(testRoot, relativePath)
@@ -42,7 +45,12 @@ function writeFixture(relativePath: string, bytes: number): void {
   fs.writeFileSync(target, Buffer.alloc(bytes, relativePath.length % 255))
 }
 
-afterAll(() => {
+beforeAll(async () => {
+  modelApplication = await createDesktopModelApplication(testRoot)
+})
+
+afterAll(async () => {
+  await modelApplication.stop()
   database.getDB().close()
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir

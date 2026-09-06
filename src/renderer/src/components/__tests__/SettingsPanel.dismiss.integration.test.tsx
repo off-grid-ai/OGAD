@@ -6,11 +6,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import { SettingsPanel } from '../SettingsPanel'
+import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 beforeEach(() => {
+  const modelControl = modelControlSnapshot({ kinds: ['text'], models: [] })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getLlmSettings: vi.fn().mockResolvedValue({}),
+    getModelControlProjection: vi.fn().mockResolvedValue(modelControl),
+    onModelControlProjection: vi.fn(() => vi.fn()),
+    getTranscriptionInfo: vi.fn().mockResolvedValue(null),
     ttsVoices: vi.fn().mockResolvedValue([]),
+    prepareTtsVoice: vi.fn().mockResolvedValue({ ready: true }),
+    onTtsVoiceProgress: vi.fn(() => vi.fn()),
+    speechCommands: { onEvent: vi.fn(() => vi.fn()) },
     listTools: vi.fn().mockResolvedValue([]),
     getSettings: vi.fn().mockResolvedValue({}),
     mcpList: vi.fn().mockResolvedValue([]),
@@ -25,10 +34,9 @@ afterEach(() => {
 describe('<SettingsPanel/> dismissal', () => {
   it('closes when the click-outside scrim is clicked', () => {
     const onClose = vi.fn()
-    const { container } = render(<SettingsPanel onClose={onClose} />)
-    const scrim = container.querySelector('[aria-hidden="true"]')
-    expect(scrim, 'the click-outside scrim should render').toBeTruthy()
-    fireEvent.click(scrim!)
+    render(<SettingsPanel onClose={onClose} />)
+    const scrim = screen.getByTestId('side-panel-backdrop')
+    fireEvent.click(scrim)
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -44,6 +52,20 @@ describe('<SettingsPanel/> dismissal', () => {
     render(<SettingsPanel onClose={onClose} />)
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes before opening Active models', () => {
+    const sequence: string[] = []
+    const onClose = vi.fn(() => sequence.push('close'))
+    const onOpen = vi.fn(() => sequence.push('open'))
+    window.addEventListener(OPEN_ACTIVE_MODELS_PANEL_EVENT, onOpen, { once: true })
+    render(<SettingsPanel onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Active models' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(sequence).toEqual(['close', 'open'])
   })
 
   it('a click INSIDE the panel does not close it', () => {

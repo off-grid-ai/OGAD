@@ -1,27 +1,11 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import {
+  ReprocessingContext,
+  type ReprocessProgress,
+  type ReprocessResult
+} from './reprocessing-context'
 
-interface ReprocessProgress {
-  phase: string
-  processed: number
-  total: number
-}
-
-interface ReprocessResult {
-  processed: number
-  total: number
-}
-
-interface ReprocessingContextType {
-  reprocessing: boolean
-  progress: ReprocessProgress | null
-  result: ReprocessResult | null
-  startReprocess: (clean: boolean) => void
-  clearResult: () => void
-}
-
-const ReprocessingContext = createContext<ReprocessingContextType | undefined>(undefined)
-
-export function ReprocessingProvider({ children }: { children: ReactNode }) {
+export function ReprocessingProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [reprocessing, setReprocessing] = useState(false)
   const [progress, setProgress] = useState<ReprocessProgress | null>(null)
   const [result, setResult] = useState<ReprocessResult | null>(null)
@@ -62,12 +46,4 @@ export function ReprocessingProvider({ children }: { children: ReactNode }) {
       {children}
     </ReprocessingContext.Provider>
   )
-}
-
-export function useReprocessing() {
-  const context = useContext(ReprocessingContext)
-  if (!context) {
-    throw new Error('useReprocessing must be used within a ReprocessingProvider')
-  }
-  return context
 }

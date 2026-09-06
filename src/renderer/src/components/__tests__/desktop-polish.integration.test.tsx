@@ -8,6 +8,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Modal, ModalBody, ModalContent, ModalTrigger } from '../ui/animated-modal'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
 
@@ -24,6 +25,7 @@ const MODELS = Array.from({ length: 120 }, (_, index) => ({
 function installBoundary(): void {
   const values: Record<string, unknown> = {
     systemHealth: async () => ({ ramGb: 16 }),
+    ...modelControlBoundary({ kinds: ['text', 'image'], models: MODELS }),
     getModelCatalog: async () => ({ kinds: ['text', 'image'], models: MODELS }),
     getInstalledModels: async () => [],
     getActiveModelIds: async () => [],

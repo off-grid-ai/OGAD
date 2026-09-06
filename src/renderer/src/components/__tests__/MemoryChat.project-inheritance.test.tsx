@@ -15,6 +15,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
+import { preloadCapabilityFakes } from './harness/chat-boundary'
 
 type CreateConversationArgs = [id: string, title?: string, projectId?: string | null]
 type RagChatArgs = [
@@ -51,7 +52,13 @@ function installApi(
   }))
   const api = {
     isPro: false,
-    imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
+    ...preloadCapabilityFakes(),
+    imageGenStatus: vi.fn(async () => ({
+      available: false,
+      models: [],
+      active: '',
+      defaultModel: null
+    })),
     onImageGenProgress: vi.fn(() => () => {}),
     onRagStream: vi.fn(() => () => {}),
     getRagConversations: vi.fn(async () => (existingConversation ? [existingConversation] : [])),
@@ -60,7 +67,7 @@ function installApi(
     ),
     getRagMessages: vi.fn(async () => []),
     createRagConversation,
-    addRagMessage: vi.fn(async () => 1),
+    addRagMessage: vi.fn(async () => ({ id: 1, uuid: 'project-message-1' })),
     saveArtifact: vi.fn(async () => ''),
     getSettings: vi.fn(async () => ({})),
     saveSetting: vi.fn(async () => {}),
@@ -104,7 +111,9 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
     // A fresh id was minted for this conversation rather than an existing one reused. It is a UUID now
     // (crypto.randomUUID) instead of the old rag- prefix, because the id has to be unique across every
     // device that syncs the conversation, not just within one Mac's table.
-    expect(conversationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+    expect(conversationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    )
     expect(title).toBe('What is the launch date?')
     expect(persistedProjectId).toBe(project.id)
 

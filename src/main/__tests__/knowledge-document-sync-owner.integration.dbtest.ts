@@ -1,7 +1,15 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import {
+  CORE_SYNC_ENTITIES,
+  createOffGridApplication,
+  type ModelsPlatformPorts,
+  type OffGridApplication,
+  type SyncMutation
+} from '@offgrid/application'
+import type { RemoteServerConfiguration } from '@offgrid/models'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import fs from 'fs'
-import os from 'os'
-import path from 'path'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-knowledge-sync-owner-'))
 
@@ -15,28 +23,85 @@ vi.mock('electron', () => ({
 }))
 
 import { getDB } from '../database'
-import { HOOKS, registerHook } from '../bootstrap/hookRegistry'
 import {
-  createDesktopRagService,
+  createProject,
   deleteProject,
-  ensureRagStoreSchema,
+  desktopVectorStore,
   listProjects,
-  createProject
+  projectExists
 } from '../rag'
-import type {
-  KnowledgeDocumentMutation,
-  KnowledgeDocumentSnapshot
-} from '../sync-knowledge-document'
+import { desktopExtraction } from '../rag/extractors'
 
 const PROJECT_ID = '22222222-2222-4222-8222-222222222222'
 const REMOTE_SYNC_ID = '33333333-3333-4333-8333-333333333333'
 
-afterAll(() => {
+function modelBoundary(): ModelsPlatformPorts {
+  const selections = new Map<string, string | null>()
+  let remoteConfiguration: RemoteServerConfiguration = {
+    version: 1,
+    activeServerId: null,
+    servers: []
+  }
+  return {
+    selection: {
+      read: (modality) => selections.get(modality) ?? null,
+      write: (modality, routeId) => {
+        selections.set(modality, routeId)
+      }
+    },
+    memory: {
+      current: () => ({ totalMB: 16_000, availableMB: 8_000, platform: 'desktop' })
+    },
+    remote: {
+      configuration: {
+        read: () => remoteConfiguration,
+        write: (value) => {
+          remoteConfiguration = value
+        }
+      },
+      credentials: {
+        read: async () => null,
+        write: async () => undefined,
+        remove: async () => undefined
+      },
+      providers: {
+        register: async () => undefined,
+        unregister: async () => undefined
+      },
+      activateManaged: async () => ({})
+    }
+  }
+}
+
+const recorded: SyncMutation[] = []
+const application: OffGridApplication = createOffGridApplication({
+  models: modelBoundary(),
+  rag: {
+    store: desktopVectorStore,
+    embeddings: { dimension: 1, embed: async () => [1] },
+    extraction: desktopExtraction,
+    projectExists: async (projectId) => projectExists(projectId)
+  },
+  pro: {
+    sync: {
+      state: {
+        record: (mutation) => {
+          recorded.push(mutation)
+        },
+        sendKnowledgeDocument: async () => undefined
+      }
+    }
+  }
+})
+
+afterAll(async () => {
+  await application.stop()
+  getDB().close()
   fs.rmSync(TMP_DIR, { recursive: true, force: true })
 })
 
-describe('desktop knowledge-document sync owner', () => {
-  it('migrates stable identity and suppresses lifecycle echo for synced imports', async () => {
+describe('desktop knowledge-document application owner', () => {
+  it('keeps stable identity and does not echo synced imports', async () => {
     const db = getDB()
     db.exec(`
       CREATE TABLE rag_documents (
@@ -53,11 +118,10 @@ describe('desktop knowledge-document sync owner', () => {
       VALUES ('legacy-project', 'legacy.txt', '/legacy.txt', 12, 'text');
     `)
 
-    ensureRagStoreSchema()
-    const legacy = db
-      .prepare('SELECT sync_id FROM rag_documents WHERE name = ?')
-      .get('legacy.txt') as { sync_id: string }
-    expect(legacy.sync_id).toMatch(
+    const legacyDocuments = await application.rag.listDocuments('legacy-project')
+    expect(legacyDocuments.ok).toBe(true)
+    if (!legacyDocuments.ok) return
+    expect(legacyDocuments.value[0]?.syncId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
     )
 
@@ -66,75 +130,60 @@ describe('desktop knowledge-document sync owner', () => {
       expect.arrayContaining([expect.objectContaining({ id: PROJECT_ID })])
     )
 
-    const mutations: KnowledgeDocumentMutation[] = []
-    registerHook(HOOKS.syncKnowledgeDocumentMutation, (mutation: KnowledgeDocumentMutation) => {
-      mutations.push(mutation)
-    })
-    const service = createDesktopRagService({
-      embeddings: {
-        dimension: 1,
-        async embed() {
-          return [1]
-        }
-      }
-    })
-
     const localPath = path.join(TMP_DIR, 'local-notes.txt')
     fs.writeFileSync(localPath, 'Local field notes contain enough text to produce one RAG chunk.')
-    const indexed = await service.indexDocument({
+    const indexed = await application.rag.addDocument({
       projectId: PROJECT_ID,
       path: localPath,
       fileName: 'local-notes.txt',
       size: fs.statSync(localPath).size
     })
-    const local = (await service.listDocuments(PROJECT_ID)).find(
-      (document) => document.id === indexed.docId
-    )
+    expect(indexed.ok).toBe(true)
+    if (!indexed.ok) return
+
+    const localDocuments = await application.rag.listDocuments(PROJECT_ID)
+    expect(localDocuments.ok).toBe(true)
+    if (!localDocuments.ok) return
+    const local = localDocuments.value.find((document) => document.id === indexed.value.docId)
     expect(local?.syncId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
     )
-    expect(mutations).toEqual([
-      {
-        kind: 'indexed',
-        document: expect.objectContaining({
-          syncId: local?.syncId,
-          projectId: PROJECT_ID,
-          filePath: localPath,
-          enabled: true
-        })
-      }
-    ])
+    expect(recorded.at(-1)).toMatchObject({
+      entity: CORE_SYNC_ENTITIES.knowledgeDocument,
+      entityId: local?.syncId,
+      kind: 'put',
+      fields: { project_id: PROJECT_ID, name: 'local-notes.txt', enabled: 1 }
+    })
 
     const shortPath = path.join(TMP_DIR, 'op.txt')
     fs.writeFileSync(shortPath, 'op\n')
-    const short = await service.indexDocument({
+    const short = await application.rag.addDocument({
       projectId: PROJECT_ID,
       path: shortPath,
       fileName: 'op.txt',
       size: fs.statSync(shortPath).size
     })
-    expect(short.chunkCount).toBe(1)
+    expect(short).toMatchObject({ ok: true, value: { chunkCount: 1 } })
+    if (!short.ok) return
     expect(
-      db
-        .prepare('SELECT content, position FROM rag_chunks WHERE doc_id = ?')
-        .all(short.docId)
+      db.prepare('SELECT content, position FROM rag_chunks WHERE doc_id = ?').all(short.value.docId)
     ).toEqual([{ content: 'op', position: 0 }])
-    expect(await service.searchProject(PROJECT_ID, 'op')).toEqual(
-      expect.objectContaining({
-        chunks: expect.arrayContaining([expect.objectContaining({ content: 'op' })])
-      })
-    )
+    await expect(application.rag.search(PROJECT_ID, 'op')).resolves.toMatchObject({
+      ok: true,
+      value: { chunks: expect.arrayContaining([expect.objectContaining({ content: 'op' })]) }
+    })
 
-    await service.toggleDocument(indexed.docId, false)
-    expect(mutations.at(-1)).toEqual({
-      kind: 'enabled',
-      syncId: local?.syncId,
-      enabled: false
+    await application.rag.setDocumentEnabled(indexed.value.docId, false)
+    expect(recorded.at(-1)).toMatchObject({
+      entityId: local?.syncId,
+      kind: 'put',
+      fields: { enabled: 0 }
     })
 
     const remotePath = path.join(TMP_DIR, 'remote-notes.txt')
     fs.writeFileSync(remotePath, 'Remote field notes also contain enough text for local indexing.')
-    const remote: KnowledgeDocumentSnapshot = {
+    const mutationCount = recorded.length
+    const remote = await application.rag.sync.index({
       syncId: REMOTE_SYNC_ID,
       projectId: PROJECT_ID,
       name: 'remote-notes.txt',
@@ -142,45 +191,65 @@ describe('desktop knowledge-document sync owner', () => {
       fileSize: fs.statSync(remotePath).size,
       createdAt: '2026-07-28T08:00:00.000Z',
       enabled: true
-    }
-    const mutationCount = mutations.length
-    const remoteId = await service.indexSyncedDocument(remote)
-    await service.setSyncedDocumentEnabled(REMOTE_SYNC_ID, false)
-    expect(mutations).toHaveLength(mutationCount)
-    expect(await service.getDocumentBySyncId(REMOTE_SYNC_ID)).toMatchObject({
-      id: remoteId,
-      syncId: REMOTE_SYNC_ID,
-      enabled: false
+    })
+    expect(remote.ok).toBe(true)
+    await application.rag.sync.setEnabled(REMOTE_SYNC_ID, false)
+    expect(recorded).toHaveLength(mutationCount)
+    await expect(application.rag.documentBySyncId(REMOTE_SYNC_ID)).resolves.toMatchObject({
+      ok: true,
+      value: { syncId: REMOTE_SYNC_ID, enabled: false }
     })
 
-    await service.deleteSyncedDocument(REMOTE_SYNC_ID)
-    expect(await service.getDocumentBySyncId(REMOTE_SYNC_ID)).toBeUndefined()
-    expect(mutations).toHaveLength(mutationCount)
+    await application.rag.sync.remove(REMOTE_SYNC_ID)
+    await expect(application.rag.documentBySyncId(REMOTE_SYNC_ID)).resolves.toEqual({
+      ok: true,
+      value: undefined
+    })
+    expect(recorded).toHaveLength(mutationCount)
 
-    await service.deleteDocument(indexed.docId)
-    expect(mutations.at(-1)).toEqual({ kind: 'deleted', syncId: local?.syncId })
+    await application.rag.removeDocument(indexed.value.docId)
+    expect(recorded.at(-1)).toEqual({
+      entity: CORE_SYNC_ENTITIES.knowledgeDocument,
+      entityId: local?.syncId,
+      kind: 'delete'
+    })
 
     const projectDocumentPath = path.join(TMP_DIR, 'project-owned.txt')
     fs.writeFileSync(
       projectDocumentPath,
       'Deleting the project should publish this document tombstone after commit.'
     )
-    const projectDocument = await service.indexDocument({
+    const projectDocument = await application.rag.addDocument({
       projectId: PROJECT_ID,
       path: projectDocumentPath,
       fileName: 'project-owned.txt',
       size: fs.statSync(projectDocumentPath).size
     })
-    const projectDocumentSyncId = (await service.listDocuments(PROJECT_ID)).find(
-      (document) => document.id === projectDocument.docId
-    )?.syncId
+    expect(projectDocument.ok).toBe(true)
+    if (!projectDocument.ok) return
+    const projectDocumentRecord = await application.rag.document(projectDocument.value.docId)
+    expect(projectDocumentRecord.ok).toBe(true)
+    if (!projectDocumentRecord.ok) return
 
+    await expect(application.workflows.deleteProject(PROJECT_ID)).resolves.toEqual({
+      ok: true,
+      value: undefined
+    })
     deleteProject(PROJECT_ID)
 
-    expect(await service.getDocumentBySyncId(projectDocumentSyncId!)).toBeUndefined()
-    expect(mutations.at(-1)).toEqual({
-      kind: 'deleted',
-      syncId: projectDocumentSyncId
+    await expect(application.rag.document(projectDocument.value.docId)).resolves.toEqual({
+      ok: true,
+      value: undefined
     })
+    expect(recorded).toEqual(
+      expect.arrayContaining([
+        {
+          entity: CORE_SYNC_ENTITIES.knowledgeDocument,
+          entityId: projectDocumentRecord.value?.syncId,
+          kind: 'delete'
+        },
+        { entity: CORE_SYNC_ENTITIES.project, entityId: PROJECT_ID, kind: 'delete' }
+      ])
+    )
   })
 })

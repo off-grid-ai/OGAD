@@ -352,12 +352,14 @@ test.describe('APP-106 real licence activation', () => {
     expect(await page.evaluate(() => window.api.isPro)).toBe(true)
     expect((await page.evaluate(() => window.api.license?.status())).isPro).toBe(true)
 
-    const licensedDevices = page.getByRole('button', { name: /Manage licensed devices,/ })
-    await expect(licensedDevices).toBeVisible({ timeout: 60_000 })
-    await licensedDevices.click()
-    await expect(page.getByRole('heading', { name: 'Licensed devices' })).toBeVisible()
-    await expect(page.getByText('macOS · This device', { exact: true })).toBeVisible()
-    await expect(page.getByText('Local', { exact: true })).toBeVisible()
+    await expect(page.getByText(/^\d+ used$/)).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole('button', { name: 'Rename this device' })).toContainText(
+      'This device: Off Grid AI Desktop'
+    )
+    const savedDevices = page.getByRole('region', { name: 'Saved' })
+    await expect(savedDevices).toBeVisible()
+    expect(await savedDevices.locator('article').count()).toBeGreaterThan(0)
+    await expect(savedDevices).not.toContainText('Off Grid AI Desktop')
     expect(await page.evaluate(() => window.api.platform)).toBe('darwin')
     await page.screenshot({ path: testInfo.outputPath('app106-licensed-macos-after-restart.png') })
   })

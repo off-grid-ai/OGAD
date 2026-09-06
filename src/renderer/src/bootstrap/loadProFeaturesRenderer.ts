@@ -2,12 +2,13 @@
 // build the Vite alias resolves `@offgrid/pro/renderer` to proStub (default
 // null), so activateRenderer is absent and this is a no-op.
 
-import { registerScreen } from './screenRegistry'
-import { registerNav } from './navRegistry'
-import { registerSlot } from './slotRegistry'
-import { registerSettingsSection } from './sectionRegistry'
-import { registerHook } from './hookRegistry'
-import { registerProView } from './proView'
+import { getRendererIsPro } from './entitlementRegistry'
+import { clearRegisteredHooks, registerHook } from './hookRegistry'
+import { clearRegisteredNav, registerNav } from './navRegistry'
+import { clearProView, registerProView } from './proView'
+import { clearRegisteredScreens, registerScreen } from './screenRegistry'
+import { clearRegisteredSettingsSections, registerSettingsSection } from './sectionRegistry'
+import { clearRegisteredSlots, registerSlot } from './slotRegistry'
 
 export interface ProRendererApi {
   registerScreen: typeof registerScreen
@@ -20,17 +21,31 @@ export interface ProRendererApi {
 
 export type ProRendererActivation = 'none' | 'entitlement-bootstrap' | 'full'
 
+/** Remove every capability contributed by the private renderer package. This is
+ * synchronous so a revoked entitlement cannot render or call one more paid
+ * hook while React is changing screens. */
+export function clearProFeaturesRenderer(): void {
+  clearRegisteredNav()
+  clearRegisteredScreens()
+  clearRegisteredSlots()
+  clearRegisteredSettingsSections()
+  clearRegisteredHooks()
+  clearProView()
+}
+
 export async function loadProFeaturesRenderer(): Promise<ProRendererActivation> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entitled = Boolean((window as any).api?.isPro)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const bootstrapEnabled = Boolean((window as any).api?.proEntitlementBootstrapEnabled)
+  const bootstrapEnabled = Boolean(window.api?.proEntitlementBootstrapEnabled)
   let pro: unknown
   try {
     pro = await import('@offgrid/pro/renderer')
-  } catch {
+  } catch (error) {
+    console.error('[pro] renderer package failed to load', error)
     return 'none' // free / contributor build
   }
+  // Entitlement may change while the private chunk is loading. Read the live
+  // renderer projection only after the await so a foreground revocation cannot
+  // race a stale launch snapshot and register paid capabilities again.
+  const entitled = getRendererIsPro()
   if (!entitled && bootstrapEnabled) {
     const activateBootstrap = (
       pro as {
@@ -38,34 +53,38 @@ export async function loadProFeaturesRenderer(): Promise<ProRendererActivation> 
       }
     ).activateEntitlementBootstrapRenderer
     if (typeof activateBootstrap !== 'function') return 'none'
-    activateBootstrap({
-      registerScreen,
-      registerNav,
-      registerSlot,
-      registerSettingsSection,
-      registerHook,
-      registerProView
-    })
-    console.log('[pro] entitlement pairing renderer activated')
-    return 'entitlement-bootstrap'
+    try {
+      clearProFeaturesRenderer()
+      activateBootstrap(rendererApi)
+      console.log('[pro] entitlement pairing renderer activated')
+      return 'entitlement-bootstrap'
+    } catch (e) {
+      clearProFeaturesRenderer()
+      console.error('[pro] activateEntitlementBootstrapRenderer failed', e)
+      return 'none'
+    }
   }
   if (!entitled) return 'none'
   const activateRenderer = (pro as { activateRenderer?: (api: ProRendererApi) => void })
     .activateRenderer
   if (typeof activateRenderer !== 'function') return 'none' // stub resolved to null
   try {
-    activateRenderer({
-      registerScreen,
-      registerNav,
-      registerSlot,
-      registerSettingsSection,
-      registerHook,
-      registerProView
-    })
+    clearProFeaturesRenderer()
+    activateRenderer(rendererApi)
     console.log('[pro] renderer features activated')
     return 'full'
   } catch (e) {
+    clearProFeaturesRenderer()
     console.error('[pro] activateRenderer failed', e)
     return 'none'
   }
+}
+
+const rendererApi: ProRendererApi = {
+  registerScreen,
+  registerNav,
+  registerSlot,
+  registerSettingsSection,
+  registerHook,
+  registerProView
 }

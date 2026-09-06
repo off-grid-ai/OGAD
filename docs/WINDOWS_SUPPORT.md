@@ -81,6 +81,28 @@ Do **not** expect it in GitHub Releases; this workflow deliberately doesn't publ
 
 ---
 
+## Action rails & computer use — Windows status
+
+The three action rails live in **core** (`src/main/actions`, `src/main/vision`, `src/main/input`)
+and are chosen per-platform through one seam (`use-runtime.ts` → `pickByPlatform`), so no caller
+branches on the OS. Status reflects code inspection; the vision rail still needs a run on real
+Windows hardware.
+
+| Rail | Status | Notes / evidence |
+| --- | --- | --- |
+| **Browser rail** (`web_use`) | 🟢 | Electron CDP — no platform-specific code; identical path to macOS. |
+| **Semantic rail** (calendar / reminder / email / open) | 🟢 | `semantic-rail-win.ts` drives **local Outlook via PowerShell/COM**: create, `calendar.listEvents` / `reminders.list` read-back, and delete-by-EntryID undo — wired with a real `runPowerShell` + `shell.openExternal`. `message` (iMessage) is refused honestly (macOS-only). Covered by `semantic-rail-win.test.ts` + `platform-picks.test.ts`. |
+| ↳ Semantic rail — **Microsoft Graph online fallback** | 🟡 | The `GraphPort` + fallback logic ship, but production passes no port — a PC without local Outlook gets an honest refusal until the device-code OAuth wiring + an Azure app registration land. Fast-follow. |
+| **Vision / computer-use rail** (screenshot → grounder → cursor/keyboard) | 🟢 needs real-HW test | Capture (`desktopCapturer`) + grounder (local GGUF) are cross-platform. Actuation uses `@nut-tree-fork/nut-js` (prebuilt N-API `libnut-win32`), packaged via `postinstall` `install-app-deps` + electron-builder smartUnpack, with a **fail-loud presence gate** in `windows-build.yml`. The one Windows-specific fix — **DPI/scale coordinate mapping** so clicks land on 125%/150% displays — is `src/main/input/coordinate-mapping.ts` (12 unit tests), wired into `vision-host.ts`. Needs a real-Windows run to confirm actuation + fractional scaling. |
+
+**Already handled:** `accessibilityBlock()` (the macOS Accessibility-grant prompt) no-ops off `darwin` —
+Windows needs no such grant for synthetic input. `permissions.ts` returns "granted" for every check
+off `darwin`, so the setup flow does not block on Windows.
+
+**Follow-ups:** mixed-DPI multi-monitor coordinate mapping (needs a physical-bounds source Electron
+does not expose directly); Graph OAuth wiring for the Outlook-less fallback.
+
+
 ## Pro layer (out of scope)
 
 The Pro "sees / remembers / reflects / acts" layer is **not part of core** and is **not

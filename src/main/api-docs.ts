@@ -129,7 +129,7 @@ None. The gateway listens only on \`127.0.0.1\`. Base URL: \`${b(port)}/v1\`. Pa
 
 ## SDKs
 
-The gateway speaks the OpenAI wire format, so the **universal SDK is the OpenAI SDK** — just point \`base_url\` here and leave the key blank. No Off Grid–specific SDK is required.
+The gateway speaks the OpenAI wire format, so the **universal SDK is the OpenAI SDK** — just point \`base_url\` here and leave the key blank. No Off Grid AI–specific SDK is required.
 
 \`\`\`python
 from openai import OpenAI
@@ -146,11 +146,11 @@ const client = new OpenAI({ baseURL: "${b(port)}/v1", apiKey: "not-needed" });
 |---|---|---|
 | REST — chat, embeddings, audio, images | OpenAI SDK (Python / JS / Go / Rust / …) | ✅ works today |
 | MCP tools | any MCP client · \`@modelcontextprotocol/sdk\` | ✅ works today |
-| Off Grid native SDK (thin convenience wrapper) | \`@offgrid/sdk\` | 🚧 coming soon |
+| Off Grid AI native SDK (thin convenience wrapper) | \`@offgrid/sdk\` | 🚧 coming soon |
 
 ## MCP server
 
-Off Grid is **also an MCP server** (Streamable HTTP, stateless) at \`POST ${b(port)}/mcp\`. Any MCP client can run the on-device models as tools — the inference layer for the whole device.
+Off Grid AI is **also an MCP server** (Streamable HTTP, stateless) at \`POST ${b(port)}/mcp\`. Any MCP client can run the on-device models as tools — the inference layer for the whole device.
 
 **Tools:** \`generate_text\`, \`describe_image\`, \`generate_image\`, \`edit_image\`, \`transcribe_audio\`, \`text_to_speech\`, \`embed\`.
 
@@ -358,7 +358,7 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     }
                   }
                 },
-                example: { input: 'Hello from Off Grid.', voice: 'af_heart' }
+                example: { input: 'Hello from Off Grid AI.', voice: 'af_heart' }
               }
             }
           },
@@ -427,6 +427,10 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     steps: { type: 'integer' },
                     seed: { type: 'integer' },
                     cfg_scale: { type: 'number' },
+                    allow_unsafe_memory_override: {
+                      type: 'boolean',
+                      description: 'Load the model even when it is above the memory comfort limit.'
+                    },
                     negative_prompt: { type: 'string' },
                     model: { type: 'string', ...imgEnum },
                     response_format: {

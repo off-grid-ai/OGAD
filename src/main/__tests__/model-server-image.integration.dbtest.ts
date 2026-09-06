@@ -11,6 +11,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import type { OffGridApplication } from '@offgrid/application'
 
 const fixture = (() => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-image-'))
@@ -43,6 +44,8 @@ const CLI_PATH = path.join(fixture.binDir, 'sd', 'sd-cli')
 let gatewayPort: number
 let startModelServer: (port?: number) => void
 let stopModelServer: () => void
+let application: OffGridApplication
+let releaseApplication: (() => void) | undefined
 
 function installNativeRuntimeBoundary(): void {
   fs.mkdirSync(path.dirname(CLI_PATH), { recursive: true })
@@ -93,9 +96,23 @@ beforeAll(async () => {
   process.env.OFFGRID_BIN_DIR = fixture.binDir
   fs.mkdirSync(path.join(fixture.dataDir, 'models'), { recursive: true })
   fs.writeFileSync(path.join(fixture.dataDir, 'models', MODEL_NAME), 'fixture checkpoint')
+  fs.writeFileSync(
+    path.join(fixture.dataDir, 'models', 'active-modalities.json'),
+    JSON.stringify({ image: MODEL_NAME })
+  )
   installNativeRuntimeBoundary()
 
-  const modelServer = await import('../model-server')
+  const [modelServer, applicationModule, applicationAccess, modelServices] = await Promise.all([
+    import('../model-server'),
+    import('@offgrid/application'),
+    import('../composition/application-access'),
+    import('../model-services')
+  ])
+  application = applicationModule.createOffGridApplication({
+    models: modelServices.desktopModelWorkspacePorts
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
   startModelServer = modelServer.startModelServer
   stopModelServer = modelServer.stopModelServer
   gatewayPort = await unusedPort()
@@ -107,8 +124,10 @@ beforeEach(() => {
   installNativeRuntimeBoundary()
 })
 
-afterAll(() => {
+afterAll(async () => {
   stopModelServer()
+  await application.stop()
+  releaseApplication?.()
   delete process.env.OFFGRID_DATA_DIR
   delete process.env.OFFGRID_BIN_DIR
   fs.rmSync(fixture.root, { recursive: true, force: true })

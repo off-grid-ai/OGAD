@@ -1,0 +1,31 @@
+// Composition root: the shared portable backup engine over Desktop's SQLite, file, and archive ports.
+import os from 'node:os'
+import { app } from 'electron'
+import { BackupEngine } from '@offgrid/sync/portable'
+import { getDB } from '../database'
+import { ensureRagStoreSchema } from '../rag/store'
+import { DesktopBackupArchive } from '../backup/archive'
+import { DesktopBackupDataPort } from '../backup/data-port'
+import { DesktopBackupFileMapper } from '../backup/file-mapper'
+import { DesktopBackupSink, type DesktopBackupDelivery } from '../backup/sink'
+import type { DesktopBackupData, DesktopRestoreSummary } from '../backup/types'
+
+export type DesktopBackupEngine = BackupEngine<
+  DesktopBackupData,
+  DesktopRestoreSummary,
+  DesktopBackupDelivery
+>
+
+export function createDesktopBackupEngine(): DesktopBackupEngine {
+  ensureRagStoreSchema()
+  return new BackupEngine(
+    new DesktopBackupDataPort(getDB()),
+    new DesktopBackupFileMapper(),
+    new DesktopBackupArchive({
+      tempDir: os.tmpdir(),
+      userDataDir: app.getPath('userData')
+    }),
+    new DesktopBackupSink(),
+    () => new Date().toISOString()
+  )
+}

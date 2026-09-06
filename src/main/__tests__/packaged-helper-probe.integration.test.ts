@@ -11,6 +11,7 @@ const HELPER_PATHS = [
   'bin/llama/llama-server',
   'bin/ffmpeg',
   'bin/whisper/whisper-cli',
+  'bin/computer-use-capture',
   'bin/sd/sd-server',
   'bin/sd/sd-cli'
 ] as const
@@ -43,6 +44,7 @@ int main(int argc, char **argv) {
   if (strcmp(name, "llama-server") == 0) puts("----- common params -----\n-h, --help, --usage    print usage and exit\n-t, --threads N    number of CPU threads (env: LLAMA_ARG_THREADS)");
   else if (strcmp(name, "ffmpeg") == 0) puts("ffmpeg version 6.0-fixture");
   else if (strcmp(name, "whisper-cli") == 0) puts("usage: whisper-cli [options] file\noptions:");
+  else if (strcmp(name, "computer-use-capture") == 0) puts("usage: computer-use-capture <output.png> <display-id> <excluded-window-id> <width> <height>");
   else if (strcmp(name, "sd-server") == 0) puts("stable-diffusion.cpp version fixture\nUsage: sd-server [options]");
   else if (strcmp(name, "sd-cli") == 0) puts("stable-diffusion.cpp version fixture\nUsage: sd-cli [options]");
   else return 64;
@@ -105,9 +107,16 @@ describe.skipIf(!CAN_COMPILE_NATIVE)('packaged native helper execution probe', (
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
     expect(fs.readFileSync(log, 'utf8').trim().split('\n').sort()).toEqual(
-      ['ffmpeg', 'llama-server', 'sd-cli', 'sd-server', 'whisper-cli'].sort()
+      [
+        'computer-use-capture',
+        'ffmpeg',
+        'llama-server',
+        'sd-cli',
+        'sd-server',
+        'whisper-cli'
+      ].sort()
     )
-    expect(result.stdout).toContain('5 packaged helpers executed successfully')
+    expect(result.stdout).toContain('6 packaged helpers executed successfully')
   })
 
   it('resolves a supplied relative app path before changing helper working directories', () => {
@@ -116,7 +125,7 @@ describe.skipIf(!CAN_COMPILE_NATIVE)('packaged native helper execution probe', (
     const result = runProbe(path.basename(app), {}, root)
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
-    expect(result.stdout).toContain('5 packaged helpers executed successfully')
+    expect(result.stdout).toContain('6 packaged helpers executed successfully')
   })
 
   it('rejects a missing mandatory helper before claiming the package is usable', () => {

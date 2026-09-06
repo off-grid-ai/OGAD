@@ -12,8 +12,29 @@ type HookFn = (...args: any[]) => any
 
 const hooks: Record<string, HookFn> = {}
 
+/** Stable core-to-Pro contract for a terminal Action owned by an existing Chat. */
+export interface ChatActionResult {
+  actionId: string
+  conversationId: string
+  status: 'done' | 'failed'
+  summary: string
+}
+
 export function registerHook(name: string, fn: HookFn): void {
   hooks[name] = fn
+}
+
+/** Remove a registered hook. No-op when absent. Mainly for test isolation and
+ *  for retiring a legacy hook name once its replacement is registered. */
+export function unregisterHook(name: string, expected?: HookFn): void {
+  if (!expected || hooks[name] === expected) delete hooks[name]
+}
+
+/** Whether a hook is currently registered. Lets a caller distinguish "no handler"
+ *  from "handler ran and returned undefined" — needed when falling back from a new
+ *  hook name to a legacy one. */
+export function hasHook(name: string): boolean {
+  return name in hooks
 }
 
 /** Call a hook if registered; returns its result, or undefined when absent. */
@@ -39,13 +60,21 @@ export const HOOKS = {
   chatAugmentContext: 'chat.augmentContext',
   /** () => Promise<SearchSource[]> — extra universal-search sources (pro). */
   searchExtraSources: 'search.extraSources',
+  /**
+   * (connectorId: number, url: string | null) => ConnectorToolSource | undefined - lets Pro
+   * providers own verification, read-tool discovery, and execution through their supported protocol.
+   */
+  mcpConnectorToolSource: 'mcp:connectorToolSource',
   /** (mutation: SyncMutation) => void - record a committed core data change in Pro sync. */
   syncRecordLocalMutation: 'sync.recordLocalMutation',
   /**
-   * (mutation: KnowledgeDocumentMutation) => void - a committed RAG document lifecycle change.
-   * Pro transfers/reconciles it; free builds leave the hook unregistered.
+   * () => readonly string[] - connected peer IDs from the existing Pro transport runtime.
    */
-  syncKnowledgeDocumentMutation: 'sync.knowledgeDocumentMutation',
+  syncConnectedDeviceIds: 'sync.connectedDeviceIds',
+  /**
+   * (deviceId, document) => Promise<void> - send one Shared-approved knowledge document.
+   */
+  syncSendKnowledgeDocument: 'sync.sendKnowledgeDocument',
   /**
    * (mutation: LocalSharedFileMutation) => void - committed generated media or attachment bytes.
    * Pro owns transfer and consent; free builds leave this inert.
@@ -56,5 +85,22 @@ export const HOOKS = {
    * generating, or null when it is generating nothing. Pro streams it live to paired devices; free
    * builds leave it inert. A SNAPSHOT rather than a delta, so a consumer cannot miss the end.
    */
-  syncStreamingState: 'sync.streamingState'
+  syncStreamingState: 'sync.streamingState',
+  /** (request: ActionApprovalRequest) => boolean — offer a consequential action
+   *  for approval; returns true when queued (caller must not execute). Pro
+   *  registers it to route the action through its approval queue + audit log. */
+  actionsProposeApproval: 'actions:proposeApproval',
+  /** ({ conversationId, message }) => Promise<{ answer: string } | null> - lets Pro resolve a
+   * confirmation written in an Action's execution chat before the model can infer a new Action. */
+  actionsResolveChatDecision: 'actions:resolveChatDecision',
+  /** (task: TaskRunSnapshot) => void - lets Pro project the normal task outcome onto the
+   * approval that started the task. Core task state remains the single source of truth. */
+  actionsObserveTaskResult: 'actions:observeTaskResult',
+  /** (result: ChatActionResult) => void - lets Pro project a terminal Chat-owned Action onto the
+   * approval that started that Chat. The action engine remains the execution source of truth. */
+  actionsObserveChatActionResult: 'actions:observeChatActionResult',
+  /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
+   *  that has not yet migrated still gates connector writes; remove once
+   *  desktop-pro registers actionsProposeApproval. */
+  legacyMcpProposeApproval: 'mcp:proposeApproval'
 } as const
