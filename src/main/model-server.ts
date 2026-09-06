@@ -58,7 +58,7 @@ import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
-import { modelControlSurfaceForKind, modelsFailureMessage } from '@offgrid/application'
+import { modelsFailureMessage } from '@offgrid/application'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
 import { pickFreePort } from './free-port'
 import { guardProxyStreams } from './stream-guards'
@@ -73,6 +73,7 @@ import {
   generateWithDesktopModels,
   refreshDesktopModels
 } from './composition/application-access'
+import { handleModelManagement } from './model-server/model-management-handler'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -1044,7 +1045,10 @@ export async function startModelServer(
     // batch, sampling) — read + update remotely so a control plane (the console,
     // via the gateway) can configure this node. setSettings persists and respawns
     // llama-server when launch-time args change.
-    if (url === '/v1/settings' && method === 'GET') return json(res, 200, llm.getSettings())
+    if (url === '/v1/settings' && method === 'GET') {
+      await refreshDesktopModels()
+      return json(res, 200, desktopModels.snapshot().settings)
+    }
     if (url === '/v1/settings' && method === 'POST') {
       // Mutating launch-time LLM args triggers a llama-server respawn. The listener is
       // on every interface so a phone can reach the models, which makes this check the
@@ -1096,93 +1100,15 @@ export async function startModelServer(
       return void handleImageGeneration(req, res, rid)
     if (url === '/v1/images/edits' && method === 'POST') return void handleImageEdit(req, res, rid)
 
-    // --- Model management (pull / delete / activate / list) — the full headless
-    // repertoire, so the gateway is self-sufficient without the desktop UI. ---
     if (url.startsWith('/v1/models/') || (url === '/v1/models' && method !== 'GET')) {
-      void (async () => {
-        try {
-          const control = desktopModels.snapshot().control
-          if (url === '/v1/models/catalog' && method === 'GET')
-            return json(res, 200, { kinds: control.kinds, models: control.models })
-          if (url === '/v1/models/installed' && method === 'GET')
-            return json(res, 200, { installed: control.installed })
-          if (url === '/v1/models/active' && method === 'GET') return json(res, 200, control.active)
-          if (url === '/v1/models/pull/status' && method === 'GET') {
-            const id = (req.url || '').split('?')[1]?.match(/(?:^|&)id=([^&]+)/)?.[1]
-            return json(
-              res,
-              200,
-              control.downloads.find(
-                (download) => download.modelId === decodeURIComponent(id || '')
-              ) ?? { status: 'idle' }
-            )
-          }
-          if (url === '/v1/models/pull' && method === 'POST') {
-            const { id } = await readJson(req)
-            if (!id) return json(res, 400, { error: 'id required' })
-            const started = await desktopModels.control({ type: 'download', modelId: String(id) })
-            if (!started.ok) return json(res, 400, { error: modelsFailureMessage(started.failure) })
-            return json(res, 202, {
-              status: 'started',
-              id,
-              poll: `/v1/models/pull/status?id=${encodeURIComponent(String(id))}`
-            })
-          }
-          if (url === '/v1/models/cancel' && method === 'POST') {
-            const { id } = await readJson(req)
-            const cancelled = await desktopModels.control({
-              type: 'cancel-download',
-              modelId: String(id)
-            })
-            if (!cancelled.ok)
-              return json(res, 400, { error: modelsFailureMessage(cancelled.failure) })
-            return json(res, 200, { cancelled: cancelled.value.status === 'cancelled' })
-          }
-          if (url === '/v1/models/activate' && method === 'POST') {
-            const { id, kind } = await readJson(req)
-            if (!id) return json(res, 400, { error: 'id required' })
-            const model = control.models.find((row) => row.id === String(id))
-            // Resolved explicitly, because the two failures are different facts. An unknown id and
-            // a known model of an unsupported kind both used to answer "unsupported model kind",
-            // which sent a caller looking at the kind of a model that was never there. The union
-            // also could not be passed to `modelControlSurfaceForKind`, which takes a string - a
-            // type error that only surfaced once shared's declarations were rebuilt.
-            const requestedKind = typeof kind === 'string' ? kind : model?.kind
-            if (requestedKind === undefined)
-              return json(res, 404, { error: `unknown model: ${String(id)}` })
-            const surface = modelControlSurfaceForKind(requestedKind)
-            if (!surface)
-              return json(res, 400, { error: `unsupported model kind: ${requestedKind}` })
-            const activated = await desktopModels.control({
-              type: 'activate',
-              modelId: String(id),
-              surface
-            })
-            return activated.ok
-              ? json(res, 200, activated.value)
-              : json(res, 400, { error: modelsFailureMessage(activated.failure) })
-          }
-          // DELETE /v1/models/{id}  (or POST /v1/models/delete {id})
-          if (method === 'DELETE' && url.startsWith('/v1/models/') && url !== '/v1/models/') {
-            const id = decodeURIComponent(url.slice('/v1/models/'.length))
-            const removed = await desktopModels.control({ type: 'remove', modelId: id })
-            return removed.ok
-              ? json(res, 200, removed.value)
-              : json(res, 400, { error: modelsFailureMessage(removed.failure) })
-          }
-          if (url === '/v1/models/delete' && method === 'POST') {
-            const { id } = await readJson(req)
-            if (!id) return json(res, 400, { error: 'id required' })
-            const removed = await desktopModels.control({ type: 'remove', modelId: String(id) })
-            return removed.ok
-              ? json(res, 200, removed.value)
-              : json(res, 400, { error: modelsFailureMessage(removed.failure) })
-          }
-          return json(res, 404, { error: 'unknown model endpoint' })
-        } catch (e) {
-          json(res, 500, { error: (e as Error).message })
-        }
-      })()
+      void handleModelManagement({
+        request: req,
+        response: res,
+        url,
+        method,
+        readJson,
+        respond: json
+      })
       return
     }
 
