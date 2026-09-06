@@ -1,12 +1,8 @@
-import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
 import {
   IconPlus,
   IconFolder,
   IconFile,
-  IconFileText,
-  IconPhoto,
-  IconMovie,
-  IconMicrophone,
   IconTrash,
   IconLoader2,
   IconDeviceFloppy,
@@ -14,19 +10,22 @@ import {
   IconSettings,
   IconLayoutGrid
 } from '@tabler/icons-react'
+import type { ProjectRecord } from '@offgrid/application'
+import { workflowFailureMessage } from '@offgrid/application'
 import { timeAgo } from '@renderer/lib/time'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { executeWorkspaceContentCommand } from '@renderer/lib/workspace-content-client'
+import { useWorkspaceContentProjection } from '@renderer/hooks/useWorkspaceContentProjection'
 import { ProjectArtifacts } from './ProjectArtifacts'
+import {
+  createdProjectId,
+  describeWorkspaceContentFailure,
+  fmtSize,
+  knowledgeBaseFailure,
+  PROJECT_KIND_ICON,
+  resolveActiveId
+} from './project-screen-logic'
 
-interface Project {
-  id: string
-  name: string
-  description: string
-  systemPrompt: string
-  icon?: string
-  includeMemory: boolean
-  updatedAt: string
-}
 interface RagDoc {
   id: number
   name: string
@@ -34,44 +33,10 @@ interface RagDoc {
   kind: string
   enabled: boolean
 }
-interface RagConvo {
-  id: string
-  title: string | null
-  updated_at: string
-  message_count?: number
-}
-
 interface ProjectsScreenProps {
   onOpenChat: (target: { conversationId?: string; projectId?: string }) => void
   selectedProjectId?: string | null
   onSelectProject?: (projectId: string | null) => void
-}
-
-const KIND_ICON: Record<string, typeof IconFile> = {
-  text: IconFileText,
-  pdf: IconFile,
-  docx: IconFileText,
-  image: IconPhoto,
-  video: IconMovie,
-  audio: IconMicrophone
-}
-
-function fmtSize(n: number): string {
-  if (!n) return ''
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
-/**
- * The reason a delete was refused, without the IPC plumbing around it: Electron wraps a
- * main-process error as "Error invoking remote method '...': Error: <reason>", and the reason is
- * the only part that means anything to the user.
- */
-function deleteFailureMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error)
-  const reason = raw.split('Error: ').pop()?.trim()
-  return reason && reason.length > 0 ? reason : 'This project could not be deleted.'
 }
 
 export function ProjectsScreen({
@@ -79,30 +44,23 @@ export function ProjectsScreen({
   selectedProjectId,
   onSelectProject
 }: ProjectsScreenProps): React.ReactElement {
-  const [projects, setProjects] = useState<Project[]>([])
+  // Reads come from the Shared workspace-content projection, which is the one owner of project
+  // truth. This screen keeps no writable copy of it: a project changed elsewhere flows in through
+  // the subscription inside the hook, and the UI below only holds its own uncommitted draft state
+  // (the new-project name box, the selected id) between commands.
+  const workspaceContent = useWorkspaceContentProjection()
+  const projects = workspaceContent?.projects ?? []
   const [localActiveId, setLocalActiveId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [view, setView] = useState<'chat' | 'artifacts' | 'config'>('chat')
   const [deleteFailure, setDeleteFailure] = useState('')
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
 
-  const applyProjects = useCallback((list: Project[]): Project[] => {
-    setProjects(list)
-    setLocalActiveId((cur) => cur ?? list[0]?.id ?? null)
-    return list
-  }, [])
-  const loadProjects = useCallback(async (): Promise<Project[]> => {
-    return ((await window.api.listProjects()) ?? []) as Project[]
-  }, [])
-  const refreshProjects = useCallback(async (): Promise<Project[]> => {
-    return applyProjects(await loadProjects())
-  }, [applyProjects, loadProjects])
-
-  useEffect(() => {
-    void loadProjects().then(applyProjects)
-  }, [applyProjects, loadProjects])
-
-  const activeId = selectedProjectId ?? localActiveId
+  // Mirrors the prior local-owner behavior: nothing picks a project until one exists, and once
+  // the selection is cleared (e.g. after a delete) the first available project becomes active
+  // again. The projection above stays the only source of the project list this derives from.
+  const activeId = resolveActiveId(selectedProjectId, localActiveId, projects)
   const selectProject = (projectId: string | null): void => {
     setLocalActiveId(projectId)
     onSelectProject?.(projectId)
@@ -115,10 +73,14 @@ export function ProjectsScreen({
       setCreating(false)
       return
     }
-    const id = await window.api.createProject({ name })
     setNewName('')
     setCreating(false)
-    await refreshProjects()
+    const outcome = await executeWorkspaceContentCommand({ type: 'create_project', name })
+    if (!outcome.ok) {
+      setDeleteFailure(describeWorkspaceContentFailure(outcome.failure))
+      return
+    }
+    const id = createdProjectId(outcome)
     if (id) {
       selectProject(id)
       setView('config')
@@ -134,17 +96,19 @@ export function ProjectsScreen({
       return
     }
     setDeleteFailure('')
+    setDeletingProjectId(id)
     try {
-      await window.api.deleteProject(id)
-    } catch (error) {
-      // The delete is refused when the project's knowledge base or its sync cleanup only partly
-      // succeeded: the project is still there, deliberately, and the user has to be told why
-      // rather than watching the row survive a delete that reported nothing.
-      setDeleteFailure(deleteFailureMessage(error))
-      return
+      const outcome = await window.api.workspaceContent.workflows.deleteProject(id)
+      if (!outcome.ok) {
+        setDeleteFailure(workflowFailureMessage(outcome.failure))
+        return
+      }
+      selectProject(null)
+    } catch (cause) {
+      setDeleteFailure(cause instanceof Error ? cause.message : 'Could not delete this project.')
+    } finally {
+      setDeletingProjectId(null)
     }
-    selectProject(null)
-    await refreshProjects()
   }
 
   return (
@@ -164,6 +128,11 @@ export function ProjectsScreen({
         {deleteFailure ? (
           <p role="alert" className="mx-4 mb-2 text-[11px] text-red-400">
             {deleteFailure}
+          </p>
+        ) : null}
+        {deletingProjectId ? (
+          <p role="status" className="mx-4 mb-2 text-[11px] text-neutral-400">
+            Deleting project and its owned data…
           </p>
         ) : null}
         <div className="flex-1 overflow-y-auto px-2">
@@ -257,8 +226,8 @@ export function ProjectsScreen({
             <ProjectConfig
               key={active.id}
               project={active}
-              onSaved={refreshProjects}
               onDelete={() => removeProject(active.id)}
+              deleting={deletingProjectId === active.id}
             />
           )}
         </div>
@@ -279,30 +248,23 @@ function ProjectChats({
   project,
   onOpenChat
 }: {
-  project: Project
+  project: ProjectRecord
   onOpenChat: (target: { conversationId?: string; projectId?: string }) => void
 }): React.ReactElement {
-  const [chats, setChats] = useState<RagConvo[]>([])
-
-  useEffect(() => {
-    let alive = true
-    const refresh = (): void => {
-      void window.api
-        .getRagConversations(project.id)
-        .then((c: RagConvo[]) => {
-          if (alive) setChats(c)
-        })
-        .catch(() => {})
+  const workspaceContent = useWorkspaceContentProjection()
+  const chats = useMemo(() => {
+    if (!workspaceContent) return []
+    const counts = new Map<string, number>()
+    for (const message of workspaceContent.messages) {
+      counts.set(message.conversationId, (counts.get(message.conversationId) ?? 0) + 1)
     }
-    refresh()
-    const offChanged = window.api.onRagConversationsChanged?.(() => {
-      refresh()
-    })
-    return () => {
-      alive = false
-      offChanged?.()
-    }
-  }, [project.id])
+    return workspaceContent.conversations
+      .filter((conversation) => conversation.projectId === project.id)
+      .map((conversation) => ({
+        ...conversation,
+        messageCount: counts.get(conversation.id) ?? 0
+      }))
+  }, [project.id, workspaceContent])
 
   return (
     <div className="w-full px-8 py-6">
@@ -336,8 +298,8 @@ function ProjectChats({
                   {c.title || 'Untitled chat'}
                 </div>
                 <div className="mt-0.5 text-[11px] text-neutral-600">
-                  {c.message_count ? `${c.message_count} messages · ` : ''}
-                  {timeAgo(c.updated_at)}
+                  {c.messageCount ? `${c.messageCount} messages · ` : ''}
+                  {timeAgo(c.updatedAt)}
                 </div>
               </div>
             </button>
@@ -352,12 +314,12 @@ function ProjectChats({
 
 function ProjectConfig({
   project,
-  onSaved,
-  onDelete
+  onDelete,
+  deleting
 }: {
-  project: Project
-  onSaved: () => void
+  project: ProjectRecord
   onDelete: () => void
+  deleting: boolean
 }): React.ReactElement {
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description)
@@ -367,6 +329,7 @@ function ProjectConfig({
   // Captured-memory retrieval is a Pro feature — core projects use uploaded docs only.
   const { isPro } = useRendererEntitlement()
   const [savedAt, setSavedAt] = useState<string | null>(null)
+  const [saveFailure, setSaveFailure] = useState('')
 
   const dirty =
     name !== project.name ||
@@ -376,10 +339,20 @@ function ProjectConfig({
 
   const save = async (): Promise<void> => {
     setSaving(true)
+    setSaveFailure('')
     try {
-      await window.api.updateProject(project.id, { name, description, systemPrompt, includeMemory })
+      const outcome = await executeWorkspaceContentCommand({
+        type: 'update_project',
+        projectId: project.id,
+        patch: { name, description, systemPrompt, includeMemory }
+      })
+      if (!outcome.ok) {
+        setSaveFailure(describeWorkspaceContentFailure(outcome.failure))
+        return
+      }
+      // The active project's own snapshot arrives on the next projection broadcast; showing
+      // "Saved" here only confirms the command this form just sent was committed.
       setSavedAt('Saved')
-      onSaved()
     } finally {
       setSaving(false)
     }
@@ -387,6 +360,11 @@ function ProjectConfig({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+      {saveFailure ? (
+        <p role="alert" className="mx-6 mt-3 text-[11px] text-red-400">
+          {saveFailure}
+        </p>
+      ) : null}
       <div className="flex items-center justify-end gap-3 border-b border-neutral-800 px-6 py-3">
         {savedAt && !dirty && <span className="text-[11px] text-neutral-600">{savedAt}</span>}
         <button
@@ -403,10 +381,15 @@ function ProjectConfig({
         </button>
         <button
           onClick={onDelete}
+          disabled={deleting}
           title="Delete project"
-          className="rounded-md p-1.5 text-neutral-500 transition-colors hover:text-red-500"
+          className="rounded-md p-1.5 text-neutral-500 transition-colors hover:text-red-500 disabled:cursor-wait disabled:opacity-50"
         >
-          <IconTrash className="h-4 w-4" />
+          {deleting ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconTrash className="h-4 w-4" />
+          )}
         </button>
       </div>
 
@@ -465,7 +448,7 @@ function ProjectConfig({
         )}
 
         <div className="border-t border-neutral-800 pt-6">
-          <KnowledgeBase projectId={project.id} />
+          <KnowledgeBase key={project.id} projectId={project.id} />
         </div>
       </div>
     </div>
@@ -496,24 +479,29 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
   const [docs, setDocs] = useState<RagDoc[]>([])
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [documentsLoaded, setDocumentsLoaded] = useState(false)
 
   const refresh = useCallback(async (): Promise<void> => {
-    setDocs((await window.api.listProjectDocuments(projectId)) ?? [])
+    try {
+      setDocs((await window.api.listProjectDocuments(projectId)) ?? [])
+      setDocumentsLoaded(true)
+    } catch (cause) {
+      setStatus(knowledgeBaseFailure('Knowledge base', 'Load documents', cause))
+    }
   }, [projectId])
 
   useEffect(() => {
-    refresh()
+    const initialRefresh = window.setTimeout(() => void refresh(), 0)
     const off = window.api.onProjectIndexProgress((progress) => {
       if (progress.stage === 'error') setStatus(`${progress.name}: ${progress.error}`)
-      else if (progress.stage === 'done') {
-        setStatus(`${progress.name}: indexed`)
-        refresh()
-      } else setStatus(`${progress.name}: ${progress.stage}…`)
+      else if (progress.stage === 'done') setStatus(`${progress.name}: indexed`)
+      else setStatus(`${progress.name}: ${progress.stage}…`)
     })
     const offChanged = window.api.onProjectDocumentsChanged(({ projectId: changedProjectId }) => {
-      if (changedProjectId === projectId) refresh()
+      if (changedProjectId === projectId) void refresh()
     })
     return () => {
+      window.clearTimeout(initialRefresh)
       off()
       offChanged()
     }
@@ -524,9 +512,10 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
     setStatus('Choose files…')
     try {
       await window.api.addProjectDocuments(projectId)
+    } catch (cause) {
+      setStatus(knowledgeBaseFailure('Knowledge base', 'Add files', cause))
     } finally {
       setBusy(false)
-      refresh()
     }
   }
 
@@ -554,9 +543,11 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
       {status && <div className="mb-3 text-[11px] text-neutral-500">{status}</div>}
 
       <div className="grid grid-cols-1 gap-2">
-        {docs.length === 0 && <p className="text-sm text-neutral-600">No documents yet.</p>}
+        {documentsLoaded && docs.length === 0 && (
+          <p className="text-sm text-neutral-600">No documents yet.</p>
+        )}
         {docs.map((d) => {
-          const Icon = KIND_ICON[d.kind] ?? IconFile
+          const Icon = PROJECT_KIND_ICON[d.kind] ?? IconFile
           return (
             <div
               key={d.id}
@@ -571,10 +562,11 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
               </div>
               <button
                 onClick={async () => {
-                  await window.api.toggleProjectDocument(d.id, !d.enabled)
-                  setDocs((cur) =>
-                    cur.map((x) => (x.id === d.id ? { ...x, enabled: !x.enabled } : x))
-                  )
+                  try {
+                    await window.api.toggleProjectDocument(d.id, !d.enabled)
+                  } catch (cause) {
+                    setStatus(knowledgeBaseFailure(d.name, 'Update', cause))
+                  }
                 }}
                 aria-label={`${d.enabled ? 'Disable' : 'Enable'} ${d.name}`}
                 title={d.enabled ? 'Enabled in retrieval' : 'Disabled'}
@@ -586,8 +578,11 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.ReactElement
               </button>
               <button
                 onClick={async () => {
-                  await window.api.deleteProjectDocument(d.id)
-                  setDocs((cur) => cur.filter((x) => x.id !== d.id))
+                  try {
+                    await window.api.deleteProjectDocument(d.id)
+                  } catch (cause) {
+                    setStatus(knowledgeBaseFailure(d.name, 'Delete', cause))
+                  }
                 }}
                 aria-label={`Delete ${d.name}`}
                 className="shrink-0 text-neutral-600 transition-colors hover:text-red-500"

@@ -620,7 +620,7 @@
     },
     "src/renderer/src/components/ProjectsScreen.tsx": {
       "max-lines": [
-        610
+        598
       ]
     },
     "src/renderer/src/components/RemoteVisionSettingsTab.tsx": {
