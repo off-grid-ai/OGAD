@@ -53,7 +53,7 @@ export function ArtifactCanvas({
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null)
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const [resizing, setResizing] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState('')
+  const [preview, setPreview] = useState({ documentHtml: '', url: '' })
   // Holds the active drag's teardown so we can force it on unmount — otherwise
   // closing the canvas mid-drag (e.g. switching chats) leaks the window listeners
   // and keeps firing onResize on a stale setter.
@@ -186,11 +186,11 @@ if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); }
 else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`
   }, [artifact, runtime])
+  const previewUrl = preview.documentHtml === documentHtml ? preview.url : ''
 
   useEffect(() => {
     let active = true
     let registeredUrl: string | undefined
-    setPreviewUrl('')
 
     if (documentHtml) {
       window.api
@@ -198,13 +198,13 @@ else { __ogShow('No React component found — define a component named App or a 
         .then((url) => {
           registeredUrl = url
           if (active) {
-            setPreviewUrl(url)
+            setPreview({ documentHtml, url })
           } else {
             revokePreview(url)
           }
         })
         .catch(() => {
-          if (active) setPreviewUrl('')
+          if (active) setPreview({ documentHtml, url: '' })
         })
     }
 

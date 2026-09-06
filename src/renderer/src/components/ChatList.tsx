@@ -33,6 +33,10 @@ interface ChatListItemProps {
   onDelete: (e: React.MouseEvent, sessionId: string) => void
 }
 
+function readChatSessions(source: Source): Promise<ChatSession[]> {
+  return window.api.getChatSessions(source)
+}
+
 function ChatListItem({
   session,
   index,
@@ -289,15 +293,14 @@ function ChatListItem({
 
 export function ChatList({ onSelectSession }: ChatListProps): React.JSX.Element {
   const [sessions, setSessions] = useState<ChatSession[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [activeSource, setActiveSource] = useState<Source>('All')
 
   const fetchSessions = useCallback(async (): Promise<void> => {
-    setLoading(true)
     try {
-      const data = await window.api.getChatSessions(activeSource)
+      const data = await readChatSessions(activeSource)
       setSessions(data)
     } catch (e) {
       console.error('Failed to fetch sessions', e)
@@ -313,8 +316,21 @@ export function ChatList({ onSelectSession }: ChatListProps): React.JSX.Element 
   }
 
   useEffect(() => {
-    fetchSessions()
-  }, [fetchSessions])
+    let active = true
+    void readChatSessions(activeSource)
+      .then((data) => {
+        if (active) setSessions(data)
+      })
+      .catch((error) => {
+        console.error('Failed to fetch sessions', error)
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [activeSource])
 
   const handleDelete = async (event: React.MouseEvent, sessionId: string): Promise<void> => {
     event.stopPropagation()
@@ -354,6 +370,7 @@ export function ChatList({ onSelectSession }: ChatListProps): React.JSX.Element 
       <SourceFilterTabs
         activeSource={activeSource}
         onSourceChange={(source) => {
+          setLoading(true)
           setActiveSource(source)
           setSearchQuery('')
         }}

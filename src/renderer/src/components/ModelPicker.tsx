@@ -232,9 +232,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   // control API's own request identity (it is accepted on the intent and echoed on the
   // success), so ownership is carried by that field rather than by a second copy of the store.
   const controlOwner = useRef<string | null>(null)
-  const claimControl = useCallback((): string => {
+  const issueControlOperation = useCallback((): string => {
     const operationId = crypto.randomUUID()
     controlOwner.current = operationId
+    return operationId
+  }, [])
+  const claimControl = useCallback((): string => {
+    const operationId = issueControlOperation()
     // An outstanding consent question belongs to the claim that produced it, so ISSUING any
     // newer command retires it here — at issue, not at reply, and whether or not that newer
     // command later succeeds. Consent the user gave for one model must never stay actionable
@@ -242,7 +246,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     // minting its own claim cannot invalidate the very confirmation it is carrying.
     setConfirmation(null)
     return operationId
-  }, [])
+  }, [issueControlOperation])
   const ownsControl = useCallback(
     (operationId: string): boolean => controlOwner.current === operationId,
     []
@@ -259,49 +263,45 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setInventoryRead({ state: 'read' })
   }, [])
 
-  // The canonical model inventory. Owns only its own failure.
-  const readInventory = useCallback(async (): Promise<void> => {
-    const operationId = claimControl()
-    try {
-      const outcome = await modelControlClient.control({ type: 'refresh', operationId })
-      if (!outcome.ok) {
+  useEffect(() => {
+    // Both reads start now and settle independently; neither can reject out or block the other.
+    const operationId = issueControlOperation()
+    void modelControlClient
+      .control({ type: 'refresh', operationId })
+      .then((outcome) => {
+        if (!outcome.ok) {
+          if (!ownsControl(operationId)) return
+          const message = modelsFailureMessage(outcome.failure)
+          setFailure(message)
+          setInventoryRead({ state: 'unavailable', message })
+          return
+        }
+        // The success echoes the id we sent; an answer to any other request is not ours to apply.
+        if (!ownsControl(outcome.value.operationId)) return
+        setFailure(null)
+        // Every success status carries the fresh projection, not only `completed`. Dropping the
+        // others left the panel showing a stale (or absent) active model after a refusal.
+        applyProjection(outcome.value.projection)
+      })
+      .catch((cause) => {
         if (!ownsControl(operationId)) return
-        const message = modelsFailureMessage(outcome.failure)
+        const message = transportFailureMessage(cause)
         setFailure(message)
         setInventoryRead({ state: 'unavailable', message })
-        return
-      }
-      // The success echoes the id we sent; an answer to any other request is not ours to apply.
-      if (!ownsControl(outcome.value.operationId)) return
-      setFailure(null)
-      // Every success status carries the fresh projection, not only `completed`. Dropping the
-      // others left the panel showing a stale (or absent) active model after a refusal.
-      applyProjection(outcome.value.projection)
-    } catch (cause) {
-      if (!ownsControl(operationId)) return
-      const message = transportFailureMessage(cause)
-      setFailure(message)
-      setInventoryRead({ state: 'unavailable', message })
-    }
-  }, [applyProjection, claimControl, ownsControl])
+      })
 
-  // Computer Use is an OPTIONAL section read over a separate channel. It is deliberately not
-  // combined with the inventory read: a rejection here must never suppress a model-control
-  // projection that arrived intact. It reports its own error and guesses nothing.
-  const readComputerUse = useCallback(async (): Promise<void> => {
-    try {
-      setComputerUse(await window.api.getComputerUseActiveModels())
-      setComputerUseRead({ state: 'read' })
-    } catch (cause) {
-      setComputerUseRead({ state: 'unavailable', message: transportFailureMessage(cause) })
-    }
-  }, [])
-
-  useEffect(() => {
-    // Both start now and settle independently; neither can reject out or block the other.
-    void readInventory()
-    void readComputerUse()
-  }, [readInventory, readComputerUse])
+    // Computer Use is optional and owns its separate failure state. Its rejection cannot suppress
+    // a valid model-control projection.
+    void window.api
+      .getComputerUseActiveModels()
+      .then((projection) => {
+        setComputerUse(projection)
+        setComputerUseRead({ state: 'read' })
+      })
+      .catch((cause) => {
+        setComputerUseRead({ state: 'unavailable', message: transportFailureMessage(cause) })
+      })
+  }, [applyProjection, issueControlOperation, ownsControl])
 
   const setUnloadStatus = (mode: string, status: UnloadStatus): void =>
     setUnload((s) => ({ ...s, [mode]: status }))
