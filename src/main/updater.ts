@@ -83,11 +83,19 @@ function applyChannel(explicitChannelSwitch = false): void {
 // Register the update IPC surface. Split OUT of startAutoUpdates so it can run in
 // EVERY build, including dev: the renderer queries update:staged-version on startup
 // regardless of environment, and gating registration behind !is.dev left it with no
+/**
+ * Which kind of computer this app is running on. Whether an older release can be
+ * installed here depends on it, so it enters through the composition root as a device
+ * fact rather than being read from the host mid-journey.
+ */
+let updateHostPlatform: NodeJS.Platform = process.platform
+
 // handler ("No handler registered for 'update:staged-version'"). Every handler here is
 // safe in dev — reads return the running version / null, and checkForUpdates() itself
 // short-circuits on !app.isPackaged. The auto-download ENGINE (feed, listeners,
 // background cadence) stays in startAutoUpdates and remains production-only.
-export function registerUpdateIpc(): void {
+export function registerUpdateIpc(platform: NodeJS.Platform = process.platform): void {
+  updateHostPlatform = platform
   // Apply a staged update on demand. autoInstallOnAppQuit only swaps the bundle
   // on a GRACEFUL quit — a force-kill (Activity Monitor, kill -9, killall) skips
   // it, so a fully-downloaded update can sit unapplied forever. quitAndInstall
@@ -171,7 +179,7 @@ export function registerUpdateIpc(): void {
     }
     const releases = await listPreviousUpdateReleases({
       currentVersion: app.getVersion(),
-      platform: process.platform
+      platform: updateHostPlatform
     })
     return releases.slice(0, 20).map(({ version, channel, publishedAt }) => ({
       version,
@@ -201,7 +209,7 @@ async function downloadPreviousVersion(
 
   const releases = await listPreviousUpdateReleases({
     currentVersion: app.getVersion(),
-    platform: process.platform
+    platform: updateHostPlatform
   })
   const target = releases.find((release) => release.version === normalized)
   if (!target) {
