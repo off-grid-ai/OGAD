@@ -3060,3 +3060,31 @@ the facade. Focused fix: import `hardwareService` from its own module; then the 
 Mobile `10c435a0` records the gap in the test header.
 
 Claude-Session: https://claude.ai/code/session_01RwwvfNHkF7ohUnbpZ75oZu
+
+---
+
+## Tonight's upgrade gaps (2026-09-07, OPEN, found by running the real app)
+
+The must-pass line, held separately: a person with old chats and projects opens Desktop,
+the upgrade succeeds, and afterwards every project and every chat is still there and still
+openable. Nothing else on this list blocks tonight's send. Everything below waits.
+
+- A person is shown the database's own words about a missing column when the upgrade fails.
+  They cannot act on it. RIGHT: tell them in their own words what happened and what to do next,
+  and keep the technical detail behind a "copy details" action for support.
+- A person is offered a Retry button that can never succeed while the cause stands. It is false
+  hope, and they can press it forever. RIGHT: only offer trying again when it could work; when it
+  cannot, say so and give one real choice instead.
+- A person's whole app comes up dead behind the upgrade box - chat, models, dictation, tasks and
+  memory all fail to start - and nothing on screen says so. It is only in the log. RIGHT: if a part
+  of the app cannot start, the person is told on screen which part and what still works.
+- A person can be left trapped behind the box with no way forward and no way back to their old
+  chats. RIGHT: they can always dismiss the box and keep using the app on their existing chats.
+- No check anywhere starts the real app and confirms a person can use it. Every check ran green
+  while the app was unusable. RIGHT: one check starts the real app and fails if any part reports it
+  never started.
+- Nothing anywhere asserts that a person's existing chats and projects survive an upgrade. RIGHT:
+  one check upgrades real old-shape chats and projects and proves they are all still there after.
+- The failure message promises "Nothing was removed" without anything proving that promise holds.
+  RIGHT: a check proves the person's original chats and projects are untouched after a failed
+  upgrade, so the promise is earned.

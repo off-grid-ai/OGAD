@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ChatTurnRecord } from '@offgrid/application'
 import { CHAT_TURN_STATUSES } from '@offgrid/models'
 import { parseSyncedMessageContext } from '@offgrid/sync'
@@ -131,11 +132,15 @@ export class DesktopWorkspaceContentMigrationCoordinator {
 
   private putProjects(rows: readonly Project[], fallback: string): void {
     const put = this.db.prepare(
-      `INSERT INTO workspace_content_projects (id,name,description,system_prompt,icon,include_memory,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,system_prompt=excluded.system_prompt,icon=excluded.icon,include_memory=excluded.include_memory,created_at=excluded.created_at,updated_at=excluded.updated_at`
+      `INSERT INTO workspace_content_projects (id,sync_operation_id,name,description,system_prompt,icon,include_memory,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,system_prompt=excluded.system_prompt,icon=excluded.icon,include_memory=excluded.include_memory,created_at=excluded.created_at,updated_at=excluded.updated_at`
     )
     for (const row of rows)
       put.run(
         required(row.id, 'projects.id'),
+        // Carrying a project across from the old store IS a local change, so it
+        // gets its own operation id, minted the same way the repository mints one.
+        // Without it the row is refused and a person's chats never upgrade.
+        randomUUID(),
         required(row.name, 'projects.name'),
         row.description ?? '',
         row.system_prompt ?? '',
