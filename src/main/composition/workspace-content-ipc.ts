@@ -8,7 +8,7 @@
  */
 import { BrowserWindow, ipcMain } from 'electron'
 import type { WorkspaceContentCommand } from '@offgrid/application'
-import { desktopApplication } from './application'
+import { desktopWorkflows, desktopWorkspaceContent } from './application-access'
 import { desktopWorkspaceContent } from './application-access'
 
 const GET_SNAPSHOT_CHANNEL = 'workspace-content:get-snapshot'
@@ -39,7 +39,7 @@ let releaseRegistration: (() => void) | null = null
 export function registerWorkspaceContentIpc(): () => void {
   if (releaseRegistration) return releaseRegistration
 
-  ipcMain.handle(GET_SNAPSHOT_CHANNEL, () => desktopApplication.workspaceContent.snapshot())
+  ipcMain.handle(GET_SNAPSHOT_CHANNEL, () => desktopWorkspaceContent.snapshot())
 
   ipcMain.handle(EXECUTE_CHANNEL, async (_event, command: WorkspaceContentCommand) =>
     desktopWorkspaceContent.execute(command)
@@ -49,17 +49,17 @@ export function registerWorkspaceContentIpc(): () => void {
     if (typeof projectId !== 'string' || projectId.trim().length === 0) {
       throw new TypeError('A project ID is required.')
     }
-    return desktopApplication.workflows.deleteProject(projectId)
+    return desktopWorkflows.deleteProject(projectId)
   })
 
   ipcMain.handle(DELETE_CONVERSATION_CHANNEL, async (_event, conversationId: unknown) => {
     if (typeof conversationId !== 'string' || conversationId.trim().length === 0) {
       throw new TypeError('A conversation ID is required.')
     }
-    return desktopApplication.workflows.deleteConversation(conversationId)
+    return desktopWorkflows.deleteConversation(conversationId)
   })
 
-  const stopSubscription = desktopApplication.workspaceContent.subscribe((snapshot) => {
+  const stopSubscription = desktopWorkspaceContent.subscribe((snapshot) => {
     broadcast(SNAPSHOT_CHANGED_CHANNEL, snapshot)
   })
 
