@@ -95,7 +95,7 @@ async function readLegacyRecords(): Promise<readonly LegacyGalleryRecord[]> {
   return Promise.all(
     names
       .filter((name) => isGeneratedImageFile(name) && !name.startsWith('preview-'))
-      .sort()
+      .sort((left, right) => left.localeCompare(right, 'en'))
       .flatMap((name) => {
         const imagePath = resolveExistingOwnedEntry(directory, name)
         return imagePath ? [legacyRecord(imagePath)] : []

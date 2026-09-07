@@ -222,7 +222,9 @@ export class DesktopGeneratedImageGalleryRepository implements GeneratedImageGal
           }>
         ).map(({ image_id }) => image_id)
       )
-      for (const imageId of [...new Set(imageIds)].sort()) {
+      for (const imageId of [...new Set(imageIds)].sort((left, right) =>
+        left.localeCompare(right, 'en')
+      )) {
         if (images.has(imageId) || intents.has(imageId))
           capture.run(scope, imageId, deletionOperationId)
       }
