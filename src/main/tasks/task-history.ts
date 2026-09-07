@@ -30,8 +30,7 @@ import { TaskHistoryStore } from './task-history-store'
 import { persistTaskResultInChat } from './task-result-chat'
 import { notifyRagConversationChanged } from '../rag-conversation-events'
 import { callHook, HOOKS } from '../bootstrap/hookRegistry'
-import { desktopAutomation } from '../composition/application-access'
-import { desktopApplication } from '../composition/application'
+import { desktopAutomation, desktopWorkspaceContent } from '../composition/application-access'
 
 let configuredRunner: TaskRetryRunner | null = null
 let configuredControl: TaskControlPort | null = null
@@ -69,7 +68,7 @@ async function readGuidanceAttachment(
 }
 
 function retryGuidanceForTask(task: TaskRunSnapshot): string[] {
-  const snapshot = desktopApplication.workspaceContent.snapshot()
+  const snapshot = desktopWorkspaceContent.snapshot()
   if (snapshot.status !== 'ready') throw new Error('Workspace content is not ready.')
   const messages = snapshot.messages
     .filter((message) => message.conversationId === task.journeyId)
