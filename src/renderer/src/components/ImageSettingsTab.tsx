@@ -10,7 +10,7 @@ import { SettingsNumberField } from './SettingsNumberField'
 import { SettingsSelect } from './SettingsSelect'
 import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
 import { failed, modelFileDisplayName, modelsFailureMessage, ok } from '@offgrid/application'
-import { normalizeImageParameterStore } from '@offgrid/models'
+import { normalizeImageParameterStore } from '@offgrid/application'
 import { modelControlClient } from '@renderer/lib/model-control-client'
 
 interface ImageSettings {

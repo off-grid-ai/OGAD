@@ -13,7 +13,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Pause, CaretDown, Copy, ArrowsClockwise, Check } from '@phosphor-icons/react'
-import { nextPlaybackSpeed, speechOutcomeMessage } from '@offgrid/speech'
+import { nextPlaybackSpeed, speechOutcomeMessage } from '@offgrid/application'
 import { useSpeechProjection, type SpeechProjection } from '@renderer/hooks/useSpeechProjection'
 import { claimVoicePlayback, onVoicePlaybackClaim } from '@renderer/lib/voice-playback-bus'
 import type { PlaybackOperationSnapshot } from '@offgrid/application'

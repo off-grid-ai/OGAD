@@ -2,7 +2,7 @@ import {
   DEFAULT_VOICE_PREFERENCES,
   readVoicePreferences,
   type VoicePreferences
-} from '@offgrid/speech'
+} from '@offgrid/application'
 
 export { DEFAULT_VOICE_PREFERENCES, readVoicePreferences, type VoicePreferences }
 

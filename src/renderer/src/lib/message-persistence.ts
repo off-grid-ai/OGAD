@@ -15,7 +15,7 @@ import {
   isChatTurnStatus,
   type ChatTurnStatus,
   type GenerationMessage
-} from '@offgrid/models'
+} from '@offgrid/application'
 
 export interface PersistedChatSessionTurn {
   turnId: string

@@ -13,7 +13,7 @@ import {
   speechFailureMessage,
   type RuntimeSpeechVoice
 } from '@offgrid/application'
-import { VOICE_TURN_MODES, speechOutcomeMessage } from '@offgrid/speech'
+import { VOICE_TURN_MODES, speechOutcomeMessage } from '@offgrid/application'
 import { useSpeechProjection, type SpeechProjection } from '@renderer/hooks/useSpeechProjection'
 import type { VoicePreferences } from '@renderer/lib/voice-preferences'
 import { SettingsRow } from './SettingsRow'

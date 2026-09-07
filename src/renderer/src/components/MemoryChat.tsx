@@ -31,7 +31,7 @@ import {
   type ConversationRecord,
   type MessageRecord
 } from '@offgrid/application'
-import { normalizeImageParameterStore } from '@offgrid/models'
+import { normalizeImageParameterStore } from '@offgrid/application'
 import {
   cleanImagePrompt,
   isCancellationError,
