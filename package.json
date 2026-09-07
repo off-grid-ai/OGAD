@@ -13,7 +13,8 @@
   "scripts": {
     "prepare": "git config core.hooksPath scripts/hooks || true",
     "format": "prettier --write .",
-    "verify:shared-contract": "node scripts/verify-shared-consumer-contract.mjs",
+    "verify:lockfile-links": "node ../shared/scripts/verify-lockfile-links.mjs package-lock.json",
+    "verify:shared-contract": "npm run verify:lockfile-links && node scripts/verify-shared-consumer-contract.mjs",
     "lint": "npm run verify:shared-contract && node scripts/verify-lint-ratchet.mjs",
     "lint:fix": "npm run verify:shared-contract && eslint src pro --fix && node scripts/verify-lint-ratchet.mjs",
     "test": "node scripts/vitest-electron-node.mjs run --project ui-behavior-integration --project service-integration --project database-integration --project database-exclusive-integration",
