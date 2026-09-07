@@ -55,20 +55,17 @@ function connect(): void {
     }
   }
 
-  // The first read can fail before it starts or while it runs. Both paths end in
-  // the same visible outcome: dictation says it failed instead of going quiet.
-  try {
-    void window.api.speechCommands
-      .getSnapshot()
-      .then((snapshot) => {
-        if (activeConnection === connection && publication === publicationBeforeRead) {
-          publish({ status: 'ready', snapshot, failure: null })
-        }
-      })
-      .catch(readFailed)
-  } catch (cause) {
-    publish({ status: 'failed', snapshot: projection.snapshot, failure: transportFailure(cause) })
-  }
+  // The first read can fail before it starts or while it runs. Starting the read
+  // inside the chain turns an immediate throw into a rejection, so both paths end
+  // in ONE place: dictation says it failed instead of going quiet.
+  void Promise.resolve()
+    .then(() => window.api.speechCommands.getSnapshot())
+    .then((snapshot) => {
+      if (activeConnection === connection && publication === publicationBeforeRead) {
+        publish({ status: 'ready', snapshot, failure: null })
+      }
+    })
+    .catch(readFailed)
 }
 
 function subscribe(listener: () => void): () => void {
