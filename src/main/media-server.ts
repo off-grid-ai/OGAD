@@ -63,7 +63,8 @@ export class LoopbackMediaServer {
 
   start(): Promise<void> {
     if (this.boundPort > 0) return Promise.resolve()
-    if (this.startPromise) return this.startPromise
+    // Ask whether a start is already in flight, not whether the promise is truthy.
+    if (this.startPromise !== null) return this.startPromise
     this.startPromise = this.listenOnFreePort()
     return this.startPromise
   }

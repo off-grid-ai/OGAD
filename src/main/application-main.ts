@@ -684,7 +684,9 @@ app.on('before-quit', (event) => {
     return
   }
   event.preventDefault()
-  if (shutdownTask) return
+  // A shutdown already in flight, asked as a plain question about the field -
+  // never as a truth test on the promise itself, which is always true.
+  if (shutdownTask !== null) return
   shutdownTask = (async () => {
     // Stop the agent browser first so a playing video's audio dies immediately,
     // not whenever the process finally exits.

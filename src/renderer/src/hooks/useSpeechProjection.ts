@@ -49,30 +49,26 @@ function connect(): void {
     return
   }
 
-  let initialRead: Promise<DesktopSpeechSnapshot>
-  try {
-    initialRead = window.api.speechCommands.getSnapshot()
-  } catch (cause) {
-    publish({ status: 'failed', snapshot: projection.snapshot, failure: transportFailure(cause) })
-    return
+  const readFailed = (cause: unknown): void => {
+    if (activeConnection === connection && publication === publicationBeforeRead) {
+      publish({ status: 'failed', snapshot: projection.snapshot, failure: transportFailure(cause) })
+    }
   }
 
-  void initialRead.then(
-    (snapshot) => {
-      if (activeConnection === connection && publication === publicationBeforeRead) {
-        publish({ status: 'ready', snapshot, failure: null })
-      }
-    },
-    (cause: unknown) => {
-      if (activeConnection === connection && publication === publicationBeforeRead) {
-        publish({
-          status: 'failed',
-          snapshot: projection.snapshot,
-          failure: transportFailure(cause)
-        })
-      }
-    }
-  )
+  // The first read can fail before it starts or while it runs. Both paths end in
+  // the same visible outcome: dictation says it failed instead of going quiet.
+  try {
+    void window.api.speechCommands
+      .getSnapshot()
+      .then((snapshot) => {
+        if (activeConnection === connection && publication === publicationBeforeRead) {
+          publish({ status: 'ready', snapshot, failure: null })
+        }
+      })
+      .catch(readFailed)
+  } catch (cause) {
+    publish({ status: 'failed', snapshot: projection.snapshot, failure: transportFailure(cause) })
+  }
 }
 
 function subscribe(listener: () => void): () => void {

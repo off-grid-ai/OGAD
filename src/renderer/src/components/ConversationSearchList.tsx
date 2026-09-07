@@ -122,7 +122,16 @@ function ConversationSearchListInner({
               {g.items.map((conv) => (
                 <div
                   key={conv.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelect(conv.id)}
+                  onKeyDown={(event) => {
+                    // Reachable and openable from the keyboard, like the rest of the list.
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelect(conv.id)
+                    }
+                  }}
                   className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
                     activeConversationId === conv.id
                       ? 'border-neutral-800 bg-neutral-900'
