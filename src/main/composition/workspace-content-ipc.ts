@@ -9,7 +9,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { WorkspaceContentCommand } from '@offgrid/application'
 import { desktopWorkflows, desktopWorkspaceContent } from './application-access'
-import { desktopWorkspaceContent } from './application-access'
 
 const GET_SNAPSHOT_CHANNEL = 'workspace-content:get-snapshot'
 const EXECUTE_CHANNEL = 'workspace-content:execute'
