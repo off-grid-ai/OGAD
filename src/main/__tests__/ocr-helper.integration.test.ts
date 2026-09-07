@@ -22,7 +22,7 @@ const OCR_TEST_TIMEOUT_MS = 35_000
 
 describe.skipIf(!HAVE_BIN)('native OCR helper (Vision) extracts text from an image', () => {
   let imagePath: string
-  const KNOWN = 'OFF GRID OCR'
+  const KNOWN = 'Off Grid AI OCR'
 
   beforeAll(async () => {
     vi.stubGlobal('fetch', offlineNetwork.fetch)
@@ -51,7 +51,7 @@ describe.skipIf(!HAVE_BIN)('native OCR helper (Vision) extracts text from an ima
       })
       // Vision may split/space differently; assert the salient tokens survive round-trip.
       const normalized = out.toUpperCase().replace(/\s+/g, ' ')
-      expect(normalized).toContain('OFF GRID')
+      expect(normalized).toContain('OFF GRID AI')
       expect(normalized).toContain('OCR')
     },
     OCR_TEST_TIMEOUT_MS

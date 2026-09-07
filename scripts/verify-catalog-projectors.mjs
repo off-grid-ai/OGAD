@@ -16,7 +16,7 @@ const catalogVerification = {
     return /mmproj|clip/i.test(name)
   },
   isChatModel(kind) {
-    return kind === 'text' || kind === 'vision'
+    return kind === 'text' || kind === 'vision' || kind === 'computer_use'
   },
   looksLikeHfRepo(id) {
     return /^[^/\s]+\/[^/\s]+$/.test(id)

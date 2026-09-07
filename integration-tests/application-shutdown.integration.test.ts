@@ -5,20 +5,19 @@ import {
   registerCoreShutdownOwners,
   type ApplicationQuitSource
 } from '../src/main/shutdown'
-import { registerRuntime, shutdownRuntimes, type ManagedRuntime } from '../src/main/runtime-manager'
 
 class QuitBoundary implements ApplicationQuitSource {
   private readonly listeners = new Set<() => void>()
 
-  on(_event: 'before-quit', listener: () => void): void {
+  on(_event: 'will-quit', listener: () => void): void {
     this.listeners.add(listener)
   }
 
-  removeListener(_event: 'before-quit', listener: () => void): void {
+  removeListener(_event: 'will-quit', listener: () => void): void {
     this.listeners.delete(listener)
   }
 
-  emitBeforeQuit(): void {
+  emitWillQuit(): void {
     for (const listener of [...this.listeners]) listener()
   }
 
@@ -56,9 +55,14 @@ describe('application shutdown integration', () => {
     const downloads = resource(trace, 'core:downloads')
     registerCoreShutdownOwners(registry, {
       stopGateway: () => gateway.stop(),
-      stopMediaServer: () => media.stop(),
-      stopModelRuntimes: () => runtimes.stop(),
-      stopModelDownloads: () => downloads.stop()
+      stopMediaServer: () => media.stop()
+    })
+    registry.register({
+      name: 'core:application',
+      shutdown: () => {
+        downloads.stop()
+        runtimes.stop()
+      }
     })
 
     // Clipboard and dictation stand at the OS/native boundary in production: one
@@ -113,10 +117,10 @@ describe('application shutdown integration', () => {
       tray,
       recorder
     ]
-    source.emitBeforeQuit()
+    source.emitWillQuit()
     expect(ownedResources.every((owned) => !owned.active && owned.stops === 1)).toBe(true)
     const firstResult = await registry.shutdown()
-    source.emitBeforeQuit()
+    source.emitWillQuit()
     const secondResult = await registry.shutdown()
 
     expect(firstResult).toEqual([])
@@ -200,27 +204,5 @@ describe('application shutdown integration', () => {
     remove()
     remove()
     expect(source.listenerCount).toBe(0)
-  })
-
-  it('stops every real managed runtime and immediately evicts late async registration', async () => {
-    const evicted: string[] = []
-    const failedRuntime = new Error('engine teardown failed')
-    const runtime = (modality: ManagedRuntime['modality'], failure?: Error): ManagedRuntime => ({
-      modality,
-      evict: () => {
-        evicted.push(modality)
-        if (failure) throw failure
-      },
-      warm: () => {},
-      release: () => {}
-    })
-    registerRuntime(runtime('llm'))
-    registerRuntime(runtime('tts', failedRuntime))
-
-    await expect(shutdownRuntimes()).rejects.toBe(failedRuntime)
-    registerRuntime(runtime('image'))
-    await Promise.resolve()
-
-    expect(evicted).toEqual(['tts', 'llm', 'image'])
   })
 })

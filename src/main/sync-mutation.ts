@@ -1,59 +1,29 @@
-import { callHook, HOOKS } from './bootstrap/hookRegistry'
-import { KNOWLEDGE_DOCUMENT_ENTITY, SHARED_FILE_ENTITY } from '@offgrid/sync'
+import { callHook, hasHook, HOOKS } from './bootstrap/hookRegistry'
+import {
+  CORE_SYNC_ENTITIES as APPLICATION_SYNC_ENTITIES,
+  encodeChangedModelSettings,
+  type CoreSyncEntity,
+  type SyncMutation
+} from '@offgrid/application'
 
 /**
- * Stable desktop entity names shared by the core writers and the private sync materializer.
- * Values are wire identities, so changing one requires a cross-platform migration.
+ * TEST-ONLY COMPATIBILITY SHIM.
+ * Production consumers import this contract from `@offgrid/application`. Delete these two exports
+ * when the intentionally deferred test migration moves its imports to the application package.
  */
-export const CORE_SYNC_ENTITIES = {
-  conversation: 'conversation',
-  message: 'message',
-  project: 'project',
-  knowledgeDocument: KNOWLEDGE_DOCUMENT_ENTITY,
-  sharedFile: SHARED_FILE_ENTITY,
-  modelSetting: 'model_setting'
-} as const
-
-export type CoreSyncEntity = (typeof CORE_SYNC_ENTITIES)[keyof typeof CORE_SYNC_ENTITIES]
-
-export interface SyncMutation {
-  entity: CoreSyncEntity
-  entityId: string
-  kind: 'put' | 'delete'
-  /** Optional canonical fields for a committed owner that is not backed by the core SQLite DB. */
-  fields?: Record<string, unknown>
-}
-
-/** User-controlled LLM settings that are safe and meaningful on another device. */
-export const SYNCABLE_LLM_SETTING_KEYS = [
-  'performanceMode',
-  'temperature',
-  'ctxSize',
-  'topP',
-  'topK',
-  'minP',
-  'repeatPenalty',
-  'maxTokens',
-  'systemPrompt',
-  'kvCacheType',
-  'flashAttn',
-  'gpuLayers',
-  'threads',
-  'batchSize'
-] as const
+export const CORE_SYNC_ENTITIES = APPLICATION_SYNC_ENTITIES
+export type { CoreSyncEntity, SyncMutation }
 
 export function emitChangedLlmSettings(
   before: Record<string, unknown>,
   after: Record<string, unknown>
 ): void {
-  for (const key of SYNCABLE_LLM_SETTING_KEYS) {
-    const value = after[key]
-    if (value === undefined || Object.is(value, before[key])) continue
+  for (const setting of encodeChangedModelSettings('desktop', before, after)) {
     emitSyncMutation({
       entity: CORE_SYNC_ENTITIES.modelSetting,
-      entityId: key,
+      entityId: setting.wireKey,
       kind: 'put',
-      fields: { value }
+      fields: { version: setting.version, value: JSON.parse(setting.valueJson) }
     })
   }
 }
@@ -61,11 +31,52 @@ export function emitChangedLlmSettings(
 /**
  * Core owns its committed writes; Pro optionally records them. Free builds register no hook, so
  * this is an inert call with no sync engine or Pro business logic in the public application.
+ *
+ * Fire-and-forget: a missing hook or a handler failure is swallowed. Do not use this for any
+ * caller that must acknowledge delivery (e.g. the Workspace Content outbox) - use
+ * `deliverSyncMutationOrThrow` there instead, which surfaces both failure modes.
  */
 export function emitSyncMutation(mutation: SyncMutation): void {
   try {
     callHook(HOOKS.syncRecordLocalMutation, mutation)
   } catch (error) {
     console.error('[sync] Failed to record committed mutation', mutation, error)
+  }
+}
+
+/** Why a strict sync mutation delivery did not complete. */
+export type SyncMutationDeliveryFailureReason = 'hook_unregistered' | 'handler_failed'
+
+/** Typed failure from `deliverSyncMutationOrThrow`, carrying the original handler error when any. */
+export class SyncMutationDeliveryError extends Error {
+  readonly reason: SyncMutationDeliveryFailureReason
+
+  constructor(reason: SyncMutationDeliveryFailureReason, cause?: unknown) {
+    super(
+      reason === 'hook_unregistered'
+        ? 'No sync.recordLocalMutation hook is registered'
+        : 'sync.recordLocalMutation handler failed'
+    )
+    this.name = 'SyncMutationDeliveryError'
+    this.reason = reason
+    if (cause !== undefined) this.cause = cause
+  }
+}
+
+/**
+ * Strict delivery boundary for callers that must not treat a mutation as delivered unless Sync
+ * actually accepted it. Unlike `emitSyncMutation`, this throws `SyncMutationDeliveryError` when no
+ * hook is registered or the handler fails, instead of returning success-like void - so a caller
+ * that only acknowledges on a resolved promise (the Workspace Content outbox delivery port) can
+ * leave the row pending/retryable rather than marking it delivered with nowhere it went.
+ */
+export async function deliverSyncMutationOrThrow(mutation: SyncMutation): Promise<void> {
+  if (!hasHook(HOOKS.syncRecordLocalMutation)) {
+    throw new SyncMutationDeliveryError('hook_unregistered')
+  }
+  try {
+    callHook(HOOKS.syncRecordLocalMutation, mutation)
+  } catch (error) {
+    throw new SyncMutationDeliveryError('handler_failed', error)
   }
 }

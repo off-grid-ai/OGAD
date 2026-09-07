@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Sun, Moon, Monitor } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
-import { getThemeMode, setThemeMode, type ThemeMode } from '../theme'
+import { getThemeMode, onThemeModeChanged, setThemeMode, type ThemeMode } from '../theme'
 
 // Theme switch (system -> light -> dark -> system).
 const ORDER: ThemeMode[] = ['system', 'light', 'dark']
@@ -12,6 +12,7 @@ const LABEL = { system: 'System', light: 'Light', dark: 'Dark' }
  *  when expanded) — matches the other nav buttons in App.tsx. */
 export function NavThemeToggle({ expanded }: { expanded: boolean }): React.ReactElement {
   const [mode, setMode] = useState<ThemeMode>(getThemeMode())
+  useEffect(() => onThemeModeChanged(setMode), [])
   const Icon = ICON[mode]
   const cycle = (): void => {
     const next = ORDER[(ORDER.indexOf(mode) + 1) % ORDER.length]!
@@ -21,6 +22,7 @@ export function NavThemeToggle({ expanded }: { expanded: boolean }): React.React
   return (
     <button
       onClick={cycle}
+      aria-label={`Theme: ${LABEL[mode]}`}
       title={!expanded ? `Theme: ${LABEL[mode]}` : undefined}
       className={cn(
         'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',

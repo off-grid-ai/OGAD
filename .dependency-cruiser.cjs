@@ -10,13 +10,25 @@
 // code without blocking). Run: `npm run depcruise`.
 module.exports = {
   forbidden: [
+    {
+      name: 'models-facade-owns-download-control-plane',
+      comment:
+        'Desktop supplies download I/O ports to the Models facade. Production modules must not depend on the deleted app-owned coordinator or service.',
+      severity: 'error',
+      from: { path: '^(src|pro)/', pathNot: '\\.(test|spec|dbtest)\\.[jt]sx?$|/__tests__/' },
+      to: {
+        path: '^src/main/(?:composition/model-downloads|models/desktop-model-download-service)\\.ts$'
+      }
+    },
     // --- structural bug-catchers ------------------------------------------------
     {
       name: 'not-to-unresolvable',
       comment: 'A broken/typo/moved import must fail the build, not surface at runtime.',
       severity: 'error',
-      from: {},
-      to: { couldNotResolve: true }
+      from: { path: '^src/' },
+      // Electron provides `original-fs` at runtime. It is not a resolvable npm package, and the
+      // two importers are packaging tests that must exercise Electron's unpatched filesystem.
+      to: { couldNotResolve: true, pathNot: '^original-fs$' }
     },
     {
       name: 'no-circular',
@@ -71,7 +83,8 @@ module.exports = {
         'the boundary. A stray core->pro import ships paid source in the public repo.',
       severity: 'error',
       from: {
-        pathNot: '(loadProFeaturesMain|loadProFeaturesRenderer|main\\.tsx|bootstrap/proStub)'
+        pathNot:
+          '(^pro/|loadProFeaturesMain|loadProFeaturesRenderer|main\\.tsx|bootstrap/proStub|\\.(test|spec)\\.[tj]sx?$|/__tests__/)'
       },
       to: { path: 'bootstrap/proStub\\.ts$|(^|/)pro/(main|renderer)/' }
     },
@@ -98,6 +111,85 @@ module.exports = {
       to: { path: '^src/main' }
     },
     {
+      name: 'presentation-not-to-raw-rag-use-or-automation',
+      comment:
+        'Presentation reads RAG, Use, and Automation through @offgrid/application facades. Shared domain packages are composition and platform-adapter dependencies, not renderer dependencies.',
+      severity: 'error',
+      from: { path: '^(src/renderer/|pro/renderer/)' },
+      to: { path: '^\\.\\./shared/packages/(rag|use|automation)/' }
+    },
+    {
+      name: 'presentation-not-to-raw-speech',
+      comment:
+        'Presentation reads Speech through @offgrid/application. Renderer composition adapters may depend on the raw platform contract.',
+      severity: 'error',
+      from: {
+        path: '^(src/renderer/src/|pro/renderer/)',
+        pathNot: '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/composition/'
+      },
+      to: { path: '^\\.\\./shared/packages/speech/' }
+    },
+    {
+      name: 'presentation-not-to-raw-models',
+      comment:
+        'Presentation reads Models through @offgrid/application. Renderer composition and platform adapters may depend on the raw domain contract.',
+      severity: 'error',
+      from: {
+        path: '^(src/renderer/src/|pro/renderer/)',
+        pathNot:
+          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/composition/|^src/renderer/src/lib/(capture-readiness-ports|desktop-chat-generation-adapter|desktop-chat-session-repository)\\.ts$'
+      },
+      to: { path: '^\\.\\./shared/packages/models/' }
+    },
+    {
+      name: 'presentation-not-to-raw-sync',
+      comment:
+        'Presentation reads Sync through @offgrid/application. The renderer Sync state adapter is the only raw domain seam.',
+      severity: 'error',
+      from: {
+        path: '^(src/renderer/src/|pro/renderer/)',
+        pathNot:
+          '(__tests__/|\\.(test|spec)\\.[tj]sx?$)|^src/renderer/src/composition/|^pro/renderer/sync-state\\.ts$'
+      },
+      to: { path: '^\\.\\./shared/packages/sync/' }
+    },
+    {
+      name: 'main-not-to-renderer',
+      comment:
+        'The other half of renderer-not-to-main: main must not import renderer modules either. Main ' +
+        'has no window, no DOM and no React runtime, so such an import either drags presentation into ' +
+        'the main bundle or is a decision that belongs in shared. Both directions of the process ' +
+        'boundary are now gated; only the preload IPC bridge crosses it.',
+      severity: 'error',
+      from: { path: '^(src|pro)/main/', pathNot: '\\.(test|spec)\\.[tj]sx?$|/__tests__/' },
+      to: { path: '^(src|pro)/renderer/' }
+    },
+    {
+      name: 'no-shared-package-source-bypass',
+      comment:
+        'A shared package is consumed through its declared entry points, never by reaching into its ' +
+        'source. A relative path or tsconfig alias into `shared/packages/<pkg>/src` bypasses the ' +
+        "package's public API, its build, and every boundary rule expressed in terms of it.",
+      severity: 'error',
+      from: { path: '^(src|pro)/' },
+      to: { path: '^\\.\\./shared/packages/[^/]+/src/' }
+    },
+    {
+      name: 'main-not-to-presentation-logic',
+      comment:
+        'Zone rule: main is not presentation. @offgrid/ui is a headless settings/control-plane store ' +
+        'for React and RN views, and @offgrid/design is the token set those views render with; a main ' +
+        'process that reads either is either doing UI work or borrowing a helper that belongs in a ' +
+        'domain package. NO EXEMPTIONS: the two this rule shipped with are closed (desktop 52073686), ' +
+        'and both closures were better than a relocation - the transfer rate is now derived by the ' +
+        'surface that renders it, and the vision overlay colours are named for what they do, because ' +
+        'that screenshot goes to a model rather than to a person and nobody in that flow has a theme ' +
+        'opinion. Do not add an entry here; fix the caller.',
+      severity: 'error',
+      from: { path: '^src/main/', pathNot: '\\.(test|spec)\\.[tj]sx?$|/__tests__/' },
+      to: { path: '^\\.\\./shared/packages/(ui|design)/' }
+    },
+    {
       name: 'not-to-test',
       comment:
         'Production code must not import test files (they would ship, dragging fixtures in).',
@@ -107,9 +199,13 @@ module.exports = {
     }
   ],
   options: {
-    doNotFollow: { path: 'node_modules' },
+    // Pro is a sibling checkout in CI. Inspect the core -> Pro edge, but do not
+    // traverse the private graph and apply open-core rules inside Pro itself.
+    doNotFollow: { path: 'node_modules|^pro/' },
     tsConfig: { fileName: 'tsconfig.web.json' },
-    exclude: { path: 'node_modules|e2e/' },
+    exclude: {
+      path: 'node_modules|e2e/|(^|/)(__tests__|__mocks__)/|\\.(test|spec|dbtest)\\.[jt]sx?$'
+    },
     tsPreCompilationDeps: true,
     // Follow package "exports" subpaths (e.g. @modelcontextprotocol/sdk/client/*.js)
     // so real imports resolve and not-to-unresolvable doesn't false-positive on them.

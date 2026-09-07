@@ -1,8 +1,8 @@
-# Off Grid Pro — coming July 2026
+# Off Grid AI Pro — coming July 2026
 
 [← All features](../FEATURES.md)
 
-![Off Grid Pro — coming July 2026](../screenshots/07-pro-upgrade.png)
+![Off Grid AI Pro — coming July 2026](../screenshots/07-pro-upgrade.png)
 
 The free app **runs** models. **Pro** adds the always-on layer that **sees, remembers, and
 acts**, on-device:

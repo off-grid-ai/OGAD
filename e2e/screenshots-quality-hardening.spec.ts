@@ -26,12 +26,11 @@ const shot = async (name: string): Promise<void> => {
   await page.screenshot({ path: `e2e/screenshots/qh-${name}.png` })
 }
 
-const nav = async (label: string): Promise<boolean> => {
+const nav = async (label: string, destination = label): Promise<void> => {
   const btn = page.getByRole('button', { name: label, exact: true }).first()
-  if (!(await btn.isVisible().catch(() => false))) return false
-  await btn.click().catch(() => {})
-  await page.waitForTimeout(700)
-  return true
+  await expect(btn).toBeVisible()
+  await btn.click()
+  await expect(page.getByRole('heading', { name: destination, exact: true }).first()).toBeVisible()
 }
 
 test.beforeAll(async () => {
@@ -50,7 +49,7 @@ test.beforeAll(async () => {
   page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   for (let i = 0; i < 8; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click().catch(() => {})
     await page.waitForTimeout(400)
@@ -73,12 +72,12 @@ test.afterAll(async () => {
 })
 
 test('capture Models screen — never-block fit chip', async () => {
-  expect(await nav('Models'), 'the Models screen has to be reachable from the sidebar').toBe(true)
+  await nav('Models')
   await shot('models-fit-chip')
 })
 
 test('capture Settings — model pipeline controls', async () => {
-  expect(await nav('Settings'), 'Settings has to be reachable from the sidebar').toBe(true)
+  await nav('Settings')
   // Scroll the Model pipeline section into view if present.
   const section = page.getByText('Model pipeline', { exact: false }).first()
   if (await section.isVisible().catch(() => false)) {
@@ -92,7 +91,7 @@ test('capture Settings — capture opt-in control', async () => {
   // main-process rule proven by unit + real-seam integration in desktop-pro; here we capture the
   // user-facing surface the opt-in is controlled through — the Settings "Capture" section with its
   // status label and pause/resume/restart controls — which is what a user sees to turn capture on.
-  expect(await nav('Settings'), 'Settings has to be reachable from the sidebar').toBe(true)
+  await nav('Settings')
   // The capture control lives inside the collapsed "Capture & processing" accordion — expand it.
   const header = page.getByText('Capture & processing', { exact: false }).first()
   if (await header.isVisible().catch(() => false)) {
@@ -104,32 +103,28 @@ test('capture Settings — capture opt-in control', async () => {
 })
 
 test('capture Integrations — BYO Google OAuth client setup', async () => {
-  const reached = (await nav('Integrations')) || (await nav('Connectors'))
-  if (!reached) await shot('integrations-not-reached')
-  // Named either way in this build; one of the two must exist, or the screenshot below is of whatever screen
-  // happened to be open.
-  expect(reached, 'Integrations (or Connectors) has to be reachable from the sidebar').toBe(true)
+  await nav('Integrations')
   await shot('integrations-overview')
-  // Best-effort: open the Google client setup (BYO OAuth) if an entry is present.
-  for (const label of [/set up your google client/i, /google/i, /set up/i]) {
-    const entry = page.getByRole('button', { name: label }).first()
-    if (await entry.isVisible().catch(() => false)) {
-      await entry.click().catch(() => {})
-      await page.waitForTimeout(600)
-      break
-    }
-  }
+  const entry = page.getByRole('button', { name: 'Set up your Google client', exact: true }).first()
+  await expect(entry).toBeVisible()
+  await entry.click()
+  const setup = page.getByRole('dialog', { name: 'Use your own Google client', exact: true })
+  await expect(setup).toBeVisible()
   await shot('integrations-byo-google-setup')
+  await setup.getByRole('button', { name: 'Close Google client setup', exact: true }).click()
+  await expect(setup).toBeHidden()
 })
 
 test('capture Replay — enable/disable capture control', async () => {
   // Task 4: the Replay screen carries a compact enable/disable capture control in its header,
   // sharing the same seam as the Settings Capture section (useCaptureControl).
-  const reached = await nav('Replay')
-  if (!reached) await shot('replay-not-reached')
-  expect(reached, 'Replay has to be reachable from the sidebar').toBe(true)
-  const toggle = page.getByRole('button', { name: /capture/i }).first()
-  await toggle.scrollIntoViewIfNeeded().catch(() => {})
+  await nav('Replay')
+  const capture = page.getByRole('group', { name: 'Capture', exact: true })
+  await expect(capture).toBeVisible()
+  const toggle = capture.getByRole('button', {
+    name: /^(Pause capture|Resume capture|Restart capture|Review permissions)$/
+  })
+  await toggle.scrollIntoViewIfNeeded()
   // The control this case exists to photograph. Without this the shot could be of a Replay screen that never
   // rendered its header, which is precisely the evidence a reviewer would be misled by.
   await expect(toggle).toBeVisible()

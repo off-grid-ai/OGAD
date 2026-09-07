@@ -11,11 +11,11 @@ This report cross-checks Core-applicable rows in
 - Excluded as Pro-only: #2, #83-104, #107-128, and #138-140.
 - Rows that combine Core and Pro outcomes remain in scope, but this report names only the Core
   portion. Pro-only clauses must be marked N/A during a Core pass.
-- `High` means the decisive product seam is exercised without replacing Off Grid code. The manual
+- `High` means the decisive product seam is exercised without replacing Off Grid AI code. The manual
   pass still checks the installed artifact, operating-system boundary, or pixels.
 - `Medium` means material production owners run, but a native, network, installer, renderer, or
   relaunch boundary remains split or controlled.
-- `Low` means the decisive boundary is still manual, the current UI test substitutes an Off Grid
+- `Low` means the decisive boundary is still manual, the current UI test substitutes an Off Grid AI
   preload/service, or the manual checklist does not explicitly represent the CSV journey.
 
 ## Manual-checklist gaps
@@ -95,7 +95,7 @@ This report cross-checks Core-applicable rows in
 
 | ID  | Pri | Journey and manual representation                                       | Exact automation evidence                                                                                                              | Remaining Core manual boundary                                                                                       | Confidence                                                                                          |
 | --- | --- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| #32 | P0  | First local message replies - exact: Send the first local message       | `src/renderer/src/components/__tests__/MemoryChat.chat-lifecycle.test.tsx`                                                             | Send through installed preload/IPC to a real local model, inspect one streaming bubble, switch screens, and relaunch | Low - rendered test substitutes Off Grid preload/model ownership                                    |
+| #32 | P0  | First local message replies - exact: Send the first local message       | `src/renderer/src/components/__tests__/MemoryChat.chat-lifecycle.test.tsx`                                                             | Send through installed preload/IPC to a real local model, inspect one streaming bubble, switch screens, and relaunch | Low - rendered test substitutes Off Grid AI preload/model ownership                                    |
 | #33 | P0  | No memory scope works - grouped: Verify memory scopes                   | `src/renderer/src/components/__tests__/MemoryChat.chat-lifecycle.test.tsx`                                                             | Send a real local turn with No memory and inspect visible/persisted scope                                            | Low - rendered test substitutes the preload path                                                    |
 | #34 | P0  | All memory scope works - grouped: Verify memory scopes                  | `src/main/__tests__/rag-empty-memory.dbtest.ts`                                                                                        | Seed synthetic memory through product UI/capture, send from rendered chat, and inspect answer/citation               | Medium - real IPC/RAG/SQLite run; model and rendered entry are split                                |
 | #35 | P1  | Empty memory degrades safely - grouped: Verify memory scopes            | `src/main/__tests__/rag-empty-memory.dbtest.ts`                                                                                        | Use a truly empty installed profile and send a second turn after the empty-memory result                             | Medium - real IPC/RAG/controller release run; rendered/local-model boundary remains                 |

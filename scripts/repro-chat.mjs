@@ -20,7 +20,7 @@ await app.evaluate(({ BrowserWindow }) => {
 await timing.wait(3000)
 // skip onboarding if present
 for (let i = 0; i < 4; i++) {
-  const b = win.getByRole('button', { name: /Continue|Start using Off Grid/i }).first()
+  const b = win.getByRole('button', { name: /Continue|Start using Off Grid AI/i }).first()
   if (await b.isVisible().catch(() => false)) {
     await b.click().catch(() => {})
     await timing.wait(1000)

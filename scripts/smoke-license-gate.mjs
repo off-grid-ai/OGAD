@@ -167,6 +167,10 @@ async function run() {
   }
   delete environment.OFFGRID_SEED
   delete environment.OFFGRID_SEED_PRO
+  // Inherited from a runner living inside Electron (VS Code tasks, the Electron-Node vitest
+  // runner, agent sandboxes); it would turn the app under test into plain Node and the launch
+  // would die before the gate can be observed.
+  delete environment.ELECTRON_RUN_AS_NODE
 
   let app
   try {

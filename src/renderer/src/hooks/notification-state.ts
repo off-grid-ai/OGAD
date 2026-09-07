@@ -49,7 +49,7 @@ export function restoreNotifications(value: unknown): Notification[] {
   for (const valueItem of value) {
     const item = parseStoredNotification(valueItem)
     if (!item) continue
-    if (item.type === 'todo') continue
+    if (item.type === 'todo' || item.type === 'approval') continue
     if (item.dedupeKey && seenKeys.has(item.dedupeKey)) continue
     if (item.dedupeKey) seenKeys.add(item.dedupeKey)
     restored.push(item)
@@ -62,12 +62,12 @@ export function addNotificationToState(
   notifications: readonly Notification[],
   input: NotificationInput
 ): Notification[] {
-  if (input.type === 'todo') return [...notifications]
+  if (input.type === 'todo' || input.type === 'approval') return [...notifications]
   const dedupeKey = input.dedupeKey?.trim() || undefined
   const notification: Notification = {
     ...input,
     ...(dedupeKey ? { dedupeKey } : {}),
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    id: crypto.randomUUID(),
     timestamp: new Date(),
     read: false
   }

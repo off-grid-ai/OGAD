@@ -1,10 +1,10 @@
-# Off Grid Console — build plan (the SaaS for the 4 planes)
+# Off Grid AI Console — build plan (the SaaS for the 4 planes)
 
 The **org-side web application** — the UI and backend for the Control / Data / AI /
 Regulatory planes. This is **Fleet Control's console + the Gateway/Brain admin surface**:
-the "app that connects to all the nodes" (Off Grid Desktop/Mobile). Next.js.
+the "app that connects to all the nodes" (Off Grid AI Desktop/Mobile). Next.js.
 
-This is a **new, separate product** from Off Grid Desktop. The nodes already carry the
+This is a **new, separate product** from Off Grid AI Desktop. The nodes already carry the
 gateway and enforce policy locally (see `ENTERPRISE_BUILD_PLAN.md`). The Console does **not**
 run the intelligence or enforce policy — it **defines and observes**: provisions policy +
 knowledge + config _down_ to the fleet, aggregates audit + telemetry + distilled learnings
@@ -15,13 +15,13 @@ _up_.
 ## Where it fits
 
 ```
-   ┌─────────────────────────  OFF GRID CONSOLE (Next.js, this plan)  ─────────────────────────┐
+   ┌─────────────────────────  Off Grid AI CONSOLE (Next.js, this plan)  ─────────────────────────┐
    │  Control plane UI · Data plane UI · AI plane (Brain) UI · Regulatory (DPO) UI · Fleet mgmt │
    │                              + backend (API · DB · node protocol)                          │
    └───────────────┬───────────────────────────────────────────────────────┬──────────────────┘
         policy / config / SOPs  ▼ (down)                    audit / telemetry / learnings ▲ (up)
               ┌─────────────────────────── FLEET OF NODES ───────────────────────────┐
-              │  Off Grid Desktop / Mobile — gateway baked in, enforces policy locally │
+              │  Off Grid AI Desktop / Mobile — gateway baked in, enforces policy locally │
               └───────────────────────────────────────────────────────────────────────┘
    Org systems (DBs · warehouses · SaaS) ──connectors──► Brain (org knowledge)  ◄── Console manages
 ```
@@ -122,9 +122,9 @@ Navigation mirrors the planes (and the `ENTERPRISE_BUILD_PLAN.md` component map)
 ## Standards (decision locked)
 
 We follow the Wednesday **Standards Kit** for engineering and component sourcing, and the
-**Off Grid brutalist brand** (`docs/DESIGN.md`) for visual identity. Where the kit's _visual_
-identity conflicts with Off Grid (it uses green→teal gradients, Instrument Serif, DM Sans,
-shimmer, card-lift, rich animation), **Off Grid wins** — the Console is one product family
+**Off Grid AI brutalist brand** (`docs/DESIGN.md`) for visual identity. Where the kit's _visual_
+identity conflicts with Off Grid AI (it uses green→teal gradients, Instrument Serif, DM Sans,
+shimmer, card-lift, rich animation), **Off Grid AI wins** — the Console is one product family
 with the Desktop/Mobile nodes it manages, and a dense compliance/audit tool suits the flat,
 information-first look.
 
@@ -137,7 +137,7 @@ information-first look.
 - Animate only `transform` / `opacity`; wrap motion in `prefers-reduced-motion`; mandatory
   `aria-label` on icons, `alt` on images; 4.5:1 contrast.
 
-**Visual identity (Off Grid `docs/DESIGN.md` — overrides the kit):**
+**Visual identity (Off Grid AI `docs/DESIGN.md` — overrides the kit):**
 
 - Menlo mono everywhere; single emerald accent (`#34D399`/`#059669`), **no gradients**.
 - Flat 8px radius, hairline borders, no shadow/lift; hierarchy via size+opacity, not color.
@@ -187,7 +187,7 @@ gradients**, **single emerald accent**, Menlo mono, **no decorative animation**)
   where functional (loading), never decorative.
 
 Net: **zero custom components** — discover in the catalog, source from the real library,
-re-theme to Off Grid.
+re-theme to Off Grid AI.
 
 ## Tech stack
 
@@ -277,7 +277,7 @@ diagrams + OSS map). All on real Postgres + LanceDB + SSO + the live `:7878` gat
 2. **Multi-tenant Admin module + ABAC/RBAC** — tenants/orgs, provisioning (who the console
    is for + their access), ABAC (tenant/purpose/data-class) layered on existing RBAC. Do now
    to avoid a retrofit. Single interface (ours) — no white-labeling underlying tools.
-3. **License & legal audit** — every integrated OSS tool's license vs Off Grid (AGPL-3.0,
+3. **License & legal audit** — every integrated OSS tool's license vs Off Grid AI (AGPL-3.0,
    on-prem). Flag AGPL (Grafana/Loki), SSPL/ELv2 (Redis/Airbyte), commercial-only features;
    produce `LICENSES.md` + swap recommendations. Confirm no copyright infringement (diagrams
    are first-party Wednesday assets).

@@ -1,10 +1,8 @@
+import type { McpToolDescriptor } from '@offgrid/models'
+
 export const MCP_TOOL_PREFIX = 'mcp__'
 
-export interface ConnectorToolDefinition {
-  name: string
-  description?: string
-  inputSchema?: unknown
-}
+export type ConnectorToolDefinition = McpToolDescriptor
 
 export interface ConnectorToolSchema {
   type: 'function'
@@ -13,10 +11,6 @@ export interface ConnectorToolSchema {
     description: string
     parameters: unknown
   }
-}
-
-export function isActionTool(tool: string): boolean {
-  return !/^(list|get|search|read|fetch|whoami|describe)[_-]/i.test(tool)
 }
 
 export function buildConnectorToolSchema(

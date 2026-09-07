@@ -20,6 +20,15 @@ on:
         type: string
         required: false
         default: ''
+      shared_ref:
+        # off-grid-ai/shared carries @offgrid/models|sync|use. This core branch depends
+        # on shared feature work that is NOT on shared main, and the auto match below is
+        # by BRANCH NAME - which differs across repos here - so it would fall back to main
+        # and miss effectId/undo/computer_use. Pin it on dispatch (e.g. feat/use-approval-tiers).
+        description: 'off-grid-ai/shared ref for @offgrid/* (empty = match this branch name, else shared main)'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -75,8 +84,84 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check out the private Desktop speech package
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/executorch-speech
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _executorch_speech
+          lfs: false # The current native speech engine is macOS-only.
+          persist-credentials: false
+      - name: Put the speech package beside this checkout
+        shell: bash
+        run: |
+          if [ ! -f _executorch_speech/package.json ]; then
+            echo "::error::off-grid-ai/executorch-speech was not checked out. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../executorch-speech
+          mv _executorch_speech ../executorch-speech
+
+      # `@offgrid/sync` and `@offgrid/use` are file: dependencies on the shared
+      # monorepo, so it must sit BESIDE this checkout before `npm ci` runs -
+      # mirrors release.yml's build-win. The branch ref decides the shared ref:
+      # a build from an integration branch takes the shared branch of the same
+      # name when one exists, else shared main.
+      - name: Checkout shared at the matching ref
+        id: shared_branch
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: ${{ inputs.shared_ref || github.ref_name }}
+          path: _shared
+          persist-credentials: false
+      - name: Fall back to shared main
+        if: ${{ steps.shared_branch.outcome != 'success' }}
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          persist-credentials: false
+      - name: Put shared beside this checkout
+        shell: bash
+        run: |
+          if [ ! -d _shared ]; then
+            echo "::error::off-grid-ai/shared was not checked out - @offgrid/sync and @offgrid/use cannot resolve. Check CI_CROSS_REPO_TOKEN."
+            exit 1
+          fi
+          rm -rf ../shared
+          mv _shared ../shared
+          npm --prefix ../shared ci
+          npm --prefix ../shared/packages/automation run build
+          npm --prefix ../shared/packages/models run build
+          npm --prefix ../shared/packages/rag run build
+          npm --prefix ../shared/packages/speech run build
+          npm --prefix ../shared/packages/sync run build
+          npm --prefix ../shared/packages/ui run build
+          npm --prefix ../shared/packages/use run build
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify the computer-use input addon (nut.js) shipped for Windows
+        shell: pwsh
+        run: |
+          # The vision computer-use rail drives the cursor/keyboard through
+          # @nut-tree-fork/nut-js, whose Windows binding is the prebuilt (N-API)
+          # libnut-win32 addon - an OPTIONAL dependency. If npm skips it or the
+          # prebuild fails to land, the rail loads null and refuses every task
+          # silently. Fail the build loudly instead, the same way
+          # fetch-win-binaries.ps1 fails on a missing llama-server.exe.
+          $addon = "node_modules/@nut-tree-fork/libnut-win32/build/Release/libnut.node"
+          if (-not (Test-Path $addon)) {
+            Write-Error "Missing $addon - the Windows computer-use rail would refuse every task. Confirm @nut-tree-fork/libnut-win32 installed (optional dep)."
+            exit 1
+          }
+          Write-Host "OK: computer-use addon present ($((Get-Item $addon).Length) bytes)"
 
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh

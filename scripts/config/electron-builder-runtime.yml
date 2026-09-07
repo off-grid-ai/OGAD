@@ -7,8 +7,8 @@ extraResources:
     filter:
       - '**/*'
       - '!models/**'
-      # Built into app.asar/out/main so Node resolves kokoro-js from the packaged
-      # dependency tree instead of the external Resources directory.
+      # The legacy worker is not a runtime input. Speech uses the packaged
+      # ExecuTorch helper under Resources/bin.
       - '!tts-worker.mjs'
 
 # Native modules are installed for Electron by postinstall/CI before packaging.

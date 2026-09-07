@@ -9,7 +9,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
-import { downloadIntegrityError, sha256File, sha256IntegrityError } from '../download-verify'
+import { sha256File, verifyDownloadedPart } from '../download-verify'
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-dlverify-'))
 const write = (name: string, buf: Buffer): string => {
@@ -26,35 +26,94 @@ afterAll(() => {
   }
 })
 
-describe('downloadIntegrityError (D2)', () => {
-  it('rejects a truncated download (written < the server-reported total)', () => {
+describe('verifyDownloadedPart (D2)', () => {
+  it('rejects a truncated download (written < the server-reported total)', async () => {
     const p = write('model.gguf', validGguf)
-    expect(downloadIntegrityError('model.gguf', 1500, 3000, p)).toMatch(/incomplete/)
+    expect(
+      await verifyDownloadedPart({
+        name: 'model.gguf',
+        writtenBytes: 1500,
+        responseTotalBytes: 3000,
+        partPath: p
+      })
+    ).toMatch(/incomplete/)
+    expect(fs.existsSync(p)).toBe(true)
   })
 
-  it('rejects a corrupt GGUF (wrong magic) even when the byte count matches', () => {
+  it('deletes a corrupt GGUF so retry starts from byte zero', async () => {
     const bad = write('bad.gguf', Buffer.concat([Buffer.from('XXXX'), Buffer.alloc(2000)]))
-    expect(downloadIntegrityError('bad.gguf', 2004, 2004, bad)).toMatch(/not a valid GGUF/)
+    expect(
+      await verifyDownloadedPart({
+        name: 'bad.gguf',
+        writtenBytes: 2004,
+        responseTotalBytes: 2004,
+        partPath: bad
+      })
+    ).toMatch(/not a valid GGUF/)
+    expect(fs.existsSync(bad)).toBe(false)
   })
 
-  it('rejects a GGUF that is under the minimum size', () => {
+  it('rejects a GGUF that is under the minimum size', async () => {
     const tiny = write('tiny.gguf', Buffer.from('GGUF'))
-    expect(downloadIntegrityError('tiny.gguf', 4, 4, tiny)).toMatch(/not a valid GGUF/)
+    expect(
+      await verifyDownloadedPart({
+        name: 'tiny.gguf',
+        writtenBytes: 4,
+        responseTotalBytes: 4,
+        partPath: tiny
+      })
+    ).toMatch(/not a valid GGUF/)
+    expect(fs.existsSync(tiny)).toBe(false)
   })
 
-  it('passes a complete, valid GGUF', () => {
+  it('deletes a completed file whose size does not match the catalog manifest', async () => {
+    const wrongSize = write('wrong-size.gguf', validGguf)
+    expect(
+      await verifyDownloadedPart({
+        name: 'wrong-size.gguf',
+        writtenBytes: validGguf.length,
+        responseTotalBytes: validGguf.length,
+        partPath: wrongSize,
+        expectedBytes: validGguf.length + 1
+      })
+    ).toMatch(/does not match the manifest/)
+    expect(fs.existsSync(wrongSize)).toBe(false)
+  })
+
+  it('passes a complete, valid GGUF', async () => {
     const p = write('good.gguf', validGguf)
-    expect(downloadIntegrityError('good.gguf', validGguf.length, validGguf.length, p)).toBeNull()
+    expect(
+      await verifyDownloadedPart({
+        name: 'good.gguf',
+        writtenBytes: validGguf.length,
+        responseTotalBytes: validGguf.length,
+        partPath: p
+      })
+    ).toBeNull()
   })
 
-  it('passes a complete non-GGUF file (no magic check applies)', () => {
+  it('passes a complete non-GGUF file (no magic check applies)', async () => {
     const p = write('tokenizer.json', Buffer.alloc(50))
-    expect(downloadIntegrityError('tokenizer.json', 50, 50, p)).toBeNull()
+    expect(
+      await verifyDownloadedPart({
+        name: 'tokenizer.json',
+        writtenBytes: 50,
+        responseTotalBytes: 50,
+        partPath: p
+      })
+    ).toBeNull()
   })
 
-  it('passes when the server gave no length (total = 0) and the file is fine', () => {
+  it('passes when the server gave no length (total = 0) and the file is fine', async () => {
     const p = write('nolen.bin', Buffer.alloc(10))
-    expect(downloadIntegrityError('nolen.bin', 10, 0, p)).toBeNull()
+    expect(
+      await verifyDownloadedPart({
+        name: 'nolen.bin',
+        writtenBytes: 10,
+        responseTotalBytes: 0,
+        partPath: p
+      })
+    ).toBeNull()
   })
 })
 
@@ -70,25 +129,55 @@ describe('sha256 content verification', () => {
   it('passes when the downloaded bytes match the expected hash', async () => {
     const buf = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(4096, 7)])
     const p = write('good.gguf', buf)
-    expect(await sha256IntegrityError('good.gguf', p, sha(buf))).toBeNull()
+    expect(
+      await verifyDownloadedPart({
+        name: 'good.gguf',
+        writtenBytes: buf.length,
+        responseTotalBytes: buf.length,
+        partPath: p,
+        expectedSha256: sha(buf)
+      })
+    ).toBeNull()
   })
 
   it('flags a mismatch when the bytes are corrupt (right length, wrong content)', async () => {
     const expected = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(4096, 7)])
     const corrupted = Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(4096, 9)])
     const p = write('bad.gguf', corrupted) // same length, different bytes
-    const err = await sha256IntegrityError('bad.gguf', p, sha(expected))
+    const err = await verifyDownloadedPart({
+      name: 'bad.gguf',
+      writtenBytes: corrupted.length,
+      responseTotalBytes: corrupted.length,
+      partPath: p,
+      expectedSha256: sha(expected)
+    })
     expect(err).toMatch(/checksum mismatch/i)
+    expect(fs.existsSync(p)).toBe(false)
   })
 
   it('is case-insensitive on the expected hex', async () => {
     const buf = Buffer.from('abc')
     const p = write('case.bin', buf)
-    expect(await sha256IntegrityError('case.bin', p, sha(buf).toUpperCase())).toBeNull()
+    expect(
+      await verifyDownloadedPart({
+        name: 'case.bin',
+        writtenBytes: buf.length,
+        responseTotalBytes: buf.length,
+        partPath: p,
+        expectedSha256: sha(buf).toUpperCase()
+      })
+    ).toBeNull()
   })
 
   it('skips verification when no expected hash is known (opt-in)', async () => {
-    const p = write('nohash.gguf', Buffer.from('anything'))
-    expect(await sha256IntegrityError('nohash.gguf', p, undefined)).toBeNull()
+    const p = write('nohash.gguf', validGguf)
+    expect(
+      await verifyDownloadedPart({
+        name: 'nohash.gguf',
+        writtenBytes: validGguf.length,
+        responseTotalBytes: validGguf.length,
+        partPath: p
+      })
+    ).toBeNull()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { matchesScreen, paletteScreenMatches } from '../paletteScreens'
+import { internalTabPaletteScreens, matchesScreen, paletteScreenMatches } from '../paletteScreens'
 
 // ⌘K has to find a screen by the word the user reaches for, not only by the label we chose for the
 // sidebar - and it must never crowd out the content results it already searched.
@@ -38,5 +38,16 @@ describe('command palette screen matching', () => {
   it('caps the screen group so content results stay on screen', () => {
     const all = [settings, devices, { label: 'Models', view: 'models' }]
     expect(paletteScreenMatches(all, 'e', 2)).toHaveLength(2)
+  })
+
+  it('projects every named internal subroute from the canonical route catalog', () => {
+    expect(internalTabPaletteScreens([{ view: 'devices', locked: false }])).toEqual([
+      { label: 'Sync sharing', view: 'devices', subroute: 'sharing', locked: false },
+      { label: 'Activity', view: 'devices', subroute: 'activity', locked: false },
+      { label: 'Files', view: 'devices', subroute: 'files', locked: false }
+    ])
+    expect(
+      internalTabPaletteScreens([{ view: 'models', locked: true }]).map(({ subroute }) => subroute)
+    ).toEqual(['image', 'computer-use', 'voice', 'transcription', 'storage'])
   })
 })

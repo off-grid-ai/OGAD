@@ -3,12 +3,14 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
+  desktopAsyncDownloadedRegistryPorts,
   recordDownloaded,
   removeDownloaded,
   findDownloaded,
   readDownloaded,
   installedDownloadedIds,
-  downloadedProtectedNames
+  downloadedProtectedNames,
+  reconcileDownloadedModelRegistry
 } from '../downloaded-models'
 
 // Real temp models dir with real files — no mocks. This is the exact registry logic
@@ -38,6 +40,25 @@ afterEach(() => {
 })
 
 describe('downloaded-models registry (real temp dir)', () => {
+  it('gives the Shared owner atomic durable registry I/O without hiding damaged state', async () => {
+    const ports = desktopAsyncDownloadedRegistryPorts(dir)
+    if (!('read' in ports)) {
+      throw new Error('Desktop downloaded-model storage must expose atomic row updates')
+    }
+    await expect(ports.read()).resolves.toEqual([])
+
+    fs.writeFileSync(path.join(dir, 'downloaded-models.json'), 'not json{')
+    await expect(ports.read()).rejects.toBeInstanceOf(SyntaxError)
+    expect(fs.readFileSync(path.join(dir, 'downloaded-models.json'), 'utf8')).toBe('not json{')
+
+    fs.rmSync(path.join(dir, 'downloaded-models.json'))
+    writeFiles(MINICPM.files)
+    await ports.updateAtomically(() => [MINICPM])
+    await expect(ports.read()).resolves.toEqual([MINICPM])
+    await expect(ports.fileSize(MINICPM.files[0]!)).resolves.toBe(2048)
+    expect(fs.readdirSync(dir).some((name) => name.includes('.tmp-'))).toBe(false)
+  })
+
   it('a recorded model with all files present is reported installed', () => {
     writeFiles(MINICPM.files)
     recordDownloaded(dir, MINICPM)
@@ -86,10 +107,27 @@ describe('downloaded-models registry (real temp dir)', () => {
     expect(findDownloaded(dir, MINICPM.id)).toBeUndefined()
   })
 
-  it('survives a corrupt/absent registry file without throwing', () => {
+  it('treats absence as empty but reports corrupt durable state', () => {
     expect(readDownloaded(dir)).toEqual([]) // absent
     fs.writeFileSync(path.join(dir, 'downloaded-models.json'), 'not json{')
-    expect(readDownloaded(dir)).toEqual([]) // corrupt -> empty, no throw
-    expect(installedDownloadedIds(dir)).toEqual([])
+    expect(() => readDownloaded(dir)).toThrow(SyntaxError)
+    expect(() => installedDownloadedIds(dir)).toThrow(SyntaxError)
+  })
+
+  it('repairs a transferred model when its catalog family gains a specialist role', () => {
+    const transferred = {
+      ...MINICPM,
+      id: `model-package-v1:${'a'.repeat(64)}`,
+      familyId: MINICPM.id,
+      packageIdentity: `model-package-v1:${'a'.repeat(64)}`
+    }
+    writeFiles(transferred.files)
+    recordDownloaded(dir, transferred)
+
+    expect(
+      reconcileDownloadedModelRegistry(dir, [
+        { id: MINICPM.id, kind: 'computer_use', files: transferred.files.map((name) => ({ name })) }
+      ])[0]
+    ).toMatchObject({ id: transferred.id, familyId: MINICPM.id, kind: 'computer_use' })
   })
 })

@@ -1,3 +1,5 @@
+import { isArtifactBuildRequest } from '@offgrid/models'
+
 // Pure query/message helpers extracted from ipc.ts so the retrieval-gating logic
 // is unit-testable without Electron / the DB (mirrors search-ranking.ts,
 // model-sizing.ts). No imports, no side effects. ipc.ts re-imports these; the
@@ -50,15 +52,35 @@ export const STOPWORDS = new Set([
 ])
 
 /** Tokenise a free-text query: lowercase, split on whitespace, strip punctuation
- *  (keep a-z0-9_-), drop tokens < 3 chars and STOPWORDS, de-dup, cap at maxTokens. */
-export function tokenizeQuery(query: string, maxTokens: number = 6): string[] {
+ *  (keep a-z0-9_-), drop tokens < 3 chars and STOPWORDS, de-dup, cap at maxTerms. */
+export function tokenizeQuery(query: string, maxTerms: number = 6): string[] {
   const tokens = query
     .toLowerCase()
     .split(/\s+/)
     .map((t) => t.replace(/[^a-z0-9_-]/g, ''))
     .filter((t) => t.length >= 3)
     .filter((t) => !STOPWORDS.has(t))
-  return Array.from(new Set(tokens)).slice(0, maxTokens)
+  return Array.from(new Set(tokens)).slice(0, maxTerms)
+}
+
+/** Quote one term as an FTS5 phrase literal, doubling any embedded quote per FTS5 escaping.
+ *  A phrase literal makes retained punctuation inert - the tokeniser inside FTS re-splits it. */
+function quoteFtsPhrase(term: string): string {
+  return `"${term.replace(/"/g, '""')}"`
+}
+
+/** Build a safe FTS5 MATCH expression from free text: tokenise, then quote each token as a phrase
+ *  literal and OR-join (any-term recall). tokenizeQuery keeps `-`/`_`, so a bare token like
+ *  `best-reviewed` reaches MATCH as invalid syntax and throws `no such column: reviewed`, failing the
+ *  whole rag:chat retrieval; quoting removes that entire class of syntax error. When tokenisation
+ *  yields nothing (all stopwords / too short), fall back to the whole text as one quoted phrase so
+ *  the fallback can't throw either. */
+export function ftsMatchExpression(query: string, maxTerms: number = 6): string {
+  const tokens = tokenizeQuery(query, maxTerms)
+  if (tokens.length > 0) {
+    return tokens.map(quoteFtsPhrase).join(' OR ')
+  }
+  return quoteFtsPhrase(query.trim())
 }
 
 /** Clip text to maxLength, replacing the final char with an ellipsis when it
@@ -74,17 +96,7 @@ export function clipText(text: string, maxLength: number): string {
 // the model cite junk and second-guess itself. Detect them so we can answer with
 // the artifact instructions only and skip the search.
 export function isGenerativeRequest(text: string): boolean {
-  const q = (text || '').trim().toLowerCase()
-  if (!q) return false
-  const hasNoun =
-    /\b(react|next\.?js|vue|svelte|html|css|svg|website|web ?app|web ?page|landing page|component|widget|diagram|chart|flowchart|mermaid|game|canvas|prototype|mock-?up|ui|app|script|function|snippet|webpage|playground|frontend|front-end|dashboard|form|interface|page|tool|visualization|visualisation|simulator|editor|viewer|demo|site)\b/.test(
-      q
-    )
-  const hasVerb =
-    /\b(build|create|make|write|generate|code|implement|design|draw|render|scaffold|give me a|show me a)\b/.test(
-      q
-    )
-  return hasNoun && hasVerb
+  return isArtifactBuildRequest(text)
 }
 
 /**

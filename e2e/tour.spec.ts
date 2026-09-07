@@ -106,20 +106,20 @@ test('Resource mode is selectable (Conservative)', async () => {
 })
 
 test('every locked Pro navigation item renders its matching upgrade screen', async () => {
-  // Discover the lock-bearing buttons rendered from the production Pro catalog. This
-  // avoids duplicating its route list in the test and fails when a new locked item is
-  // added without a working upgrade destination.
-  const lockedButtons = page.locator('button').filter({
-    has: page.locator('svg title').filter({ hasText: /^Pro$/ })
-  })
-  const count = await lockedButtons.count()
-  expect(count).toBeGreaterThan(2)
+  // The production navigation catalog owns both the label and the lock decision. Locked buttons
+  // expose that complete state to every user as "<destination> Pro"; the visual icon is decorative.
+  const primaryNavigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  const lockedButtons = primaryNavigation.getByRole('button', { name: / Pro$/ })
+  const accessibleLabels = await lockedButtons.evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute('aria-label'))
+  )
+  expect(accessibleLabels.length).toBeGreaterThan(2)
+  expect(accessibleLabels.every((label): label is string => Boolean(label))).toBe(true)
 
-  const labels: string[] = []
-  for (let index = 0; index < count; index += 1) {
-    const button = lockedButtons.nth(index)
-    const label = (await button.locator('span.flex-1').innerText()).trim()
-    labels.push(label)
+  const labels = accessibleLabels.map((accessibleLabel) => accessibleLabel!.replace(/ Pro$/, ''))
+  for (const [index, label] of labels.entries()) {
+    const accessibleLabel = accessibleLabels[index]!
+    const button = primaryNavigation.getByRole('button', { name: accessibleLabel, exact: true })
     await button.click()
     await expect(page.getByText('Off Grid AI Pro · Available now')).toBeVisible()
     await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()

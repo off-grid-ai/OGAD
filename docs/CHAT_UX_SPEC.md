@@ -1,4 +1,4 @@
-# Off Grid Desktop — Conversational UX Spec
+# Off Grid AI Desktop — Conversational UX Spec
 
 > **This is one application of the app-wide design philosophy in
 > `docs/DESIGN_PHILOSOPHY.md` (read that first — it is binding for the whole app).**
@@ -61,7 +61,7 @@ a choice materially changes the answer — so the conversation never feels like 
   **Aceternity** (effects), **Magic UI** (text/buttons), **Motion Primitives** (transitions).
   Pull via `npx shadcn add` / `@aceternity` / `@magicui`; pick from
   `component-library-animations/skills/component-library-index.md`.
-- **Brand stays Off Grid:** Menlo mono, emerald (`#34D399`/`#059669`), flat/brutalist,
+- **Brand stays Off Grid AI:** Menlo mono, emerald (`#34D399`/`#059669`), flat/brutalist,
   dense. shadcn semantic tokens are mapped to `--og-*` in `main.css @theme`, so library
   components inherit the brand with zero per-component styling.
 - **Code standard (standards-kit):** cyclomatic complexity < 8; PascalCase UI/Types,
@@ -73,6 +73,6 @@ a choice materially changes the answer — so the conversation never feels like 
 - [ ] Model generates images **and** artifacts **and** clarifying questions inline, chosen
       automatically, each rendered with calm motion.
 - [ ] Responses **stream** (text, and artifacts build live in the canvas).
-- [ ] Composer/messages/menus use approved-library components, themed to Off Grid.
+- [ ] Composer/messages/menus use approved-library components, themed to Off Grid AI.
 - [ ] Conversation list searchable + grouped; artifact canvas docks right.
 - [ ] Verified on screen (not just typecheck) — feels smooth, easy, breathtaking.

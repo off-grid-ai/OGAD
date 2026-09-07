@@ -32,6 +32,13 @@ export function isPortFree(port: number, host = '127.0.0.1'): Promise<boolean> {
   })
 }
 
+export interface FreePortSelectionOptions {
+  /** Exact interface the eventual listener will bind. */
+  host: string
+  maxTries?: number
+  isFree?: (port: number, host: string) => Promise<boolean>
+}
+
 /**
  * The first free port at or after `preferred`, scanning upward in single steps. Returns null if none
  * in the window is free (caller decides whether to surface a conflict). `isFree` is injected so the
@@ -39,11 +46,12 @@ export function isPortFree(port: number, host = '127.0.0.1'): Promise<boolean> {
  */
 export async function pickFreePort(
   preferred: number,
-  isFree: (port: number) => Promise<boolean> = (p) => isPortFree(p),
-  maxTries = 20
+  options: FreePortSelectionOptions
 ): Promise<number | null> {
+  const isFree = options.isFree ?? isPortFree
+  const maxTries = options.maxTries ?? 20
   for (const port of portCandidates(preferred, maxTries)) {
-    if (await isFree(port)) {
+    if (await isFree(port, options.host)) {
       return port
     }
   }

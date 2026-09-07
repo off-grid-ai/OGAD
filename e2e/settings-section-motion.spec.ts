@@ -40,7 +40,7 @@ test.beforeAll(async () => {
   await page.waitForLoadState('domcontentloaded')
   // Dismiss onboarding if present.
   for (let i = 0; i < 8; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click().catch(() => {})
     await page.waitForTimeout(300)

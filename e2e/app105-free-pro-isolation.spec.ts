@@ -8,7 +8,7 @@
  *
  * This launches the real Electron app, uses the real sidebar and Settings UI,
  * and probes only the public preload/IPC boundary plus durable profile output.
- * No Off Grid module or store is mocked.
+ * No Off Grid AI module or store is mocked.
  */
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import fs from 'node:fs'
@@ -50,10 +50,10 @@ const SETTINGS_PLACEHOLDERS = [
   },
   {
     title: 'You',
-    description: 'Tell Off Grid who you are'
+    description: 'Tell Off Grid AI who you are'
   },
   {
-    title: 'What Off Grid has learned',
+    title: 'What Off Grid AI has learned',
     description: 'Preferences distilled from the suggestions you dismiss'
   }
 ] as const
@@ -85,6 +85,7 @@ test.beforeAll(async () => {
       ...process.env,
       OFFGRID_USER_DATA: profileDir,
       OFFGRID_PRO: '0',
+      OFFGRID_E2E_ISOLATED_INSTANCE: '1',
       NODE_ENV: 'production'
     }
   })
@@ -92,9 +93,10 @@ test.beforeAll(async () => {
   await page.waitForLoadState('domcontentloaded')
   await completeOnboarding(page)
 
-  const expandSidebar = page.getByRole('button', { name: 'Expand sidebar' })
-  if (await expandSidebar.isVisible().catch(() => false)) await expandSidebar.click()
-  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  await expect(navigation).toBeVisible()
+  await navigation.hover()
+  await expect(navigation).toHaveAttribute('aria-expanded', 'true')
 })
 
 test.afterAll(async () => {
@@ -109,7 +111,7 @@ test('every locked Pro destination opens its matching upgrade explanation', asyn
     const button = navButton(page, feature.label)
     await expect(button, `${feature.label} remains discoverable in the free sidebar`).toBeVisible()
     await expect(
-      button.getByRole('img', { name: 'Pro' }),
+      button.locator('svg:has(title:text-is("Pro"))'),
       `${feature.label} is visibly marked Pro`
     ).toBeVisible()
 
@@ -181,7 +183,7 @@ test('visiting locked surfaces leaves every protected runtime and durable store 
       channelResults[channel]?.rejected,
       `${channel} must not be registered for free users`
     ).toBe(true)
-    expect(channelResults[channel]?.message).toContain('No handler registered')
+    expect(channelResults[channel]?.message).toBe('Pro license required.')
   }
 
   // Clipboard quick-paste and dictation each create an auxiliary BrowserWindow when their Pro

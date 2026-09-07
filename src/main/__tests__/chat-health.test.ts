@@ -7,7 +7,7 @@
  * 'starting', not 'down'.
  */
 import { describe, it, expect } from 'vitest'
-import { decideChatStatus } from '../chat-health'
+import { decideChatStatus } from '@offgrid/application'
 
 describe('decideChatStatus', () => {
   it('ready when /health answers, detail = active model', () => {

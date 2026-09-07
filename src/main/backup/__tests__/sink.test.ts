@@ -39,7 +39,7 @@ describe('delivering and collecting a backup file', () => {
     // The shape pack() produces: the archive alone inside its own temp directory.
     archiveDir = path.join(workspace, 'offgrid-backup-archive-abc')
     await fs.promises.mkdir(archiveDir, { recursive: true })
-    archive = path.join(archiveDir, 'Off Grid Backup.zip')
+    archive = path.join(archiveDir, 'Off Grid AI Backup.zip')
     await fs.promises.writeFile(archive, 'zip bytes')
   })
 
@@ -58,7 +58,7 @@ describe('delivering and collecting a backup file', () => {
       await fs.promises.mkdir(path.dirname(chosen), { recursive: true })
       electron.showSaveDialog.mockResolvedValue({ canceled: false, filePath: chosen })
 
-      const delivery = await (await sink()).deliverFile(archive, 'Off Grid Backup.zip')
+      const delivery = await (await sink()).deliverFile(archive, 'Off Grid AI Backup.zip')
 
       expect(delivery).toEqual({ canceled: false, path: chosen })
       expect(await fs.promises.readFile(chosen, 'utf8')).toBe('zip bytes')
@@ -67,13 +67,13 @@ describe('delivering and collecting a backup file', () => {
     it('offers a .zip filter and the suggested name, so the user is not typing an extension', async () => {
       electron.showSaveDialog.mockResolvedValue({ canceled: true })
 
-      await (await sink()).deliverFile(archive, 'Off Grid Backup 2026-01-01.zip')
+      await (await sink()).deliverFile(archive, 'Off Grid AI Backup 2026-01-01.zip')
 
       expect(electron.showSaveDialog).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: 'Export Off Grid backup',
-          defaultPath: 'Off Grid Backup 2026-01-01.zip',
-          filters: [{ name: 'Off Grid backup', extensions: ['zip'] }]
+          title: 'Export Off Grid AI backup',
+          defaultPath: 'Off Grid AI Backup 2026-01-01.zip',
+          filters: [{ name: 'Off Grid AI backup', extensions: ['zip'] }]
         })
       )
     })
@@ -179,9 +179,9 @@ describe('delivering and collecting a backup file', () => {
       await expect((await sink()).pickFile()).resolves.toBe('/Users/someone/Downloads/backup.zip')
       expect(electron.showOpenDialog).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: 'Import Off Grid backup',
+          title: 'Import Off Grid AI backup',
           properties: ['openFile'],
-          filters: [{ name: 'Off Grid backup', extensions: ['zip'] }]
+          filters: [{ name: 'Off Grid AI backup', extensions: ['zip'] }]
         })
       )
     })

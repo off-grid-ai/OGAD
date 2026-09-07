@@ -1,4 +1,4 @@
-# Off Grid — Master Plan
+# Off Grid AI — Master Plan
 
 The single forward plan for the enterprise product. Ties together `CONSOLE_PLAN.md`,
 `ENTERPRISE_BUILD_PLAN.md`, `LICENSES.md` (in `off-grid-ai/console`), and everything decided
@@ -10,7 +10,7 @@ so far. Read this first; the others hold detail.
 
 A **common control plane for organizational AI**: one governed chokepoint for every model
 call, agent action, and byte of data — running on the org's own infrastructure, fully
-auditable, built on open source. It manages a **fleet of on-device nodes** (Off Grid
+auditable, built on open source. It manages a **fleet of on-device nodes** (Off Grid AI
 Desktop/Mobile), grounds them in the **organizational brain**, and proves compliance to a
 regulator.
 
@@ -178,9 +178,9 @@ f. **FinOps + token issuance**: virtual keys scoped to user/project, budgets, co
 Single interface (ours) · gateway is the chokepoint · findings normalized onto the audit
 record · OTel as the one observability wire · permissive-only shipped · out-of-process
 aggregation · worker-owns-raw / org-sees-distilled · embed don't rebuild rich UIs · no tool's
-copyleft ever linked into a closed module · **from the Off Grid ecosystem the console reuses only
+copyleft ever linked into a closed module · **from the Off Grid AI ecosystem the console reuses only
 two things — the UI (design system) and the single Off Grid AI Gateway; it pulls in NO other
-Off Grid packages (no `@offgrid/rag`, no desktop/mobile code) and stands on its own stack.** ·
+Off Grid AI packages (no `@offgrid/rag`, no desktop/mobile code) and stands on its own stack.** ·
 **all model/inference (embeddings, grounding/NLI, multimodal) routes through that one gateway —
 never a third-party LLM; everything else is the console's own third-party OSS behind ports.** ·
 **every capability is sellable alone (grounding without the Brain, the Brain without agents, …);

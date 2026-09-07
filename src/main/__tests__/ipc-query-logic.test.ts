@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { DatabaseSync } from 'node:sqlite'
 import {
   tokenizeQuery,
+  ftsMatchExpression,
   isGenerativeRequest,
   clipText,
   safeParseJson,
@@ -41,6 +43,83 @@ describe('tokenizeQuery', () => {
 
   it('keeps underscores and hyphens inside a token', () => {
     expect(tokenizeQuery('foo_bar baz-qux')).toEqual(['foo_bar', 'baz-qux'])
+  })
+})
+
+describe('ftsMatchExpression', () => {
+  it('quotes each token as a phrase and OR-joins them (any-term recall)', () => {
+    expect(ftsMatchExpression('cafe food near')).toBe('"cafe" OR "food" OR "near"')
+  })
+
+  it('quotes a hyphenated token instead of leaving it bare in the MATCH', () => {
+    // tokenizeQuery keeps the hyphen, so a bare join produced `best-reviewed`, which FTS5 rejects.
+    const expr = ftsMatchExpression('best-reviewed places')
+    expect(expr).toContain('"best-reviewed"')
+    // never a bare hyphenated bareword adjacent to whitespace/operators
+    expect(expr).not.toMatch(/(^|\s)best-reviewed(\s|$)/)
+  })
+
+  it('falls back to the whole text as one quoted phrase when nothing tokenises', () => {
+    // all stopwords / too short → no tokens; the fallback must still be a quoted phrase, not raw text
+    expect(ftsMatchExpression('to of a')).toBe('"to of a"')
+  })
+
+  it('escapes an embedded double-quote so the phrase literal stays well-formed', () => {
+    expect(ftsMatchExpression('say "hey" now')).toBe('"say" OR "hey" OR "now"')
+    // a quote that survives into the fallback phrase is doubled per FTS5 escaping
+    expect(ftsMatchExpression('a "b')).toBe('"a ""b"')
+  })
+
+  // The real regression: run the built expression against a REAL FTS5 table (node:sqlite ships FTS5)
+  // and prove SQLite accepts it. Before the fix the bare `best-reviewed` threw `no such column:
+  // reviewed`, which failed the entire rag:chat retrieval and surfaced as "something went wrong".
+  describe('against a real FTS5 table', () => {
+    const withFts = (fn: (db: InstanceType<typeof DatabaseSync>) => void): void => {
+      const db = new DatabaseSync(':memory:')
+      try {
+        db.exec('CREATE VIRTUAL TABLE entity_fts USING fts5(name, summary)')
+        db.prepare('INSERT INTO entity_fts(name, summary) VALUES (?, ?)').run(
+          'Cafe Roma',
+          'best reviewed place near good food'
+        )
+        fn(db)
+      } finally {
+        db.close()
+      }
+    }
+
+    const failingPrompt =
+      'Find the three best-reviewed places near me for a specific kind of food, open right now.'
+
+    it('reproduces the original failure with the old bare-join form', () => {
+      withFts((db) => {
+        const bare = tokenizeQuery(failingPrompt).join(' OR ') // the pre-fix expression
+        expect(bare).toContain('best-reviewed')
+        expect(() =>
+          db.prepare('SELECT name FROM entity_fts WHERE entity_fts MATCH ?').all(bare)
+        ).toThrow(/no such column/)
+      })
+    })
+
+    it('accepts the fixed expression and still matches the row', () => {
+      withFts((db) => {
+        const expr = ftsMatchExpression(failingPrompt)
+        const rows = db
+          .prepare('SELECT name FROM entity_fts WHERE entity_fts MATCH ?')
+          .all(expr) as { name: string }[]
+        expect(rows.map((r) => r.name)).toContain('Cafe Roma')
+      })
+    })
+
+    it('never throws on hyphenated or punctuation-heavy input', () => {
+      withFts((db) => {
+        for (const q of ['e-commerce back-end co-founder', 'twenty-first', 'a---b', 'x: y', '"quoted"']) {
+          expect(() =>
+            db.prepare('SELECT name FROM entity_fts WHERE entity_fts MATCH ?').all(ftsMatchExpression(q))
+          ).not.toThrow()
+        }
+      })
+    })
   })
 })
 

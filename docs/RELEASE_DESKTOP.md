@@ -51,7 +51,7 @@ These builds are **unsigned** (no cert/Apple-ID prompts) and never touch GitHub.
    "Activated. Restart to finish unlocking Pro." → Restart → pro tabs unlock.
 3. Things that broke before — verify explicitly: local model server starts on
    :7878 (chat responds), whisper/ffmpeg present, no missing-binary errors in the
-   console (`Console.app` → filter "Off Grid").
+   console (`Console.app` → filter "Off Grid AI").
 
 > Both DMGs use distinct appIds (`…desktop` / `…desktop.pro`) so they can be
 > installed side by side. They share the canonical userData dir

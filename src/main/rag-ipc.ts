@@ -3,38 +3,61 @@
 
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import fs from 'fs'
-import { randomUUID } from 'node:crypto'
-import { ragService, listProjects, createProject, updateProject, deleteProject } from './rag'
-import { uploadPickerExtensions } from './files-classify'
+import { desktopRag } from './composition/application-access'
+import { requireApplicationOutcome } from './composition/application-outcome'
+import { attachmentPickerExtensions } from '@offgrid/sync'
+import {
+  PROJECT_DOCUMENTS_CHANGED_CHANNEL,
+  PROJECT_INDEX_PROGRESS_CHANNEL,
+  type ProjectDocumentsChangedContract,
+  type ProjectIndexProgressContract
+} from '../shared/ipc-contracts'
 
-// Built from the router's classify sets (files-classify) so the picker allowlist
+// Built from the shared attachment classifier (@offgrid/sync) so the picker allowlist
 // and the processor can never drift: it used to hardcode a subset that omitted
 // gif/bmp/heic/opus/aiff/avi the router actually handles.
-const DOC_FILTERS = [{ name: 'Documents, audio & video', extensions: uploadPickerExtensions() }]
+const DOC_FILTERS = [{ name: 'Documents, audio & video', extensions: attachmentPickerExtensions() }]
 
-export function setupRagIPC(): void {
-  // --- Projects -------------------------------------------------------------
-  ipcMain.handle('projects:list', () => listProjects())
+let releaseDocumentProjection: (() => void) | null = null
 
-  ipcMain.handle(
-    'projects:create',
-    (_e, p: { name: string; description?: string; systemPrompt?: string; icon?: string }) => {
-      const id = randomUUID()
-      createProject({ id, ...p })
-      return id
+function publishProjectDocumentsChanged(projectId: string): void {
+  const payload: ProjectDocumentsChangedContract = { projectId }
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(PROJECT_DOCUMENTS_CHANGED_CHANNEL, payload)
+  }
+}
+
+function observeDocumentProjection(): () => void {
+  releaseDocumentProjection?.()
+  const release = desktopRag.events((event) => {
+    switch (event.type) {
+      case 'document_indexed':
+      case 'document_enabled':
+      case 'document_removed':
+        publishProjectDocumentsChanged(event.document.projectId)
+        break
+      case 'project_documents_removed':
+        publishProjectDocumentsChanged(event.projectId)
+        break
+      default:
+        break
     }
-  )
-
-  ipcMain.handle('projects:update', (_e, id: string, patch: Record<string, unknown>) => {
-    updateProject(id, patch)
   })
+  releaseDocumentProjection = release
+  return () => {
+    if (releaseDocumentProjection !== release) return
+    releaseDocumentProjection = null
+    release()
+  }
+}
 
-  ipcMain.handle('projects:delete', (_e, id: string) => deleteProject(id))
-
+export function setupRagIPC(): () => void {
+  const releaseProjection = observeDocumentProjection()
   // --- Knowledge base (documents) ------------------------------------------
-  ipcMain.handle('projects:list-documents', (_e, projectId: string) =>
-    ragService.listDocuments(projectId)
-  )
+  ipcMain.handle('projects:list-documents', async (_e, projectId: string) => {
+    requireApplicationOutcome(await desktopRag.loadProjectDocuments(projectId))
+    return desktopRag.snapshot().documents.filter((document) => document.projectId === projectId)
+  })
 
   ipcMain.handle('projects:add-documents', async (e, projectId: string) => {
     const win = BrowserWindow.fromWebContents(e.sender) ?? undefined
@@ -48,37 +71,43 @@ export function setupRagIPC(): void {
     let added = 0
     for (const filePath of result.filePaths) {
       const name = filePath.split('/').pop() ?? filePath
-      let size = 0
       try {
-        size = fs.statSync(filePath).size
-      } catch {
-        /* ignore */
-      }
-      try {
-        await ragService.indexDocument(
+        const size = fs.statSync(filePath).size
+        const indexed = await desktopRag.addDocument(
           { projectId, path: filePath, fileName: name, size },
           (stage) => {
-            e.sender.send('projects:index-progress', { projectId, name, stage })
+            const progress: ProjectIndexProgressContract = { projectId, name, stage }
+            e.sender.send(PROJECT_INDEX_PROGRESS_CHANNEL, progress)
           }
         )
+        requireApplicationOutcome(indexed)
         added++
       } catch (err) {
-        e.sender.send('projects:index-progress', {
+        const failed: ProjectIndexProgressContract = {
           projectId,
           name,
           stage: 'error',
           error: err instanceof Error ? err.message : String(err)
-        })
+        }
+        e.sender.send(PROJECT_INDEX_PROGRESS_CHANNEL, failed)
       }
     }
     return { added }
   })
 
-  ipcMain.handle('projects:toggle-document', (_e, docId: number, enabled: boolean) =>
-    ragService.toggleDocument(docId, enabled)
+  ipcMain.handle('projects:toggle-document', async (_e, docId: number, enabled: boolean) =>
+    requireApplicationOutcome(await desktopRag.setDocumentEnabled(docId, enabled))
   )
 
-  ipcMain.handle('projects:delete-document', (_e, docId: number) =>
-    ragService.deleteDocument(docId)
+  ipcMain.handle('projects:delete-document', async (_e, docId: number) =>
+    requireApplicationOutcome(await desktopRag.removeDocument(docId))
   )
+
+  return () => {
+    releaseProjection()
+    ipcMain.removeHandler('projects:list-documents')
+    ipcMain.removeHandler('projects:add-documents')
+    ipcMain.removeHandler('projects:toggle-document')
+    ipcMain.removeHandler('projects:delete-document')
+  }
 }

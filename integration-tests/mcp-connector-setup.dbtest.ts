@@ -98,11 +98,14 @@ describe('<ConnectorsScreen/> connector setup', () => {
     expect(persisted).toHaveLength(1)
     expect(persisted[0]).toMatchObject({
       name: 'Reachable synthetic MCP',
-      status: 'ok',
-      tools: JSON.stringify([
-        { name: 'read_status', description: 'Returns the synthetic connector status.' }
-      ])
+      status: 'ok'
     })
+    expect(JSON.parse(persisted[0]!.tools!)).toEqual([
+      expect.objectContaining({
+        name: 'read_status',
+        description: 'Returns the synthetic connector status.'
+      })
+    ])
     const count = reopenedDatabase
       .getDB()
       .prepare('SELECT COUNT(*) AS count FROM connectors WHERE name = ?')

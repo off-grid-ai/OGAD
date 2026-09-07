@@ -31,6 +31,10 @@ export function getRegisteredNav(): NavEntry[] {
   return [...entries].sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
 }
 
+export function clearRegisteredNav(): void {
+  entries.length = 0
+}
+
 /** True once the pro package has registered at least one screen — used by the
  *  shell to decide between rendering the real screen vs the upgrade teaser. */
 export function isProActive(): boolean {

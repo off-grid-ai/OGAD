@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BundleError } from '@offgrid/sync/portable'
 import { DesktopBackupFileMapper, isSafeBackupKey } from '../file-mapper'
-import type {
-  DesktopBackupData,
-  DesktopBackupDocument,
-  DesktopBackupProject
-} from '../types'
+import type { DesktopBackupData, DesktopBackupDocument, DesktopBackupProject } from '../types'
 
 /**
  * How a project's documents travel inside a backup bundle, and why the keys are not their paths.
@@ -68,8 +64,10 @@ describe('addressing a backup‑s documents by key rather than by path', () => {
       backup([project({ documents: [original] })])
     )
 
-    const { path: _replaced, ...rest } = keyed.projects[0]!.documents[0]!
-    const { path: _original, ...expected } = original
+    const rest = { ...keyed.projects[0]!.documents[0]! }
+    const expected = { ...original }
+    Reflect.deleteProperty(rest, 'path')
+    Reflect.deleteProperty(expected, 'path')
     expect(rest).toEqual(expected)
   })
 

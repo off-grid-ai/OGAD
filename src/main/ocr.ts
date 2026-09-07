@@ -26,14 +26,26 @@ function ocrBin(): string | null {
   return null
 }
 
-export async function runOCR(imagePath: string): Promise<string> {
+export type OCRResult = { ok: true; text: string } | { ok: false; message: string }
+
+/** Callers that make decisions from OCR must distinguish an unreadable image from a failed probe. */
+export async function readOCR(imagePath: string, timeoutMs?: number): Promise<OCRResult> {
   const bin = ocrBin()
-  if (!bin) return ''
+  if (!bin) return { ok: false, message: 'The on-device OCR helper is unavailable' }
   try {
-    const { stdout } = await execFileAsync(bin, [imagePath], { maxBuffer: 32 * 1024 * 1024 })
-    return stdout.trim()
+    const { stdout } = await execFileAsync(bin, [imagePath], {
+      maxBuffer: 32 * 1024 * 1024,
+      ...(timeoutMs === undefined ? {} : { timeout: timeoutMs })
+    })
+    return { ok: true, text: stdout.trim() }
   } catch (e) {
-    console.error('[OCR] failed:', e)
-    return ''
+    return { ok: false, message: e instanceof Error ? e.message : String(e) }
   }
+}
+
+export async function runOCR(imagePath: string): Promise<string> {
+  const result = await readOCR(imagePath)
+  if (result.ok) return result.text
+  console.error('[OCR] failed:', result.message)
+  return ''
 }

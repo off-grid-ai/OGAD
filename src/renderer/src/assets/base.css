@@ -1,8 +1,8 @@
-/* Off Grid design tokens (--og-* variables, dark by default) */
+/* Off Grid AI design tokens (--og-* variables, dark by default) */
 @import '@offgrid/design/tokens.css';
 
 /*
- * Electron-Vite boilerplate variables are remapped onto the Off Grid tokens so
+ * Electron-Vite boilerplate variables are remapped onto the Off Grid AI tokens so
  * existing styles inherit the brutalist/terminal palette. Prefer using --og-*
  * (or the Tailwind tokens) directly in new code.
  */
@@ -40,7 +40,7 @@
 }
 
 /*
- * Off Grid Mobile uses a 14px body. Tailwind's rem-based sizing is rooted at
+ * Off Grid AI Mobile uses a 14px body. Tailwind's rem-based sizing is rooted at
  * the browser default 16px, which makes every text-* / spacing class ~14% too
  * large on desktop. Drop the root to 14px so the whole UI matches the mobile
  * terminal density (text-sm -> ~12px, text-base -> 14px, etc.).

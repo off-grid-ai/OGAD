@@ -16,7 +16,24 @@ const HAS_TZ = /[zZ]$|[+-]\d{2}:?\d{2}$/
  * / ChatList (`dateStr.replace(' ', 'T') + 'Z'`).
  */
 export function parseSqliteUtc(dateStr: string): Date {
-  return new Date(HAS_TZ.test(dateStr) ? dateStr : dateStr.replace(' ', 'T') + 'Z')
+  return new Date(HAS_TZ.test(dateStr) ? dateStr : `${dateStr.replace(' ', 'T')}Z`)
+}
+
+/** System-local midnight for the calendar day containing `date`. */
+export function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+/** Move by local calendar days. This remains correct across DST transitions. */
+export function shiftLocalDay(date: Date, days: number): Date {
+  const shifted = startOfLocalDay(date)
+  shifted.setDate(shifted.getDate() + days)
+  return shifted
+}
+
+/** Inclusive start and exclusive end of a local calendar day, in epoch milliseconds. */
+export function localDayRangeMs(date: Date): [number, number] {
+  return [startOfLocalDay(date).getTime(), shiftLocalDay(date, 1).getTime()]
 }
 
 function toDate(input: string | number | Date): Date {

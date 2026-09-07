@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { ExtractionBridges } from '@offgrid/rag'
-import { llm } from '../llm'
+import { generateDesktopText } from '../desktop-generation'
 import { ffmpegBin } from '../transcription/whisper-cli'
 import { getActiveTranscription } from '../transcription/select'
 
@@ -37,9 +37,12 @@ export const desktopExtraction: ExtractionBridges = {
 
   async extractPdf(p, maxChars) {
     // pdf-parse has a debug side-effect on import, so load it only when needed.
-    const pdfParse = loadCjsDependency('pdf-parse') as (b: Buffer) => Promise<{ text: string }>
+    const pdfParse = loadCjsDependency('pdf-parse') as (
+      bytes: Uint8Array
+    ) => Promise<{ text: string }>
     const buf = await fs.promises.readFile(p)
-    const { text } = await pdfParse(buf)
+    // Pass owned plain bytes: pdf-parse can reject valid PDFs when given a Node Buffer directly.
+    const { text } = await pdfParse(new Uint8Array(buf))
     return maxChars ? text.slice(0, maxChars) : text
   },
 
@@ -82,6 +85,12 @@ export const desktopExtraction: ExtractionBridges = {
 
   async captionImage(imagePath) {
     // Reuse the local vision model. Requires an active vision (mmproj) model.
-    return (await llm.chat(IMAGE_PROMPT, [imagePath], 300000, 1024)).trim()
+    return (
+      await generateDesktopText(IMAGE_PROMPT, {
+        profile: 'vision-caption',
+        operation: { type: 'vision' },
+        images: [imagePath]
+      })
+    ).content.trim()
   }
 }

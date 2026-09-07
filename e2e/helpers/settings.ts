@@ -40,13 +40,14 @@ export const settingsSectionHeader = (page: Page, title: string): Locator =>
 
 /**
  * Collapse whichever section is currently the open detail, returning to the card grid.
- * Uses the group's own Cmd/Ctrl+] shortcut — the same seam the app ships — so this keeps
- * working if the header markup changes. No-op when nothing is open.
+ * The open SettingsCard is the only button whose accessible name starts with "All settings".
+ * Scope to that product boundary so expanded sidebar navigation groups are not mistaken for
+ * Settings details. No-op when nothing is open.
  */
 export const closeSettingsSection = async (page: Page): Promise<void> => {
-  const open = page.locator('button[aria-expanded="true"]')
+  const open = page.getByRole('button', { name: /^All settings\s/ })
   if ((await open.count()) === 0) return
-  await page.keyboard.press('Control+]')
+  await open.click()
   await expect(open).toHaveCount(0)
 }
 

@@ -25,7 +25,7 @@ const killNudge = (win) =>
         const t = el.textContent || ''
         if (
           el.className?.includes?.('fixed') &&
-          (t.includes('Finish setting up Off Grid Pro') || t.includes('click to stop'))
+          (t.includes('Finish setting up Off Grid AI Pro') || t.includes('click to stop'))
         )
           el.remove()
       }
@@ -78,7 +78,7 @@ await win.evaluate(async () => {
         id: 'n1',
         type: 'approval',
         title: 'Reply to Sam Shafer re: pilot rollout',
-        message: 'Off Grid drafted a reply about the v0.8.0 timeline. Approve to send.',
+        message: 'Off Grid AI drafted a reply about the v0.8.0 timeline. Approve to send.',
         timestamp: min(4),
         read: false,
         approvalId: 1

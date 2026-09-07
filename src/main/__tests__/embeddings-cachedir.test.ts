@@ -20,15 +20,16 @@ import os from 'os'
 
 describe('embeddings on-disk cache is a writable dir (not inside app.asar / the package)', () => {
   it('points transformers cacheDir at the userData models dir', async () => {
-    // runtime-env resolves the data dir from OFFGRID_DATA_DIR; set it BEFORE the
-    // module import, since embeddings.ts reads modelsDir() at load time.
+    // The pipeline now runs in a worker thread (embeddings-worker.ts), which cannot reach
+    // Electron's app paths — so the writable-dir contract lives in one function that takes the
+    // directory, and the worker calls it on startup. Exercise that function directly: it IS the
+    // assignment this guard exists to protect.
     const dataDir = path.join(os.tmpdir(), 'offgrid-embed-cachedir-test')
-    process.env.OFFGRID_DATA_DIR = dataDir
+    const modelsDir = path.join(dataDir, 'models')
 
     const { env } = await import('@xenova/transformers')
-    await import('../embeddings') // sets env.localModelPath / cacheDir / allowRemoteModels on load
-
-    const modelsDir = path.join(dataDir, 'models')
+    const { configureTransformersEnv } = await import('../embeddings-env')
+    configureTransformersEnv(modelsDir)
     expect(env.cacheDir).toBe(path.join(modelsDir, '.cache'))
     // The download target and the local-model lookup must share the writable dir.
     expect(env.localModelPath).toBe(modelsDir)

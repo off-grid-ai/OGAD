@@ -17,7 +17,7 @@ describe('secure storage bootstrap', () => {
 
   it.each([
     [0, 'healthy', 'The user default Keychain is available.'],
-    [1, 'repaired', 'The existing login Keychain was restored for Off Grid secure storage.'],
+    [1, 'repaired', 'The existing login Keychain was restored for Off Grid AI secure storage.'],
     [2, 'unavailable', 'The login Keychain is unavailable and was not changed.'],
     [3, 'failed', 'macOS refused to restore the existing login Keychain.']
   ] as const)('maps native status %s to %s', (nativeStatus, status, detail) => {

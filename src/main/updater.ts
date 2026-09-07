@@ -8,16 +8,13 @@
 import { autoUpdater } from 'electron-updater'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import type { UpdateInfo } from 'builder-util-runtime'
+import { UPDATE_DOWNLOADED_CHANNEL, type UpdateDownloadedContract } from '../shared/ipc-contracts'
+import type { ProgressInfo } from 'electron-updater'
 import { valid } from 'semver'
 import { getSetting, saveSetting } from './database'
 import { resolveChannelConfig, type UpdateChannel } from './update-channel'
 import { listPreviousUpdateReleases } from './update-release-history'
-
-const GITHUB_UPDATE_PROVIDER = {
-  provider: 'github' as const,
-  owner: 'off-grid-ai',
-  repo: 'off-grid-ai-desktop'
-}
+import { GITHUB_UPDATE_PROVIDER } from '../shared/update-provider'
 
 // Version of an update that finished downloading and is staged for install
 // (null = none). Held in main so a window created AFTER the download finished
@@ -27,6 +24,19 @@ const GITHUB_UPDATE_PROVIDER = {
 let stagedVersion: string | null = null
 let availableVersion: string | null = null
 let targetedDownloadVersion: string | null = null
+type UpdateDownloadProgress = ProgressInfo & {
+  status: 'downloading' | 'completed' | 'failed'
+  version: string | null
+  error?: string
+}
+let updateDownloadProgress: UpdateDownloadProgress | null = null
+
+function publishDownloadProgress(progress: UpdateDownloadProgress): void {
+  updateDownloadProgress = progress
+  BrowserWindow.getAllWindows().forEach((window) =>
+    window.webContents.send('update:download-progress', progress)
+  )
+}
 
 const platformSupportsUpdate = autoUpdater.isUpdateSupported
 
@@ -73,11 +83,19 @@ function applyChannel(explicitChannelSwitch = false): void {
 // Register the update IPC surface. Split OUT of startAutoUpdates so it can run in
 // EVERY build, including dev: the renderer queries update:staged-version on startup
 // regardless of environment, and gating registration behind !is.dev left it with no
+/**
+ * Which kind of computer this app is running on. Whether an older release can be
+ * installed here depends on it, so it enters through the composition root as a device
+ * fact rather than being read from the host mid-journey.
+ */
+let updateHostPlatform: NodeJS.Platform = process.platform
+
 // handler ("No handler registered for 'update:staged-version'"). Every handler here is
 // safe in dev — reads return the running version / null, and checkForUpdates() itself
 // short-circuits on !app.isPackaged. The auto-download ENGINE (feed, listeners,
 // background cadence) stays in startAutoUpdates and remains production-only.
-export function registerUpdateIpc(): void {
+export function registerUpdateIpc(platform: NodeJS.Platform = process.platform): void {
+  updateHostPlatform = platform
   // Apply a staged update on demand. autoInstallOnAppQuit only swaps the bundle
   // on a GRACEFUL quit — a force-kill (Activity Monitor, kill -9, killall) skips
   // it, so a fully-downloaded update can sit unapplied forever. quitAndInstall
@@ -89,6 +107,7 @@ export function registerUpdateIpc(): void {
 
   // Lets a freshly-created window ask whether an update is already staged.
   ipcMain.handle('update:staged-version', () => stagedVersion)
+  ipcMain.handle('update:download-progress', () => updateDownloadProgress)
 
   // Current state for the Settings UI: the running version + auto on/off + channel.
   ipcMain.handle('update:get-prefs', () => ({
@@ -160,7 +179,7 @@ export function registerUpdateIpc(): void {
     }
     const releases = await listPreviousUpdateReleases({
       currentVersion: app.getVersion(),
-      platform: process.platform
+      platform: updateHostPlatform
     })
     return releases.slice(0, 20).map(({ version, channel, publishedAt }) => ({
       version,
@@ -190,7 +209,7 @@ async function downloadPreviousVersion(
 
   const releases = await listPreviousUpdateReleases({
     currentVersion: app.getVersion(),
-    platform: process.platform
+    platform: updateHostPlatform
   })
   const target = releases.find((release) => release.version === normalized)
   if (!target) {
@@ -240,7 +259,16 @@ export function startAutoUpdates(): void {
   applyAutoPref()
   applyChannel()
 
-  autoUpdater.on('error', (e) => console.error('[update] error', e))
+  autoUpdater.on('error', (e) => {
+    console.error('[update] error', e)
+    if (updateDownloadProgress?.status === 'downloading') {
+      publishDownloadProgress({
+        ...updateDownloadProgress,
+        status: 'failed',
+        error: e instanceof Error ? e.message : String(e)
+      })
+    }
+  })
   autoUpdater.on('checking-for-update', () => console.log('[update] checking…'))
   autoUpdater.on('update-available', (i) => {
     availableVersion = i.version
@@ -250,11 +278,28 @@ export function startAutoUpdates(): void {
     availableVersion = null
     console.log('[update] up to date')
   })
+  autoUpdater.on('download-progress', (progress) => {
+    publishDownloadProgress({
+      ...progress,
+      status: 'downloading',
+      version: targetedDownloadVersion ?? availableVersion
+    })
+  })
   autoUpdater.on('update-downloaded', (i) => {
     console.log('[update] downloaded', i.version, '— will install on quit')
     stagedVersion = i.version
+    publishDownloadProgress({
+      bytesPerSecond: 0,
+      percent: 100,
+      total: updateDownloadProgress?.total ?? 0,
+      transferred: updateDownloadProgress?.total ?? updateDownloadProgress?.transferred ?? 0,
+      delta: 0,
+      status: 'completed',
+      version: i.version
+    })
+    const downloaded: UpdateDownloadedContract = { version: i.version }
     BrowserWindow.getAllWindows().forEach((w) =>
-      w.webContents.send('update:downloaded', { version: i.version })
+      w.webContents.send(UPDATE_DOWNLOADED_CHANNEL, downloaded)
     )
   })
 
@@ -277,7 +322,10 @@ export type UpdateCheckResult =
  * Run a one-shot update check and resolve with a definite outcome (instead of the
  * fire-and-forget event model), so the Settings button can show a clear result.
  */
-export function checkForUpdates(timeoutMs = 30_000): Promise<UpdateCheckResult> {
+/** A software update check is an HTTP round trip to the release feed, not model work. */
+const UPDATE_CHECK_TIMEOUT_MS = 30_000
+
+export function checkForUpdates(timeoutMs = UPDATE_CHECK_TIMEOUT_MS): Promise<UpdateCheckResult> {
   // electron-updater only works in a packaged, signed app (it reads app-update.yml,
   // bundled at build time). In a dev/unpackaged run there's nothing to check
   // against, so it would silently hang to the timeout — surface the real reason

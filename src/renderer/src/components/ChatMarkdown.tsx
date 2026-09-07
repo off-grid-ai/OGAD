@@ -1,78 +1,42 @@
-import { preprocessChatMarkdown } from '@offgrid/sync'
+import { preprocessChatMarkdown, safeChatExternalUrl } from '@offgrid/application'
+import { openChatLink } from '@renderer/lib/chat-link'
+import { openTaskSidePanel } from '@renderer/lib/task-side-panel'
+import { useTaskSessions } from '@renderer/lib/task-session-store'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
+import { chatMarkdownComponents } from './chat-markdown-components'
 
-/**
- * Desktop's native Markdown rendering rules.
- *
- * Shared owns the text grammar and preprocessing. Desktop owns HTML and visual styles. Explicit
- * font weights are required because the app reset intentionally gives every element normal weight.
- */
-export const chatMarkdownComponents: Components = {
-  h1: ({ children }) => (
-    <h1
-      className="mb-2 mt-3 text-base font-bold text-neutral-100 first:mt-0"
-      style={{ fontWeight: 700 }}
+const TASK_REFERENCE_TEXT = /(\b(?:the\s+)?task reference(?:\s+is)?:\s*)([A-Za-z0-9_-]+)/gi
+const TASK_REFERENCE_PREFIX = '#offgrid-task:'
+
+function ExternalChatLink({
+  href,
+  children
+}: {
+  href?: string
+  children?: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <a
+      href={safeChatExternalUrl(href) ?? undefined}
+      className="text-green-500 underline"
+      onClick={(event) => {
+        event.preventDefault()
+        openChatLink(href)
+      }}
     >
-      {children}
-    </h1>
-  ),
-  h2: ({ children }) => (
-    <h2
-      className="mb-1.5 mt-3 text-sm font-bold text-neutral-100 first:mt-0"
-      style={{ fontWeight: 700 }}
-    >
-      {children}
-    </h2>
-  ),
-  h3: ({ children }) => (
-    <h3
-      className="mb-1 mt-2.5 text-sm font-semibold text-neutral-200 first:mt-0"
-      style={{ fontWeight: 600 }}
-    >
-      {children}
-    </h3>
-  ),
-  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-  ul: ({ children }) => (
-    <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0" style={{ listStyleType: 'disc' }}>
-      {children}
-    </ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0" style={{ listStyleType: 'decimal' }}>
-      {children}
-    </ol>
-  ),
-  li: ({ children }) => <li className="pl-0.5">{children}</li>,
-  blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-neutral-700 pl-3 text-neutral-400">
-      {children}
-    </blockquote>
-  ),
-  strong: ({ children }) => (
-    <strong className="font-bold text-neutral-100" style={{ fontWeight: 700 }}>
-      {children}
-    </strong>
-  ),
-  hr: () => <hr className="my-3 border-neutral-800" />,
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="text-green-500 underline">
       {children}
     </a>
-  ),
-  code: ({ children, ...props }) => {
-    const inline = !('className' in props)
-    return (
-      <code
-        className={`font-mono text-[0.9em] bg-neutral-800/60 rounded ${inline ? 'px-1 py-0.5' : 'block px-2.5 py-2 overflow-x-auto'}`}
-      >
-        {children}
-      </code>
-    )
-  },
-  pre: ({ children }) => <pre className="my-2 overflow-x-auto last:mb-0">{children}</pre>
+  )
+}
+
+function linkTaskReferences(content: string): string {
+  return content.replace(
+    TASK_REFERENCE_TEXT,
+    (_match, prefix: string, taskId: string) =>
+      `${prefix}[${taskId}](${TASK_REFERENCE_PREFIX}${taskId})`
+  )
 }
 
 interface ChatMarkdownProps {
@@ -84,12 +48,34 @@ export function ChatMarkdown({
   content,
   components
 }: Readonly<ChatMarkdownProps>): React.JSX.Element {
+  const { tasks } = useTaskSessions()
+  const taskAwareComponents: Components = {
+    ...chatMarkdownComponents,
+    a: ({ href, children }) => {
+      if (!href?.startsWith(TASK_REFERENCE_PREFIX)) {
+        return <ExternalChatLink href={href}>{children}</ExternalChatLink>
+      }
+      const taskId = href.slice(TASK_REFERENCE_PREFIX.length)
+      const task = tasks.find((candidate) => candidate.taskId === taskId)
+      if (!task) return <span className="font-mono text-muted-foreground">{children}</span>
+      return (
+        <button
+          type="button"
+          className="font-mono text-green-500 underline underline-offset-2 hover:text-green-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500"
+          onClick={() => openTaskSidePanel({ taskId, kind: task.kind, detail: true })}
+          aria-label={`Open task details for ${taskId}`}
+        >
+          {children}
+        </button>
+      )
+    }
+  }
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkBreaks]}
-      components={components ?? chatMarkdownComponents}
+      components={components ?? taskAwareComponents}
     >
-      {preprocessChatMarkdown(content)}
+      {linkTaskReferences(preprocessChatMarkdown(content))}
     </ReactMarkdown>
   )
 }

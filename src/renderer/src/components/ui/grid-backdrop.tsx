@@ -1,6 +1,6 @@
 import { cn } from '@renderer/lib/utils'
 
-/** Flat, theme-aware terminal grid — the Off Grid brutalist backdrop (no gradients,
+/** Flat, theme-aware terminal grid — the Off Grid AI brutalist backdrop (no gradients,
  *  no decoration). A hairline neutral grid at ~6% opacity that reads correctly on
  *  both light and dark, replacing the old dark-only star-field. */
 export function GridBackdrop({ className }: { className?: string }): React.ReactElement {

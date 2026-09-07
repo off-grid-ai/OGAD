@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { startFakeLlamaServer } from '../../__tests__/harness/fake-llama-server'
-import { toResponseGenerationResult } from '../response-result'
+import { normalizeTextResponse as toResponseGenerationResult } from '@offgrid/models'
 
 const OLD_MAX_TOKENS = 2048
 const RAISED_MAX_TOKENS = 4096
@@ -45,9 +45,12 @@ describe('persisted response limit over the production local stream', () => {
       )
       fake.enqueue({ contentDeltas: nativeTokenDeltas, finishReason: 'length' })
       const streamed: string[] = []
-      const result = await reloaded.chatStream('Write a long answer', [], (text, kind) => {
-        if (kind === 'content') streamed.push(text)
-      })
+      const result = await reloaded.streamChatLocal(
+        [{ role: 'user', content: 'Write a long answer' }],
+        (text, kind) => {
+          if (kind === 'content') streamed.push(text)
+        }
+      )
 
       expect(fake.requests).toHaveLength(1)
       expect(fake.requests[0]!.max_tokens).toBe(RAISED_MAX_TOKENS)
@@ -55,11 +58,15 @@ describe('persisted response limit over the production local stream', () => {
       expect(streamed.join('')).toBe(result.content)
       expect(result.content).toMatch(/LIMIT-END$/)
       expect(result.finishReason).toBe('length')
-      expect(result.maxTokens).toBe(RAISED_MAX_TOKENS)
-      expect(toResponseGenerationResult(result)).toEqual({
-        answer: result.content,
-        cutoff: { reason: 'max_tokens', maxTokens: RAISED_MAX_TOKENS }
-      })
+      // toMatchObject, not toEqual: the result also carries measured generation metrics whose
+      // values are wall-clock and therefore not assertable here. The metrics themselves are tested
+      // in generation-metrics, against fixed inputs.
+      expect(toResponseGenerationResult({ ...result, maxTokens: RAISED_MAX_TOKENS })).toMatchObject(
+        {
+          answer: result.content,
+          cutoff: { reason: 'max_tokens', maxTokens: RAISED_MAX_TOKENS }
+        }
+      )
     } finally {
       await fake.close()
       fs.rmSync(dataDir, { recursive: true, force: true })

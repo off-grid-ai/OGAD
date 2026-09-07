@@ -1,6 +1,6 @@
-# Off Grid — Cross-Device Sync & Offload Plan
+# Off Grid AI — Cross-Device Sync & Offload Plan
 
-> **Vision:** every Off Grid device is a window onto _all_ of your information.
+> **Vision:** every Off Grid AI device is a window onto _all_ of your information.
 > Open the phone, the laptop, the tablet — same chats, same projects, same
 > memory, same search — and when a more capable device is nearby, heavy work
 > (LLM inference, big search, media) transparently runs there. No cloud, no
@@ -20,7 +20,7 @@ Status: **planning**. Nothing here is built yet except the pieces noted as
 ## 1. Principles (do not drift)
 
 - **Local-first, no cloud.** Devices talk **directly** over the LAN. Not a
-  single byte goes to a server we own. (Same posture as the rest of Off Grid.)
+  single byte goes to a server we own. (Same posture as the rest of Off Grid AI.)
 - **One encrypted session, reused for everything.** All cross-device traffic
   rides the existing `@offgrid/sync` NaCl-encrypted, paired channel. We do **not**
   open a second unauthenticated LAN port.
@@ -113,7 +113,7 @@ gating for free. "In vicinity" is simply: the paired peer is visible on mDNS.
 
 ## 4. Cross-platform feasibility — four OSes, two codebases
 
-Off Grid is **two products**: the Electron **desktop** (macOS + Windows) and the
+Off Grid AI is **two products**: the Electron **desktop** (macOS + Windows) and the
 RN **mobile** app (iOS + Android). The mesh must span all four. Every sync
 primitive is already cross-platform, so this is two adapter implementations
 (one Node, one RN), not four.

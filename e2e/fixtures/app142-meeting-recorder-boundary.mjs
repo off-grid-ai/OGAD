@@ -6,7 +6,7 @@
  * The production MeetingController owns when this process starts and stops. This
  * executable only replaces ScreenCaptureKit/AVFoundation, which cannot be driven
  * deterministically in CI. It emits a small valid video so production finalization,
- * persistence, IPC, and UI state can run without mocking any Off Grid module.
+ * persistence, IPC, and UI state can run without mocking any Off Grid AI module.
  */
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'

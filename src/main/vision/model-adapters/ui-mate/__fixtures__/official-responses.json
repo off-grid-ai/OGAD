@@ -1,0 +1,26 @@
+{
+  "source": "https://github.com/Tencent/UI-Mate/blob/d2b2e0aede83eeacfb1bc86f66503acbc4a6738a/resources/example_trajectory/trajectory.json",
+  "viewport": { "width": 1920, "height": 1080 },
+  "cases": [
+    {
+      "name": "left click",
+      "response": "<think>I need to open a terminal where I can run a git clone command.</think>\n<action>Click the terminal icon in the left sidebar to open a terminal.</action>\n<tool_call>\n<function=computer_use>\n<parameter=action>\nleft_click\n</parameter>\n<parameter=coordinate>\n[19, 561]\n</parameter>\n</function>\n</tool_call>",
+      "expectedAction": "left_click"
+    },
+    {
+      "name": "type",
+      "response": "<think>The Activities overview is now open with a search bar at the top.</think>\n<action>Type \"terminal\" into the search bar to find the Terminal application.</action>\n<tool_call>\n<function=computer_use>\n<parameter=action>\ntype\n</parameter>\n<parameter=text>\nterminal\n</parameter>\n</function>\n</tool_call>",
+      "expectedAction": "type"
+    },
+    {
+      "name": "wait",
+      "response": "<think>The git clone command is now running successfully.</think>\n<action>Wait for the git clone operation to complete.</action>\n<tool_call>\n<function=computer_use>\n<parameter=action>\nwait\n</parameter>\n<parameter=time>\n0.5\n</parameter>\n</function>\n</tool_call>",
+      "expectedControl": "WAIT"
+    },
+    {
+      "name": "finished",
+      "response": "<think>The git clone operation has completed successfully.</think>\n<action>The repository has been successfully cloned to `/home/user/instructor-embedding`. The task is complete.</action>\n<tool_call>\n<function=computer_use>\n<parameter=action>\nfinished\n</parameter>\n<parameter=status>\nsuccess\n</parameter>\n</function>\n</tool_call>",
+      "expectedControl": "DONE"
+    }
+  ]
+}

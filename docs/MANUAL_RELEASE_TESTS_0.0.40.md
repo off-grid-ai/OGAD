@@ -11,7 +11,7 @@ device pass.
 
 For a shareable execution sheet, import
 [`RELEASE_READINESS_CHECKLIST_0.0.40.csv`](RELEASE_READINESS_CHECKLIST_0.0.40.csv) into Google
-Sheets. It contains 210 Core and Pro journeys: the canonical 155 product journeys plus 55
+Sheets. It contains 214 Core and Pro journeys: the canonical 155 product journeys plus 59
 manually-audited native, security, release, and omitted-surface cases. Every row includes exact
 steps and expected results, strict automation status and evidence, remaining manual boundaries,
 calibrated regression confidence, and blank tester/result/evidence/defect columns for the release
@@ -113,7 +113,7 @@ Stop and mark the build failed if any of these occurs:
     `/usr/bin/xcrun stapler validate <app>`, and
     `/usr/sbin/spctl --assess --type execute --verbose=4 <app>`.
   - Confirm version `0.0.40`, bundle identifier `co.getoffgridai.desktop.pro`, hardened runtime,
-    Off Grid Apple Team ID `84V6KCAC49`, and both ASAR fuses:
+    Off Grid AI Apple Team ID `84V6KCAC49`, and both ASAR fuses:
     `EnableEmbeddedAsarIntegrityValidation` and `OnlyLoadAppFromAsar`.
   - Confirm the only ASAR roots are `/node_modules`, `/out`, and `/package.json`; the only `/out`
     children are `main`, `preload`, and `renderer`; and there is no nested `.app` or case-normalized

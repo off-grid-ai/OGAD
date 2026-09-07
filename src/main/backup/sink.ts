@@ -12,9 +12,9 @@ export class DesktopBackupSink implements BackupSink<DesktopBackupDelivery> {
   async deliverFile(absPath: string, suggestedName: string): Promise<DesktopBackupDelivery> {
     try {
       const options: Electron.SaveDialogOptions = {
-        title: 'Export Off Grid backup',
+        title: 'Export Off Grid AI backup',
         defaultPath: suggestedName,
-        filters: [{ name: 'Off Grid backup', extensions: ['zip'] }]
+        filters: [{ name: 'Off Grid AI backup', extensions: ['zip'] }]
       }
       const owner = BrowserWindow.getFocusedWindow()
       const result = owner
@@ -31,9 +31,9 @@ export class DesktopBackupSink implements BackupSink<DesktopBackupDelivery> {
 
   async pickFile(): Promise<string | null> {
     const options: Electron.OpenDialogOptions = {
-      title: 'Import Off Grid backup',
+      title: 'Import Off Grid AI backup',
       properties: ['openFile'],
-      filters: [{ name: 'Off Grid backup', extensions: ['zip'] }]
+      filters: [{ name: 'Off Grid AI backup', extensions: ['zip'] }]
     }
     const owner = BrowserWindow.getFocusedWindow()
     const result = owner

@@ -24,4 +24,4 @@ a full-screen window too. Nothing is uploaded; the audio never leaves the machin
 - **Folds into your timeline** - an on-device LLM pulls the people, projects, and
   to-dos out of what you dictated, through the same observation pipeline as meetings.
 
-→ Part of [Off Grid Pro](pro.md).
+→ Part of [Off Grid AI Pro](pro.md).

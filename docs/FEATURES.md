@@ -24,7 +24,7 @@ device** — no cloud inference, no account, no API key. Each feature has its ow
 | ---------------------------------------------------- | --------------------------------------------------------------- |
 | [Privacy & data](features/privacy.md)                | 100% local inference, encryption at rest, fully offline.        |
 | [Architecture (open core)](features/architecture.md) | The AGPL core, the `pro/` submodule, and the `activate()` seam. |
-| [Off Grid Pro](features/pro.md)                      | The sees / remembers / acts layer — **coming July 2026**.       |
+| [Off Grid AI Pro](features/pro.md)                      | The sees / remembers / acts layer — **coming July 2026**.       |
 
 ---
 

@@ -24,3 +24,7 @@ export function getRegisteredScreen(name: string): RegisteredScreen | undefined 
 export function getRegisteredScreens(): RegisteredScreen[] {
   return screens
 }
+
+export function clearRegisteredScreens(): void {
+  screens.length = 0
+}

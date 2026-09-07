@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { IconServer2, IconCopy, IconCheck, IconExternalLink } from '@tabler/icons-react'
+import { IconServer2, IconExternalLink } from '@tabler/icons-react'
 import { GATEWAY_HOST, GATEWAY_PORT } from '@offgrid/core/shared/ports'
+import { CopyButton } from './ui/CopyButton'
 
 // Explains the local OpenAI-compatible gateway with copyable quick-start snippets
 // and a link to the interactive playground the gateway serves. Core feature.
@@ -84,28 +85,6 @@ console.log(resp.choices[0].message.content);`
   -d '{ "prompt": "a misty mountain at dawn", "aspect_ratio": "16:9" }' --output out.png`
   }
 ]
-
-function CopyButton({ text }: { text: string }): React.ReactElement {
-  const [done, setDone] = useState(false)
-  return (
-    <button
-      onClick={() =>
-        navigator.clipboard.writeText(text).then(() => {
-          setDone(true)
-          setTimeout(() => setDone(false), 1500)
-        })
-      }
-      className="flex items-center gap-1.5 rounded-md border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-white"
-    >
-      {done ? (
-        <IconCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-      ) : (
-        <IconCopy className="h-3.5 w-3.5" />
-      )}
-      {done ? 'Copied' : 'Copy'}
-    </button>
-  )
-}
 
 export function GatewayScreen(): React.ReactElement {
   const [tab, setTab] = useState(SNIPPETS[0]!.id)

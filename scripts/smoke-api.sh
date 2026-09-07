@@ -51,7 +51,7 @@ ok "embeddings"
 # 3b. TTS (kokoro /v1/audio/speech). THE endpoint that shipped broken - a `spawn ENOTDIR`
 # from an asar-file cwd - while chat/stream/embeddings were all green. Assert a real WAV.
 curl -s -m 90 "$GW/v1/audio/speech" -H 'Content-Type: application/json' \
-  -d '{"input":"off grid","voice":"af_heart"}' -o "$TTS_WAV"
+  -d '{"input":"Off Grid AI","voice":"af_heart"}' -o "$TTS_WAV"
 { [ "$(head -c 4 "$TTS_WAV" 2>/dev/null)" = "RIFF" ] && [ "$(wc -c < "$TTS_WAV")" -gt 1000 ]; } \
   || fail "TTS (voice) did not return a real WAV - $(head -c 200 "$TTS_WAV")"
 ok "TTS (voice) -> WAV ($(wc -c < "$TTS_WAV" | tr -d ' ') bytes)"

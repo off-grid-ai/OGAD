@@ -33,7 +33,16 @@ function runRunner(
   return spawnSync(process.execPath, args, {
     cwd: REPO_ROOT,
     encoding: 'utf8',
-    env: { ...process.env, ...extraEnvironment },
+    // The smoke runner is a plain Node script. Vitest itself runs under Electron's Node
+    // (scripts/vitest-electron-node.mjs), so execPath is the Electron binary and must keep
+    // ELECTRON_RUN_AS_NODE, or the runner launches as a GUI app and dies before it can
+    // print its usage (status null on headless CI). The runner strips the flag again for
+    // the Electron it launches under test, so that app is never turned into plain Node.
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: process.versions.electron ? '1' : undefined,
+      ...extraEnvironment
+    },
     timeout: REAL_APP_TIMEOUT_MS
   })
 }

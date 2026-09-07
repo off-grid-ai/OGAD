@@ -5,7 +5,14 @@
  * and universal-search sources both route through it.
  */
 import { describe, it, expect } from 'vitest'
-import { registerHook, callHook, callHookAsync, HOOKS } from '../hookRegistry'
+import {
+  registerHook,
+  unregisterHook,
+  hasHook,
+  callHook,
+  callHookAsync,
+  HOOKS
+} from '../hookRegistry'
 
 describe('hookRegistry', () => {
   it('registers a hook and callHook returns its result', () => {
@@ -48,8 +55,30 @@ describe('hookRegistry', () => {
     await expect(callHookAsync<string>('t.sync-via-async')).resolves.toBe('plain')
   })
 
+  it('hasHook reports registration and unregisterHook removes it', () => {
+    expect(hasHook('t.presence')).toBe(false)
+    registerHook('t.presence', () => 1)
+    expect(hasHook('t.presence')).toBe(true)
+    unregisterHook('t.presence')
+    expect(hasHook('t.presence')).toBe(false)
+    expect(callHook('t.presence')).toBeUndefined()
+  })
+
+  it('hasHook is true even for a hook that returns undefined', () => {
+    registerHook('t.returns-undefined', () => undefined)
+    expect(hasHook('t.returns-undefined')).toBe(true)
+    expect(callHook('t.returns-undefined')).toBeUndefined()
+    unregisterHook('t.returns-undefined')
+  })
+
+  it('unregisterHook is a no-op for an unknown key', () => {
+    expect(() => unregisterHook('t.never')).not.toThrow()
+  })
+
   it('exposes the known hook-name constants core and pro share', () => {
     expect(HOOKS.chatAugmentContext).toBe('chat.augmentContext')
     expect(HOOKS.searchExtraSources).toBe('search.extraSources')
+    expect(HOOKS.actionsProposeApproval).toBe('actions:proposeApproval')
+    expect(HOOKS.legacyMcpProposeApproval).toBe('mcp:proposeApproval')
   })
 })

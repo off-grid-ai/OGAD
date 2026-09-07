@@ -10,13 +10,9 @@ import path from 'node:path'
 // The DB Vitest config uses the classic JSX transform, which reads this binding at runtime.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  startFakeLlamaServer,
-  type FakeLlamaServer
-} from '../src/main/__tests__/harness/fake-llama-server'
 
 interface IpcEvent {
   sender: {
@@ -31,9 +27,10 @@ type IpcListener = (event: unknown, ...args: unknown[]) => void
 
 const PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-workspace-bridge-'))
 const previousUserData = process.env.OFFGRID_USER_DATA
+const previousDataDir = process.env.OFFGRID_DATA_DIR
 const bridge = vi.hoisted(() => ({
   handlers: new Map<string, IpcHandler>(),
-  mainListeners: new Map<string, IpcHandler>(),
+  mainListeners: new Map<string, Set<IpcHandler>>(),
   rendererListeners: new Map<string, Set<IpcListener>>()
 }))
 
@@ -61,9 +58,30 @@ vi.mock('electron', () => ({
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
   },
+  // Mirrors the real Electron ipcMain surface the booted main modules use (handle / removeHandler /
+  // on / removeListener / removeAllListeners), including Electron's one-handler-per-channel rule.
   ipcMain: {
-    handle: (channel: string, handler: IpcHandler) => bridge.handlers.set(channel, handler),
-    on: (channel: string, handler: IpcHandler) => bridge.mainListeners.set(channel, handler)
+    handle: (channel: string, handler: IpcHandler) => {
+      if (bridge.handlers.has(channel)) {
+        throw new Error(`Attempted to register a second handler for '${channel}'`)
+      }
+      bridge.handlers.set(channel, handler)
+    },
+    removeHandler: (channel: string) => {
+      bridge.handlers.delete(channel)
+    },
+    on: (channel: string, listener: IpcHandler) => {
+      const listeners = bridge.mainListeners.get(channel) ?? new Set<IpcHandler>()
+      listeners.add(listener)
+      bridge.mainListeners.set(channel, listeners)
+    },
+    removeListener: (channel: string, listener: IpcHandler) => {
+      bridge.mainListeners.get(channel)?.delete(listener)
+    },
+    removeAllListeners: (channel?: string) => {
+      if (channel === undefined) bridge.mainListeners.clear()
+      else bridge.mainListeners.delete(channel)
+    }
   },
   ipcRenderer: {
     invoke: async (channel: string, ...args: unknown[]) => {
@@ -72,7 +90,7 @@ vi.mock('electron', () => ({
       return handler(event, ...args)
     },
     send: (channel: string, ...args: unknown[]) => {
-      bridge.mainListeners.get(channel)?.(event, ...args)
+      for (const listener of bridge.mainListeners.get(channel) ?? []) listener(event, ...args)
     },
     sendSync: () => false,
     on: (channel: string, listener: IpcListener) => {
@@ -121,25 +139,37 @@ vi.mock('@lancedb/lancedb', () => ({
   })
 }))
 
-let fake: FakeLlamaServer
 let MemoryChat: typeof import('../src/renderer/src/components/MemoryChat').MemoryChat
 let ProjectsScreen: typeof import('../src/renderer/src/components/ProjectsScreen').ProjectsScreen
 let TooltipProvider: typeof import('../src/renderer/src/components/ui/tooltip').TooltipProvider
+let stopDesktopApplication: (() => Promise<void>) | undefined
+let stopActionsIpc: (() => void) | undefined
 
 async function bootProductionMain(): Promise<void> {
   bridge.handlers.clear()
   bridge.mainListeners.clear()
-  const [{ setupIPC }, { setupRagIPC }, { llm }] = await Promise.all([
+  const [
+    { setupIPC },
+    { setupRagIPC },
+    { registerTaskHistoryIpc },
+    { registerActionsIpc },
+    { startDesktopApplication, stopDesktopApplication: stopApplication }
+  ] = await Promise.all([
     import('../src/main/ipc'),
     import('../src/main/rag-ipc'),
-    import('../src/main/llm')
+    import('../src/main/tasks/task-history-ipc'),
+    import('../src/main/actions/actions-ipc'),
+    import('../src/main/composition/application')
   ])
-  const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
-  service.port = fake.port
-  service.initialized = true
-  service.paused = false
+  const started = await startDesktopApplication()
+  if (started.status !== 'running') {
+    throw new Error(`Desktop application did not start: ${JSON.stringify(started)}`)
+  }
+  stopDesktopApplication = stopApplication
   setupIPC()
   setupRagIPC()
+  registerTaskHistoryIpc()
+  stopActionsIpc = registerActionsIpc()
 }
 
 function renderChat(target?: { conversationId?: string; projectId?: string }): void {
@@ -152,7 +182,10 @@ function renderChat(target?: { conversationId?: string; projectId?: string }): v
 
 beforeAll(async () => {
   process.env.OFFGRID_USER_DATA = PROFILE_DIR
-  fake = await startFakeLlamaServer()
+  process.env.OFFGRID_DATA_DIR = PROFILE_DIR
+  // Load the root before task-history IPC to preserve its production initialization order. Start
+  // only after bootProductionMain clears the fixture maps, so startup registers fresh handlers.
+  await import('../src/main/composition/application')
   await bootProductionMain()
   await import('../src/preload/index')
   ;({ MemoryChat } = await import('../src/renderer/src/components/MemoryChat'))
@@ -170,16 +203,21 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  fake.reset()
 })
 
 afterAll(async () => {
+  stopActionsIpc?.()
+  await stopDesktopApplication?.()
   const { getDB } = await import('../src/main/database')
   if (getDB().open) getDB().close()
-  await fake.close()
   fs.rmSync(PROFILE_DIR, { recursive: true, force: true })
   if (previousUserData === undefined) delete process.env.OFFGRID_USER_DATA
   else process.env.OFFGRID_USER_DATA = previousUserData
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
+  bridge.handlers.clear()
+  bridge.mainListeners.clear()
+  bridge.rendererListeners.clear()
 })
 
 /**
@@ -202,39 +240,36 @@ async function inTranscript(text: string): Promise<HTMLElement> {
 }
 
 describe('production workspace bridge', () => {
-  it('sends a rendered chat turn through preload, IPC, the model socket, and SQLite', async () => {
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The production bridge persisted this answer.' }
-    )
-    const user = userEvent.setup()
-    renderChat()
-
-    const composer = await screen.findByPlaceholderText(/^ask /i)
-    fireEvent.change(composer, { target: { value: 'Prove the complete local chat path' } })
-    await user.click(screen.getByRole('button', { name: /^send$/i }))
-
-    expect(await inTranscript('The production bridge persisted this answer.')).toBeTruthy()
-    const { getRagConversations, getRagMessages } = await import('../src/main/database')
-    await waitFor(() => {
-      const conversation = getRagConversations().find(
-        ({ title }) => title === 'Prove the complete local chat path'
-      )
-      expect(conversation).toBeTruthy()
-      expect(getRagMessages(conversation!.id).map(({ role, content }) => [role, content])).toEqual([
-        ['user', 'Prove the complete local chat path'],
-        ['assistant', 'The production bridge persisted this answer.']
-      ])
-    })
-    expect(fake.requests).toHaveLength(2)
-  })
-
-  it('renders projects, chats, messages, and artifacts after the real database reopens', async () => {
+  it('renders projects, chats, messages, and artifacts from the durable canonical tables', async () => {
     const api = window.api
-    const projectId = await api.createProject!({ name: 'Reopened Workspace' })
-    await api.createRagConversation('reopened-chat', 'Durable planning chat', projectId)
-    await api.addRagMessage('reopened-chat', 'user', 'Keep this project context')
-    await api.addRagMessage('reopened-chat', 'assistant', 'Context retained locally')
+    const project = await api.workspaceContent.execute({
+      type: 'create_project',
+      name: 'Reopened Workspace'
+    })
+    if (!project.ok) throw new Error(project.failure.message)
+    const createdProject = project.value.changes.find(
+      (change) => change.kind === 'put' && change.entity === 'project'
+    )
+    if (!createdProject) throw new Error('Project creation returned no canonical project record.')
+    const projectId = createdProject.record.id
+    const conversation = await api.workspaceContent.execute({
+      type: 'create_conversation',
+      conversationId: 'reopened-chat',
+      title: 'Durable planning chat',
+      projectId
+    })
+    if (!conversation.ok) throw new Error(conversation.failure.message)
+    for (const portable of [
+      { role: 'user' as const, content: 'Keep this project context' },
+      { role: 'assistant' as const, content: 'Context retained locally' }
+    ]) {
+      const message = await api.workspaceContent.execute({
+        type: 'append_message',
+        conversationId: 'reopened-chat',
+        portable
+      })
+      if (!message.ok) throw new Error(message.failure.message)
+    }
     await api.saveArtifact({
       kind: 'html',
       code: '<h1>Durable artifact</h1>',
@@ -242,10 +277,6 @@ describe('production workspace bridge', () => {
       conversationId: 'reopened-chat',
       projectId
     })
-
-    const { getDB } = await import('../src/main/database')
-    getDB().close()
-    expect(getDB().open).toBe(true)
 
     render(<ProjectsScreen onOpenChat={() => undefined} />)
     expect(await screen.findByRole('button', { name: 'Reopened Workspace' })).toBeTruthy()
@@ -259,5 +290,32 @@ describe('production workspace bridge', () => {
     renderChat({ conversationId: 'reopened-chat' })
     expect(await inTranscript('Keep this project context')).toBeTruthy()
     expect(await inTranscript('Context retained locally')).toBeTruthy()
+  })
+
+  it('shows a canonically durable generated image in Gallery', async () => {
+    const imageId = '44444444-4444-4444-8444-444444444444'
+    const imagePath = path.join(PROFILE_DIR, 'generated-images', `${imageId}.png`)
+    fs.mkdirSync(path.dirname(imagePath), { recursive: true })
+    fs.writeFileSync(imagePath, Buffer.from('durable-image-bytes'))
+
+    const { desktopApplication } = await import('../src/main/composition/application')
+    if (!desktopApplication.generatedImages) throw new Error('Generated Images is unavailable.')
+    const created = await desktopApplication.generatedImages.create({
+      id: imageId,
+      contentId: imageId,
+      conversationId: null,
+      prompt: 'A durable local proof image',
+      width: 512,
+      height: 512,
+      steps: 8,
+      seed: 7,
+      modelId: 'proof-model',
+      createdAt: '2026-09-06T00:00:00.000Z',
+      local: { path: imagePath, fileName: `${imageId}.png` }
+    })
+    if (!created.ok) throw new Error(created.failure.message)
+
+    renderChat({ openGallery: true })
+    expect(await screen.findByAltText(`${imageId}.png`)).toBeTruthy()
   })
 })

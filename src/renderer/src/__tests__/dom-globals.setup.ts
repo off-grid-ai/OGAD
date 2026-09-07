@@ -31,3 +31,10 @@ if (typeof window !== 'undefined' && typeof globalThis.ResizeObserver === 'undef
     value: ResizeObserverBoundary
   })
 }
+
+// Element.scrollTo: jsdom leaves it undefined, so a component that scrolls a feed
+// to the bottom in an effect (the watched browser pane's step log) throws during
+// commit and takes the render down. Chromium provides it; keep the shim inert.
+if (typeof window !== 'undefined' && typeof Element.prototype.scrollTo === 'undefined') {
+  Element.prototype.scrollTo = function scrollTo(): void {}
+}

@@ -6,6 +6,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { nativeSurfaceIsOccluded } from '../../lib/native-surface-occlusion'
 
 // The palette reads window.api when its module loads, as the renderer does at boot, so the boundary
 // is installed before the import.
@@ -14,10 +15,14 @@ let hits: unknown[] = []
 
 const SCREENS = [
   { label: 'Devices', view: 'devices' },
+  { label: 'Sync sharing', view: 'devices', subroute: 'sharing' },
+  { label: 'Activity', view: 'devices', subroute: 'activity' },
+  { label: 'Files', view: 'devices', subroute: 'files' },
   { label: 'Integrations', view: 'connectors' },
   { label: 'Models', view: 'models' },
   { label: 'Vault', view: 'vault', locked: true },
-  { label: 'Settings', view: 'settings' }
+  { label: 'Settings', view: 'settings' },
+  { label: 'Remote model server', view: 'settings', subroute: 'remote' }
 ]
 
 beforeAll(async () => {
@@ -46,12 +51,7 @@ describe('command palette', () => {
   const openPalette = async (): Promise<ReturnType<typeof userEvent.setup>> => {
     const user = userEvent.setup()
     render(
-      <CommandPalette
-        onOpenHit={() => {}}
-        onSeeAll={() => {}}
-        screens={SCREENS}
-        onGoTo={goTo}
-      />
+      <CommandPalette onOpenHit={() => {}} onSeeAll={() => {}} screens={SCREENS} onGoTo={goTo} />
     )
     await user.keyboard('{Meta>}k{/Meta}')
     await waitFor(() => expect(screen.getByPlaceholderText(/jump to a screen/i)).toBeTruthy())
@@ -65,10 +65,20 @@ describe('command palette', () => {
 
   it('opens on ⌘K as a jump list of every screen', async () => {
     await openPalette()
+    expect(nativeSurfaceIsOccluded()).toBe(true)
     expect(screen.getByText('Go to')).toBeTruthy()
     for (const item of SCREENS) {
       expect(screen.getByText(item.label)).toBeTruthy()
     }
+  })
+
+  it('restores the browser surface after the palette closes', async () => {
+    const user = await openPalette()
+    expect(nativeSurfaceIsOccluded()).toBe(true)
+
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(nativeSurfaceIsOccluded()).toBe(false))
   })
 
   it('finds a screen by the word the user types for it, and still shows content results', async () => {
@@ -90,7 +100,23 @@ describe('command palette', () => {
     await waitFor(() => expect(screen.getByText('Settings')).toBeTruthy())
     await user.click(screen.getByText('Settings'))
 
-    await waitFor(() => expect(goTo).toHaveBeenCalledWith('settings'))
+    await waitFor(() => expect(goTo).toHaveBeenCalledWith('settings', undefined))
     expect(screen.queryByPlaceholderText(/jump to a screen/i)).toBeNull()
+  })
+
+  it.each([
+    ['Sync sharing', 'sharing'],
+    ['Activity', 'activity'],
+    ['Files', 'files'],
+    ['Remote model server', 'remote']
+  ])('opens the %s nested route', async (label, subroute) => {
+    const user = await openPalette()
+    await user.type(screen.getByPlaceholderText(/jump to a screen/i), label)
+    await waitFor(() => expect(screen.getByText(label)).toBeTruthy())
+    await user.click(screen.getByText(label))
+
+    await waitFor(() =>
+      expect(goTo).toHaveBeenCalledWith(subroute === 'remote' ? 'settings' : 'devices', subroute)
+    )
   })
 })

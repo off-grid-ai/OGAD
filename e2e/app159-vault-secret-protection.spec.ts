@@ -78,7 +78,7 @@ async function openVault(): Promise<void> {
   await vault.click()
   await expect(
     page
-      .getByText('Off Grid Vault', { exact: true })
+      .getByText('Off Grid AI Vault', { exact: true })
       .or(page.getByRole('button', { name: 'Lock vault', exact: true }))
   ).toBeVisible()
 }

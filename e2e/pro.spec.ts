@@ -21,6 +21,7 @@
  */
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { launchOffGrid } from './helpers/launch'
+import { screenRecordingUnavailableReason } from './helpers/permissions'
 import os from 'os'
 import path from 'path'
 import fs from 'fs'
@@ -122,16 +123,7 @@ const expectSystemClipboardText = async (expected: string): Promise<void> => {
     .toBe(expected)
 }
 
-test.beforeAll(async () => {
-  test.skip(!PRO_PRESENT, 'pro package not present — pro features cannot activate')
-  userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-pro-'))
-  binDir = path.join(userDataDir, 'e2e-bin')
-  const whisper = path.join(binDir, 'whisper', 'whisper-cli')
-  fs.mkdirSync(path.dirname(whisper), { recursive: true })
-  fs.writeFileSync(whisper, '#!/bin/sh\nprintf "synthetic e2e dictation\\n"\n', { mode: 0o755 })
-  const modelsDir = path.join(userDataDir, 'models')
-  fs.mkdirSync(modelsDir, { recursive: true })
-  fs.writeFileSync(path.join(modelsDir, 'ggml-base.bin'), 'synthetic whisper model')
+const launchProTestApp = async (headedForNativeHotkey = false): Promise<void> => {
   app = await launchOffGrid({
     extraArgs: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
     env: {
@@ -141,14 +133,15 @@ test.beforeAll(async () => {
       OFFGRID_SEED: 'force', // core chats, knowledge, and RAG schema used by cross-surface Search
       OFFGRID_SEED_PRO: 'force', // deterministic observations + entities + replay frames (TEMP profile only)
       OFFGRID_BIN_DIR: binDir,
-      NODE_ENV: 'production'
+      NODE_ENV: 'production',
+      ...(headedForNativeHotkey ? { OFFGRID_E2E_HEADED: '1' } : {})
     }
   })
   page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   // Click through onboarding into the app shell.
   for (let i = 0; i < 8; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click()
     await page.waitForTimeout(400)
@@ -161,6 +154,19 @@ test.beforeAll(async () => {
   await page.waitForTimeout(500)
   // Seeding runs async on the main process after IPC setup — give it a beat to land.
   await page.waitForTimeout(1500)
+}
+
+test.beforeAll(async () => {
+  test.skip(!PRO_PRESENT, 'pro package not present — pro features cannot activate')
+  userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-pro-'))
+  binDir = path.join(userDataDir, 'e2e-bin')
+  const whisper = path.join(binDir, 'whisper', 'whisper-cli')
+  fs.mkdirSync(path.dirname(whisper), { recursive: true })
+  fs.writeFileSync(whisper, '#!/bin/sh\nprintf "synthetic e2e dictation\\n"\n', { mode: 0o755 })
+  const modelsDir = path.join(userDataDir, 'models')
+  fs.mkdirSync(modelsDir, { recursive: true })
+  fs.writeFileSync(path.join(modelsDir, 'ggml-base.bin'), 'synthetic whisper model')
+  await launchProTestApp()
 })
 
 test.afterAll(async () => {
@@ -174,7 +180,7 @@ test.afterAll(async () => {
 
 test('Replay is unlocked in the pro build (renders the manager, not the upgrade screen)', async () => {
   await nav('Replay')
-  await expect(page.getByText('Off Grid Pro · Available now')).toHaveCount(0)
+  await expect(page.getByText('Off Grid AI Pro · Available now')).toHaveCount(0)
   // The seeded day has frames, so the film + scrubber render.
   await expect(page.getByText(/frames?$/).first()).toBeVisible()
 })
@@ -336,13 +342,15 @@ test('Search opens Replay at the selected captured moment instead of a timeline 
           ts: number
           imagePath: string | null
         }[]
-        const hit = hits.find(
+        const hitIndex = hits.findIndex(
           (candidate) => candidate.kind === 'screen' && candidate.imagePath === selected.path
         )
+        const hit = hits[hitIndex]
         if (hit) {
           return {
             query,
             hit,
+            hitIndex,
             selected,
             selectedIndex,
             frameCount: frames.length,
@@ -365,11 +373,17 @@ test('Search opens Replay at the selected captured moment instead of a timeline 
   expect(expected.hit.imagePath).toBe(expected.selected.path)
 
   await page.keyboard.press('Meta+K')
-  const search = page.getByRole('dialog', { name: 'Search Off Grid' })
+  const search = page.getByRole('dialog', { name: 'Search Off Grid AI' })
   await expect(search).toBeVisible()
-  await search.getByPlaceholder('Search everything…').fill(expected.query)
-  const result = search.getByText(expected.hit.snippet, { exact: true })
+  await search.getByRole('combobox').fill(expected.query)
+  const result = search
+    .getByText('Results', { exact: true })
+    .locator('..')
+    .getByRole('option')
+    .nth(expected.hitIndex)
   await expect(result).toBeVisible()
+  await expect(result).toContainText(expected.hit.title)
+  await expect(result).toContainText(expected.hit.snippet)
   await result.click()
 
   await expect(search).toBeHidden()
@@ -387,76 +401,111 @@ test('Search opens Replay at the selected captured moment instead of a timeline 
 })
 
 test('Capture and processing share one actionable Settings detail with keyboard drill-back', async () => {
+  // Pause/Resume/Restart only render while capture is permitted; a denied host shows the
+  // product's "Review permissions" state instead, which is correct and not what this asserts.
+  const screenRecordingReason = await screenRecordingUnavailableReason(app)
+  test.skip(screenRecordingReason !== null, screenRecordingReason ?? '')
   await nav('Settings')
   await page.getByRole('button', { name: /Capture & processing/ }).click()
 
   await expect(page.getByText('Pipeline: Accessibility text + local vision')).toBeVisible()
   await expect(page.getByText('Frame queue', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Restart capture' })).toBeVisible()
+  const captureActions = page.getByRole('button', {
+    name: /^(Pause capture|Resume capture|Restart capture)$/
+  })
+  await expect(captureActions).toHaveCount(1)
+  await expect(captureActions).toBeEnabled()
   await expect(page.getByRole('button', { name: /Re-process today/ })).toBeVisible()
   await expect(page.getByText('Proactive delivery', { exact: true })).toBeVisible()
   await expect(page.getByText('Model memory', { exact: true })).toBeVisible()
   await expect(page.getByText('Processing priority', { exact: true })).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/pro-capture-processing.png', fullPage: true })
 
-  await page.keyboard.press('Meta+]')
+  await page.keyboard.press('Meta+[')
   await expect(page.getByText(/All settings/i)).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Capture & processing/ })).toBeVisible()
 })
 
 test('Clipboard is unlocked in the pro build', async () => {
   await nav('Clipboard')
-  await expect(page.getByText('Off Grid Pro · Available now')).toHaveCount(0)
+  await expect(page.getByText('Off Grid AI Pro · Available now')).toHaveCount(0)
   await expect(page.getByPlaceholder('Search content or tags…')).toBeVisible()
 })
 
 test('Clipboard quick-open renders populated content on the first native hotkey press', async () => {
-  await nav('Clipboard')
-  const popupOpened = app.waitForEvent('window', {
-    predicate: (candidate) => candidate.url().includes('#clip-popup'),
-    timeout: 10_000
-  })
   if (process.platform === 'darwin') {
-    // System Events delivers the keystroke to whatever app is FRONTMOST, so the app has to
-    // be it. Without this the spec only passed when an earlier spec happened to leave the
-    // window focused: it passed in a full-suite run and failed 3/3 with pro.spec.ts alone,
-    // because the keystroke went to the terminal instead. Order-dependent, not a product bug.
-    await app.evaluate(({ app: electronApp, BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.show()
-      electronApp.focus({ steal: true })
-    })
-    // Focus is asynchronous at the OS level — asking for it is not the same as having it, and
-    // sending the keystroke too early delivers it to the previously-frontmost app. Wait for
-    // the window to actually report focus.
-    await expect
-      .poll(
-        () =>
-          app.evaluate(
-            ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFocused() ?? false
-          ),
-        { timeout: 5_000 }
-      )
-      .toBe(true)
-    await execFileAsync('/usr/bin/osascript', [
-      '-e',
-      'tell application "System Events" to keystroke "c" using {command down, shift down}'
-    ])
-  } else {
-    await page.getByRole('button', { name: 'Open quick clipboard' }).click()
+    // This is the only journey that must inject a real macOS key event. The normal E2E launch is
+    // deliberately non-focusable so it cannot steal a developer's keyboard; AppleScript cannot
+    // target that process. Relaunch this one journey with the existing headed E2E override, then
+    // restore the headless app for every later test.
+    await app.close()
+    await launchProTestApp(true)
   }
-  const popup = await popupOpened
-  await popup.waitForLoadState('domcontentloaded')
+  try {
+    await nav('Clipboard')
+    if (process.platform === 'darwin') {
+      expect(
+        await app.evaluate(({ globalShortcut }) =>
+          globalShortcut.isRegistered('CommandOrControl+Shift+C')
+        )
+      ).toBe(true)
+      await app.evaluate(({ app: electronApp, BrowserWindow }) => {
+        BrowserWindow.getAllWindows()[0]?.show()
+        electronApp.focus({ steal: true })
+      })
+      const focused = await expect
+        .poll(
+          () =>
+            app.evaluate(
+              ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFocused() ?? false
+            ),
+          { timeout: 5_000 }
+        )
+        .toBe(true)
+        .then(() => true)
+        .catch(() => false)
+      const electronPid = app.process().pid
+      const { stdout: frontmostOutput } = await execFileAsync('/usr/bin/osascript', [
+        '-e',
+        'tell application "System Events" to unix id of first application process whose frontmost is true'
+      ])
+      const frontmostPid = Number.parseInt(frontmostOutput.trim(), 10)
+      test.skip(
+        !focused || frontmostPid !== electronPid,
+        'requires unlocked macOS session with the headed E2E app frontmost'
+      )
+    }
+    // Electron emits the window event at construction time, while its URL is still about:blank.
+    // Capture that first window, then prove that the same window reaches the clipboard route.
+    const popupOpened = app.waitForEvent('window', { timeout: 10_000 })
+    if (process.platform === 'darwin') {
+      await execFileAsync('/usr/bin/osascript', [
+        '-e',
+        'tell application "System Events" to keystroke "c" using {command down, shift down}'
+      ])
+    } else {
+      await page.getByRole('button', { name: 'Open quick clipboard' }).click()
+    }
+    const popup = await popupOpened
+    await popup.waitForURL(/#clip-popup$/, { timeout: 10_000 })
+    await popup.waitForLoadState('domcontentloaded')
 
-  await expect(popup.getByPlaceholder('Search content or tags…')).toBeVisible()
-  await expect(popup.getByText('Nothing copied yet')).toHaveCount(0)
-  await expect(popup.getByText('↑↓ navigate · ↵ paste · esc close')).toBeVisible()
-  await popup.screenshot({ path: 'e2e/screenshots/pro-clipboard-quick-open.png' })
-  await popup.keyboard.press('Escape')
+    await expect(popup.getByPlaceholder('Search content or tags…')).toBeVisible()
+    await expect(popup.getByText('Nothing copied yet')).toHaveCount(0)
+    await expect(popup.getByText('↑↓ navigate · ↵ paste · esc close')).toBeVisible()
+    await popup.screenshot({ path: 'e2e/screenshots/pro-clipboard-quick-open.png' })
+    await popup.keyboard.press('Escape')
+  } finally {
+    if (process.platform === 'darwin') {
+      await app.close()
+      await launchProTestApp()
+    }
+  }
 })
 
 test('Voice is unlocked in the pro build (renders the dictation library)', async () => {
   await nav('Voice')
-  await expect(page.getByText('Off Grid Pro · Available now')).toHaveCount(0)
+  await expect(page.getByText('Off Grid AI Pro · Available now')).toHaveCount(0)
   // The real screen: a search box, the dictation CTA, and the file-transcribe entry.
   await expect(page.getByPlaceholder('Search transcripts')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start dictation' })).toBeVisible()

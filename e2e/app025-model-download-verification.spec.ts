@@ -2,7 +2,7 @@
  * APP-025: a rendered model download is staged, verified, activated, used, and restored.
  *
  * Only Hugging Face delivery is controlled. The retry payload is a real Qwen GGUF and the app uses
- * its actual llama-server; all Off Grid UI, IPC, integrity, filesystem, runtime selection, chat,
+ * its actual llama-server; all Off Grid AI UI, IPC, integrity, filesystem, runtime selection, chat,
  * persistence, and relaunch behavior stay production.
  */
 import {
@@ -186,7 +186,7 @@ test('rejects corrupt download, verifies retry, activates, chats, and persists',
 
   const card = targetCard()
   await expect(card).toBeVisible()
-  await expect(card).toContainText('2.0GB')
+  await expect(card).toContainText('2.0 GB')
   await expect(card).not.toContainText("Won't fit")
   await card.getByRole('button', { name: 'Download', exact: true }).click()
 
@@ -199,18 +199,19 @@ test('rejects corrupt download, verifies retry, activates, chats, and persists',
 
   const finalPath = path.join(modelsDir(), TARGET_FILE)
   const partPath = `${finalPath}.part`
-  expect(fs.existsSync(partPath)).toBe(true)
-  const corruptPartBytes = fs.statSync(partPath).size
+  // A completed payload that violates the manifest is not a resumable interruption. The
+  // verification boundary removes it so Retry must start from byte zero.
+  expect(fs.existsSync(partPath)).toBe(false)
   expect(fs.existsSync(finalPath)).toBe(false)
   expect(fs.existsSync(path.join(modelsDir(), 'active-model.json'))).toBe(false)
   await expect(card.getByText('Active', { exact: true })).toHaveCount(0)
-  await expect(card.getByRole('button', { name: 'Download', exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
 
-  // Retry is a real rendered recovery journey in Storage. The corrupt staging bytes remain visible
+  // Retry is a real rendered recovery journey in Storage. The rejected transfer remains visible
   // as failed work, but cannot appear in the installed group or be selected.
   await page.getByRole('button', { name: /^Storage/ }).click()
   const failedDownload = page.getByText(TARGET_ID, { exact: true }).locator('../..')
-  await expect(failedDownload).toContainText('downloaded file is not a valid GGUF')
+  await expect(failedDownload).toContainText('transferred file size does not match the manifest')
   await failedDownload.getByRole('button', { name: 'Retry' }).click()
   await expect.poll(sawIntermediateStorageProgress, { timeout: 15_000 }).toBe(true)
 
@@ -227,27 +228,36 @@ test('rejects corrupt download, verifies retry, activates, chats, and persists',
   expect(fs.readFileSync(projectorPath).subarray(0, 4).toString('ascii')).toBe('GGUF')
 
   const audit = events()
-  expect(audit).toContainEqual(
-    expect.objectContaining({ event: 'model-response', attempt: 1, kind: 'corrupt' })
+  const corruptResponse = audit.find(
+    (event) => event.event === 'model-response' && event.kind === 'corrupt'
   )
+  const validPrimaryResponse = audit.find(
+    (event) => event.event === 'model-response' && event.kind === 'valid-gguf'
+  )
+  const validProjectorResponse = audit.find(
+    (event) => event.event === 'model-response' && event.kind === 'valid-mmproj'
+  )
+  expect(corruptResponse?.attempt).toBeDefined()
+  expect(validPrimaryResponse?.attempt).toBeDefined()
+  expect(validProjectorResponse?.attempt).toBeDefined()
   expect(audit).toContainEqual(
     expect.objectContaining({
       event: 'model-request',
-      attempt: 2,
-      range: `bytes=${corruptPartBytes}-`
+      attempt: validPrimaryResponse?.attempt,
+      range: null
     })
   )
   expect(audit).toContainEqual(
     expect.objectContaining({
       event: 'payload-complete',
-      attempt: 2,
+      attempt: validPrimaryResponse?.attempt,
       bytes: fs.statSync(SOURCE_MODEL).size
     })
   )
   expect(audit).toContainEqual(
     expect.objectContaining({
       event: 'payload-complete',
-      attempt: 3,
+      attempt: validProjectorResponse?.attempt,
       bytes: fs.statSync(SOURCE_PROJECTOR).size
     })
   )
@@ -259,7 +269,9 @@ test('rejects corrupt download, verifies retry, activates, chats, and persists',
   await expect(installedCard.getByText('Active', { exact: true })).toBeVisible()
 
   await enterChat()
-  await expect(page.getByRole('button', { name: /Qwen 3\.5 2B/ })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: `${TARGET_NAME} · 16K`, exact: true })
+  ).toBeVisible()
   await sendPromptAndWaitForAssistant(CHAT_PROMPT)
   await testInfo.attach('app025-verified-model-chat', {
     body: await page.screenshot(),
@@ -279,6 +291,8 @@ test('rejects corrupt download, verifies retry, activates, chats, and persists',
   })
 
   await enterChat()
-  await expect(page.getByRole('button', { name: /Qwen 3\.5 2B/ })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: `${TARGET_NAME} · 16K`, exact: true })
+  ).toBeVisible()
   await sendPromptAndWaitForAssistant(RELAUNCH_PROMPT)
 })

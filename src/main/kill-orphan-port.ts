@@ -164,6 +164,12 @@ export function reapOrphanProcessesOnPort(
           continue
         }
         try {
+          // `killed` counts SIGNALS DELIVERED, not exits observed: there is no wait and no
+          // recheck here, and SIGKILL does not return memory from a process in an uninterruptible
+          // wait. So it is a hint, never evidence. A caller that needs to know whether the port
+          // came back must PROBE it (`isPortFree`), and one that needs to know whether memory came
+          // back must prove the process exited (`process-teardown`). One caller already read this
+          // count as a port-free check; that is the mistake this note exists to prevent.
           process.kill(Number(pid), 'SIGKILL')
           killed++
           console.log(`[orphan] killed orphaned ${label} ${pid} on port ${port}`)

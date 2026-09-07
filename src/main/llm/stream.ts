@@ -7,24 +7,72 @@
 // assembled tool calls (empty for the plain chat path, which sends no tools).
 import http from 'http'
 import {
-  parseSseLine,
-  createThinkSplitter,
-  createToolCallAccumulator,
-  createToolMarkupFilter,
-  type AssembledToolCall
-} from './sse-stream'
+  createOpenAICompletionStreamAccumulator,
+  type AssembledOpenAIToolCall
+} from '@offgrid/models'
 import { modelRequestOptions, serverResponseError } from './http-post'
+import { generationMetrics, type GenerationMetrics } from '../../shared/generation-metrics'
+
+/** Injectable clock so the accumulator's timing is testable without waiting in real time. */
+const now = (): number => Date.now()
 
 export interface StreamResult {
   content: string
-  toolCalls: AssembledToolCall[]
+  toolCalls: AssembledOpenAIToolCall[]
   /** Raw OpenAI-compatible stop reason. Product layers normalize this value. */
   finishReason: string | null
+  /**
+   * What the generation cost. Present when the stream was measured; absent where a StreamResult is
+   * constructed directly (a vision adapter assembling one from a non-streamed reply), because an
+   * unmeasured run has no metrics rather than zero ones.
+   */
+  metrics?: GenerationMetrics
 }
 
 export interface StreamOptions {
   signal?: AbortSignal
-  timeoutMs: number
+  /** Idle limit between chunks. Undefined means none: a generation runs until it finishes or is stopped. */
+  timeoutMs?: number
+}
+
+export interface CompletionStreamAccumulator {
+  push(chunk: string): void
+  finish(): StreamResult
+}
+
+/** Transport-neutral OpenAI SSE projection. Local HTTP and selected remote
+ * models feed the same parser, reasoning split, markup filter, and tool-call
+ * accumulator so model location cannot change the caller-visible contract. */
+export function createCompletionStreamAccumulator(
+  onDelta: (text: string, kind: 'content' | 'reasoning') => void
+): CompletionStreamAccumulator {
+  // Timed from the moment the accumulator is created - which is the moment the request goes out -
+  // so time to first token includes queueing and prefill, the part the user actually waits through.
+  const startedAtMs = now()
+  let firstTokenAtMs: number | undefined
+  const accumulator = createOpenAICompletionStreamAccumulator((text, kind) => {
+    if (text && firstTokenAtMs === undefined) firstTokenAtMs = now()
+    onDelta(text, kind)
+  })
+
+  return {
+    push: (chunk) => accumulator.push(chunk),
+    finish() {
+      const result = accumulator.finish()
+      return {
+        content: result.content,
+        toolCalls: result.toolCalls,
+        finishReason: result.finishReason,
+        metrics: generationMetrics({
+          startedAtMs,
+          ...(firstTokenAtMs === undefined ? {} : { firstTokenAtMs }),
+          finishedAtMs: now(),
+          ...(result.usage ? { usage: result.usage } : {}),
+          ...(result.timings ? { timings: result.timings } : {})
+        })
+      }
+    }
+  }
 }
 
 /**
@@ -46,37 +94,9 @@ export function streamCompletion(
   opts: StreamOptions
 ): Promise<StreamResult> {
   return new Promise<StreamResult>((resolve, reject) => {
-    let buf = ''
     let timedOut = false
     let aborted = false
-    // Stateful think-tag splitter: routes inline reasoning vs answer and
-    // accumulates the answer text across chunk boundaries (see sse-stream.ts).
-    // BOTH channels are routed through a tool-markup filter, so a model that emits a tool call AS
-    // TEXT never flashes the raw <tool_call>{…} at the user wherever it puts it. splitter.answer()
-    // still keeps the full text (with markup) so the loop can recover the text-form call — only the
-    // VISIBLE stream is filtered.
-    const markup = createToolMarkupFilter((t) => onDelta(t, 'content'))
-    // Reasoning gets its OWN filter, for the same reason content has one. A model that emits its
-    // tool call inside the thinking block sent raw `<tool_call><function=…><parameter=…>` straight
-    // to the screen: the call was recovered and executed correctly, and the markup was ALSO printed,
-    // because only one of the two channels was ever filtered. Separate instances, because each holds
-    // its own partial-opener state across chunk boundaries and sharing one would let a fragment from
-    // either channel suppress the other.
-    const reasoningMarkup = createToolMarkupFilter((t) => onDelta(t, 'reasoning'))
-    const splitter = createThinkSplitter((ev) => {
-      if (ev.kind === 'content') {
-        markup.push(ev.text)
-      } else {
-        reasoningMarkup.push(ev.text)
-      }
-    })
-    const tools = createToolCallAccumulator()
-    let finishReason: string | null = null
-    const done = (): StreamResult => ({
-      content: splitter.answer(),
-      toolCalls: tools.list(),
-      finishReason
-    })
+    const accumulator = createCompletionStreamAccumulator(onDelta)
     // opts.signal is REUSED across the whole tool loop, so every completed stream
     // must detach its abort listener — otherwise handlers accumulate on the shared
     // signal for the loop's lifetime. cleanup() runs on every terminal path.
@@ -93,6 +113,7 @@ export function streamCompletion(
     // mid-stream the moment output was uncapped ("LLM request timed out" at ~5 min).
     const armIdleTimer = (): void => {
       clearTimeout(idleTimer)
+      if (opts.timeoutMs === undefined) return
       idleTimer = setTimeout(() => {
         timedOut = true
         cleanup()
@@ -123,37 +144,12 @@ export function streamCompletion(
       res.setEncoding('utf8')
       res.on('data', (chunk: string) => {
         armIdleTimer() // progress: reset the idle timeout on every chunk so a long stream survives
-        buf += chunk
-        let nl: number
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl)
-          buf = buf.slice(nl + 1)
-          const frame = parseSseLine(line)
-          if (!frame) {
-            continue
-          }
-          const { delta } = frame
-          if (frame.finishReason) finishReason = frame.finishReason
-          if (delta.reasoning_content) {
-            // Through the filter, not straight to the screen. A server that reports thinking in its
-            // own field skipped both the splitter and the filter, so a tool call the model wrote
-            // inside its reasoning was printed verbatim.
-            reasoningMarkup.push(delta.reasoning_content)
-          }
-          if (delta.content) {
-            splitter.push(delta.content)
-          }
-          if (delta.tool_calls) {
-            tools.push(delta.tool_calls)
-          }
-        }
+        accumulator.push(chunk)
       })
       res.on('end', () => {
         cleanup()
-        markup.end() // flush any held-back tail that turned out not to be tool markup
-        reasoningMarkup.end() // the thinking channel holds a tail the same way
         if (!timedOut && !aborted) {
-          resolve(done())
+          resolve(accumulator.finish())
         }
       })
     })
@@ -168,14 +164,12 @@ export function streamCompletion(
       onAbort = (): void => {
         aborted = true
         cleanup()
-        markup.end() // flush the held tail on cancellation too
-        reasoningMarkup.end()
         try {
           req.destroy()
         } catch {
           /* already gone */
         }
-        resolve(done())
+        resolve(accumulator.finish())
       }
       if (opts.signal.aborted) {
         // Already aborted before we sent anything (the tool loop reuses one signal and a

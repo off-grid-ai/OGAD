@@ -44,7 +44,7 @@ run embeddings       POST /v1/embeddings -H 'Content-Type: application/json' \
 
 # --- TTS (returns wav bytes) ---
 run tts-wav          POST /v1/audio/speech -H 'Content-Type: application/json' \
-  -d '{"input":"Hello from Off Grid.","voice":"af_heart"}'
+  -d '{"input":"Hello from Off Grid AI.","voice":"af_heart"}'
 
 # --- image generation (small + few steps to stay quick) ---
 run image            POST /v1/images -H 'Content-Type: application/json' \

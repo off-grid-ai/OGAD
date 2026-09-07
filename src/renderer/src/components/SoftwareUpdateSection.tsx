@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import { Button } from './ui/button'
+import { projectProgress } from '@offgrid/ui'
+import { downloadProgressSummary } from '@renderer/lib/download-progress'
 import {
   Dialog,
   DialogClose,
@@ -15,6 +17,16 @@ interface PreviousVersion {
   version: string
   channel: 'stable' | 'nightly'
   publishedAt: string | null
+}
+
+interface UpdateProgress {
+  transferred: number
+  total: number
+  bytesPerSecond: number
+  percent: number
+  status: 'downloading' | 'completed' | 'failed'
+  version: string | null
+  error?: string
 }
 
 function releaseDate(value: string | null): string {
@@ -112,8 +124,7 @@ function RollbackDialog({
 }
 
 export function SoftwareUpdateSection(): React.ReactElement {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const api = (window as any).api
+  const api = window.api
   const [auto, setAuto] = useState(true)
   const [beta, setBeta] = useState(false)
   const [version, setVersion] = useState('')
@@ -127,10 +138,11 @@ export function SoftwareUpdateSection(): React.ReactElement {
   const [history, setHistory] = useState<PreviousVersion[]>([])
   const [historyError, setHistoryError] = useState('')
   const [selectedVersion, setSelectedVersion] = useState<PreviousVersion | null>(null)
+  const [downloadProgress, setDownloadProgress] = useState<UpdateProgress | null>(null)
 
   useEffect(() => {
     api
-      .updateGetPrefs?.()
+      .updateGetPrefs()
       .then(
         (prefs: {
           currentVersion?: string
@@ -148,9 +160,21 @@ export function SoftwareUpdateSection(): React.ReactElement {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [])
 
+  useEffect(() => {
+    void api.updateDownloadProgress().then((progress: UpdateProgress | null) => {
+      if (progress) setDownloadProgress(progress)
+    })
+    const stop = api.onUpdateDownloadProgress((progress: UpdateProgress) => {
+      setDownloadProgress(progress)
+    })
+    return () => {
+      if (typeof stop === 'function') stop()
+    }
+  }, [api])
+
   const toggle = (): void => {
     const next = !auto
-    void persistToggle(next, auto, setAuto, (value) => api.updateSetAuto?.(value))
+    void persistToggle(next, auto, setAuto, (value) => api.updateSetAuto(value))
     setStatus(
       next
         ? 'Automatic updates on. New versions download in the background and install when you quit.'
@@ -160,7 +184,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
 
   const toggleBeta = (): void => {
     const next = !beta
-    void persistToggle(next, beta, setBeta, () => api.updateSetChannel?.(next ? 'beta' : 'stable'))
+    void persistToggle(next, beta, setBeta, () => api.updateSetChannel(next ? 'beta' : 'stable'))
     setStatus(
       next
         ? 'Switched to nightly builds. These ship on every change and are pre-release. Turn this off to return to stable.'
@@ -173,7 +197,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
     setAvailableVersion(null)
     setStatus('Checking for updates...')
     try {
-      const result = await api.checkForUpdates?.()
+      const result = await api.checkForUpdates()
       if (!result) setStatus('Could not check right now.')
       else if (result.status === 'available') {
         setAvailableVersion(result.downloadStarted ? null : result.version)
@@ -197,7 +221,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
     if (!availableVersion) return
     setDownloading(true)
     try {
-      await api.updateDownload?.(availableVersion)
+      await api.updateDownload(availableVersion)
       setStatus(`Downloading ${availableVersion} in the background.`)
       setAvailableVersion(null)
       setSkippedVersion(null)
@@ -211,7 +235,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
   const skip = async (): Promise<void> => {
     if (!availableVersion) return
     try {
-      const skipped = await api.updateSkipVersion?.(availableVersion)
+      const skipped = await api.updateSkipVersion(availableVersion)
       setSkippedVersion(skipped ?? availableVersion)
       setStatus(`Skipped v${availableVersion}.`)
       setAvailableVersion(null)
@@ -221,7 +245,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
   }
 
   const clearSkipped = async (): Promise<void> => {
-    await api.updateClearSkippedVersion?.()
+    await api.updateClearSkippedVersion()
     setSkippedVersion(null)
     setStatus('Skipped version cleared. Check again when you are ready.')
   }
@@ -235,7 +259,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
     setHistoryLoading(true)
     setHistoryError('')
     try {
-      setHistory((await api.updateListVersions?.()) ?? [])
+      setHistory((await api.updateListVersions()) ?? [])
     } catch {
       setHistoryError('Could not load previous versions. Check your connection and retry.')
     } finally {
@@ -247,7 +271,7 @@ export function SoftwareUpdateSection(): React.ReactElement {
     if (!selectedVersion) return
     setDownloading(true)
     try {
-      await api.updateDownloadVersion?.(selectedVersion.version)
+      await api.updateDownloadVersion(selectedVersion.version)
       setAuto(false)
       setAvailableVersion(null)
       setStatus(`Downloading v${selectedVersion.version}. Restart when the update banner appears.`)
@@ -258,6 +282,17 @@ export function SoftwareUpdateSection(): React.ReactElement {
       setDownloading(false)
     }
   }
+
+  const presentedProgress = downloadProgress
+    ? projectProgress({
+        currentBytes: downloadProgress.transferred,
+        totalBytes: downloadProgress.total,
+        bytesPerSecond: downloadProgress.bytesPerSecond,
+        percent: downloadProgress.percent,
+        status: downloadProgress.status
+      })
+    : null
+  const progressSummary = presentedProgress ? downloadProgressSummary(presentedProgress) : null
 
   return (
     <div>
@@ -337,6 +372,35 @@ export function SoftwareUpdateSection(): React.ReactElement {
           {status}
         </p>
       )}
+      {downloadProgress && downloadProgress.status !== 'failed' ? (
+        <div className="mt-3 border border-neutral-800 bg-neutral-950/40 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-3 text-xs text-neutral-400">
+            <span>
+              {downloadProgress.status === 'completed'
+                ? `v${downloadProgress.version ?? ''} ready to install`
+                : `Downloading v${downloadProgress.version ?? ''}`}
+            </span>
+            <span className="tabular-nums">
+              {presentedProgress?.determinate
+                ? `${Math.round(presentedProgress.percentage ?? 0)}%`
+                : 'Downloading'}
+            </span>
+          </div>
+          <div className="mt-2 h-1 overflow-hidden bg-neutral-800">
+            <div
+              className="h-full bg-emerald-500 transition-all duration-150"
+              style={{ width: `${presentedProgress?.percentage ?? 0}%` }}
+            />
+          </div>
+          <div className="mt-1.5 text-[11px] tabular-nums text-neutral-600">
+            {progressSummary ? `${progressSummary.bytes} · ${progressSummary.rate}` : null}
+          </div>
+        </div>
+      ) : downloadProgress?.status === 'failed' ? (
+        <p className="mt-3 text-xs text-red-400" role="alert">
+          {downloadProgress.error ?? 'The update download failed. Check your connection and retry.'}
+        </p>
+      ) : null}
 
       <RollbackDialog
         currentVersion={version}

@@ -7,7 +7,8 @@
     "src/preload/index.ts",
     "src/bootstrap/**/*",
     "src/shared/**/*",
-    "src/main/**/*"
+    "src/main/**/*",
+    "integration-tests/**/*.ts"
   ],
   "exclude": ["src/main/index.ts"],
   "compilerOptions": {

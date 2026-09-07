@@ -39,7 +39,7 @@ test.beforeAll(async () => {
   page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   for (let i = 0; i < 8; i++) {
-    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid/i })
+    const btn = page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
     if (!(await btn.isVisible().catch(() => false))) break
     await btn.click().catch(() => {})
     await page.waitForTimeout(400)

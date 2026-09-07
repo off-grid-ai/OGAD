@@ -241,7 +241,7 @@ onnxruntime. **Returns raw `audio/wav` bytes** by default (like OpenAI).
 # Raw WAV to a file
 curl http://127.0.0.1:7878/v1/audio/speech \
   -H "Content-Type: application/json" \
-  -d '{ "input": "Hello from Off Grid.", "voice": "af_heart" }' \
+  -d '{ "input": "Hello from Off Grid AI.", "voice": "af_heart" }' \
   --output speech.wav
 ```
 

@@ -80,6 +80,11 @@ vi.mock('electron-updater', () => ({
   }
 }))
 
+// The device these journeys run on. The renderer boundary below already says this
+// is a Mac; the main process is told the same fact instead of reading the host, so
+// the journey proves the same behaviour on any machine that runs the checks.
+const DEVICE_PLATFORM = 'darwin' as const
+
 function handler<T>(channel: string): (...args: unknown[]) => Promise<T> {
   const registered = state.handlers.get(channel)
   expect(registered).toBeTypeOf('function')
@@ -92,6 +97,7 @@ function installRendererTransport(): void {
       isPro: false,
       platform: 'darwin',
       updateGetPrefs: () => handler('update:get-prefs')(),
+      updateDownloadProgress: () => handler('update:download-progress')(),
       checkForUpdates: () => handler('update:check')(),
       updateDownload: (version: string) => handler('update:download')(version),
       updateSkipVersion: (version: string) => handler('update:skip-version')(version),
@@ -111,6 +117,7 @@ function installRendererTransport(): void {
 }
 
 async function renderUpdateCard(): Promise<HTMLElement> {
+  cleanup()
   const settingsModule = '../../renderer/src/components/Settings'
   const { Settings } = (await import(/* @vite-ignore */ settingsModule)) as {
     Settings: React.ComponentType
@@ -151,7 +158,7 @@ afterAll(async () => {
 describe('manual update check', () => {
   it('renders truthful terminal states without changing stable channel or installing (#142)', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
     installRendererTransport()
     // startAutoUpdates' background cadence is captured by fake timers. Discard it before using
@@ -191,11 +198,39 @@ describe('manual update check', () => {
     })
     expect(quitAndInstall).not.toHaveBeenCalled()
     expect(checkForUpdates).toHaveBeenCalledTimes(3)
+  }, 30_000)
+
+  it('restores finite update download progress with bytes, rate and terminal state', async () => {
+    const updater = await import('../updater')
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
+    updater.startAutoUpdates()
+    updaterEvents.emit('update-available', { version: '0.0.104' })
+    updaterEvents.emit('download-progress', {
+      bytesPerSecond: 2 * 1024 * 1024,
+      percent: 25,
+      total: 100 * 1024 * 1024,
+      transferred: 25 * 1024 * 1024,
+      delta: 1024
+    })
+    installRendererTransport()
+    vi.useRealTimers()
+
+    const card = await renderUpdateCard()
+    expect(await within(card).findByText('Downloading v0.0.104')).toBeTruthy()
+    expect(within(card).getByText('25%')).toBeTruthy()
+    expect(within(card).getByText(/26 MB of 105 MB/)).toBeTruthy()
+    expect(within(card).getByText(/2\.0 MB\/s/)).toBeTruthy()
+
+    updaterEvents.emit('update-downloaded', { version: '0.0.104' })
+    const restored = await renderUpdateCard()
+    expect(await within(restored).findByText('v0.0.104 ready to install')).toBeTruthy()
+    expect(within(restored).getByText('100%')).toBeTruthy()
+    expect(restored.textContent).not.toContain('NaN')
   })
 
   it('lets a manual-update user choose when an available version starts downloading', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
     expect(await handler<boolean>('update:set-auto')(false)).toBe(false)
     installRendererTransport()
@@ -218,7 +253,7 @@ describe('manual update check', () => {
 
   it('lets a user skip a version and reports the persisted choice on the next check', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
     expect(await handler<boolean>('update:set-auto')(false)).toBe(false)
     installRendererTransport()
@@ -242,7 +277,7 @@ describe('manual update check', () => {
 
   it('lists compatible history and downloads an explicitly confirmed older version', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
     vi.stubGlobal(
       'fetch',
@@ -283,7 +318,7 @@ describe('manual update check', () => {
 
   it('keeps automatic updates on when an older version cannot be verified', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
     await handler<boolean>('update:set-auto')(true)
     vi.stubGlobal(
@@ -306,7 +341,7 @@ describe('manual update check', () => {
 
   it('reports the installed version when stable is current and releases one-shot listeners', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
 
     const result = handler<{ status: string; version: string }>('update:check')()
@@ -319,7 +354,7 @@ describe('manual update check', () => {
 
   it('returns a useful boundary failure and remains usable for the next check', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
 
     const failed = handler<{ status: string; error: string }>('update:check')()
@@ -337,7 +372,7 @@ describe('manual update check', () => {
 
   it('times out clearly, cleans up, and allows an immediate retry', async () => {
     const updater = await import('../updater')
-    updater.registerUpdateIpc()
+    updater.registerUpdateIpc(DEVICE_PLATFORM)
     updater.startAutoUpdates()
 
     const timedOut = updater.checkForUpdates(25)

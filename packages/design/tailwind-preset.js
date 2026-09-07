@@ -1,5 +1,5 @@
 /**
- * Off Grid Tailwind preset (Tailwind v3).
+ * Off Grid AI Tailwind preset (Tailwind v3).
  *
  * Maps Tailwind theme tokens onto the --og-rgb-* CSS variables defined in
  * tokens.css, using the rgb(... / <alpha-value>) pattern so opacity modifiers

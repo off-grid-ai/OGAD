@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CACHE_CLEANUP_CHANNEL } from '../../shared/ipc-contracts'
-import {
-  BACKUP_EXPORT_ALL_CHANNEL,
-  BACKUP_IMPORT_CHANNEL
-} from '../../shared/backup-contracts'
+import { BACKUP_EXPORT_ALL_CHANNEL, BACKUP_IMPORT_CHANNEL } from '../../shared/backup-contracts'
 
 /**
  * The bridge, which is the entire vocabulary the renderer has for talking to this machine.
@@ -50,9 +47,7 @@ vi.mock('electron', () => ({
 
 type Bridge = Record<string, unknown>
 
-const loadBridge = async (
-  sendSyncAnswers: Record<string, unknown> = {}
-): Promise<Bridge> => {
+const loadBridge = async (sendSyncAnswers: Record<string, unknown> = {}): Promise<Bridge> => {
   vi.resetModules()
   electron.exposed.clear()
   electron.invoke.mockReset()
@@ -135,7 +130,7 @@ describe('the preload bridge', () => {
 
   describe('every method reaches the main process', () => {
     it('has no dead ends: each function invokes, sends, or subscribes', async () => {
-      const bridge = await loadBridge()
+      const bridge = await loadBridge({ 'pro:is-enabled': true })
       const leaves = leafFunctions(bridge)
       expect(leaves.length).toBeGreaterThan(100)
 
@@ -187,8 +182,46 @@ describe('the preload bridge', () => {
       expect(electron.invoke).toHaveBeenCalledWith('license:deactivate', 'machine-7')
     })
 
-    it('passes a pro channel and its arguments straight through', async () => {
+    it('forwards a task-specific Computer Use command', async () => {
       const bridge = await loadBridge()
+      const vision = bridge.vision as {
+        control: (command: string, taskId: string) => unknown
+      }
+
+      vision.control('stop', 'computer-task-7')
+
+      expect(electron.invoke).toHaveBeenCalledWith('vision:control', 'stop', 'computer-task-7')
+    })
+
+    it('forwards Computer Use settings through their owning read and patch ports', async () => {
+      const bridge = await loadBridge()
+
+      ;(bridge.getComputerUseSettings as () => unknown)()
+      ;(bridge.patchComputerUseSettings as (patch: unknown) => unknown)({ context: '32k' })
+
+      expect(electron.invoke).toHaveBeenCalledWith('computer-use-settings:get')
+      expect(electron.invoke).toHaveBeenCalledWith('computer-use-settings:patch', {
+        context: '32k'
+      })
+    })
+
+    it('keeps Computer Use PiP visibility separate from task control', async () => {
+      const bridge = await loadBridge()
+      const vision = bridge.vision as {
+        showSupervisor: () => unknown
+        dismissSupervisor: () => unknown
+      }
+
+      vision.dismissSupervisor()
+      vision.showSupervisor()
+
+      expect(electron.invoke).toHaveBeenCalledWith('vision:supervisor:dismiss')
+      expect(electron.invoke).toHaveBeenCalledWith('vision:supervisor:show')
+      expect(electron.invoke).not.toHaveBeenCalledWith('vision:control', expect.anything())
+    })
+
+    it('passes a pro channel and its arguments straight through', async () => {
+      const bridge = await loadBridge({ 'pro:is-enabled': true })
 
       ;(bridge.proInvoke as (channel: string, ...args: unknown[]) => unknown)(
         'pro:sync:pair',
@@ -199,6 +232,22 @@ describe('the preload bridge', () => {
       // The generic passthrough is what lets pro renderer code reach pro IPC without this core bundle
       // enumerating every channel - so it must not rewrite or swallow anything on the way.
       expect(electron.invoke).toHaveBeenCalledWith('pro:sync:pair', 'ABCD2345', { trusted: true })
+    })
+
+    it('blocks a pro call after the live entitlement closes', async () => {
+      const bridge = await loadBridge({ 'pro:is-enabled': true })
+      const licenseListener = electron.on.mock.calls.find(
+        ([channel]) => channel === 'license:changed'
+      )?.[1] as ((event: unknown, info: { isPro: boolean }) => void) | undefined
+      expect(licenseListener).toBeTypeOf('function')
+      licenseListener?.({}, { isPro: false })
+      electron.invoke.mockClear()
+
+      await expect(
+        (bridge.proInvoke as (channel: string) => Promise<unknown>)('pro:sync:pair')
+      ).rejects.toThrow('Pro license required.')
+      expect(electron.invoke).not.toHaveBeenCalled()
+      expect(bridge.isPro).toBe(false)
     })
   })
 
@@ -275,10 +324,8 @@ describe('the preload bridge', () => {
 
       ;(bridge.exportBackup as () => unknown)()
       expect(electron.invoke).toHaveBeenCalledWith(BACKUP_EXPORT_ALL_CHANNEL)
-
       ;(bridge.importBackup as () => unknown)()
       expect(electron.invoke).toHaveBeenCalledWith(BACKUP_IMPORT_CHANNEL)
-
       ;(bridge.clearAppCache as () => unknown)()
       // Imported from the contract rather than retyped here: a channel spelled in two places is a channel
       // that eventually differs in one of them, and the failure is a silently dead feature.

@@ -1,0 +1,67 @@
+{
+  "source": "https://github.com/Tencent/UI-Mate/blob/d2b2e0aede83eeacfb1bc86f66503acbc4a6738a/agents/ui_mate_agent.py#L883-L949",
+  "input": {
+    "instruction": "Open Firefox.",
+    "currentScreenshotDataUrl": "data:image/png;base64,current",
+    "history": [
+      {
+        "actionText": "Click Firefox.",
+        "response": "<think>Find Firefox.</think>\n<action>Click Firefox.</action>\n<tool_call>first</tool_call>"
+      },
+      {
+        "actionText": "Wait for Firefox.",
+        "response": "<think>Firefox is starting.</think>\n<action>Wait for Firefox.</action>\n<tool_call>second</tool_call>"
+      }
+    ]
+  },
+  "expectedMessages": [
+    {
+      "role": "system",
+      "content": [{ "type": "text", "text": "__OFFICIAL_SYSTEM_PROMPT__" }]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "\nPlease generate the next move according to the UI screenshot, instruction and previous actions.\n\nInstruction: Open Firefox.\n\nPrevious actions:\nNone"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "<think>Find Firefox.</think>\n<action>Click Firefox.</action>\n<tool_call>first</tool_call>"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "<tool_response>\nThis screenshot has been collapsed.\n</tool_response>"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "<think>Firefox is starting.</think>\n<action>Wait for Firefox.</action>\n<tool_call>second</tool_call>"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "<tool_response>\n" },
+        { "type": "image_url", "image_url": { "url": "data:image/png;base64,current" } },
+        { "type": "text", "text": "\n</tool_response>" }
+      ]
+    }
+  ]
+}

@@ -21,37 +21,37 @@ Voice rules (from `mobile/docs/brand_tone_voice.md`): proof-first, privacy state
 ## Angles
 
 **1. The amnesia angle**
-You don't remember what you did last Tuesday. Your laptop does. Off Grid is a quiet record of your work that you can actually ask.
+You don't remember what you did last Tuesday. Your laptop does. Off Grid AI is a quiet record of your work that you can actually ask.
 
 **2. Private by architecture, not by policy**
-Most "private" AI still uploads your screen to someone's cloud. Off Grid runs the model in your laptop's own memory. Nothing is sent anywhere because there is no server to send it to.
+Most "private" AI still uploads your screen to someone's cloud. Off Grid AI runs the model in your laptop's own memory. Nothing is sent anywhere because there is no server to send it to.
 
 **3. Background, not another tab**
-Every AI tool waits for you to open it and explain yourself. Off Grid already watched the meeting, read the thread, and saw the ticket. You don't brief it. It briefs you.
+Every AI tool waits for you to open it and explain yourself. Off Grid AI already watched the meeting, read the thread, and saw the ticket. You don't brief it. It briefs you.
 
 **4. Where your attention actually went**
-Not hours logged. Mind share. Off Grid shows what you spent the day thinking about, how many times you context-switched, and how little uninterrupted focus you actually got.
+Not hours logged. Mind share. Off Grid AI shows what you spent the day thinking about, how many times you context-switched, and how little uninterrupted focus you actually got.
 
 **5. A movie of your day**
 Scrub through your whole day like a recording. Every screen, in order, on device. The thing you swear you saw three hours ago is right there.
 
 **6. The off-grid line vs the cloud line**
-Littlebird stores your captured work on AWS. Off Grid stores it on your disk. Same idea, opposite trust model. Yours never leaves the building.
+Littlebird stores your captured work on AWS. Off Grid AI stores it on your disk. Same idea, opposite trust model. Yours never leaves the building.
 
 **7. Read the code**
-The memory apps ask you to trust them. Off Grid is open source under AGPL. You can read exactly what leaves your device. The answer is nothing, and you can check.
+The memory apps ask you to trust them. Off Grid AI is open source under AGPL. You can read exactly what leaves your device. The answer is nothing, and you can check.
 
 **8. The exocortex that fills itself**
 A second brain only works if you feed it. This one feeds itself. Capture, meetings, email, Notion, Linear, Jira, all flowing into one local memory without you copy-pasting anything.
 
 **9. Source of truth, not screenshots**
-When you open a Notion page or a Linear issue, Off Grid pulls the real thing from the source, on device, instead of guessing from pixels. It knows what you care about from what you look at, then gets the accurate version.
+When you open a Notion page or a Linear issue, Off Grid AI pulls the real thing from the source, on device, instead of guessing from pixels. It knows what you care about from what you look at, then gets the accurate version.
 
 **10. Your to-dos, found not written**
-You wrote "we need to ship X by Friday" in an email. Off Grid noticed and put it on a list. It detects the commitments you make and the asks aimed at you, across everything you touch.
+You wrote "we need to ship X by Friday" in an email. Off Grid AI noticed and put it on a list. It detects the commitments you make and the asks aimed at you, across everything you touch.
 
 **11. It acts, you approve**
-Off Grid can draft the reply, file the ticket, update the doc. It never does it on its own. Every action is a proposal you approve, and every approval is logged.
+Off Grid AI can draft the reply, file the ticket, update the doc. It never does it on its own. Every action is a proposal you approve, and every approval is logged.
 
 **12. For people who build**
 Tuned for software, design, and product. It speaks issues, PRs, cycles, and tickets, not generic "tasks". Linear, Jira, GitHub, Sentry, Vercel connect in one click.
@@ -69,7 +69,7 @@ No training on your data. No selling it. No "we value your privacy" page. The sy
 Your laptop knows your work. Your phone knows your life. They sync over your own network while you sleep, never through a cloud relay, into one model of your day.
 
 **17. The relationship graph builds itself**
-Off Grid quietly maps the people, projects, and topics you work with, and what's open with each. A CRM for everything, that you never have to update.
+Off Grid AI quietly maps the people, projects, and topics you work with, and what's open with each. A CRM for everything, that you never have to update.
 
 **18. Time tracking with nothing to track**
 You don't start a timer. You don't tag anything. At the end of the day the breakdown is just there: 4h on the rewrite, 50m on Slack, 30m you'll wish you had back.
@@ -84,7 +84,7 @@ You pick up your device and the day is already laid out. The 9am is with someone
 It only sees what you let it see, per device, with a visible recording indicator. Pause it anytime from the menu bar. Off-grid means in your control, not just off the cloud.
 
 **22. Intelligence for everyone, not a few**
-A personal chief of staff used to be a privilege. The compute to run one now sits in every laptop. Off Grid is that layer, private and in your hands, not rented from a company that reads your mail.
+A personal chief of staff used to be a privilege. The compute to run one now sits in every laptop. Off Grid AI is that layer, private and in your hands, not rented from a company that reads your mail.
 
 ---
 
@@ -92,9 +92,9 @@ A personal chief of staff used to be a privilege. The compute to run one now sit
 
 Three products, one brand, one loop. They started as three problems Mac solved for himself, and they're becoming one thing.
 
-- **Off Grid Mobile** - on-device intelligence in your pocket: chat, image, vision, voice, documents, all local. Becomes an opt-in offline recorder for your life. An AI meeting recorder, but for everything, processed on device, never shared. Never forget anything again.
-- **Off Grid Desktop** - what My Memories becomes: the intelligence layer for your laptop. Captures your day there - meetings, email, the work context that makes the rest useful.
-- **Off Grid Sync** - what Easy Share becomes: the private backbone that moves all of it between your devices over your own network, no third party in the middle.
+- **Off Grid AI Mobile** - on-device intelligence in your pocket: chat, image, vision, voice, documents, all local. Becomes an opt-in offline recorder for your life. An AI meeting recorder, but for everything, processed on device, never shared. Never forget anything again.
+- **Off Grid AI Desktop** - what My Memories becomes: the intelligence layer for your laptop. Captures your day there - meetings, email, the work context that makes the rest useful.
+- **Off Grid AI Sync** - what Easy Share becomes: the private backbone that moves all of it between your devices over your own network, no third party in the middle.
 
 Together they close the loop between your physical and digital life, and make an assistant that knows everything about you possible without giving everything away.
 
@@ -105,19 +105,19 @@ Origin (the honest version): **My Memories** came first - a macOS app that watch
 ## More angles (from the vision)
 
 **23. The price of useful AI**
-The most useful AI is the one that knows everything about you. Today, getting that means giving everything away. Off Grid is the version where you don't have to.
+The most useful AI is the one that knows everything about you. Today, getting that means giving everything away. Off Grid AI is the version where you don't have to.
 
 **24. No lock-in for your own thinking**
 Your conversations across ChatGPT, Claude, and Gemini end up in one place that is yours. Switch tools whenever you want. Your memory stays.
 
 **25. A recorder for your life, not just your meetings**
-AI meeting recorders capture the call. Off Grid Mobile captures the day, opt-in, on device, nothing shared. The thing your partner said about dinner is a calendar event, not a forgotten text.
+AI meeting recorders capture the call. Off Grid AI Mobile captures the day, opt-in, on device, nothing shared. The thing your partner said about dinner is a calendar event, not a forgotten text.
 
 **26. Close the loop**
-Your phone holds your life. Your laptop holds your work. Off Grid joins them into one model of you, synced over your own network, so the assistant finally has the full picture.
+Your phone holds your life. Your laptop holds your work. Off Grid AI joins them into one model of you, synced over your own network, so the assistant finally has the full picture.
 
 **27. Structured, not hand-the-keys**
-This is not an open-ended agent you give the keys to and hope. Even the local open-source ones work that way. Off Grid is structured, with guardrails you set, so you stay in control. That structure is what makes the upside real instead of reckless.
+This is not an open-ended agent you give the keys to and hope. Even the local open-source ones work that way. Off Grid AI is structured, with guardrails you set, so you stay in control. That structure is what makes the upside real instead of reckless.
 
 **28. The deal, plainly**
 The core stays open. The integration that ties the three products together is open source and free. Some advanced, opt-in features sit in Pro. Pro keeps the lights on so the core keeps getting better.

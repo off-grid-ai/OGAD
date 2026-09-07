@@ -22,11 +22,11 @@ import {
   projectorFileName,
   visionStatus,
   projectorToHeal,
+  modalityForKind,
   type CatalogEntry,
   type LocalModelLike,
   type DownloadedModelLike
-} from '../catalog-logic'
-import { modalityForKind } from '../../active-models'
+} from '@offgrid/models'
 
 const local: LocalModelLike = {
   id: 'local:my.gguf',
@@ -99,6 +99,7 @@ describe('downloadedForCatalog', () => {
     expect(out).toEqual([
       {
         id: 'org/hf',
+        catalogEntry: false,
         name: 'HF',
         kind: 'vision',
         org: 'Hugging Face',
@@ -163,6 +164,41 @@ describe('mergeCatalog — order + all three sources', () => {
     })
     expect(out.map((model) => model.id)).toEqual([variant.id])
     expect(out[0]!.files.find((file) => file.role === 'mmproj')?.name).toBe('hf-mmproj.gguf')
+    expect(out[0]).toMatchObject({
+      id: variant.id,
+      name: catEntry.name,
+      kind: catEntry.kind
+    })
+  })
+
+  it('uses the current catalog role for an installed family variant', () => {
+    const family = {
+      ...catEntry,
+      id: 'bartowski/tencent_UI-Mate-9B-GGUF',
+      name: 'UI-Mate-9B',
+      kind: 'computer_use',
+      org: 'Tencent'
+    }
+    const variant = {
+      ...dl,
+      id: 'model-package-v1:ui-mate',
+      familyId: family.id,
+      name: 'tencent_UI-Mate-9B-GGUF',
+      kind: 'vision'
+    }
+    const [row] = mergeCatalog({
+      locals: [],
+      downloaded: [variant],
+      installedDownloadedIds: [variant.id],
+      catalog: [family],
+      present: presentAll
+    })
+    expect(row).toMatchObject({
+      id: variant.id,
+      name: 'UI-Mate-9B',
+      kind: 'computer_use',
+      org: 'Tencent'
+    })
   })
 })
 
@@ -264,7 +300,7 @@ describe('buildDiskEntry — source resolution + active flag', () => {
         'cat.gguf': 400
       }) as Record<string, number>
     )[name] ?? 0
-  const noModals = { image: null, speech: null, transcription: null }
+  const noModals = { computer_use: null, image: null, speech: null, transcription: null }
 
   it('imported local: sums primary + mmproj, kind local, active when it is the chat id', () => {
     const e = buildDiskEntry({
@@ -300,7 +336,7 @@ describe('buildDiskEntry — source resolution + active flag', () => {
       catalogById: () => undefined,
       isCatalogId: () => false,
       activeChatId: null,
-      modals: { image: null, speech: null, transcription: null },
+      modals: { computer_use: null, image: null, speech: null, transcription: null },
       sizeOf
     })
     // vision => chat LLM path (not a modality), so not active unless it is the chat id.
@@ -360,7 +396,12 @@ describe('buildDiskEntry — source resolution + active flag', () => {
       catalogById: () => img,
       isCatalogId: () => true,
       activeChatId: null,
-      modals: { image: 'img.safetensors', speech: null, transcription: null },
+      modals: {
+        computer_use: null,
+        image: 'img.safetensors',
+        speech: null,
+        transcription: null
+      },
       sizeOf: () => 0
     })
     expect(e.active).toBe(true)

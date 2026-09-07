@@ -1,4 +1,4 @@
-# Off Grid Desktop — Roadmap
+# Off Grid AI Desktop — Roadmap
 
 The desktop product view of the plan. The shared, package-oriented plan lives in `../shared/ROADMAP.md`; this is the same arc re-cut around the **desktop app**, with honest current status. Sources folded in: `shared/ROADMAP.md`, root `CLAUDE.md`, `website/vision.md`.
 
@@ -10,7 +10,7 @@ Legend: ✅ done · 🟡 partial / in progress · ⬜ not started
 
 ## Phase 0 — Foundation ✅
 
-- ✅ App shell, Off Grid design (Menlo / black / emerald), unified `userData` path, dock + tray icons
+- ✅ App shell, Off Grid AI design (Menlo / black / emerald), unified `userData` path, dock + tray icons
 - ✅ Bundled local runtimes: `llama-server` (gemma-4 vision), `whisper.cpp`, `ffmpeg`, `sharp`
 - ✅ Local LLM plumbing: grammar-constrained JSON, `enable_thinking:false`, single-flight init, port 8439
 - 🟡 Full design pass on every screen (ongoing polish)
@@ -64,7 +64,7 @@ Legend: ✅ done · 🟡 partial / in progress · ⬜ not started
 - ⬜ **Google (Gmail/Calendar) via SCREEN CAPTURE, not an OAuth client** (decided June 2026, fully-offline). Google MCP has no DCR → would need a registered GCP client = anti-offline; rejected. We already OCR Gmail/Calendar on screen — zero setup, nothing leaves the device.
 - ⬜ **Capture ↔ connector intelligence (source-of-truth priority).** Be smart: capture is the universal SIGNAL of interest ("you're on a Notion page / a Linear issue / company XYZ"); when a connector exists for what you're looking at, **pull the authoritative data from the connector (source of truth) instead of leaning on OCR/AX.** Connector data **takes priority** over captured/OCR data in synthesis + dedup, and lets us **throttle/skip OCR** for those apps (cheaper, cleaner). Capture tells us _what you care about_; the connector gives the _correct_ version.
 - ⬜ **Cross-source synthesis** — join email ↔ calendar event ↔ person ↔ project ↔ ticket into one entity, across capture + connectors
-- ⬜ **File system access (local file catalogue + auto-retrieval).** Index opt-in, **scoped folders** on-device — file metadata (path / name / type / size / mtime) + content embeddings into the RAG store (Phase 5) — so Off Grid knows _what files exist_ and _what's in them_. Then **fetch the right file at the right time instead of making the user attach it**: capture/context signals _what you're working on_ → the catalogue surfaces or auto-attaches the relevant document (meeting prep pulls the deck; a chat about project X pulls its docs; "the contract we discussed" resolves to the file). Local-only, per-folder enable/revoke under the consent model, incremental re-index via an fs watcher. The local-first peer of the source-of-truth-priority rule above: **capture tells us what you care about; the file system gives the actual document — no manual attach.**
+- ⬜ **File system access (local file catalogue + auto-retrieval).** Index opt-in, **scoped folders** on-device — file metadata (path / name / type / size / mtime) + content embeddings into the RAG store (Phase 5) — so Off Grid AI knows _what files exist_ and _what's in them_. Then **fetch the right file at the right time instead of making the user attach it**: capture/context signals _what you're working on_ → the catalogue surfaces or auto-attaches the relevant document (meeting prep pulls the deck; a chat about project X pulls its docs; "the contract we discussed" resolves to the file). Local-only, per-folder enable/revoke under the consent model, incremental re-index via an fs watcher. The local-first peer of the source-of-truth-priority rule above: **capture tells us what you care about; the file system gives the actual document — no manual attach.**
 
 **Skills & action:**
 
@@ -83,11 +83,11 @@ Legend: ✅ done · 🟡 partial / in progress · ⬜ not started
 - ✅ **Projects + RAG + chat** over all memory + ingested docs — file upload (txt/md/PDF/DOCX/image/audio/video) → MiniLM embeddings + better-sqlite3 vector store; cited sources; "include captured memory" toggle spans uploads + everything captured (`@offgrid/rag`, `rag/index.ts`, `ProjectsScreen.tsx`)
 - ⬜ Unified search
 - ✅ **Models** — HF browser / provider abstraction / download manager (`@offgrid/models`, `ModelsScreen.tsx`)
-- ⬜ **Expose a local model server** — surface the on-device runtimes (the bundled `llama-server` on 8439, whisper, embeddings) as a **local, OpenAI-compatible API endpoint** so other apps on the machine — and, over the mesh, other paired devices — can use Off Grid AI Desktop as their private inference backend. Off Grid Desktop becomes the household's on-device model server (no cloud, no API keys). Auth-gated + opt-in (off by default); ties into the consent model and the cross-device mesh (Phase 6).
+- ⬜ **Expose a local model server** — surface the on-device runtimes (the bundled `llama-server` on 8439, whisper, embeddings) as a **local, OpenAI-compatible API endpoint** so other apps on the machine — and, over the mesh, other paired devices — can use Off Grid AI Desktop as their private inference backend. Off Grid AI Desktop becomes the household's on-device model server (no cloud, no API keys). Auth-gated + opt-in (off by default); ties into the consent model and the cross-device mesh (Phase 6).
 
-### Phase 5b — The Off Grid chat as a local AI Studio (in progress, June 2026)
+### Phase 5b — The Off Grid AI chat as a local AI Studio (in progress, June 2026)
 
-The Off Grid chat (`MemoryChat.tsx`) is becoming a full local-first studio — like Claude/LM Studio/Ollama, but everything on-device. Brand: brutalist/terminal (Menlo, emerald, flat). Done + planned:
+The Off Grid AI chat (`MemoryChat.tsx`) is becoming a full local-first studio — like Claude/LM Studio/Ollama, but everything on-device. Brand: brutalist/terminal (Menlo, emerald, flat). Done + planned:
 
 - ✅ **Chat redesign** — brutalist composer, clickable example prompts, mode segmented control; light + dark.
 - ✅ **On-device image generation** — `stable-diffusion.cpp` (`sd-cli`, Metal) in `resources/bin/sd`; txt2img + img2img; per-model size/steps/seed/negative-prompt; **live per-step preview + progress bar + ETA + Stop/cancel**; **lightbox** (zoom/download/delete); **artifacts gallery** of every generated image (`main/imagegen.ts`, `MemoryChat.tsx`).
@@ -157,7 +157,7 @@ Phases 0–2 largely done — the full **see → remember → reflect → act(de
 
 ## Later phase — UI standardization audit (design philosophy)
 
-**Decided 2026-06-23.** Off Grid Desktop adopts the Wednesday Solutions standards-kit: **no custom UI components** — every element comes from the approved libraries (**shadcn/ui** foundation, **Aceternity** effects, **Magic UI** text/buttons, **Motion Primitives** transitions). Branding stays Off Grid (Menlo mono, emerald, brutalist); shadcn semantic tokens are mapped to `--og-*` in `main.css` `@theme` so library components inherit the brand automatically.
+**Decided 2026-06-23.** Off Grid AI Desktop adopts the Wednesday Solutions standards-kit: **no custom UI components** — every element comes from the approved libraries (**shadcn/ui** foundation, **Aceternity** effects, **Magic UI** text/buttons, **Motion Primitives** transitions). Branding stays Off Grid AI (Menlo mono, emerald, brutalist); shadcn semantic tokens are mapped to `--og-*` in `main.css` `@theme` so library components inherit the brand automatically.
 
 - [ ] Audit every screen/component and replace hand-rolled markup with approved-library components (start: MemoryChat composer/messages, then Settings, Onboarding, Day/Replay/Reflect/Actions/Connectors/Meetings/Models/Entities screens).
 - [ ] Pull primitives via `npx shadcn add` (+ `@aceternity`/`@magicui` registries); pick from `component-library-animations/skills/component-library-index.md`.

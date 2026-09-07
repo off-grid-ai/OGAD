@@ -51,3 +51,7 @@ export function registerProView(fn: ProViewRenderer): void {
 export function renderProView(viewMode: string, ctx: ProViewContext): ReactNode | null {
   return renderer ? renderer(viewMode, ctx) : null
 }
+
+export function clearProView(): void {
+  renderer = null
+}

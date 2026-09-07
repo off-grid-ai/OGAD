@@ -2,7 +2,7 @@
   "name": "@offgrid/design",
   "version": "0.0.1",
   "private": true,
-  "description": "Off Grid design tokens (colors, typography, spacing) shared across desktop, mobile, and sync UIs",
+  "description": "Off Grid AI design tokens (colors, typography, spacing) shared across desktop, mobile, and sync UIs",
   "license": "AGPL-3.0-only",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

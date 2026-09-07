@@ -10,7 +10,53 @@
 // (round 1 emits a tool_call, round 2 emits the final answer) exactly as llama-server
 // would. Requests beyond the queue get an empty-content turn (loop terminator).
 import * as http from 'http'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { AddressInfo } from 'net'
+
+const FAKE_TEXT_MODEL_ID = 'unsloth/Qwen3.5-0.8B-GGUF'
+const FAKE_TEXT_MODEL_FILE = 'Qwen3.5-0.8B-Q4_K_M.gguf'
+const FAKE_TEXT_PROJECTOR_FILE = 'mmproj-Qwen3.5-0.8B-BF16.gguf'
+const GGUF_VERSION = 3
+
+/**
+ * Bytes a real GGUF file starts with: the `GGUF` magic, the little-endian u32 format version,
+ * then filler past the shared minimum size. The production artifact verifier (magic, version,
+ * minimum bytes) runs for real over these and passes on its own terms; only the weights are fake.
+ * `marker` fills the body so two artifacts can be told apart byte-for-byte after a transfer.
+ */
+export function validGguf(marker: number): Buffer {
+  const version = Buffer.alloc(4)
+  version.writeUInt32LE(GGUF_VERSION, 0)
+  return Buffer.concat([Buffer.from('GGUF', 'ascii'), version, Buffer.alloc(2_048, marker)])
+}
+
+/**
+ * Install the minimum durable model selection needed by the real shared inventory.
+ * The socket remains the only inference fake; model discovery and routing stay real.
+ */
+export function installFakeActiveTextModel(
+  profileDir: string,
+  options: { projector?: boolean } = {}
+): void {
+  const modelsDir = path.join(profileDir, 'models')
+  fs.mkdirSync(modelsDir, { recursive: true })
+  // Real GGUF header bytes: the application's own integrity check must accept this file.
+  fs.writeFileSync(path.join(modelsDir, FAKE_TEXT_MODEL_FILE), validGguf(1))
+  // The vision projector is a file on disk: present, the selected model can read images; absent,
+  // it cannot. Tests that exercise the vision guard choose which world they are in here.
+  const projector = path.join(modelsDir, FAKE_TEXT_PROJECTOR_FILE)
+  if (options.projector === false) fs.rmSync(projector, { force: true })
+  else fs.writeFileSync(projector, validGguf(2))
+  fs.writeFileSync(
+    path.join(modelsDir, 'active-model.json'),
+    JSON.stringify({
+      id: FAKE_TEXT_MODEL_ID,
+      primary: FAKE_TEXT_MODEL_FILE,
+      mmproj: FAKE_TEXT_PROJECTOR_FILE
+    })
+  )
+}
 
 interface FakeToolCall {
   id?: string
@@ -36,7 +82,7 @@ interface FakeTurn {
   errorStatus?: number
   errorBody?: string
   /** Delay the native-engine response after the request is admitted. Lifecycle tests use
-   *  this to exercise cancellation/drain ownership without replacing any Off Grid service. */
+   *  this to exercise cancellation/drain ownership without replacing any Off Grid AI service. */
   delayMs?: number
   /** Stream the frames then HANG (never send [DONE] / close) — so a client abort fires
    *  mid-turn. The real engine's socket stays open until the client cancels; this lets a
@@ -138,6 +184,7 @@ export async function startFakeLlamaServer(): Promise<FakeLlamaServer> {
                   {
                     message: {
                       content: turn.content ?? '',
+                      ...(turn.reasoning ? { reasoning_content: turn.reasoning } : {}),
                       ...(turn.toolCalls?.length
                         ? {
                             tool_calls: turn.toolCalls.map((tc, i) => ({

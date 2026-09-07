@@ -178,7 +178,7 @@ const writeDesktopFixture = () => {
   fs.writeFileSync(
     desktopFixturePath,
     [
-      `Off Grid physical Sync fixture ${runId}.`,
+      `Off Grid AI physical Sync fixture ${runId}.`,
       'This synthetic document was created on macOS and must arrive on iOS through encrypted Sync.',
       'It contains no private user data.'
     ].join('\n')

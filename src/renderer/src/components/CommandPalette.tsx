@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   IconPhoto,
   IconUser,
@@ -22,9 +22,6 @@ import {
 import type { SearchHit } from '@/types'
 import { paletteScreenMatches, type PaletteScreen } from '../lib/paletteScreens'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
-
 const KIND_ICON = {
   screen: IconPhoto,
   meeting: IconVideo,
@@ -38,7 +35,7 @@ interface CommandPaletteProps {
   onSeeAll: (query: string) => void
   /** Every navigable screen, in sidebar order. */
   screens?: PaletteScreen[]
-  onGoTo?: (view: string) => void
+  onGoTo?: (view: string, subroute?: string) => void
 }
 
 // ⌘K universal search launcher. Fast (keyword-only) results; Enter opens, or jump
@@ -69,38 +66,40 @@ export function CommandPalette({
   // Debounced fast search (keyword only for instant feel).
   useEffect(() => {
     if (!query.trim()) {
-      setHits([])
-      return undefined
+      const id = ++seq.current
+      const clearTimer = window.setTimeout(() => {
+        if (id === seq.current) setHits([])
+      }, 0)
+      return () => window.clearTimeout(clearTimer)
     }
     const id = ++seq.current
-    const t = setTimeout(async () => {
-      const r = (await api.universalSearch(query, { limit: 8, semantic: false })) as SearchHit[]
-      if (id === seq.current) setHits(r)
+    const searchTimer = window.setTimeout(() => {
+      void window.api
+        .universalSearch(query, { limit: 8, semantic: false })
+        .then((result) => {
+          const nextHits = Array.isArray(result) ? result : []
+          if (id === seq.current) setHits(nextHits)
+        })
+        .catch((error: unknown) => console.error('Command palette search failed:', error))
     }, 140)
-    return () => clearTimeout(t)
+    return () => window.clearTimeout(searchTimer)
   }, [query])
 
-  const open_ = useCallback(
-    (h: SearchHit) => {
-      setOpen(false)
-      onOpenHit(h)
-    },
-    [onOpenHit]
-  )
-  const seeAll = useCallback(() => {
+  const open_ = (hit: SearchHit): void => {
+    setOpen(false)
+    onOpenHit(hit)
+  }
+  const seeAll = (): void => {
     if (query.trim()) {
       setOpen(false)
       onSeeAll(query)
     }
-  }, [query, onSeeAll])
-  const goTo = useCallback(
-    (view: string) => {
-      setOpen(false)
-      setQuery('')
-      onGoTo?.(view)
-    },
-    [onGoTo]
-  )
+  }
+  const goTo = (view: string, subroute?: string): void => {
+    setOpen(false)
+    setQuery('')
+    onGoTo?.(view, subroute)
+  }
 
   // Screens are known locally, so they resolve as you type rather than waiting on a search round
   // trip. With nothing typed the palette is a jump list: ⌘K then a screen name, never a hunt.
@@ -111,7 +110,7 @@ export function CommandPalette({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent showCloseButton={false} className="overflow-hidden p-0">
-        <DialogTitle className="sr-only">Search Off Grid</DialogTitle>
+        <DialogTitle className="sr-only">Search Off Grid AI</DialogTitle>
         <Command shouldFilter={false} className="font-mono">
           <CommandInput
             value={query}
@@ -126,11 +125,11 @@ export function CommandPalette({
               <CommandGroup heading={needle ? 'Screens' : 'Go to'}>
                 {screenMatches.map((screen) => (
                   <CommandItem
-                    key={screen.view}
-                    value={`__screen_${screen.view}`}
-                    onSelect={() => goTo(screen.view)}
+                    key={`${screen.view}:${screen.subroute ?? ''}`}
+                    value={`__screen_${screen.view}_${screen.subroute ?? ''}`}
+                    onSelect={() => goTo(screen.view, screen.subroute)}
                     className="gap-3"
-                    data-testid={`palette-screen-${screen.view}`}
+                    data-testid={`palette-screen-${screen.view}-${screen.subroute ?? 'root'}`}
                   >
                     <IconLayoutSidebar className="h-4 w-4 shrink-0 text-neutral-500" aria-hidden />
                     <span className="min-w-0 flex-1 truncate text-sm text-white">

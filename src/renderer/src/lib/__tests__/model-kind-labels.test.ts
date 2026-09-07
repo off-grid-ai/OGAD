@@ -6,6 +6,7 @@ describe('MODEL_KIND_LABELS — the shared model-kind display labels', () => {
     expect(MODEL_KIND_LABELS).toEqual({
       text: 'Text',
       vision: 'Vision',
+      computer_use: 'Computer Use',
       image: 'Image',
       voice: 'Voice',
       transcription: 'Transcription',
@@ -15,6 +16,7 @@ describe('MODEL_KIND_LABELS — the shared model-kind display labels', () => {
 
   it('modelKindLabel returns the label for a known kind', () => {
     expect(modelKindLabel('text')).toBe('Text')
+    expect(modelKindLabel('computer_use')).toBe('Computer Use')
     expect(modelKindLabel('transcription')).toBe('Transcription')
     expect(modelKindLabel('other')).toBe('Other')
   })

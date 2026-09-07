@@ -201,21 +201,25 @@ describe('database.ts - RAG messages', () => {
     expect(db.getRagMessages('cascade-conv')).toHaveLength(0)
   })
 
-  it('truncateRagMessages keeps the first N (chronological) and deletes the rest', () => {
+  it('truncateRagMessages keeps everything up to the anchor message and deletes the rest', () => {
     db.createRagConversation('trunc-conv')
+    const added = [] as Array<{ uuid: string }>
     for (let i = 0; i < 5; i++) {
-      db.addRagMessage('trunc-conv', i % 2 === 0 ? 'user' : 'assistant', `m${i}`)
+      added.push(db.addRagMessage('trunc-conv', i % 2 === 0 ? 'user' : 'assistant', `m${i}`))
     }
-    const removed = db.truncateRagMessages('trunc-conv', 2)
+    const removed = db.truncateRagMessages('trunc-conv', {
+      messageId: added[1]!.uuid,
+      keepAnchor: true
+    })
     expect(removed).toBe(3)
     const remaining = db.getRagMessages('trunc-conv')
     expect(remaining.map((m) => m.content)).toEqual(['m0', 'm1'])
   })
 
-  it('truncateRagMessages is a no-op (returns 0) when keepCount exceeds the message count', () => {
+  it('truncateRagMessages is a no-op (returns 0) when nothing follows the anchor', () => {
     db.createRagConversation('trunc-noop')
-    db.addRagMessage('trunc-noop', 'user', 'only')
-    expect(db.truncateRagMessages('trunc-noop', 10)).toBe(0)
+    const only = db.addRagMessage('trunc-noop', 'user', 'only')
+    expect(db.truncateRagMessages('trunc-noop', { messageId: only.uuid, keepAnchor: true })).toBe(0)
     expect(db.getRagMessages('trunc-noop')).toHaveLength(1)
   })
 

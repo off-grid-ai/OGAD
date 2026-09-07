@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate bundled style previews through the running Off Grid Desktop gateway.
+# Generate bundled style previews through the running Off Grid AI Desktop gateway.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,7 +9,7 @@ NEGATIVE="people, person, human, woman, women, girl, girls, man, men, boy, boys,
 
 mkdir -p "$OUT"
 curl --fail --silent --max-time 5 "$GATEWAY/health" >/dev/null || {
-  echo "Off Grid Desktop gateway is not available at $GATEWAY." >&2
+  echo "Off Grid AI Desktop gateway is not available at $GATEWAY." >&2
   exit 1
 }
 

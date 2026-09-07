@@ -15,7 +15,7 @@ export const LLAMA_SERVER_PORT = 8439
 export const GATEWAY_HOST = '127.0.0.1'
 
 /**
- * Every interface, so a phone on the same LAN can reach this Mac's models: Off Grid Mobile
+ * Every interface, so a phone on the same LAN can reach this Mac's models: Off Grid AI Mobile
  * scans the subnet for :7878 and a loopback-only listener is invisible to it. That path
  * worked until the gateway was bound to loopback, and this restores it.
  *

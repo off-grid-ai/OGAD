@@ -2,7 +2,7 @@
   "name": "@offgrid/clipboard",
   "version": "0.0.1",
   "private": true,
-  "description": "Off Grid shared clipboard: cross-platform clipboard capture + history engine, embeddable in desktop and mobile. Absorbed from copyclip (MIT).",
+  "description": "Off Grid AI shared clipboard: cross-platform clipboard capture + history engine, embeddable in desktop and mobile. Absorbed from copyclip (MIT).",
   "license": "AGPL-3.0-only",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

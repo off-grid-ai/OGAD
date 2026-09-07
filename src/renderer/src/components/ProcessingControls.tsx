@@ -17,12 +17,11 @@ interface QueueLive {
 }
 
 export function RuntimeResidencySection(): React.ReactElement {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const api = (window as any).api
+  const api = window.api
   const [modes, setModes] = useState<Record<string, string>>({})
   useEffect(() => {
     api
-      .residencyGet?.()
+      .residencyGet()
       .then((m: Record<string, string>) => setModes(m))
       .catch(() => {})
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
@@ -32,7 +31,7 @@ export function RuntimeResidencySection(): React.ReactElement {
     if (locked) return
     const nextMode = modes[modality] === 'resident' ? 'on-demand' : 'resident'
     void persistToggle({ ...modes, [modality]: nextMode }, modes, setModes, () =>
-      api.residencySet?.(modality, nextMode)
+      api.residencySet(modality, nextMode)
     )
   }
 
@@ -86,19 +85,18 @@ export function RuntimeResidencySection(): React.ReactElement {
 }
 
 export function ModelPipelineSection(): React.ReactElement {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const api = (window as any).api
+  const api = window.api
   const [cfg, setCfg] = useState<QueueCfg>({ enabled: true, tier1Coexists: true })
   const [live, setLive] = useState<QueueLive>({ running: [], queued: [] })
 
   useEffect(() => {
     api
-      .queueConfigGet?.()
+      .queueConfigGet()
       .then(setCfg)
       .catch(() => {})
     const poll = (): void => {
       api
-        .queueState?.()
+        .queueState()
         .then(setLive)
         .catch(() => {})
     }
@@ -110,7 +108,7 @@ export function ModelPipelineSection(): React.ReactElement {
 
   const set = (patch: Partial<QueueCfg>): void => {
     void persistToggle({ ...cfg, ...patch }, cfg, setCfg, () =>
-      Promise.resolve(api.queueConfigSet?.(patch)).then((persisted: QueueCfg | undefined) => {
+      Promise.resolve(api.queueConfigSet(patch)).then((persisted: QueueCfg | undefined) => {
         if (persisted) setCfg(persisted)
       })
     )

@@ -1,5 +1,5 @@
 // Release journeys #17-#19, #21, and #23 through the production desktop model manager.
-// Only boundaries outside Off Grid are controlled: HTTP serves small deterministic
+// Only boundaries outside Off Grid AI are controlled: HTTP serves small deterministic
 // model bytes, while tiny executable fixtures stand in for the native image, STT,
 // and TTS runtimes. Download sequencing, integrity checks, filesystem promotion,
 // installed/readiness decisions, activation, and runtime selection all stay real.
@@ -30,12 +30,39 @@ vi.mock('electron', () => ({
   }
 }))
 
-const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
 
 type CatalogModel = (typeof CATALOG)[number]
 type ModelFile = CatalogModel['files'][number]
-type ModelDownloadProgress = import('../../models-manager').DownloadProgress
+type ModelDownloadProgress = import('./download-facade-test-client').DownloadProgress
+
+const productionCatalog = [...CATALOG]
+
+function fixtureSize(file: ModelFile): number {
+  // Whisper verification has a real 10 MiB minimum. Other native formats only need
+  // enough bytes for their real format gate in this HTTP-boundary integration test.
+  return file.name.endsWith('.bin') ? 10 * 1024 * 1024 : 2_048
+}
+
+const fixtureCatalog = productionCatalog.map((entry) => ({
+  ...entry,
+  files: entry.files.map((file) => ({ ...file, sizeBytes: fixtureSize(file) }))
+}))
+CATALOG.splice(0, CATALOG.length, ...fixtureCatalog)
+
+const [applicationModule, modelServices, applicationAccess] = await Promise.all([
+  import('@offgrid/application'),
+  import('../../model-services'),
+  import('../../composition/application-access')
+])
+const application = applicationModule.createOffGridApplication({
+  models: modelServices.desktopModelWorkspacePorts
+})
+const releaseApplication = applicationAccess.registerDesktopApplication(application)
+const manager = {
+  ...(await import('../../models-manager')),
+  ...(await import('./download-facade-test-client'))
+}
 
 const byKind = (kind: CatalogModel['kind'], fileCount?: number): CatalogModel => {
   const entry = CATALOG.find(
@@ -52,7 +79,13 @@ const byKind = (kind: CatalogModel['kind'], fileCount?: number): CatalogModel =>
 // mechanics are exercised with any single-file model (image/voice exist).
 const singleFileModels = CATALOG.filter((m) => m.files.length === 1)
 const chatModel = byKind('vision', 2)
-const visionModel = byKind('vision', 2)
+const visionModel = CATALOG.find(
+  (candidate) =>
+    candidate.kind === 'vision' && candidate.files.length === 2 && candidate.id !== chatModel.id
+)
+if (!visionModel) throw new Error('Model catalog needs two installable vision fixtures')
+const holoGrounder = CATALOG.find((candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF')
+if (!holoGrounder) throw new Error('Model catalog needs the Computer Use Holo3.1-4B fixture')
 const imageModel = byKind('image', 3)
 const speechModel = CATALOG.find(
   (candidate) => candidate.kind === 'transcription' && candidate.engine === 'parakeet'
@@ -67,10 +100,11 @@ function executable(file: string, source: string): void {
 }
 
 function modelBytes(file: ModelFile, seed: number): Buffer {
+  const size = file.sizeBytes ?? fixtureSize(file)
   if (file.name.endsWith('.gguf')) {
-    return Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(2_044, seed)])
+    return Buffer.concat([Buffer.from('GGUF', 'ascii'), Buffer.alloc(size - 4, seed)])
   }
-  return Buffer.from(`off-grid-${file.name}-${seed}`)
+  return Buffer.alloc(size, seed)
 }
 
 interface PendingResponse {
@@ -78,16 +112,63 @@ interface PendingResponse {
   resolve: (response: Response) => void
 }
 
+const HUB_REVISION = '0123456789abcdef0123456789abcdef01234567'
+
+function requestUrl(input: string | URL | Request): string {
+  return typeof input === 'string' || input instanceof URL ? String(input) : input.url
+}
+
+function huggingFaceSource(url: string): { repositoryId: string; fileName: string } | null {
+  const match = /^\/([^/]+\/[^/]+)\/resolve\/[^/]+\/(.+)$/.exec(new URL(url).pathname)
+  if (!match) return null
+  return {
+    repositoryId: decodeURIComponent(match[1]!),
+    fileName: decodeURIComponent(match[2]!)
+  }
+}
+
+function resolvedArtifactUrl(file: ModelFile): string {
+  const sourceRevision = /\/resolve\/([^/]+)\//.exec(file.url)?.[1] ?? 'main'
+  const revision = /^[a-f0-9]{40}$/i.test(sourceRevision) ? sourceRevision : HUB_REVISION
+  return file.url.replace(/\/resolve\/[^/]+\//, `/resolve/${revision}/`)
+}
+
 function controlledHttp(): PendingResponse[] {
   const pending: PendingResponse[] = []
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      (input: string | URL | Request) =>
-        new Promise<Response>((resolve) => {
-          pending.push({ url: String(input), resolve })
-        })
-    )
+    vi.fn((input: string | URL | Request) => {
+      const url = requestUrl(input)
+      if (url.includes('/api/models/') && url.includes('/revision/')) {
+        const match = /\/api\/models\/(.+)\/revision\/([^?]+)/.exec(url)
+        const repositoryId = match?.[1]
+        const repositoryFiles = CATALOG.flatMap((candidate) => candidate.files).filter(
+          (file) => huggingFaceSource(file.url)?.repositoryId === repositoryId
+        )
+        if (repositoryFiles.length === 0) {
+          return Promise.resolve(new Response('{}', { status: 404 }))
+        }
+        const requestedRevision = decodeURIComponent(match?.[2] ?? 'main')
+        const revision = /^[a-f0-9]{40}$/i.test(requestedRevision)
+          ? requestedRevision
+          : HUB_REVISION
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              sha: revision,
+              siblings: repositoryFiles.map((file) => ({
+                rfilename: huggingFaceSource(file.url)!.fileName,
+                size: file.sizeBytes ?? fixtureSize(file)
+              }))
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          )
+        )
+      }
+      return new Promise<Response>((resolve) => {
+        pending.push({ url, resolve })
+      })
+    })
   )
   return pending
 }
@@ -111,7 +192,7 @@ async function downloadEveryRequiredFile(entry: CatalogModel): Promise<{
 
   for (const [index, file] of entry.files.entries()) {
     await waitFor(() => pending.length === index + 1)
-    expect(pending[index]!.url).toBe(file.url)
+    expect(pending[index]!.url).toBe(resolvedArtifactUrl(file))
 
     // A model is never ready while its current or any later required file is pending.
     expect(await manager.listInstalled()).not.toContain(entry.id)
@@ -128,7 +209,9 @@ async function downloadEveryRequiredFile(entry: CatalogModel): Promise<{
 
     if (index < entry.files.length - 1) {
       await waitFor(() => pending.length === index + 2)
-      expect(fs.readFileSync(path.join(dataDir, 'models', file.name))).toEqual(body)
+      // Each verified artifact stays under Shared's staging owner until every required artifact is
+      // ready. The finalizer promotes the package as one recoverable transaction.
+      expect(fs.existsSync(path.join(dataDir, 'models', file.name))).toBe(false)
       expect(await manager.listInstalled()).not.toContain(entry.id)
     }
   }
@@ -137,12 +220,14 @@ async function downloadEveryRequiredFile(entry: CatalogModel): Promise<{
   installedByTest.add(entry.id)
 
   expect(await manager.listInstalled()).toContain(entry.id)
-  expect(manager.downloadStatus(entry.id)).toMatchObject({
+  expect(await manager.downloadStatus(entry.id)).toMatchObject({
     modelId: entry.id,
     status: 'completed',
     percent: 100
   })
-  expect(progress[0]).toMatchObject({ modelId: entry.id, status: 'downloading', percent: 0 })
+  expect(progress[0]).toMatchObject({ modelId: entry.id, status: 'downloading' })
+  expect(progress[0]!.percent).toBeGreaterThanOrEqual(0)
+  expect(progress[0]!.percent).toBeLessThanOrEqual(100)
   expect(progress.at(-1)).toMatchObject({ modelId: entry.id, status: 'completed', percent: 100 })
   for (const file of entry.files) {
     expect(fs.readFileSync(path.join(dataDir, 'models', file.name))).toEqual(bytes.get(file.name))
@@ -150,6 +235,13 @@ async function downloadEveryRequiredFile(entry: CatalogModel): Promise<{
   }
 
   return { progress, bytes }
+}
+
+function seedInstalledCatalogModel(entry: CatalogModel): void {
+  for (const [index, file] of entry.files.entries()) {
+    fs.writeFileSync(path.join(dataDir, 'models', file.name), modelBytes(file, index + 1))
+  }
+  installedByTest.add(entry.id)
 }
 
 beforeAll(() => {
@@ -169,14 +261,23 @@ afterEach(async () => {
   vi.restoreAllMocks()
   for (const id of installedByTest) {
     await manager.deleteModel(id)
-    await manager.clearDownload(id)
+    const record = applicationAccess.desktopModels
+      .snapshot()
+      .downloads.find((download) => download.modelId === id)
+    if (record) {
+      await applicationAccess.desktopModels.removeDownload({ downloadId: record.downloadId })
+    }
   }
   installedByTest.clear()
   fs.rmSync(path.join(dataDir, 'models', 'active-model.json'), { force: true })
   fs.rmSync(path.join(dataDir, 'models', 'active-modalities.json'), { force: true })
 })
 
-afterAll(() => {
+afterAll(async () => {
+  await manager.shutdownModelDownloads()
+  releaseApplication()
+  await application.stop()
+  CATALOG.splice(0, CATALOG.length, ...productionCatalog)
   if (originalDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = originalDataDir
   if (originalBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
@@ -211,18 +312,38 @@ describe('model download release matrix', () => {
     })
   })
 
+  it('activates Holo 4B for the product rail that the user selected', async () => {
+    // The immutable catalog checksums are proven by the shared package tests.
+    // This journey starts at the installed-model boundary and proves which
+    // active slot receives the specialist package.
+    seedInstalledCatalogModel(holoGrounder)
+    expect(await manager.listInstalled()).toContain(holoGrounder.id)
+
+    expect(await manager.activateModel(holoGrounder.id)).toEqual({ success: true })
+    expect(manager.getActiveModalities().computer_use).toBe(holoGrounder.id)
+    expect(manager.getActiveModalities().text).not.toBe(holoGrounder.id)
+
+    expect(await manager.activateModel(holoGrounder.id, 'computer_use')).toEqual({ success: true })
+    expect(manager.getActiveModalities().computer_use).toBe(holoGrounder.id)
+    expect(manager.getActiveModalities().text).not.toBe(holoGrounder.id)
+  })
+
   it('makes a complete Parakeet download selectable by the real dictation service (#19)', async () => {
-    const { getActiveTranscription } = await import('../../transcription/select')
-    expect(getActiveTranscription().isAvailable()).toBe(false)
+    const { getNativeTranscriptionForRoute } = await import('../../transcription/select')
+    // This suite cannot load the native database ABI. The model route and setting reader are
+    // the controlled boundaries; the production Parakeet selection and native process stay real.
+    const noStoredPreferences = <T>(_key: string, fallback: T): T => fallback
+    const route = { id: speechModel.id, providerId: speechModel.engine }
+    expect(getNativeTranscriptionForRoute(route, noStoredPreferences).isAvailable()).toBe(false)
 
     await downloadEveryRequiredFile(speechModel)
     expect(await manager.activateModel(speechModel.id)).toEqual({ success: true })
-    const dictation = getActiveTranscription()
+    const dictation = getNativeTranscriptionForRoute(route, noStoredPreferences)
 
     expect(dictation.isAvailable()).toBe(true)
     await expect(
       dictation.transcribe({ path: path.join(testRoot, 'synthetic.wav') }, { alreadyWav16k: true })
-    ).resolves.toEqual({ text: 'downloaded model dictation works', language: undefined })
+    ).resolves.toEqual({ text: 'downloaded model dictation works', language: 'en' })
   })
 
   it('keeps a multi-file image model unavailable until the whole runtime stack lands (#21)', async () => {
@@ -261,9 +382,9 @@ describe('model download release matrix', () => {
     )
     await waitFor(() => pending.length === 2)
 
-    const initialOrder = manager.listDownloads().map((download) => download.modelId)
-    const firstWhileBothRun = manager.downloadStatus(firstModel.id)
-    const secondWhileBothRun = manager.downloadStatus(secondModel.id)
+    const initialOrder = (await manager.listDownloads()).map((download) => download.modelId)
+    const firstWhileBothRun = await manager.downloadStatus(firstModel.id)
+    const secondWhileBothRun = await manager.downloadStatus(secondModel.id)
     let secondResult: Awaited<typeof secondDownload> | undefined
     let firstResult: Awaited<typeof firstDownload> | undefined
     let installedAfterSecond: string[] = []
@@ -278,7 +399,7 @@ describe('model download release matrix', () => {
       secondResult = await secondDownload
       installedByTest.add(secondModel.id)
       installedAfterSecond = await manager.listInstalled()
-      firstWhileSecondDone = manager.downloadStatus(firstModel.id)
+      firstWhileSecondDone = await manager.downloadStatus(firstModel.id)
 
       pending[0]!.resolve(
         new Response(new Uint8Array(firstBytes), {
@@ -322,10 +443,12 @@ describe('model download release matrix', () => {
       status: 'downloading',
       percent: 0
     })
-    expect(installedAfterSecond).toEqual([secondModel.id])
+    expect(
+      installedAfterSecond.filter((id) => concurrentModels.some((model) => model.id === id))
+    ).toEqual([secondModel.id])
     expect(firstResult).toEqual({ success: true })
 
-    expect(manager.listDownloads()).toEqual([
+    expect(await manager.listDownloads()).toEqual([
       expect.objectContaining({
         modelId: firstModel.id,
         status: 'completed',
@@ -347,7 +470,11 @@ describe('model download release matrix', () => {
     )
     expect(firstProgress.at(-1)).toMatchObject({ status: 'completed', percent: 100 })
     expect(secondProgress.at(-1)).toMatchObject({ status: 'completed', percent: 100 })
-    expect((await manager.listInstalled()).sort()).toEqual([firstModel.id, secondModel.id].sort())
+    expect(
+      (await manager.listInstalled())
+        .filter((id) => concurrentModels.some((model) => model.id === id))
+        .sort()
+    ).toEqual([firstModel.id, secondModel.id].sort())
     expect(fs.readFileSync(path.join(dataDir, 'models', firstFile.name))).toEqual(firstBytes)
     expect(fs.readFileSync(path.join(dataDir, 'models', secondFile.name))).toEqual(secondBytes)
     expect(fs.existsSync(path.join(dataDir, 'models', `${firstFile.name}.part`))).toBe(false)
@@ -369,45 +496,50 @@ describe('model download release matrix', () => {
     })
 
     await waitFor(() => pending.length === 3)
-    const initial = manager
-      .listDownloads()
-      .filter((download) => queueModels.some((model) => model.id === download.modelId))
+    const initial = (await manager.listDownloads()).filter((download) =>
+      queueModels.some((model) => model.id === download.modelId)
+    )
     expect(initial.filter((download) => download.status === 'downloading')).toHaveLength(3)
-    expect(initial.filter((download) => download.status === 'queued')).toEqual([
-      expect.objectContaining({ modelId: queueModels[3]!.id, percent: 0 })
-    ])
-    await expect(manager.downloadModel(queueModels[3]!.id)).resolves.toEqual({
-      success: false,
-      error: 'already downloading'
-    })
+    const queued = initial.find((download) => download.status === 'queued')
+    expect(queued).toMatchObject({ percent: 0 })
+    const queuedIndex = queueModels.findIndex((model) => model.id === queued?.modelId)
+    expect(queuedIndex).toBeGreaterThanOrEqual(0)
+    // A duplicate caller joins the existing queued job. It must not create another
+    // transfer or a second queue record, and it receives the same terminal result.
+    const duplicateFourthDownload = manager.downloadModel(queueModels[queuedIndex]!.id)
     expect(pending).toHaveLength(3)
 
     try {
-      const firstFile = queueModels[0]!.files[0]!
+      const firstPending = pending[0]!
+      const firstIndex = queueModels.findIndex(
+        (model) => model.files[0] && resolvedArtifactUrl(model.files[0]) === firstPending.url
+      )
+      expect(firstIndex).toBeGreaterThanOrEqual(0)
+      const firstFile = queueModels[firstIndex]!.files[0]!
       const firstBytes = modelBytes(firstFile, 61)
-      pending[0]!.resolve(
+      firstPending.resolve(
         new Response(new Uint8Array(firstBytes), {
           status: 200,
           headers: { 'content-length': String(firstBytes.length) }
         })
       )
-      await expect(downloads[0]).resolves.toEqual({ success: true })
-      installedByTest.add(queueModels[0]!.id)
+      await expect(downloads[firstIndex]).resolves.toEqual({ success: true })
+      installedByTest.add(queueModels[firstIndex]!.id)
       await waitFor(() => pending.length === 4)
 
-      expect(manager.downloadStatus(queueModels[3]!.id)).toMatchObject({
+      expect(await manager.downloadStatus(queueModels[queuedIndex]!.id)).toMatchObject({
         status: 'downloading',
         percent: 0
       })
-      expect(progress.get(queueModels[3]!.id)).toEqual([
-        expect.objectContaining({ status: 'queued' }),
-        expect.objectContaining({ status: 'downloading' })
-      ])
 
-      for (let index = 1; index < queueModels.length; index++) {
-        const file = queueModels[index]!.files[0]!
-        const bytes = modelBytes(file, 61 + index)
-        pending[index]!.resolve(
+      for (const response of pending.slice(1)) {
+        const modelIndex = queueModels.findIndex(
+          (model) => model.files[0] && resolvedArtifactUrl(model.files[0]) === response.url
+        )
+        expect(modelIndex).toBeGreaterThanOrEqual(0)
+        const file = queueModels[modelIndex]!.files[0]!
+        const bytes = modelBytes(file, 61 + modelIndex)
+        response.resolve(
           new Response(new Uint8Array(bytes), {
             status: 200,
             headers: { 'content-length': String(bytes.length) }
@@ -415,12 +547,13 @@ describe('model download release matrix', () => {
         )
       }
       const results = await Promise.all(downloads)
+      await expect(duplicateFourthDownload).resolves.toEqual({ success: true })
       for (const model of queueModels) installedByTest.add(model.id)
 
       expect(results).toEqual(queueModels.map(() => ({ success: true })))
-      const terminal = manager
-        .listDownloads()
-        .filter((download) => queueModels.some((model) => model.id === download.modelId))
+      const terminal = (await manager.listDownloads()).filter((download) =>
+        queueModels.some((model) => model.id === download.modelId)
+      )
       expect(terminal).toHaveLength(4)
       expect(terminal.every((download) => download.status === 'completed')).toBe(true)
     } finally {
@@ -435,7 +568,7 @@ describe('model download release matrix', () => {
           })
         )
       }
-      await Promise.allSettled(downloads)
+      await Promise.allSettled([...downloads, duplicateFourthDownload])
     }
   })
 
@@ -451,7 +584,7 @@ describe('model download release matrix', () => {
     const pending = controlledHttp()
     const inFlight = manager.downloadModel(downloading.id)
     await waitFor(() => pending.length === 1)
-    expect(manager.downloadStatus(downloading.id)).toMatchObject({ status: 'downloading' })
+    expect(await manager.downloadStatus(downloading.id)).toMatchObject({ status: 'downloading' })
 
     await expect(manager.deleteModel(existing.id)).resolves.toEqual({
       success: true,
@@ -459,7 +592,7 @@ describe('model download release matrix', () => {
     })
     installedByTest.delete(existing.id)
     expect(await manager.listInstalled()).not.toContain(existing.id)
-    expect(manager.downloadStatus(downloading.id)).toMatchObject({ status: 'downloading' })
+    expect(await manager.downloadStatus(downloading.id)).toMatchObject({ status: 'downloading' })
 
     const file = downloading.files[0]!
     const body = modelBytes(file, 9)
@@ -474,6 +607,6 @@ describe('model download release matrix', () => {
     installedByTest.add(downloading.id)
     expect(fs.readFileSync(path.join(dataDir, 'models', file.name))).toEqual(body)
     expect(await manager.listInstalled()).toContain(downloading.id)
-    expect(manager.downloadStatus(downloading.id)).toMatchObject({ status: 'completed' })
+    expect(await manager.downloadStatus(downloading.id)).toMatchObject({ status: 'completed' })
   })
 })

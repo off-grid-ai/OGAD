@@ -1,5 +1,5 @@
 /**
- * Regression tests for the model-sizing math — the two production incidents this
+ * Regression tests for the shared text-runtime policy — the two production incidents this
  * session fixed:
  *   1. A hardcoded 64K context overcommitted unified memory and FROZE macOS.
  *   2. "Configure for me" picked the LARGEST fitting model (8B at 64K froze a 16GB Mac).
@@ -8,23 +8,23 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  computeSafeCtx,
-  chooseChatModel,
+  safeTextContext as computeSafeCtx,
+  chooseTextModel as chooseChatModel,
   fitLevel,
-  modeBudget,
-  kvPerKTokGb,
-  totalBytes,
-  recommendedParamCeiling,
-  preferredModelIds,
+  textRuntimeModeBudget as modeBudget,
+  kvCacheGbPerThousandTokens as kvPerKTokGb,
+  modelFileBytes as totalBytes,
+  recommendedTextModelParamCeiling as recommendedParamCeiling,
+  preferredTextModelIds as preferredModelIds,
   fitTier,
   isLoadableOnDevice,
   checkOverrideSurvival,
-  contextLadder,
-  loadAttempts,
-  capContextToModel,
+  textContextFallbackLadder as contextLadder,
+  textRuntimeLoadAttempts as loadAttempts,
+  capContextToTrainedWindow as capContextToModel,
   OVERRIDE_SURVIVAL_FLOOR_GB,
   type SizingModel
-} from '../model-sizing'
+} from '@offgrid/models'
 
 const GB = 1e9
 // A 16GB Mac reports ~17.18 GB from os.totalmem()/1e9.
@@ -251,10 +251,9 @@ describe('fitLevel — RAM-fit badge thresholds', () => {
   })
 
   it('is the SAME function the shared source exports (one rule, main + renderer)', async () => {
-    // The renderer badge imports fitLevel from ../../../shared/model-fit; main
-    // re-exports that exact function. Guard the single source so a copy can't
-    // creep back into either layer with drifted thresholds.
-    const shared = await import('../../shared/model-fit')
+    // Main and renderer import the same shared function. Guard the single source
+    // so a platform copy cannot creep back in with drifted thresholds.
+    const shared = await import('@offgrid/models')
     expect(fitLevel).toBe(shared.fitLevel)
     // Thresholds sit exactly on the shared constants, not re-hardcoded numbers.
     expect(fitLevel(16 * shared.FIT_OK_FRAC, 16)).toBe('ok')

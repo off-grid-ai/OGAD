@@ -14,7 +14,8 @@ const LOCAL_MEDIA_DIRS = [
   'entity-photos',
   'voice',
   'generated-images',
-  'style-thumbs'
+  'style-thumbs',
+  'task-run-snapshots'
 ] as const
 
 export function localMediaRoots(userData: string, resourceRoots: readonly string[] = []): string[] {

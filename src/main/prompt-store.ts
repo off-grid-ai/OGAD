@@ -1,18 +1,16 @@
-import { deleteSetting, getSetting } from './database'
-import { fillTemplate, getDefaultPromptTemplate } from './prompts'
+import { deleteSetting, getSetting, saveSetting } from './database'
+import { registeredPromptKey } from '@offgrid/models'
 
-/** Returns the user-customized template if one exists, otherwise the default. */
-export function getPromptTemplate(key: string): string {
-  const defaultTemplate = getDefaultPromptTemplate(key)
-  return getSetting<string>(`prompt:${key}`, defaultTemplate)
+/** Reads the Desktop-owned override. Shared owns defaults and expansion. */
+export function getPromptOverride(key: string): string | null {
+  return getSetting<string | null>(`prompt:${registeredPromptKey(key)}`, null)
 }
 
-/** Gets the effective template for `key` and fills it with `vars`. */
-export function getPrompt(key: string, vars: Record<string, string>): string {
-  return fillTemplate(getPromptTemplate(key), vars)
+export function savePromptOverride(key: string, value: string): void {
+  saveSetting(`prompt:${registeredPromptKey(key)}`, value)
 }
 
 /** Deletes a custom override so the prompt reverts to its default. */
-export function resetPrompt(key: string): void {
-  deleteSetting(`prompt:${key}`)
+export function resetPromptOverride(key: string): void {
+  deleteSetting(`prompt:${registeredPromptKey(key)}`)
 }

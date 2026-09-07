@@ -17,19 +17,32 @@
 // pure request/arg/parse shaping is extracted into exported functions (unit-tested,
 // zero-IO), exactly as whisper-cli.ts extracts model resolution and parseSegments.
 import { spawn, type ChildProcess, execSync } from 'child_process'
+import type { ResidentReclaim } from '@offgrid/models'
+import {
+  createProcessTeardown,
+  requireNoStrandedProcess,
+  type ProcessTeardown
+} from '../process-teardown'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { promisify } from 'util'
-import { execFile } from 'child_process'
 import { binRoots, isPackaged, exe } from '../runtime-env'
 import { existing } from './bin-resolution'
-import { whisperModel, ffmpegBin } from './whisper-cli'
-import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
-import type { TranscriptionService, Transcript, TranscribeOptions } from './types'
+import type { Transcript } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
-
-const execFileAsync = promisify(execFile)
+import { Mutex } from 'async-mutex'
+import {
+  buildWhisperInferenceFields,
+  desktopEngineIdleMs,
+  engineReadinessAction,
+  idleEvictionAction,
+  modelReadinessIssue,
+  parseWhisperInferenceResponse,
+  residentEngineAction,
+  residentEngineKey,
+  transcriptLanguage
+} from '@offgrid/models'
+import { WHISPER_SERVER_READY_TIMEOUT_MS } from '@offgrid/speech'
 
 // Off the LLM (8439) and image (8440) ports so the resident STT engine can bind
 // alongside them - they may all be warm at once (chat + dictation together).
@@ -53,6 +66,8 @@ export interface WhisperInferenceRequest {
   language?: string
   /** Initial prompt biasing recognition toward custom vocabulary. */
   prompt?: string
+  /** Aborts the request and response body. The shared server has no per-job native cancel API. */
+  signal?: AbortSignal
 }
 
 /** Build the whisper-server launch argv (context/model args only; per-request
@@ -74,7 +89,7 @@ export function buildWhisperServerArgs(ctx: WhisperServerContext): string[] {
 /** A stable key identifying a resident configuration - the server is restarted
  *  when this changes (model swap, thread change). Pure. */
 export function whisperContextKey(ctx: WhisperServerContext): string {
-  return JSON.stringify([ctx.modelPath, ctx.threads ?? null, ctx.port ?? WHISPER_SERVER_PORT])
+  return residentEngineKey([ctx.modelPath, ctx.threads ?? null, ctx.port ?? WHISPER_SERVER_PORT])
 }
 
 /** The multipart form fields for POST /inference. whisper-server takes the audio
@@ -82,51 +97,22 @@ export function whisperContextKey(ctx: WhisperServerContext): string {
  *  deterministic. The audio file itself is attached by the caller (it can't live
  *  in a pure builder). `language` is omitted when 'auto' so the server detects.
  *  Pure - returns the field map, not a wire body. */
-export function buildInferenceFields(req: WhisperInferenceRequest): Record<string, string> {
-  const fields: Record<string, string> = { response_format: 'json' }
-  const lang = (req.language ?? 'auto').trim()
-  if (lang && lang !== 'auto') fields.language = lang
-  const prompt = (req.prompt ?? '').trim()
-  if (prompt) fields.prompt = prompt.slice(0, 800)
-  return fields
-}
-
-/** Parse whisper-server's /inference JSON response into a Transcript-shaped
- *  { text }. The server returns { "text": "..." } for response_format=json; some
- *  builds nest it or return an OpenAI-style { text }. A malformed/empty body
- *  yields empty text rather than throwing, so a bad interim tick degrades to
- *  "no text yet" instead of erroring the dictation loop. Pure. */
-export function parseInferenceResponse(body: unknown): { text: string } {
-  if (typeof body === 'string') {
-    // Non-JSON (plain text) response: use it verbatim.
-    return { text: body.trim() }
-  }
-  const b = (body ?? {}) as Record<string, unknown>
-  // Direct { text } (the json/verbose_json shapes).
-  if (typeof b.text === 'string') return { text: b.text.trim() }
-  // Some builds return segments only; join their texts.
-  if (Array.isArray(b.segments)) {
-    const text = b.segments
-      .map((s) =>
-        s && typeof s === 'object' ? String((s as Record<string, unknown>).text ?? '') : ''
-      )
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    return { text }
-  }
-  return { text: '' }
-}
-
 /** The resident whisper server. One instance (the exported `whisperServer`). */
-class WhisperServerService {
+export class WhisperServerService {
   private server: ChildProcess | null = null
-  private port = WHISPER_SERVER_PORT
+  /**
+   * Processes that would not die. Held so a later reclaim can answer honestly, and so the spawn
+   * path can refuse rather than start a second server beside a live orphan.
+   */
+  private readonly teardown: ProcessTeardown = createProcessTeardown('transcription')
+  private readonly inferenceMutex = new Mutex()
   private activeKey: string | null = null // whisperContextKey of the loaded model, null when down
   private startPromise: Promise<void> | null = null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
-  private idleMs = 5 * 60_000 // keep the model hot for 5 min of inactivity, then evict
+  private idleMs = desktopEngineIdleMs('transcription')
   private stderrTail: string[] = []
+
+  constructor(private readonly port = WHISPER_SERVER_PORT) {}
 
   /** Tune the idle window (mainly for tests). */
   setIdleMs(ms: number): void {
@@ -151,11 +137,27 @@ class WhisperServerService {
   /** Ensure a server is up with EXACTLY this context; restart on a model/thread
    *  swap. Cancels any pending idle-eviction (we're about to be busy). */
   async ensureUp(ctx: WhisperServerContext): Promise<void> {
-    this.clearIdleTimer()
+    // `residentEngineAction` decides from `processAlive: this.server !== null`, so a stranded
+    // process would read as "nothing running" here and this would spawn a second server beside it.
+    await requireNoStrandedProcess(this.teardown)
+    if (
+      idleEvictionAction({ event: 'activity-started', processAlive: this.server !== null }) ===
+      'cancel'
+    )
+      this.clearIdleTimer()
     const key = whisperContextKey({ ...ctx, port: this.port })
-    if (this.server && this.activeKey === key) return // already the right model
-    if (this.server && this.activeKey !== key) this.stopProcess() // swap -> restart
-    if (this.startPromise !== null) return this.startPromise
+    const action = residentEngineAction({
+      processAlive: this.server !== null,
+      activeKey: this.activeKey,
+      requestedKey: key,
+      startInFlight: this.startPromise !== null
+    })
+    if (action === 'reuse') return
+    if (action === 'join-start') return this.startPromise!
+    // An internal swap: a fresh spawn follows immediately, so the reclaim answer has no consumer -
+    // but it is awaited, because spawning the replacement before the old process is gone is how
+    // two engines briefly hold the same weights.
+    if (action === 'restart') await this.stopProcess()
     this.startPromise = this.spawn(ctx, key).finally(() => {
       this.startPromise = null
     })
@@ -168,7 +170,12 @@ class WhisperServerService {
       throw new Error(
         'Resident STT engine (whisper-server) not found in resources/bin/whisper-server.'
       )
-    if (!fs.existsSync(ctx.modelPath))
+    const readinessIssue = modelReadinessIssue({
+      primaryExists: fs.existsSync(ctx.modelPath),
+      projectorRequired: false,
+      projectorExists: false
+    })
+    if (readinessIssue === 'primary-missing')
       throw new Error(`Transcription model not found: ${ctx.modelPath}`)
     const binDir = path.dirname(bin)
 
@@ -218,75 +225,131 @@ class WhisperServerService {
     this.activeKey = key
   }
 
-  private async waitForReady(timeoutMs = 60_000): Promise<void> {
+  private async waitForReady(timeoutMs = WHISPER_SERVER_READY_TIMEOUT_MS): Promise<void> {
     const start = Date.now()
-    while (Date.now() - start < timeoutMs) {
-      if (!this.server) {
-        throw new Error(
-          `whisper-server exited during startup: ${this.stderrTail.slice(-6).join(' | ')}`
-        )
-      }
+    for (;;) {
+      let probeReady = false
       try {
         // whisper-server serves an HTML page at / once the model is loaded and it's
         // listening. A 2xx means the socket is up and the model finished loading.
         const res = await fetch(`${this.base()}/`)
-        if (res.ok) return
+        probeReady = res.ok
       } catch {
         /* not up yet */
       }
+      const action = engineReadinessAction({
+        processAlive: this.server !== null,
+        probeReady,
+        elapsedMs: Date.now() - start,
+        timeoutMs
+      })
+      if (action === 'ready') return
+      if (action === 'failed')
+        throw new Error(
+          `whisper-server exited during startup: ${this.stderrTail.slice(-6).join(' | ')}`
+        )
+      if (action === 'timed-out') throw new Error('whisper-server failed to become ready in time.')
       await new Promise((r) => setTimeout(r, 300))
     }
-    throw new Error('whisper-server failed to become ready in time.')
   }
 
-  /** Transcribe a 16 kHz mono WAV on the resident server. Assumes ensureUp() has
-   *  already loaded the intended model. */
-  async inference(req: WhisperInferenceRequest): Promise<Transcript> {
+  /** Run one request against the shared resident process. whisper-server has no
+   *  per-job cancellation API, so this owner serializes native inference. Cancelling
+   *  the active request can then stop its process without terminating another request;
+   *  the next queued request restarts the resident process through ensureUp(). */
+  async transcribe(ctx: WhisperServerContext, req: WhisperInferenceRequest): Promise<Transcript> {
+    return this.inferenceMutex.runExclusive(async () => {
+      req.signal?.throwIfAborted()
+      // Cancelling one request's native inference. It must stay synchronous - it is an abort
+      // listener - and there is no caller to report a reclaim to, so the answer is dropped here
+      // deliberately rather than by omission.
+      const cancelNativeInference = (): void => {
+        void this.stopProcess()
+      }
+      req.signal?.addEventListener('abort', cancelNativeInference, { once: true })
+      try {
+        req.signal?.throwIfAborted()
+        await this.ensureUp(ctx)
+        req.signal?.throwIfAborted()
+        return await this.inference(req)
+      } finally {
+        req.signal?.removeEventListener('abort', cancelNativeInference)
+      }
+    })
+  }
+
+  /** Transcribe a 16 kHz mono WAV after the serialized owner loads its context. */
+  private async inference(req: WhisperInferenceRequest): Promise<Transcript> {
     this.clearIdleTimer()
     try {
-      const fields = buildInferenceFields(req)
+      const fields = buildWhisperInferenceFields(req)
       const form = new FormData()
-      const bytes = await fs.promises.readFile(req.wavPath)
+      const bytes = await fs.promises.readFile(req.wavPath, { signal: req.signal })
       // FormData wants a Blob; the audio part is named `file` (whisper-server's field).
       form.append('file', new Blob([bytes], { type: 'audio/wav' }), path.basename(req.wavPath))
       for (const [k, v] of Object.entries(fields)) form.append(k, v)
 
-      const res = await fetch(`${this.base()}/inference`, { method: 'POST', body: form })
+      const res = await fetch(`${this.base()}/inference`, {
+        method: 'POST',
+        body: form,
+        signal: req.signal
+      })
       if (!res.ok) throw new Error(`whisper-server rejected the request (HTTP ${res.status}).`)
       // Prefer JSON; fall back to raw text so a plain-text build still parses.
       const ctype = res.headers.get('content-type') ?? ''
       const body: unknown = ctype.includes('application/json') ? await res.json() : await res.text()
-      const { text } = parseInferenceResponse(body)
-      const lang = req.language && req.language !== 'auto' ? req.language : undefined
+      const { text } = parseWhisperInferenceResponse(body)
+      const lang = transcriptLanguage(req.language ?? 'auto')
       return { text, language: lang }
     } finally {
       this.armIdleTimer()
     }
   }
 
-  /** Stop the server now (model swap, shutdown, or memory reclaim). */
-  stop(): void {
+  /** Stop the server now (model swap, shutdown, or memory reclaim), and say whether it let go. */
+  async stop(): Promise<ResidentReclaim> {
     this.clearIdleTimer()
-    this.stopProcess()
+    return this.stopProcess()
   }
 
-  private stopProcess(): void {
-    if (this.server) {
-      try {
-        this.server.kill('SIGKILL')
-      } catch {
-        /* already gone */
-      }
-      this.server = null
-    }
+  /**
+   * Terminate the process and say whether the memory actually came back.
+   *
+   * This was `try { kill('SIGKILL') } catch { /* already gone *\/ }` followed by nulling the handle
+   * and the active key unconditionally - so a failed kill was indistinguishable from a successful
+   * one, and residency could admit the next model into memory nobody had released. A signal call
+   * not throwing is not evidence the process is gone; waiting for it to exit is.
+   *
+   * This object does stop managing the process, and that is deliberate - but it does NOT drop the
+   * reference, because "no longer managed" and "reclaimed" are different facts. A process that
+   * survives termination is retained by `teardown`, which is what lets every later call keep
+   * answering `reclaimed: false` until its exit is proven instead of inventing a release the moment
+   * the handle is gone.
+   */
+  private async stopProcess(): Promise<ResidentReclaim> {
+    const proc = this.server
+    this.server = null
     this.activeKey = null
+    // No process of our own to stop, but an earlier one may still be stranded: re-ask rather than
+    // assume, because "nothing here now" was exactly the false `true` this replaces.
+    if (!proc) return this.teardown.recheck()
+    return (await this.teardown.terminate(proc)).reclaim
   }
 
   private armIdleTimer(): void {
     this.clearIdleTimer()
+    if (
+      idleEvictionAction({ event: 'activity-finished', processAlive: this.server !== null }) !==
+      'arm'
+    )
+      return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      this.stop()
+      if (
+        idleEvictionAction({ event: 'timer-fired', processAlive: this.server !== null }) === 'evict'
+      )
+        // An idle eviction has no caller to report to; the next `ensureUp` spawns a replacement.
+        void this.stop()
     }, this.idleMs)
     // Don't let the eviction timer keep the Node event loop (or a test) alive.
     ;(this.idleTimer as unknown as { unref?: () => void }).unref?.()
@@ -318,60 +381,3 @@ class WhisperServerService {
 
 /** Shared singleton - callers depend on this, not on the class. */
 export const whisperServer = new WhisperServerService()
-
-/** TranscriptionService backed by the resident whisper-server. Same contract as
- *  WhisperCliTranscription (isAvailable / transcribe), so it drops in behind the
- *  select.ts seam. When the server binary isn't staged, isAvailable() is false and
- *  select.ts degrades to the one-shot whisper-cli - exactly like Parakeet does. */
-class WhisperServerTranscription implements TranscriptionService {
-  constructor(private readonly svc: WhisperServerService = whisperServer) {}
-
-  isAvailable(): boolean {
-    // Available only when BOTH the resident binary and a whisper ggml model exist.
-    // (whisperModel() returns null when no ggml model is downloaded.)
-    return !!this.svc.findBinary() && !!whisperModel()
-  }
-
-  async transcribe(input: { path: string }, opts: TranscribeOptions = {}): Promise<Transcript> {
-    const model =
-      opts.model && path.isAbsolute(opts.model) && fs.existsSync(opts.model)
-        ? opts.model
-        : whisperModel()
-    if (!model)
-      throw new Error('No transcription model found - download Whisper from Models first.')
-
-    // Ensure the resident server is warm on the intended model (loads once; a
-    // subsequent call with the same model is a no-op).
-    await this.svc.ensureUp({ modelPath: model })
-
-    // The server expects a decoded 16 kHz mono WAV. Reuse the exact ffmpeg re-encode
-    // whisper-cli.ts uses; skip it when the caller pre-converted (dictation interim ticks).
-    let wav = input.path
-    let tmp: string | null = null
-    if (!opts.alreadyWav16k) {
-      const ff = ffmpegBin()
-      if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
-      tmp = path.join(os.tmpdir(), `offgrid-stt-srv-${Date.now()}-${process.pid}.wav`)
-      try {
-        await execFileAsync(ff, decodeToWavArgs(input.path, tmp), { timeout: DECODE_TIMEOUT_MS })
-      } catch (e) {
-        fs.promises.unlink(tmp).catch(() => {})
-        throw e
-      }
-      wav = tmp
-    }
-
-    try {
-      return await this.svc.inference({
-        wavPath: wav,
-        language: opts.language,
-        prompt: opts.prompt
-      })
-    } finally {
-      if (tmp) fs.promises.unlink(tmp).catch(() => {})
-    }
-  }
-}
-
-/** Shared singleton for the resident-whisper TranscriptionService. */
-export const whisperServerTranscription: TranscriptionService = new WhisperServerTranscription()

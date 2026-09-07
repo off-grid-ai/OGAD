@@ -97,7 +97,7 @@ describe('macOS application trust', () => {
         OFFGRID_REQUIRE_RELEASE_TRUST: '1',
         APPLE_TEAM_ID: 'OTHERTEAM'
       })
-    ).toThrow("must match Off Grid's pinned signing team")
+    ).toThrow("must match Off Grid AI's pinned signing team")
   })
 
   it('accepts only the intended Developer ID team with hardened runtime', () => {

@@ -2,25 +2,49 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { ModelPicker } from '../ModelPicker'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
+import { ok } from '@offgrid/application'
 
 function stubApi(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ;(window as any).api = {
+  const models = [
+    {
+      id: 'kokoro',
+      name: 'Kokoro TTS 82M',
+      kind: 'voice',
+      artifacts: [{ name: 'kokoro.onnx', role: 'primary' }]
+    },
+    {
+      id: 'whisper',
+      name: 'Whisper Tiny',
+      kind: 'transcription',
+      artifacts: [{ name: 'whisper.bin', role: 'primary' }]
+    }
+  ]
+  const projection = modelControlSnapshot({
+    kinds: ['voice', 'transcription'],
+    models,
+    installed: ['kokoro', 'whisper'],
+    active: { speech: 'kokoro', transcription: 'whisper' }
+  })
+  ;(globalThis as unknown as { window: { api: unknown } }).window.api = {
+    getModelControlProjection: async () => projection,
+    controlModel: async (intent: {
+      type: string
+      surface?: 'speech' | 'transcription'
+      operationId: string
+    }) => {
+      if (intent.type === 'unload' && intent.surface) {
+        projection.active[intent.surface] = { ...projection.active[intent.surface], ready: false }
+      }
+      return ok({ status: 'completed', operationId: intent.operationId, projection })
+    },
+    getComputerUseActiveModels: async () => ({
+      strategy: 'separate_specialist',
+      strategyLabel: 'Separate specialist',
+      models: []
+    }),
     getModelCatalog: async () => ({
-      models: [
-        {
-          id: 'kokoro',
-          name: 'Kokoro TTS 82M',
-          kind: 'voice',
-          files: [{ name: 'kokoro.onnx', role: 'primary' }]
-        },
-        {
-          id: 'whisper',
-          name: 'Whisper Tiny',
-          kind: 'transcription',
-          files: [{ name: 'whisper.bin', role: 'primary' }]
-        }
-      ]
+      models
     }),
     getInstalledModels: async () => ['kokoro', 'whisper'],
     getActiveModel: async () => null,
@@ -33,8 +57,7 @@ describe('ModelPicker unload — per modality, independent', () => {
   beforeEach(stubApi)
   afterEach(() => {
     cleanup()
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window as any).api = undefined
+    ;(globalThis as unknown as { window: { api: unknown } }).window.api = undefined
   })
 
   it('keeps each modality unloaded independently (unloading one does not reset another)', async () => {

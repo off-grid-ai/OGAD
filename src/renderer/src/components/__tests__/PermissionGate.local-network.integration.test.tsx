@@ -4,10 +4,12 @@
  * Local Network recovery through the rendered Pro setup journey. macOS owns the permission and
  * System Settings; the Electron preload is the only controlled boundary.
  */
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PermissionGate } from '../PermissionGate'
+import { closeTaskWorkspace, openTaskSidePanel } from '../../lib/task-side-panel'
+import { installAppBoundary } from '../../__tests__/harness/app-boundary'
 
 let openLocalNetworkSettings: ReturnType<typeof vi.fn>
 let requestScreenRecordingPermission: ReturnType<typeof vi.fn>
@@ -31,31 +33,51 @@ beforeEach(() => {
     localNetwork: false,
     allGranted: false
   }
-  Object.defineProperty(window, 'api', {
-    configurable: true,
-    value: {
-      isPro: true,
-      getPermissionStatus: async () => permissionStatus,
-      checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
-      getActiveModel: async () => null,
-      getModelVisionStatus: async () => ({}),
-      proInvoke: async (channel: string) =>
-        channel === 'capture:status' ? { running: false, paused: false, visionReady: true } : null,
-      proOn: () => () => {},
-      onModelProgress: () => () => {},
-      openLocalNetworkSettings,
-      requestScreenRecordingPermission,
-      openScreenRecordingSettings,
-      relaunchForPermissions,
-      setupPlan: async () => null,
-      getLlmSettings: async () => ({ performanceMode: 'balanced' })
-    }
+  // The whole Electron preload comes from the canonical renderer boundary fixture; only the doors
+  // this journey drives are named here.
+  installAppBoundary({
+    isPro: true,
+    getPermissionStatus: async () => permissionStatus,
+    proInvoke: async (channel: string) =>
+      channel === 'capture:status' ? { running: false, paused: false, visionReady: true } : null,
+    openLocalNetworkSettings,
+    requestScreenRecordingPermission,
+    openScreenRecordingSettings,
+    relaunchForPermissions,
+    setupPlan: async () => null,
+    getLlmSettings: async () => ({ performanceMode: 'balanced' })
   })
 })
 
-afterEach(() => cleanup())
+afterEach(() => {
+  closeTaskWorkspace()
+  cleanup()
+})
 
 describe('<PermissionGate/> Local Network recovery', () => {
+  it('keeps the setup nudge inside Chat when the Task workspace is open', async () => {
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    HTMLElement.prototype.getBoundingClientRect = function (): DOMRect {
+      if (this.getAttribute('data-testid') === 'task-side-panel') {
+        return { left: 900, right: 1200, top: 0, bottom: 800, width: 300, height: 800 } as DOMRect
+      }
+      return originalRect.call(this)
+    }
+    openTaskSidePanel()
+    try {
+      render(
+        <PermissionGate>
+          <div data-testid="task-side-panel">Task workspace</div>
+        </PermissionGate>
+      )
+      const title = await screen.findByText('Allow Local Network access')
+      const nudge = title.closest('.fixed') as HTMLElement
+      await waitFor(() => expect(nudge.style.right).toBe(`${window.innerWidth - 900 + 16}px`))
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = originalRect
+    }
+  })
+
   it('keeps the app usable and routes the setup action to macOS Local Network settings', async () => {
     const user = userEvent.setup()
     render(

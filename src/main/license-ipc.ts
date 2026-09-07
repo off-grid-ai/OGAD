@@ -5,11 +5,16 @@
  * to unlock, so the canonical gate lives in main and the renderer reads it two
  * ways:
  *  - `pro:is-enabled` (SYNC) — preload's `isPro`, read once at load via sendSync.
- *  - `license:changed` (push) — fired on activate/deactivate/revalidate so the UI
- *    can prompt a relaunch (main-process pro features only attach at boot).
+ *  - `license:changed` (push) — fired on activate/deactivate/revalidate and at a
+ *    cached expiry deadline so the UI and paid runtime close in this session.
  */
 import { ipcMain, BrowserWindow, app, shell } from 'electron'
-import { proEnabled, proEntitlementBootstrapEnabled } from './bootstrap/loadProFeaturesMain'
+import {
+  deactivateProFeaturesMain,
+  loadProFeaturesMain,
+  proEnabled,
+  proEntitlementBootstrapEnabled
+} from './bootstrap/loadProFeaturesMain'
 import { requestApplicationRelaunch } from './shutdown'
 import {
   activateProByKey,
@@ -22,13 +27,42 @@ import {
   PRO_PAY_PAGE_URL,
   type ProLicenseInfo
 } from './licensing/license-service'
+import { effectiveProLicenseInfo } from './licensing/effective-license'
 
 export function setupLicenseIpc(): void {
-  // Push entitlement changes to every window so the UI can react / offer restart.
+  let entitlementRevision = 0
+  // Push entitlement changes to every window and stop live paid services when
+  // access closes.
   setLicenseChangeNotifier((info: ProLicenseInfo) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('license:changed', info)
+    const revision = ++entitlementRevision
+    const effectiveInfo = effectiveProLicenseInfo(info, proEnabled())
+    const publish = (current: ProLicenseInfo): void => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        try {
+          win.webContents.send('license:changed', current)
+        } catch (error) {
+          console.error('[pro] license observer failed', error)
+        }
+      }
     }
+    if (effectiveInfo.isPro) {
+      // Restore the paid runtime before the renderer receives access. This prevents a renewed
+      // session from showing controls whose main-process handlers are not ready yet.
+      void loadProFeaturesMain()
+        .then(() => {
+          if (revision !== entitlementRevision) return
+          const current = effectiveProLicenseInfo(getProLicenseInfo(), proEnabled())
+          if (current.isPro) publish(current)
+        })
+        .catch((error) => {
+          console.error('[pro] entitlement-gain activation failed', error)
+        })
+      return
+    }
+    publish(effectiveInfo)
+    void deactivateProFeaturesMain().catch((error) => {
+      console.error('[pro] entitlement-loss shutdown failed', error)
+    })
   })
 
   // SYNC: preload reads this once to seed window.api.isPro. Must be registered
@@ -40,7 +74,10 @@ export function setupLicenseIpc(): void {
     e.returnValue = proEntitlementBootstrapEnabled()
   })
 
-  ipcMain.handle('license:status', () => getProLicenseInfo())
+  ipcMain.handle('license:status', () => {
+    const info = getProLicenseInfo()
+    return effectiveProLicenseInfo(info, proEnabled())
+  })
   ipcMain.handle('license:activate', (_e, key: string) => activateProByKey(key))
   ipcMain.handle('license:list-devices', () => listProDevices())
   ipcMain.handle('license:deactivate', (_e, machineId: string) => deactivateProDevice(machineId))

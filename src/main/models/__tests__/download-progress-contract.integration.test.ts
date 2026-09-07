@@ -3,12 +3,12 @@
 // job, and a refusal that reaches the channel rather than only the caller.
 //
 // Real models-manager, real filesystem under a temp data dir, real queue. Only HTTP is controlled —
-// the one boundary outside Off Grid.
+// the one boundary outside Off Grid AI.
 //
 // Grounded in the macOS session of 2026-08-09: a refused download told nobody, so the card kept a
 // spinner at 0% for hours; and the percent was per-FILE, so a two-file model ran 0→100 twice and
 // the number meant something different on each side of the reset.
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,6 +16,7 @@ import path from 'node:path'
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-download-progress-'))
 const dataDir = path.join(testRoot, 'data')
 process.env.OFFGRID_DATA_DIR = dataDir
+fs.mkdirSync(path.join(dataDir, 'models'), { recursive: true })
 
 vi.mock('electron', () => ({
   app: {
@@ -31,13 +32,25 @@ vi.mock('electron', () => ({
   }
 }))
 
-const manager = await import('../../models-manager')
 const { CATALOG } = await import('@offgrid/models')
-type ModelDownloadProgress = import('../../models-manager').DownloadProgress
+type ModelDownloadProgress = import('./download-facade-test-client').DownloadProgress
 
 /** A real catalog model with TWO files — the shape the reset was visible on (weights + projector). */
-const twoFileModel = CATALOG.find((m) => m.files.length === 2)
-if (!twoFileModel) throw new Error('Model catalog needs a two-file fixture')
+const productionModel = CATALOG.find((m) => m.files.length === 2)
+if (!productionModel) throw new Error('Model catalog needs a two-file fixture')
+const productionIndex = CATALOG.indexOf(productionModel)
+const twoFileModel = {
+  ...productionModel,
+  files: productionModel.files.map((file, index) => ({
+    ...file,
+    sizeBytes: index === 0 ? 8 * 1024 * 1024 : 4 * 1024 * 1024
+  }))
+}
+CATALOG.splice(productionIndex, 1, twoFileModel)
+
+await import('../../model-services')
+const manager = await import('../../models-manager')
+const downloads = await import('./download-facade-test-client')
 
 interface Pending {
   url: string
@@ -47,14 +60,29 @@ interface Pending {
 /** HTTP under the test's control, so each file can be served on cue and the progress in between read. */
 function controlledHttp(): Pending[] {
   const pending: Pending[] = []
+  const revision = '0123456789abcdef0123456789abcdef01234567'
   vi.stubGlobal(
     'fetch',
-    vi.fn(
-      (input: string | URL | Request) =>
-        new Promise<Response>((resolve) => {
-          pending.push({ url: String(input), resolve })
-        })
-    )
+    vi.fn((input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.includes('/api/models/') && url.includes('/revision/')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              sha: revision,
+              siblings: twoFileModel.files.map((file) => ({
+                rfilename: decodeURIComponent(new URL(file.url).pathname.split('/').at(-1)!),
+                size: file.sizeBytes
+              }))
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          )
+        )
+      }
+      return new Promise<Response>((resolve) => {
+        pending.push({ url, resolve })
+      })
+    })
   )
   return pending
 }
@@ -74,8 +102,16 @@ function bodyOf(name: string, bytes: number): Buffer {
     : Buffer.alloc(bytes, 7)
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals()
+  await manager.deleteModel(twoFileModel.id)
+  await downloads.clearDownload(twoFileModel.id)
+})
+
+afterAll(async () => {
+  await downloads.shutdownModelDownloads()
+  CATALOG.splice(productionIndex, 1, productionModel)
+  fs.rmSync(testRoot, { recursive: true, force: true })
 })
 
 describe('the progress a download publishes', () => {
@@ -87,7 +123,7 @@ describe('the progress a download publishes', () => {
     const first = bodyOf(twoFileModel.files[0]!.name, 8 * 1024 * 1024)
     const second = bodyOf(twoFileModel.files[1]!.name, 4 * 1024 * 1024)
 
-    const done = manager.downloadModel(twoFileModel.id, (e) => events.push(e))
+    const done = downloads.downloadModel(twoFileModel.id, (e) => events.push(e))
 
     await waitFor(() => pending.length === 1)
     pending[0]!.resolve(
@@ -100,7 +136,9 @@ describe('the progress a download publishes', () => {
 
     // The first file has finished and the job is NOT done: reporting 100 here is what made the
     // number restart on the file after it. The card also learns which part of how many is moving.
-    const afterFirst = events.filter((e) => e.status === 'downloading' && e.downloadedMB).at(-1)!
+    const afterFirst = events
+      .filter((e) => e.status === 'downloading' && e.fileIndex === 1 && e.downloadedMB)
+      .at(-1)!
     expect(afterFirst.percent).toBeLessThan(100)
     expect(afterFirst.fileIndex).toBe(1)
     expect(afterFirst.fileCount).toBe(2)
@@ -126,26 +164,30 @@ describe('the progress a download publishes', () => {
     // And the bytes are cumulative: the second file continues the count rather than starting over,
     // which is the same reset seen from the other side.
     const lastOfFile = (index: number): number =>
-      Number(events.filter((e) => e.fileIndex === index && e.downloadedMB).at(-1)!.downloadedMB)
+      Number(
+        events
+          .filter((e) => e.status === 'downloading' && e.fileIndex === index && e.downloadedMB)
+          .at(-1)!.downloadedMB
+      )
     expect(lastOfFile(2)).toBeGreaterThan(lastOfFile(1))
   })
 
   // LAST in this file on purpose: closing the queue is process-wide and permanent, so any download
   // after it would be refused too. Splitting it into its own file would duplicate the whole setup.
-  it('publishes a refusal instead of returning it silently, once downloads are closed', async () => {
+  it('returns a refusal without retaining active work after the application is closed', async () => {
     const events: ModelDownloadProgress[] = []
 
-    await manager.shutdownModelDownloads() // the application is going away
+    await downloads.shutdownModelDownloads() // the application is going away
 
-    const result = await manager.downloadModel(twoFileModel.id, (e) => events.push(e))
+    const result = await downloads.downloadModel(twoFileModel.id, (e) => events.push(e))
 
     // The caller is told, as before...
     expect(result.success).toBe(false)
-    // ...and so is every watcher of the channel, which is the part the screen needs. Without this
-    // the card keeps whatever it assumed when you clicked, forever.
-    expect(events).toContainEqual(
-      expect.objectContaining({ modelId: twoFileModel.id, status: 'failed', percent: 0 })
-    )
-    expect(manager.downloadStatus(twoFileModel.id)?.status).toBe('failed')
+    // The command must still fail and the retained projection must not claim that work is active.
+    // A stopped application does not publish or persist new work. The typed command result is the
+    // caller's failure signal and clears the renderer's optimistic queued state.
+    const stored = await downloads.downloadStatus(twoFileModel.id)
+    expect(stored?.status).not.toBe('downloading')
+    expect(events).toEqual([])
   })
 })

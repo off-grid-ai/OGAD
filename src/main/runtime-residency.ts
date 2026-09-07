@@ -10,17 +10,20 @@
 // Concrete engines map onto these: LLM = llama-server; image = sd-cli/sd-server or
 // mflux; STT = whisper-cli / whisper-server (resident) / parakeet; TTS = kokoro.
 //
-// Pure policy lives in runtime-residency-logic.ts. This module is the thin SQLite
+// Pure policy lives in @offgrid/models. This module is the thin SQLite
 // settings wrapper used by production runtimes.
 
 import { getSetting, saveSetting } from './database'
 import {
-  isResidencyLocked,
-  normalizeResidency,
-  type Modality,
-  type ResidencyMode
-} from './runtime-residency-logic'
-export { type Modality, type ResidencyMode } from './runtime-residency-logic'
+  isRuntimeResidencyLocked as isResidencyLocked,
+  normalizeRuntimeResidency as normalizeResidency,
+  type RuntimeModality as Modality,
+  type PersistedResidencyPreference as ResidencyMode
+} from '@offgrid/models'
+export type {
+  RuntimeModality as Modality,
+  PersistedResidencyPreference as ResidencyMode
+} from '@offgrid/models'
 
 const SETTING_KEY = 'runtime:residency'
 

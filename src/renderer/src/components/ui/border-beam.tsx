@@ -54,7 +54,7 @@ export const BorderBeam = ({
   size = 50,
   delay = 0,
   duration = 6,
-  // Off Grid is emerald-only: the beam rides the brand accent (theme-aware via
+  // Off Grid AI is emerald-only: the beam rides the brand accent (theme-aware via
   // the --og-* tokens), never the stock orange/purple gradient.
   colorFrom = 'var(--og-primary-light)',
   colorTo = 'var(--og-primary)',

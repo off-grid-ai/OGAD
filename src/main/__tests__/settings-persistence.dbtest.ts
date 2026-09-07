@@ -3,7 +3,7 @@
  *
  * The test controls only Electron and electron-updater, which are process/OS/network
  * boundaries. Production update handlers write through the real database module,
- * the database is closed, every Off Grid module is reloaded, and the production
+ * the database is closed, every Off Grid AI module is reloaded, and the production
  * read handler must restore the same values from disk.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

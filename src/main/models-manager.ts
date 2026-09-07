@@ -5,16 +5,7 @@
 import fs from 'fs'
 import path from 'path'
 import { llm } from './llm'
-import { isValidGgufFile } from './models/gguf'
-import { pumpToFile } from './models/download-pump'
-import { downloadIntegrityError, sha256IntegrityError } from './models/download-verify'
-import { downloadFailureMessage, isStorageCapacityError } from './models/download-error'
-import {
-  DOWNLOAD_INTERRUPTED_ERROR,
-  modelDownloadQueue,
-  shutdownModelDownloads
-} from './models/download-queue'
-import { getAllActiveModals, setActiveModal as setModal, type Modality } from './active-models'
+import { verifyArtifactFile } from './models/gguf'
 import {
   recordDownloaded,
   removeDownloaded,
@@ -24,56 +15,156 @@ import {
   reconcileDownloadedModelRegistry,
   type DownloadedModel
 } from './downloaded-models'
+import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
 import {
+  artifactVerificationError,
+  findDownloadedModelVariant as downloadedVariant,
+  type LocalModelImportPorts,
+  type ModelLibraryRemovalPorts,
+  type ModelTransferRegistrationPorts,
+  type TransferableModelFileAccess,
+  type ModelMetadataRepairCommandPorts,
+  type ModelLibraryRemovalTarget,
   mergeCatalog,
+  workspaceRouteId,
+  catalogEntryForIdentifier,
   installedIds,
   buildDiskEntry,
   primaryFileName,
   protectedNames,
   scanModelDir,
-  modalityForModel,
-  modalSelectionMatches,
   isChatLoadable,
   visionStatus,
   projectorToHeal,
   isProjectorFileName,
+  modelSelectionRefusal,
+  specialistReclassificationModality,
+  transferredProjectorRepair,
   type CatalogEntry,
-  type VisionStatus
-} from './models/catalog-logic'
-import { writeDiagnosticLog } from './diagnostics-log'
-import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
+  type HFSearchResult,
+  type ModelCapabilities,
+  type ModelModality,
+  type Modality,
+  type VisionStatus,
+  isLocalLibraryModelId
+} from '@offgrid/models'
+import type { ModelControlCatalogModel } from '@offgrid/application'
+import type { RemoteVisionInventoryModel } from '../shared/remote-vision-server'
+import type { ModelImportResultContract } from '../shared/ipc-contracts'
+import { registerDesktopModelManagerPorts } from './model-manager-ports'
+import { desktopModelSelectionPersistence } from './model-selection-persistence'
+import { platformFetch } from '@offgrid/models/fetch'
+import { desktopImageRuntimeIdentity } from './models/image-runtime-identity'
+import { modelSearchKind } from './models/model-search-kind'
+import {
+  desktopDownloadMetadataRepair,
+  registerDesktopDownloadMetadataRepairPorts,
+  type DesktopProjectorRepair
+} from './models/desktop-model-download-ports'
+import { LocalModelRegistry, type LocalModelRegistryEntry } from './models/local-model-registry'
+import { MODEL_FILE_EXTENSION, isGgufFile } from '@offgrid/models'
+import {
+  desktopActiveModalities,
+  desktopModels,
+  modelsFailureMessage,
+  refreshDesktopModels,
+  selectDesktopModel
+} from './composition/application-access'
 
-export interface DownloadProgress {
-  modelId: string
-  percent?: number
-  status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
-  currentFile?: string
-  /** Which file of the job is in flight, 1-based, and how many the job has. percent/downloadedMB
-   *  measure the WHOLE job, so these exist to say what the named file is a part of. */
-  fileIndex?: number
-  fileCount?: number
-  downloadedMB?: string
-  totalMB?: string
-  error?: string
+export type DesktopModelControlCatalogModel = Omit<ModelControlCatalogModel, 'artifacts'> & {
+  files?: Array<{
+    name: string
+    role?: 'primary' | 'mmproj' | 'tokenizer' | 'aux'
+    sizeBytes?: number
+    url?: string
+    sha256?: string
+  }>
+  remoteModelId?: string
+  capabilities?: ModelCapabilities
 }
-export type ProgressCb = (p: DownloadProgress) => void
 
-const downloadQueue = modelDownloadQueue
-const lastProgress = new Map<string, DownloadProgress>()
+function isModelControlCatalogModel(value: unknown): value is DesktopModelControlCatalogModel {
+  if (!value || typeof value !== 'object') return false
+  if (
+    !('id' in value) ||
+    typeof value.id !== 'string' ||
+    !('name' in value) ||
+    typeof value.name !== 'string' ||
+    !('kind' in value) ||
+    typeof value.kind !== 'string' ||
+    !['text', 'vision', 'image', 'voice', 'transcription', 'computer_use'].includes(value.kind)
+  ) {
+    return false
+  }
+  const files = 'files' in value ? value.files : undefined
+  return (
+    files === undefined ||
+    (Array.isArray(files) &&
+      files.every(
+        (file) =>
+          Boolean(file) &&
+          typeof file === 'object' &&
+          'name' in file &&
+          typeof file.name === 'string' &&
+          (!('url' in file) || typeof file.url === 'string') &&
+          (!('sizeBytes' in file) || typeof file.sizeBytes === 'number') &&
+          (!('sha256' in file) || typeof file.sha256 === 'string') &&
+          (!('role' in file) ||
+            file.role === 'primary' ||
+            file.role === 'mmproj' ||
+            file.role === 'tokenizer' ||
+            file.role === 'aux')
+      ))
+  )
+}
 
-export { DOWNLOAD_INTERRUPTED_ERROR, shutdownModelDownloads }
+export function requireModelControlCatalogModels(
+  values: readonly unknown[]
+): DesktopModelControlCatalogModel[] {
+  return values.map((value, index) => {
+    if (!isModelControlCatalogModel(value)) {
+      throw new Error(`Model-control catalog entry ${String(index)} is invalid.`)
+    }
+    return value
+  })
+}
 
 function activeModelFile(): string {
   return path.join(llm.getModelsDir(), 'active-model.json')
 }
 
-/** Size (bytes) of a file in the models dir; 0 when absent/unreadable. The single
+/** Size (bytes) of a file in the models dir; 0 only when absent. The single
  *  FS probe injected into the pure catalog logic. */
+export class ModelFilesystemProbeError extends Error {
+  readonly code = 'MODEL_FILESYSTEM_PROBE_FAILED'
+  readonly filePath: string
+
+  constructor(filePath: string, cause: unknown) {
+    super(`Could not inspect the model artifact at ${filePath}.`, { cause })
+    this.name = 'ModelFilesystemProbeError'
+    this.filePath = filePath
+  }
+}
+
 function fileSizeOf(dir: string, name: string): number {
+  const filePath = path.join(dir, name)
   try {
-    return fs.statSync(path.join(dir, name)).size
-  } catch {
-    return 0
+    return fs.statSync(filePath).size
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return 0
+    console.error('[models] Failed to inspect model artifact:', filePath, cause)
+    throw new ModelFilesystemProbeError(filePath, cause)
+  }
+}
+
+export class ModelIdentityResolutionError extends Error {
+  readonly code = 'MODEL_IDENTITY_RESOLUTION_FAILED'
+  readonly modelId: string
+
+  constructor(modelId: string, cause: unknown) {
+    super(`Could not resolve the catalog identity for model ${modelId}.`, { cause })
+    this.name = 'ModelIdentityResolutionError'
+    this.modelId = modelId
   }
 }
 
@@ -85,12 +176,129 @@ function downloadedProjector(model: DownloadedModel): string | undefined {
   return model.files.find(isProjectorFileName)
 }
 
-/** Exact id first; a unique family match keeps a stale pre-migration selection working. */
-function downloadedVariant(models: DownloadedModel[], id: string): DownloadedModel | undefined {
-  const exact = models.find((model) => model.id === id)
-  if (exact) return exact
-  const family = models.filter((model) => model.familyId === id)
-  return family.length === 1 ? family[0] : undefined
+/** A route id, or any id that names a remote route, is already canonical (the workspace decides). */
+function isCanonicalSelectionId(modelId: string): boolean {
+  const model = desktopModels.lookup(modelId)
+  return Boolean(model && (model.source === 'remote' || workspaceRouteId(model) === modelId))
+}
+
+/** Resolve a stale family alias at the model-library adapter boundary. */
+export async function resolveCanonicalModelSelectionId(modelId: string): Promise<string> {
+  if (isLocalLibraryModelId(modelId) || isCanonicalSelectionId(modelId)) return modelId
+  const { CATALOG } = await import('@offgrid/models')
+  const downloaded = reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG)
+  return downloadedVariant(downloaded, modelId)?.id ?? modelId
+}
+
+function localArtifactName(value: unknown): string | null {
+  if (typeof value !== 'string' || !value || path.basename(value) !== value) return null
+  return value
+}
+
+export class ActiveModelMetadataError extends Error {
+  readonly code = 'ACTIVE_MODEL_METADATA_CORRUPT'
+
+  constructor(
+    readonly filePath: string,
+    message: string
+  ) {
+    super(message)
+    this.name = 'ActiveModelMetadataError'
+  }
+}
+
+interface ActiveModelArtifactConfig {
+  id: string
+  primary: string
+  mmproj: string | null
+}
+
+/** Read and validate the legacy native text-runtime projection.
+ *  An absent file means there is no local selection. A present partial or unsafe
+ *  projection is damaged state and must stop storage cleanup and runtime repair. */
+function readActiveModelArtifactConfig(): ActiveModelArtifactConfig | null {
+  const value = desktopModelSelectionPersistence.readLegacyTextConfigIfPresent()
+  if (!value) return null
+  const hasState =
+    value.id !== undefined || value.primary !== undefined || value.mmproj !== undefined
+  const id = typeof value.id === 'string' && value.id.trim() ? value.id : null
+  const primary = localArtifactName(value.primary)
+  const mmproj = value.mmproj == null ? null : localArtifactName(value.mmproj)
+  if (!hasState || !id || !primary || (value.mmproj != null && !mmproj)) {
+    throw new ActiveModelMetadataError(
+      activeModelFile(),
+      'The active model metadata is damaged. Repair it before changing model files.'
+    )
+  }
+  return { id, primary, mmproj }
+}
+
+/**
+ * Read-only migration projection for profiles created before local/downloaded inventory was
+ * authoritative. The legacy selection files contribute artifact facts only; Shared inventory
+ * remains the sole owner of readiness and canonical route selection.
+ */
+function legacySelectedLocalInventory(dir: string): CatalogEntry[] {
+  const projected: CatalogEntry[] = []
+  const text = desktopModelSelectionPersistence.readLegacyTextConfig()
+  const textId = typeof text.id === 'string' && text.id ? text.id : null
+  const primary = localArtifactName(text.primary)
+  const projector = localArtifactName(text.mmproj)
+  if (textId && primary && fileSizeOf(dir, primary) > 0) {
+    const files = [
+      { name: primary, sizeBytes: fileSizeOf(dir, primary), role: 'primary' as const },
+      ...(projector && fileSizeOf(dir, projector) > 0
+        ? [{ name: projector, sizeBytes: fileSizeOf(dir, projector), role: 'mmproj' as const }]
+        : [])
+    ]
+    projected.push({
+      id: textId,
+      name: textId,
+      kind: projector ? 'vision' : 'text',
+      files
+    } as CatalogEntry)
+  }
+
+  const imageId = desktopModelSelectionPersistence.projectedModelId('image')
+  const imageArtifact = localArtifactName(imageId)
+  if (imageId && imageArtifact && fileSizeOf(dir, imageArtifact) > 0) {
+    projected.push({
+      id: imageId,
+      name: imageId,
+      kind: 'image',
+      files: [{ name: imageArtifact, sizeBytes: fileSizeOf(dir, imageArtifact), role: 'primary' }]
+    } as CatalogEntry)
+  }
+  return projected
+}
+
+function uniqueLegacySelectedInventory(
+  dir: string,
+  knownModels: readonly CatalogEntry[]
+): CatalogEntry[] {
+  const knownIds = new Set(knownModels.map((model) => model.id))
+  const knownArtifacts = new Set(
+    knownModels.flatMap((model) => model.files.map((file) => file.name))
+  )
+  return legacySelectedLocalInventory(dir).filter(
+    (model) => !knownIds.has(model.id) && !model.files.some((file) => knownArtifacts.has(file.name))
+  )
+}
+
+/** Remote rows for the catalog surfaces: the workspace's rows plus Desktop presentation. */
+function remoteCatalogEntries(): RemoteVisionInventoryModel[] {
+  return desktopModels.remoteCatalogRows().map((row) => ({
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    org: row.serverName,
+    description: `Runs through ${row.serverName}.`,
+    files: [],
+    tags: ['Remote'],
+    remoteServerId: row.remoteServerId,
+    remoteModelId: row.remoteModelId,
+    remoteCapabilities: row.remoteCapabilities
+  }))
 }
 
 export async function getCatalog(): Promise<{ kinds: readonly string[]; models: unknown[] }> {
@@ -101,15 +309,64 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   // catalog) in that exact order - decision in catalog-logic, filesystem probe
   // injected as a closure so it stays pure.
   const present = (name: string): boolean => fileSizeOf(dir, name) > 0
-  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG)
   const models = mergeCatalog({
     locals: getLocalModels(),
     downloaded,
     installedDownloadedIds: installedDownloadedIds(dir),
-    catalog: CATALOG as unknown as CatalogEntry[],
+    catalog: CATALOG,
     present
   })
-  return { kinds: MODEL_KINDS, models }
+  const remoteModels = remoteCatalogEntries()
+  const legacySelected = uniqueLegacySelectedInventory(dir, [...models, ...remoteModels])
+  return { kinds: MODEL_KINDS, models: [...models, ...legacySelected, ...remoteModels] }
+}
+
+/** Read Desktop catalog facts without reaching into Computer Use composition. */
+export async function getModelControlCatalogFacts(): Promise<{
+  catalog: Awaited<ReturnType<typeof getCatalog>>
+  installed: string[]
+}> {
+  await refreshDesktopModels()
+  const [catalog, installed] = await Promise.all([getCatalog(), listInstalled()])
+  return { catalog, installed }
+}
+
+export interface ModelIdentity {
+  modelId: string
+  modelName: string
+}
+
+interface ModelIdentityCatalogEntry {
+  id: string
+  name?: string
+  remoteServerId?: string
+  remoteModelId?: string
+}
+
+/** Resolve one canonical selection against its exact local or server-owned catalog identity. */
+export function projectModelIdentity(
+  modelId: string,
+  catalog: readonly ModelIdentityCatalogEntry[]
+): ModelIdentity | null {
+  // Pure projection over the catalog rows; shared owns how an identifier names a row.
+  const model = catalogEntryForIdentifier(modelId, catalog)
+  const modelName = model?.name?.trim()
+  return model && modelName ? { modelId, modelName } : null
+}
+
+/** Resolve a captured model ID to its display name without consulting which
+ * model is active now. Task runs use this once, then persist the result. */
+export async function resolveModelIdentity(modelId: string): Promise<ModelIdentity> {
+  try {
+    const catalog = (await getCatalog()).models as ModelIdentityCatalogEntry[]
+    const identity = projectModelIdentity(modelId, catalog)
+    if (!identity) throw new Error('The selected model is absent from the model-control catalog.')
+    return identity
+  } catch (cause) {
+    console.error('[models] Failed to resolve model identity:', modelId, cause)
+    throw new ModelIdentityResolutionError(modelId, cause)
+  }
 }
 
 /** Per-model vision status for every vision-CAPABLE model, keyed by id. supportsVision
@@ -121,12 +378,12 @@ export async function getVisionStatuses(): Promise<Record<string, VisionStatus>>
   const { CATALOG } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
   const present = (name: string): boolean => fileSizeOf(dir, name) > 0
-  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG)
   const merged = mergeCatalog({
     locals: getLocalModels(),
     downloaded,
     installedDownloadedIds: installedDownloadedIds(dir),
-    catalog: CATALOG as unknown as CatalogEntry[],
+    catalog: CATALOG,
     present
   }) as CatalogEntry[]
   const out: Record<string, VisionStatus> = {}
@@ -139,293 +396,55 @@ export async function getVisionStatuses(): Promise<Record<string, VisionStatus>>
   return out
 }
 
-/** Catalog ids (plus imported local ids) whose files are fully present on disk. */
+/** Canonical ids installed through file-backed stores or their owning native runtime. */
 export async function listInstalled(): Promise<string[]> {
   const { CATALOG } = await import('@offgrid/models')
   const { isMfluxModelCached } = await import('./mflux')
   const dir = llm.getModelsDir()
-  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
-  return installedIds({
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG)
+  const localInstalled = installedIds({
     locals: getLocalModels(),
     installedDownloadedIds: installedDownloadedIds(dir),
     downloaded,
-    catalog: CATALOG as unknown as CatalogEntry[],
+    catalog: CATALOG,
     present: (name) => fileSizeOf(dir, name) > 0,
     mfluxCached: (id) => isMfluxModelCached(id)
   })
+  const remoteInstalled = remoteCatalogEntries().map((model) => model.id)
+  const { inspectTtsRuntimeState } = await import('./tts')
+  const runtimeInstalled = inspectTtsRuntimeState().installed
+    ? CATALOG.filter(
+        (model) =>
+          model.kind === 'voice' &&
+          model.runtime === 'executorch' &&
+          model.artifactDelivery === 'runtime'
+      ).map((model) => model.id)
+    : []
+  const knownModels = mergeCatalog({
+    locals: getLocalModels(),
+    downloaded,
+    installedDownloadedIds: installedDownloadedIds(dir),
+    catalog: CATALOG,
+    present: (name) => fileSizeOf(dir, name) > 0
+  })
+  const legacyInstalled = uniqueLegacySelectedInventory(dir, knownModels).map((model) => model.id)
+  return [
+    ...new Set([...localInstalled, ...legacyInstalled, ...remoteInstalled, ...runtimeInstalled])
+  ]
 }
 
-export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
+export async function searchModels(query: string, kind?: string): Promise<HFSearchResult[]> {
   try {
     const { searchHuggingFace } = await import('@offgrid/models')
-    return await searchHuggingFace(query, { limit: 30, kind: kind as never })
+    return await searchHuggingFace(query, {
+      limit: 30,
+      kind: modelSearchKind(kind),
+      fetchImpl: platformFetch
+    })
   } catch (err) {
     console.error('[models] HF search failed:', err)
     return []
   }
-}
-
-export function downloadStatus(modelId: string): DownloadProgress | null {
-  return lastProgress.get(modelId) ?? null
-}
-
-export function cancelDownload(modelId: string): boolean {
-  const cancelled = downloadQueue.cancel(modelId)
-  writeDiagnosticLog('models.download', 'cancel.requested', { modelId, cancelled })
-  return cancelled
-}
-
-/** A download refused before it ever reached the queue is still an OUTCOME the watchers must see.
- *  The refusal used to be returned to the caller only, so the status registry kept whatever the UI
- *  had assumed and the card sat on a spinner forever. Publishing 'failed' the same way a mid-transfer
- *  failure does means every client — the screen, a headless poller, the registry — learns the same
- *  thing from one place, whether the download died at byte zero or at the last one. */
-function publishRefusal(
-  modelId: string,
-  error: string,
-  onProgress?: ProgressCb
-): { success: false; error: string } {
-  const p: DownloadProgress = { modelId, status: 'failed', percent: 0, error }
-  lastProgress.set(modelId, p)
-  onProgress?.(p)
-  return { success: false, error }
-}
-
-/** Download a catalog entry or any Hugging Face repo id. Progress via callback
- *  AND a status registry (so a headless poller can read it). */
-export async function downloadModel(
-  modelId: string,
-  onProgress?: ProgressCb
-): Promise<{ success: boolean; error?: string }> {
-  if (!downloadQueue.isAccepting()) {
-    writeDiagnosticLog('models.download', 'request.rejected', {
-      modelId,
-      reason: 'application_shutdown'
-    })
-    return publishRefusal(modelId, DOWNLOAD_INTERRUPTED_ERROR, onProgress)
-  }
-  const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
-  const inCatalog = CATALOG.find((m) => m.id === modelId)
-  const entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
-  if (!entry) {
-    writeDiagnosticLog('models.download', 'request.rejected', { modelId, reason: 'unknown_model' })
-    return publishRefusal(modelId, 'unknown model', onProgress)
-  }
-  writeDiagnosticLog('models.download', 'request.accepted', {
-    modelId,
-    kind: entry.kind,
-    files: entry.files.length
-  })
-
-  const dir = llm.getModelsDir()
-  fs.mkdirSync(dir, { recursive: true })
-  ensureRegistryLoaded()
-  // Re-entrancy guard (before any status emit / queue registration): a second
-  // download of the same id would write into the SAME .part (interleaved writes →
-  // corrupt file). The queue tracks both waiting and active ids, so double-clicking
-  // a queued card cannot enqueue it twice either.
-  if (downloadQueue.has(modelId)) {
-    writeDiagnosticLog('models.download', 'request.rejected', {
-      modelId,
-      reason: 'already_downloading'
-    })
-    return { success: false, error: 'already downloading' }
-  }
-  let loggedStatus: DownloadProgress['status'] | undefined
-  const send = (data: Partial<DownloadProgress>): void => {
-    const p: DownloadProgress = { modelId, ...data }
-    lastProgress.set(modelId, p)
-    onProgress?.(p)
-    if (p.status && p.status !== loggedStatus) {
-      loggedStatus = p.status
-      writeDiagnosticLog(
-        'models.download',
-        `status.${p.status}`,
-        { modelId, error: p.error, percent: p.percent },
-        p.status === 'failed' ? 'error' : 'info'
-      )
-    }
-    // Queue/start persistence happens in the lifecycle callback below. Persist
-    // terminal transitions here, but skip high-frequency transfer ticks.
-    if (p.status && p.status !== 'queued' && p.status !== 'downloading') persistRegistry()
-  }
-  const interruptedResult = (
-    signal: AbortSignal,
-    activePartPath: string | null
-  ): { success: false; error: string } => {
-    const interrupted = signal.reason === DOWNLOAD_INTERRUPTED_ERROR
-    if (!interrupted && activePartPath) fs.rmSync(activePartPath, { force: true })
-    const error = interrupted ? DOWNLOAD_INTERRUPTED_ERROR : 'cancelled'
-    send(interrupted ? { status: 'failed', error } : { status: 'cancelled' })
-    return { success: false, error }
-  }
-  return downloadQueue.enqueue(
-    modelId,
-    async (signal) => {
-      if (entry.runtime === 'mflux') {
-        try {
-          const { downloadMfluxModel } = await import('./mflux')
-          await downloadMfluxModel(modelId, (pct: number) =>
-            send({ percent: pct, status: 'downloading' })
-          )
-          send({ percent: 100, status: 'completed' })
-          return { success: true }
-        } catch (err) {
-          const error = downloadFailureMessage(err)
-          send({ status: 'failed', error })
-          return { success: false, error }
-        }
-      }
-
-      let activePartPath: string | null = null
-      let activePartRecoverable = true
-      try {
-        // Decide the JOB before reporting on it. A model is several files, and percent used to be
-        // per-file: a two-file download ran 0→100 for the weights and then 0→100 again for the
-        // projector, so the number reset halfway and meant something different each time. The job
-        // is the set of files this run must actually fetch (a file already on disk is not work),
-        // and one percent measures the whole of it.
-        const pending = entry.files.filter((file) => {
-          const dest = path.join(dir, file.name)
-          const present = fs.existsSync(dest) && fs.statSync(dest).size > 0
-          if (present) {
-            writeDiagnosticLog('models.download', 'file.skipped', {
-              modelId,
-              file: file.name,
-              reason: 'already_present'
-            })
-          }
-          return !present
-        })
-        // Catalog sizes plan the denominator; the file being fetched contributes its REAL
-        // content-length instead, so the total sharpens as the job proceeds rather than drifting.
-        const plannedBytes = pending.map((file) => file.sizeBytes ?? 0)
-        const laterBytes = (index: number): number =>
-          plannedBytes.slice(index + 1).reduce((sum, bytes) => sum + bytes, 0)
-        let jobDoneBytes = 0
-        for (const [fileIndex, file] of pending.entries()) {
-          const dest = path.join(dir, file.name)
-          const partPath = `${dest}.part`
-          activePartPath = partPath
-          activePartRecoverable = true
-          // Resume from a partial .part if one exists (e.g. download interrupted by a
-          // quit/crash) via an HTTP Range request, so we don't re-fetch GBs.
-          let resumeFrom = 0
-          try {
-            if (fs.existsSync(partPath)) resumeFrom = fs.statSync(partPath).size
-          } catch {
-            /* fresh */
-          }
-          writeDiagnosticLog('models.download', 'file.started', {
-            modelId,
-            file: file.name,
-            resumeBytes: resumeFrom
-          })
-          const res = await fetch(file.url, {
-            signal,
-            headers: resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : undefined
-          })
-          if (!res.ok || !res.body) throw new Error(`HTTP ${res.status} for ${file.name}`)
-          // Server honored the range (206) → append; otherwise (200) start over.
-          const append = resumeFrom > 0 && res.status === 206
-          const remaining = Number(res.headers.get('content-length') ?? 0)
-          const total = (append ? resumeFrom : 0) + remaining
-          const out = fs.createWriteStream(partPath, append ? { flags: 'a' } : {})
-          let written = append ? resumeFrom : 0
-          const reader = res.body.getReader()
-          // pumpToFile owns the write-stream error path: a disk-full/EIO 'error' becomes
-          // a rejection (caught below → status 'failed') instead of crashing the main
-          // process, and never hangs on a 'finish' that won't come.
-          await pumpToFile(reader, out, (n) => {
-            written += n
-            const jobDone = jobDoneBytes + written
-            const jobTotal = jobDoneBytes + total + laterBytes(fileIndex)
-            send({
-              currentFile: file.name,
-              fileIndex: fileIndex + 1,
-              fileCount: pending.length,
-              percent: jobTotal ? Math.round((jobDone / jobTotal) * 100) : 0,
-              downloadedMB: (jobDone / 1048576).toFixed(1),
-              totalMB: jobTotal ? (jobTotal / 1048576).toFixed(1) : '?',
-              status: 'downloading'
-            })
-          })
-          if (signal.aborted) {
-            return interruptedResult(signal, partPath)
-          }
-          // Verify the file is complete + valid BEFORE promoting it — never mark a
-          // truncated/corrupt download installed (it loads as a blank "Chat model Down").
-          const integrityErr = downloadIntegrityError(file.name, written, total, partPath)
-          if (integrityErr) {
-            activePartRecoverable = false
-            throw new Error(integrityErr)
-          }
-          // Content check: when the file carries an expected SHA-256 (e.g. HF's lfs
-          // oid), verify the bytes match — catches silent corruption the byte-count +
-          // magic check can't. Skipped when no hash is known.
-          const checksumErr = await sha256IntegrityError(
-            file.name,
-            partPath,
-            (file as { sha256?: string }).sha256
-          )
-          if (checksumErr) {
-            activePartRecoverable = false
-            throw new Error(checksumErr)
-          }
-          fs.renameSync(partPath, dest)
-          activePartPath = null
-          jobDoneBytes += written // this file's real bytes now count toward the job, not a new 0%
-          writeDiagnosticLog('models.download', 'file.completed', {
-            modelId,
-            file: file.name,
-            bytes: written
-          })
-        }
-        if (signal.aborted) return interruptedResult(signal, activePartPath)
-        // Register a free-form Hugging Face download (not a catalog entry) so it counts
-        // as installed + activatable and its files aren't flagged as "unused". Catalog
-        // models are recognized by CATALOG membership already, so skip them.
-        if (!inCatalog) {
-          recordDownloaded(dir, {
-            id: modelId,
-            name: entry.name,
-            kind: entry.kind,
-            files: entry.files.map((f) => f.name)
-          })
-        }
-        // If this download added the projector for the active chat model, turn its
-        // vision on now (main-side, so it works even when no Models screen is open).
-        await reconcileActiveModelProjector().catch(() => false)
-        send({ percent: 100, status: 'completed' })
-        return { success: true }
-      } catch (err) {
-        // A capacity failure cannot resume until space is reclaimed. A file that failed byte or
-        // checksum validation must restart because the stored prefix is not trustworthy. Only a
-        // transport interruption keeps its partial file for a Range retry.
-        if (activePartPath && (!activePartRecoverable || isStorageCapacityError(err))) {
-          try {
-            fs.rmSync(activePartPath, { force: true })
-          } catch {
-            /* retain the original write failure */
-          }
-        }
-        if (signal.aborted || (err as Error).name === 'AbortError') {
-          return interruptedResult(signal, activePartPath)
-        }
-        const error = downloadFailureMessage(err)
-        send({ status: 'failed', error })
-        return { success: false, error }
-      }
-    },
-    (state) => {
-      if (state === 'interrupted') {
-        send({ status: 'failed', error: DOWNLOAD_INTERRUPTED_ERROR, percent: 0 })
-      } else {
-        send({ status: state, percent: 0 })
-      }
-      if (state === 'queued' || state === 'downloading') persistRegistry()
-    }
-  )
 }
 
 interface DeleteModelResult {
@@ -434,16 +453,13 @@ interface DeleteModelResult {
   freedFiles?: number
 }
 
-interface TransferredDeletionContext {
-  dir: string
-  requestedId: string
+function retainedTransferredFileNames(input: {
   target: DownloadedModel
   downloaded: DownloadedModel[]
   catalog: CatalogEntry[]
-}
-
-function retainedTransferredFileNames(context: TransferredDeletionContext): Set<string> {
-  const { target, downloaded, catalog, dir } = context
+  dir: string
+}): Set<string> {
+  const { target, downloaded, catalog, dir } = input
   const retained = new Set<string>()
   catalog.forEach((model) => model.files.forEach((file) => retained.add(file.name)))
   getLocalModels(dir).forEach((model) => {
@@ -456,208 +472,253 @@ function retainedTransferredFileNames(context: TransferredDeletionContext): Set<
   return retained
 }
 
-function clearTransferredModelSelections(target: DownloadedModel, requestedId: string): void {
-  const activeId = getActiveModel()
-  if (activeId === target.id || activeId === requestedId) {
-    try {
-      fs.rmSync(activeModelFile(), { force: true })
-    } catch {
-      /* already clear */
-    }
-    llm.reloadModel()
-  }
-  const primary = downloadedPrimary(target)
-  const modals = getAllActiveModals()
-  ;(Object.keys(modals) as Modality[]).forEach((kind) => {
-    if (
-      modalSelectionMatches(modals[kind], target.id, primary) ||
-      modalSelectionMatches(modals[kind], requestedId, primary)
-    ) {
-      setModal(kind, null)
-    }
-  })
+interface DesktopRemovalTarget extends ModelLibraryRemovalTarget {
+  source: 'local' | 'downloaded' | 'catalog'
 }
 
-function deleteTransferredModel(context: TransferredDeletionContext): DeleteModelResult {
-  const { dir, requestedId, target } = context
-  // A projector can be shared by two installed quants. Delete only files that no other installed
-  // model owns, then remove this exact package from the registry projection.
-  const retainedNames = retainedTransferredFileNames(context)
-  let freedFiles = 0
-  for (const name of target.files) {
-    if (!retainedNames.has(name)) {
-      try {
-        const filePath = path.join(dir, name)
-        if (fs.existsSync(filePath)) {
-          fs.rmSync(filePath, { force: true })
-          freedFiles++
-        }
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : `could not delete ${name}`,
-          freedFiles
-        }
-      }
-    }
-    try {
-      fs.rmSync(path.join(dir, `${name}.part`), { force: true })
-    } catch {
-      /* the installed package remains authoritative */
-    }
+function selectedModelRoutes(): Partial<Record<ModelModality, string | null>> {
+  const active = desktopActiveModalities()
+  return {
+    text: active.text,
+    computer_use: active.computer_use,
+    image: active.image,
+    voice: active.speech,
+    transcription: active.transcription
   }
-  removeDownloaded(dir, target.id)
-  clearTransferredModelSelections(target, requestedId)
-  return { success: true, freedFiles }
 }
 
-/** Delete a model's files from disk. Clears it as active if it was selected. */
-export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
+async function resolveDesktopRemoval(modelId: string): Promise<DesktopRemovalTarget | null> {
   const dir = llm.getModelsDir()
-  // Imported local model: remove its files + registry entry, clear if active.
-  if (modelId.startsWith('local:')) {
-    const list = getLocalModels()
-    const lm = list.find((m) => m.id === modelId)
-    if (!lm) return { success: false, error: 'unknown local model' }
-    let freedLocal = 0
-    for (const name of [lm.primary, lm.mmproj].filter(Boolean) as string[]) {
-      try {
-        fs.rmSync(path.join(dir, name), { force: true })
-        freedLocal++
-      } catch {
-        /* ignore */
-      }
-    }
-    saveLocalModels(list.filter((m) => m.id !== modelId))
-    if (getActiveModel() === modelId) {
-      try {
-        fs.rmSync(activeModelFile(), { force: true })
-      } catch {
-        /* ignore */
-      }
-      llm.reloadModel()
-    }
-    return { success: true, freedFiles: freedLocal }
+  if (isLocalLibraryModelId(modelId)) {
+    const local = getLocalModels().find((model) => model.id === modelId)
+    return local
+      ? {
+          source: 'local',
+          modelId,
+          requestedId: modelId,
+          primaryFile: local.primary,
+          files: [local.primary, local.mmproj].filter((name): name is string => Boolean(name))
+        }
+      : null
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
-  const catalog = CATALOG as unknown as CatalogEntry[]
+  const catalog = CATALOG
   const downloaded = reconcileDownloadedModelRegistry(dir, catalog)
   const transferred = downloadedVariant(downloaded, modelId)
   if (transferred) {
-    return deleteTransferredModel({
-      dir,
+    return {
+      source: 'downloaded',
+      modelId: transferred.id,
       requestedId: modelId,
-      target: transferred,
-      downloaded,
-      catalog
-    })
-  }
-
-  const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
-  if (!entry) return { success: false, error: 'unknown model' }
-  let freed = 0
-
-  if (entry.runtime === 'mflux') {
-    try {
-      const mod = await import('./mflux')
-      const del = (mod as Record<string, unknown>).deleteMfluxModel
-      if (typeof del === 'function') await (del as (id: string) => Promise<void>)(modelId)
-    } catch (e) {
-      console.warn('[models] mflux delete', e)
+      primaryFile: downloadedPrimary(transferred),
+      files: transferred.files,
+      retainedFiles: retainedTransferredFileNames({
+        target: transferred,
+        downloaded,
+        catalog,
+        dir
+      }),
+      strictFileRemoval: true
     }
-  } else {
-    for (const f of entry.files) {
-      try {
-        fs.rmSync(path.join(dir, f.name), { force: true })
-        freed++
-      } catch {
-        /* ignore */
+  }
+  const entry =
+    CATALOG.find((m) => m.id === modelId) ??
+    (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
+  if (entry?.artifactDelivery === 'runtime') return null
+  return entry
+    ? {
+        source: 'catalog',
+        modelId,
+        requestedId: modelId,
+        primaryFile:
+          entry.kind === 'image'
+            ? desktopImageRuntimeIdentity.resolve(modelId, entry)
+            : primaryFileName(entry),
+        files: entry.files.map((file) => file.name),
+        runtimeManaged: entry.runtime === 'mflux'
       }
-      try {
-        fs.rmSync(path.join(dir, `${f.name}.part`), { force: true })
-      } catch {
-        /* ignore */
-      }
-    }
-    // Drop it from the downloaded registry too (no-op for a catalog model).
-    if (findDownloaded(dir, modelId)) removeDownloaded(dir, modelId)
-  }
-
-  // If this was the active chat model, clear the selection so we don't point at gone files.
-  if (getActiveModel() === modelId) {
-    try {
-      fs.rmSync(activeModelFile(), { force: true })
-    } catch {
-      /* ignore */
-    }
-    llm.reloadModel()
-  }
-  // Clear any per-modality selection pointing at it — matching the id AND the
-  // primary filename, because image picks are stored by filename (D6: without the
-  // filename match, deleting the active image model left a dangling pointer).
-  const primaryFile =
-    entry.runtime === 'mflux' ? null : primaryFileName(entry as unknown as CatalogEntry)
-  const modals = getAllActiveModals()
-  ;(Object.keys(modals) as Modality[]).forEach((k) => {
-    if (modalSelectionMatches(modals[k], modelId, primaryFile)) setModal(k, null)
-  })
-  return { success: true, freedFiles: freed }
+    : null
 }
 
-/** Set the chat LLM (text/vision). Writes active-model.json + reloads llama-server. */
-export async function setActiveModel(
-  modelId: string
+/** Desktop file, runtime, and registry I/O for model removal. Shared owns the transaction. */
+export function desktopModelLibraryRemovalPorts(): Omit<
+  ModelLibraryRemovalPorts,
+  'selected' | 'clearSelection'
+> {
+  return {
+    resolve: resolveDesktopRemoval,
+    async removeFile(fileName) {
+      const filePath = path.join(llm.getModelsDir(), fileName)
+      const existed = fs.existsSync(filePath)
+      fs.rmSync(filePath, { force: true })
+      return existed
+    },
+    async removePartial(fileName) {
+      fs.rmSync(path.join(llm.getModelsDir(), `${fileName}.part`), { force: true })
+    },
+    async removeRuntime(target) {
+      const mod = await import('./mflux')
+      const remove = (mod as Record<string, unknown>).deleteMfluxModel
+      if (typeof remove === 'function') {
+        await (remove as (id: string) => Promise<void>)(target.modelId)
+      }
+    },
+    async unregister(target) {
+      const desktop = target as DesktopRemovalTarget
+      if (desktop.source === 'local') {
+        saveLocalModels(getLocalModels().filter((model) => model.id !== target.modelId))
+      } else if (
+        desktop.source === 'downloaded' ||
+        findDownloaded(llm.getModelsDir(), target.modelId)
+      ) {
+        removeDownloaded(llm.getModelsDir(), target.modelId)
+      }
+    }
+  }
+}
+
+/** Delete a model package through the Shared removal and selection-cleanup transaction. */
+export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
+  const outcome = await desktopModels.remove(modelId)
+  return outcome.ok
+    ? { success: true, freedFiles: outcome.value.freedFiles }
+    : { success: false, error: modelsFailureMessage(outcome.failure), freedFiles: 0 }
+}
+
+async function setActiveLlamaModel(
+  modelId: string,
+  allowedKinds: readonly string[],
+  expectedKind: string
 ): Promise<{ success: boolean; error?: string }> {
   // Imported local model: resolve from the local registry (not the catalog).
-  if (modelId.startsWith('local:')) {
+  if (isLocalLibraryModelId(modelId)) {
     const lm = getLocalModels().find((m) => m.id === modelId)
     if (!lm) return { success: false, error: 'unknown local model' }
-    fs.writeFileSync(
-      activeModelFile(),
-      JSON.stringify({ id: modelId, primary: lm.primary, mmproj: lm.mmproj ?? null }, null, 2)
-    )
+    const refusal = modelSelectionRefusal({
+      kind: lm.kind,
+      allowedKinds,
+      expectedKind,
+      hasPrimary: Boolean(lm.primary)
+    })
+    if (refusal) return { success: false, error: refusal }
+    desktopModelSelectionPersistence.projectLegacyTextConfig({
+      id: modelId,
+      primary: lm.primary,
+      mmproj: lm.mmproj ?? null
+    })
     llm.reloadModel()
     return { success: true }
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const catalogEntry = CATALOG.find((model) => model.id === modelId)
   const dir = llm.getModelsDir()
-  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG)
   const transferred = downloadedVariant(downloaded, modelId)
   if (transferred) {
-    if (!isChatLoadable(transferred.kind)) {
-      return {
-        success: false,
-        error: `${transferred.kind} models are not loadable as the chat LLM`
-      }
-    }
     const primary = downloadedPrimary(transferred)
-    if (!primary) return { success: false, error: 'transferred model has no primary file' }
+    const refusal = modelSelectionRefusal({
+      kind: transferred.kind,
+      allowedKinds,
+      expectedKind,
+      availability: catalogEntry?.availability,
+      availabilityNote: catalogEntry?.availabilityNote,
+      hasPrimary: Boolean(primary),
+      transferred: true
+    })
+    if (refusal) return { success: false, error: refusal }
     const mmproj = downloadedProjector(transferred) ?? null
-    fs.writeFileSync(
-      activeModelFile(),
-      JSON.stringify({ id: transferred.id, primary, mmproj }, null, 2)
-    )
+    desktopModelSelectionPersistence.projectLegacyTextConfig({
+      id: transferred.id,
+      primary: primary!,
+      mmproj
+    })
     llm.reloadModel()
     return { success: true }
   }
-  const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
+  const entry =
+    catalogEntry ?? (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch }))
   if (!entry) return { success: false, error: 'unknown model' }
-  if (!isChatLoadable(entry.kind)) {
-    return { success: false, error: `${entry.kind} models are not loadable as the chat LLM` }
-  }
-  const primary = primaryFileName(entry as unknown as CatalogEntry)
+  const primary = primaryFileName(entry)
+  const refusal = modelSelectionRefusal({
+    kind: entry.kind,
+    allowedKinds,
+    expectedKind,
+    availability: entry.availability,
+    availabilityNote: entry.availabilityNote,
+    hasPrimary: Boolean(primary)
+  })
+  if (refusal) return { success: false, error: refusal }
   const mmproj = entry.files.find((f) => f.role === 'mmproj')?.name ?? null
-  fs.writeFileSync(activeModelFile(), JSON.stringify({ id: modelId, primary, mmproj }, null, 2))
+  desktopModelSelectionPersistence.projectLegacyTextConfig({
+    id: modelId,
+    primary: primary!,
+    mmproj
+  })
   llm.reloadModel()
   return { success: true }
 }
 
+/** Raw native-runtime projection for the shared text selection store. */
+export function projectActiveTextModelSelection(
+  modelId: string
+): Promise<{ success: boolean; error?: string }> {
+  return setActiveLlamaModel(modelId, ['text', 'vision'], 'the chat LLM')
+}
+
+/** Set the chat LLM through the shared selection owner. */
+export function setActiveModel(modelId: string): Promise<{ success: boolean; error?: string }> {
+  return selectDesktopModel('text', modelId)
+}
+
+/** Load the selected Computer Use policy into the shared llama.cpp runtime for one supervised run. */
+export function loadComputerUseModel(
+  modelId: string
+): Promise<{ success: boolean; error?: string }> {
+  return setActiveLlamaModel(modelId, ['computer_use'], 'Computer Use')
+}
+
 export function getActiveModel(): string | null {
-  try {
-    return JSON.parse(fs.readFileSync(activeModelFile(), 'utf-8')).id ?? null
-  } catch {
-    return null
+  return desktopModelSelectionPersistence.projectedModelId('text')
+}
+
+/**
+ * Move a legacy chat selection into its canonical specialist slot.
+ *
+ * Older catalogs exposed some specialist models as chat/vision models. After a catalog
+ * correction, their old active-model.json entry must not keep routing normal chat to the
+ * specialist. Preserve the user's choice in the proper modality, then remove the invalid
+ * chat selection before llama-server starts.
+ */
+/**
+ * `signal` is checked at the ONE safe point: after the reads, before the first persisted change.
+ *
+ * The two writes below are an atomic pair - migrating the model to its real modality and clearing
+ * it out of the text slot. Abandoning the repair between them would leave a specialist both
+ * migrated AND still selected as the chat model, which is worse than a repair that ran slightly
+ * late. So the guard refuses to BEGIN the pair when its caller has already given up on it, and
+ * never interrupts it once begun.
+ */
+export async function reconcileActiveModelClassification(signal?: AbortSignal): Promise<boolean> {
+  const activeId = getActiveModel()
+  if (!activeId) return false
+
+  const { CATALOG } = await import('@offgrid/models')
+  const entry = CATALOG.find((model) => model.id === activeId)
+  if (!entry || isChatLoadable(entry.kind)) return false
+
+  const modality = specialistReclassificationModality(entry.kind)
+  if (!modality) return false
+  if (signal?.aborted === true) return false
+  // selectedModelRoutes owns the modality-to-slot mapping; a modality this desktop has no
+  // slot for reads as unselected and the migration proceeds through the same selection port.
+  const activeForModality = selectedModelRoutes()[modality]
+  if (!activeForModality) {
+    const migrated = await setActiveModalChoice(modality, activeId)
+    if (!migrated.success) return false
   }
+  const cleared = await selectDesktopModel('text', null)
+  if (!cleared.success) return false
+  return true
 }
 
 /** Heal a stale active-model.json that predates its model gaining a vision projector.
@@ -668,44 +729,55 @@ export function getActiveModel(): string | null {
  *  reloads — so vision turns on without a manual re-activate. Runs at startup and after
  *  every download completes, independent of which screen (if any) is open. Returns true
  *  when it healed something. */
-export async function reconcileActiveModelProjector(): Promise<boolean> {
-  let cfg: { id?: string; primary?: string; mmproj?: string | null } | null = null
-  try {
-    cfg = JSON.parse(fs.readFileSync(activeModelFile(), 'utf-8'))
-  } catch {
-    return false // no active selection yet
-  }
+async function resolveActiveModelProjectorRepair(): Promise<{
+  id: string
+  primary: string
+  mmproj: string
+} | null> {
+  const cfg = readActiveModelArtifactConfig()
+  if (!cfg) return null
   const { CATALOG } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
-  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
-  const active = cfg!
+  const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG)
+  const active = cfg
   const transferred = active.id ? downloadedVariant(downloaded, active.id) : undefined
   if (transferred) {
-    const primary = downloadedPrimary(transferred)
-    const mmproj = downloadedProjector(transferred)
-    if (
-      primary &&
-      mmproj &&
-      fileSizeOf(dir, primary) > 0 &&
-      fileSizeOf(dir, mmproj) > 0 &&
-      (active.id !== transferred.id || active.primary !== primary || active.mmproj !== mmproj)
-    ) {
-      fs.writeFileSync(
-        activeModelFile(),
-        JSON.stringify({ id: transferred.id, primary, mmproj }, null, 2)
-      )
-      llm.reloadModel()
-      return true
+    const repair = transferredProjectorRepair({
+      active,
+      transferred: {
+        id: transferred.id,
+        primary: downloadedPrimary(transferred),
+        projector: downloadedProjector(transferred)
+      },
+      present: (name) => fileSizeOf(dir, name) > 0
+    })
+    if (repair) {
+      return repair
     }
   }
-  const entry = (CATALOG as unknown as CatalogEntry[]).find((m) => m.id === active.id)
+  const entry = CATALOG.find((m) => m.id === active.id)
   const projector = projectorToHeal(active, entry, (name) => fileSizeOf(dir, name) > 0)
   if (!projector) {
-    return false // already has one / no projector / not downloaded yet — leave as is
+    return null // already has one / no projector / not downloaded yet — leave as is
   }
-  fs.writeFileSync(activeModelFile(), JSON.stringify({ ...cfg, mmproj: projector }, null, 2))
-  llm.reloadModel()
-  return true
+  return {
+    id: String(active.id),
+    primary: String(active.primary),
+    mmproj: projector
+  }
+}
+
+export function desktopActiveProjectorRepairPorts(): ModelMetadataRepairCommandPorts<DesktopProjectorRepair> {
+  return {
+    resolve: resolveActiveModelProjectorRepair,
+    persist: (repair) => desktopModelSelectionPersistence.projectLegacyTextConfig(repair),
+    reload: () => llm.reloadModel(),
+    refresh: refreshDesktopModels
+  }
+}
+
+export function reconcileActiveModelProjector(): Promise<boolean> {
+  return desktopDownloadMetadataRepair().execute()
 }
 
 /**
@@ -715,61 +787,58 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
  * per-entry active computation in getStorageInfo (one definition of "active").
  */
 export async function getActiveModelIds(): Promise<string[]> {
-  const info = await getStorageInfo()
-  return info.models.filter((m) => m.active).map((m) => m.id)
+  return [...desktopModels.activeModelIds()]
 }
 
 /**
- * Make ANY installed model the active one for its type — the single seam the UI
- * calls. Routes by kind internally: text/vision load the chat LLM; image/voice/
- * transcription set that modality's default pick. Callers pass only the id and
- * never branch on kind. Adding a new modality needs zero caller changes.
+ * Resolve local/catalog activation facts. Shared owns remote inventory lookup and
+ * modality dispatch; this host callback must not re-enter the facade that holds it.
  */
-export async function activateModel(
-  modelId: string
-): Promise<{ success: boolean; error?: string }> {
+export async function resolveDesktopActivation(
+  modelId: string,
+  requestedKind?: string
+): Promise<{ kind?: string; supportsRequestedKind?: boolean } | null> {
   let kind: string | undefined
-  if (modelId.startsWith('local:')) {
+  let supportsRequestedKind = false
+  if (isLocalLibraryModelId(modelId)) {
     kind = getLocalModels().find((m) => m.id === modelId)?.kind
   } else {
-    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
-    kind = (CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId)))?.kind
+    const { CATALOG, modelSupportsKind, resolveHuggingFaceModel } = await import('@offgrid/models')
+    const downloaded = reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG)
+    const catalogEntry = CATALOG.find((m) => m.id === modelId)
+    kind =
+      downloadedVariant(downloaded, modelId)?.kind ??
+      (catalogEntry ?? (await resolveHuggingFaceModel(modelId, { fetchImpl: platformFetch })))?.kind
+    const requested = requestedKind as Parameters<typeof modelSupportsKind>[1]
+    supportsRequestedKind = Boolean(
+      catalogEntry && requestedKind && modelSupportsKind(catalogEntry, requested)
+    )
   }
-  const modal = modalityForModel(kind)
-  return modal ? setActiveModalChoice(modal, modelId) : setActiveModel(modelId)
+  return kind ? { kind, supportsRequestedKind } : null
+}
+
+export async function activateModel(
+  modelId: string,
+  requestedKind?: string
+): Promise<{ success: boolean; error?: string }> {
+  const outcome = await desktopModels.activate({ modelId, requestedKind })
+  return outcome.ok
+    ? { success: true }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
 }
 
 export async function setActiveModalChoice(
   kind: string,
   modelId: string | null
 ): Promise<{ success: boolean; error?: string }> {
-  // Normalize to the storage modality so BOTH vocabularies work — the setup path
-  // passes 'voice', the UI/dispatch pass 'speech'. Before this, the guard only
-  // accepted 'speech', so "Configure for me" (which passes 'voice') silently failed
-  // to activate TTS (D26). One normalizer is the single source of truth.
-  const modal = modalityForModel(kind)
-  if (modal) {
-    let stored = modelId
-    // The image resolver loads by FILENAME, but the UI passes a catalog id — map it
-    // to the entry's primary filename so an in-app pick (e.g. Juggernaut) takes effect.
-    if (modelId && modal === 'image') {
-      try {
-        const { CATALOG } = await import('@offgrid/models')
-        const e = CATALOG.find((m) => m.id === modelId)
-        const fname = e ? primaryFileName(e as unknown as CatalogEntry) : undefined
-        if (fname) stored = fname
-      } catch {
-        /* keep modelId as-is */
-      }
-    }
-    setModal(modal, stored)
-    return { success: true }
-  }
-  return { success: false, error: 'use setActiveModel for the chat LLM (text/vision)' }
+  const outcome = await desktopModels.activate({ modelId, requestedKind: kind })
+  return outcome.ok
+    ? { success: true }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
 }
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
-  return { text: getActiveModel(), ...getAllActiveModals() }
+  return desktopActiveModalities()
 }
 
 // ---------------------------------------------------------------------------
@@ -778,237 +847,73 @@ export function getActiveModalities(): { text: string | null } & Record<Modality
 // other installed model — and are protected from orphan cleanup.
 // ---------------------------------------------------------------------------
 
-export interface LocalModel {
-  id: string
-  name: string
-  primary: string
-  mmproj?: string
-  kind: 'text' | 'vision'
-  params?: number
-  sizeBytes: number
-}
-
-export type TransferableModelSource = 'catalog' | 'downloaded' | 'local'
-
-export interface TransferableModelFile {
-  name: string
-  sizeBytes: number
-  path: string
-}
-
-export interface TransferableModel {
-  id: string
-  familyId: string
-  packageIdentity?: string
-  name: string
-  kind: string
-  source: TransferableModelSource
-  files: TransferableModelFile[]
-}
-
-function localRegistryFile(dir = llm.getModelsDir()): string {
-  return path.join(dir, 'local-models.json')
-}
+export type LocalModel = LocalModelRegistryEntry
 
 export function getLocalModels(dir = llm.getModelsDir()): LocalModel[] {
-  try {
-    const arr = JSON.parse(fs.readFileSync(localRegistryFile(dir), 'utf-8'))
-    return Array.isArray(arr) ? (arr as LocalModel[]) : []
-  } catch {
-    return []
-  }
+  return new LocalModelRegistry(dir).read()
 }
 function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
-  try {
-    fs.writeFileSync(localRegistryFile(dir), JSON.stringify(list, null, 2))
-  } catch {
-    /* best effort */
-  }
+  new LocalModelRegistry(dir).write(list)
 }
 
-function safeTransferredFileName(name: string): boolean {
-  return (
-    name.length > 0 &&
-    name.length <= 255 &&
-    path.basename(name) === name &&
-    name !== '.' &&
-    name !== '..'
-  )
-}
-
-function transferredFilesOnDisk(
+async function transferredFilesOnDisk(
   dir: string,
   files: Array<{ name: string; sizeBytes: number }>
-): { error?: string; files?: TransferableModelFile[] } {
+): Promise<{ error?: string; files?: TransferableModelFileAccess[] }> {
   if (files.length === 0) return { error: 'model has no transferable files' }
-  const names = new Set<string>()
-  const resolved: TransferableModelFile[] = []
+  const resolved: TransferableModelFileAccess[] = []
   for (const file of files) {
-    if (
-      !safeTransferredFileName(file.name) ||
-      !Number.isSafeInteger(file.sizeBytes) ||
-      file.sizeBytes <= 0 ||
-      names.has(file.name)
-    ) {
-      return { error: 'model manifest contains an invalid file' }
-    }
-    names.add(file.name)
     const filePath = path.join(dir, file.name)
-    let actualSize = 0
-    try {
-      const stat = fs.lstatSync(filePath)
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        return { error: `${file.name}: transferred file is not a regular file` }
+    const verification = await verifyArtifactFile(filePath, fs, 'transfer', false, file.sizeBytes)
+    if (!verification.valid)
+      return {
+        error: artifactVerificationError(
+          {
+            path: filePath,
+            name: file.name,
+            origin: 'transfer',
+            expectedBytes: file.sizeBytes,
+            removeInvalid: false
+          },
+          verification
+        )
       }
-      actualSize = stat.size
-    } catch {
-      return { error: `${file.name}: transferred file is missing` }
-    }
-    if (actualSize !== file.sizeBytes) {
-      return { error: `${file.name}: transferred file size does not match the manifest` }
-    }
-    if (/\.gguf$/i.test(file.name) && !isValidGgufFile(filePath, fs)) {
-      return { error: `${file.name}: transferred file is not a valid GGUF model` }
-    }
     resolved.push({ ...file, path: filePath })
   }
   return { files: resolved }
 }
 
-/**
- * Resolve one installed, file-backed model for device transfer. Runtime caches such as mflux are
- * intentionally excluded because they are directory trees, not portable model files.
- */
-export async function getTransferableModel(
-  modelId: string,
-  dir = llm.getModelsDir()
-): Promise<TransferableModel | null> {
-  const local = getLocalModels(dir).find((model) => model.id === modelId)
-  const { CATALOG } = await import('@offgrid/models')
-  const catalog = CATALOG.find((model) => model.id === modelId)
-  const downloaded = downloadedVariant(
-    reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[]),
-    modelId
-  )
-
-  const source: TransferableModelSource | null = local
-    ? 'local'
-    : downloaded
-      ? 'downloaded'
-      : catalog && catalog.runtime !== 'mflux'
-        ? 'catalog'
-        : null
-  if (!source) return null
-
-  const names = local
-    ? [local.primary, local.mmproj].filter((name): name is string => Boolean(name))
-    : downloaded
-      ? downloaded.files
-      : (catalog?.files.map((file) => file.name) ?? [])
-  const files = transferredFilesOnDisk(
-    dir,
-    names.map((name) => ({ name, sizeBytes: fileSizeOf(dir, name) }))
-  ).files
-  if (!files) return null
-
+/** Registry and filesystem I/O for a transferred model, scoped to one models directory. */
+export function desktopModelTransferRegistrationPorts(
+  dir: () => string
+): ModelTransferRegistrationPorts {
   return {
-    id: downloaded?.id ?? modelId,
-    familyId: downloaded?.familyId ?? catalog?.id ?? local?.id ?? modelId,
-    packageIdentity: downloaded?.packageIdentity,
-    name: local?.name ?? downloaded?.name ?? catalog?.name ?? modelId,
-    kind: local?.kind ?? downloaded?.kind ?? catalog?.kind ?? 'text',
-    source,
-    files
+    libraryId: () => path.resolve(dir()),
+    validateFiles: async (manifest) =>
+      (
+        await transferredFilesOnDisk(
+          dir(),
+          manifest.files.map((file) => ({ name: file.name, sizeBytes: file.sizeBytes }))
+        )
+      ).error ?? null,
+    async catalogFiles(modelId) {
+      const { CATALOG } = await import('@offgrid/models')
+      return CATALOG.find((model) => model.id === modelId)?.files.map((file) => file.name) ?? null
+    },
+    readLocalModels: () => getLocalModels(dir()),
+    writeLocalModels: (models) => saveLocalModels([...models], dir()),
+    recordDownloaded: ({ id, familyId, packageIdentity, manifest }) =>
+      recordDownloaded(dir(), {
+        id,
+        familyId,
+        packageIdentity,
+        name: manifest.name,
+        kind: manifest.kind,
+        files: manifest.files.map((file) => file.name)
+      }),
+    hasDownloaded: (id) => Boolean(findDownloaded(dir(), id)),
+    packageIdentity: (manifest) => modelPackageIdentity(manifest as TransferredModelManifest)
   }
-}
-
-/**
- * Register model files only after the transfer owner has checksum-verified and atomically promoted
- * every file into the models directory. The catalog remains the source of truth for known models;
- * free-form and local models are recorded in their existing registries.
- */
-export async function registerTransferredModel(
-  manifest: TransferredModelManifest,
-  dir = llm.getModelsDir()
-): Promise<{ success: boolean; error?: string; id?: string }> {
-  if (
-    !manifest.id ||
-    manifest.id.length > 512 ||
-    !manifest.name ||
-    manifest.name.length > 512 ||
-    !manifest.kind ||
-    manifest.kind.length > 128
-  ) {
-    return { success: false, error: 'model manifest is invalid' }
-  }
-
-  const resolved = transferredFilesOnDisk(dir, manifest.files)
-  if (!resolved.files) return { success: false, error: resolved.error }
-
-  // Projector presence is the package capability SSOT. A caller can still label an older catalog
-  // entry as text, but the installed package and its deterministic identity must be vision.
-  const normalizedManifest: TransferredModelManifest = manifest.files.some(
-    (file) => file.role === 'projector' || isProjectorFileName(file.name)
-  )
-    ? { ...manifest, kind: 'vision' }
-    : manifest
-
-  const { CATALOG } = await import('@offgrid/models')
-  const catalog = CATALOG.find((model) => model.id === normalizedManifest.id)
-  if (catalog) {
-    const expected = new Set(catalog.files.map((file) => file.name))
-    const received = new Set(normalizedManifest.files.map((file) => file.name))
-    if (expected.size === received.size && [...expected].every((name) => received.has(name))) {
-      return { success: true, id: normalizedManifest.id }
-    }
-    // A catalog id can have several valid quantizations and projector variants. The sender's
-    // manifest owns the exact installed files; the catalog owns only its download variant.
-    // Register a verified alternate variant below so it remains installed and transferable.
-  }
-
-  if (normalizedManifest.source === 'local') {
-    const primary =
-      normalizedManifest.files.find(
-        (file) => /\.gguf$/i.test(file.name) && !/mmproj|projector/i.test(file.name)
-      ) ?? normalizedManifest.files.find((file) => /\.gguf$/i.test(file.name))
-    if (!primary) return { success: false, error: 'local model transfer requires a GGUF file' }
-    const mmproj = normalizedManifest.files.find(
-      (file) => file.name !== primary.name && /\.gguf$/i.test(file.name)
-    )
-    const id = `local:${primary.name}`
-    const list = getLocalModels(dir).filter((model) => model.id !== id)
-    list.push({
-      id,
-      name: normalizedManifest.name,
-      primary: primary.name,
-      mmproj: mmproj?.name,
-      kind: mmproj ? 'vision' : 'text',
-      sizeBytes: primary.sizeBytes
-    })
-    saveLocalModels(list, dir)
-    if (!getLocalModels(dir).some((model) => model.id === id)) {
-      return { success: false, error: 'could not register the transferred local model' }
-    }
-    return { success: true, id }
-  }
-
-  const exactPackageId =
-    normalizedManifest.packageIdentity ?? modelPackageIdentity(normalizedManifest)
-  recordDownloaded(dir, {
-    id: exactPackageId,
-    familyId: normalizedManifest.id,
-    packageIdentity: exactPackageId,
-    name: normalizedManifest.name,
-    kind: normalizedManifest.kind,
-    files: normalizedManifest.files.map((file) => file.name)
-  })
-  if (!findDownloaded(dir, exactPackageId)) {
-    return { success: false, error: 'could not register the transferred model' }
-  }
-  if (dir === llm.getModelsDir()) {
-    await reconcileActiveModelProjector().catch(() => false)
-  }
-  return { success: true, id: exactPackageId }
 }
 
 /** Set of every filename referenced by the local registry (primary + mmproj), so
@@ -1022,67 +927,88 @@ function localProtectedNames(): Set<string> {
   return s
 }
 
-/** A real GGUF starts with the "GGUF" magic and is more than a few bytes. */
-/** Import a local .gguf: validate, stream-copy into the models dir (with progress),
- *  and register it so it shows up as an installed, activatable model. */
-export async function importLocalModel(
-  srcPath: string,
-  onProgress?: ProgressCb
-): Promise<{ success: boolean; error?: string; id?: string }> {
-  if (!srcPath || !srcPath.toLowerCase().endsWith('.gguf'))
-    return { success: false, error: 'Not a .gguf file' }
-  if (!isValidGgufFile(srcPath, fs))
-    return { success: false, error: 'File is not a valid GGUF model (corrupt or wrong format)' }
-
-  const dir = llm.getModelsDir()
-  fs.mkdirSync(dir, { recursive: true })
-  const fileName = path.basename(srcPath)
-  const dest = path.join(dir, fileName)
-  const id = `local:${fileName}`
-  const total = fs.statSync(srcPath).size
-  const send = (data: Partial<DownloadProgress>): void => {
-    onProgress?.({ modelId: id, ...data })
-  }
-
-  // Copy unless an identical-size file is already there.
-  const already = fs.existsSync(dest) && fs.statSync(dest).size === total
-  if (!already) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const rd = fs.createReadStream(srcPath)
-        const wr = fs.createWriteStream(dest)
-        let copied = 0
-        rd.on('data', (c) => {
-          copied += c.length
-          send({
-            status: 'downloading',
-            percent: total ? Math.round((copied / total) * 100) : 0,
-            currentFile: fileName
-          })
-        })
-        rd.on('error', reject)
-        wr.on('error', reject)
-        wr.on('finish', () => resolve())
-        rd.pipe(wr)
-      })
-    } catch (e) {
-      try {
-        fs.rmSync(dest, { force: true })
-      } catch {
-        /* ignore */
+export function desktopLocalModelImportPorts(): LocalModelImportPorts {
+  return {
+    async inspect(source) {
+      if (!source || !isGgufFile(source)) {
+        return {
+          fileName: '',
+          sizeBytes: 0,
+          valid: false,
+          error: `Not a ${MODEL_FILE_EXTENSION.gguf} file`
+        }
       }
-      send({ status: 'failed', error: (e as Error).message })
-      return { success: false, error: (e as Error).message }
+      if (!(await verifyArtifactFile(source, fs, 'import')).valid) {
+        return {
+          fileName: path.basename(source),
+          sizeBytes: 0,
+          valid: false,
+          error: 'File is not a valid GGUF model (corrupt or wrong format)'
+        }
+      }
+      return { fileName: path.basename(source), sizeBytes: fs.statSync(source).size, valid: true }
+    },
+    async destinationHasSize(fileName, sizeBytes) {
+      const destination = path.join(llm.getModelsDir(), fileName)
+      try {
+        return fs.statSync(destination).size === sizeBytes
+      } catch {
+        return false
+      }
+    },
+    async copy({ source, fileName, onBytes }) {
+      const dir = llm.getModelsDir()
+      fs.mkdirSync(dir, { recursive: true })
+      await new Promise<void>((resolve, reject) => {
+        const input = fs.createReadStream(source)
+        const output = fs.createWriteStream(path.join(dir, fileName))
+        let copied = 0
+        input.on('data', (chunk) => {
+          copied += chunk.length
+          onBytes(copied)
+        })
+        input.on('error', reject)
+        output.on('error', reject)
+        output.on('finish', resolve)
+        input.pipe(output)
+      })
+    },
+    async removeDestination(fileName) {
+      fs.rmSync(path.join(llm.getModelsDir(), fileName), { force: true })
+    },
+    readLocalModels: () => getLocalModels(),
+    writeLocalModels: (models) => saveLocalModels([...models])
+  }
+}
+
+const activeProjectorRepairPorts = desktopActiveProjectorRepairPorts()
+registerDesktopDownloadMetadataRepairPorts(activeProjectorRepairPorts)
+
+/** Import and register one local GGUF through the Shared model-library transaction. */
+export async function importLocalModel(source: string): Promise<ModelImportResultContract> {
+  const outcome = await desktopModels.import({ path: source, modality: 'text' })
+  return outcome.ok
+    ? { success: true, id: outcome.value.id }
+    : { success: false, error: modelsFailureMessage(outcome.failure) }
+}
+
+/** Raw model-library I/O for the Shared application composition root. */
+export const desktopModelLibraryPorts = {
+  removal: desktopModelLibraryRemovalPorts(),
+  localImport: desktopLocalModelImportPorts(),
+  transfer: {
+    ...desktopModelTransferRegistrationPorts(() => llm.getModelsDir()),
+    afterRegistered: async () => {
+      try {
+        await reconcileActiveModelProjector()
+      } catch (cause) {
+        throw new Error(
+          'Model files are ready, but the active vision model could not be updated. Retry to finish setup.',
+          { cause }
+        )
+      }
     }
   }
-
-  // Heuristic kind: a paired mmproj makes it vision; otherwise treat as text.
-  const base = fileName.replace(/\.gguf$/i, '')
-  const list = getLocalModels().filter((m) => m.id !== id)
-  list.push({ id, name: base, primary: fileName, kind: 'text', sizeBytes: total })
-  saveLocalModels(list)
-  send({ status: 'completed', percent: 100 })
-  return { success: true, id }
 }
 
 // ---------------------------------------------------------------------------
@@ -1109,18 +1035,16 @@ export interface StorageInfo {
 export async function getStorageInfo(): Promise<StorageInfo> {
   const dir = llm.getModelsDir()
   const { CATALOG } = await import('@offgrid/models')
-  const catalog = CATALOG as unknown as CatalogEntry[]
+  const catalog = CATALOG
   const reconciledDownloaded = reconcileDownloadedModelRegistry(dir, catalog)
   // Protect catalog + imported-local + free-form-download files, plus the active
   // chat selection's files, from being flagged/deleted as orphans.
   let activePrimary: string | null = null
   let activeMmproj: string | null = null
-  try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'active-model.json'), 'utf-8'))
-    activePrimary = cfg?.primary ?? null
-    activeMmproj = cfg?.mmproj ?? null
-  } catch {
-    /* none */
+  const activeConfig = readActiveModelArtifactConfig()
+  if (activeConfig) {
+    activePrimary = activeConfig.primary
+    activeMmproj = activeConfig.mmproj
   }
   const known = protectedNames({
     catalog,
@@ -1135,9 +1059,16 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   // chosen FILENAME, not the catalog id — so an image/voice/STT model is "active"
   // when its primary file matches. Without this, only the chat LLM ever shows
   // active and image models can't be activated from the UI.
-  const modals = getAllActiveModals()
+  const selected = desktopActiveModalities()
+  const modals: Record<Modality, string | null> = {
+    computer_use: selected.computer_use,
+    image: selected.image,
+    speech: selected.speech,
+    transcription: selected.transcription
+  }
   const locals = getLocalModels()
-  const installed = await listInstalled()
+  const remoteIds = new Set(remoteCatalogEntries().map((model) => model.id))
+  const installed = (await listInstalled()).filter((id) => !remoteIds.has(id))
   const sizeOf = (name: string): number => fileSizeOf(dir, name)
   const downloaded = reconciledDownloaded
   const catalogIds = new Set(catalog.map((m) => m.id))
@@ -1187,124 +1118,39 @@ export async function deleteOrphans(): Promise<{
   success: boolean
   count: number
   freedBytes: number
+  retainedBytes: number
+  failures: Array<{ name: string; bytes: number; error: string }>
 }> {
   const info = await getStorageInfo()
   const dir = llm.getModelsDir()
   let freedBytes = 0,
     count = 0
+  const failures: Array<{ name: string; bytes: number; error: string }> = []
   for (const o of info.orphans) {
     try {
       fs.rmSync(path.join(dir, o.name), { force: true })
       freedBytes += o.bytes
       count++
-    } catch {
-      /* ignore */
+    } catch (error) {
+      failures.push({
+        name: o.name,
+        bytes: o.bytes,
+        error: error instanceof Error ? error.message : `Could not delete ${o.name}`
+      })
     }
   }
-  return { success: true, count, freedBytes }
-}
-
-// ---------------------------------------------------------------------------
-// Download registry: surface active/failed/completed downloads + retry, and
-// survive an app restart (an interrupted download becomes resumable).
-// ---------------------------------------------------------------------------
-
-function downloadsFile(): string {
-  return path.join(llm.getModelsDir(), 'downloads.json')
-}
-let registryLoaded = false
-function ensureRegistryLoaded(): void {
-  if (registryLoaded) return
-  registryLoaded = true
-  try {
-    const arr = JSON.parse(fs.readFileSync(downloadsFile(), 'utf-8')) as DownloadProgress[]
-    for (const p of arr) {
-      // Anything still active/queued when we last wrote was cut off by a quit/crash.
-      // Surface it as explicitly retryable instead of leaving a queue row that can
-      // never drain in this fresh process.
-      if (p.status === 'downloading' || p.status === 'queued') {
-        p.status = 'failed'
-        p.error = DOWNLOAD_INTERRUPTED_ERROR
-      }
-      lastProgress.set(p.modelId, p)
-    }
-  } catch {
-    /* no registry yet */
-  }
-}
-function persistRegistry(): void {
-  try {
-    const arr = Array.from(lastProgress.values()).filter((p) => p.status !== 'completed')
-    if (arr.length) fs.writeFileSync(downloadsFile(), JSON.stringify(arr))
-    else fs.rmSync(downloadsFile(), { force: true })
-  } catch {
-    /* best effort */
+  return {
+    success: failures.length === 0,
+    count,
+    freedBytes,
+    retainedBytes: failures.reduce((total, failure) => total + failure.bytes, 0),
+    failures
   }
 }
 
-/** All known downloads (active, failed, interrupted) for a download-manager view. */
-export function listDownloads(): DownloadProgress[] {
-  ensureRegistryLoaded()
-  return Array.from(lastProgress.values())
-}
-
-/** Retry (resumes from the partial .part) a failed/interrupted download. */
-export async function retryDownload(
-  modelId: string,
-  onProgress?: ProgressCb
-): Promise<{ success: boolean; error?: string }> {
-  return downloadModel(modelId, onProgress)
-}
-
-/** Dismiss a download-manager entry: abort it if still running, delete its partial
- *  .part files, and drop it from the registry so it leaves the Downloads list. */
-export async function clearDownload(
-  modelId: string
-): Promise<{ success: boolean; freedBytes: number }> {
-  cancelDownload(modelId) // no-op if not currently downloading
-  let freedBytes = 0
-  try {
-    const dir = llm.getModelsDir()
-    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
-    const entry =
-      CATALOG.find((m) => m.id === modelId) ??
-      (await resolveHuggingFaceModel(modelId).catch(() => null))
-    for (const f of entry?.files ?? []) {
-      const part = path.join(dir, `${f.name}.part`)
-      try {
-        freedBytes += fs.statSync(part).size
-      } catch {
-        /* none */
-      }
-      try {
-        fs.rmSync(part, { force: true })
-      } catch {
-        /* ignore */
-      }
-    }
-  } catch {
-    /* best effort */
-  }
-  ensureRegistryLoaded()
-  lastProgress.delete(modelId)
-  persistRegistry()
-  return { success: true, freedBytes }
-}
-
-/** Clear every failed/cancelled/interrupted download (entry + .part). */
-export async function clearInactiveDownloads(): Promise<{
-  success: boolean
-  count: number
-  freedBytes: number
-}> {
-  ensureRegistryLoaded()
-  const ids = Array.from(lastProgress.values())
-    .filter((p) => p.status === 'failed' || p.status === 'cancelled')
-    .map((p) => p.modelId)
-  let freedBytes = 0
-  for (const id of ids) {
-    const r = await clearDownload(id)
-    freedBytes += r.freedBytes
-  }
-  return { success: true, count: ids.length, freedBytes }
-}
+registerDesktopModelManagerPorts({
+  getCatalog,
+  listInstalled,
+  resolveCanonicalModelSelectionId,
+  projectActiveTextModelSelection
+})
