@@ -18,6 +18,7 @@ import { ipcMain } from 'electron'
 import { loadProEntitlementProvider, loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { resolveWindowPresentation } from './bootstrap/window-presentation'
 import { mayUseIsolatedEvidenceInstance } from './bootstrap/isolated-evidence-instance'
+import { registerDesktopStartupTextModelPreparation } from './composition/application-access'
 
 /**
  * Whether this launch may put itself on screen or take the keyboard. Resolved ONCE: the main window, the Dock
@@ -43,12 +44,13 @@ const windowPresentation = resolveWindowPresentation(process.env)
  * so.
  */
 function runTextModelPrepareStage(): Promise<StartupStageResult<StartupTextModelState>> {
-  return runStartupStage({
+  const stage = runStartupStage({
     // Heavy, and entirely optional to having a window: chat says so itself when no model is ready.
     name: 'models.text.prepare',
     deadlineMs: 180_000,
     domain: 'models',
     lateEffectIsRecoverable: true,
+    observeWork: registerDesktopStartupTextModelPreparation,
     run: async ({ operationId }) => {
       // Await the composition root MODULE, and take the facade from it. Not the
       // `application-access` proxy: that throws until the root has been registered, and this stage
@@ -64,6 +66,7 @@ function runTextModelPrepareStage(): Promise<StartupStageResult<StartupTextModel
       return outcome.value
     }
   })
+  return stage
 }
 
 function isServerOnlyLaunch(): boolean {

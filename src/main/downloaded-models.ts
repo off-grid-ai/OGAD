@@ -147,6 +147,10 @@ export function desktopAsyncDownloadedRegistryPorts(dir: string): AsyncDownloade
         throw error
       }
     },
+    containsInstalledFamily: async ({ familyId }) => {
+      const rows = desktopDownloadedRegistryPorts(dir).read()
+      return rows.some(row => row.id === familyId || row.familyId === familyId)
+    },
     packageIdentity: (input) =>
       modelPackageIdentity({
         ...input,

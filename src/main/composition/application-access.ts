@@ -26,6 +26,28 @@ interface DesktopApplicationRegistry {
   current: OffGridApplication | null
 }
 
+let startupTextModelPreparation: Promise<unknown> | null = null
+
+/**
+ * Bind Pro background generation to the one startup text-model preparation already in flight.
+ * This stores the actual stage promise, not a second readiness flag, and releases it when settled.
+ */
+export function registerDesktopStartupTextModelPreparation(task: Promise<unknown>): void {
+  if (startupTextModelPreparation && startupTextModelPreparation !== task) {
+    throw new Error('Desktop startup text-model preparation is already registered.')
+  }
+  startupTextModelPreparation = task
+  const release = (): void => {
+    if (startupTextModelPreparation === task) startupTextModelPreparation = null
+  }
+  void task.then(release, release)
+}
+
+/** Wait only when startup currently owns text-model preparation. */
+export async function awaitDesktopStartupTextModelPreparation(): Promise<void> {
+  await startupTextModelPreparation
+}
+
 const registryHost = globalThis as typeof globalThis & {
   __offgridDesktopApplicationRegistry?: DesktopApplicationRegistry
 }
