@@ -5,7 +5,7 @@ import { modelsDir } from '../runtime-env'
 import {
   REMOTE_FETCH_REDIRECT_POLICY,
   type RemoteServerApplicationPorts,
-  activeRemoteServer,
+  firstEnabledRemoteServer,
   canReconcileCredentialedEndpoint,
   catalogFromDiscovery,
   defaultRemoteSelections,
@@ -19,7 +19,8 @@ import {
   remoteModelListUrl,
   type RemoteModelCatalog,
   type RemoteModalitySelections,
-  type PersistedRemoteServer
+  type PersistedRemoteServer,
+  type ModelModality
 } from '@offgrid/models'
 import {
   desktopModels,
@@ -56,7 +57,8 @@ interface StoredRemoteVisionServer {
 
 /**
  * On disk since version 4. Files written before 2026-09-03 also carry an `activeServerId`; the
- * active server is derived from the list (shared `activeRemoteServer`), so that field is read past.
+ * settings display derives its shown server from the list (shared `firstEnabledRemoteServer`), so
+ * that field is read past. Routing never reads it: a screen task asks for the SELECTED server.
  */
 interface StoredRemoteVisionConfig {
   version: 4
@@ -129,7 +131,7 @@ function sharedConfiguration(
 ): ReturnType<typeof migrateRemoteServerConfiguration> {
   return {
     version: 1,
-    activeServerId: activeRemoteServer(stored.servers)?.id ?? null,
+    activeServerId: firstEnabledRemoteServer(stored.servers)?.id ?? null,
     servers: stored.servers.map((server) => ({ ...server, provider: sharedProvider(server.provider) }))
   }
 }
@@ -273,7 +275,7 @@ export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'selec
 
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
-  const active = activeRemoteServer(stored.servers)
+  const active = firstEnabledRemoteServer(stored.servers)
   return {
     provider: active?.provider ?? 'local',
     endpoint: active?.endpoint ?? '',
@@ -284,10 +286,19 @@ export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   }
 }
 
-export function getActiveRemoteVisionServer(): RemoteVisionServerConnection | null {
-  const stored = readStored()
-  const active = activeRemoteServer(stored.servers)
-  return active ? { ...active, apiKey: transportApiKey(active) } : null
+/**
+ * The remote server behind the model the user selected for one modality, or null when that
+ * selection runs on this device.
+ *
+ * Privacy and execution must agree with the selection the user made, so both ask the canonical
+ * router rather than reading the saved list. The first enabled server in the file is NOT an answer:
+ * a user with two servers saved could see a screen frame sent to the one they did not choose.
+ */
+export function getSelectedRemoteVisionServer(
+  modality: ModelModality
+): RemoteVisionServerConnection | null {
+  const serverId = desktopModels.resolve({ modality }).selected?.serverId
+  return serverId ? getRemoteVisionServer(serverId) : null
 }
 
 /** Resolve one persisted server for a route selected by the shared model service. */
