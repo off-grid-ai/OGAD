@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #105 - the rendered Speak action reaches the production
+ * The rendered Speak action reaches the production
  * TTS path, strips markdown for speech, returns playable local WAV audio, and can
  * be stopped. The native ExecuTorch speech executable and its model assets are
  * the only replaced boundary.

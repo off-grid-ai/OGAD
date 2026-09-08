@@ -1,4 +1,4 @@
-// Main-process adjacent evidence for RELEASE_TEST_CHECKLIST #49. This owns the real
+// Main-process adjacent coverage. This owns the real
 // persisted-settings -> fresh LLMService -> loopback native-model socket -> production SSE
 // parser chain. The paired renderer test owns the public preload event -> visible chat path.
 
