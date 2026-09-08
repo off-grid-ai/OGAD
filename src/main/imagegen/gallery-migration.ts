@@ -23,7 +23,7 @@ interface MigrationRepository {
 
 interface LegacyGalleryRecord {
   readonly record: GeneratedImageRecord
-  readonly messageId?: string
+  readonly messageIds: readonly string[]
   readonly byteIdentity: string
 }
 
@@ -85,7 +85,7 @@ async function legacyRecord(imagePath: string): Promise<LegacyGalleryRecord | nu
       createdAt: sidecar.createdAt ?? stat.mtime.toISOString(),
       local: { path: imagePath, fileName: path.basename(imagePath) }
     }),
-    ...(sidecar.messageId ? { messageId: sidecar.messageId } : {})
+    messageIds: sidecar.messageId ? [sidecar.messageId] : []
   }
 }
 
@@ -119,9 +119,14 @@ function coalesceLegacyRecords(
     if (!sameGeneration(current, item) || relationsConflict) {
       throw new Error(`Generated image ${item.record.id} has conflicting legacy records.`)
     }
-    if (current.record.conversationId === null && item.record.conversationId !== null) {
-      byId.set(item.record.id, item)
-    }
+    byId.set(item.record.id, {
+      ...current,
+      record:
+        current.record.conversationId === null && item.record.conversationId !== null
+          ? item.record
+          : current.record,
+      messageIds: [...new Set([...current.messageIds, ...item.messageIds])]
+    })
   }
   return [...byId.values()]
 }
@@ -188,30 +193,31 @@ function migratedContent(
 }
 
 async function migrateMessageRelation(item: LegacyGalleryRecord): Promise<LegacyGalleryRecord> {
-  if (!item.messageId) return item
-  const snapshot = desktopWorkspaceContent.snapshot()
-  if (snapshot.status !== 'ready') {
-    throw new Error('Workspace Content is not ready for gallery migration.')
+  for (const messageId of item.messageIds) {
+    const snapshot = desktopWorkspaceContent.snapshot()
+    if (snapshot.status !== 'ready') {
+      throw new Error('Workspace Content is not ready for gallery migration.')
+    }
+    const message = snapshot.messages.find((candidate) => candidate.id === messageId)
+    if (!message) {
+      console.warn(
+        `[gallery-migration] importing generated image ${item.record.id} without its missing legacy message ${messageId}`
+      )
+      continue
+    }
+    if (message.conversationId !== item.record.conversationId) {
+      throw new Error(`Generated image ${item.record.id} has a conflicting message conversation.`)
+    }
+    const content = migratedContent(message, item.record)
+    if (content === message.portable.content) continue
+    const outcome = await desktopWorkspaceContent.execute({
+      type: 'update_message',
+      origin: 'migration',
+      messageId: message.id,
+      portable: { ...message.portable, content }
+    })
+    if (!outcome.ok) throw new Error(outcome.failure.message)
   }
-  const message = snapshot.messages.find((candidate) => candidate.id === item.messageId)
-  if (!message) {
-    console.warn(
-      `[gallery-migration] importing generated image ${item.record.id} without its missing legacy message ${item.messageId}`
-    )
-    return { ...item, record: { ...item.record, conversationId: null } }
-  }
-  if (message.conversationId !== item.record.conversationId) {
-    throw new Error(`Generated image ${item.record.id} has a conflicting message conversation.`)
-  }
-  const content = migratedContent(message, item.record)
-  if (content === message.portable.content) return item
-  const outcome = await desktopWorkspaceContent.execute({
-    type: 'update_message',
-    origin: 'migration',
-    messageId: message.id,
-    portable: { ...message.portable, content }
-  })
-  if (!outcome.ok) throw new Error(outcome.failure.message)
   return item
 }
 
