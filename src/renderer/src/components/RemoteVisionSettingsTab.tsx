@@ -304,7 +304,16 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
         serverId
       )) as RemoteVisionServerSettings
       applySettings(saved)
-      setStatus('Server removed.')
+      // Removing the chosen server leaves nothing chosen, and only the saved settings know that.
+      // A person who is told only "removed" has no idea a screen task will now be refused, so the
+      // ask to choose comes straight from the same answer rather than from a guess here.
+      setStatus(
+        saved.activeServerId
+          ? 'Server removed.'
+          : saved.servers.length > 0
+            ? 'Server removed. No server is chosen now - choose a server to use one.'
+            : 'Server removed. Your local model is active.'
+      )
     } catch {
       setStatus('Server could not be removed.')
     } finally {

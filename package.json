@@ -39,6 +39,8 @@
     "gateway": "npm run verify:shared-contract && node scripts/stage-native.mjs && OFFGRID_SERVER_ONLY=1 electron-vite dev",
     "build": "npm run verify:shared-contract && node scripts/stage-native.mjs && npm run typecheck:node && npm run typecheck:web && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
+    "setup": "npm run setup:native",
+    "setup:native": "electron-builder install-app-deps",
     "prepare:speech-defaults": "node scripts/prepare-default-speech.mjs",
     "build:unpack": "npm run build && npm run prepare:speech-defaults && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",

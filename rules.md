@@ -28,6 +28,19 @@ Two process rules, learned from the same incident — they matter as much as the
 - **Surface the engine's stderr; never guess at the cause.** When `llama-server` dies on load, classify its stderr into a real, actionable reason (`src/main/llama-error.ts`) and show it in System Health. A blank "Model installed but server is not running" got misdiagnosed as code-signing for days when the stderr said `unknown model architecture: 'gemma4'` the whole time.
 - **Verify the EXACT CI path, not an approximation.** A local build using different `cp`/`find` flags than `build-llama.sh` proves nothing — that is exactly how 0.0.28's regression slipped through (local test followed symlinks; CI's `-type f` didn't). Run `scripts/build-llama.sh` itself, then confirm the staged `.0.dylib` names exist as real files **and** a model loads, before claiming a fix is shipped.
 
+## Setting up a machine
+
+Two steps, in this order. There is no third, and nothing here is optional.
+
+1. `npm ci` — installs everything and rebuilds the database library for this Electron.
+2. `npm run setup` — run this ANY time Electron's version changes without a reinstall.
+
+**Why step 2 exists.** The tests run inside Electron, and the database library is compiled against
+one exact Electron version. Bump Electron, skip the rebuild, and the database suites fail with a
+version-mismatch error that names no product rule and looks like a broken feature. `npm run setup`
+rebuilds that library for the Electron now in the tree. It is the same command `npm ci` runs for
+you, kept under its own name so nobody has to remember the secret.
+
 ## Conventions
 
 - Verify changes with `npx tsc --noEmit` (main: `tsconfig.node.json`, web: `tsconfig.web.json`) before declaring done. **If you touched `pro/`, also run `cd pro && npx tsc --noEmit -p tsconfig.json`** — that is a separate CI gate, and core's two configs do NOT compile pro's tests.
