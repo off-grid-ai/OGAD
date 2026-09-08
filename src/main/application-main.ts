@@ -50,6 +50,7 @@ function runTextModelPrepareStage(): Promise<StartupStageResult<StartupTextModel
     deadlineMs: 180_000,
     domain: 'models',
     lateEffectIsRecoverable: true,
+    observeWork: registerDesktopStartupTextModelPreparation,
     run: async ({ operationId }) => {
       // Await the composition root MODULE, and take the facade from it. Not the
       // `application-access` proxy: that throws until the root has been registered, and this stage
@@ -65,7 +66,6 @@ function runTextModelPrepareStage(): Promise<StartupStageResult<StartupTextModel
       return outcome.value
     }
   })
-  registerDesktopStartupTextModelPreparation(stage)
   return stage
 }
 
