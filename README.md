@@ -16,7 +16,6 @@
 
 <p align="center">
   <a href="https://github.com/off-grid-ai/desktop/releases/latest">Download (macOS · Windows)</a> ·
-  <a href="docs/FEATURES.md">Features</a> ·
   <a href="https://getoffgridai.co">getoffgridai.co</a> ·
   <a href="https://getoffgridai.co/pro/#buy">Get Pro</a>
 </p>
@@ -111,8 +110,6 @@ The free, open app is a complete on-device AI studio:
   download, manage, and set the active model per modality.
 - **The Gateway** — one OpenAI-compatible endpoint for everything; see below.
 - **Auto-update** — signed releases update themselves.
-
-A full breakdown is in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## The Gateway
 

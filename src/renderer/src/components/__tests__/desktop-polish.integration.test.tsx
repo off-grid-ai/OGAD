@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// RELEASE_TEST_CHECKLIST #149 and #152 - large collection and transient-layer
+// Large collection and transient-layer
 // integration coverage. The production Models screen and shared modal are real;
 // only Electron/native calls are provided at the window.api boundary.
 

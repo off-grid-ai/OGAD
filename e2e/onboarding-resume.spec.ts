@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #12 - persisted onboarding and interrupted setup work
+ * Persisted onboarding and interrupted setup work
  * survive a real Electron process relaunch. The interrupted transfer fixture is
  * written at the network/filesystem boundary in the exact registry and partial-
  * file format owned by the production model manager; all recovery reads and UI
