@@ -34,7 +34,14 @@ while read -r _local_ref local_oid _remote_ref remote_oid; do
   [ "$local_oid" = "$ZERO_OID" ] && continue
   if [ "$remote_oid" = "$ZERO_OID" ]; then
     base=$(git merge-base "$local_oid" origin/main 2>/dev/null || true)
-    [ -n "$base" ] && range="$base..$local_oid" || range="$local_oid^..$local_oid"
+    if [ -n "$base" ]; then
+      range="$base..$local_oid"
+    elif git rev-parse "$local_oid^" >/dev/null 2>&1; then
+      range="$local_oid^..$local_oid"
+    else
+      CHANGED_FILES="$CHANGED_FILES $(git diff-tree --no-commit-id --name-only -r --diff-filter=ACMR "$local_oid")"
+      continue
+    fi
   else
     range="$remote_oid..$local_oid"
   fi
