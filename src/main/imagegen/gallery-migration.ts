@@ -24,7 +24,13 @@ interface MigrationRepository {
 interface LegacyGalleryRecord {
   readonly record: GeneratedImageRecord
   readonly messageId?: string
+  readonly byteIdentity: string
 }
+
+// Old sidecars could retain every generation fact except the model identifier. Preserve those
+// images with an explicit unknown legacy origin instead of inventing a model or blocking the whole
+// gallery migration.
+const LEGACY_UNKNOWN_MODEL_ID = 'legacy:unknown'
 
 async function contentIdentity(imagePath: string): Promise<string> {
   return createHash('sha256')
@@ -43,27 +49,27 @@ function assertLegacyMessageRelation(
   }
 }
 
-async function legacyRecord(imagePath: string): Promise<LegacyGalleryRecord> {
+async function legacyRecord(imagePath: string): Promise<LegacyGalleryRecord | null> {
   const sidecar = readGeneratedImageSidecar(imagePath)
   const generation = readGeneratedImageMetadata(sidecar.metadataJson)
   const image = await sharp(imagePath).metadata()
   const stat = await fs.promises.stat(imagePath)
-  const id = sidecar.syncId ?? (await contentIdentity(imagePath))
+  const byteIdentity = await contentIdentity(imagePath)
+  const id = sidecar.syncId ?? byteIdentity
   const width = sidecar.width ?? image.width
   const height = sidecar.height ?? image.height
   assertLegacyMessageRelation(imagePath, sidecar)
-  if (
-    !generation?.prompt ||
-    !generation.modelId ||
-    !generation.steps ||
-    generation.seed === undefined
-  ) {
-    throw new Error(`Generated image ${path.basename(imagePath)} has incomplete generation facts.`)
+  if (!generation?.prompt || !generation.steps || generation.seed === undefined) {
+    console.warn(
+      `[gallery-migration] preserving ${path.basename(imagePath)} on disk because its legacy generation facts are incomplete`
+    )
+    return null
   }
   if (!width || !height) {
     throw new Error(`Generated image ${path.basename(imagePath)} has no readable dimensions.`)
   }
   return {
+    byteIdentity,
     record: createGeneratedImageRecord({
       id,
       ...(sidecar.conversationId === undefined ? {} : { conversationId: sidecar.conversationId }),
@@ -75,12 +81,49 @@ async function legacyRecord(imagePath: string): Promise<LegacyGalleryRecord> {
       height,
       steps: generation.steps,
       seed: generation.seed,
-      modelId: generation.modelId,
+      modelId: generation.modelId?.trim() || LEGACY_UNKNOWN_MODEL_ID,
       createdAt: sidecar.createdAt ?? stat.mtime.toISOString(),
       local: { path: imagePath, fileName: path.basename(imagePath) }
     }),
     ...(sidecar.messageId ? { messageId: sidecar.messageId } : {})
   }
+}
+
+function sameGeneration(left: LegacyGalleryRecord, right: LegacyGalleryRecord): boolean {
+  return (
+    left.byteIdentity === right.byteIdentity &&
+    left.record.prompt === right.record.prompt &&
+    left.record.negativePrompt === right.record.negativePrompt &&
+    left.record.width === right.record.width &&
+    left.record.height === right.record.height &&
+    left.record.steps === right.record.steps &&
+    left.record.seed === right.record.seed &&
+    left.record.modelId === right.record.modelId
+  )
+}
+
+function coalesceLegacyRecords(
+  records: readonly LegacyGalleryRecord[]
+): readonly LegacyGalleryRecord[] {
+  const byId = new Map<string, LegacyGalleryRecord>()
+  for (const item of records) {
+    const current = byId.get(item.record.id)
+    if (!current) {
+      byId.set(item.record.id, item)
+      continue
+    }
+    const relationsConflict =
+      current.record.conversationId !== null &&
+      item.record.conversationId !== null &&
+      current.record.conversationId !== item.record.conversationId
+    if (!sameGeneration(current, item) || relationsConflict) {
+      throw new Error(`Generated image ${item.record.id} has conflicting legacy records.`)
+    }
+    if (current.record.conversationId === null && item.record.conversationId !== null) {
+      byId.set(item.record.id, item)
+    }
+  }
+  return [...byId.values()]
 }
 
 async function readLegacyRecords(): Promise<readonly LegacyGalleryRecord[]> {
@@ -92,7 +135,7 @@ async function readLegacyRecords(): Promise<readonly LegacyGalleryRecord[]> {
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw cause
   }
-  return Promise.all(
+  const records = await Promise.all(
     names
       .filter((name) => isGeneratedImageFile(name) && !name.startsWith('preview-'))
       .sort((left, right) => left.localeCompare(right, 'en'))
@@ -101,6 +144,7 @@ async function readLegacyRecords(): Promise<readonly LegacyGalleryRecord[]> {
         return imagePath ? [legacyRecord(imagePath)] : []
       })
   )
+  return records.filter((record): record is LegacyGalleryRecord => record !== null)
 }
 
 function imagePart(record: GeneratedImageRecord): PortableMessageContentPart {
@@ -143,19 +187,24 @@ function migratedContent(
   return [...current, imagePart(record)]
 }
 
-async function migrateMessageRelation(item: LegacyGalleryRecord): Promise<void> {
-  if (!item.messageId) return
+async function migrateMessageRelation(item: LegacyGalleryRecord): Promise<LegacyGalleryRecord> {
+  if (!item.messageId) return item
   const snapshot = desktopWorkspaceContent.snapshot()
   if (snapshot.status !== 'ready') {
     throw new Error('Workspace Content is not ready for gallery migration.')
   }
   const message = snapshot.messages.find((candidate) => candidate.id === item.messageId)
-  if (!message) throw new Error(`Generated image message ${item.messageId} was not found.`)
+  if (!message) {
+    console.warn(
+      `[gallery-migration] importing generated image ${item.record.id} without its missing legacy message ${item.messageId}`
+    )
+    return { ...item, record: { ...item.record, conversationId: null } }
+  }
   if (message.conversationId !== item.record.conversationId) {
     throw new Error(`Generated image ${item.record.id} has a conflicting message conversation.`)
   }
   const content = migratedContent(message, item.record)
-  if (content === message.portable.content) return
+  if (content === message.portable.content) return item
   const outcome = await desktopWorkspaceContent.execute({
     type: 'update_message',
     origin: 'migration',
@@ -163,6 +212,7 @@ async function migrateMessageRelation(item: LegacyGalleryRecord): Promise<void> 
     portable: { ...message.portable, content }
   })
   if (!outcome.ok) throw new Error(outcome.failure.message)
+  return item
 }
 
 /** Import the old sidecar inventory exactly once through Shared validation and conflict policy. */
@@ -171,9 +221,9 @@ export async function migrateGeneratedImageSidecars(input: {
   readonly gallery: GeneratedImageGalleryFacade
 }): Promise<void> {
   if (input.repository.migrationComplete()) return
-  const legacy = await readLegacyRecords()
-  for (const item of legacy) await migrateMessageRelation(item)
-  const outcome = await input.gallery.importLegacy(legacy.map((item) => item.record))
+  const legacy = coalesceLegacyRecords(await readLegacyRecords())
+  const migrated = await Promise.all(legacy.map(migrateMessageRelation))
+  const outcome = await input.gallery.importLegacy(migrated.map((item) => item.record))
   if (!outcome.ok) throw new Error(outcome.failure.message)
   input.repository.markMigrationComplete()
 }
