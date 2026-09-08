@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #149 - a large persisted chat collection remains
+ * A large persisted chat collection remains
  * searchable, scrollable, and usable in the real desktop master-detail layout.
  * Synthetic records enter through production preload and main-process IPC.
  */
