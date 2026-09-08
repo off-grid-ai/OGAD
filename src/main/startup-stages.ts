@@ -159,8 +159,11 @@ export async function runStartupStage<T>(stage: StartupStage<T>): Promise<Startu
   // running, the stage reading as pending forever, and `runIndependentStartupStages` rejecting
   // early instead of collecting a typed failure.
   const work = Promise.resolve().then(() => stage.run(context))
-  stage.observeWork?.(work)
+  // This independent rejection observer remains attached if observeWork itself throws before the
+  // stage reaches Promise.race. Awaiting the original promise below still preserves its outcome.
+  void work.catch(() => undefined)
   try {
+    stage.observeWork?.(work)
     const outcome = await Promise.race([work.then((value) => ({ value }) as const), deadline])
     const durationMs = Date.now() - startedAt
     if (outcome === 'timeout') {
