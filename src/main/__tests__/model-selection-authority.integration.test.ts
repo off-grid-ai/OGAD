@@ -74,9 +74,87 @@ afterAll(() => {
 
 afterEach(async () => {
   await Promise.all(applications.splice(0).map((application) => application.stop()))
+  fs.rmSync(path.join(modelDirectory, 'remote-vision-server.json'), { force: true })
+  fs.rmSync(path.join(modelDirectory, 'model-selections.json'), { force: true })
 })
 
 describe('Desktop active-model authority', () => {
+  it('routes through the selected second remote server and preserves it after restart', async () => {
+    fs.writeFileSync(
+      path.join(modelDirectory, 'remote-vision-server.json'),
+      JSON.stringify({
+        version: 4,
+        servers: [
+          {
+            id: 'remote-first',
+            name: 'First enabled server',
+            provider: 'custom',
+            endpoint: 'https://first.example/v1',
+            model: 'vision-first',
+            selections: { text: 'vision-first' },
+            catalog: {
+              text: [
+                {
+                  id: 'vision-first',
+                  name: 'Vision first',
+                  capabilities: { supportsVision: true }
+                }
+              ]
+            },
+            screenFramesAllowed: true
+          },
+          {
+            id: 'remote-second',
+            name: 'Selected second server',
+            provider: 'custom',
+            endpoint: 'https://second.example/v1',
+            model: 'vision-second',
+            selections: { text: 'vision-second' },
+            catalog: {
+              text: [
+                {
+                  id: 'vision-second',
+                  name: 'Vision second',
+                  capabilities: { supportsVision: true }
+                }
+              ]
+            },
+            screenFramesAllowed: true
+          }
+        ]
+      })
+    )
+    const ports = {
+      listCatalog: async () => [],
+      listInstalled: async () => [],
+      localTextRuntime: createFakeLocalTextRuntime().runtime
+    }
+    const firstApplication = await createModelsApplication(ports)
+    await firstApplication.models.refresh()
+    const secondRoute = firstApplication.models
+      .snapshot()
+      .inventory.find((model) => model.modality === 'text' && model.serverId === 'remote-second')
+    if (!secondRoute?.routeId) throw new Error('The second remote server route was not projected.')
+
+    await expect(
+      firstApplication.models.select({ modality: 'text', modelId: secondRoute.routeId })
+    ).resolves.toMatchObject({ ok: true })
+    const { getSelectedRemoteVisionServer } = await import('../vision/remote-vision-server')
+    expect(getSelectedRemoteVisionServer('text')).toMatchObject({
+      id: 'remote-second',
+      endpoint: 'https://second.example/v1'
+    })
+
+    await firstApplication.stop()
+    applications.splice(applications.indexOf(firstApplication), 1)
+    const restartedApplication = await createModelsApplication(ports)
+    await restartedApplication.models.refresh()
+    expect(getSelectedRemoteVisionServer('text')).toMatchObject({
+      id: 'remote-second',
+      endpoint: 'https://second.example/v1'
+    })
+  })
+
   it('uses the persisted route for inventory, runtime state, UI projection, and execution', async () => {
     const byKind = (kind: string): CatalogEntry => {
       const model = CATALOG.find(

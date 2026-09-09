@@ -19,7 +19,7 @@ vi.mock('electron', () => ({
 
 import { llm } from '../llm'
 import {
-  getActiveRemoteVisionServer,
+  getSelectedRemoteVisionServer,
   removeRemoteVisionServer,
   setRemoteVisionServerSettings
 } from '../vision/remote-vision-server'
@@ -202,7 +202,7 @@ beforeAll(async () => {
     apiKey: 'test-api-key'
   })
   remoteServerId = settings.activeServerId ?? ''
-  const activeRemote = getActiveRemoteVisionServer()
+  const activeRemote = getSelectedRemoteVisionServer('text')
   if (!activeRemote) throw new Error('The selected remote fixture was not persisted.')
   await remoteReasoningMetadata(activeRemote)
 })
@@ -382,7 +382,7 @@ describe('active text model transport', () => {
     turns.push({ content: 'Partial remote answer.', hold: true })
     const controller = new AbortController()
 
-    const remote = getActiveRemoteVisionServer()
+    const remote = getSelectedRemoteVisionServer('text')
     expect(remote).not.toBeNull()
     const result = await llm.streamChatRemote(
       remote!,
