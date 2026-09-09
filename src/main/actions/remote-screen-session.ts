@@ -1,12 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { ComputerUseModelStrategy } from '../../shared/computer-use-settings'
 import type { ScreenTaskKind } from '../../shared/remote-screen-privacy'
-import type { getActiveRemoteVisionServer } from '../vision/remote-vision-server'
+import type { getSelectedRemoteVisionServer } from '../vision/remote-vision-server'
 
 export interface RemoteScreenTaskSession {
   taskKind: ScreenTaskKind
   modelStrategy: ComputerUseModelStrategy
-  activeServer: ReturnType<typeof getActiveRemoteVisionServer>
+  activeServer: ReturnType<typeof getSelectedRemoteVisionServer>
 }
 
 const sessions = new AsyncLocalStorage<Readonly<RemoteScreenTaskSession>>()

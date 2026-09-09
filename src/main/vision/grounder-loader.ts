@@ -24,7 +24,7 @@ import type { ModelsFacade } from '@offgrid/application'
 import { llm } from '../llm'
 import { isGrounderActive } from './vision-model-notice'
 import { getComputerUseSettings } from '../computer-use-settings'
-import { getActiveRemoteVisionServer } from './remote-vision-server'
+import { getSelectedRemoteVisionServer } from './remote-vision-server'
 import {
   currentRemoteScreenTaskSession,
   runWithRemoteScreenTaskSession
@@ -98,7 +98,7 @@ const productionGrounderDependencies: GrounderRunnerDependencies = {
   activeModelId: () => desktopModels.activeModelId('text'),
   activeRemote: () => {
     const session = currentRemoteScreenTaskSession()
-    return session ? session.activeServer : getActiveRemoteVisionServer()
+    return session ? session.activeServer : getSelectedRemoteVisionServer('text')
   },
   isGrounder: isGrounderActive,
   load: productionGrounderLifecycle.load,
