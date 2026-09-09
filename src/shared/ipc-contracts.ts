@@ -165,8 +165,10 @@ export interface SystemHealthContract {
 
 export interface CacheCleanupResultContract {
   success: true
-  /** HTTP cache bytes reclaimed when Electron can measure them; null otherwise. */
+  /** Known disposable bytes reclaimed; null when no owner can measure them. */
   freedBytes: number | null
+  /** Failed, cancelled, or interrupted model downloads removed by Shared Models. */
+  incompleteDownloadsRemoved: number
 }
 
 export const CACHE_CLEANUP_CHANNEL = 'storage:clear-cache'
