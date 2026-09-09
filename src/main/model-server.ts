@@ -56,7 +56,8 @@ import { whisperModel } from './rag/extractors'
 import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
-import { logActionTokenForDev } from './mcp-auth'
+import { logActionTokenForDev, authorizeActionRequest } from './mcp-auth'
+import { isLoopbackAddress } from './loopback-address'
 import { llm, type LlmSettings } from './llm'
 import { modelsFailureMessage } from '@offgrid/application'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
@@ -539,6 +540,14 @@ async function handleTranscription(
   res: http.ServerResponse,
   rid: string
 ): Promise<void> {
+  // Transcription offload gate: local callers stay open (the app's own tools), but a REMOTE
+  // device - the paired phone offloading its recorder audio over the LAN - must present a valid
+  // per-device token. Same guard the MCP action tools use (reads live per-device tokens from the
+  // sync layer), so unpairing the phone closes this route for it on the very next request.
+  if (!isLoopbackAddress(req.socket.remoteAddress) && !authorizeActionRequest(req).allowed) {
+    json(res, 401, errBody('Unauthorized. Pair this device to use Mac transcription.', 'unauthorized'))
+    return
+  }
   const ct = req.headers['content-type'] || ''
   if (!ct.includes('multipart/form-data')) {
     json(res, 400, errBody('Send multipart/form-data with a "file" field.'))
@@ -1053,10 +1062,7 @@ export async function startModelServer(
       // Mutating launch-time LLM args triggers a llama-server respawn. The listener is
       // on every interface so a phone can reach the models, which makes this check the
       // ONLY thing standing between the LAN and a respawn - not defense in depth.
-      const remote = req.socket.remoteAddress
-      const isLocalhost =
-        remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
-      if (!isLocalhost) {
+      if (!isLoopbackAddress(req.socket.remoteAddress)) {
         json(res, 403, errBody('Settings mutations are restricted to localhost.', 'forbidden'))
         return
       }
