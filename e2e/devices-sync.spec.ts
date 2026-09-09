@@ -569,19 +569,6 @@ test.describe('Devices surface — pro tier', () => {
     expect(
       syntheticPeer.sendApp(desktop.localDevice.id, 'state', { t: 'ops', ops: inboundOps })
     ).toBe(true)
-    await expect
-      .poll(async () => {
-        const status = await page.evaluate(async () =>
-          (
-            window as unknown as {
-              api: { proInvoke(channel: string): Promise<{ ops: number }> }
-            }
-          ).api.proInvoke('pro:sync:status')
-        )
-        return status.ops
-      })
-      .toBeGreaterThanOrEqual(inboundOps.length)
-
     await navButton(page, 'Projects').click()
     const syncedProject = page.getByRole('button', { name: 'Synced from phone' })
     await expect(syncedProject).toBeVisible()

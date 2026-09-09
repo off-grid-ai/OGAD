@@ -1358,11 +1358,6 @@
       "max-lines": [
         555
       ]
-    },
-    "pro/renderer/settings-sync.tsx": {
-      "complexity": [
-        22
-      ]
     }
   }
 }
