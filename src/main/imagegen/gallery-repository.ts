@@ -117,6 +117,10 @@ export class DesktopGeneratedImageGalleryRepository implements GeneratedImageGal
     return this.db.transaction(() => {
       const current = readGeneratedImageGalleryState(this.db)
       if (current.revision !== Number(input.expectedRevision)) return false
+      const currentImages = JSON.parse(current.images_json) as GeneratedImageRecord[]
+      const currentConversationByImageId = new Map(
+        currentImages.map((image) => [image.id, image.conversationId] as const)
+      )
       const conversationExists = this.db.prepare(
         `SELECT 1 FROM workspace_content_conversations c
          WHERE c.id = ? AND NOT EXISTS (
@@ -125,7 +129,10 @@ export class DesktopGeneratedImageGalleryRepository implements GeneratedImageGal
          )`
       )
       const fenced = input.images.find(
-        (image) => image.conversationId && !conversationExists.get(image.conversationId)
+        (image) =>
+          image.conversationId &&
+          currentConversationByImageId.get(image.id) !== image.conversationId &&
+          !conversationExists.get(image.conversationId)
       )
       if (fenced?.conversationId) {
         throw new Error(`Conversation ${fenced.conversationId} is missing or being deleted.`)
@@ -135,7 +142,7 @@ export class DesktopGeneratedImageGalleryRepository implements GeneratedImageGal
       // may act, so the metadata row and the durable knowledge of its bytes leave together. A
       // remote-provenance path is stored verbatim - it is the Shared File owner's to confine, and
       // it is never resolved against this app's generated-image library.
-      const removed = (JSON.parse(current.images_json) as GeneratedImageRecord[])
+      const removed = currentImages
         .filter((image) => !retained.has(image.id))
         .map((image) => ({
           id: image.id,

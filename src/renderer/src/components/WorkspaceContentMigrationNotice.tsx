@@ -81,7 +81,7 @@ export function WorkspaceContentMigrationNotice(): React.JSX.Element | null {
               ? 'Your chats could not be upgraded'
               : state.phase === 'read_failed'
                 ? 'Upgrade status could not be read'
-                : 'Preparing your chats'}
+                : 'Preparing your workspace'}
           </DialogTitle>
         </DialogHeader>
         <DialogDescription asChild>
@@ -115,7 +115,7 @@ export function WorkspaceContentMigrationNotice(): React.JSX.Element | null {
               <p>Restart Off Grid AI Desktop. Your saved chats have not been changed.</p>
             ) : (
               <div className="flex items-center gap-2" role="status">
-                <span>Reading your saved chats</span>
+                <span>Checking upgrade status</span>
                 <LoadingDots size="small" />
               </div>
             )}
