@@ -56,7 +56,7 @@ import { whisperModel } from './rag/extractors'
 import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
-import { logActionTokenForDev, authorizeActionRequest } from './mcp-auth'
+import { logActionTokenForDev } from './mcp-auth'
 import { isLoopbackAddress } from './loopback-address'
 import { llm, type LlmSettings } from './llm'
 import { modelsFailureMessage } from '@offgrid/application'
@@ -540,14 +540,9 @@ async function handleTranscription(
   res: http.ServerResponse,
   rid: string
 ): Promise<void> {
-  // Transcription offload gate: local callers stay open (the app's own tools), but a REMOTE
-  // device - the paired phone offloading its recorder audio over the LAN - must present a valid
-  // per-device token. Same guard the MCP action tools use (reads live per-device tokens from the
-  // sync layer), so unpairing the phone closes this route for it on the very next request.
-  if (!isLoopbackAddress(req.socket.remoteAddress) && !authorizeActionRequest(req).allowed) {
-    json(res, 401, errBody('Unauthorized. Pair this device to use Mac transcription.', 'unauthorized'))
-    return
-  }
+  // Open like the gateway's other model routes (chat, images, speech): the machine's network is the
+  // trust boundary, so a paired phone offloading its recorder audio over the LAN is accepted the same
+  // way as a chat request. Only settings mutations are peer-guarded.
   const ct = req.headers['content-type'] || ''
   if (!ct.includes('multipart/form-data')) {
     json(res, 400, errBody('Send multipart/form-data with a "file" field.'))
