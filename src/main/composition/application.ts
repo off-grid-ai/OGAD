@@ -154,10 +154,13 @@ if (desktopApplication.generatedImages) {
   )
 }
 
-// Registered for the life of the running application. `startDesktopApplication` re-registers so a
-// stop followed by a start in one process is served, and `stopDesktopApplication` disposes so a late
-// caller after stop gets "not initialized" rather than a stopped instance.
-let releaseApplicationRegistration: (() => void) | null = null
+// The constructed application is the process composition root, so every early IPC adapter can bind
+// to that one identity before its domains start. Runtime state still belongs to Shared: callers see
+// the facade's explicit `created` state until `startDesktopApplication` advances it. Keeping the
+// registration until stop also lets a stopped root become unavailable instead of leaving a stale
+// singleton behind.
+let releaseApplicationRegistration: (() => void) | null =
+  registerDesktopApplication(desktopApplication)
 
 let starting: ReturnType<typeof desktopApplication.start> | null = null
 let releaseSyncRuntime: (() => void) | null = null

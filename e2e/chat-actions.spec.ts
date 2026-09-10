@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #44 and #46 - conversation rename and assistant-copy
+ * Conversation rename and assistant-copy
  * cross the real Electron renderer, preload, IPC, SQLite, and OS clipboard seams.
  * Synthetic records are created through production IPC in a fresh temp profile.
  */

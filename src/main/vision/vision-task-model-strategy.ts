@@ -24,7 +24,7 @@ import type {
   VisionPolicyInput
 } from './model-adapters/types'
 import { createVisionGrounder } from './vision-policy-runner'
-import { getActiveRemoteVisionServer } from './remote-vision-server'
+import { getSelectedRemoteVisionServer } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import {
@@ -70,7 +70,7 @@ const productionDependencies: VisionTaskModelStrategyDependencies = {
   activeArtifacts: () => llm.activeModelArtifacts(),
   activeRemote: () => {
     const session = currentRemoteScreenTaskSession()
-    return session ? session.activeServer : getActiveRemoteVisionServer()
+    return session ? session.activeServer : getSelectedRemoteVisionServer('text')
   },
   selectedChatId: getActiveModel,
   selectedSpecialistId: selectedGrounderModelId,

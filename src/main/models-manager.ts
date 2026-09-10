@@ -36,7 +36,7 @@ import {
   isChatLoadable,
   visionStatus,
   projectorToHeal,
-  isProjectorFileName,
+  isModelProjectorFile,
   modelSelectionRefusal,
   specialistReclassificationModality,
   transferredProjectorRepair,
@@ -169,11 +169,11 @@ export class ModelIdentityResolutionError extends Error {
 }
 
 function downloadedPrimary(model: DownloadedModel): string | undefined {
-  return model.files.find((name) => !isProjectorFileName(name)) ?? model.files[0]
+  return model.files.find((name) => !isModelProjectorFile(name)) ?? model.files[0]
 }
 
 function downloadedProjector(model: DownloadedModel): string | undefined {
-  return model.files.find(isProjectorFileName)
+  return model.files.find(isModelProjectorFile)
 }
 
 /** A route id, or any id that names a remote route, is already canonical (the workspace decides). */

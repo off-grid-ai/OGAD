@@ -33,6 +33,7 @@ describe('transferred model lifecycle', () => {
     const { registerDesktopApplication } = await import('../composition/application-access')
     const { createDesktopModelTransferQueryPorts } =
       await import('../models/model-transfer-query-ports')
+    const { createDesktopModelControlPort } = await import('../models/desktop-model-control-port')
     const workspace = createDesktopModelWorkspacePorts({
       listCatalog: async () =>
         (await manager.getCatalog()).models as Awaited<
@@ -59,7 +60,8 @@ describe('transferred model lifecycle', () => {
         library: {
           ...manager.desktopModelLibraryPorts,
           transferable: createDesktopModelTransferQueryPorts()
-        }
+        },
+        control: createDesktopModelControlPort()
       }
     })
     registerDesktopApplication(application)
@@ -92,6 +94,12 @@ describe('transferred model lifecycle', () => {
     expect((await manager.getCatalog()).models).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: packageId, kind: 'vision' })])
     )
+    expect(application.models.snapshot().control.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: packageId, sourceModelId: familyId, kind: 'vision' })
+      ])
+    )
+    expect(application.models.snapshot().control.installed).toContain(packageId)
     expect(await manager.getVisionStatuses()).toMatchObject({
       [packageId]: { supportsVision: true, projectorInstalled: true }
     })

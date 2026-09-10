@@ -92,6 +92,8 @@ export interface StartupStage<T> {
    * lands. Everything else defaults to refusing late effects.
    */
   readonly lateEffectIsRecoverable?: boolean
+  /** Observe the real work promise when another lifecycle must remain blocked until it settles. */
+  readonly observeWork?: (work: Promise<T>) => void
   readonly run: (context: StartupStageContext) => Promise<T>
 }
 
@@ -157,7 +159,11 @@ export async function runStartupStage<T>(stage: StartupStage<T>): Promise<Startu
   // running, the stage reading as pending forever, and `runIndependentStartupStages` rejecting
   // early instead of collecting a typed failure.
   const work = Promise.resolve().then(() => stage.run(context))
+  // This independent rejection observer remains attached if observeWork itself throws before the
+  // stage reaches Promise.race. Awaiting the original promise below still preserves its outcome.
+  void work.catch(() => undefined)
   try {
+    stage.observeWork?.(work)
     const outcome = await Promise.race([work.then((value) => ({ value }) as const), deadline])
     const durationMs = Date.now() - startedAt
     if (outcome === 'timeout') {

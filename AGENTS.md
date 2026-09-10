@@ -2,36 +2,14 @@
 
 This is **Off Grid AI Desktop** — an Electron (macOS) desktop app. The product name is always **"Off Grid AI Desktop"** (never "Off Grid AI Desktop", "My Memories", etc.) — in window titles, OAuth client names, about screens, everywhere.
 
-## Design — DESKTOP-FIRST, Off Grid AI brand
+## Design
 
-Full design doc: **`docs/DESIGN.md`**. The essentials, which OVERRIDE any mobile-first or monochrome assumptions:
-
-- **Desktop-first.** Wide canvas: multi-column layouts, dense lists/tables, side panels, detail screens, hover affordances. Never design mobile-first or for narrow viewports. (The mobile app is a separate product with its own guide.)
-- **Typeface: Menlo** (monospace) everywhere — terminal/brutalist.
-- **Accent: emerald** — `#34D399` (dark) / `#059669` (light). THE accent for primary actions, active states, links, success. (Tailwind `green-500/400` is an acceptable stand-in but prefer the exact tokens.)
-- **Base:** black / `#0A0A0A` + white; neutral grays for surfaces/borders/text tiers. Flat, sharp, dense.
-- Tokens: `@offgrid/design`. Brand canon: `mobile/docs/design/DESIGN_PHILOSOPHY_SYSTEM.md` (brand only — desktop _layout_ follows `docs/DESIGN.md`, desktop-first).
-- Real brand logos (Simple Icons), no decorative tiles behind them; no gradients; no emojis in the UI.
-
-### Use the screen real estate — desktop density rules
-
-The window is WIDE. A list of cards/rows stretched edge-to-edge in a single column (one item per 1900px line, the action button marooned on the far right) wastes the canvas and reads worse, not better. Lay out for the space you have. These are hard rules, learned the hard way on the Models screen:
-
-- **Multi-column responsive grids for collections.** Any list of comparable items (models, connectors, entities, meetings) is a grid that fills the width: `grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4`, not one full-width row each. A card's controls stay next to its content, never flung across empty space.
-- **Tight, consistent spacing on a 4/8/12px scale.** Dense data UIs use narrow gutters (8-12px) and small padding, NOT the 16-24px editorial spacing. Body text ~12-14px, compact line-height. Flat and sharp, per the brand.
-- **Group, then separate.** Reduce gaps _within_ a group (rows in a section) but keep clear separation _between_ functional groups (filters vs data, "On this device" vs "Available"). Section headers over a wall of identical rows.
-- **Progressive disclosure.** Secondary info and rarely-used controls go behind a detail panel / "…" / hover affordance — don't lay everything flat. Master list stays scannable; depth lives in the side panel or slide-over.
-- **Sticky context.** Fix headers, tabs, filter bars, and column labels while the body scrolls, so context never scrolls away.
-- **Finesse the interactions.** Every click gets a small micro-interaction — `transition-all duration-150`, `active:scale-95` on buttons, slide+fade (not abrupt mount) for panels/slide-overs. State changes animate; nothing pops in or out hard.
-- **Offer density where it matters**, but the default IS dense — this is a terminal/brutalist desktop app, not a spacious mobile-first card feed.
-
-Best-practice references: [UXPin grid systems](https://www.uxpin.com/studio/blog/ui-grids-how-to-guide/), [Pencil & Paper enterprise data tables](https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-data-tables), [Designing for data density](https://paulwallas.medium.com/designing-for-data-density-what-most-ui-tutorials-wont-teach-you-091b3e9b51f4), [Andrew Coyle on large data tables](https://coyleandrew.medium.com/ui-considerations-for-designing-large-data-tables-aa6c1ea93797).
+`brand/DESIGN_PHILOSOPHY.md` is the only design source of truth. Apply its Desktop profile and
+use `@offgrid/design` tokens.
 
 ## What this app is
 
 A private, **local-first** layer that **sees** (screen capture → OCR → entities), **remembers** (observations/entities/memory), helps you **reflect** (mind-share / day), and **acts** (MCP connectors + approval-gated actions). Everything is processed on-device by a bundled local LLM (llama.cpp + gemma); nothing routes through a server we own.
-
-Roadmap: **`ROADMAP_DESKTOP.md`** (this repo) and `../shared/ROADMAP.md`.
 
 ## Stack
 
@@ -135,7 +113,7 @@ This is a hard rule, not a preference. **Before writing ANY new component, panel
 
 - If something close exists, **extend it with a prop** — never fork a parallel copy. Two surfaces showing the same kind of thing (a viewer, a modal, a card, a search box, a preview pane) MUST use the same component. Parallel versions cause visual + behavioural drift (e.g. don't build a new centered modal when the image **Lightbox** overlay already exists — reuse that layout).
 - Only build new when nothing fits, and say why.
-- UI follows the approved-library + brand-token rules in `docs/DESIGN.md`; icons are `@phosphor-icons/react` only (never lucide).
+- UI follows `brand/DESIGN_PHILOSOPHY.md`; icons are `@phosphor-icons/react` only.
 
 ## Open core — pro feature code lives in the pro repo
 

@@ -3,9 +3,10 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { modelsDir } from '../runtime-env'
 import {
+  GENERATION_PROFILES,
   REMOTE_FETCH_REDIRECT_POLICY,
   type RemoteServerApplicationPorts,
-  activeRemoteServer,
+  firstEnabledRemoteServer,
   canReconcileCredentialedEndpoint,
   catalogFromDiscovery,
   defaultRemoteSelections,
@@ -17,6 +18,7 @@ import {
   remoteAuthorizationHeaders,
   remoteErrorBodyMessage,
   remoteModelListUrl,
+  type ModelModality,
   type RemoteModelCatalog,
   type RemoteModalitySelections,
   type PersistedRemoteServer
@@ -56,7 +58,8 @@ interface StoredRemoteVisionServer {
 
 /**
  * On disk since version 4. Files written before 2026-09-03 also carry an `activeServerId`; the
- * active server is derived from the list (shared `activeRemoteServer`), so that field is read past.
+ * settings fallback is derived from the list (shared `firstEnabledRemoteServer`), so that field is
+ * read past. Execution never uses this fallback.
  */
 interface StoredRemoteVisionConfig {
   version: 4
@@ -129,7 +132,7 @@ function sharedConfiguration(
 ): ReturnType<typeof migrateRemoteServerConfiguration> {
   return {
     version: 1,
-    activeServerId: activeRemoteServer(stored.servers)?.id ?? null,
+    activeServerId: firstEnabledRemoteServer(stored.servers)?.id ?? null,
     servers: stored.servers.map((server) => ({ ...server, provider: sharedProvider(server.provider) }))
   }
 }
@@ -273,7 +276,7 @@ export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'selec
 
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
-  const active = activeRemoteServer(stored.servers)
+  const active = firstEnabledRemoteServer(stored.servers)
   return {
     provider: active?.provider ?? 'local',
     endpoint: active?.endpoint ?? '',
@@ -284,16 +287,21 @@ export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   }
 }
 
-export function getActiveRemoteVisionServer(): RemoteVisionServerConnection | null {
-  const stored = readStored()
-  const active = activeRemoteServer(stored.servers)
-  return active ? { ...active, apiKey: transportApiKey(active) } : null
-}
-
 /** Resolve one persisted server for a route selected by the shared model service. */
 export function getRemoteVisionServer(serverId: string): RemoteVisionServerConnection | null {
   const server = readStored().servers.find((candidate) => candidate.id === serverId)
   return server ? { ...server, apiKey: transportApiKey(server) } : null
+}
+
+/** Join Shared's strict selected route to this device's remote-server transport. */
+export function getSelectedRemoteVisionServer(
+  modality: ModelModality
+): RemoteVisionServerConnection | null {
+  const selected = desktopModels.resolve({
+    modality,
+    allowFallback: GENERATION_PROFILES.chat.allowFallback
+  }).selected
+  return selected?.serverId ? getRemoteVisionServer(selected.serverId) : null
 }
 
 export async function setRemoteVisionServerSettings(

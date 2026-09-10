@@ -97,7 +97,11 @@ describe('rendered storage usage', () => {
           projection
         })
       ),
-      clearAppCache: vi.fn(async () => ({ success: true, freedBytes: 3_000_000 }))
+      clearAppCache: vi.fn(async () => ({
+        success: true,
+        freedBytes: 3_000_000,
+        incompleteDownloadsRemoved: 2
+      }))
     }
     ;(globalThis as unknown as { window: Window }).window.api = api as never
   })
@@ -333,14 +337,14 @@ describe('rendered storage usage', () => {
     })
   })
 
-  it('clears only temporary cache and explains which durable stores remain (#134)', async () => {
+  it('clears temporary cache and partial model downloads while preserving installed models', async () => {
     const user = userEvent.setup()
     render(<StoragePanel />)
 
     expect(await screen.findByText('Temporary app cache')).toBeTruthy()
     expect(
       screen.getByText(
-        'Safe to clear. Chats, projects, models, vault, settings, and Pro access stay.'
+        'Safe to clear. Partial model downloads are removed. Installed models and your data stay.'
       )
     ).toBeTruthy()
 
@@ -348,7 +352,7 @@ describe('rendered storage usage', () => {
 
     expect(api.clearAppCache).toHaveBeenCalledTimes(1)
     expect((await screen.findByRole('status')).textContent).toBe(
-      'Temporary cache cleared. 3 MB reclaimed. Your data and models were kept.'
+      'Temporary cache cleared. 3 MB reclaimed. 2 partial model downloads removed. Installed models were kept.'
     )
   })
 
@@ -360,19 +364,23 @@ describe('rendered storage usage', () => {
     await user.click(await screen.findByRole('button', { name: 'Clear cache' }))
 
     expect((await screen.findByRole('status')).textContent).toBe(
-      'Cache could not be cleared. Your data and models were not changed.'
+      'Cleanup could not be completed. Installed models and your data were kept.'
     )
   })
 
   it('reports successful cleanup when Electron cannot measure reclaimed bytes', async () => {
-    api.clearAppCache.mockResolvedValue({ success: true, freedBytes: null })
+    api.clearAppCache.mockResolvedValue({
+      success: true,
+      freedBytes: null,
+      incompleteDownloadsRemoved: 0
+    })
     const user = userEvent.setup()
     render(<StoragePanel />)
 
     await user.click(await screen.findByRole('button', { name: 'Clear cache' }))
 
     expect((await screen.findByRole('status')).textContent).toBe(
-      'Temporary cache cleared. Your data and models were kept.'
+      'Temporary cache cleared. Installed models were kept.'
     )
   })
 })

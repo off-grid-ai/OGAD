@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 /**
- * RELEASE_TEST_CHECKLIST #16 - denied capture permissions recover through the real
+ * Denied capture permissions recover through the real
  * permission owner and rendered setup surface. Only macOS TCC, Electron transport,
  * and opening System Settings are controlled boundaries.
  */

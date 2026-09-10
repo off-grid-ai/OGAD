@@ -97,6 +97,36 @@ describe('Desktop startup stages through real application health', () => {
     expect(changes).toEqual(['active'])
   })
 
+  it('settles when work observer registration fails', async () => {
+    let completeWork!: () => void
+    let stageContext: StartupStageContext | undefined
+    const pendingWork = new Promise<void>((resolve) => {
+      completeWork = resolve
+    })
+
+    const result = await runStartupStage({
+      name: 'desktop.models.observe',
+      deadlineMs: 1_000,
+      required: true,
+      observeWork() {
+        throw new Error('another preparation task is already registered')
+      },
+      async run(context) {
+        stageContext = context
+        return pendingWork
+      }
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'failed',
+      error: 'another preparation task is already registered'
+    })
+    expect(stageContext?.isOwner()).toBe(false)
+    completeWork()
+    await pendingWork
+  })
+
   it('returns typed failures, reports domain degradation, and collects independent work', async () => {
     const [successful, failed] = await runIndependentStartupStages([
       {

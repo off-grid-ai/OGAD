@@ -3,7 +3,7 @@ import { Broom } from '@phosphor-icons/react'
 import type { CacheCleanupResultContract } from '../../../../shared/ipc-contracts'
 import { formatStorageBytes } from './storage-format'
 
-/** Cache-only cleanup control. Durable-store reassurance stays beside the action. */
+/** One cleanup control for disposable cache and inactive model downloads. */
 export function CacheCleanupControl(): React.ReactElement {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -16,9 +16,12 @@ export function CacheCleanupControl(): React.ReactElement {
       const reclaimed = result.freedBytes
         ? ` ${formatStorageBytes(result.freedBytes)} reclaimed.`
         : ''
-      setNotice(`Temporary cache cleared.${reclaimed} Your data and models were kept.`)
+      const downloads = result.incompleteDownloadsRemoved
+        ? ` ${result.incompleteDownloadsRemoved} partial model download${result.incompleteDownloadsRemoved === 1 ? '' : 's'} removed.`
+        : ''
+      setNotice(`Temporary cache cleared.${reclaimed}${downloads} Installed models were kept.`)
     } catch {
-      setNotice('Cache could not be cleared. Your data and models were not changed.')
+      setNotice('Cleanup could not be completed. Installed models and your data were kept.')
     } finally {
       setBusy(false)
     }
@@ -29,7 +32,7 @@ export function CacheCleanupControl(): React.ReactElement {
       <div className="min-w-0">
         <div className="text-[11px] text-neutral-300">Temporary app cache</div>
         <div className="text-[10px] text-neutral-600">
-          Safe to clear. Chats, projects, models, vault, settings, and Pro access stay.
+          Safe to clear. Partial model downloads are removed. Installed models and your data stay.
         </div>
         {notice && (
           <div role="status" className="mt-1 text-[10px] text-neutral-500">

@@ -1510,7 +1510,7 @@ export function setupIPC(): void {
     import('./models-manager').then((m) => m.deleteOrphans())
   )
   ipcMain.handle(CACHE_CLEANUP_CHANNEL, () =>
-    import('./cache-cleanup').then((m) => m.clearEphemeralCache())
+    import('./cache-cleanup').then((m) => m.clearTemporaryStorage())
   )
   // Import a local .gguf from disk (file picker → validate → copy → register).
   ipcMain.handle('models:import', async (): Promise<ModelImportResultContract> => {

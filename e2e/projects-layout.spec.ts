@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #59 - a populated Projects workspace uses the desktop
+ * A populated Projects workspace uses the desktop
  * canvas as a dense master-detail surface, with project chats laid out in a
  * multi-column collection. Synthetic records enter through the production IPC
  * handlers and are rendered by the production Electron UI.

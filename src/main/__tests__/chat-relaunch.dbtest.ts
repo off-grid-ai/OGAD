@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #43 - conversation state survives a full database close/reopen.
+ * Conversation state survives a full database close/reopen.
  * The Electron profile and Keychain are native boundaries; every conversation and message
  * operation uses the production database API against a real disposable SQLite file.
  */

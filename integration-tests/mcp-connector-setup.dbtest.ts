@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * RELEASE_TEST_CHECKLIST #71 - connector setup through the real product seam.
+ * Connector setup through the real product seam.
  *
  * The real Integrations screen drives production connector persistence, production MCP discovery,
  * and a real stdio MCP child process. Electron IPC is the native boundary, represented only by a
