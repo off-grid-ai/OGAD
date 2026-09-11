@@ -1,7 +1,6 @@
+import { restoreCanonicalProductName } from './bootstrap/user-data'
 import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
-import { join } from 'path'
 import { tmpdir } from 'os'
-import fs from 'fs'
 
 // Custom scheme to serve local capture screenshots to the renderer (file:// is
 // blocked there). Registered before app 'ready'; handled after.
@@ -58,8 +57,6 @@ import { PRODUCT_NAME } from '../shared/product-identity'
 import { installMediaPermissionHandler } from './media-permission'
 import { localMediaRoots } from './media-roots'
 import { resourceDirs } from './runtime-env'
-import { beginProductIdentityBootstrap } from './product-identity-lifecycle'
-import { repairMissingDefaultKeychainAtBootstrap } from './secure-storage-bootstrap'
 import {
   installDiagnosticConsoleCapture,
   installIpcDiagnostics,
@@ -79,60 +76,6 @@ import { shutdownModelDownloads } from './models/download-queue'
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
 guardConsoleStreams([process.stdout, process.stderr])
-
-// Electron asks macOS for its safeStorage password during early bootstrap. Repair
-// the one safe, known-bad state before that lookup can trigger SecurityAgent's
-// generic "Keychain Not Found" dialog. This never creates or resets a Keychain.
-const secureStorageBootstrap = repairMissingDefaultKeychainAtBootstrap(
-  process.platform,
-  app.isPackaged
-)
-if (secureStorageBootstrap?.status === 'repaired') {
-  console.warn(`[secure-storage] ${secureStorageBootstrap.detail}`)
-} else if (secureStorageBootstrap && secureStorageBootstrap.status !== 'healthy') {
-  console.error(`[secure-storage] ${secureStorageBootstrap.detail}`)
-}
-
-// Pin one canonical userData dir ("Off Grid AI Desktop") regardless of package
-// name, and migrate data from the legacy split dirs ("My Memories" had the
-// models, "my-memories" had the DB) so nothing is lost / re-downloaded. Must run
-// before app 'ready' and before any getPath('userData') usage.
-// Preserve the Keychain namespace used by every existing install during Electron's
-// early safeStorage bootstrap. The returned callback restores the canonical visible
-// product name at the beginning of the ready phase.
-const restoreCanonicalProductName = beginProductIdentityBootstrap(app, process.platform)
-;(function unifyUserDataPath(): void {
-  try {
-    // Test/CI seam: let a harness isolate userData (e.g. screenshot capture of
-    // a fresh, pre-onboarding profile). Harmless in production (unset).
-    if (process.env.OFFGRID_USER_DATA) {
-      fs.mkdirSync(process.env.OFFGRID_USER_DATA, { recursive: true })
-      app.setPath('userData', process.env.OFFGRID_USER_DATA)
-      console.log('[userData] override path:', process.env.OFFGRID_USER_DATA)
-      return
-    }
-    const appData = app.getPath('appData')
-    const canonical = join(appData, 'Off Grid AI Desktop')
-    fs.mkdirSync(canonical, { recursive: true })
-    const move = (fromDir: string, name: string): void => {
-      try {
-        const src = join(fromDir, name)
-        const dst = join(canonical, name)
-        if (fs.existsSync(src) && !fs.existsSync(dst)) fs.renameSync(src, dst)
-      } catch (e) {
-        console.warn('[userData] migrate skip', name, e)
-      }
-    }
-    move(join(appData, 'My Memories'), 'models')
-    move(join(appData, 'my-memories'), 'models')
-    move(join(appData, 'my-memories'), 'memories.db')
-    move(join(appData, 'My Memories'), 'memories.db')
-    app.setPath('userData', canonical)
-    console.log('[userData] canonical path:', canonical)
-  } catch (e) {
-    console.error('[userData] unify failed', e)
-  }
-})()
 
 installDiagnosticConsoleCapture()
 writeDiagnosticLog('app', 'bootstrap.started', {
