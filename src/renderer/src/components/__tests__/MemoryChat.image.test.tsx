@@ -440,7 +440,10 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     })
     renderChat()
 
-    await openImageComposer(user)
+    await user.click(await screen.findByRole('button', { name: /^image$/i }))
+    expect(screen.queryByAltText('Photoreal')).toBeNull()
+    const imageOptions = await screen.findByRole('button', { name: /image options/i })
+    await user.click(imageOptions)
 
     expect((await screen.findByAltText('Photoreal')).getAttribute('src')).toBe(
       'ogcapture:///app/resources/style-thumbs/Photoreal.png'
@@ -450,6 +453,16 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       'ogcapture:///app/resources/style-thumbs/Cinematic.png'
     )
     expect(screen.queryByRole('button', { name: /generate previews/i })).toBeNull()
+
+    const photoreal = screen.getByAltText('Photoreal').closest('button')!
+    await user.click(photoreal)
+    expect(photoreal.getAttribute('aria-pressed')).toBe('true')
+    await user.click(imageOptions)
+    expect(screen.queryByAltText('Photoreal')).toBeNull()
+    await user.click(imageOptions)
+    expect(screen.getByAltText('Photoreal').closest('button')?.getAttribute('aria-pressed')).toBe(
+      'true'
+    )
   })
 
   it('shows the same style previews inline when Image is opened in an existing chat', async () => {
@@ -477,7 +490,9 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     renderChat({ conversationId: conv.id })
 
     expect(await screen.findByText('Draw a dog')).toBeTruthy()
-    await openImageComposer(user)
+    await user.click(await screen.findByRole('button', { name: /^image$/i }))
+    expect(screen.queryByRole('region', { name: 'Image style presets' })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: /image options/i }))
 
     expect((await screen.findByAltText('Photoreal')).getAttribute('src')).toBe(
       'ogcapture:///app/resources/style-thumbs/Photoreal.png'
@@ -1008,7 +1023,10 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     act(() => {
       boundary.emitProgress({ phase: 'sampling', step: 4, total: 10, secPerStep: 0.5 })
     })
-    expect(await screen.findByText('Generating image · Step 4 of 10')).toBeTruthy()
+    const progressLabel = await screen.findByText('Generating image · Step 4 of 10')
+    const progressColumn = progressLabel.closest('.max-w-2xl')
+    expect(progressColumn?.className).toContain('w-full')
+    expect(progressColumn?.className).toContain('max-w-2xl')
 
     const enhancedPrompt =
       'A cinematic lighthouse in a fierce winter storm, dramatic waves, cold blue light'
@@ -1022,6 +1040,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     const disclosure = await screen.findByRole('button', { name: /enhanced prompt/i })
     expect(screen.getAllByAltText('Generated')).toHaveLength(1)
     expect(generated.className).toContain('w-full')
+    expect(generated.closest('button')?.className).toContain('w-full')
     expect(generated.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
       0
     )
