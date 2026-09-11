@@ -10,6 +10,7 @@ import { registerToolExtension } from './tools'
 import { registerNativeActionTools } from './tools/nativeActionToolExtension'
 import { setupDesktopBackupIPC } from './backup/ipc'
 import { createMainWindow } from './create-main-window'
+import { registerGodTwinWindowIpc, showGodTwinWindow } from './god-twin-window'
 import { startModelServer, stopModelServer } from './model-server'
 import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { capturePathFromUrl, serveCaptureFile } from './ogcapture-serve'
@@ -514,7 +515,9 @@ const applicationReady = app.whenReady().then(async () => {
   // The shell. Everything above it is either the local authorization decision or the handler
   // registration that makes the window's own calls answerable - nothing network-bound, no domain
   // started, no data reconciled.
+  registerGodTwinWindowIpc()
   createMainWindow(windowPresentation.showWindow)
+  if (windowPresentation.showWindow) showGodTwinWindow()
 
   // Everything below runs BESIDE the open window. None of it may hold the shell closed: the
   // licence revalidation is network-bound, and the rest is optional or recoverable. Each one is

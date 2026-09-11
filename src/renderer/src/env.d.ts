@@ -113,6 +113,34 @@ interface SessionEntityRecord {
 type ArtifactKind = import('../../shared/ipc-contracts').ArtifactKindContract
 
 interface RendererAPIOverrides {
+    godTwin?: {
+      wake: () => Promise<boolean>
+      getEnabled: () => Promise<boolean>
+      setEnabled: (enabled: boolean) => Promise<boolean>
+      getPreferences: () => Promise<{
+        state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+        spinning: boolean
+      }>
+      setPreferences: (preferences: {
+        state?: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+        spinning?: boolean
+      }) => Promise<{
+        state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+        spinning: boolean
+      }>
+      setListening: (listening: boolean) => void
+      setState: (state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting') => void
+      resize: (
+        edge: 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw',
+        deltaX: number,
+        deltaY: number
+      ) => void
+      onWake: (callback: () => void) => () => void
+      onListening: (callback: (listening: boolean) => void) => () => void
+      onState: (
+        callback: (state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting') => void
+      ) => () => void
+    }
   // Open-core bridge
   isPro?: boolean
   proEntitlementBootstrapEnabled?: boolean

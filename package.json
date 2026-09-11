@@ -116,6 +116,7 @@
     "remark-parse": "^11.0.0",
     "sharp": "^0.35.2",
     "tailwind-merge": "^3.4.0",
+    "three": "^0.186.0",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
     "unified": "^11.0.5",

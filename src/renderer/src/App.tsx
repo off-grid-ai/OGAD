@@ -319,6 +319,7 @@ function AppContent(): React.ReactElement {
     presetId?: string
     draftPrompt?: string
   } | null>(null)
+  const [godTwinWakeRequest, setGodTwinWakeRequest] = useState(0)
   // Navigation is unconditional. Leaving a chat with a task running used to prompt, because the
   // live view was lost on the way out; a running task now follows you in a floating card
   // (tasks.floatingView), so there is nothing left to warn about.
@@ -493,6 +494,13 @@ function AppContent(): React.ReactElement {
       window.removeEventListener('og:navigate', onNav)
       offNav()
     }
+  }, [navigateTo])
+
+  useEffect(() => {
+    return window.api.godTwin?.onWake(() => {
+      navigateTo('memory-chat')
+      setGodTwinWakeRequest((request) => request + 1)
+    })
   }, [navigateTo])
 
   useEffect(() => {
@@ -1268,6 +1276,7 @@ function AppContent(): React.ReactElement {
                         <ExploreScreen onRunPreset={handleRunPreset} />
                       ) : viewMode === 'memory-chat' ? (
                         <MemoryChat
+                          godTwinWakeRequest={godTwinWakeRequest}
                           onNavigateToMemory={handleSelectMemory}
                           onNavigateToChat={handleSelectChat}
                           onNavigateToMeeting={(meetingId) =>
