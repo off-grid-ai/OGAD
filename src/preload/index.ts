@@ -27,6 +27,7 @@ import type {
 } from '../shared/browser-session'
 import type { TaskGuideInput } from '../shared/task-guidance'
 import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
+import type { StartupSnapshot } from '../shared/startup-contract'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
 
 console.log('PRELOAD SCRIPT LOADED')
@@ -511,6 +512,13 @@ const offGridApi = {
     ): void => callback(data)
     ipcRenderer.on('model:download-progress', subscription)
     return unsubscribe('model:download-progress', subscription)
+  },
+
+  startupStatus: (): Promise<StartupSnapshot> => ipcRenderer.invoke('app:startup-status'),
+  onStartupStatusChanged: (callback: (snapshot: StartupSnapshot) => void) => {
+    const subscription = (_event: unknown, snapshot: StartupSnapshot): void => callback(snapshot)
+    ipcRenderer.on('app:startup-status-changed', subscription)
+    return unsubscribe('app:startup-status-changed', subscription)
   },
 
   // Setup + system health
