@@ -25,7 +25,14 @@ import {
 } from './proposal-deck/tool'
 import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
-import { DEFAULT_MAX_TOOL_CALLS } from '../shared/llm-defaults'
+import {
+  boundToolResult,
+  callsWithinToolBudget,
+  finalResponseFromToolResults,
+  normalizeMaxToolCalls,
+  toolPromptChars,
+  toolResultCharBudget
+} from '@offgrid/models'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -672,6 +679,7 @@ export async function toolChat(
     { role: 'user', content: buildContentParts(query, decodedImages) }
   ]
   const toolCalls: ToolCall[] = []
+  const successfulToolResults: string[] = []
   const unified: UnifiedSource[] = []
   const unifiedKeys = new Set<string>()
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
@@ -697,7 +705,13 @@ export async function toolChat(
     }
   }
 
-  const maxToolCalls = llm.getSettings().maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS
+  const settings = llm.getSettings()
+  const maxToolCalls = normalizeMaxToolCalls(settings.maxToolCalls)
+  const answerFrom = (content: string): string => {
+    const answer = finalResponseFromToolResults(content, successfulToolResults)
+    if (!content.trim() && answer) onDelta(answer, 'content')
+    return answer
+  }
   let round = 0
   while (toolCalls.length < maxToolCalls) {
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
@@ -744,8 +758,7 @@ export async function toolChat(
     if (effective.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
-      const remaining = maxToolCalls - toolCalls.length
-      const callsToRun = effective.slice(0, remaining)
+      const callsToRun = callsWithinToolBudget(effective, toolCalls.length, maxToolCalls)
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
       messages.push({
         role: 'assistant',
@@ -769,7 +782,16 @@ export async function toolChat(
         // Uniform dispatch — every tool owns its own result. Merge any structured
         // side channels: sources are deduped into `unified` across rounds; image requests retain
         // call order for deferred generation after the turn.
-        const res = await runTool(c.name, c.args, toolContext, exts)
+        const rawResult = await runTool(c.name, c.args, toolContext, exts)
+        const resultBudget = toolResultCharBudget({
+          contextLength: llm.effectiveContextSize(),
+          promptChars: toolPromptChars(messages, tools),
+          replyReserveTokens: settings.maxTokens
+        })
+        const res = {
+          ...rawResult,
+          text: boundToolResult(c.name, rawResult.text, resultBudget)
+        }
         for (const s of res.sources ?? []) {
           if (unifiedKeys.has(s.key)) continue
           unifiedKeys.add(s.key)
@@ -778,6 +800,7 @@ export async function toolChat(
         if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
         else if (res.imageRequest) imageRequests.push(res.imageRequest)
         const status = res.status ?? 'completed'
+        if (status === 'completed' && res.text.trim()) successfulToolResults.push(res.text)
         toolCalls.push({ name: c.name, args: c.args, result: res.text, status })
         // Surface the COMPLETED call (with its result) live, so the UI can show each
         // tool call + result as it lands, not only in the final batch.
@@ -792,7 +815,7 @@ export async function toolChat(
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: content.trim(), toolCalls, unified })
+    return resultWithImages({ answer: answerFrom(content), toolCalls, unified })
   }
   // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
   // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
@@ -808,7 +831,7 @@ export async function toolChat(
     signal: opts.signal
   })
   return resultWithImages({
-    answer: final.content.trim() || 'Stopped after too many tool steps.',
+    answer: answerFrom(final.content) || 'Stopped after too many tool steps.',
     toolCalls,
     unified
   })
