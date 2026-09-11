@@ -1273,6 +1273,12 @@ that has to watch journeys it is not driving.
 
 **Status:** partially fixed 2026-08-07. Found by looking at both screens during a real macOS -> iOS send.
 
+**F6 evidence, 2026-09-11:** Desktop and Mobile now advertise model-transfer support explicitly,
+and saved or discovered peer facts keep that capability. Focused Shared and app integration checks
+pass, and both development apps start with the new wiring. This does not close the gap. A real
+multi-GB transfer, interruption and resume, receiver load, sender/receiver completion agreement, and
+visual review still need two physical devices. This task did not control the UI.
+
 **Symptom.** The Mac reported the model sent successfully. The iPhone reported the same transfer as
 "could not receive / interrupted". Both screens were honest about their own side, and the user has no
 way to know which to believe.
