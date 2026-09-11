@@ -16,7 +16,7 @@
 /** Single-quote a value for a PowerShell string literal (embedded quotes doubled).
  *  This is the injection boundary: an app name is only ever a quoted literal. */
 export function psQuote(value: string): string {
-  return `'${String(value ?? '').replace(/'/g, "''")}'`
+  return `'${value.replace(/'/g, "''")}'`
 }
 
 /** `--apps`: one display name per line for every app that owns a foreground window. */

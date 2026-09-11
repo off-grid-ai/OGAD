@@ -2,10 +2,9 @@ import type { WebContentsView } from 'electron'
 import { llm } from '../llm'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { appendTaskStepDetail, getTaskExecutionDevice } from '../tasks/task-history'
-import type { ComputerUseStepDetail } from '../tasks/task-step-details'
-import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
-import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
-import { recentVisualFacts } from '../vision/visual-context'
+import type { ComputerUseStepDetail } from '@offgrid/automation'
+import type { TaskExecutionPlan } from '@offgrid/automation'
+import { resolveComputerUseContextTokens } from '@offgrid/automation'
 import {
   type VisionStepObservation,
   type VisionTaskProgress,
@@ -14,8 +13,8 @@ import {
 import { resolveVisionModelAdapterForStrategy } from '../vision/model-adapters'
 import { generalVisionOperatorAdapter } from '../vision/model-adapters/general-vision-operator'
 import type { VisionModelAdapter } from '../vision/model-adapters/types'
-import { getActiveRemoteVisionServer } from '../vision/remote-vision-server'
-import { remoteVisionModelId } from '../../shared/remote-vision-server'
+import { workspaceRouteId } from '@offgrid/models'
+import { desktopAutomation, desktopModels } from '../composition/application-access'
 import { createVisionGrounder } from '../vision/vision-policy-runner'
 import { runVisionTaskGraph } from '../vision/vision-task-graph'
 import type { VisionGuard } from '../vision/vision-guard'
@@ -47,11 +46,11 @@ export interface ActiveBrowserVisionDependencies {
 /** Capture the adapter and model ID from one active-model read. The task host
  * persists this identity, so a later global selection cannot relabel the run. */
 export function resolveActiveBrowserVisionSelection(): BrowserVisionSelection {
-  const remote = getActiveRemoteVisionServer()
-  if (remote) {
+  const activeText = desktopModels.snapshot().active.text?.model
+  if (activeText?.source === 'remote') {
     return {
       adapter: generalVisionOperatorAdapter,
-      modelId: remoteVisionModelId(remote.id, remote.model)
+      modelId: workspaceRouteId(activeText)
     }
   }
   const artifacts = llm.activeModelArtifacts()
@@ -150,7 +149,9 @@ export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<Vis
     contextTokens: resolveComputerUseContextTokens(settings.context, llm.effectiveContextSize()),
     checkpointInterval: settings.checkpointInterval,
     visualHistoryFrames: settings.visualHistoryFrames,
-    retrievedFacts: settings.retrieveOlderVisuals ? recentVisualFacts(input.taskId) : [],
+    retrievedFacts: settings.retrieveOlderVisuals
+      ? [...desktopAutomation.recentVisualFacts(input.taskId)]
+      : [],
     signal: input.signal,
     onObservation: (observation) => {
       const detail = browserVisionStepDetail(observation, executionDevice)

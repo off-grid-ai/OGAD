@@ -1,4 +1,21 @@
-import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
+import {
+  openAICompatibleCompletionPayload,
+  RemoteHttpError,
+  reasoningMetadataForOllama,
+  reasoningMetadataFromChatTemplate,
+  reasoningMetadataFromOpenRouter,
+  publishedCompatibleReasoningMetadata,
+  ollamaReasoningMetadata,
+  openRouterNativeToolCapability,
+  remoteCapabilityDiscoveryPlan,
+  nativeToolPlannerUnavailableMessage,
+  RemoteCapabilityCache,
+  remoteCapabilityCacheKey,
+  type ModelReasoningMetadata,
+  type OpenRouterPublishedReasoning,
+  type ReasoningWireFragment,
+  type RemoteNativeToolCapability
+} from '@offgrid/models'
 import type { RemoteVisionProvider } from '../../shared/remote-vision-server'
 import {
   createCompletionStreamAccumulator,
@@ -23,31 +40,120 @@ export interface RemoteChatRequest {
   thinking?: boolean
   /** The user's thinking cap in tokens (REASONING_BUDGET_AUTO for unrestricted). */
   reasoningBudget?: number
+  reasoningWire?: ReasoningWireFragment
   responseFormat?: unknown
   tools?: unknown[]
-  toolChoice?: string
+  toolChoice?: unknown
 }
 
 export interface RemoteChatOptions {
   signal?: AbortSignal
-  timeoutMs: number
-}
-
-export interface RemoteNativeToolCapability {
-  status: 'supported' | 'unsupported' | 'unknown'
-  modelName: string
+  /** Idle limit between chunks. Undefined means none. */
+  timeoutMs?: number
 }
 
 interface OpenRouterModelMetadata {
   id?: unknown
   name?: unknown
   supported_parameters?: unknown
+  reasoning?: OpenRouterPublishedReasoning
 }
 
-const nativeToolCapabilities = new Map<string, Promise<RemoteNativeToolCapability>>()
+const nativeToolCapabilities = new RemoteCapabilityCache<RemoteNativeToolCapability>()
+const reasoningCapabilities = new RemoteCapabilityCache<ModelReasoningMetadata>()
+
+function ollamaApiBase(endpoint: string): string {
+  return endpoint.replace(/\/v1\/?$/i, '')
+}
+
+async function discoverOllamaReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  try {
+    const response = await fetch(`${ollamaApiBase(remote.endpoint)}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: remote.model }),
+      signal: AbortSignal.timeout(5_000)
+    })
+    if (!response.ok) return reasoningMetadataForOllama('unsupported')
+    return ollamaReasoningMetadata(await response.json())
+  } catch {
+    return reasoningMetadataForOllama('unsupported')
+  }
+}
+
+async function discoverOpenRouterReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  try {
+    const response = await fetch(`${remote.endpoint}/models`, {
+      headers: remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {},
+      signal: AbortSignal.timeout(5_000)
+    })
+    if (!response.ok) return reasoningMetadataFromOpenRouter(undefined)
+    const body = (await response.json()) as { data?: unknown }
+    if (!Array.isArray(body.data)) return reasoningMetadataFromOpenRouter(undefined)
+    const selected = (body.data as OpenRouterModelMetadata[]).find(
+      (candidate) => candidate.id === remote.model
+    )
+    return reasoningMetadataFromOpenRouter(selected?.reasoning)
+  } catch {
+    return reasoningMetadataFromOpenRouter(undefined)
+  }
+}
+
+async function discoverCompatibleReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  try {
+    const response = await fetch(`${remote.endpoint}/models`, {
+      headers: remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {},
+      signal: AbortSignal.timeout(5_000)
+    })
+    if (!response.ok) throw new Error('metadata unavailable')
+    const body = (await response.json()) as { data?: unknown }
+    if (!Array.isArray(body.data)) throw new Error('metadata unavailable')
+    const selected = (body.data as Array<Record<string, unknown>>).find(
+      (candidate) => candidate.id === remote.model
+    )
+    const published = publishedCompatibleReasoningMetadata(selected?.reasoning)
+    if (published) return published
+    const template =
+      typeof selected?.chat_template === 'string' ? selected.chat_template : undefined
+    return reasoningMetadataFromChatTemplate('openai-compatible', template)
+  } catch {
+    return { transport: 'openai-compatible', control: 'unsupported' }
+  }
+}
+
+/** The learned reasoning dialect for a server, or undefined until the background probe lands. */
+export function peekRemoteReasoningMetadata(
+  remote: RemoteTextModelConnection
+): ModelReasoningMetadata | undefined {
+  return reasoningCapabilities.peek(capabilityKey(remote))
+}
+
+export function remoteReasoningMetadata(
+  remote: RemoteTextModelConnection
+): Promise<ModelReasoningMetadata> {
+  const key = capabilityKey(remote)
+  return reasoningCapabilities.getOrLoad(key, () => {
+    const plan = remoteCapabilityDiscoveryPlan(remote.provider)
+    return plan.reasoning === 'openrouter'
+      ? discoverOpenRouterReasoningMetadata(remote)
+      : plan.reasoning === 'ollama'
+        ? discoverOllamaReasoningMetadata(remote)
+        : discoverCompatibleReasoningMetadata(remote)
+  })
+}
 
 function capabilityKey(remote: RemoteTextModelConnection): string {
-  return `${remote.provider}\n${remote.endpoint}\n${remote.model}`
+  return remoteCapabilityCacheKey({
+    provider: remote.provider,
+    endpoint: remote.endpoint,
+    modelId: remote.model
+  })
 }
 
 /** OpenRouter is the authority for native request features. A missing metadata response stays
@@ -55,7 +161,7 @@ function capabilityKey(remote: RemoteTextModelConnection): string {
 async function discoverRemoteNativeToolCapability(
   remote: RemoteTextModelConnection
 ): Promise<RemoteNativeToolCapability> {
-  if (remote.provider !== 'openrouter') {
+  if (remoteCapabilityDiscoveryPlan(remote.provider).nativeTools === 'unknown') {
     return { status: 'unknown', modelName: remote.name || remote.model }
   }
 
@@ -68,20 +174,7 @@ async function discoverRemoteNativeToolCapability(
     })
     if (!response.ok) return { status: 'unknown', modelName: remote.name || remote.model }
     const body = (await response.json()) as { data?: unknown }
-    if (!Array.isArray(body.data)) {
-      return { status: 'unknown', modelName: remote.name || remote.model }
-    }
-    const selected = (body.data as OpenRouterModelMetadata[]).find(
-      (candidate) => candidate.id === remote.model
-    )
-    if (!selected || !Array.isArray(selected.supported_parameters)) {
-      return { status: 'unknown', modelName: remote.name || remote.model }
-    }
-    const modelName = typeof selected.name === 'string' ? selected.name : remote.model
-    return {
-      status: selected.supported_parameters.includes('tools') ? 'supported' : 'unsupported',
-      modelName
-    }
+    return openRouterNativeToolCapability(body.data, remote.model, remote.name || remote.model)
   } catch {
     return { status: 'unknown', modelName: remote.name || remote.model }
   } finally {
@@ -93,25 +186,7 @@ export function remoteNativeToolCapability(
   remote: RemoteTextModelConnection
 ): Promise<RemoteNativeToolCapability> {
   const key = capabilityKey(remote)
-  const cached = nativeToolCapabilities.get(key)
-  if (cached) return cached
-  const discovered = discoverRemoteNativeToolCapability(remote)
-  nativeToolCapabilities.set(key, discovered)
-  return discovered
-}
-
-export function nativeToolPlannerUnavailableMessage(
-  capability: RemoteNativeToolCapability
-): string {
-  return `${capability.modelName} cannot act as the Chat tool planner because OpenRouter reports that this model does not support native tools. Select it as the Computer Use specialist instead, then select a tool-capable text model for Chat.`
-}
-
-interface RemoteErrorBody {
-  error?: {
-    message?: string
-    code?: string | number
-    metadata?: { raw?: string; provider_name?: string }
-  }
+  return nativeToolCapabilities.getOrLoad(key, () => discoverRemoteNativeToolCapability(remote))
 }
 
 /** Keep remote transport errors useful without exposing the endpoint, headers,
@@ -130,20 +205,9 @@ export function remoteTextModelTransportError(error: unknown): Error {
   )
 }
 
-/** Preserve the provider's useful, non-secret failure reason. */
+/** Preserve the provider's useful, non-secret failure reason (the shared typed failure). */
 export function remoteTextModelProviderError(status: number, rawBody: string): Error {
-  let body: RemoteErrorBody = {}
-  try {
-    body = JSON.parse(rawBody) as RemoteErrorBody
-  } catch {
-    // Non-JSON provider errors use the bounded response text below.
-  }
-  const detail =
-    body.error?.metadata?.raw?.trim() || body.error?.message?.trim() || rawBody.trim().slice(0, 500)
-  const provider = body.error?.metadata?.provider_name?.trim()
-  return new Error(
-    `Remote text model returned HTTP ${status}${provider ? ` from ${provider}` : ''}${detail ? `: ${detail}` : '.'}`
-  )
+  return new RemoteHttpError(status, rawBody)
 }
 
 /** The OpenAI-compatible request body. Pure: what we send, with nothing about how we send it. */
@@ -151,26 +215,25 @@ function completionRequestBody(
   remote: RemoteTextModelConnection,
   request: RemoteChatRequest
 ): string {
-  return JSON.stringify({
-    model: remote.model,
-    messages: request.messages,
-    max_tokens: request.maxTokens,
-    temperature: request.temperature,
-    ...(request.topP === undefined ? {} : { top_p: request.topP }),
-    ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
-    ...(request.tools?.length
-      ? { tools: request.tools, tool_choice: request.toolChoice ?? 'auto' }
-      : {}),
-    // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
-    // cap was dropped for every remote model and the budget setting did nothing.
-    ...(remote.provider === 'openrouter'
-      ? openRouterReasoningPayload(
-          request.thinking === true,
-          request.reasoningBudget ?? REASONING_BUDGET_AUTO
-        )
-      : {}),
-    stream: true
-  })
+  return JSON.stringify(
+    openAICompatibleCompletionPayload({
+      model: remote.model,
+      messages: request.messages,
+      maxTokens: request.maxTokens,
+      temperature: request.temperature,
+      topP: request.topP,
+      responseFormat: request.responseFormat,
+      tools: request.tools,
+      toolChoice: request.toolChoice,
+      // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
+      // cap was dropped for every remote model and the budget setting did nothing.
+      reasoningWire: request.reasoningWire,
+      provider: remote.provider,
+      thinking: request.thinking,
+      reasoningBudget: request.reasoningBudget,
+      stream: true
+    })
+  )
 }
 
 interface IdleWatchdog {
@@ -194,12 +257,17 @@ interface IdleWatchdog {
  * the compiler cannot order against a later read, so a plain flag narrowed to `false` and made the
  * timeout branch look statically dead.
  */
-function createIdleWatchdog(timeoutMs: number, callerSignal?: AbortSignal): IdleWatchdog {
+function createIdleWatchdog(
+  timeoutMs: number | undefined,
+  callerSignal?: AbortSignal
+): IdleWatchdog {
   const controller = new AbortController()
   const firedRef = { current: false }
   let timer: ReturnType<typeof setTimeout> | undefined
   const arm = (): void => {
     if (timer) clearTimeout(timer)
+    // No idle limit unless the caller set one: a generation runs until it finishes or is stopped.
+    if (timeoutMs === undefined) return
     timer = setTimeout(() => {
       firedRef.current = true
       controller.abort()
@@ -245,9 +313,7 @@ function classifyStreamFailure(
   cause: { cancelled: boolean; timedOut: boolean }
 ): Error {
   if (cause.timedOut) return new Error('Remote text model request timed out.')
-  if (error instanceof Error && error.message.startsWith('Remote text model returned HTTP ')) {
-    return error
-  }
+  if (error instanceof RemoteHttpError) return error
   return remoteTextModelTransportError(error)
 }
 

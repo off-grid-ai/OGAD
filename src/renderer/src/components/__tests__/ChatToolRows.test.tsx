@@ -35,6 +35,46 @@ afterEach(() => {
 })
 
 describe('<ChatToolRows/> work timeline', () => {
+  it('keeps retrieved memory evidence inside the one work timeline', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'search_meetings',
+            status: 'completed',
+            result: 'Meeting 1: Planning review'
+          }
+        ]}
+        context={{
+          unified: [
+            {
+              key: 'meeting:1',
+              kind: 'meeting',
+              refId: 1,
+              title: 'Planning review',
+              snippet: 'Release plan',
+              surface: 'Meeting',
+              url: null,
+              ts: 1,
+              imagePath: null,
+              score: 1
+            }
+          ]
+        }}
+        navigation={{}}
+      />
+    )
+
+    expect(screen.getAllByRole('button', { name: /Work done/ })).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: /Work done/ }))
+    const step = screen.getByRole('button', {
+      name: 'Searched your memory — 1 result, complete'
+    })
+    await user.click(step)
+    expect(screen.getByText('Planning review')).toBeTruthy()
+  })
+
   it('uses the meeting search result for the collapsed summary', async () => {
     const user = userEvent.setup()
     render(
@@ -262,6 +302,27 @@ describe('<ChatToolRows/> work timeline', () => {
     expect(screen.queryByRole('button', { name: /Work done/ })).toBeNull()
   })
 
+  it('shows cancelled image work as stopped instead of complete or failed', async () => {
+    render(
+      <ChatToolRows
+        tools={[
+          {
+            name: 'generate_image',
+            status: 'cancelled',
+            result: 'Image generation was cancelled.'
+          }
+        ]}
+      />
+    )
+
+    const heading = screen.getByRole('button', { name: /Work stopped/ })
+    expect(heading.textContent).toContain('1 step · cancelled')
+    await userEvent.click(heading)
+    expect(screen.getByRole('button', { name: 'Generated image, cancelled' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Work done/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Work failed/ })).toBeNull()
+  })
+
   it('shows persisted redacted Computer Use evidence inside the assistant turn', async () => {
     const user = userEvent.setup()
     window.api.tasks!.list = vi.fn(async () => [
@@ -440,5 +501,38 @@ describe('<ChatToolRows/> work timeline', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Computer Use, failed' }))
     const retry = await screen.findByRole('button', { name: 'Retry on Studio Mac' })
     expect((retry as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('<ChatToolRows/> a stopped task headlines as stopped', () => {
+  it('says Work stopped when you stopped the task, even if an earlier step returned an error', async () => {
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'web-stopped',
+        kind: 'web_use' as const,
+        journeyId: 'conversation-a',
+        title: 'Find the release notes',
+        status: 'stopped' as const,
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2,
+        createdAt: 1
+      }
+    ])
+    render(
+      <ChatToolRows
+        tools={[
+          { name: 'read_url', arguments: '{}', result: 'Error: HTTP 404', status: 'completed' },
+          {
+            name: 'web_use',
+            arguments: '{}',
+            result: 'Started "Find the release notes". Task reference: web-stopped.',
+            status: 'pending'
+          }
+        ]}
+      />
+    )
+    await waitFor(() => expect(screen.getByText('Work stopped')).toBeTruthy())
+    expect(screen.queryByText('Work failed')).toBeNull()
   })
 })

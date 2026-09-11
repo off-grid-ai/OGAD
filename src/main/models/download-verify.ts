@@ -8,24 +8,39 @@
 // on load with a blank "Chat model Down" (the exact class CLAUDE.md warns about).
 import fs from 'fs'
 import crypto from 'crypto'
-import { isValidGgufFile } from './gguf'
+import { artifactVerificationError, type ArtifactVerificationRequest } from '@offgrid/models'
+import { artifactVerification } from '../composition/artifact-verification'
 
 /** Reason a just-downloaded file must NOT be promoted to installed, or null if it
  *  passes. Checks the byte count (when the server reported a length) and, for a
  *  GGUF, the magic header + minimum size. */
-export function downloadIntegrityError(
-  name: string,
-  written: number,
-  total: number,
+export interface DownloadedPartVerificationInput {
+  name: string
+  writtenBytes: number
+  responseTotalBytes: number
   partPath: string
-): string | null {
-  if (total > 0 && written < total) {
-    return `${name}: incomplete download (${written}/${total} bytes) — the connection closed early`
+  expectedSha256?: string
+  expectedBytes?: number
+}
+
+export async function verifyDownloadedPart(
+  input: DownloadedPartVerificationInput
+): Promise<string | null> {
+  const request: ArtifactVerificationRequest = {
+    path: input.partPath,
+    name: input.name,
+    origin: 'download',
+    writtenBytes: input.writtenBytes,
+    responseTotalBytes: input.responseTotalBytes,
+    expectedSha256: input.expectedSha256,
+    expectedBytes: input.expectedBytes,
+    // Only an interrupted stream is safe to resume. A completed file with the
+    // wrong manifest size, checksum, or format must restart from byte zero.
+    resumeSupported: true,
+    removeInvalid: true
   }
-  if (/\.gguf$/i.test(name) && !isValidGgufFile(partPath, fs)) {
-    return `${name}: downloaded file is not a valid GGUF (corrupt or truncated)`
-  }
-  return null
+  const result = await artifactVerification(fs, sha256File).verify(request)
+  return result.valid ? null : artifactVerificationError(request, result)
 }
 
 /** Stream a file through SHA-256 and return the lowercase hex digest. */
@@ -44,22 +59,3 @@ export async function sha256File(path: string): Promise<string> {
  *  byte-count + magic-header check can't (a mirror serving the right length of the
  *  wrong/garbled bytes). Returns null when no hash is known (skip) or it matches;
  *  an error string on mismatch. Case-insensitive compare. */
-export async function sha256IntegrityError(
-  name: string,
-  partPath: string,
-  expectedSha256: string | undefined
-): Promise<string | null> {
-  if (!expectedSha256) {
-    return null // no known hash → nothing to verify against
-  }
-  let actual: string
-  try {
-    actual = await sha256File(partPath)
-  } catch (e) {
-    return `${name}: could not read the file to verify its checksum (${(e as Error).message})`
-  }
-  if (actual.toLowerCase() !== expectedSha256.toLowerCase()) {
-    return `${name}: checksum mismatch — the download is corrupt (expected ${expectedSha256.slice(0, 12)}…, got ${actual.slice(0, 12)}…)`
-  }
-  return null
-}

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createGrounderRunner, type GrounderRunnerDependencies } from '../grounder-loader'
+import { createOffGridApplication } from '@offgrid/application'
+import { runtimeModelRouteId, type ModelModality, type RuntimeModel } from '@offgrid/models'
+import {
+  createGrounderLifecycle,
+  createGrounderRunner,
+  type GrounderRunnerDependencies
+} from '../grounder-loader'
 
 const CHAT_MODEL = 'google/gemini-3.7-flash'
 const SPECIALIST = 'tencent/UI-Mate-9B-GGUF'
@@ -19,14 +25,15 @@ function lifecycle(): {
     activeModelId: () => activeModel.id,
     activeRemote: () => activeRemote,
     dependencies: {
-      modelStrategy: () => 'separate_specialist',
+      strategy: () => 'separate_specialist',
       selectedModelId: () => SPECIALIST,
       installed: async () => true,
       activeModel: () => activeModel,
       activeModelId: () => activeModel.id,
       activeRemote: () => activeRemote,
       isGrounder: (model) => model.id === SPECIALIST,
-      load: async (modelId) => {
+      load: async (modelId, nativeAlreadyLoaded) => {
+        if (nativeAlreadyLoaded) return
         events.push(`load:${modelId}`)
         activeModel = { id: modelId, vision: true }
       },
@@ -47,11 +54,186 @@ function lifecycle(): {
 }
 
 describe('Computer Use specialist lifecycle', () => {
+  it('uses shared selection and residency for the native specialist swap and restore', async () => {
+    const selections = new Map<ModelModality, string | null>()
+    const runtimeModels: RuntimeModel[] = [
+      {
+        id: CHAT_MODEL,
+        name: 'Chat',
+        kind: 'text',
+        modality: 'text',
+        source: 'local',
+        adapterId: 'desktop.llama',
+        capabilities: { textGeneration: true },
+        installed: true,
+        ready: false,
+        loaded: false,
+        residentSizeMB: 200,
+        peakSizeMB: 240,
+        residencyKey: 'desktop.llama'
+      },
+      {
+        id: SPECIALIST,
+        name: 'Grounder',
+        kind: 'computer_use',
+        modality: 'computer_use',
+        source: 'local',
+        adapterId: 'desktop.llama.computer-use',
+        capabilities: { vision: true, computerUse: true },
+        installed: true,
+        ready: true,
+        loaded: false,
+        residentSizeMB: 300,
+        peakSizeMB: 360,
+        residencyKey: 'desktop.llama'
+      }
+    ]
+    const events: string[] = []
+    const loaded = new Set<string>()
+    const inventory = {
+      id: 'desktop-test-inventory',
+      listModels: async () =>
+        runtimeModels.map((model) => {
+          const routeId = runtimeModelRouteId(model)
+          return { ...model, ready: loaded.has(routeId), loaded: loaded.has(routeId) }
+        })
+    }
+    const modelFor = (identifier: string): RuntimeModel => {
+      const model = runtimeModels.find(
+        (candidate) => candidate.id === identifier || runtimeModelRouteId(candidate) === identifier
+      )
+      if (!model) throw new Error(`Unknown lifecycle model: ${identifier}`)
+      return model
+    }
+    const unloadModel = async (model: RuntimeModel): Promise<{ reclaimed: true }> => {
+      const routeId = runtimeModelRouteId(model)
+      loaded.delete(routeId)
+      events.push(model.modality === 'computer_use' ? 'unload-grounder' : 'unload-chat')
+      return { reclaimed: true }
+    }
+    const application = createOffGridApplication({
+      models: {
+        selection: {
+          read: (modality) => selections.get(modality) ?? null,
+          write: (modality, routeId) => {
+            selections.set(modality, routeId)
+          }
+        },
+        memory: {
+          current: () => ({ totalMB: 16_384, availableMB: 16_384, platform: 'desktop' })
+        },
+        remote: {
+          configuration: {
+            read: () => ({ version: 1, activeServerId: null, servers: [] }),
+            write: async () => undefined
+          },
+          credentials: {
+            read: async () => null,
+            write: async () => undefined,
+            remove: async () => undefined
+          },
+          providers: {
+            register: async () => undefined,
+            unregister: async () => undefined
+          }
+        },
+        inventoryAdapters: [inventory],
+        lifecycle: () => ({
+          resolveLoad(modality, identifier) {
+            const model = modelFor(identifier)
+            const routeId = runtimeModelRouteId(model)
+            return {
+              routeId,
+              spec: {
+                key: `${modality}:${routeId}`,
+                modelId: routeId,
+                type: modality,
+                sizeMB: model.peakSizeMB ?? 0,
+                residencyKey: model.residencyKey
+              },
+              handlers: {
+                load: async () => {
+                  loaded.add(routeId)
+                  if (modality === 'computer_use') {
+                    events.push(`project:${model.id}`)
+                    events.push('restart-grounder')
+                  } else {
+                    events.push('load-chat')
+                  }
+                },
+                unload: () => unloadModel(model)
+              }
+            }
+          },
+          resolveUnload(modality) {
+            const model = application.models.snapshot().active[modality]?.model
+            if (!model) {
+              return {
+                key: `${modality}:inactive`,
+                hadRuntime: false,
+                unload: async () => ({ reclaimed: true }) as const
+              }
+            }
+            return {
+              key: `${modality}:${runtimeModelRouteId(model)}`,
+              hadRuntime: true,
+              unload: () => unloadModel(model)
+            }
+          },
+          async selectRoute(modality, routeId) {
+            const selected = await application.models.select({ modality, modelId: routeId })
+            if (!selected.ok) throw new Error(selected.failure.kind)
+          },
+          async refreshInventory() {
+            const refreshed = await application.models.refresh()
+            if (!refreshed.ok) throw new Error(refreshed.failure.kind)
+          }
+        })
+      }
+    })
+
+    try {
+      await application.start()
+      await application.models.refresh()
+      const chatRoute = runtimeModelRouteId(runtimeModels[0]!)
+      expect(
+        await application.models.select({ modality: 'text', modelId: chatRoute })
+      ).toMatchObject({ ok: true })
+      expect(await application.models.load({ modality: 'text', modelId: chatRoute })).toMatchObject(
+        { ok: true }
+      )
+      const lifecycle = createGrounderLifecycle(application.models)
+
+      await lifecycle.load(SPECIALIST)
+
+      expect(application.models.snapshot().active.computer_use?.model?.id).toBe(SPECIALIST)
+      expect(application.models.snapshot().residents.map((resident) => resident.type)).toEqual([
+        'computer_use'
+      ])
+      expect(events).toEqual([
+        'load-chat',
+        'unload-chat',
+        `project:${SPECIALIST}`,
+        'restart-grounder'
+      ])
+
+      await lifecycle.restoreLocal(CHAT_MODEL)
+
+      expect(application.models.snapshot().active.text?.model?.id).toBe(CHAT_MODEL)
+      expect(application.models.snapshot().residents.map((resident) => resident.type)).toEqual([
+        'text'
+      ])
+      expect(events.slice(-2)).toEqual(['unload-grounder', 'load-chat'])
+    } finally {
+      await application.stop()
+    }
+  })
+
   it('keeps the specialist resident between actions when the text reasoner is remote', async () => {
     const h = lifecycle()
     const run = createGrounderRunner({
       ...h.dependencies,
-      modelStrategy: () => 'text_plus_specialist'
+      strategy: () => 'text_plus_specialist'
     })
 
     await run(async () => {
@@ -157,11 +339,7 @@ describe('Computer Use specialist lifecycle', () => {
     })
 
     expect(h.activeModelId()).toBe(CHAT_MODEL)
-    expect(h.events).toEqual([
-      `load:${SPECIALIST}`,
-      'run',
-      `restore-local:${CHAT_MODEL}`
-    ])
+    expect(h.events).toEqual([`load:${SPECIALIST}`, 'run', `restore-local:${CHAT_MODEL}`])
   })
 
   it('suspends remote priority even when the selected specialist is already resident', async () => {

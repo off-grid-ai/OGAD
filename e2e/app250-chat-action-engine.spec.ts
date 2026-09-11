@@ -68,7 +68,10 @@ const helperCalls = (): Array<{ command: string; args: Record<string, unknown> }
 }
 
 test.beforeEach(async () => {
-  test.skip(targetIsPackaged(), 'dev-target journey: the packaged app resolves its helper from Resources')
+  test.skip(
+    targetIsPackaged(),
+    'dev-target journey: the packaged app resolves its helper from Resources'
+  )
   profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-app250-'))
   helperLog = path.join(profileDir, 'helper-log.jsonl')
   stageWorld()
@@ -123,7 +126,11 @@ test('a chat ask becomes a created, read-back-verified reminder', async () => {
   })
 
   // The tool activity row shows the engine's verified outcome, not a guess.
-  await expect(page.getByText('reminders_create → Created the reminder.')).toBeVisible()
+  // The current work timeline presents a human label and the verified result
+  // as separate semantic elements.
+  await page.getByRole('button', { name: 'Work done 1 step · complete' }).click()
+  await expect(page.getByRole('button', { name: 'Reminders create, complete' })).toBeVisible()
+  await expect(page.getByText('Created the reminder.', { exact: true })).toBeVisible()
 
   // The helper log pins the guarantee: exactly one create, and at least one
   // list AFTER it - the read-back verification actually observed the world.

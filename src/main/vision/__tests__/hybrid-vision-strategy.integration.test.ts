@@ -2,8 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { llm } from '../../llm'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
 import type { VisionPolicyRequest, VisionPolicyResponse } from '../model-adapters/types'
 import { VisionGuard } from '../vision-guard'
@@ -17,7 +16,6 @@ import {
 const tempDirs: string[] = []
 
 afterEach(() => {
-  vi.restoreAllMocks()
   for (const directory of tempDirs.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true })
   }
@@ -90,14 +88,6 @@ describe('Text + Specialist visual task journey', () => {
           visible_evidence: 'The requested destination is visible.'
         })
       ]
-      vi.spyOn(llm, 'chatMessages').mockImplementation(async (messages) => {
-        const user = messages.find((message) => message.role === 'user')
-        const parts = Array.isArray(user?.content) ? user.content : []
-        const image = parts.find((part) => part.type === 'image_url')
-        if (image?.type === 'image_url') specialistScreens.push(image.image_url.url)
-        return "click(point='<point>500 500</point>')"
-      })
-
       const plan: TaskExecutionPlan = {
         version: 1,
         phases: [{ id: 'continue', title: 'Open the next screen' }]
@@ -125,6 +115,17 @@ describe('Text + Specialist visual task journey', () => {
         runReasoner: async (request) => {
           reasonerScreens.push(imageFrom(request))
           return reasonerResponses.shift()!
+        },
+        runSpecialist: async (adapter, input, prepared) => {
+          specialistScreens.push(prepared.screenshotDataUrl)
+          const response = "click(point='<point>500 500</point>')"
+          const bounds = input.coordinateFrame?.encoded ?? { width: 0, height: 0 }
+          return {
+            response,
+            decision: adapter.parseResponse(response, bounds, input.coordinateFrame),
+            modelInput: 'specialist boundary request',
+            screenshotDataUrl: prepared.screenshotDataUrl
+          }
         }
       }
       const projection = await getComputerUseActiveModelProjection(dependencies)

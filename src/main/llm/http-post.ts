@@ -10,6 +10,7 @@
 // integration test drives postCompletionOnce against a real socket-closing server (behaviour).
 
 import * as http from 'http'
+import { textServerFailure, type TextServerFailureKind } from '@offgrid/models'
 
 /**
  * WHY a failure happened, decided by the only layer that can see it.
@@ -25,7 +26,7 @@ import * as http from 'http'
  * A caller must NOT re-derive this from the message text. Capture did exactly that, called every
  * refusal `capture-model-unavailable`, and retried a permanently broken request 32 times.
  */
-export type ModelServerFailureKind = 'unavailable' | 'overflow' | 'rejected' | 'aborted'
+export type ModelServerFailureKind = TextServerFailureKind
 
 export class ModelServerError extends Error {
   readonly kind: ModelServerFailureKind
@@ -39,64 +40,8 @@ export class ModelServerError extends Error {
   }
 }
 
-/** The server's own explanation of a non-200, unwrapped from its JSON envelope. */
-function serverDetail(body: string): string {
-  const raw = (body || '').trim()
-  try {
-    const j = JSON.parse(body) as { error?: { message?: unknown }; message?: unknown } | null
-    const m = j?.error?.message ?? j?.message
-    if (typeof m === 'string' && m) return m
-  } catch {
-    /* non-JSON body — use the raw text */
-  }
-  return raw
-}
-
-/** Classify a non-200 model-server response into a durable reason plus an ACTIONABLE message.
- *  llama-server returns a JSON body like {"error":{"message":"request (22825 tokens) exceeds
- *  the available context size (16384 tokens) …"}}; the bare status code alone is useless both
- *  to the user and to a retry policy. */
-export function classifyServerError(
-  statusCode: number | undefined,
-  body: string
-): { kind: ModelServerFailureKind; message: string } {
-  const detail = serverDetail(body)
-  // Context overflow — usually too many connectors enabled at once (their tool
-  // schemas + grammar overflow the context window).
-  if (/exceeds the available context size/i.test(detail)) {
-    return {
-      kind: 'overflow',
-      message:
-        'The request is larger than the model’s context window — usually too many connectors enabled at once. Disable some connectors, or raise the context window in Settings, then try again.'
-    }
-  }
-  // A tool schema that can't be compiled into a valid grammar for the engine.
-  if (/failed to (parse|initialize|compile) (grammar|json ?schema)/i.test(detail)) {
-    return {
-      kind: 'rejected',
-      message:
-        'A connected tool’s schema couldn’t be turned into a valid grammar for the local model. Disable the most recently added connector and try again.'
-    }
-  }
-  // The server could not READ our request. A lone surrogate from Accessibility text makes the JSON
-  // body unparseable to nlohmann, and a prompt whose media markers do not match its images cannot
-  // be tokenized. Both are deterministic: the identical bytes fail identically, forever.
-  if (/json\.exception|parse error|failed to tokenize/i.test(detail)) {
-    return {
-      kind: 'rejected',
-      message: `LLM Server Error: ${statusCode ?? '?'}${detail ? ` ${detail}` : ''}`
-    }
-  }
-  // A 4xx means the server understood the request and refused it. Anything else — 502, 503, 504, a
-  // bare 500 — is the server failing to service it, which is the definition of an outage.
-  //
-  // Deliberately generous: an outage misread as a refusal loses a frame permanently, while a
-  // refusal misread as an outage costs at most the bounded retry budget. Before that budget
-  // existed the generous reading was dangerous. Now it is the safe one.
-  const refused = statusCode !== undefined && statusCode >= 400 && statusCode < 500
-  const kind: ModelServerFailureKind = refused ? 'rejected' : 'unavailable'
-  return { kind, message: `LLM Server Error: ${statusCode ?? '?'}${detail ? ` ${detail}` : ''}` }
-}
+/** @deprecated Import `textServerFailure` from `@offgrid/models`. */
+export const classifyServerError = textServerFailure
 
 /** Turn a non-200 model-server response into an ACTIONABLE message. */
 export function describeServerError(statusCode: number | undefined, body: string): string {
@@ -139,7 +84,7 @@ export function modelRequestOptions(port: number, contentLength: number): http.R
 export function postCompletionOnce(
   port: number,
   body: string,
-  timeoutMs: number,
+  timeoutMs: number | undefined,
   signal?: AbortSignal
 ): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -161,12 +106,18 @@ export function postCompletionOnce(
       req.destroy()
       finish(() => reject(new ModelServerError('aborted', 'aborted')))
     }
-    const timer = setTimeout(() => {
-      req.destroy()
-      finish(() =>
-        reject(new ModelServerError('unavailable', 'LLM request timed out - try a shorter prompt'))
-      )
-    }, timeoutMs)
+    // No deadline unless the caller set one: a slow prompt is not a failure.
+    const timer =
+      timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            req.destroy()
+            finish(() =>
+              reject(
+                new ModelServerError('unavailable', 'LLM request timed out - try a shorter prompt')
+              )
+            )
+          }, timeoutMs)
 
     const req = http.request(modelRequestOptions(port, Buffer.byteLength(body)), (res) => {
       let data = ''

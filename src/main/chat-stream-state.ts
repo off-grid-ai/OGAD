@@ -228,6 +228,17 @@ export function continueChatStreamWithImage(streamId: string | undefined): boole
   if (!streamId) return false
   const stream = active.get(streamId)
   if (!stream) return false
+  // The model loop has accepted the deferred image request, but the native image job now owns the
+  // work. Keep the same tool row live until that job produces its terminal session outcome.
+  if (stream.tools) {
+    for (let index = stream.tools.length - 1; index >= 0; index -= 1) {
+      const tool = stream.tools[index]
+      if (tool?.name === 'generate_image' && tool.status === 'pending') {
+        stream.tools[index] = { ...tool, status: 'running' }
+        break
+      }
+    }
+  }
   stream.phase = 'loading_image_model'
   delete stream.progress
   publish(streamId)

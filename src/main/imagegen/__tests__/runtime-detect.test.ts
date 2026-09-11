@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { hasMlmodelc, isZImageModel, isQuantizedModel, isMfluxModelId } from '../runtime-detect'
+import { isZImageModel } from '@offgrid/application'
+import { hasMlmodelc, isQuantizedModel, isMfluxModelId } from '../runtime-detect'
 
 describe('hasMlmodelc', () => {
   it('true when a directory listing contains a .mlmodelc resource', () => {

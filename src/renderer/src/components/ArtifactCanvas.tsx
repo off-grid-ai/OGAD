@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
+import { artifactKindLabel } from '@renderer/lib/artifact-labels'
+import type { Artifact } from '@renderer/lib/artifact-parser'
 import { SidePanel } from './SidePanel'
 
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
@@ -11,16 +12,15 @@ import { SidePanel } from './SidePanel'
 
 // 'text'/'image' are catalogued inputs (uploaded file / pasted block / image) —
 // shown as plain text or a thumbnail, never executed in the sandbox.
-export type Artifact = { kind: ArtifactKind; code: string; title?: string }
-
-const KIND_LABEL = ARTIFACT_KIND_LABELS
 
 function escapeForHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function revokePreview(url: string): void {
-  void window.api.revokeArtifactPreview(url).catch(() => {})
+  void window.api.revokeArtifactPreview(url).catch((cause: unknown) => {
+    console.error('Artifact preview cleanup failed:', cause)
+  })
 }
 
 // npm packages a React artifact imports beyond react/react-dom (loaded from esm.sh).
@@ -48,11 +48,11 @@ export function ArtifactCanvas({
   onClose: () => void
   width?: number | null
   onResize?: (w: number) => void
-}) {
+}): React.JSX.Element {
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null)
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const [resizing, setResizing] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState('')
+  const [preview, setPreview] = useState({ documentHtml: '', url: '' })
   // Holds the active drag's teardown so we can force it on unmount — otherwise
   // closing the canvas mid-drag (e.g. switching chats) leaks the window listeners
   // and keeps firing onResize on a stale setter.
@@ -98,11 +98,12 @@ export function ArtifactCanvas({
   useEffect(() => {
     let alive = true
     window.api
-      .artifactRuntime?.(artifact.kind)
+      .artifactRuntime(artifact.kind)
       .then((r: Record<string, string>) => {
         if (alive) setRuntime(r)
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
+        console.error('Artifact runtime could not be loaded:', cause)
         if (alive) setRuntime({})
       })
     return () => {
@@ -184,11 +185,11 @@ if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); }
 else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`
   }, [artifact, runtime])
+  const previewUrl = preview.documentHtml === documentHtml ? preview.url : ''
 
   useEffect(() => {
     let active = true
     let registeredUrl: string | undefined
-    setPreviewUrl('')
 
     if (documentHtml) {
       window.api
@@ -196,13 +197,13 @@ else { __ogShow('No React component found — define a component named App or a 
         .then((url) => {
           registeredUrl = url
           if (active) {
-            setPreviewUrl(url)
+            setPreview({ documentHtml, url })
           } else {
             revokePreview(url)
           }
         })
         .catch(() => {
-          if (active) setPreviewUrl('')
+          if (active) setPreview({ documentHtml, url: '' })
         })
     }
 
@@ -278,7 +279,7 @@ else { __ogShow('No React component found — define a component named App or a 
 
   return (
     <SidePanel
-      ariaLabel={artifact.title || KIND_LABEL[artifact.kind]}
+      ariaLabel={artifact.title || artifactKindLabel(artifact.kind)}
       onClose={onClose}
       className="min-w-[360px] max-w-[90vw]"
       style={{ width: width ? `${width}px` : '30vw' }}
@@ -295,7 +296,7 @@ else { __ogShow('No React component found — define a component named App or a 
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm text-neutral-200">
           <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
-            {KIND_LABEL[artifact.kind]}
+            {artifactKindLabel(artifact.kind)}
           </span>
           <span className="truncate">{artifact.title || 'Canvas'}</span>
         </div>
@@ -354,45 +355,4 @@ else { __ogShow('No React component found — define a component named App or a 
       </div>
     </SidePanel>
   )
-}
-
-const JSX_SIGNAL =
-  /(<[A-Za-z][^>]*>|<\/[A-Za-z]|=>\s*\(?\s*<|React\.|useState|ReactDOM|export default function|className=)/
-
-/** Extract a renderable artifact from assistant markdown, if any. */
-export function parseArtifact(content: string): Artifact | null {
-  // React first: COMBINE all jsx/tsx/react blocks so multi-file responses
-  // (App.js + Child.js) run together — imports are stripped, so every component
-  // ends up in one shared scope and relative imports resolve.
-  const reactBlocks = [...content.matchAll(/```(?:jsx|tsx|react)\s*\n([\s\S]*?)```/gi)].map((b) =>
-    b[1]!.trim()
-  )
-  if (reactBlocks.length) return { kind: 'react', code: reactBlocks.join('\n\n') }
-
-  // A single html/svg/mermaid artifact.
-  const m = content.match(/```(html|svg|mermaid)\s*\n([\s\S]*?)```/i)
-  if (m) {
-    const lang = m[1]!.toLowerCase()
-    return {
-      kind: lang === 'svg' ? 'svg' : lang === 'mermaid' ? 'mermaid' : 'html',
-      code: m[2]!.trim()
-    }
-  }
-
-  // Plain js/ts blocks that look like React — combine them too.
-  const jsBlocks = [
-    ...content.matchAll(/```(?:javascript|js|typescript|ts)\s*\n([\s\S]*?)```/gi)
-  ].map((b) => b[1]!.trim())
-  if (jsBlocks.length && jsBlocks.some((b) => JSX_SIGNAL.test(b))) {
-    return { kind: 'react', code: jsBlocks.join('\n\n') }
-  }
-
-  // A bare <svg>…</svg> with no fence is still a valid artifact.
-  const svg = content.match(/<svg[\s\S]*<\/svg>/i)
-  if (svg) return { kind: 'svg', code: svg[0] }
-
-  // A fenced markdown/doc block becomes a rendered document artifact.
-  const md = content.match(/```(?:markdown|md)\s*\n([\s\S]*?)```/i)
-  if (md) return { kind: 'text', code: md[1]!.trim() }
-  return null
 }

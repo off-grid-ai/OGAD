@@ -1,8 +1,8 @@
 /**
  * computer_use tiering: a control-rich AX window drives via accessibility; a
  * dead-AX window (or a goal that names no running app) falls through to vision.
- * The routing decision is made once, from the snapshot - AX failure is reported
- * honestly, never silently re-run under vision.
+ * The routing decision starts with the cheapest viable rail. If AX cannot
+ * finish, the same action falls through to vision before the task can fail.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { makeComputerTaskExecutor, type ComputerTaskTiers } from '../ax-rail'
@@ -64,13 +64,14 @@ describe('makeComputerTaskExecutor', () => {
       'act-1',
       'act-1',
       'Slack',
-      routing.snapshot
+      routing.snapshot,
+      true
     )
     expect(tiers.visionExecute).not.toHaveBeenCalled()
     expect(result).toEqual({ ok: true, effectId: 'act-1' })
   })
 
-  it('reports an AX give_up honestly and does NOT fall to vision', async () => {
+  it('falls through to vision when AX cannot finish', async () => {
     const routing: AxRouting = { app: 'Slack', snapshot: richSnapshot() }
     const tiers = makeTiers({
       routingSnapshot: vi.fn(async () => routing),
@@ -80,8 +81,24 @@ describe('makeComputerTaskExecutor', () => {
 
     const result = await exec(action())
 
-    expect(result).toEqual({ ok: false, detail: 'needs a sign-in' })
-    expect(tiers.visionExecute).not.toHaveBeenCalled()
+    expect(tiers.visionExecute).toHaveBeenCalledWith(action())
+    expect(result).toEqual({ ok: true, effectId: 'vision' })
+  })
+
+  it('reports failure only after AX and vision both fail', async () => {
+    const routing: AxRouting = { app: 'Slack', snapshot: richSnapshot() }
+    const tiers = makeTiers({
+      routingSnapshot: vi.fn(async () => routing),
+      runAx: vi.fn(async () => ({ ok: false, summary: 'AX could not proceed', steps: [] })),
+      visionExecute: vi.fn(async () => ({ ok: false, detail: 'Vision could not proceed' }))
+    })
+    const exec = makeComputerTaskExecutor(tiers)
+
+    const result = await exec(action())
+
+    expect(tiers.runAx).toHaveBeenCalledOnce()
+    expect(tiers.visionExecute).toHaveBeenCalledOnce()
+    expect(result).toEqual({ ok: false, detail: 'Vision could not proceed' })
   })
 
   it('falls through to vision on a dead-AX window', async () => {
@@ -130,7 +147,8 @@ describe('makeComputerTaskExecutor', () => {
       'act-1',
       'chat-42',
       'Slack',
-      routing.snapshot
+      routing.snapshot,
+      true
     )
   })
 
@@ -158,6 +176,20 @@ describe('makeComputerTaskExecutor', () => {
       expect(tiers.runAx).toHaveBeenCalledOnce() // forced past the viability gate
       expect(tiers.visionExecute).not.toHaveBeenCalled()
       expect(result).toEqual({ ok: true, effectId: 'act-1' })
+    })
+
+    it("forcedRail 'ax' reports its result without falling through to vision", async () => {
+      const routing: AxRouting = { app: 'Slack', snapshot: richSnapshot() }
+      const tiers = makeTiers({
+        routingSnapshot: vi.fn(async () => routing),
+        runAx: vi.fn(async () => ({ ok: false, summary: 'AX diagnostic failure', steps: [] }))
+      })
+      const exec = makeComputerTaskExecutor(tiers, { forcedRail: 'ax' })
+
+      const result = await exec(action())
+
+      expect(tiers.visionExecute).not.toHaveBeenCalled()
+      expect(result).toEqual({ ok: false, detail: 'AX diagnostic failure' })
     })
 
     it("forcedRail 'ax' still falls to vision when NO app resolves (nothing to drive)", async () => {

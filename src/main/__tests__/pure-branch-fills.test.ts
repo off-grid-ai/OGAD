@@ -5,7 +5,7 @@
 //   - search-ranking: matchScore ignoring an empty-string term (the `t ?` false arm).
 import { describe, it, expect } from 'vitest'
 import { classifyLlamaError } from '../llama-error'
-import { decideChatStatus } from '../chat-health'
+import { decideChatStatus } from '@offgrid/application'
 import { matchScore } from '../search-ranking'
 
 describe('classifyLlamaError - architecture without a quoted name', () => {

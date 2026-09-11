@@ -34,6 +34,16 @@ interface ActiveProRuntime {
   shutdown(): Promise<void>
 }
 
+export class ProMainActivationError extends Error {
+  readonly cause: unknown
+
+  constructor(cause: unknown) {
+    super('Off Grid AI Pro could not start.')
+    this.name = 'ProMainActivationError'
+    this.cause = cause
+  }
+}
+
 interface RuntimeSessionOptions {
   entitlementRequired: boolean
   requestRelaunch(): void
@@ -43,6 +53,7 @@ let activeProRuntime: ActiveProRuntime | null = null
 let activeEntitlementBootstrap: ActiveProRuntime | null = null
 let lifecycleTask: Promise<void> = Promise.resolve()
 let applicationShutdownOwnerRegistered = false
+let personalDataRegistration: Promise<void> | null = null
 
 function enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
   const result = lifecycleTask.then(operation)
@@ -147,6 +158,35 @@ export async function loadProEntitlementProvider(): Promise<void> {
   if (typeof register === 'function') await register()
 }
 
+/**
+ * Register passive Pro privacy stores before application recovery. This imports no writer and starts
+ * no Pro service. Free builds expose no registration function and remain a no-op.
+ */
+export function registerProPersonalStoresBeforeApplication(): Promise<void> {
+  personalDataRegistration ??= import('@offgrid/pro/main').then((pro: unknown) => {
+    const registerPlatform = (pro as { registerEntitlementProvider?: () => void | Promise<void> })
+      .registerEntitlementProvider
+    const register = (pro as { registerProPersonalStores?: () => void | Promise<void> })
+      .registerProPersonalStores
+    const registerPrivacy = (
+      pro as {
+        registerPassivePrivacyPublicationRecovery?: () => void | Promise<void>
+      }
+    ).registerPassivePrivacyPublicationRecovery
+    return Promise.resolve(typeof registerPlatform === 'function' ? registerPlatform() : undefined)
+      .then(() =>
+        Promise.all([
+          typeof register === 'function' ? Promise.resolve(register()) : Promise.resolve(),
+          typeof registerPrivacy === 'function'
+            ? Promise.resolve(registerPrivacy())
+            : Promise.resolve()
+        ])
+      )
+      .then(() => undefined)
+  })
+  return personalDataRegistration
+}
+
 /** Whether pro features should activate. The pro submodule must be present AND
  *  the user entitled by a valid Keygen license. Local env override (dev/contributor):
  *    OFFGRID_PRO=0 → force free even with pro code bundled,
@@ -179,7 +219,11 @@ async function loadProFeaturesMainNow(): Promise<void> {
   let pro: unknown
   try {
     pro = await import('@offgrid/pro/main')
-  } catch {
+  } catch (cause) {
+    if (proEnabled()) {
+      console.error('[pro] paid runtime import failed', cause)
+      throw new ProMainActivationError(cause)
+    }
     return // free / contributor build: package not present
   }
   const forced = getForcedProActivation(__OFFGRID_PRO__, process.env.OFFGRID_PRO, app.isPackaged)
@@ -218,7 +262,11 @@ async function loadProFeaturesMainNow(): Promise<void> {
   }
   const activateMain = (pro as { activateMain?: (api: ProMainApi) => void | Promise<void> })
     .activateMain
-  if (typeof activateMain !== 'function') return // stub resolved to null
+  if (typeof activateMain !== 'function') {
+    const cause = new Error('The paid runtime does not export activateMain.')
+    console.error('[pro] paid runtime activation entry is missing', cause)
+    throw new ProMainActivationError(cause)
+  }
   if (activeProRuntime) return
   const bootstrap = activeEntitlementBootstrap
   activeEntitlementBootstrap = null
@@ -231,6 +279,7 @@ async function loadProFeaturesMainNow(): Promise<void> {
   } catch (e) {
     await session.runtime.shutdown()
     console.error('[pro] activateMain failed', e)
+    throw new ProMainActivationError(e)
   }
 }
 

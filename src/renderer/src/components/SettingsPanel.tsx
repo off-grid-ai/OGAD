@@ -1,27 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
+import { createElement, useCallback, useState } from 'react'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
   DEFAULT_CTX_SIZE,
   DEFAULT_MAX_TOOL_CALLS,
+  DESKTOP_TEXT_SETTINGS_DEFAULTS,
   MAX_MAX_TOOL_CALLS,
-  MAX_TOKENS_AUTO,
   MIN_MAX_TOOL_CALLS,
-  MIN_CAPTURE_CTX_SIZE
-} from '@offgrid/core/shared/llm-defaults'
-import {
+  MIN_CAPTURE_CTX_SIZE,
   REASONING_BUDGET_AUTO,
   REASONING_BUDGET_OPTIONS,
   reasoningBudgetLabel,
   optionsWithinCeiling,
-  reconcileBudgets
-} from '@offgrid/models'
-import { gpuLayersHint, type EngineAccelerator } from '@offgrid/core/shared/engine-accelerator'
+  failed,
+  modelsFailureMessage,
+  ok
+} from '@offgrid/application'
+import { gpuLayersHint } from '@offgrid/core/shared/engine-accelerator'
 import {
   contextWindowOptions,
   contextWindowHint,
   recommendedContextWindow
 } from '@renderer/lib/ctx-options'
-import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summary'
+import { formatContextWindow } from '@renderer/lib/model-summary'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 import {
   invalidateDisplaySettings,
   invalidateLlmSettings
@@ -35,74 +36,24 @@ import { SidePanel } from './SidePanel'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
 import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 import { SettingsRow as Row } from './SettingsRow'
+import { SettingsSlider } from './SettingsSlider'
+import type { SettingsWriteOutcome } from './SettingsTextField'
 import { SettingsSelect } from './SettingsSelect'
-import type { SpeechLanguage } from '@offgrid/speech'
 import { X } from '@phosphor-icons/react'
 import { getSlot, SLOTS } from '@renderer/bootstrap/slotRegistry'
-
-const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
-// The values THIS picker offers. The nesting rule they obey is shared (@offgrid/models); which
-// discrete steps to show is a desktop rendering choice, and OGAM uses sliders instead.
-const MAX_OUTPUT_OPTIONS = [2048, 4096, 8192, 16384, 32768]
-
-/** The ceiling on thinking: the response length it must fit inside, which for an auto output cap
- *  is the context window. Mirrors reconcileBudgets so the options offered match what is kept. */
-function thinkingCeiling(s: LlmSettings): number {
-  const maxOutput = s.maxTokens ?? MAX_OUTPUT_AUTO
-  const ctx = s.ctxSize ?? DEFAULT_CTX_SIZE
-  return maxOutput === MAX_OUTPUT_AUTO ? ctx : maxOutput
-}
-
-/**
- * Apply one budget edit and pull the inner budgets back under it.
- *
- * Filtering the option lists stops a user PICKING an impossible combination; this stops an already
- * stored one surviving a change to an outer limit. Both read the same rule from @offgrid/models,
- * so the picker and the persisted value cannot disagree. Only genuinely changed fields are
- * returned, so an unrelated edit does not rewrite the other two.
- */
-function budgetChange(s: LlmSettings, patch: LlmSettings): LlmSettings {
-  const next = { ...s, ...patch }
-  const reconciled = reconcileBudgets({
-    contextWindow: next.ctxSize ?? DEFAULT_CTX_SIZE,
-    maxOutput: next.maxTokens ?? MAX_OUTPUT_AUTO,
-    thinkingBudget: next.reasoningBudget ?? REASONING_BUDGET_AUTO
-  })
-  return {
-    ...patch,
-    ...(reconciled.maxOutput !== (next.maxTokens ?? MAX_OUTPUT_AUTO)
-      ? { maxTokens: reconciled.maxOutput }
-      : {}),
-    ...(reconciled.thinkingBudget !== (next.reasoningBudget ?? REASONING_BUDGET_AUTO)
-      ? { reasoningBudget: reconciled.thinkingBudget }
-      : {})
-  }
-}
+import {
+  MAX_OUTPUT_AUTO,
+  MAX_OUTPUT_OPTIONS,
+  budgetChange,
+  thinkingCeiling,
+  threadsLabel,
+  type LlmSettings
+} from './settings-model-budget'
+import { useInitialSettings, type TranscriptionInfo } from './use-settings-panel-load'
 
 // Right-side Settings panel (same pattern as SkillsPanel/ArtifactCanvas).
 // Tabs: Model (inference params), Image, Voice (Kokoro TTS), Tools (built-in, read-only),
 // Connectors (MCP servers — the user's reusable tool library). All on-device.
-type KvCacheType = 'f16' | 'q8_0' | 'q4_0'
-type LlmSettings = {
-  temperature?: number
-  ctxSize?: number
-  topP?: number
-  topK?: number
-  minP?: number
-  repeatPenalty?: number
-  maxTokens?: number
-  maxToolCalls?: number
-  reasoningBudget?: number
-  systemPrompt?: string
-  kvCacheType?: KvCacheType
-  flashAttn?: boolean
-  gpuLayers?: number
-  threads?: number
-  batchSize?: number
-  effectiveCtxSize?: number // reported by the backend (RAM-clamped); read-only
-  modelMaxCtx?: number | null // the model's TRAINED window (GGUF); read-only, bounds the picker
-  gpuAccelerator?: EngineAccelerator | null // the engine the backend actually spawned; read-only
-}
 type Connector = {
   id: number
   name: string
@@ -111,34 +62,45 @@ type Connector = {
   enabled?: number | boolean
 }
 
-type TranscriptionInfo = {
-  engine: 'whisper' | 'parakeet' | 'whisper-resident'
-  modelId: string | null
-  label: string
-  language: string
-  languages: SpeechLanguage[]
-  options: { id: string | null; name: string; active: boolean }[]
-}
-
 const DEFAULT_TRANSCRIPTION_MODEL = '__default-transcription-model__'
 
 const CTX_OPTIONS = [4096, 8192, 16384, 32768, 65536, 131072]
 // Defaults mirror the backend's LLMService field defaults (for "Reset to defaults").
 const DEFAULTS: LlmSettings = {
-  temperature: 0.7,
-  topP: 0.95,
-  topK: 40,
-  minP: 0.05,
-  repeatPenalty: 1.1,
-  maxTokens: MAX_TOKENS_AUTO,
-  maxToolCalls: DEFAULT_MAX_TOOL_CALLS,
-  ctxSize: DEFAULT_CTX_SIZE,
+  temperature: DESKTOP_TEXT_SETTINGS_DEFAULTS.temperature,
+  topP: DESKTOP_TEXT_SETTINGS_DEFAULTS.topP,
+  topK: DESKTOP_TEXT_SETTINGS_DEFAULTS.topK,
+  minP: DESKTOP_TEXT_SETTINGS_DEFAULTS.minP,
+  repeatPenalty: DESKTOP_TEXT_SETTINGS_DEFAULTS.repeatPenalty,
+  maxTokens: DESKTOP_TEXT_SETTINGS_DEFAULTS.maxTokens,
+  maxToolCalls: DESKTOP_TEXT_SETTINGS_DEFAULTS.maxToolCalls,
+  ctxSize: DESKTOP_TEXT_SETTINGS_DEFAULTS.contextLength,
   systemPrompt: '',
   kvCacheType: 'f16',
   flashAttn: false,
   gpuLayers: 99,
   threads: 0,
   batchSize: 512
+}
+
+async function persistConnector(
+  connector: { name: string; url: string },
+  clear: () => void,
+  refresh: () => void
+): Promise<void> {
+  if (!connector.name.trim() || !connector.url.trim()) return
+  await window.api.mcpAdd({
+    name: connector.name.trim(),
+    transport: 'http',
+    url: connector.url.trim()
+  })
+  clear()
+  refresh()
+}
+
+function openModels(onClose: () => void): void {
+  onClose()
+  openActiveModelsPanel()
 }
 
 export function SettingsPanel({
@@ -163,71 +125,88 @@ export function SettingsPanel({
 
   const refreshConnectors = useCallback((): void => {
     window.api
-      .mcpList?.()
+      .mcpList()
       .then((c: Connector[]) => setConnectors(c))
       .catch(() => setConnectors([]))
   }, [])
 
-  useEffect(() => {
-    window.api
-      .getLlmSettings?.()
-      .then((v: LlmSettings) => setS(v))
-      .catch(() => {})
-    const modelApi = window.api as Partial<
-      Pick<typeof window.api, 'getModelCatalog' | 'getActiveModel'>
-    >
-    if (modelApi.getModelCatalog && modelApi.getActiveModel) {
-      Promise.all([modelApi.getModelCatalog(), modelApi.getActiveModel()])
-        .then(([catalog, activeId]) =>
-          setActiveModelName(resolveModelName(catalog.models, activeId))
-        )
-        .catch(() => setActiveModelName(null))
-    }
-    window.api
-      .getTranscriptionInfo?.()
-      .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
-      .catch(() => setTranscriptionInfo(null))
-    window.api
-      .getSettings?.()
-      .then((settings) => setShowGenerationDetails(settings.showGenerationDetails === true))
-      .catch(() => {})
-    window.api
-      .listTools?.()
-      .then((t: { name: string; description: string }[]) => setTools(t))
-      .catch(() => {})
-    refreshConnectors()
-  }, [refreshConnectors])
+  useInitialSettings({
+    setSettings: setS,
+    setTranscriptionInfo,
+    setTools,
+    setActiveModelName,
+    setShowGenerationDetails,
+    refreshConnectors
+  })
 
-  // Persist one inference setting (optimistic) — backend applies it per-request.
+  /**
+   * Commit one group of model settings and say, in the user's terms, what happened.
+   *
+   * One command per save. Shared validates and normalizes the group together, writes it once,
+   * publishes at most one mutation per portable key, and asks for at most one engine restart - and
+   * returns the committed record, so this panel renders what IS committed instead of writing and
+   * then reading the whole record back to guess.
+   *
+   * The three outcomes a user can actually be in:
+   * - refused: nothing was committed, and the message names the settings at fault, so the draft is
+   *   still theirs to fix;
+   * - committed but not shared: the value is live on this device and only the mesh missed it, so it
+   *   stays and says so - rolling a stored value back over someone else's network is worse;
+   * - committed, restart failed: the value is stored, the engine did not come back with it, and the
+   *   message says which of the two happened rather than a generic failure.
+   */
+  const commitModelSettings = useCallback(
+    async (patch: LlmSettings): Promise<SettingsWriteOutcome> => {
+      const outcome = await window.api.setLlmSettings(patch)
+      if (!outcome.ok) return failed({ message: modelsFailureMessage(outcome.failure) })
+      const committed = outcome.value
+      setS(committed.settings as LlmSettings)
+      if (committed.changed.length > 0) invalidateLlmSettings()
+      if (committed.launch?.status === 'failed') {
+        return failed({
+          message: `Saved, but the model could not restart with it: ${committed.launch.message}`
+        })
+      }
+      if (committed.syncFailure) {
+        return failed({
+          message: 'Saved on this device, but it could not be shared with your other devices.'
+        })
+      }
+      return ok(undefined)
+    },
+    []
+  )
+
+  // Persist one inference setting. Applied per request by the engine, so nothing here waits.
   const set = (patch: LlmSettings): void => {
     setS((prev) => ({ ...prev, ...patch }))
-    void Promise.resolve(window.api.setLlmSettings?.(patch))
-      .then(() => window.api.getLlmSettings?.())
-      .then((next) => {
-        if (next) {
-          setS(next)
-          invalidateLlmSettings()
-        }
-      })
-      .catch(() => {
-        void window.api
-          .getLlmSettings?.()
-          .then((next) => setS(next))
-          .catch(() => {})
-      })
+    void commitModelSettings(patch)
   }
+
+  /**
+   * Launch-time settings commit through the same command; the sliders just need the outcome.
+   *
+   * A launch argument change costs a model restart, so the caller has to know whether the value it
+   * is showing is the value the engine took. Which restart wins is no longer decided here or in the
+   * engine: the command asks its coordinator once per save, and a drag that is overtaken is
+   * superseded rather than spawning.
+   */
+  const commitGpuLayers = useCallback(
+    (gpuLayers: number) => commitModelSettings({ gpuLayers }),
+    [commitModelSettings]
+  )
+  const commitThreads = useCallback(
+    (threads: number) => commitModelSettings({ threads }),
+    [commitModelSettings]
+  )
+  const commitBatchSize = useCallback(
+    (batchSize: number) => commitModelSettings({ batchSize }),
+    [commitModelSettings]
+  )
 
   const resetDefaults = (): void => {
     setS((prev) => ({ ...prev, ...DEFAULTS }))
-    void Promise.resolve(window.api.setLlmSettings?.(DEFAULTS))
-      .then(() => {
-        invalidateLlmSettings()
-        return window.api.getLlmSettings?.()
-      })
-      .then((next) => {
-        if (next) setS(next)
-      })
-      .catch(() => {})
+    void commitModelSettings(DEFAULTS)
   }
 
   /**
@@ -259,8 +238,12 @@ export function SettingsPanel({
 
   const pickTranscriptionModel = (value: string): void => {
     const modelId = value === DEFAULT_TRANSCRIPTION_MODEL ? null : value
-    void Promise.resolve(window.api.setActiveModalModel('transcription', modelId))
-      .then(() => window.api.getTranscriptionInfo())
+    void modelControlClient
+      .control({ type: 'select', surface: 'transcription', modelId })
+      .then((outcome) => {
+        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+        return window.api.getTranscriptionInfo()
+      })
       .then((info) => setTranscriptionInfo(info))
       .catch(() => {
         void window.api
@@ -270,21 +253,10 @@ export function SettingsPanel({
       })
   }
 
-  const addConnector = async (): Promise<void> => {
-    if (!newConn.name.trim() || !newConn.url.trim()) return
-    await window.api.mcpAdd?.({
-      name: newConn.name.trim(),
-      transport: 'http',
-      url: newConn.url.trim()
-    })
-    setNewConn({ name: '', url: '' })
-    refreshConnectors()
-  }
+  const addConnector = (): Promise<void> =>
+    persistConnector(newConn, () => setNewConn({ name: '', url: '' }), refreshConnectors)
 
-  const openActiveModels = (): void => {
-    onClose()
-    openActiveModelsPanel()
-  }
+  const openActiveModels = (): void => openModels(onClose)
 
   const content = (
     <>
@@ -337,7 +309,7 @@ export function SettingsPanel({
       </div>
 
       <div className={embedded ? 'p-1 pt-4 text-sm' : 'min-h-0 flex-1 overflow-y-auto p-4 text-sm'}>
-        {tab === 'tasks' && TaskSettings ? <TaskSettings /> : null}
+        {tab === 'tasks' && TaskSettings ? createElement(TaskSettings) : null}
         {tab === 'model' && (
           <>
             <div
@@ -592,51 +564,37 @@ export function SettingsPanel({
                 {s.flashAttn ? 'Enabled' : 'Disabled'}
               </button>
             </Row>
-            <Row
+            <SettingsSlider
+              id="llm-gpu-layers"
               label="GPU layers"
-              value={String(s.gpuLayers ?? 99)}
               hint={gpuLayersHint(s.gpuAccelerator ?? null)}
-            >
-              <input
-                type="range"
-                min={0}
-                max={99}
-                step={1}
-                value={s.gpuLayers ?? 99}
-                onChange={(e) => set({ gpuLayers: Number(e.target.value) })}
-                className="w-full accent-green-500"
-              />
-            </Row>
-            <Row
+              min={0}
+              max={99}
+              step={1}
+              value={s.gpuLayers ?? 99}
+              commit={commitGpuLayers}
+            />
+            <SettingsSlider
+              id="llm-threads"
               label="CPU threads"
-              value={(s.threads ?? 0) === 0 ? 'auto' : String(s.threads)}
               hint="0 = auto (let llama.cpp choose)."
-            >
-              <input
-                type="range"
-                min={0}
-                max={16}
-                step={1}
-                value={s.threads ?? 0}
-                onChange={(e) => set({ threads: Number(e.target.value) })}
-                className="w-full accent-green-500"
-              />
-            </Row>
-            <Row
+              min={0}
+              max={16}
+              step={1}
+              value={s.threads ?? 0}
+              format={threadsLabel}
+              commit={commitThreads}
+            />
+            <SettingsSlider
+              id="llm-batch-size"
               label="Batch size"
-              value={String(s.batchSize ?? 512)}
               hint="Tokens processed per batch during prompt ingest."
-            >
-              <input
-                type="range"
-                min={64}
-                max={2048}
-                step={64}
-                value={s.batchSize ?? 512}
-                onChange={(e) => set({ batchSize: Number(e.target.value) })}
-                className="w-full accent-green-500"
-              />
-            </Row>
+              min={64}
+              max={2048}
+              step={64}
+              value={s.batchSize ?? 512}
+              commit={commitBatchSize}
+            />
 
             <button
               onClick={resetDefaults}
@@ -728,7 +686,7 @@ export function SettingsPanel({
                           tools.map((x) => (x.name === t.name ? { ...x, enabled: next } : x)),
                           tools,
                           setTools,
-                          () => window.api.setToolEnabled?.(t.name, next)
+                          () => window.api.setToolEnabled(t.name, next)
                         )
                       }}
                       className={`shrink-0 rounded px-2 py-1 text-[11px] ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
@@ -787,7 +745,7 @@ export function SettingsPanel({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={async () => {
-                          await window.api.mcpSetEnabled?.(c.id, !c.enabled)
+                          await window.api.mcpSetEnabled(c.id, !c.enabled)
                           refreshConnectors()
                         }}
                         className={`rounded px-2 py-1 text-[11px] ${c.enabled ? 'text-green-500' : 'text-neutral-500'}`}
@@ -796,7 +754,7 @@ export function SettingsPanel({
                       </button>
                       <button
                         onClick={async () => {
-                          await window.api.mcpRemove?.(c.id)
+                          await window.api.mcpRemove(c.id)
                           refreshConnectors()
                         }}
                         className="rounded px-2 py-1 text-[11px] text-red-400 hover:bg-red-500/10"

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 // Local text-to-speech through the pinned React Native ExecuTorch Kokoro runtime.
 // The runtime lives in its own repository and runs as a child process, so it does
 // not add another native inference engine to Electron's main process.
@@ -8,15 +9,21 @@ import {
   speechCapabilities,
   type DownloadProgress
 } from '@offgrid/executorch-speech'
-import { kokoroVoiceLabel, speechLanguageLabel, type RuntimeSpeechVoice } from '@offgrid/speech'
+import {
+  admitSpeechInput,
+  kokoroVoiceLabel,
+  speechLanguageLabel,
+  type RuntimeSpeechVoice
+} from '@offgrid/speech'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { getActiveModal } from './active-models'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
-import type { ManagedRuntime } from './runtime-manager'
-import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
+import type { DesktopManagedRuntime } from './model-runtime-port'
+import { DEFAULT_SPEECH_VOICE, resolveSpeechVoice } from '@offgrid/models'
+import { generateDesktopOperation } from './desktop-generation'
+import { registerDesktopVoiceProgress } from './generation-progress'
 
 const LANGUAGE_TAGS: Readonly<Record<string, string>> = {
   'en-us': 'en-US',
@@ -38,6 +45,22 @@ function executablePath(): string {
   return executable
 }
 
+export interface TtsRuntimeState {
+  installed: boolean
+  ready: boolean
+  error?: string
+}
+
+/** Publish native adapter readiness without projecting runtime assets into the generic model store. */
+export function inspectTtsRuntimeState(): TtsRuntimeState {
+  try {
+    executablePath()
+    return { installed: true, ready: true }
+  } catch (error) {
+    return { installed: false, ready: false, error: messageOf(error) }
+  }
+}
+
 function cacheDirectory(): string {
   return path.join(modelsDir(), '.cache', 'executorch-speech')
 }
@@ -55,10 +78,19 @@ function runtime(): ExecutorchSpeechRuntime {
 
 let busy = false
 
-/** ExecuTorch releases every model when its short-lived process exits. */
-export const ttsRuntime: ManagedRuntime = {
+/**
+ * ExecuTorch releases every model when its short-lived process exits.
+ *
+ * DELIBERATELY EMPTY, and `{ reclaimed: true }` is the TRUE answer here - do not "fix" this in a
+ * sweep that makes every evict able to fail. The runtime is constructed per call and its process is
+ * short-lived, so between calls nothing is resident: there is no memory for an eviction to release
+ * and nothing that could fail to release it. Answering `false` would strand a phantom resident and
+ * refuse every future admission, which would make the one wrapper that was always honest into the
+ * only one that lies.
+ */
+export const ttsRuntime: DesktopManagedRuntime = {
   modality: 'tts',
-  evict: () => {},
+  evict: () => Promise.resolve({ reclaimed: true }),
   warm: () => {},
   release: () => {}
 }
@@ -90,19 +122,23 @@ export async function prepareVoiceAssets(
 }
 
 /** Synthesize speech for `text`; returns a WAV data URL. */
-export async function synthesize(
+export async function synthesizeNative(
   text: string,
   voice?: string,
-  onProgress?: (progress: DownloadProgress) => void
+  options: {
+    onProgress?: (progress: DownloadProgress) => void
+    signal?: AbortSignal
+  } = {}
 ): Promise<{ dataUrl: string }> {
-  const selected = getActiveModal('speech')
-  const requestedVoice = chooseVoice(voice, selected) || DEFAULT_VOICE
-  // Older releases persisted Kokoro voices that the ExecuTorch catalogue does not contain.
-  // Keep those profiles able to speak after upgrade; the runtime manifest remains the voice SSOT.
-  const chosenVoice = SUPPORTED_VOICES.has(requestedVoice) ? requestedVoice : DEFAULT_VOICE
-  const input = (text || '').trim()
-  if (!input) throw new Error('Nothing to speak.')
-  if (busy) throw new Error('Already generating speech. Please wait.')
+  // Shared owns voice selection and stale-persistence recovery. This adapter owns only ExecuTorch I/O.
+  const chosenVoice = resolveSpeechVoice({
+    requested: voice,
+    supported: SUPPORTED_VOICES,
+    fallback: DEFAULT_SPEECH_VOICE
+  })
+  const admission = admitSpeechInput({ text, busy })
+  if (!admission.ok) throw new Error(admission.message)
+  const input = admission.text
 
   busy = true
   const requestId = `speak-${process.pid}-${Date.now()}`
@@ -116,10 +152,11 @@ export async function synthesize(
 
   try {
     await runtime().synthesize({
-      text: input.slice(0, 2000),
+      text: input,
       voiceId: chosenVoice,
       outputPath,
-      onDownloadProgress: onProgress
+      onDownloadProgress: options.onProgress,
+      signal: options.signal
     })
     const wav = await fs.promises.readFile(outputPath)
     if (wav.length <= 44) throw new Error('The local voice runtime returned empty audio.')
@@ -139,6 +176,39 @@ export async function synthesize(
     throw error
   } finally {
     busy = false
-    void fs.promises.unlink(outputPath).catch(() => {})
+    void fs.promises.unlink(outputPath).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      writeDiagnosticLog(
+        'tts',
+        'request.cleanup_failed',
+        { requestId, path: outputPath, error: messageOf(error) },
+        'error'
+      )
+    })
+  }
+}
+
+export async function synthesize(
+  text: string,
+  voice?: string,
+  onProgress?: (progress: DownloadProgress) => void
+): Promise<{ dataUrl: string }> {
+  const turnId = `desktop-voice:${randomUUID()}`
+  const unregister = onProgress ? registerDesktopVoiceProgress(turnId, onProgress) : undefined
+  try {
+    const result = await generateDesktopOperation(
+      { type: 'voice', text, voice },
+      {
+        profile: 'voice-synthesis',
+        identity: { conversationId: turnId, turnId }
+      }
+    )
+    if (result.output.type !== 'voice') throw new Error('The voice engine returned no audio.')
+    const audio = result.output.audio
+    return {
+      dataUrl: audio.data ? `data:${audio.mimeType};base64,${audio.data}` : (audio.uri ?? '')
+    }
+  } finally {
+    unregister?.()
   }
 }

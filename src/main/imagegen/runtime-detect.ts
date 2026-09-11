@@ -5,18 +5,12 @@
 // Re-export so callers get the mflux id check from a single place alongside the
 // other runtime predicates (the concrete list lives in ../mflux).
 export { isMfluxModelId } from '../mflux'
-
 /** A Core ML model is a DIRECTORY that contains a compiled .mlmodelc resource.
  *  The caller passes the directory's entry names (fs.readdirSync result); this
  *  only inspects them. Core ML is macOS-only, so the caller gates on platform
  *  before treating a dir as Core ML. */
 export function hasMlmodelc(entries: string[]): boolean {
   return entries.some((f) => /\.mlmodelc$/i.test(f))
-}
-
-/** Z-Image family (the 3-model diffusion-transformer stack) by filename. */
-export function isZImageModel(base: string): boolean {
-  return /z[-_]?image/i.test(base)
 }
 
 /** A quantized checkpoint (q8_0 / Q4_K …) — LoRA can't be merged into these. */

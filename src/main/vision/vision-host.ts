@@ -19,7 +19,7 @@
  */
 import fs from 'fs'
 import sharp from 'sharp'
-import { globalShortcut, screen } from 'electron'
+import { screen } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import { type VisionScreen, type VisionTaskResult } from './vision-agent'
@@ -28,7 +28,6 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask,
   waitForVisionUser
 } from './vision-controller'
 import { hideSupervisorWindow } from './supervisor-window'
@@ -53,7 +52,7 @@ import {
   planAspectPreservingResize,
   type ScreenshotGeometry
 } from './screenshot-geometry'
-import { recentVisualFacts } from './visual-context'
+import { desktopAutomation } from '../composition/application-access'
 import { retryPlanningGoal, type TaskRetryCheckpoint } from '../tasks/task-retry'
 import { dispatchVisionAction } from './vision-actuation'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
@@ -251,7 +250,9 @@ class VisionHost {
                   ...(checkpoint.summary ? [`Earlier attempt ended: ${checkpoint.summary}`] : [])
                 ]
               : []),
-            ...(settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : [])
+            ...(settings.retrieveOlderVisuals
+              ? desktopAutomation.recentVisualFacts(taskId)
+              : [])
           ].slice(0, 5)
           return this.runActiveTask({
             goal,
@@ -310,19 +311,7 @@ class VisionHost {
       contextTokens,
       retrievedFacts
     } = input
-    // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
-    // Stop routes to the SAME guard via the controller session.
-    const escapeRegistered = globalShortcut.register('Escape', () => {
-      stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
-    })
     const releaseSession = registerVisionSession(taskId, guard, request)
-    // The only run-level notice is an unavailable emergency shortcut. Model
-    // selection guidance belongs in settings, not in a live task.
-    const notice = [
-      escapeRegistered ? null : 'Esc is unavailable. Use Stop or Take Over in the task controls.'
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join(' ')
     emitVisionState({
       taskId,
       journeyId,
@@ -331,8 +320,7 @@ class VisionHost {
       status: 'running',
       phase: 'preparing',
       currentStep: 0,
-      currentAction: 'Preparing local screen control',
-      ...(notice ? { notice } : {})
+      currentAction: 'Preparing local screen control'
     })
     const queuedGuidance: string[] = [...(checkpoint?.guidance ?? [])]
     const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
@@ -382,8 +370,7 @@ class VisionHost {
                   : 'running',
             phase: progress.phase,
             currentStep: progress.step,
-            currentAction: progress.action,
-            ...(notice ? { notice } : {})
+            currentAction: progress.action
           })
         },
         contextTokens,
@@ -477,7 +464,6 @@ class VisionHost {
       return { ok: false, summary, steps: [], handoffs: 0 }
     } finally {
       releaseGuidance()
-      if (escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       hideSupervisorWindow()
     }

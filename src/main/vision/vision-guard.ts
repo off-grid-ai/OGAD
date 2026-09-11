@@ -50,7 +50,7 @@ export class VisionGuard {
   }
 
   /** The kill switch. STOP is terminal in the shared state owner. */
-  halt(_reason = 'stopped with Esc'): boolean {
+  halt(_reason = 'stopped by you'): boolean {
     if (this.apply({ type: 'STOP' })) {
       this.resolveWaiters()
       return true

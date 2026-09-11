@@ -39,6 +39,40 @@ export interface GenerationMetrics {
   completionTokens?: number
 }
 
+/**
+ * Format the elapsed time for an assistant response.
+ *
+ * A synced turn's explicit duration is authoritative. Local generations currently carry the same
+ * fact as total seconds in their measured metrics, so that value is the fallback until persistence
+ * gives every turn one representation.
+ */
+export function formatGenerationDuration(input: {
+  generationTimeMs?: number
+  totalSeconds?: number
+}): string | undefined {
+  const explicitDuration =
+    typeof input.generationTimeMs === 'number' &&
+    Number.isFinite(input.generationTimeMs) &&
+    input.generationTimeMs >= 0
+      ? input.generationTimeMs
+      : undefined
+  const fallbackDuration =
+    typeof input.totalSeconds === 'number' &&
+    Number.isFinite(input.totalSeconds) &&
+    input.totalSeconds >= 0
+      ? input.totalSeconds * 1000
+      : undefined
+  const durationMs = explicitDuration ?? fallbackDuration
+  if (durationMs === undefined) return undefined
+  if (durationMs < 1000) return `${Math.round(durationMs)}ms`
+
+  const seconds = durationMs / 1000
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${Math.floor(seconds % 60)}s`
+}
+
 function positive(value: number | undefined): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined
 }
@@ -79,13 +113,13 @@ export function generationMetrics(input: {
   return {
     ...(timeToFirstTokenSeconds === undefined ? {} : { timeToFirstTokenSeconds }),
     ...(totalSeconds === undefined ? {} : { totalSeconds }),
-    ...(serverDecodeRate ?? estimatedDecodeRate
+    ...((serverDecodeRate ?? estimatedDecodeRate)
       ? { decodeTokensPerSecond: serverDecodeRate ?? estimatedDecodeRate }
       : {}),
     ...(positive(timings?.prompt_per_second) === undefined
       ? {}
       : { prefillTokensPerSecond: positive(timings?.prompt_per_second) }),
-    ...(positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n)
+    ...((positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n))
       ? { promptTokens: positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n) }
       : {}),
     ...(completionTokens === undefined ? {} : { completionTokens })

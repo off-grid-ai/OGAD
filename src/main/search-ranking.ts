@@ -110,6 +110,12 @@ export interface RawHit {
   ts: number
 }
 
+/** Absolute half-open interval supplied by Shared search policy. */
+export interface SearchTimeRange {
+  startMs: number
+  endMs: number
+}
+
 const RRF_K = 60
 /** Reciprocal-rank-fusion weight for a 0-based rank. */
 export function rrf(rank: number): number {
@@ -165,6 +171,7 @@ export function rankResults(
     kinds?: SearchKind[]
     excludeChatId?: string
     sort?: SearchSort
+    timeRange?: SearchTimeRange
   }
 ): SearchResult[] {
   const sourceSet = opts.sources?.length ? new Set(opts.sources.map((s) => s.toLowerCase())) : null
@@ -172,6 +179,13 @@ export function rankResults(
   let ordered = results
   if (sourceSet) ordered = ordered.filter((r) => sourceSet.has((r.surface || '').toLowerCase()))
   if (kindSet) ordered = ordered.filter((r) => kindSet.has(r.kind))
+  if (opts.timeRange) {
+    const { startMs, endMs } = opts.timeRange
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      throw new Error('Invalid search time range')
+    }
+    ordered = ordered.filter((result) => result.ts >= startMs && result.ts < endMs)
+  }
   // Don't let an answer cite the very conversation it's being asked in.
   if (opts.excludeChatId) ordered = ordered.filter((r) => r.key !== `chat:${opts.excludeChatId}`)
   const sort = opts.sort ?? 'relevance'

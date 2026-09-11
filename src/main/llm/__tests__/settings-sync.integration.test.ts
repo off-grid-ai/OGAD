@@ -44,13 +44,13 @@ describe('LLM settings sync contract', () => {
         entity: 'model_setting',
         entityId: 'temperature',
         kind: 'put',
-        fields: { value: 0.35 }
+        fields: { value: 0.35, version: 1 }
       },
       {
         entity: 'model_setting',
         entityId: 'topP',
         kind: 'put',
-        fields: { value: 0.8 }
+        fields: { value: 0.8, version: 1 }
       }
     ])
     expect(
@@ -86,7 +86,7 @@ describe('LLM settings sync contract', () => {
         entity: 'model_setting',
         entityId: 'maxToolCalls',
         kind: 'put',
-        fields: { value: 100 }
+        fields: { value: 100, version: 1 }
       }
     ])
   })

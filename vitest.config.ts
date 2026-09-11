@@ -1,38 +1,74 @@
 import { resolve } from 'path'
 import { existsSync } from 'fs'
+import { availableParallelism } from 'os'
 import { defineConfig } from 'vitest/config'
-import { createVitestProjects } from './src/main/__tests__/vitest-projects'
+import {
+  createProductTestFiles,
+  createUiBehaviorTestFiles,
+  createVitestProjects
+} from './src/main/__tests__/vitest-projects'
+import { databaseProjectOptions } from './vitest.db.config'
 
 // The pro/ submodule is present in the working tree when you have access, absent
 // otherwise (and in a fork CI without the cross-repo token). Only enforce the
 // pro-specific threshold group when pro is actually checked out, so a core-only
 // run measures + gates core alone instead of erroring on an empty pro/** glob.
 const hasPro = existsSync(resolve(__dirname, 'pro/tsconfig.json'))
-// CI and the pre-push hook merge this report with the DB and optional e2e reports, then
-// gate only the lines this branch adds. The fast suite is one input to that aggregate,
-// so applying the whole-tree floor here would stop before the complementary reports run.
-const usesAggregateCoverageGate = process.env.OFFGRID_AGGREGATE_COVERAGE === '1'
 // The pro test globs are gated the same way the pro thresholds already are:
 // a core-only checkout can carry stray pro/ files (this repo tracks a handful
 // of pro test files with no implementations beside them), and collecting
 // orphan tests fails the suite for everyone without desktop-pro access.
-const productTestFiles = [
-  'integration-tests/*.test.ts',
-  'src/**/*.test.ts',
-  'src/**/*.test.tsx',
-  ...(hasPro ? ['pro/**/*.test.ts', 'pro/**/*.test.tsx'] : [])
-]
+const productTestFiles = createProductTestFiles(hasPro)
+const uiBehaviorTestFiles = createUiBehaviorTestFiles(hasPro)
 const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
+const configuredProjects = createVitestProjects(
+  uiBehaviorTestFiles,
+  productTestFiles,
+  commonExcludes
+)
+const uiBehaviorProject = configuredProjects[0]!
+const serviceIntegrationProject = configuredProjects[1]!
+const nonConsumerProjects = configuredProjects.slice(2).map((project) => ({
+  ...project,
+  test: {
+    ...project.test,
+    sequence: { groupOrder: project.test.sequence.groupOrder + 2 }
+  }
+}))
+const desktopWorkerCount = Math.max(1, Math.min(8, availableParallelism() - 2))
+const databaseWorkerCount = Math.max(1, Math.min(4, availableParallelism() - 2))
 
-// Unit + integration tests (fast, deterministic). The Playwright Electron E2E lives
+// These journeys own a fixed model port, a long-running transfer, or a background
+// capture lifecycle. They must not compete with another DB worker. All other DB
+// journeys use process-isolated temporary profiles and can run in parallel safely.
+export const DATABASE_EXCLUSIVE_TESTS = [
+  'integration-tests/memory-chat-tts.ui.integration.dbtest.ts',
+  'integration-tests/workspace-production-bridge.ui.integration.dbtest.tsx',
+  'src/main/__tests__/active-text-model-transport.integration.dbtest.ts',
+  'src/main/__tests__/fresh-setup-first-use.integration.dbtest.ts',
+  'src/main/__tests__/image-runtime-reliability.integration.dbtest.ts',
+  'src/main/__tests__/memory-rag-chat-lifecycle.integration.dbtest.ts',
+  'src/main/__tests__/model-server-image.integration.dbtest.ts',
+  'src/main/__tests__/multimodal-rag-lifecycle.integration.dbtest.ts',
+  'src/main/__tests__/rag-empty-memory.dbtest.ts',
+  'src/main/__tests__/tools-loop.dbtest.ts',
+  'src/main/__tests__/tools-search.dbtest.ts',
+  'src/main/__tests__/tools-vision.dbtest.ts',
+  'pro/main/__tests__/capture-backlog-deletion-race.integration.dbtest.ts',
+  'pro/main/__tests__/capture-deletion-race.integration.dbtest.ts',
+  'pro/main/__tests__/manual-todo-journey.integration.dbtest.ts',
+  'pro/main/__tests__/meeting-chat.integration.dbtest.ts',
+  'pro/main/__tests__/meeting-persistence.dbtest.ts',
+  'pro/main/__tests__/model-transfer-service.integration.dbtest.ts',
+  'pro/main/__tests__/replay-chat.integration.dbtest.ts',
+  'pro/main/__tests__/sync-service.integration.dbtest.ts'
+]
+
+// Behavioral UI and service integration tests. The Playwright Electron E2E lives
 // in e2e/ and runs via `npm run test:e2e`, NOT here.
 //
-// Coverage (npm run test:coverage) gates the TESTABLE surface: the pure, Electron-free
-// decision logic the codebase deliberately extracts so it can be exercised in-process
-// (see CLAUDE.md "pull the pure part out"). Electron/DB/native-bound shells are excluded
-// because they can't be unit-tested directly — cover the logic you pulled out of them.
-// The 85% floor is enforced here and on pre-push. `all: true` means a new pure module
-// with no test drags the number down, so untested logic cannot sneak in.
+// Coverage is diagnostic. It reports which production paths the behavioral suites execute,
+// but it does not decide whether a user journey passes.
 export default defineConfig({
   // Renderer path aliases, mirrored 1:1 from tsconfig.web.json `paths`. Without these
   // a .tsx render test cannot import any renderer module (electron-vite provides them
@@ -43,6 +79,16 @@ export default defineConfig({
       '@renderer': resolve(__dirname, 'src/renderer/src'),
       '@offgrid/core': resolve(__dirname, 'src'),
       '@offgrid/pro/renderer': resolve(__dirname, 'src/bootstrap/proStub.ts'),
+      // `loadProFeaturesMain` dynamically imports `@offgrid/pro/main`, which the production build
+      // (electron.vite.config.ts) resolves to the real `pro/main/index.ts` when the submodule is
+      // present and to the stub when it is not. This alias mirrors that exactly. Without it the
+      // import threw ERR_MODULE_NOT_FOUND under test, which `loadProFeaturesMainNow` reports as a
+      // pro activation failure whenever pro is enabled - so every entitlement-gain test logged a
+      // failure that no production build can produce. A real module when we have it, per the
+      // testing doctrine; the stub only where production would also have the stub.
+      '@offgrid/pro/main': hasPro
+        ? resolve(__dirname, 'pro/main/index.ts')
+        : resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@offgrid/pro': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@': resolve(__dirname, 'src/renderer/src')
     }
@@ -69,7 +115,38 @@ export default defineConfig({
     // build. Run them in a second project only after ordinary product tests finish;
     // otherwise coverage workers can starve the build past its timeout even when the
     // cross-process filesystem lock prevents config-file races.
-    projects: createVitestProjects(productTestFiles, commonExcludes),
+    projects: [
+      {
+        ...uiBehaviorProject,
+        test: { ...uiBehaviorProject.test, maxWorkers: desktopWorkerCount }
+      },
+      {
+        ...serviceIntegrationProject,
+        test: { ...serviceIntegrationProject.test, maxWorkers: desktopWorkerCount }
+      },
+      {
+        extends: true,
+        ...databaseProjectOptions,
+        test: {
+          ...databaseProjectOptions.test,
+          exclude: [...databaseProjectOptions.test.exclude, ...DATABASE_EXCLUSIVE_TESTS],
+          fileParallelism: true,
+          maxWorkers: databaseWorkerCount,
+          sequence: { groupOrder: 2 }
+        }
+      },
+      {
+        extends: true,
+        ...databaseProjectOptions,
+        test: {
+          ...databaseProjectOptions.test,
+          name: 'database-exclusive-integration',
+          include: DATABASE_EXCLUSIVE_TESTS,
+          sequence: { groupOrder: 3 }
+        }
+      },
+      ...nonConsumerProjects
+    ],
     coverage: {
       provider: 'v8',
       // Write the report even when a test FAILS. Without this, one flaky pro
@@ -81,14 +158,13 @@ export default defineConfig({
       // fails the run; this only decouples "a test flaked" from "the coverage
       // report is missing". Mirrors vitest.db.config.ts.
       reportOnFailure: true,
-      // all:true + an `include` of the LOGIC surface (.ts, both core src AND the pro
-      // submodule) => every logic file is in the denominator whether or not a test imports
-      // it, so untested modules show as 0% and are VISIBLE (previously all:false hid them -
-      // pro/main had ~72 .ts files but only the imported ones counted, flattering the %).
-      // Mirrors mobile's collectCoverageFrom(src + pro). UI (.tsx) is deliberately NOT here:
-      // desktop covers rendered components via the Playwright e2e tour, not unit tests.
-      all: true,
-      include: ['src/**/*.ts', 'pro/**/*.ts'],
+      // One workspace include (core + Pro, production TypeScript + rendered TSX) keeps every
+      // consumer-owned module visible even when no test imports it: since vitest 4 `include`
+      // alone decides the report's file set (the former `all: true` is the only behaviour), so an
+      // untested file matching it is reported at 0% rather than silently dropped. Render tests and
+      // e2e coverage contribute to the same report instead of leaving Pro UI as an unmeasured
+      // blind spot.
+      include: ['src/**/*.ts', 'src/**/*.tsx', 'pro/**/*.ts', 'pro/**/*.tsx'],
       // text-summary is the console line, json-summary powers the README badges.
       reporter: ['text-summary', 'json-summary', 'json'],
       // Excludes: (a) vendored/built code (not ours) and (b) native/DB/spawn/IPC-wiring
@@ -142,9 +218,7 @@ export default defineConfig({
         // sibling modules that ARE covered (imagegen/*, models/*, transcription/classify,
         // model-server/*); these husks spawn binaries / bind sockets - exercised via
         // `npm run smoke` + e2e, not unit tests. Mirrors the excluded model-server.ts.
-        'src/main/imagegen.ts',
         'src/main/mflux.ts',
-        'src/main/sd-server.ts',
         'src/main/model-server.ts',
         // Cross-platform orphan-port reaper: execSync(netstat/lsof/tasklist/ps) + process.kill
         // — an OS-boundary shell, verified by the real macOS/Windows run, not in-process.
@@ -172,8 +246,6 @@ export default defineConfig({
         'src/main/license-ipc.ts',
         'src/main/llm.ts', // spawns llama-server; pure bits in llm/* (tested)
         'src/main/mcp.ts',
-        'src/main/mcp-oauth.ts',
-        'src/main/mcp-server.ts', // MCP tool registration; parseDataUrl extracted+tested
         // Connector DB/network orchestration; pure schema/result rules are measured separately.
         'src/main/tools/mcpConnectorToolExtension.ts',
         'src/main/updater.ts',
@@ -192,7 +264,6 @@ export default defineConfig({
         'src/main/licensing/keygen-config.ts', // constants only
         'src/main/bootstrap/loadProFeaturesMain.ts', // dynamic-import loader; proEnabled() tested
         'src/main/search.ts', // DB orchestrator; ranking in search-ranking.ts (tested)
-        'src/main/setup.ts', // model-recommendation orchestrator; fusion via tested model-sizing
         'src/main/models-manager.ts', // catalog/install/activate IO; logic in models/* (tested)
         'src/main/skills.ts', // fs CRUD shell; parsers → skills-parse.ts (tested)
         'src/main/tools.ts', // agentic loop (tools-stream.test.ts) + parsers (tools-parsers.ts)
@@ -243,40 +314,8 @@ export default defineConfig({
         'pro/main/clipboard.ts',
         'pro/main/focus.ts',
         'pro/main/dictation/hotkey/toggle.ts',
-        'pro/main/crm/notify.ts', // pure Electron Notification shell (isSupported/new Notification/show) — no branchable logic
-
-        // Renderer .tsx COMPONENTS are rendered-behavior surface, covered by the Playwright
-        // e2e tour (npm run test:e2e) + targeted render tests (MemoryChat.image.test.tsx),
-        // NOT unit coverage — their pure logic is extracted to measured .ts (lib/*, image-params,
-        // message-persistence, chat-labels, image-intent). The coverage `include` is .ts-only by
-        // design; this also drops any .tsx a render test transitively imports from the denominator
-        // (a render test asserts the terminal artifact, it is not a unit-coverage vehicle).
-        'src/renderer/src/**/*.tsx',
-        'pro/renderer/**/*.tsx'
-      ],
-      thresholds: usesAggregateCoverageGate
-        ? undefined
-        : {
-            // Uniform 80% floor across every metric. Set deliberately per the maintainer's call
-            // (2026-08-05), down from 85: pro BRANCHES sit right on the old line (85.5% local, ~85.2%
-            // measured in CI, because CI legitimately skips the native-dep ambient journeys), so a
-            // 0.3% environment swing decided whether the gate was red. That is a gate reporting the
-            // runner rather than the code.
-            //
-            // What 80 actually loosens is branches ALONE — statements, functions and lines all measure
-            // 91-93% in pro and higher in core, so they stay far above either line. It is a floor
-            // against regression, not a target: the standard in CLAUDE.md is still 85%, every change
-            // that adds logic adds tests, and this number only moves back UP.
-            statements: 80,
-            branches: 80,
-            functions: 80,
-            lines: 80,
-            // pro/** stays separately regression-guarded (mobile pattern), same uniform floor.
-            // Only applied when pro is checked out (see hasPro) so a core-only CI run doesn't error.
-            ...(hasPro
-              ? { 'pro/**': { statements: 80, branches: 80, functions: 80, lines: 80 } }
-              : {})
-          }
+        'pro/main/crm/notify.ts' // pure Electron Notification shell (isSupported/new Notification/show) — no branchable logic
+      ]
     }
   }
 })

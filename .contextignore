@@ -1,0 +1,11 @@
+# Lockfiles - generated, no semantic value
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.lock
+
+# Minified vendor bundles (mermaid/babel/react) - 6.3MB of unreadable minified JS
+resources/artifacts/**
+
+# Indexed separately as its own codebase
+pro/**

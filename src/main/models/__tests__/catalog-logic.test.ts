@@ -22,11 +22,11 @@ import {
   projectorFileName,
   visionStatus,
   projectorToHeal,
+  modalityForKind,
   type CatalogEntry,
   type LocalModelLike,
   type DownloadedModelLike
-} from '../catalog-logic'
-import { modalityForKind } from '../../active-models'
+} from '@offgrid/models'
 
 const local: LocalModelLike = {
   id: 'local:my.gguf',
@@ -99,6 +99,7 @@ describe('downloadedForCatalog', () => {
     expect(out).toEqual([
       {
         id: 'org/hf',
+        catalogEntry: false,
         name: 'HF',
         kind: 'vision',
         org: 'Hugging Face',

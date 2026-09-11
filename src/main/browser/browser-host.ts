@@ -42,15 +42,16 @@ import type {
   BrowserNavigationState,
   BrowserTaskPointer,
   BrowserTaskStatus
-} from '../../shared/browser-session'
+} from '@offgrid/automation'
 import {
-  BROWSER_REGION_PRIORITY,
+  NEW_TAB_TITLE,
+  winningBrowserRegionOwner,
   fitWebUseDesktopRegion,
   isBrowserRegionOwner,
   webUseDesktopZoomFactor,
   type BrowserRegionOwner
-} from '../../shared/browser-session'
-import { encodeTaskPhase } from '../../shared/task-execution-plan'
+} from '@offgrid/automation'
+import { encodeTaskPhase } from '@offgrid/automation'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { retryPlanningGoal, TASK_RETRY_TRACE } from '../tasks/task-retry'
 import { runBrowserVisualTask, withActiveBrowserVision } from './browser-visual-task'
@@ -60,6 +61,9 @@ import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
 import { automationTaskReadStatus } from '@offgrid/automation'
+import { explicitBrowserAddress, normalizeBrowserAddress } from './browser-address'
+
+export { explicitBrowserAddress, normalizeBrowserAddress } from './browser-address'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -77,41 +81,6 @@ interface Rect {
 }
 
 type BrowserTaskState = BrowserTaskPointer & { sessionId: string }
-
-/** Convert what the user enters in the address field to a safe web URL. A host
- *  gets HTTPS; other text becomes a search. The browser rail never accepts
- *  file:, javascript:, or app protocols from this surface. */
-export function normalizeBrowserAddress(input: string): string | null {
-  const value = input.trim()
-  if (!value) {
-    return null
-  }
-  if (/^https?:\/\//i.test(value)) {
-    try {
-      const parsed = new URL(value)
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null
-    } catch {
-      return null
-    }
-  }
-  if (!/\s/.test(value) && value.includes('.')) {
-    try {
-      return new URL(`https://${value}`).toString()
-    } catch {
-      return null
-    }
-  }
-  return `https://www.google.com/search?q=${encodeURIComponent(value)}`
-}
-
-/** Use an address that the user wrote explicitly. This removes a full visual
- * model round trip for simple "open example.com" tasks. */
-export function explicitBrowserAddress(goal: string): string | null {
-  const match = goal.match(
-    /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z]{2,}(?:\/[^\s,;]*)?/i
-  )
-  return match ? normalizeBrowserAddress(match[0].replace(/[.)!?]+$/, '')) : null
-}
 
 /** Fail-closed parse of the region the renderer reports. A missing/garbage value
  *  (or a zero-size rect) means "hide" - null. */
@@ -149,7 +118,7 @@ function attachCdp(view: WebContentsView): CdpTransport {
 class BrowserHost implements BrowserRailHost {
   private readonly sessions = new BrowserSessionStore<WebContentsView>()
   private readonly history = new BrowserHistoryStore(getDB())
-  private readonly runOwners = new BrowserJourneyRunOwners()
+  private readonly runOwners = new BrowserJourneyRunOwners<VisionGuard>()
   private readonly taskPointers = new Map<string, BrowserPointerEvent>()
   private region: Rect | null = null
   /** Latest rect per hosting surface. The painted region is the highest-priority entry present. */
@@ -202,7 +171,7 @@ class BrowserHost implements BrowserRailHost {
     const navigationHistory = contents.navigationHistory
     return {
       url: contents.getURL(),
-      title: contents.getTitle() || 'New tab',
+      title: contents.getTitle() || NEW_TAB_TITLE,
       canGoBack: navigationHistory.canGoBack(),
       canGoForward: navigationHistory.canGoForward(),
       isLoading: contents.isLoading()
@@ -352,12 +321,8 @@ class BrowserHost implements BrowserRailHost {
   }
 
   private winningRegion(): Rect | null {
-    let winner: { rect: Rect; priority: number } | null = null
-    for (const [owner, rect] of this.regions) {
-      const priority = BROWSER_REGION_PRIORITY[owner]
-      if (!winner || priority > winner.priority) winner = { rect, priority }
-    }
-    return winner?.rect ?? null
+    const winner = winningBrowserRegionOwner(this.regions.keys())
+    return winner ? (this.regions.get(winner) ?? null) : null
   }
 
   private createSession(input: {
@@ -448,19 +413,27 @@ class BrowserHost implements BrowserRailHost {
     return child
   }
 
-  newTab(): { sessionId: string } {
+  /** A manual tab belongs to the chat that opened it (journeyId), so the docked
+   * pane scopes it to that chat and it does not leak into other conversations.
+   * Tabs opened outside a chat (the Tasks route) stay unbound. */
+  newTab(journeyId?: string): { sessionId: string } {
     const sessionId = randomUUID()
-    const record = this.createSession({ sessionId, historyId: sessionId, kind: 'manual' })
+    const record = this.createSession({
+      sessionId,
+      historyId: sessionId,
+      kind: 'manual',
+      ...(journeyId ? { journeyId } : {})
+    })
     return { sessionId: record.sessionId }
   }
 
   /** Open a Chat link as a normal manual page. This is deliberately separate
    * from runTask: reading a source must never start Web Use automation. */
-  async openUrl(url: string): Promise<{ sessionId: string } | null> {
+  async openUrl(url: string, journeyId?: string): Promise<{ sessionId: string } | null> {
     if (!/^https?:\/\//i.test(url)) return null
     const target = normalizeBrowserAddress(url)
     if (!target) return null
-    const opened = this.newTab()
+    const opened = this.newTab(journeyId)
     await this.navigate(target, opened.sessionId)
     return opened
   }
@@ -1041,9 +1014,13 @@ export function registerBrowserViewIpc(): void {
     if (!isBrowserRegionOwner(owner)) return
     browserHost().setRegion(owner, parseRect(raw))
   })
-  ipcMain.handle('browser:new-tab', () => browserHost().newTab())
-  ipcMain.handle('browser:open-url', (_event, url: unknown) =>
-    typeof url === 'string' ? browserHost().openUrl(url) : null
+  ipcMain.handle('browser:new-tab', (_event, journeyId: unknown) =>
+    browserHost().newTab(typeof journeyId === 'string' ? journeyId : undefined)
+  )
+  ipcMain.handle('browser:open-url', (_event, url: unknown, journeyId: unknown) =>
+    typeof url === 'string'
+      ? browserHost().openUrl(url, typeof journeyId === 'string' ? journeyId : undefined)
+      : null
   )
   ipcMain.handle('browser:get-sessions', () => browserHost().getSessions())
   ipcMain.handle('browser:activate-session', (_event, sessionId: unknown) =>

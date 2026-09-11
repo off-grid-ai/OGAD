@@ -1,7 +1,7 @@
 import type { WebContentsView } from 'electron'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { appendTaskStepDetail, getTaskExecutionDevice } from '../tasks/task-history'
-import type { ComputerUseStepDetail } from '../tasks/task-step-details'
+import type { ComputerUseStepDetail } from '@offgrid/automation'
 import type { BrowserDriver } from './browser-driver'
 import type { BrowserSemanticObservation } from './browser-playwright-task-contract'
 import { createBrowserVisionScreen } from './browser-vision-screen'

@@ -32,8 +32,8 @@ import { currentPlatform, isMac } from './lib/device'
 import { NotificationProvider } from './hooks/NotificationProvider'
 import { useNotifications } from './hooks/useNotifications'
 import { ToastProvider } from './hooks/ToastProvider'
-import { ReprocessingProvider, useReprocessing } from './hooks/useReprocessing'
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
+import { ReprocessingProvider } from './hooks/useReprocessing'
+import { createElement, useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { GridBackdrop } from './components/ui/grid-backdrop'
 import { StarfieldBackdrop } from './components/ui/starfield-backdrop'
 import { Sidebar, SidebarBody } from './components/ui/sidebar'
@@ -50,8 +50,9 @@ import {
   IconLock,
   IconLoader2,
   IconArrowLeft,
+  IconPin,
+  IconPinnedOff,
   IconArrowRight,
-  IconActivityHeartbeat,
   IconDeviceMobile,
   IconListCheck,
   IconExternalLink,
@@ -67,6 +68,9 @@ import { navigateSearchHit } from './lib/search-navigation'
 import { internalTabPaletteScreens } from './lib/paletteScreens'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
+import { StartupNotice } from './components/StartupNotice'
+import { WorkspaceContentMigrationNotice } from './components/WorkspaceContentMigrationNotice'
+import { ModelStatusDot, ReprocessingBanner } from './components/AppStatusIndicators'
 import { CHAT_VIEW, setCurrentView } from './lib/current-view'
 import {
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
@@ -127,56 +131,12 @@ interface NavigationState {
   selectedProjectId: string | null
 }
 
-function ReprocessingBanner() {
-  const { reprocessing, progress } = useReprocessing()
-  if (!reprocessing) return null
-
-  const pct =
-    progress && progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0
-
-  return (
-    <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: 'auto', opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="bg-neutral-900/90 backdrop-blur-sm border-b border-neutral-800 px-4 py-2 flex items-center gap-3"
-    >
-      <motion.div
-        className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full shrink-0"
-        animate={{ rotate: 360 }}
-        transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-      />
-      <span className="text-sm text-neutral-400 flex-1 min-w-0 truncate">
-        {progress?.phase === 'cleared'
-          ? 'Data cleared. Rebuilding memories and entities...'
-          : progress
-            ? `Reprocessing session ${progress.processed} of ${progress.total}...`
-            : 'Reprocessing sessions...'}
-      </span>
-      {progress && progress.total > 0 && (
-        <div className="w-24 h-1.5 bg-neutral-800 rounded-full overflow-hidden shrink-0">
-          <motion.div
-            className="h-full bg-neutral-500 rounded-full"
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-      )}
-      {progress && progress.total > 0 && (
-        <span className="text-xs text-neutral-600 shrink-0">{pct}%</span>
-      )}
-    </motion.div>
-  )
+interface BrowserRoute {
+  viewMode: ViewMode
+  subroute: string | null
+  settingsSection: string | null
 }
 
-// One rule for the look of EVERY sidebar row - nav items, the model-status row, the mobile-app
-// link. The Tailwind palette is remapped onto the theme-aware --og-* tokens in assets/main.css,
-// so these classes already flip with data-theme and no `dark:` variant belongs here: `dark:` is
-// Tailwind's own prefers-color-scheme media query, a SECOND source of truth for the theme that
-// disagrees with data-theme whenever the app theme and the OS theme differ.
-// The tell that made this visible: neutral-900 is a SURFACE token here (#f5f5f5 in light), not a
-// text token, so `hover:text-neutral-900` painted the label near-white on a near-white row.
 const navRowClass = (expanded: boolean, active = false): string =>
   cn(
     'group/nav relative flex items-center gap-3 rounded-lg py-2 text-sm transition-colors',
@@ -186,95 +146,87 @@ const navRowClass = (expanded: boolean, active = false): string =>
       : 'text-neutral-400 hover:bg-neutral-500/10 hover:text-white'
   )
 
+type TaskSlots = [ReturnType<typeof getSlot>, ReturnType<typeof getSlot>]
+
+function taskSlotProjection(isPro: boolean, ready: boolean): TaskSlots {
+  if (!isPro || !ready) return [undefined, undefined]
+  return [getSlot(SLOTS.taskWorkspace), getSlot(SLOTS.taskFloatingView)]
+}
+
+const VIEW_BY_PATH: Readonly<Record<string, ViewMode>> = {
+  '/': 'day',
+  '/explore': 'explore',
+  '/day': 'day',
+  '/replay': 'replay',
+  '/reflect': 'reflect',
+  '/actions': 'actions',
+  '/connectors': 'connectors',
+  '/meetings': 'meetings',
+  '/chat': CHAT_VIEW,
+  '/chats': 'chats',
+  '/memories': 'memories',
+  '/entities': 'entities',
+  '/models': 'models',
+  '/gateway': 'gateway',
+  '/projects': 'projects',
+  '/notifications': 'notifications',
+  '/search': 'search',
+  '/settings': 'settings',
+  '/voice': 'voice',
+  '/devices': 'devices'
+}
+
+function browserRoute(path: string, fallback: ViewMode): BrowserRoute {
+  const internalTab = internalTabLocation(path)
+  if (internalTab) {
+    return {
+      viewMode: internalTab.view,
+      subroute: internalTab.subroute,
+      settingsSection: null
+    }
+  }
+
+  if (path.startsWith('/settings/')) {
+    let settingsSection: string | null = null
+    try {
+      settingsSection = decodeURIComponent(path.slice('/settings/'.length)) || null
+    } catch {
+      settingsSection = null
+    }
+    return { viewMode: 'settings', subroute: null, settingsSection }
+  }
+
+  return {
+    viewMode: VIEW_BY_PATH[path] ?? fallback,
+    subroute: null,
+    settingsSection: null
+  }
+}
+
+// One rule for the look of EVERY sidebar row - nav items, the model-status row, the mobile-app
+// link. The Tailwind palette is remapped onto the theme-aware --og-* tokens in assets/main.css,
+// so these classes already flip with data-theme and no `dark:` variant belongs here: `dark:` is
+// Tailwind's own prefers-color-scheme media query, a SECOND source of truth for the theme that
+// disagrees with data-theme whenever the app theme and the OS theme differ.
+// The tell that made this visible: neutral-900 is a SURFACE token here (#f5f5f5 in light), not a
+// text token, so `hover:text-neutral-900` painted the label near-white on a near-white row.
 // Model-server health dot for the sidebar. Uses the same authoritative chat probe
 // as the full System Health panel, through a narrow IPC projection that does not
 // re-check permissions, the gateway, image generation, and native helpers every
 // five seconds. Green = running, amber = starting, red = stopped.
-type ChatHealth = 'ready' | 'starting' | 'down' | null
-function ModelStatusDot({
-  open,
-  onClick
+function ProViewRoute({
+  viewMode,
+  context
 }: {
-  open: boolean
-  onClick: () => void
+  viewMode: ViewMode
+  context: ProViewContext
 }): React.ReactElement {
-  const [status, setStatus] = useState<ChatHealth>(null)
-  useEffect(() => {
-    let live = true
-    let refreshInFlight: Promise<void> | null = null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const api = (window as any).api
-    const applyHealth = (chat: { status?: string } | null | undefined): void => {
-      const next: ChatHealth =
-        chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down'
-      if (live) setStatus(next)
-    }
-    const refresh = (): void => {
-      if (refreshInFlight !== null) return
-      refreshInFlight = Promise.resolve(api?.chatHealth?.())
-        .then(applyHealth)
-        .catch(() => {
-          if (live) setStatus('down')
-        })
-        .finally(() => {
-          refreshInFlight = null
-        })
-    }
-    const refreshWhenVisible = (): void => {
-      if (document.visibilityState === 'visible') refresh()
-    }
-    const offChanged = api?.onChatHealthChanged?.(applyHealth)
-    refresh()
-    window.addEventListener('focus', refreshWhenVisible)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
-    const id = setInterval(refreshWhenVisible, 60_000)
-    return () => {
-      live = false
-      clearInterval(id)
-      window.removeEventListener('focus', refreshWhenVisible)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-      try {
-        offChanged?.()
-      } catch {
-        /* preload subscription already closed */
-      }
-    }
-  }, [])
-  const color =
-    status == null
-      ? 'text-neutral-500'
-      : status === 'ready'
-        ? 'text-green-500'
-        : status === 'starting'
-          ? 'text-amber-500'
-          : 'text-red-500'
-  const text =
-    status == null
-      ? 'Checking…'
-      : status === 'ready'
-        ? 'Model running'
-        : status === 'starting'
-          ? 'Model starting'
-          : 'Model stopped'
-  const label =
-    status === 'down'
-      ? 'Model server stopped. Open Setup and health.'
-      : `Model server: ${text.toLowerCase()}. Open Setup and health.`
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className={navRowClass(open)}
-    >
-      <IconActivityHeartbeat className={cn('h-5 w-5 shrink-0', color)} />
-      {open && <span className="flex-1 text-left text-xs">{text}</span>}
-    </button>
+    <>{renderProView(viewMode, context) ?? <UpgradeScreen feature={getProFeature(viewMode)} />}</>
   )
 }
 
-function AppContent() {
+function AppContent(): React.ReactElement {
   const { addNotification, unreadCount } = useNotifications()
 
   // Main owns entitlement truth. The preload value seeds this renderer, then
@@ -283,10 +235,9 @@ function AppContent() {
   // Re-render once pro renderer features have activated (registers the view-router).
   const [proReady, setProReady] = useState(false)
   const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
-  const TaskWorkspace = isPro && proReady ? getSlot(SLOTS.taskWorkspace) : undefined
+  const [TaskWorkspace, TaskFloatingView] = taskSlotProjection(isPro, proReady)
   // Rendered at the app root, NOT inside the route switch: a running task follows the user across
   // navigation, so a route-scoped mount would unmount it exactly when it is wanted.
-  const TaskFloatingView = isPro && proReady ? getSlot(SLOTS.taskFloatingView) : undefined
   const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
     let mounted = true
@@ -303,7 +254,7 @@ function AppContent() {
 
   useEffect(() => {
     if (!proReady || !isPro) {
-      setExternalUnreadCount(0)
+      void Promise.resolve().then(() => setExternalUnreadCount(0))
       return
     }
     return callHook<ReturnType<NotificationExternalUnreadSubscriber>>(
@@ -322,10 +273,15 @@ function AppContent() {
 
   // Free users land on Models (download a model first, with the sidebar to
   // explore); Mac Pro users land on Day. Never land on a locked or unavailable tab.
-  const [viewMode, commitViewMode] = useState<ViewMode>(isPro && isMac() ? 'day' : 'models')
-  const [settingsSection, setSettingsSection] = useState<string | null>(null)
+  const initialRoute = useRef(
+    browserRoute(window.location.pathname, isPro && isMac() ? 'day' : 'models')
+  ).current
+  const [viewMode, commitViewMode] = useState<ViewMode>(initialRoute.viewMode)
+  const [settingsSection, setSettingsSection] = useState<string | null>(
+    initialRoute.settingsSection
+  )
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0)
-  const [navigationSubroute, setNavigationSubroute] = useState<string | null>(null)
+  const [navigationSubroute, setNavigationSubroute] = useState<string | null>(initialRoute.subroute)
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false)
   const [modelSettingsTab, setModelSettingsTab] = useState<ModelSettingsPanelTab>('model')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
@@ -363,6 +319,7 @@ function AppContent() {
     presetId?: string
     draftPrompt?: string
   } | null>(null)
+  const [godTwinWakeRequest, setGodTwinWakeRequest] = useState(0)
   // Navigation is unconditional. Leaving a chat with a task running used to prompt, because the
   // live view was lost on the way out; a running task now follows you in a floating card
   // (tasks.floatingView), so there is nothing left to warn about.
@@ -371,12 +328,25 @@ function AppContent() {
     prepare?.()
     commitViewMode(destination)
   }, [])
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const rec = useMeetingRecorder()
+  const [sidebarHovered, setSidebarHovered] = useState(false)
+  // Pinned keeps the rail open; unpinned returns it to open-on-hover. A per-machine preference.
+  const [sidebarPinned, setSidebarPinned] = useState(() => readSidebarPinned())
+  const sidebarOpen = sidebarPinned || sidebarHovered
+  const setSidebarOpen = setSidebarHovered
+  const toggleSidebarPinned = (): void => {
+    setSidebarPinned((pinned) => {
+      writeSidebarPinned(!pinned)
+      return !pinned
+    })
+  }
+  const rec = useMeetingRecorder(isPro && proReady && proActivation === 'full')
 
-  const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
-    if (detailOpen) setSidebarOpen(false)
-  }, [])
+  const setTaskDetailSidebarMode = useCallback(
+    (detailOpen: boolean): void => {
+      if (detailOpen) setSidebarOpen(false)
+    },
+    [setSidebarOpen]
+  )
 
   // The meeting recording lifecycle (detect → record → warn → stop → finalize) is
   // owned by the main-process MeetingController. This view just reflects rec.* and
@@ -385,9 +355,11 @@ function AppContent() {
   // Tell the capture layer which screen is showing, so self-capture can skip the
   // memory-mirror views (Day/Replay/Entities/…) and avoid looping the graph.
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window.api as any)?.reportSelfView?.(viewMode)
-  }, [viewMode])
+    if (!isPro || !proReady || proActivation !== 'full') return
+    void window.api.reportSelfView(viewMode).catch((error: unknown) => {
+      console.error('[capture] Self-view report failed', error)
+    })
+  }, [viewMode, isPro, proReady, proActivation])
 
   // Navigation history stacks (back and forward)
   const navigationHistory = useRef<NavigationState[]>([])
@@ -441,68 +413,43 @@ function AppContent() {
     const license = window.api.license
     if (!license || typeof license.onChanged !== 'function') return
     let active = true
+    let version = 0
     const applyStatus = (info: ProLicenseInfo): void => {
-      if (!active || !shouldRemovePaidRendererAccess(info)) return
-      removePaidRendererAccess()
+      const requestVersion = ++version
+      if (!active) return
+      if (shouldRemovePaidRendererAccess(info)) {
+        removePaidRendererAccess()
+        return
+      }
+      if (!info.isPro) return
+      setIsPro(true)
+      setProReady(false)
+      void loadProFeaturesRenderer()
+        .then((activation) => {
+          if (!active || requestVersion !== version) return
+          setProActivation(activation)
+          setProReady(true)
+        })
+        .catch((error: unknown) => {
+          if (!active || requestVersion !== version) return
+          clearProFeaturesRenderer()
+          setProActivation('none')
+          setProReady(true)
+          console.error('[pro] renderer entitlement restoration failed', error)
+        })
     }
     const off = license.onChanged(applyStatus)
     void license
       .status()
       .then(applyStatus)
-      .catch(() => {})
+      .catch((error: unknown) => {
+        console.error('[license] Failed to read current status', error)
+      })
     return () => {
       active = false
       off()
     }
-  }, [removePaidRendererAccess])
-
-  // Handle browser URL changes
-  useEffect(() => {
-    const path = window.location.pathname
-    const viewMap: Record<string, ViewMode> = {
-      '/': 'day',
-      '/explore': 'explore',
-      '/day': 'day',
-      '/replay': 'replay',
-      '/reflect': 'reflect',
-      '/actions': 'actions',
-      '/connectors': 'connectors',
-      '/meetings': 'meetings',
-      '/chat': CHAT_VIEW,
-      '/chats': 'chats',
-      '/memories': 'memories',
-      '/entities': 'entities',
-      '/models': 'models',
-      '/gateway': 'gateway',
-      '/projects': 'projects',
-      '/notifications': 'notifications',
-      '/search': 'search',
-      '/settings': 'settings',
-      '/voice': 'voice',
-      '/devices': 'devices'
-    }
-
-    const internalTab = internalTabLocation(path)
-    if (internalTab) {
-      setNavigationSubroute(internalTab.subroute)
-      setSettingsSection(null)
-      commitViewMode(internalTab.view)
-    } else if (path.startsWith('/settings/')) {
-      let section: string | null = null
-      try {
-        section = decodeURIComponent(path.slice('/settings/'.length)) || null
-      } catch {
-        section = null
-      }
-      setSettingsSection(section)
-      setNavigationSubroute(null)
-      commitViewMode('settings')
-    } else if (viewMap[path]) {
-      setNavigationSubroute(null)
-      setSettingsSection(null)
-      commitViewMode(viewMap[path])
-    }
-  }, [])
+  }, [removePaidRendererAccess, setIsPro])
 
   // Programmatic navigation from outside the shell (e.g. the first-run gate's
   // "pick a model yourself" CTA) — switch the active view without a remount.
@@ -537,7 +484,7 @@ function AppContent() {
     }
     window.addEventListener('og:navigate', onNav)
     // Main-driven navigation (tray → a screen).
-    const offNav = window.api.onNavigate?.((v: string) => {
+    const offNav = window.api.onNavigate((v: string) => {
       navigateTo(v as ViewMode, () => {
         setNavigationSubroute(null)
         setSettingsSection(null)
@@ -545,8 +492,15 @@ function AppContent() {
     })
     return () => {
       window.removeEventListener('og:navigate', onNav)
-      offNav?.()
+      offNav()
     }
+  }, [navigateTo])
+
+  useEffect(() => {
+    return window.api.godTwin?.onWake(() => {
+      navigateTo('memory-chat')
+      setGodTwinWakeRequest((request) => request + 1)
+    })
   }, [navigateTo])
 
   useEffect(() => {
@@ -669,7 +623,9 @@ function AppContent() {
       .then((v) => {
         if (v) setUpdateReady(v)
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        console.error('[updates] Failed to read the staged update version', error)
+      })
     unsubscribers.push(
       window.api.onUpdateDownloaded((data) => {
         setUpdateReady(data.version)
@@ -831,15 +787,17 @@ function AppContent() {
     const prev = prevViewRef.current
     prevViewRef.current = viewMode
     if (prev === viewMode) return
-    if (prev === 'replay' && viewMode !== 'replay') setReplayTarget(null)
-    if (prev === 'meetings' && viewMode !== 'meetings') setMeetingTarget(null)
-    if (prev === 'day' && viewMode !== 'day') setCalendarEventTarget(null)
-    if (prev === 'actions' && viewMode !== 'actions') {
-      setActionTarget(null)
-      setApprovalTarget(null)
-      setActionsMode(null)
-      setActionsEntity(null)
-    }
+    void Promise.resolve().then(() => {
+      if (prev === 'replay' && viewMode !== 'replay') setReplayTarget(null)
+      if (prev === 'meetings' && viewMode !== 'meetings') setMeetingTarget(null)
+      if (prev === 'day' && viewMode !== 'day') setCalendarEventTarget(null)
+      if (prev === 'actions' && viewMode !== 'actions') {
+        setActionTarget(null)
+        setApprovalTarget(null)
+        setActionsMode(null)
+        setActionsEntity(null)
+      }
+    })
   }, [viewMode])
 
   // Open a project chat in the main Chat screen (existing convo or new-in-project).
@@ -875,7 +833,7 @@ function AppContent() {
 
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key === '[') {
         e.preventDefault()
         if (modelSettingsOpen) setModelSettingsOpen(false)
@@ -919,11 +877,6 @@ function AppContent() {
       label: 'Discover',
       icon: <IconSparkles className="h-5 w-5 shrink-0" />,
       items: navItems(
-        {
-          label: 'Explore',
-          icon: <IconCompass className="h-5 w-5 shrink-0" />,
-          view: 'explore' as ViewMode
-        },
         proItem('search'),
         proItem('day'),
         proItem('replay'),
@@ -946,6 +899,11 @@ function AppContent() {
           label: 'Chat',
           icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
           view: 'memory-chat' as ViewMode
+        },
+        {
+          label: 'Explore',
+          icon: <IconCompass className="h-5 w-5 shrink-0" />,
+          view: 'explore' as ViewMode
         },
         {
           label: 'Tasks',
@@ -1010,14 +968,15 @@ function AppContent() {
     locked?: boolean
   }): React.ReactElement => {
     const active = viewMode === item.view
+    const accessibleLabel = item.locked ? `${item.label} Pro` : item.label
     const notificationCount = item.view === 'notifications' ? unreadCount + externalUnreadCount : 0
     const notificationCountLabel = notificationCount > 9 ? '9+' : String(notificationCount)
     return (
       <button
         key={item.view}
         onClick={() => goToView(item.view)}
-        aria-label={item.label}
-        title={!sidebarOpen ? item.label : undefined}
+        aria-label={accessibleLabel}
+        title={!sidebarOpen ? accessibleLabel : undefined}
         className={navRowClass(sidebarOpen, active)}
       >
         {active && (
@@ -1037,391 +996,510 @@ function AppContent() {
           </span>
         )}
         {sidebarOpen && item.locked && (
-          <IconLock className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" title="Pro" />
+          <IconLock
+            aria-hidden="true"
+            className="h-3.5 w-3.5 shrink-0 text-neutral-400/60"
+            title="Pro"
+          />
         )}
       </button>
     )
   }
 
   return (
-    <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
-      <CommandPalette
-        onOpenHit={handleOpenHit}
-        onSeeAll={openSearch}
-        /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
-        screens={[
-          ...[...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
-            label,
-            view,
-            locked
-          })),
-          ...internalTabPaletteScreens([...navigationItems, ...bottomNav]),
-          ...SETTINGS_DESTINATIONS
-        ]}
-        onGoTo={(view, subroute) => {
-          goToView(view as ViewMode, subroute)
-          setSidebarOpen(false)
-        }}
-      />
-      {/* Recording indicator — auto-records detected meetings; always visible. */}
-      {(rec.recording || rec.busy) && (
-        <button
-          onClick={() =>
-            rec.warningSecondsLeft > 0 ? rec.keepAlive() : rec.recording && rec.stop()
-          }
-          className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-red-500/40 bg-neutral-900/95 px-3.5 py-1.5 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur hover:border-red-500"
-        >
-          {rec.busy ? (
-            <>
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" /> Transcribing
-              meeting…
-            </>
-          ) : rec.warningSecondsLeft > 0 ? (
-            <>
-              <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
-              Stopping in {rec.warningSecondsLeft}s - click to keep, or rejoin the meeting
-            </>
-          ) : (
-            <>
-              <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-              Recording{' '}
-              {rec.platform === 'zoom'
-                ? 'Zoom'
-                : rec.platform === 'teams'
-                  ? 'Teams'
-                  : rec.platform === 'meet'
-                    ? 'Meet'
-                    : 'meeting'}{' '}
-              · {Math.floor(rec.elapsed / 60)}:{String(rec.elapsed % 60).padStart(2, '0')} · click
-              to stop
-            </>
-          )}
-        </button>
-      )}
-      {/* Update ready — a new version downloaded and is staged. The button drives
-          the install (quit + swap + relaunch); a plain quit/force-kill would leave
-          it unapplied. */}
-      {updateReady && (
-        <div className="absolute right-4 top-4 z-50 flex items-center gap-3 rounded-md border border-green-500/40 bg-neutral-900/95 px-3.5 py-2 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur">
-          <IconDownload className="h-4 w-4 text-green-500" />
-          <span>Update {updateReady} is ready</span>
+    <div className="relative flex h-screen w-full flex-col overflow-hidden bg-neutral-950">
+      {/* The shell opens before startup finishes, so it says so instead of not opening. */}
+      <StartupNotice />
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <CommandPalette
+          onOpenHit={handleOpenHit}
+          onSeeAll={openSearch}
+          /* The sidebar IS the list of screens - the palette searches that, never a second copy. */
+          screens={[
+            ...[...navigationItems, ...bottomNav].map(({ label, view, locked }) => ({
+              label,
+              view,
+              locked
+            })),
+            ...internalTabPaletteScreens([...navigationItems, ...bottomNav]),
+            ...SETTINGS_DESTINATIONS
+          ]}
+          onGoTo={(view, subroute) => {
+            goToView(view as ViewMode, subroute)
+            setSidebarOpen(false)
+          }}
+        />
+        {/* Recording indicator — auto-records detected meetings; always visible. */}
+        {(rec.recording || rec.busy) && (
           <button
-            onClick={async () => {
-              setInstalling(true)
-              try {
-                await window.api.installUpdate()
-              } catch {
-                // quitAndInstall normally never returns (the app exits). If it
-                // rejects, unlock the button so the user can retry.
-                setInstalling(false)
-                addNotification({
-                  type: 'info',
-                  title: 'Update restart failed',
-                  message: 'Try again from the update banner.'
-                })
-              }
-            }}
-            disabled={installing}
-            className="flex items-center gap-1.5 rounded-sm border border-green-500/50 bg-green-500/10 px-2.5 py-1 text-emerald-400 hover:bg-green-500/20 disabled:opacity-60"
+            onClick={() =>
+              rec.warningSecondsLeft > 0 ? rec.keepAlive() : rec.recording && rec.stop()
+            }
+            className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-red-500/40 bg-neutral-900/95 px-3.5 py-1.5 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur hover:border-red-500"
           >
-            {installing ? (
+            {rec.busy ? (
               <>
-                <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Restarting…
+                <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" /> Transcribing
+                meeting…
+              </>
+            ) : rec.warningSecondsLeft > 0 ? (
+              <>
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+                Stopping in {rec.warningSecondsLeft}s - click to keep, or rejoin the meeting
               </>
             ) : (
-              'Restart to update'
+              <>
+                <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                Recording{' '}
+                {rec.platform === 'zoom'
+                  ? 'Zoom'
+                  : rec.platform === 'teams'
+                    ? 'Teams'
+                    : rec.platform === 'meet'
+                      ? 'Meet'
+                      : 'meeting'}{' '}
+                · {Math.floor(rec.elapsed / 60)}:{String(rec.elapsed % 60).padStart(2, '0')} · click
+                to stop
+              </>
             )}
           </button>
-        </div>
-      )}
-      {/* Background — flat Off Grid AI terminal grid (theme-aware), with a dark-mode
-          starfield + periodic shooting star layered on top. */}
-      <GridBackdrop className="z-0" />
-      <StarfieldBackdrop className="z-0" />
-
-      <div className="flex h-full relative z-10">
-        {/* Aceternity Sidebar */}
-        <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
-          <SidebarBody
-            role="navigation"
-            aria-label="Primary navigation"
-            aria-expanded={sidebarOpen}
-            className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
-            onMouseEnter={() => setSidebarOpen(true)}
-            onMouseLeave={() => setSidebarOpen(false)}
-            onFocusCapture={() => setSidebarOpen(true)}
-            onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarOpen(false)
-            }}
-          >
-            <div className="flex min-h-0 flex-1 flex-col">
-              {/* The rail expands only while hovered or keyboard-focused. */}
-              <div
-                className={cn('flex items-center py-2', sidebarOpen ? 'gap-2' : 'justify-center')}
-              >
-                <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
-                {sidebarOpen ? (
-                  <span className="flex-1 text-left font-semibold text-white whitespace-pre">
-                    Off Grid AI
-                  </span>
-                ) : null}
-              </div>
-
-              {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
-              <div className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}>
-                <button
-                  onClick={navigateBack}
-                  disabled={!canGoBack}
-                  aria-label="Back"
-                  title="Back (⌘[)"
-                  className={cn(
-                    'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
-                    sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
-                  )}
-                >
-                  <IconArrowLeft className="h-4 w-4 shrink-0" />
-                  {sidebarOpen && <span className="text-xs font-medium">Back</span>}
-                </button>
-                {sidebarOpen && (
-                  <button
-                    onClick={navigateForward}
-                    disabled={!canGoForward}
-                    aria-label="Forward"
-                    title="Forward (⌘])"
-                    className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
-                  >
-                    <IconArrowRight className="h-4 w-4 shrink-0" />
-                  </button>
-                )}
-              </div>
-
-              {/* Navigation (scrolls; Settings is pinned to the bottom) */}
-              <div className="mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5">
-                {sidebarOpen && (
-                  <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
-                    Menu
-                  </div>
-                )}
-                <SidebarNavigationMenu
-                  activeView={viewMode}
-                  expanded={sidebarOpen}
-                  groups={navigationGroups}
-                  renderItem={renderNavItem}
-                />
-              </div>
-            </div>
-
-            {/* Pinned bottom */}
-            {/* neutral-800 is the surface token, theme-aware on its own - neutral-200 is the TEXT
-                token, which drew a hard black rule here in light mode. See navRowClass. */}
-            <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
-              <ModelStatusDot
-                open={sidebarOpen}
-                onClick={() => {
-                  navigateTo('settings', () => {
-                    setNavigationSubroute(null)
-                    setSettingsSection('setup')
-                    setSettingsNavigationKey((key) => key + 1)
+        )}
+        {/* Update ready — a new version downloaded and is staged. The button drives
+          the install (quit + swap + relaunch); a plain quit/force-kill would leave
+          it unapplied. */}
+        {updateReady && (
+          <div className="absolute right-4 top-4 z-50 flex items-center gap-3 rounded-md border border-green-500/40 bg-neutral-900/95 px-3.5 py-2 font-mono text-xs text-neutral-200 shadow-xl backdrop-blur">
+            <IconDownload className="h-4 w-4 text-green-500" />
+            <span>Update {updateReady} is ready</span>
+            <button
+              onClick={async () => {
+                setInstalling(true)
+                try {
+                  await window.api.installUpdate()
+                } catch {
+                  // quitAndInstall normally never returns (the app exits). If it
+                  // rejects, unlock the button so the user can retry.
+                  setInstalling(false)
+                  addNotification({
+                    type: 'info',
+                    title: 'Update restart failed',
+                    message: 'Try again from the update banner.'
                   })
-                }}
-              />
-              <NavThemeToggle expanded={sidebarOpen} />
-              {bottomNav.map(renderNavItem)}
-              {/* Cross-sell to the companion phone app — opens the /mobile page
-                  (App Store + Google Play). Mirrors mobile's link back to desktop. */}
-              <button
-                onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
-                aria-label="Mobile app"
-                title={!sidebarOpen ? 'Get the mobile app' : undefined}
-                className={navRowClass(sidebarOpen)}
-              >
-                <IconDeviceMobile className="h-5 w-5 shrink-0" />
-                {sidebarOpen && <span className="flex-1 text-left whitespace-pre">Mobile app</span>}
-                {sidebarOpen && (
-                  <IconExternalLink className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" />
-                )}
-              </button>
-            </div>
-          </SidebarBody>
-        </Sidebar>
+                }
+              }}
+              disabled={installing}
+              className="flex items-center gap-1.5 rounded-sm border border-green-500/50 bg-green-500/10 px-2.5 py-1 text-emerald-400 hover:bg-green-500/20 disabled:opacity-60"
+            >
+              {installing ? (
+                <>
+                  <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Restarting…
+                </>
+              ) : (
+                'Restart to update'
+              )}
+            </button>
+          </div>
+        )}
+        {/* Background — flat Off Grid AI terminal grid (theme-aware), with a dark-mode
+          starfield + periodic shooting star layered on top. */}
+        <GridBackdrop className="z-0" />
+        <StarfieldBackdrop className="z-0" />
 
-        <div className="min-w-0 flex-1" data-testid="main-workspace">
-          <div className="flex h-full flex-col overflow-hidden">
-            {/* Global reprocessing banner */}
-            <AnimatePresence>
-              <ReprocessingBanner />
-            </AnimatePresence>
-            {/* Content Area */}
-            <div className="flex-1 overflow-hidden">
-              <AnimatePresence mode="wait">
-                {viewMode === 'chats' && selectedSessionId ? (
-                  <motion.div
-                    key={`chat-detail-${selectedSessionId}`}
-                    initial={{ opacity: 0, filter: 'blur(10px)' }}
-                    animate={{ opacity: 1, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, filter: 'blur(5px)' }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                    className="h-full"
-                  >
-                    <ChatDetail
-                      sessionId={selectedSessionId}
-                      onBack={handleBack}
-                      onSelectEntity={(entityId) => {
-                        navigateTo('entities', () => {
-                          setSelectedEntityId(entityId)
-                          setSelectedSessionId(null)
-                        })
-                      }}
-                      onSelectMemory={(memoryId) => {
-                        navigateTo('memories', () => {
-                          setSelectedMemoryId(memoryId)
-                          setSelectedSessionId(null)
-                        })
-                      }}
-                    />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key={viewMode}
-                    initial={{ opacity: 0, filter: 'blur(10px)' }}
-                    animate={{ opacity: 1, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, filter: 'blur(5px)' }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
-                    className="p-6 h-full overflow-y-auto"
-                  >
-                    {viewMode === 'explore' ? (
-                      <ExploreScreen onRunPreset={handleRunPreset} />
-                    ) : viewMode === 'memory-chat' ? (
-                      <MemoryChat
-                        onNavigateToMemory={handleSelectMemory}
-                        onNavigateToChat={handleSelectChat}
-                        onNavigateToMeeting={(meetingId) =>
-                          handleProNavigate({ view: 'meetings', meetingId })
-                        }
-                        onNavigateToEntity={handleSelectEntity}
-                        onOpenProject={(id) => {
-                          navigateTo('projects', () => setSelectedProjectId(id))
-                        }}
-                        onSeekReplay={(ts) => {
-                          navigateTo('replay', () => setReplayTarget(ts || Date.now()))
-                        }}
-                        onOpenSkillPreset={handleOpenSkillPreset}
-                        onOpenConnectors={() => navigateTo('connectors')}
-                        openTarget={chatTarget}
-                        onTargetConsumed={() => setChatTarget(null)}
-                        onTaskDetailModeChange={setTaskDetailSidebarMode}
-                      />
-                    ) : viewMode === 'tasks' ? (
-                      TaskWorkspace ? (
-                        <TaskWorkspace standalone onDetailModeChange={setTaskDetailSidebarMode} />
+        <div className="flex h-full relative z-10">
+          {/* Aceternity Sidebar */}
+          <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
+            <SidebarBody
+              role="navigation"
+              aria-label="Primary navigation"
+              aria-expanded={sidebarOpen}
+              className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
+              onMouseEnter={() => setSidebarOpen(true)}
+              onMouseLeave={() => setSidebarOpen(false)}
+              onFocusCapture={() => setSidebarOpen(true)}
+              onBlurCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setSidebarOpen(false)
+              }}
+            >
+              <div className="flex min-h-0 flex-1 flex-col">
+                {/* The rail expands only while hovered or keyboard-focused. */}
+                <div
+                  className={cn('flex items-center py-2', sidebarOpen ? 'gap-2' : 'justify-center')}
+                >
+                  <img src={logo} alt="Off Grid AI" className="h-8 w-8 shrink-0 rounded-lg" />
+                  {sidebarOpen ? (
+                    <span className="flex-1 text-left font-semibold text-white whitespace-pre">
+                      Off Grid AI
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
+                <div
+                  className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}
+                >
+                  {sidebarOpen && (
+                    <button
+                      onClick={toggleSidebarPinned}
+                      aria-label={sidebarPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+                      aria-pressed={sidebarPinned}
+                      title={sidebarPinned ? 'Unpin: open on hover' : 'Pin: keep the sidebar open'}
+                      className={cn(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white',
+                        sidebarPinned ? 'text-green-500' : 'text-neutral-400'
+                      )}
+                    >
+                      {sidebarPinned ? (
+                        <IconPinnedOff className="h-4 w-4 shrink-0" />
                       ) : (
-                        <UpgradeScreen feature={getProFeature(viewMode)} />
-                      )
-                    ) : viewMode === 'chats' ? (
-                      <ChatList onSelectSession={setSelectedSessionId} />
-                    ) : viewMode === 'models' ? (
-                      <ModelsScreen
-                        navigationSubroute={navigationSubroute}
-                        onNavigateSubroute={setNavigationSubroute}
-                      />
-                    ) : viewMode === 'projects' ? (
-                      <ProjectsScreen
-                        onOpenChat={handleOpenProjectChat}
-                        selectedProjectId={selectedProjectId}
-                        onSelectProject={setSelectedProjectId}
-                      />
-                    ) : viewMode === 'connectors' ? (
-                      <ConnectorsScreen />
-                    ) : viewMode === 'gateway' ? (
-                      <GatewayScreen />
-                    ) : viewMode === 'settings' ? (
-                      <Settings
-                        key={settingsNavigationKey}
-                        activeSection={settingsSection}
-                        onSectionChange={setSettingsSection}
-                      />
-                    ) : !isPro ? (
-                      <UpgradeScreen feature={getProFeature(viewMode)} />
-                    ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
-                      <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
-                    ) : (
-                      // Pro tabs: render through the pro view-router when active,
-                      // otherwise show the upgrade writeup for that feature.
-                      (renderProView(viewMode, {
-                        setView: (v) => navigateTo(v as ViewMode),
-                        onNavigate: handleProNavigate,
-                        navigationSubroute,
-                        setNavigationSubroute,
-                        navigateBack,
-                        replayTarget,
-                        meetingTarget,
-                        actionTarget,
-                        approvalTarget,
-                        calendarEventTarget,
-                        actionsMode,
-                        actionsEntity,
-                        searchQuery,
-                        onSearchQueryChange: setSearchQuery,
-                        searchSources,
-                        onSearchSourcesChange: setSearchSources,
-                        searchSort,
-                        onSearchSortChange: setSearchSort,
-                        selectedMemoryId,
-                        setSelectedMemoryId,
-                        selectedEntityId,
-                        rec,
-                        onSelectEntity: handleSelectEntity,
-                        onSelectMemory: handleSelectMemory,
-                        onOpenHit: handleOpenHit,
-                        openChatOwner: handleOpenChatOwner
-                      } satisfies ProViewContext) ?? (
-                        <UpgradeScreen feature={getProFeature(viewMode)} />
-                      ))
+                        <IconPin className="h-4 w-4 shrink-0" />
+                      )}
+                    </button>
+                  )}
+                  <button
+                    onClick={navigateBack}
+                    disabled={!canGoBack}
+                    aria-label="Back"
+                    title="Back (⌘[)"
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
+                      sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
                     )}
-                  </motion.div>
-                )}
+                  >
+                    <IconArrowLeft className="h-4 w-4 shrink-0" />
+                    {sidebarOpen && <span className="text-xs font-medium">Back</span>}
+                  </button>
+                  {sidebarOpen && (
+                    <button
+                      onClick={navigateForward}
+                      disabled={!canGoForward}
+                      aria-label="Forward"
+                      title="Forward (⌘])"
+                      className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
+                    >
+                      <IconArrowRight className="h-4 w-4 shrink-0" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Navigation (scrolls; Settings is pinned to the bottom) */}
+                <div className="mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5">
+                  <SidebarNavigationMenu
+                    activeView={viewMode}
+                    expanded={sidebarOpen}
+                    groups={navigationGroups}
+                    renderItem={renderNavItem}
+                  />
+                </div>
+              </div>
+
+              {/* Pinned bottom */}
+              {/* neutral-800 is the surface token, theme-aware on its own - neutral-200 is the TEXT
+                token, which drew a hard black rule here in light mode. See navRowClass. */}
+              <div className="flex flex-col gap-1 border-t border-neutral-800 pt-2">
+                <ModelStatusDot
+                  open={sidebarOpen}
+                  onClick={() => {
+                    navigateTo('settings', () => {
+                      setNavigationSubroute(null)
+                      setSettingsSection('setup')
+                      setSettingsNavigationKey((key) => key + 1)
+                    })
+                  }}
+                />
+                <NavThemeToggle expanded={sidebarOpen} />
+                {bottomNav.map(renderNavItem)}
+                {/* Cross-sell to the companion phone app — opens the /mobile page
+                  (App Store + Google Play). Mirrors mobile's link back to desktop. */}
+                <button
+                  onClick={() => openExternal(OFF_GRID_MOBILE_URL)}
+                  aria-label="Mobile app"
+                  title={!sidebarOpen ? 'Get the mobile app' : undefined}
+                  className={navRowClass(sidebarOpen)}
+                >
+                  <IconDeviceMobile className="h-5 w-5 shrink-0" />
+                  {sidebarOpen && (
+                    <span className="flex-1 text-left whitespace-pre">Mobile app</span>
+                  )}
+                  {sidebarOpen && (
+                    <IconExternalLink className="h-3.5 w-3.5 shrink-0 text-neutral-400/60" />
+                  )}
+                </button>
+              </div>
+            </SidebarBody>
+          </Sidebar>
+
+          <div className="min-w-0 flex-1" data-testid="main-workspace">
+            <div className="flex h-full flex-col overflow-hidden">
+              {/* Global reprocessing banner */}
+              <AnimatePresence>
+                <ReprocessingBanner />
               </AnimatePresence>
+              {/* Content Area */}
+              <div className="flex-1 overflow-hidden">
+                <AnimatePresence mode="wait">
+                  {viewMode === 'chats' && selectedSessionId ? (
+                    <motion.div
+                      key={`chat-detail-${selectedSessionId}`}
+                      initial={{ opacity: 0, filter: 'blur(10px)' }}
+                      animate={{ opacity: 1, filter: 'blur(0px)' }}
+                      exit={{ opacity: 0, filter: 'blur(5px)' }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      className="h-full"
+                    >
+                      <ChatDetail
+                        sessionId={selectedSessionId}
+                        onBack={handleBack}
+                        onSelectEntity={(entityId) => {
+                          navigateTo('entities', () => {
+                            setSelectedEntityId(entityId)
+                            setSelectedSessionId(null)
+                          })
+                        }}
+                        onSelectMemory={(memoryId) => {
+                          navigateTo('memories', () => {
+                            setSelectedMemoryId(memoryId)
+                            setSelectedSessionId(null)
+                          })
+                        }}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key={viewMode}
+                      initial={{ opacity: 0, filter: 'blur(10px)' }}
+                      animate={{ opacity: 1, filter: 'blur(0px)' }}
+                      exit={{ opacity: 0, filter: 'blur(5px)' }}
+                      transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      className="p-6 h-full overflow-y-auto"
+                    >
+                      {viewMode === 'explore' ? (
+                        <ExploreScreen onRunPreset={handleRunPreset} />
+                      ) : viewMode === 'memory-chat' ? (
+                        <MemoryChat
+                          godTwinWakeRequest={godTwinWakeRequest}
+                          onNavigateToMemory={handleSelectMemory}
+                          onNavigateToChat={handleSelectChat}
+                          onNavigateToMeeting={(meetingId) =>
+                            handleProNavigate({ view: 'meetings', meetingId })
+                          }
+                          onNavigateToEntity={handleSelectEntity}
+                          onOpenProject={(id) => {
+                            navigateTo('projects', () => setSelectedProjectId(id))
+                          }}
+                          onSeekReplay={(ts) => {
+                            navigateTo('replay', () => setReplayTarget(ts || Date.now()))
+                          }}
+                          onOpenSkillPreset={handleOpenSkillPreset}
+                          onOpenConnectors={() => navigateTo('connectors')}
+                          openTarget={chatTarget}
+                          onTargetConsumed={() => setChatTarget(null)}
+                          onTaskDetailModeChange={setTaskDetailSidebarMode}
+                        />
+                      ) : viewMode === 'tasks' ? (
+                        TaskWorkspace ? (
+                          createElement(TaskWorkspace, {
+                            standalone: true,
+                            onDetailModeChange: setTaskDetailSidebarMode
+                          })
+                        ) : (
+                          <UpgradeScreen feature={getProFeature(viewMode)} />
+                        )
+                      ) : viewMode === 'chats' ? (
+                        <ChatList onSelectSession={setSelectedSessionId} />
+                      ) : viewMode === 'models' ? (
+                        <ModelsScreen
+                          navigationSubroute={navigationSubroute}
+                          onNavigateSubroute={setNavigationSubroute}
+                        />
+                      ) : viewMode === 'projects' ? (
+                        <ProjectsScreen
+                          onOpenChat={handleOpenProjectChat}
+                          selectedProjectId={selectedProjectId}
+                          onSelectProject={setSelectedProjectId}
+                        />
+                      ) : viewMode === 'connectors' ? (
+                        <ConnectorsScreen />
+                      ) : viewMode === 'gateway' ? (
+                        <GatewayScreen />
+                      ) : viewMode === 'settings' ? (
+                        <Settings
+                          key={settingsNavigationKey}
+                          activeSection={settingsSection}
+                          onSectionChange={setSettingsSection}
+                        />
+                      ) : !isPro ? (
+                        <UpgradeScreen feature={getProFeature(viewMode)} />
+                      ) : proFeatureComingSoon(viewMode, currentPlatform(), isPro) ? (
+                        <UpgradeScreen variant="coming-soon" feature={getProFeature(viewMode)} />
+                      ) : (
+                        // Pro tabs: render through the pro view-router when active,
+                        // otherwise show the upgrade writeup for that feature.
+                        <ProViewRoute
+                          viewMode={viewMode}
+                          context={
+                            {
+                              setView: (v) => navigateTo(v as ViewMode),
+                              onNavigate: handleProNavigate,
+                              navigationSubroute,
+                              setNavigationSubroute,
+                              navigateBack,
+                              replayTarget,
+                              meetingTarget,
+                              actionTarget,
+                              approvalTarget,
+                              calendarEventTarget,
+                              actionsMode,
+                              actionsEntity,
+                              searchQuery,
+                              onSearchQueryChange: setSearchQuery,
+                              searchSources,
+                              onSearchSourcesChange: setSearchSources,
+                              searchSort,
+                              onSearchSortChange: setSearchSort,
+                              selectedMemoryId,
+                              setSelectedMemoryId,
+                              selectedEntityId,
+                              rec,
+                              onSelectEntity: handleSelectEntity,
+                              onSelectMemory: handleSelectMemory,
+                              onOpenHit: handleOpenHit,
+                              openChatOwner: handleOpenChatOwner
+                            } satisfies ProViewContext
+                          }
+                        />
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           </div>
         </div>
+        <AnimatePresence>
+          {modelSettingsOpen && (
+            <SettingsPanel
+              key={modelSettingsTab}
+              initialTab={modelSettingsTab}
+              onClose={() => setModelSettingsOpen(false)}
+            />
+          )}
+        </AnimatePresence>
+        {TaskFloatingView ? createElement(TaskFloatingView) : null}
       </div>
-      <AnimatePresence>
-        {modelSettingsOpen && (
-          <SettingsPanel
-            key={modelSettingsTab}
-            initialTab={modelSettingsTab}
-            onClose={() => setModelSettingsOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-      {TaskFloatingView ? <TaskFloatingView /> : null}
     </div>
   )
 }
 
-function App() {
+const SIDEBAR_PINNED_KEY = 'sidebar_pinned'
+function readSidebarPinned(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_PINNED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+function writeSidebarPinned(pinned: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_PINNED_KEY, pinned ? 'true' : 'false')
+  } catch {
+    /* a private window forgets the choice; nothing else breaks */
+  }
+}
+
+function App(): React.ReactElement {
   // Onboarding runs FIRST — before the model/permission gate — so a new user sees
   // the intro, then goes straight to model selection (handled by PermissionGate).
-  const [onboarded, setOnboarded] = useState<boolean | null>(null)
-  useEffect(() => {
-    setOnboarded(localStorage.getItem('onboarding_completed') === 'true')
-  }, [])
+  const [onboarded, setOnboarded] = useState(
+    () => localStorage.getItem('onboarding_completed') === 'true'
+  )
+  const [setupChecked, setSetupChecked] = useState(false)
+  const [setupCheckError, setSetupCheckError] = useState<string | null>(null)
+  const [setupRetry, setSetupRetry] = useState(0)
 
-  if (onboarded === null) return null
-  if (!onboarded) return <Onboarding onComplete={() => setOnboarded(true)} />
+  useEffect(() => {
+    if (onboarded) return
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = setTimeout(() => {
+      if (disposed) return
+      disposed = true
+      if (timer) clearTimeout(timer)
+      setSetupCheckError('Checking your saved setup took too long. Retry when startup is ready.')
+    }, 30000)
+    const check = async (): Promise<void> => {
+      try {
+        const status = await window.api.checkModelStatus()
+        if (disposed) return
+        if (status.status === 'loading') {
+          timer = setTimeout(() => void check(), 2000)
+          return
+        }
+        if (status.configured) {
+          localStorage.setItem('onboarding_completed', 'true')
+          setOnboarded(true)
+        }
+        setSetupCheckError(null)
+        setSetupChecked(true)
+        clearTimeout(deadline)
+      } catch (error) {
+        if (disposed) return
+        console.error('Failed to read saved setup:', error)
+        clearTimeout(deadline)
+        setSetupCheckError('Your saved setup could not be checked.')
+      }
+    }
+    void check()
+    return () => {
+      disposed = true
+      if (timer) clearTimeout(timer)
+      clearTimeout(deadline)
+    }
+  }, [onboarded, setupRetry])
+
+  if (!onboarded && !setupChecked)
+    return (
+      <>
+        <WorkspaceContentMigrationNotice />
+        <div className="p-6 font-mono text-sm" role="status">
+          {setupCheckError ?? 'Checking your saved setup...'}
+          {setupCheckError && (
+            <button
+              className="ml-3 underline"
+              onClick={() => {
+                setSetupCheckError(null)
+                setSetupRetry((value) => value + 1)
+              }}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      </>
+    )
+
+  if (!onboarded)
+    return (
+      <>
+        <WorkspaceContentMigrationNotice />
+        <Onboarding onComplete={() => setOnboarded(true)} />
+      </>
+    )
 
   return (
-    <RendererEntitlementProvider>
-      <PermissionGate>
-        <NotificationProvider>
-          <ToastProvider>
-            <ReprocessingProvider>
-              <AppContent />
-            </ReprocessingProvider>
-          </ToastProvider>
-        </NotificationProvider>
-      </PermissionGate>
-    </RendererEntitlementProvider>
+    <>
+      <WorkspaceContentMigrationNotice />
+      <RendererEntitlementProvider>
+        <PermissionGate>
+          <NotificationProvider>
+            <ToastProvider>
+              <ReprocessingProvider>
+                <AppContent />
+              </ReprocessingProvider>
+            </ToastProvider>
+          </NotificationProvider>
+        </PermissionGate>
+      </RendererEntitlementProvider>
+    </>
   )
 }
 

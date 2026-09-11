@@ -31,16 +31,20 @@ interface TextModelSummaryEntry {
   id: string
   name?: string
   remoteServerId?: string
+  capabilities?: { thinking?: boolean }
 }
 
 /** Resolve the one active text/vision selection. Remote activation supersedes the
  * local llama-server selection, which may remain loaded as an implementation detail. */
 export function resolveActiveTextModel(
   models: ReadonlyArray<TextModelSummaryEntry>,
-  localActiveId: string | null | undefined,
-  activeIds: ReadonlySet<string>
-): { name: string | null; remote: boolean } {
-  const remote = models.find((model) => model.remoteServerId && activeIds.has(model.id))
-  if (remote) return { name: remote.name ?? remote.id, remote: true }
-  return { name: resolveModelName(models, localActiveId), remote: false }
+  selectedTextId: string | null | undefined
+): { name: string | null; remote: boolean; thinking: boolean | null } {
+  const selected = models.find((model) => model.id === selectedTextId)
+  return {
+    name: resolveModelName(models, selectedTextId),
+    remote: Boolean(selected?.remoteServerId),
+    thinking:
+      typeof selected?.capabilities?.thinking === 'boolean' ? selected.capabilities.thinking : null
+  }
 }

@@ -15,10 +15,15 @@ vi.mock('electron', () => ({
 }))
 
 import { deleteSetting, getDB } from '../database'
-import { getComputerUseSettings, setComputerUseSettings } from '../computer-use-settings'
+import {
+  getComputerUseSettings,
+  patchComputerUseSettings,
+  readComputerUseSettings,
+  setComputerUseSettings
+} from '../computer-use-settings'
 import { COMPUTER_USE_SETTINGS_KEY } from '../../shared/computer-use-settings'
 import { TaskHistoryStore } from '../tasks/task-history-store'
-import { recentVisualFacts } from '../vision/visual-context'
+import { AutomationApplication } from '@offgrid/automation'
 
 beforeEach(() => {
   deleteSetting(COMPUTER_USE_SETTINGS_KEY)
@@ -66,16 +71,51 @@ describe('Computer Use settings persistence', () => {
     })
   })
 
+  it('reads through a typed owner port and patches from the latest authoritative value', () => {
+    setComputerUseSettings({
+      modelStrategy: 'text_plus_specialist',
+      context: '16k',
+      screenshotSize: 'large',
+      checkpointInterval: 8
+    })
+
+    expect(readComputerUseSettings()).toEqual({
+      status: 'available',
+      settings: expect.objectContaining({
+        modelStrategy: 'text_plus_specialist',
+        context: '16k',
+        screenshotSize: 'large',
+        checkpointInterval: 8
+      })
+    })
+
+    expect(patchComputerUseSettings({ context: '32k' })).toEqual({
+      status: 'available',
+      settings: expect.objectContaining({
+        modelStrategy: 'text_plus_specialist',
+        context: '32k',
+        screenshotSize: 'large',
+        checkpointInterval: 8
+      })
+    })
+  })
+
   it('retrieves only bounded text outcomes from older Computer Use runs', () => {
-    const history = new TaskHistoryStore(getDB(), () => 100)
-    history.upsert({
+    const history = new TaskHistoryStore(getDB())
+    const application = new AutomationApplication({
+      history,
+      device: { id: 'desktop-test', name: 'Desktop test' },
+      now: () => 100
+    })
+    application.start()
+    application.record({
       taskId: 'older',
       kind: 'computer_use',
       title: 'Open Settings',
       status: 'done',
       summary: 'Settings opened'
     })
-    history.upsert({
+    application.record({
       taskId: 'current',
       kind: 'computer_use',
       title: 'Current task',
@@ -83,6 +123,6 @@ describe('Computer Use settings persistence', () => {
       summary: 'Must not be returned'
     })
 
-    expect(recentVisualFacts('current')).toEqual(['Open Settings: Settings opened'])
+    expect(application.recentVisualFacts('current')).toEqual(['Open Settings: Settings opened'])
   })
 })

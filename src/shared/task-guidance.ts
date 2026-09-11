@@ -1,49 +1,20 @@
-export const TASK_GUIDE_MAX_TEXT_CHARS = 2_000
-export const TASK_GUIDE_MAX_ATTACHMENTS = 4
-export const TASK_GUIDE_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
-export const TASK_GUIDE_MAX_TOTAL_ATTACHMENT_BYTES = 12 * 1024 * 1024
-export const TASK_GUIDE_MAX_ATTACHMENT_TEXT_CHARS = 16_000
-export const TASK_GUIDE_MAX_TOTAL_ATTACHMENT_TEXT_CHARS = 48_000
-
-export const TASK_GUIDE_ATTACHMENT_EXTENSIONS = [
-  'txt',
-  'md',
-  'markdown',
-  'csv',
-  'json',
-  'pdf',
-  'docx',
-  'png',
-  'jpg',
-  'jpeg',
-  'webp',
-  'gif',
-  'bmp',
-  'heic'
-] as const
-
-export const TASK_GUIDE_ATTACHMENT_ACCEPT = TASK_GUIDE_ATTACHMENT_EXTENSIONS.map(
-  (extension) => `.${extension}`
-).join(',')
-
-export interface TaskGuideAttachmentInput {
-  name: string
-  mimeType?: string
-  bytes: ArrayBuffer | Uint8Array
-}
-
-export interface TaskGuideInput {
-  text: string
-  attachments?: TaskGuideAttachmentInput[]
-}
-
-export function taskGuideAttachmentExtension(name: string): string {
-  const leaf = name.replace(/\\/g, '/').split('/').at(-1) ?? ''
-  const dot = leaf.lastIndexOf('.')
-  return dot > 0 ? leaf.slice(dot + 1).toLowerCase() : ''
-}
-
-export function isTaskGuideAttachmentNameAllowed(name: string): boolean {
-  const extension = taskGuideAttachmentExtension(name)
-  return TASK_GUIDE_ATTACHMENT_EXTENSIONS.some((allowed) => allowed === extension)
-}
+/**
+ * TEMPORARY re-export shim (hexagonal program 2, seat C). Owner: `@offgrid/automation`
+ * (`task-guidance`). Delete when every importer listed under this shim in
+ * shared/docs/hexagonal-program-2/PROGRESS_C.md imports `@offgrid/automation` directly; Agent A
+ * flips the renderer, preload, and pro importers in the same cutover.
+ */
+export {
+  TASK_GUIDE_MAX_TEXT_CHARS,
+  TASK_GUIDE_MAX_ATTACHMENTS,
+  TASK_GUIDE_MAX_ATTACHMENT_BYTES,
+  TASK_GUIDE_MAX_TOTAL_ATTACHMENT_BYTES,
+  TASK_GUIDE_MAX_ATTACHMENT_TEXT_CHARS,
+  TASK_GUIDE_MAX_TOTAL_ATTACHMENT_TEXT_CHARS,
+  TASK_GUIDE_ATTACHMENT_EXTENSIONS,
+  TASK_GUIDE_ATTACHMENT_ACCEPT,
+  taskGuideAttachmentExtension,
+  isTaskGuideAttachmentNameAllowed,
+  type TaskGuideAttachmentInput,
+  type TaskGuideInput
+} from '@offgrid/automation'

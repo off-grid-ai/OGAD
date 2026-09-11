@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  parseRemoteVisionModelId,
   remoteVisionApiBase,
   remoteVisionEndpoint,
-  remoteVisionInventoryModels,
-  remoteVisionModelId,
   remoteVisionProviderForEndpoint
 } from '../remote-vision-server'
 
@@ -38,46 +35,5 @@ describe('remote server form normalization', () => {
     expect(remoteVisionProviderForEndpoint('http://localhost:11434/v1')).toBe('ollama')
     expect(remoteVisionProviderForEndpoint('https://openrouter.ai/api/v1')).toBe('openrouter')
     expect(remoteVisionProviderForEndpoint('https://models.example/v1')).toBe('custom')
-  })
-})
-
-describe('remote model inventory ids', () => {
-  it('round-trips server and model ids without collisions', () => {
-    const id = remoteVisionModelId('home:server', 'google/gemma 4:e12b')
-    expect(parseRemoteVisionModelId(id)).toEqual({
-      serverId: 'home:server',
-      modelId: 'google/gemma 4:e12b'
-    })
-  })
-
-  it('rejects local and malformed ids', () => {
-    expect(parseRemoteVisionModelId('google/gemma-4')).toBeNull()
-    expect(parseRemoteVisionModelId('remote-vision:only-one-part')).toBeNull()
-  })
-
-  it('projects saved servers into available remote vision models', () => {
-    expect(
-      remoteVisionInventoryModels([
-        {
-          id: 'home',
-          name: 'Home server',
-          provider: 'custom',
-          endpoint: 'https://models.example/v1',
-          model: 'google/gemma-4',
-          hasApiKey: true,
-          screenFramesAllowed: true
-        }
-      ])
-    ).toEqual([
-      expect.objectContaining({
-        id: 'remote-vision:home:google%2Fgemma-4',
-        name: 'google/gemma-4',
-        kind: 'vision',
-        org: 'Home server',
-        files: [],
-        tags: ['Remote'],
-        remoteServerId: 'home'
-      })
-    ])
   })
 })

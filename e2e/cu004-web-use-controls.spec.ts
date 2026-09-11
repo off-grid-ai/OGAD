@@ -5,12 +5,21 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import { encodeTaskExecutionPlan, type TaskExecutionPlan } from '../src/shared/task-execution-plan'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid } from './helpers/launch'
 
 const TASK_ID = 'cu004-web-controls'
 const JOURNEY_ID = 'cu004-web-controls-journey'
-const MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
+const MODEL_ID = 'unsloth/Qwen3.5-0.8B-GGUF'
+const TASK_PLAN: TaskExecutionPlan = {
+  version: 1,
+  phases: [
+    { id: 'phase-1', title: 'Enter the requested text' },
+    { id: 'phase-2', title: 'Click the target' },
+    { id: 'phase-3', title: 'Confirm the protected account step' }
+  ]
+}
 
 let app: ElectronApplication | null = null
 let page: Page
@@ -31,7 +40,7 @@ function stageModelBoundary(): void {
   fs.mkdirSync(modelDir, { recursive: true })
   fs.mkdirSync(llamaDir, { recursive: true })
 
-  for (const file of ['UI-TARS-1.5-7B-Q4_K_M.gguf', 'mmproj-UI-TARS-1.5-7B-f16.gguf']) {
+  for (const file of ['Qwen3.5-0.8B-Q4_K_M.gguf', 'mmproj-Qwen3.5-0.8B-BF16.gguf']) {
     const bytes = Buffer.alloc(2_048)
     bytes.write('GGUF')
     fs.writeFileSync(path.join(modelDir, file), bytes)
@@ -40,8 +49,8 @@ function stageModelBoundary(): void {
     path.join(modelDir, 'active-model.json'),
     JSON.stringify({
       id: MODEL_ID,
-      primary: 'UI-TARS-1.5-7B-Q4_K_M.gguf',
-      mmproj: 'mmproj-UI-TARS-1.5-7B-f16.gguf'
+      primary: 'Qwen3.5-0.8B-Q4_K_M.gguf',
+      mmproj: 'mmproj-Qwen3.5-0.8B-BF16.gguf'
     })
   )
 
@@ -67,7 +76,7 @@ function seedRetryableTask(): void {
     INSERT INTO task_run_history VALUES (
       ${sql(TASK_ID)}, ${sql(JOURNEY_ID)}, 'web_use', 'Complete the protected web form',
       'failed', 'The prior browser run stopped before the protected step.',
-      ${sql(JSON.stringify(['Opened the protected form']))},
+      ${sql(JSON.stringify([encodeTaskExecutionPlan(TASK_PLAN), 'Opened the protected form']))},
       ${now - 60_000}, ${now - 30_000}, ${now - 30_000},
       NULL, NULL, 'failed', 1, 'Retry the browser task',
       ${sql(localPageUrl)}, 'CU-004 Pointer Lab', NULL, NULL, '[]'
@@ -89,7 +98,7 @@ async function startLocalPage(): Promise<void> {
         button{position:fixed;left:16vw;top:52vh;width:20vw;height:12vh;font:inherit;padding:14px}
         #status{position:fixed;left:8vw;top:68vh;margin:0}
         #protected-step{position:fixed;left:52vw;top:20vh;width:36vw}
-      </style></head><body><h1>Web Use pointer lab</h1>
+      </style></head><body aria-hidden="true"><h1>Web Use pointer lab</h1>
       <label>Type target<input id="type-target" aria-label="Type target" oninput="document.querySelector('#status').textContent='Typing recorded.'"></label>
       <button id="click-target" onclick="document.querySelector('#status').textContent='Pointer click recorded.'">Click target</button>
       <p id="status">Waiting for the production browser driver.</p>

@@ -15,9 +15,35 @@ describe('<RemoteVisionSettingsTab/>', () => {
       ok: true,
       latencyMs: 42,
       models: [
-        { id: 'vision-model', name: 'Vision model' },
-        { id: 'new-vision-model', name: 'New vision model' }
-      ]
+        { id: 'vision-model', name: 'Vision model', modality: 'text' },
+        { id: 'new-vision-model', name: 'New vision model', modality: 'text' },
+        { id: 'remote-image', name: 'Remote Image', modality: 'image' },
+        { id: 'remote-stt', name: 'Remote STT', modality: 'transcription' },
+        { id: 'remote-voice', name: 'Remote Voice', modality: 'voice' },
+        { id: 'remote-embedding', name: 'Remote Embedding', modality: 'embedding' },
+        {
+          id: 'remote-vision:server-1:google%2Fgemini',
+          name: 'remote-vision:server-1:google%2Fgemini',
+          modality: 'text'
+        }
+      ],
+      catalog: {
+        text: [
+          { id: 'vision-model', name: 'Vision model' },
+          { id: 'new-vision-model', name: 'New vision model' }
+        ],
+        image: [{ id: 'remote-image', name: 'Remote Image' }],
+        transcription: [{ id: 'remote-stt', name: 'Remote STT' }],
+        voice: [{ id: 'remote-voice', name: 'Remote Voice' }],
+        embedding: [{ id: 'remote-embedding', name: 'Remote Embedding' }]
+      },
+      selections: {
+        text: 'vision-model',
+        image: 'remote-image',
+        transcription: 'remote-stt',
+        voice: 'remote-voice',
+        embedding: 'remote-embedding'
+      }
     }))
     const setRemoteVisionServer = vi.fn(async (update) => ({
       provider: update.provider,
@@ -74,7 +100,17 @@ describe('<RemoteVisionSettingsTab/>', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Change model' }))
-    await screen.findByText('Connected in 42 ms. 2 models found.')
+    await screen.findByText('Connected in 42 ms. 7 models found.')
+    expect(screen.getByLabelText('Image')).toBeTruthy()
+    expect(screen.getByLabelText('Transcription')).toBeTruthy()
+    expect(screen.getByLabelText('Voice')).toBeTruthy()
+    expect(screen.getByLabelText('Embeddings')).toBeTruthy()
+    expect(screen.queryByText(/remote-vision:/i)).toBeNull()
+    fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'gemini' } })
+    expect(screen.getByText('google/gemini')).toBeTruthy()
+    // Media pickers are fed from the catalog the test connection returned, not the text list.
+    const imagePicker = screen.getByLabelText('Image') as HTMLSelectElement
+    expect(Array.from(imagePicker.options).map((o) => o.text)).toContain('Remote Image')
     fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'new' } })
     expect(screen.queryByText('Vision model')).toBeNull()
     fireEvent.click(screen.getByText('New vision model'))
@@ -98,7 +134,24 @@ describe('<RemoteVisionSettingsTab/>', () => {
         name: 'Models example',
         serverId: 'server-1',
         apiKey: 'private-key',
-        screenFramesAllowed: true
+        screenFramesAllowed: true,
+        catalog: {
+          text: [
+            { id: 'vision-model', name: 'Vision model' },
+            { id: 'new-vision-model', name: 'New vision model' }
+          ],
+          image: [{ id: 'remote-image', name: 'Remote Image' }],
+          transcription: [{ id: 'remote-stt', name: 'Remote STT' }],
+          voice: [{ id: 'remote-voice', name: 'Remote Voice' }],
+          embedding: [{ id: 'remote-embedding', name: 'Remote Embedding' }]
+        },
+        selections: {
+          text: 'new-vision-model',
+          image: 'remote-image',
+          transcription: 'remote-stt',
+          voice: 'remote-voice',
+          embedding: 'remote-embedding'
+        }
       })
     )
     expect((screen.getByLabelText('API key (optional)') as HTMLInputElement).value).toBe('')
@@ -143,5 +196,38 @@ describe('<RemoteVisionSettingsTab/>', () => {
 
     fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
     expect(screen.getByPlaceholderText('https://models.example')).toBeTruthy()
+  })
+
+  it('always offers image, transcription, and voice rows, naming an absence as the server\'s', async () => {
+    ;(window as unknown as { api: unknown }).api = {
+      getRemoteVisionServer: vi.fn(async () => ({
+        provider: 'ollama',
+        endpoint: 'http://192.168.1.20:11434/v1',
+        model: 'llama',
+        hasApiKey: false,
+        activeServerId: 'server-1',
+        servers: [
+          {
+            id: 'server-1',
+            name: 'Text only box',
+            provider: 'ollama',
+            endpoint: 'http://192.168.1.20:11434/v1',
+            model: 'llama',
+            selections: { text: 'llama' },
+            catalog: { text: [{ id: 'llama', name: 'Llama' }] },
+            hasApiKey: false,
+            screenFramesAllowed: false
+          }
+        ]
+      })),
+      testRemoteVisionServer: vi.fn(),
+      setRemoteVisionServer: vi.fn(),
+      removeRemoteVisionServer: vi.fn()
+    }
+    render(<RemoteVisionSettingsTab />)
+    expect(await screen.findByText('No image models on this server')).toBeTruthy()
+    expect(screen.getByText('No transcription models on this server')).toBeTruthy()
+    expect(screen.getByText('No voice models on this server')).toBeTruthy()
+    expect(screen.queryByLabelText('Embeddings')).toBeNull()
   })
 })

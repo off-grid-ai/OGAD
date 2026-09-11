@@ -112,7 +112,10 @@ afterAll(() => {
 
 describe('active chat model handoff', () => {
   it('finishes the admitted turn on its original model and uses the new model next', async () => {
-    const [{ llm }, manager] = await Promise.all([import('../llm'), import('../models-manager')])
+    const [{ llm }, manager] = await Promise.all([
+      import('../llm'),
+      import('../model-services').then(() => import('../models-manager'))
+    ])
     const service = llm as unknown as { port: number }
     service.port = await unusedPort()
 
@@ -129,10 +132,13 @@ describe('active chat model handoff', () => {
       const sawFirstToken = new Promise<void>((resolve) => {
         firstToken = resolve
       })
-      const firstTurn = llm.chatStream('hold this turn', [], (text) => {
-        firstDeltas.push(text)
-        if (firstDeltas.length === 1) firstToken()
-      })
+      const firstTurn = llm.streamChatLocal(
+        [{ role: 'user', content: 'hold this turn' }],
+        (text) => {
+          firstDeltas.push(text)
+          if (firstDeltas.length === 1) firstToken()
+        }
+      )
 
       await sawFirstToken
       expect(await manager.setActiveModel(modelB.id!)).toEqual({ success: true })
@@ -142,7 +148,9 @@ describe('active chat model handoff', () => {
 
       const secondDeltas: string[] = []
       await expect(
-        llm.chatStream('next turn', [], (text) => secondDeltas.push(text))
+        llm.streamChatLocal([{ role: 'user', content: 'next turn' }], (text) =>
+          secondDeltas.push(text)
+        )
       ).resolves.toMatchObject({ content: 'model-b.gguf:first second' })
       expect(secondDeltas.join('')).toBe('model-b.gguf:first second')
       expect(manager.getActiveModel()).toBe(modelB.id)

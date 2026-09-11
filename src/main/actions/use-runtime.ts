@@ -11,17 +11,20 @@
  * the app is single-instance, so there is never a second live worker).
  */
 import {
-  HandlerRegistry,
-  UseEngine,
+  parseActionProposal,
+  WEB_USE_HANDLER,
+  type ActionHandler,
   type ActionSource,
   type ProposeOutcome,
   type Rail,
   type TickOutcome,
   type ActionRecord,
-  type ExecuteResult
+  type ExecuteResult,
+  type TerminalChatActionOutcome
 } from '@offgrid/use'
+import type { Outcome, UseFailure, UsePlatformPorts, UseSnapshot } from '@offgrid/application'
 import { getDB } from '../database'
-import { hasHook, HOOKS } from '../bootstrap/hookRegistry'
+import { callHook, hasHook, HOOKS, type ChatActionResult } from '../bootstrap/hookRegistry'
 import { shell } from 'electron'
 import { makeUseDriver } from './use-driver'
 import { makeSemanticRailExecutor } from './semantic-rail'
@@ -30,10 +33,9 @@ import { runPowerShell } from './win-powershell'
 import { makeReadBackVerifiers } from './verification'
 import { runNativeAction } from './native-helper'
 import { gateHost, onActionParked, onGateParked, whenActionParked } from './gate-host'
-import { createActionWorker, type ActionWorker } from './use-worker'
-import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser-rail'
+import { makeBrowserRailExecutor } from '../browser/browser-rail'
 import { getBrowserRailHost } from '../browser/browser-host'
-import { makeVisionRailExecutor, registerVisionRail } from '../vision/vision-rail'
+import { makeVisionRailExecutor } from '../vision/vision-rail'
 import { getVisionRailHost } from '../vision/vision-host'
 import {
   makeComputerTaskExecutor,
@@ -48,18 +50,26 @@ import { withRemoteScreenGate } from './remote-screen-gate'
 import { getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
 import { taskLaunchFromActionArgs } from '../tasks/task-launch-identity'
 import { taskKindForActionType } from '../tools/nativeActionToolExtension-logic'
+import { desktopUse } from '../composition/application-access'
 
 export interface ActionsRuntime {
+  /** Canonical Shared projection. Desktop transports it without deriving lifecycle state. */
+  snapshot(): UseSnapshot
+  subscribe(listener: (snapshot: UseSnapshot) => void): () => void
   propose(
     input: unknown,
     meta: { source: ActionSource; sourceRef?: string }
   ): Promise<ProposeOutcome>
   /** Reverse a done action through its handler's undo capability. */
   undo(record: ActionRecord): Promise<{ ok: boolean; detail?: string }>
+  retry(actionId: string): Promise<Outcome<boolean, UseFailure>>
   /** Every outcome as it lands, with whether it can be undone - the chat
    *  card and Undo chip feed. Returns unsubscribe. */
   onOutcome(listener: (event: { outcome: TickOutcome; undoable: boolean }) => void): () => void
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
+  /** Read-only terminal facts owned by the action engine. Projection consumers may reconcile them;
+   * they cannot execute or mutate an Action through this port. */
+  listTerminalChatActionResults(): Promise<readonly ChatActionResult[]>
   whenParked(actionId: string): Promise<void>
   onParked(actionId: string, listener: () => void): () => void
   kick(): void
@@ -68,8 +78,20 @@ export interface ActionsRuntime {
   approvalHookActive(): boolean
 }
 
-export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
-  const registry = new HandlerRegistry()
+class DesktopUseOperationError extends Error {
+  constructor(readonly failure: UseFailure) {
+    super(failure.message)
+    this.name = 'DesktopUseOperationError'
+  }
+}
+
+function requireUseOutcome<Value>(outcome: Outcome<Value, UseFailure>): Value {
+  if (outcome.ok) return outcome.value
+  throw new DesktopUseOperationError(outcome.failure)
+}
+
+export function buildHandlers(run: typeof runNativeAction): ActionHandler[] {
+  const handlers: ActionHandler[] = []
   const verifiers = makeReadBackVerifiers(run)
   /** Undo = delete the exact effect the create returned (Approval UX v2):
    *  the capability that makes these reversible, which is what lets them
@@ -82,7 +104,7 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
     }
   // Calendar and reminders are observable: read back after create, so a
   // failed write retries once and "done" means the item is really there.
-  registry.register({
+  handlers.push({
     type: 'calendar',
     rail: 'semantic',
     defaultRisk: 'mutate',
@@ -90,7 +112,7 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
     verify: verifiers.calendar,
     undo: undoVia('calendar.deleteEvent')
   })
-  registry.register({
+  handlers.push({
     type: 'reminder',
     rail: 'semantic',
     defaultRisk: 'mutate',
@@ -107,27 +129,27 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
     { type: 'open', defaultRisk: 'navigate' },
     { type: 'lookup', defaultRisk: 'read' }
   ] as const) {
-    registry.register({
+    handlers.push({
       type: handler.type,
       rail: 'semantic',
       defaultRisk: handler.defaultRisk,
       verification: 'none_fuzzy'
     })
   }
-  // The browser rail: web_use, on every platform (Electron CDP is the same
-  // everywhere). Declared in the browser module so its rail/risk live there.
-  registerBrowserRail(registry)
-  // The vision rail: computer_use, the supervised tier. Registered so the
-  // engine routes it; the host refuses cleanly until actuation is available,
-  // and the tool is not offered to the model until then.
-  registerVisionRail(registry)
-  registry.register({
+  handlers.push(WEB_USE_HANDLER)
+  handlers.push({
+    type: 'computer_use',
+    rail: 'vision',
+    defaultRisk: 'mutate',
+    verification: 'none_fuzzy'
+  })
+  handlers.push({
     type: 'connector',
     rail: 'connector',
     defaultRisk: 'mutate',
     verification: 'none_fuzzy'
   })
-  return registry
+  return handlers
 }
 
 /** The one place a platform picks an implementation - exported so both arms
@@ -157,40 +179,85 @@ function recordAuthenticatedTaskLaunch(
   })
 }
 
-/** Keep the durable task projection aligned with the action engine's terminal decision. */
-function recordTaskActionOutcome(outcome: TickOutcome): void {
-  if (outcome.outcome === 'poisoned') return
-  const kind = taskKindForActionType(outcome.record.type)
-  if (!kind || outcome.outcome === 'done') return
-  const detail = outcome.record.attemptLog.at(-1)?.detail?.trim()
-  const status = outcome.outcome === 'rejected' ? 'failed' : 'waiting'
+/** One-way projection from the durable action engine to a Chat owner's result observer. */
+function chatActionResultFromRecord(
+  actionId: string,
+  outcome: 'done' | 'rejected' | 'needs_help',
+  record: ActionRecord
+): ChatActionResult | null {
+  const conversationId = record.source === 'chat' ? record.sourceRef?.trim() : ''
+  if (!conversationId) return null
+  const detail = record.attemptLog.at(-1)?.detail?.trim()
   const summary =
     detail ||
-    (outcome.outcome === 'rejected'
-      ? 'The task was declined and did not run.'
-      : outcome.outcome === 'edited'
-        ? 'The task is waiting for changes.'
-        : 'The task ran but could not be confirmed.')
-  recordTaskRun({
-    taskId: outcome.id,
-    kind,
-    title: outcome.record.intent,
-    status,
+    (outcome === 'rejected'
+      ? 'The action was declined and did not run.'
+      : outcome === 'needs_help'
+        ? 'The action ran but could not be confirmed.'
+        : record.intent)
+  return {
+    actionId,
+    conversationId,
+    status: outcome === 'done' ? 'done' : 'failed',
     summary
-  })
+  }
 }
 
-let runtime: ActionsRuntime | null = null
+export function chatActionResultFromOutcome(outcome: TickOutcome): ChatActionResult | null {
+  if (outcome.outcome === 'poisoned' || outcome.outcome === 'edited') return null
+  return chatActionResultFromRecord(outcome.id, outcome.outcome, outcome.record)
+}
 
-/** Lazy singleton: built on first use so the DB and helper exist by then. */
-export function getActionsRuntime(): ActionsRuntime {
-  if (runtime) {
-    return runtime
+export function chatActionResultFromTerminalOutcome(
+  outcome: TerminalChatActionOutcome
+): ChatActionResult | null {
+  return chatActionResultFromRecord(outcome.actionId, outcome.outcome, outcome.record)
+}
+
+export function observeActionOutcome(outcome: TickOutcome): void {
+  const chatResult = chatActionResultFromOutcome(outcome)
+  if (chatResult) {
+    const reportProjectionFailure = (error: unknown): void => {
+      console.error('[actions] Chat action result projection failed', error)
+    }
+    try {
+      const projection = callHook<unknown>(HOOKS.actionsObserveChatActionResult, chatResult)
+      void Promise.resolve(projection).catch(reportProjectionFailure)
+    } catch (error) {
+      // Projection is downstream of the committed action. Its failure must not turn a completed
+      // external effect into a rejected wait result or invite an unsafe retry.
+      reportProjectionFailure(error)
+    }
   }
+  if (outcome.outcome === 'poisoned') return
+  try {
+    const kind = taskKindForActionType(outcome.record.type)
+    if (!kind || outcome.outcome === 'done') return
+    const detail = outcome.record.attemptLog.at(-1)?.detail?.trim()
+    const status = outcome.outcome === 'rejected' ? 'failed' : 'waiting'
+    const summary =
+      detail ||
+      (outcome.outcome === 'rejected'
+        ? 'The task was declined and did not run.'
+        : outcome.outcome === 'edited'
+          ? 'The task is waiting for changes.'
+          : 'The task ran but could not be confirmed.')
+    recordTaskRun({
+      taskId: outcome.id,
+      kind,
+      title: outcome.record.intent,
+      status,
+      summary
+    })
+  } catch (error) {
+    console.error('[actions] Task action result projection failed', error)
+  }
+}
 
+export function createDesktopUsePorts(): UsePlatformPorts {
   // The platform decides which semantic rail implements the port - the one
   // concrete choice, made once here; nothing above it branches on an OS.
-  const registry = buildRegistry(
+  const handlers = buildHandlers(
     pickByPlatform(process.platform, makeOutlookNativeReader(runPowerShell), runNativeAction)
   )
   const semanticExecute = pickByPlatform(
@@ -229,8 +296,8 @@ export function getActionsRuntime(): ActionsRuntime {
   // rail for the A/B; unset = the real tiered behaviour.
   const computerTaskTiers: ComputerTaskTiers = {
     routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
-    runAx: (goal, taskId, journeyId, app, initial) =>
-      getAxRailHost().runTask(goal, taskId, app, initial, journeyId),
+    runAx: (goal, taskId, journeyId, app, initial, allowVisionRecovery) =>
+      getAxRailHost().runTask(goal, taskId, app, initial, journeyId, allowVisionRecovery),
     visionExecute: groundedVisionExecute
   }
   const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {
@@ -241,86 +308,78 @@ export function getActionsRuntime(): ActionsRuntime {
       forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL)
     })(action)
   }
-  const engine = new UseEngine({
+  const device = {
+    async execute(action: ActionRecord, rail: Rail) {
+      if (rail === 'semantic') return semanticExecute(action)
+      if (rail === 'browser') {
+        if (!isProEntitled()) return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
+        recordAuthenticatedTaskLaunch(action, 'web_use')
+        return browserExecute(action)
+      }
+      if (rail === 'connector') return connectorExecute(action)
+      if (rail === 'vision') {
+        if (!isProEntitled()) return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
+        recordAuthenticatedTaskLaunch(action, 'computer_use')
+        return computerTaskExecute(action)
+      }
+      return { ok: false, detail: `the '${rail}' rail is not built yet` }
+    }
+  }
+  return {
     driver: makeUseDriver(getDB()),
-    // Read-back verification reads the world back through the platform's own
-    // surface: the Swift helper's list verbs on macOS, Outlook COM on
-    // Windows - the same command names, so buildRegistry is unchanged.
-    registry,
-    device: {
-      async execute(action: ActionRecord, rail: Rail) {
-        if (rail === 'semantic') {
-          return semanticExecute(action)
-        }
-        if (rail === 'browser') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
-          }
-          recordAuthenticatedTaskLaunch(action, 'web_use')
-          return browserExecute(action)
-        }
-        if (rail === 'connector') {
-          return connectorExecute(action)
-        }
-        if (rail === 'vision') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
-          }
-          recordAuthenticatedTaskLaunch(action, 'computer_use')
-          // computer_use: accessibility-first, vision as the fallback tier.
-          return computerTaskExecute(action)
-        }
-        return { ok: false, detail: `the '${rail}' rail is not built yet` }
+    handlers,
+    device,
+    gate: gateHost,
+    park: { onParked: onGateParked, onActionParked },
+    scheduler: {
+      every: (intervalMs, listener) => {
+        const timer = setInterval(listener, intervalMs)
+        timer.unref()
+        return () => clearInterval(timer)
+      },
+      after: (delayMs, listener) => {
+        const timer = setTimeout(listener, delayMs)
+        timer.unref()
+        return () => clearTimeout(timer)
       }
     },
-    gate: gateHost,
     attemptTimeoutMs: 30_000, // the helper's own timeout is 20s
     visibilityMs: 24 * 60 * 60 * 1000
-  })
-
-  const worker: ActionWorker = createActionWorker(engine, { onParked: onGateParked })
-
-  const ready = (async () => {
-    await engine.init()
-    await engine.queue.releaseAll() // stale leases from the previous process
-    worker.kick() // resume anything the last session left behind
-  })()
-
-  // Scheduled actions become due while the app idles; a slow heartbeat
-  // re-kicks the drain. unref'd so it never holds the process open.
-  const heartbeat = setInterval(() => worker.kick(), 30_000)
-  heartbeat.unref()
-
-  runtime = {
-    async propose(input, meta) {
-      await ready
-      const outcome = await engine.propose(input, meta)
-      worker.kick()
-      return outcome
-    },
-    async waitForOutcome(actionId, timeoutMs) {
-      await ready
-      const outcome = await worker.waitForOutcome(actionId, timeoutMs)
-      if (outcome) recordTaskActionOutcome(outcome)
-      return outcome
-    },
-    whenParked: whenActionParked,
-    onParked: onActionParked,
-    kick: () => worker.kick(),
-    undo: async (record) => {
-      await ready
-      return engine.undo(record)
-    },
-    onOutcome: (listener) =>
-      worker.onOutcome((outcome) => {
-        const undoable =
-          outcome.outcome === 'done' &&
-          !!outcome.record.effectId &&
-          !!registry.get(outcome.record.type)?.undo
-        listener({ outcome, undoable })
-      }),
-    approvalHookActive: () =>
-      hasHook(HOOKS.actionsProposeApproval) || hasHook(HOOKS.legacyMcpProposeApproval)
   }
+}
+
+const runtime: ActionsRuntime = {
+  snapshot: () => desktopUse.snapshot(),
+  subscribe: (listener) => desktopUse.subscribe(listener),
+  async propose(input, meta) {
+    const parsed = parseActionProposal(input)
+    if (!parsed.ok) return { accepted: false, reason: parsed.error }
+    return desktopUse.run({ proposal: parsed.value, ...meta })
+  },
+  async waitForOutcome(actionId, timeoutMs) {
+    return requireUseOutcome(await desktopUse.waitForOutcome(actionId, timeoutMs))
+  },
+  async listTerminalChatActionResults() {
+    const outcomes = requireUseOutcome(await desktopUse.terminalChatOutcomes())
+    return outcomes.flatMap((outcome) => {
+      const result = chatActionResultFromTerminalOutcome(outcome)
+      return result ? [result] : []
+    })
+  },
+  whenParked: whenActionParked,
+  onParked: (actionId, listener) => desktopUse.onParked(actionId, listener),
+  kick: () => desktopUse.kick(),
+  undo: (record) => desktopUse.undo(record.id),
+  retry: (actionId) => desktopUse.retry(actionId),
+  onOutcome: (listener) =>
+    desktopUse.events((event) => {
+      if (event.type === 'action_outcome') listener(event)
+    }),
+  approvalHookActive: () =>
+    hasHook(HOOKS.actionsProposeApproval) || hasHook(HOOKS.legacyMcpProposeApproval)
+}
+
+/** Compatibility API over the single Shared Use facade. */
+export function getActionsRuntime(): ActionsRuntime {
   return runtime
 }

@@ -1,17 +1,8 @@
-import { useEffect, useState, useCallback, useRef, type ReactElement } from 'react'
-import {
-  IconLoader2,
-  IconPlug,
-  IconPlus,
-  IconTrash,
-  IconPlugConnected,
-  IconAlertTriangle,
-  IconCircleCheck,
-  IconRefresh,
-  IconChevronRight,
-  IconChevronLeft,
-  IconX
-} from '@tabler/icons-react'
+import { useEffect, useMemo, useState, useCallback, useRef, type ReactElement } from 'react'
+import { ConnectorPullQueryField } from './ConnectorPullQueryField'
+import { ConnectorSecretsForm } from './ConnectorSecretsForm'
+import * as Tabler from '@tabler/icons-react'
+import { connectorFailureReason } from '@offgrid/application'
 import {
   CONNECTOR_CATALOG,
   CATEGORY_ORDER,
@@ -29,20 +20,23 @@ const LOGO_OVERRIDE: Record<string, string> = { slack: slackLogo }
 // client is configured so the card can gate its Connect button.
 function ConnectorSetup({
   entry,
+  connectorId,
+  compact,
   onReadyChange
 }: {
   entry: CatalogEntry
-  onReadyChange: (ready: boolean) => void
+  connectorId?: number
+  compact?: boolean
+  onReadyChange?: (ready: boolean) => void
 }): ReactElement | null {
   const Slot = getSlot(SLOTS.connectorSetup)
   if (entry.oauthClient !== 'byo' || !Slot) return null
   // The Pro slot is registered at runtime after the core bundle loads, so it must be resolved here.
-  // eslint-disable-next-line react-hooks/static-components
-  return <Slot entry={entry} onReadyChange={onReadyChange} />
+  return (
+    // eslint-disable-next-line react-hooks/static-components
+    <Slot entry={entry} connectorId={connectorId} compact={compact} onReadyChange={onReadyChange} />
+  )
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const api = (window as any).api
 
 interface Connector {
   id: number
@@ -104,18 +98,6 @@ const LOGO_SLUGS: Record<string, string> = {
 }
 
 // How to obtain credentials for token-based connectors (shown in the connect form).
-
-// Turn raw transport errors into something human.
-function cleanError(detail: string): string {
-  const d = detail || ''
-  if (
-    /invalid_token|Missing or invalid access token|401|unauthorized|Authorization required/i.test(d)
-  )
-    return 'Sign-in required — click Test to authorize in your browser.'
-  if (/<!DOCTYPE html|<html|404|not found/i.test(d)) return 'Endpoint not reachable.'
-  if (/ENOTFOUND|ECONNREFUSED|fetch failed|network/i.test(d)) return 'Could not reach the server.'
-  return d.length > 140 ? d.slice(0, 140) + '…' : d
-}
 
 function Badge({
   id,
@@ -180,11 +162,11 @@ function ConnectorConnectControls({
         >
           {connecting ? (
             <>
-              <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> {progressLabel}
+              <Tabler.IconLoader2 className="h-3.5 w-3.5 animate-spin" /> {progressLabel}
             </>
           ) : (
             <>
-              <IconPlugConnected className="h-3.5 w-3.5" /> Connect
+              <Tabler.IconPlugConnected className="h-3.5 w-3.5" /> Connect
               {entry.auth === 'oauth' ? ' with OAuth' : ''}
             </>
           )}
@@ -197,7 +179,7 @@ function ConnectorConnectControls({
             title="Cancel authorization"
             className="flex size-8 shrink-0 items-center justify-center rounded-md border border-neutral-700 text-neutral-400 transition-colors hover:border-red-500 hover:text-red-400"
           >
-            <IconX className="h-3.5 w-3.5" />
+            <Tabler.IconX className="h-3.5 w-3.5" />
           </button>
         )}
       </div>
@@ -208,7 +190,7 @@ function ConnectorConnectControls({
 
 async function removePendingConnector(id: number | undefined): Promise<void> {
   if (id == null) return
-  await api.mcpRemove?.(id)
+  await window.api.mcpRemove(id)
 }
 
 async function persistConnectorSecrets(
@@ -217,7 +199,7 @@ async function persistConnectorSecrets(
 ): Promise<void> {
   if (id == null) return
   for (const [key, value] of Object.entries(secretValues)) {
-    if (value) await api.secretsSet?.(`connector:${id}:${key}`, value)
+    if (value) await window.api.secretsSet(`connector:${id}:${key}`, value)
   }
 }
 
@@ -237,7 +219,20 @@ async function settleConnectionAttempt(
   }
   if (result?.ok) return { connected: true }
   await removePendingConnector(id)
-  return { connected: false, error: cleanError(result?.error ?? 'Could not connect') }
+  return { connected: false, error: connectorFailureReason(result?.error ?? 'Could not connect') }
+}
+
+function connectorDetail(items: readonly Connector[], detailId: number | null): Connector | null {
+  return detailId == null ? null : (items.find((connector) => connector.id === detailId) ?? null)
+}
+
+function fmtAgo(ms: number | null): string {
+  if (!ms) return 'never'
+  const seconds = Math.floor((Date.now() - ms) / 1000)
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  return `${Math.floor(seconds / 86400)}d ago`
 }
 
 export function ConnectorsScreen(): ReactElement {
@@ -247,7 +242,6 @@ export function ConnectorsScreen(): ReactElement {
   const [testingId, setTestingId] = useState<number | null>(null)
   const [syncingId, setSyncingId] = useState<number | null>(null)
   const [syncMsg, setSyncMsg] = useState<string>('')
-  const [queries, setQueries] = useState<Record<number, string>>({})
   const [detailId, setDetailId] = useState<number | null>(null)
   const [tab, setTab] = useState<'all' | 'connected' | 'disconnected'>('all')
   const [syncedItems, setSyncedItems] = useState<
@@ -258,7 +252,6 @@ export function ConnectorsScreen(): ReactElement {
   const cancelledConnections = useRef(new Set<string>())
   const [errorFor, setErrorFor] = useState<Record<string, string>>({})
   const [tokenFor, setTokenFor] = useState<CatalogEntry | null>(null)
-  const [tokenVals, setTokenVals] = useState<Record<string, string>>({})
   // Whether a BYO-OAuth connector has its client configured yet (reported by the
   // setup slot). Connect stays gated until it's true — no OAuth without a client.
   const [byoReady, setByoReady] = useState<Record<string, boolean>>({})
@@ -273,7 +266,7 @@ export function ConnectorsScreen(): ReactElement {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setItems((await api.mcpList?.()) ?? [])
+      setItems((await window.api.mcpList()) ?? [])
     } finally {
       setLoading(false)
     }
@@ -282,8 +275,14 @@ export function ConnectorsScreen(): ReactElement {
     void load()
   }, [load])
 
-  const installed = new Set(items.map((i) => i.name.toLowerCase()))
-  const gallery = CONNECTOR_CATALOG.filter((e) => !installed.has(e.name.toLowerCase()))
+  // The gallery is every catalog connector that is not installed. It changes only when the
+  // installed list changes, so it is not rebuilt on every keystroke or sync tick.
+  const gallery = useMemo(() => {
+    const installed = new Set(items.map((i) => i.name.toLowerCase()))
+    return CONNECTOR_CATALOG.filter(
+      (e) => e.oauthClient === 'byo' || !installed.has(e.name.toLowerCase())
+    )
+  }, [items])
 
   const doConnect = async (
     entry: CatalogEntry,
@@ -294,7 +293,7 @@ export function ConnectorsScreen(): ReactElement {
     setErrorFor((p) => ({ ...p, [entry.id]: '' }))
     let id: number | undefined
     try {
-      id = await api.mcpAdd?.({
+      id = await window.api.mcpAdd({
         name: entry.name,
         transport: entry.transport,
         url: entry.url,
@@ -302,13 +301,14 @@ export function ConnectorsScreen(): ReactElement {
         args: entry.args,
         envKeys: entry.secrets?.map((s) => s.key)
       })
-      if (id != null) pendingConnectorIds.current.set(entry.id, id)
+      if (id == null) throw new Error('Connector was not created')
+      pendingConnectorIds.current.set(entry.id, id)
       if (cancelledConnections.current.has(entry.id)) {
         await removePendingConnector(id)
         return
       }
       await persistConnectorSecrets(id, secretVals)
-      const res = await api.mcpTest?.(id)
+      const res = await window.api.mcpTest(id)
       const outcome = await settleConnectionAttempt(
         id,
         cancelledConnections.current.has(entry.id),
@@ -316,8 +316,8 @@ export function ConnectorsScreen(): ReactElement {
       )
       if (outcome.connected) {
         // Truly connected → it moves into "Connected" and out of the gallery.
+        // The secrets form closes with the card, and the typed secrets go with it.
         setTokenFor(null)
-        setTokenVals({})
       } else if (outcome.error) {
         setErrorFor((p) => ({ ...p, [entry.id]: outcome.error ?? '' }))
       }
@@ -342,7 +342,7 @@ export function ConnectorsScreen(): ReactElement {
     const connectorId = pendingConnectorIds.current.get(entryId)
     if (connectorId == null) return
     try {
-      await api.mcpRemove?.(connectorId)
+      await window.api.mcpRemove(connectorId)
     } catch {
       // The in-flight connect owns final cleanup and will restore the card state.
     }
@@ -351,7 +351,6 @@ export function ConnectorsScreen(): ReactElement {
   const onConnect = (entry: CatalogEntry): void => {
     if (entry.auth === 'token' && entry.secrets?.length) {
       setTokenFor(entry)
-      setTokenVals({})
     } else {
       void doConnect(entry, {})
     }
@@ -359,7 +358,7 @@ export function ConnectorsScreen(): ReactElement {
 
   const addCustom = async (): Promise<void> => {
     if (!name.trim()) return
-    await api.mcpAdd?.({
+    await window.api.mcpAdd({
       name: name.trim(),
       transport,
       url: transport === 'http' ? url.trim() : undefined,
@@ -377,25 +376,25 @@ export function ConnectorsScreen(): ReactElement {
   const test = async (id: number): Promise<void> => {
     setTestingId(id)
     try {
-      await api.mcpTest?.(id)
+      await window.api.mcpTest(id)
     } finally {
       setTestingId(null)
       load()
     }
   }
   const toggle = async (id: number, enabled: boolean): Promise<void> => {
-    await api.mcpSetEnabled?.(id, enabled)
+    await window.api.mcpSetEnabled(id, enabled)
     load()
   }
   const remove = async (id: number): Promise<void> => {
-    await api.mcpRemove?.(id)
+    await window.api.mcpRemove(id)
     load()
   }
   const sync = async (id: number, query?: string): Promise<void> => {
     setSyncingId(id)
     setSyncMsg('')
     try {
-      const res = await api.mcpIngest?.(id, query)
+      const res = await window.api.mcpIngest(id, query)
       if (res && !res.ok) setSyncMsg(res.error ?? 'Sync failed')
       else if (res && res.count === 0) setSyncMsg('Synced — nothing new found.')
       else if (res) setSyncMsg(`Synced ${res.count} item${res.count === 1 ? '' : 's'}.`)
@@ -403,27 +402,18 @@ export function ConnectorsScreen(): ReactElement {
       setSyncingId(null)
       load()
       const c = items.find((x) => x.id === id)
-      if (c) setSyncedItems((await api.mcpItems?.(c.name)) ?? [])
+      if (c) setSyncedItems((await window.api.mcpItems(c.name)) ?? [])
     }
   }
   const openDetail = async (c: Connector): Promise<void> => {
     setDetailId(c.id)
-    setSyncedItems((await api.mcpItems?.(c.name)) ?? [])
+    setSyncedItems((await window.api.mcpItems(c.name)) ?? [])
   }
-  const fmtAgo = (ms: number | null): string => {
-    if (!ms) return 'never'
-    const s = Math.floor((Date.now() - ms) / 1000)
-    if (s < 60) return 'just now'
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`
-    return `${Math.floor(s / 86400)}d ago`
-  }
-
   return (
     <div className="flex h-full flex-col bg-neutral-950 font-mono">
       <div className="flex items-center justify-between border-b border-neutral-900 px-6 py-4">
         <div className="flex items-center gap-3">
-          <IconPlug className="h-5 w-5 text-green-500" />
+          <Tabler.IconPlug className="h-5 w-5 text-green-500" />
           <div>
             <h1 className="text-lg tracking-tight text-white">Integrations</h1>
             <div className="text-[11px] uppercase tracking-wide text-neutral-600">
@@ -452,14 +442,14 @@ export function ConnectorsScreen(): ReactElement {
             onClick={() => setAdding((v) => !v)}
             className="flex items-center gap-1 rounded-md border border-neutral-800 px-3 py-1.5 text-xs text-neutral-300 hover:border-green-500 hover:text-green-500"
           >
-            <IconPlus className="h-4 w-4" /> Custom
+            <Tabler.IconPlus className="h-4 w-4" /> Custom
           </button>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
         {(() => {
-          const detail = detailId != null ? items.find((c) => c.id === detailId) : null
+          const detail = connectorDetail(items, detailId)
           if (detail) {
             const dcat = CONNECTOR_CATALOG.find((x) => x.name === detail.name)
             const dNotReady = dcat != null && !dcat.ready // preview/unverified — don't expose Test/Sync
@@ -468,6 +458,7 @@ export function ConnectorsScreen(): ReactElement {
               : []
             return (
               <div className="mx-auto max-w-[1500px] space-y-5">
+                {dcat && <ConnectorSetup entry={dcat} connectorId={detail.id} />}
                 <button
                   onClick={() => {
                     setDetailId(null)
@@ -475,7 +466,7 @@ export function ConnectorsScreen(): ReactElement {
                   }}
                   className="flex items-center gap-1 text-xs text-neutral-400 hover:text-white"
                 >
-                  <IconChevronLeft className="h-4 w-4" /> All integrations
+                  <Tabler.IconChevronLeft className="h-4 w-4" /> All integrations
                 </button>
                 <div className="flex items-start gap-3">
                   {dcat ? (
@@ -513,9 +504,9 @@ export function ConnectorsScreen(): ReactElement {
                           className="flex items-center gap-1 rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:opacity-50"
                         >
                           {testingId === detail.id ? (
-                            <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                            <Tabler.IconLoader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
-                            <IconPlugConnected className="h-3.5 w-3.5" />
+                            <Tabler.IconPlugConnected className="h-3.5 w-3.5" />
                           )}{' '}
                           Test
                         </button>
@@ -534,7 +525,7 @@ export function ConnectorsScreen(): ReactElement {
                       }}
                       className="rounded-md p-1 text-neutral-600 hover:text-red-400"
                     >
-                      <IconTrash className="h-4 w-4" />
+                      <Tabler.IconTrash className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
@@ -545,7 +536,9 @@ export function ConnectorsScreen(): ReactElement {
                   </p>
                 )}
                 {!dNotReady && detail.status === 'error' && detail.status_detail && (
-                  <p className="text-[11px] text-red-400/80">{cleanError(detail.status_detail)}</p>
+                  <p className="text-[11px] text-red-400/80">
+                    {connectorFailureReason(detail.status_detail)}
+                  </p>
                 )}
 
                 {!dNotReady && detail.status === 'ok' && (
@@ -556,29 +549,18 @@ export function ConnectorsScreen(): ReactElement {
                       className="flex items-center gap-1 rounded-md bg-green-500/90 px-3 py-1.5 text-xs text-neutral-950 hover:bg-green-400 disabled:opacity-50"
                     >
                       {syncingId === detail.id ? (
-                        <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Tabler.IconLoader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <IconRefresh className="h-3.5 w-3.5" />
+                        <Tabler.IconRefresh className="h-3.5 w-3.5" />
                       )}{' '}
                       Sync recent
                     </button>
-                    <input
-                      value={queries[detail.id] ?? ''}
-                      onChange={(e) => setQueries((p) => ({ ...p, [detail.id]: e.target.value }))}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && queries[detail.id]?.trim())
-                          sync(detail.id, queries[detail.id])
-                      }}
-                      placeholder={`Ask ${detail.name} for… (e.g. ABSLI)`}
-                      className="flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-neutral-600"
+                    <ConnectorPullQueryField
+                      key={detail.id}
+                      connectorName={detail.name}
+                      disabled={syncingId === detail.id}
+                      onPull={(query) => void sync(detail.id, query)}
                     />
-                    <button
-                      onClick={() => sync(detail.id, queries[detail.id])}
-                      disabled={syncingId === detail.id || !queries[detail.id]?.trim()}
-                      className="shrink-0 rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:opacity-40"
-                    >
-                      Pull
-                    </button>
                   </div>
                 )}
                 {syncMsg && (
@@ -762,34 +744,11 @@ export function ConnectorsScreen(): ReactElement {
                                     )}
                                   </p>
                                 )}
-                                {e.secrets?.map((s) => (
-                                  <input
-                                    key={s.key}
-                                    type="password"
-                                    value={tokenVals[s.key] ?? ''}
-                                    onChange={(ev) =>
-                                      setTokenVals((p) => ({ ...p, [s.key]: ev.target.value }))
-                                    }
-                                    placeholder={
-                                      s.label + (s.placeholder ? ` (${s.placeholder})` : '')
-                                    }
-                                    className="w-full rounded-md border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus:border-neutral-600"
-                                  />
-                                ))}
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => doConnect(e, tokenVals)}
-                                    className="rounded-md bg-green-500 px-2.5 py-1 text-xs text-neutral-950 hover:bg-green-400"
-                                  >
-                                    Connect
-                                  </button>
-                                  <button
-                                    onClick={() => setTokenFor(null)}
-                                    className="rounded-md border border-neutral-700 px-2.5 py-1 text-xs text-neutral-400"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
+                                <ConnectorSecretsForm
+                                  secrets={e.secrets ?? []}
+                                  onConnect={(secrets) => void doConnect(e, secrets)}
+                                  onCancel={() => setTokenFor(null)}
+                                />
                               </div>
                             ) : (
                               <ConnectorConnectControls
@@ -816,7 +775,7 @@ export function ConnectorsScreen(): ReactElement {
                   </h2>
                   {loading && items.length === 0 ? (
                     <div className="flex items-center justify-center gap-2 py-12 text-sm text-neutral-600">
-                      <IconLoader2 className="h-4 w-4 animate-spin" /> Loading…
+                      <Tabler.IconLoader2 className="h-4 w-4 animate-spin" /> Loading…
                     </div>
                   ) : items.length === 0 ? (
                     <p className="py-8 text-sm text-neutral-600">
@@ -844,17 +803,18 @@ export function ConnectorsScreen(): ReactElement {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
                                 <span className="text-sm text-neutral-100">{c.name}</span>
+                                {cat && <ConnectorSetup entry={cat} connectorId={c.id} compact />}
                                 {notReady ? (
                                   <span className="rounded-sm bg-neutral-800 px-1 py-0.5 text-[9px] uppercase tracking-wide text-neutral-500">
                                     disabled · preview
                                   </span>
                                 ) : c.status === 'ok' ? (
                                   <span className="flex items-center gap-1 text-[11px] text-green-500">
-                                    <IconCircleCheck className="h-3.5 w-3.5" /> connected
+                                    <Tabler.IconCircleCheck className="h-3.5 w-3.5" /> connected
                                   </span>
                                 ) : c.status === 'error' ? (
                                   <span className="flex items-center gap-1 text-[11px] text-red-400">
-                                    <IconAlertTriangle className="h-3.5 w-3.5" /> error
+                                    <Tabler.IconAlertTriangle className="h-3.5 w-3.5" /> error
                                   </span>
                                 ) : (
                                   <span className="text-[11px] text-neutral-600">not tested</span>
@@ -866,7 +826,7 @@ export function ConnectorsScreen(): ReactElement {
                                   : `${c.synced_count ?? 0} items synced · last ${fmtAgo(c.last_synced)}`}
                               </div>
                             </div>
-                            <IconChevronRight className="h-4 w-4 shrink-0 text-neutral-600" />
+                            <Tabler.IconChevronRight className="h-4 w-4 shrink-0 text-neutral-600" />
                           </button>
                         )
                       })}

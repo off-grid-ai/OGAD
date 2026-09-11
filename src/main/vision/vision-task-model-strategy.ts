@@ -6,9 +6,12 @@ import type {
   ComputerUseActiveModelProjection,
   ComputerUseModelStrategy
 } from '../../shared/computer-use-settings'
-import { remoteVisionModelId } from '../../shared/remote-vision-server'
 import { withGrounder, selectedGrounderModelId } from './grounder-loader'
-import { createHybridVisionGrounder, productionHybridReasoner } from './hybrid-vision-grounder'
+import {
+  createHybridVisionGrounder,
+  productionHybridReasoner,
+  type HybridVisionGrounderDependencies
+} from './hybrid-vision-grounder'
 import {
   matchVisionModelAdapter,
   resolveVisionModelAdapter,
@@ -21,9 +24,16 @@ import type {
   VisionPolicyInput
 } from './model-adapters/types'
 import { createVisionGrounder } from './vision-policy-runner'
-import { getActiveRemoteVisionServer } from './remote-vision-server'
+import { getSelectedRemoteVisionServer } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
+import {
+  resolveComputerUseRoleProjection,
+  type ComputerUseRoleSelection,
+  type ComputerUseSessionApplicationService
+} from '@offgrid/models/computer-use'
+import { createComputerUseSessionApplication } from '../composition/computer-use-session'
+import { desktopModels, refreshDesktopModels } from '../composition/application-access'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -50,6 +60,8 @@ export interface VisionTaskModelStrategyDependencies {
   resolveIdentity(modelId: string): Promise<ModelIdentity>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   runReasoner: typeof productionHybridReasoner
+  runSpecialist?: HybridVisionGrounderDependencies['runSpecialist']
+  resolveGenerationRoute?(modelId: string, requiredThinking?: boolean): Promise<string>
 }
 
 const productionDependencies: VisionTaskModelStrategyDependencies = {
@@ -58,23 +70,22 @@ const productionDependencies: VisionTaskModelStrategyDependencies = {
   activeArtifacts: () => llm.activeModelArtifacts(),
   activeRemote: () => {
     const session = currentRemoteScreenTaskSession()
-    return session ? session.activeServer : getActiveRemoteVisionServer()
+    return session ? session.activeServer : getSelectedRemoteVisionServer('text')
   },
   selectedChatId: getActiveModel,
   selectedSpecialistId: selectedGrounderModelId,
   resolveIdentity: resolveModelIdentity,
   withSpecialist: withGrounder,
-  runReasoner: productionHybridReasoner
+  runReasoner: productionHybridReasoner,
+  resolveGenerationRoute: computerUseRouteId
 }
 
 async function projectedModel(
-  role: ComputerUseActiveModel['role'],
-  modelId: string,
-  remote: boolean,
+  selection: ComputerUseRoleSelection,
   dependencies: VisionTaskModelStrategyDependencies
 ): Promise<ComputerUseActiveModel> {
-  const identity = await dependencies.resolveIdentity(modelId)
-  return { role, ...identity, remote }
+  const identity = await dependencies.resolveIdentity(selection.modelId)
+  return { role: selection.role, ...identity, remote: selection.remote }
 }
 
 /** Canonical read-only model-role projection for Active Models. */
@@ -83,32 +94,20 @@ export async function getComputerUseActiveModelProjection(
 ): Promise<ComputerUseActiveModelProjection> {
   const strategy = dependencies.strategy()
   const remote = dependencies.activeRemote()
-  const chatModelId = remote
-    ? remoteVisionModelId(remote.id, remote.model)
-    : dependencies.selectedChatId()
-  const specialistModelId = dependencies.selectedSpecialistId()
-  if (strategy === 'same_as_chat') {
-    return {
-      strategy,
-      strategyLabel: 'Same as Chat',
-      models: chatModelId
-        ? [await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies)]
-        : []
-    }
+  const chatModelId = remote ? remoteChatRouteId(remote) : dependencies.selectedChatId()
+  const projection = resolveComputerUseRoleProjection({
+    strategy,
+    chatModelId,
+    chatRemote: Boolean(remote),
+    specialistModelId: dependencies.selectedSpecialistId()
+  })
+  return {
+    strategy: projection.strategy,
+    strategyLabel: projection.strategyLabel,
+    models: await Promise.all(
+      projection.models.map((selection) => projectedModel(selection, dependencies))
+    )
   }
-  if (strategy === 'separate_specialist') {
-    return {
-      strategy,
-      strategyLabel: 'Specialist',
-      models: [await projectedModel('grounding_specialist', specialistModelId, false, dependencies)]
-    }
-  }
-  const models: ComputerUseActiveModel[] = []
-  if (chatModelId) {
-    models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
-  }
-  models.push(await projectedModel('grounding_specialist', specialistModelId, false, dependencies))
-  return { strategy, strategyLabel: 'Text + Specialist', models }
 }
 
 function activeChatSelection(
@@ -118,7 +117,7 @@ function activeChatSelection(
   if (remote) {
     return {
       adapter: generalVisionOperatorAdapter,
-      modelId: remoteVisionModelId(remote.id, remote.model)
+      modelId: remoteChatRouteId(remote)
     }
   }
   const artifacts = dependencies.activeArtifacts()
@@ -154,40 +153,91 @@ function specialistFamily(dependencies: VisionTaskModelStrategyDependencies): Vi
   }
 }
 
-async function directSession(
-  environment: VisionPolicyInput['operatorEnvironment'],
+async function observeModel(
   selection: VisionModelSelection,
-  dependencies: VisionTaskModelStrategyDependencies
-): Promise<VisionTaskModelSession> {
+  dependencies: VisionTaskModelStrategyDependencies,
+  requiredThinking = false
+): Promise<{ modelId: string; model: VisionModelAdapter; routeId?: string }> {
   return {
-    adapter: selection.adapter,
-    identity: await dependencies.resolveIdentity(selection.modelId),
-    decide: createVisionGrounder(selection.adapter, environment)
+    modelId: selection.modelId,
+    model: selection.adapter,
+    routeId: await dependencies.resolveGenerationRoute?.(selection.modelId, requiredThinking)
   }
 }
 
-async function hybridSession(
-  environment: VisionPolicyInput['operatorEnvironment'],
-  dependencies: VisionTaskModelStrategyDependencies
-): Promise<VisionTaskModelSession> {
-  const reasoner = activeChatSelection(dependencies)
-  const specialist = specialistFamily(dependencies)
-  const [reasonerIdentity, specialistIdentity] = await Promise.all([
-    dependencies.resolveIdentity(reasoner.modelId),
-    dependencies.resolveIdentity(specialist.modelId)
-  ])
-  return {
-    adapter: specialist.adapter,
-    identity: {
-      modelId: `${reasonerIdentity.modelId} + ${specialistIdentity.modelId}`,
-      modelName: `${reasonerIdentity.modelName} + ${specialistIdentity.modelName}`
-    },
-    decide: createHybridVisionGrounder(environment, {
-      runReasoner: dependencies.runReasoner,
-      withSpecialist: dependencies.withSpecialist,
-      activeSpecialistAdapter: () => activeSpecialistSelection(dependencies).adapter
-    })
+export function computerUseRouteIdFromInventory(
+  models: readonly import('@offgrid/models').RuntimeModel[],
+  modelId: string,
+  requiredThinking: boolean
+): string {
+  const matches = models.filter((model) => model.id === modelId)
+  const selected = matches.length === 1 ? matches[0] : undefined
+  if (!selected?.routeId) {
+    throw new Error(`The Computer Use model route is unavailable: ${modelId}.`)
   }
+  if (requiredThinking && selected.capabilities.thinking !== true) {
+    throw new Error(
+      `${selected.name || modelId} does not support the required capabilities: thinking.`
+    )
+  }
+  return selected.routeId
+}
+
+/** A remote server's chat model, named by the route this device lists for it. */
+function remoteChatRouteId(remote: { id: string; model: string }): string {
+  const route = desktopModels.remoteModelRoute(remote.id, remote.model, 'text')
+  if (!route) throw new Error("The remote chat model is not in this device's inventory.")
+  return route
+}
+
+async function computerUseRouteId(modelId: string, requiredThinking = false): Promise<string> {
+  await refreshDesktopModels()
+  const known = desktopModels.lookup(modelId)
+  const matches = desktopModels
+    .snapshot()
+    .inventory.filter((model) => model.modality === 'computer_use')
+    .filter((model) =>
+      known?.serverId
+        ? model.serverId === known.serverId && model.id === known.id
+        : !model.serverId && model.id === modelId
+    )
+  return computerUseRouteIdFromInventory(matches, known?.id ?? modelId, requiredThinking)
+}
+
+function createVisionTaskModelService(
+  dependencies: VisionTaskModelStrategyDependencies
+): ComputerUseSessionApplicationService<
+  VisionPolicyInput['operatorEnvironment'],
+  VisionModelAdapter,
+  VisionGroundingInput,
+  VisionGroundingResult
+> {
+  return createComputerUseSessionApplication({
+    strategy: dependencies.strategy,
+    observeChatModel: () => observeModel(activeChatSelection(dependencies), dependencies, true),
+    observeSpecialistModel: () => observeModel(specialistFamily(dependencies), dependencies),
+    observeActiveSpecialistModel: () =>
+      observeModel(activeSpecialistSelection(dependencies), dependencies),
+    resolveIdentity: dependencies.resolveIdentity,
+    runWithSpecialist: async (task) => (await dependencies.withSpecialist(task)).result,
+    createDirectDecision: ({ environment, selection }) =>
+      createVisionGrounder(selection.model, environment, selection.routeId),
+    createHybridDecision: ({
+      environment,
+      reasoner,
+      specialist,
+      runWithSpecialist,
+      observeActiveSpecialistModel
+    }) =>
+      createHybridVisionGrounder(environment, {
+        runReasoner: dependencies.runReasoner,
+        withSpecialist: async (task) => ({ result: await runWithSpecialist(task) }),
+        activeSpecialistAdapter: async () => (await observeActiveSpecialistModel()).model,
+        runSpecialist: dependencies.runSpecialist,
+        reasonerRouteId: reasoner.routeId,
+        specialistRouteId: specialist.routeId
+      })
+  })
 }
 
 /** Resolve one immutable model strategy session for a task. Web Use and
@@ -197,17 +247,7 @@ export async function withVisionTaskModelStrategy<T>(
   task: (session: VisionTaskModelSession) => Promise<T>,
   dependencies: VisionTaskModelStrategyDependencies = productionDependencies
 ): Promise<T> {
-  const strategy = dependencies.strategy()
-  if (strategy === 'text_plus_specialist') {
-    return task(await hybridSession(environment, dependencies))
-  }
-  if (strategy === 'same_as_chat') {
-    return task(await directSession(environment, activeChatSelection(dependencies), dependencies))
-  }
-  const { result } = await dependencies.withSpecialist(async () => {
-    return task(
-      await directSession(environment, activeSpecialistSelection(dependencies), dependencies)
-    )
-  })
-  return result
+  return createVisionTaskModelService(dependencies).withSession(environment, (session) =>
+    task({ adapter: session.model, identity: session.identity, decide: session.decide })
+  )
 }

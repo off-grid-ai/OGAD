@@ -18,7 +18,7 @@ import { expect, type Page } from '@playwright/test'
  * NOTE: the button copy is 'Start using Off Grid AI' while the product name is 'Off Grid AI
  * Desktop'. Matched as-is here rather than changing user-facing copy from a test fix.
  */
-const ONBOARDING_CTA = /^(Continue|Start using Off Grid AI)/i
+const ONBOARDING_CTA = /^(Continue|Start using Off Grid(?: AI(?: Desktop)?)?)$/i
 
 const dismissOptionalSetupNudge = async (page: Page): Promise<void> => {
   const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true })

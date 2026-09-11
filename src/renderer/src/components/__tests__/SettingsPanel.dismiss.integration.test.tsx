@@ -7,13 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, cleanup, fireEvent, screen } from '@testing-library/react'
 import { SettingsPanel } from '../SettingsPanel'
 import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
+import { modelControlSnapshot } from './harness/model-control-snapshot'
 
 beforeEach(() => {
+  const modelControl = modelControlSnapshot({ kinds: ['text'], models: [] })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getLlmSettings: vi.fn().mockResolvedValue({}),
+    getModelControlProjection: vi.fn().mockResolvedValue(modelControl),
+    onModelControlProjection: vi.fn(() => vi.fn()),
+    getTranscriptionInfo: vi.fn().mockResolvedValue(null),
     ttsVoices: vi.fn().mockResolvedValue([]),
     prepareTtsVoice: vi.fn().mockResolvedValue({ ready: true }),
     onTtsVoiceProgress: vi.fn(() => vi.fn()),
+    speechCommands: { onEvent: vi.fn(() => vi.fn()) },
     listTools: vi.fn().mockResolvedValue([]),
     getSettings: vi.fn().mockResolvedValue({}),
     mcpList: vi.fn().mockResolvedValue([]),

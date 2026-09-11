@@ -6,17 +6,39 @@
 // and loop until it answers. Built-in tools only (no network) for now — web
 // search + MCP connectors plug in here later.
 
-import { llm } from './llm'
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
-import { isMemoryToolAllowed } from './tools/memory-scope'
-import { parseToolCallsFromText } from './tools/tool-call-parse'
+import { randomUUID } from 'node:crypto'
 import { getSetting, saveSetting } from './database'
-import { buildContentParts } from './llm/chat-payload'
-import { readImages } from './llm/read-images'
-import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
-import { evaluateArithmetic } from './calculator'
+import {
+  DeferredImageRequestCollector,
+  ModelCapabilityError,
+  boundedToolHistory,
+  buildAgentToolMessages,
+  braveSearchUrl,
+  duckDuckGoSearchUrl,
+  formatWebSearchResults,
+  parseBraveResults,
+  parseDuckDuckGoResults,
+  definitionToOpenAITool,
+  evaluateArithmetic,
+  executePortableTool,
+  htmlToMarkdown,
+  normalizeToolUrl,
+  readUrlResultText,
+  catalogEntryToDefinition,
+  findToolCatalogEntry,
+  normalizeMaxToolCalls,
+  openAIToolToDefinition,
+  parseToolArguments,
+  prepareToolCallWithQueryFallback,
+  resolveTemporalSearchScope,
+  selectAvailableToolDefinitions,
+  selectToolExtensions,
+  toolSchemaTokenBudget,
+  type RuntimeModel
+} from '@offgrid/models'
+
 import type { SearchKind, SearchResult } from '../shared/search-contract'
-import { selectToolExtensions } from './tools/extension-select'
 import {
   PROPOSAL_DECK_TOOL,
   PROPOSAL_DECK_TOOL_NAME,
@@ -25,7 +47,35 @@ import {
 } from './proposal-deck/tool'
 import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
-import { DEFAULT_MAX_TOOL_CALLS } from '../shared/llm-defaults'
+import { DEFAULT_MAX_TOOL_CALLS } from '@offgrid/models'
+import { generateDesktopMessages } from './desktop-generation'
+import { desktopGenerationObservations } from './model-generation-adapters'
+import { desktopRag } from './composition/application-access'
+import { requireApplicationOutcome } from './composition/application-outcome'
+import type { GenerationMetrics } from '../shared/generation-metrics'
+import {
+  desktopToolCallLimit,
+  desktopToolContextSize,
+  readSupportedToolImages
+} from './tools/platform-ports'
+import { toolRoutingService } from './composition/tools'
+import type { GenerationToolCall, GenerationToolDefinition } from '@offgrid/models'
+import type { ToolActivity, ToolCallStatus, ToolContext, ToolResult } from './tool-types'
+
+export type {
+  ToolActivity,
+  ToolCallStatus,
+  ToolContext,
+  ToolConversationTurn,
+  ToolResult
+} from './tool-types'
+
+const sharedToolDefinition = (name: string): ReturnType<typeof catalogEntryToDefinition> =>
+  catalogEntryToDefinition(findToolCatalogEntry(name)!)
+const webSearchTool = sharedToolDefinition('web_search')
+const readUrlTool = sharedToolDefinition('read_url')
+const calculatorTool = sharedToolDefinition('calculator')
+const dateTimeTool = sharedToolDefinition('get_current_datetime')
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -45,46 +95,6 @@ export function setToolEnabled(name: string, enabled: boolean): void {
 // Per-turn context a tool may need beyond its args. Injected by the loop so a tool
 // owns its full behavior instead of the loop special-casing it (e.g. search_memory
 // excludes the current conversation so it can't cite itself).
-export interface ToolContext {
-  conversationId?: string
-  /** Authenticated Mobile launch identity. Only the MCP admission boundary sets it. */
-  taskLaunch?: { launchId: string; requestingDeviceId: string }
-  /** The exact user message. Approval-gated tools use this instead of trusting model-made args. */
-  userQuery?: string
-  /** Bounded prior user/assistant turns. Intake tools combine these facts with
-   *  the current query instead of treating a follow-up as a new task. */
-  history?: ToolConversationTurn[]
-  onActivity?: (activity: ToolActivity) => void
-  /** The active project (if the chat is in one), so search_knowledge_base can query
-   *  that project's uploaded docs + captured memory. */
-  projectId?: string
-}
-
-export interface ToolConversationTurn {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-export type ToolCallStatus = 'completed' | 'failed' | 'pending'
-
-export type ToolActivity = { kind: 'planning'; label: 'Planning next action…' }
-
-// A tool's structured result. Most tools just return text (a bare string, which the
-// loop normalizes to { text }); a tool may ALSO emit side channels — `sources`
-// (interactive citations, from search_memory) and `imageRequest` (the deferred
-// image prompt, from generate_image) — so the loop dispatches every tool uniformly
-// and no longer branches on the tool's name.
-export interface ToolResult {
-  text: string
-  /** Structured execution state. `pending` means the tool needs user input. */
-  status?: ToolCallStatus
-  /** When true, `text` is the final user-facing answer and no model may rewrite it. */
-  authoritative?: boolean
-  sources?: UnifiedSource[]
-  imageRequest?: { prompt: string }
-  imageRequests?: ProposalDeferredImageRequest[]
-}
-
 type ToolDef = {
   name: string
   description: string
@@ -107,17 +117,26 @@ export async function searchMemoryToolResult(
     excludeChatId?: string
     emptyText?: string
     errorSubject?: string
+    /** The original user request, which the model-made search query may paraphrase. */
+    temporalQuery?: string
   } = {}
 ): Promise<ToolResult> {
   try {
     const { universalSearch } = await import('./search')
     const limit = Math.min(20, Math.max(1, Number(options.limit) || 8))
+    const temporalScope = resolveTemporalSearchScope(options.temporalQuery ?? query, {
+      nowMs: Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    })
     const hits = await universalSearch(query, {
       limit,
       semantic: true,
       kinds: options.kinds,
       collapseScreenMoments: options.collapseScreenMoments,
-      excludeChatId: options.excludeChatId
+      excludeChatId: options.excludeChatId,
+      timeRange: temporalScope
+        ? { startMs: temporalScope.startMs, endMs: temporalScope.endMs }
+        : undefined
     })
     const sources: UnifiedSource[] = hits.map((hit) => ({ ...hit }))
     const text = hits.length
@@ -142,45 +161,26 @@ export async function searchMemoryToolResult(
 // Fetch a URL and return its readable text (shared by the read_url tool and the
 // deterministic "read this URL, then build" flow). Works for localhost too.
 export async function readUrlText(url: string): Promise<string> {
-  let u = url.trim()
-  if (!/^https?:\/\//i.test(u)) u = 'https://' + u
-  const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } })
+  const target = normalizeToolUrl(url)
+  const res = await fetch(target, { headers: { 'User-Agent': 'Mozilla/5.0' } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return htmlToText(await res.text())
+  return htmlToMarkdown(await res.text())
 }
 
 // --- Built-in tools --------------------------------------------------------
 const TOOLS: ToolDef[] = [
   {
-    name: 'web_search',
-    description:
-      "Search the web via DuckDuckGo and return the top results (title, URL, snippet). Use for current events or facts not in the user's memory. Requires network.",
-    parameters: {
-      type: 'object',
-      properties: { query: { type: 'string', description: 'the search query' } },
-      required: ['query']
-    },
+    name: webSearchTool.name,
+    description: webSearchTool.description ?? '',
+    parameters: webSearchTool.inputSchema,
     run: async (a) => {
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
-        const res = await fetch('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q), {
+        const res = await fetch(duckDuckGoSearchUrl(q), {
           headers: { 'User-Agent': 'Mozilla/5.0' }
         })
-        const html = await res.text()
-        const titles: { title: string; url: string }[] = []
-        const re = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
-        let m: RegExpExecArray | null
-        while ((m = re.exec(html)) && titles.length < 6)
-          titles.push({ url: decodeDdgHref(m[1]!), title: stripTags(m[2]!) })
-        const snippets: string[] = []
-        const sre = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
-        let s: RegExpExecArray | null
-        while ((s = sre.exec(html)) && snippets.length < 6) snippets.push(stripTags(s[1]!))
-        if (!titles.length) return 'No results found.'
-        return titles
-          .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${snippets[i] || ''}`)
-          .join('\n')
+        return formatWebSearchResults(parseDuckDuckGoResults(await res.text()), q)
       } catch (e) {
         return 'Error: search failed — ' + (e as Error).message
       }
@@ -199,67 +199,41 @@ const TOOLS: ToolDef[] = [
       const q = String(a.query ?? '').trim()
       if (!q) return 'Error: empty query.'
       try {
-        const res = await fetch(
-          'https://search.brave.com/search?q=' + encodeURIComponent(q) + '&source=web',
-          {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-              'Accept-Language': 'en-US,en;q=0.9'
-            }
+        const res = await fetch(braveSearchUrl(q), {
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
           }
-        )
-        const html = await res.text()
-        const out: { title: string; url: string }[] = []
-        const seen = new Set<string>()
-        const re = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
-        let m: RegExpExecArray | null
-        while ((m = re.exec(html)) && out.length < 6) {
-          const url = m[1]!
-          if (/brave\.com|search\.brave|\/settings|javascript:/i.test(url)) continue
-          const title = stripTags(m[2]!)
-          if (!title || title.length < 3 || seen.has(url)) continue
-          seen.add(url)
-          out.push({ title, url })
-        }
-        if (!out.length) return 'No results found (Brave markup may have changed — try web_search).'
-        return out.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}`).join('\n')
+        })
+        const results = parseBraveResults(await res.text())
+        if (!results.length)
+          return 'No results found (Brave markup may have changed — try web_search).'
+        return formatWebSearchResults(results, q)
       } catch (e) {
         return 'Error: brave search failed — ' + (e as Error).message
       }
     }
   },
   {
-    name: 'read_url',
-    description:
-      'Fetch a web page and return its readable text. Use to read a specific URL (e.g. one from web_search). Requires network.',
-    parameters: {
-      type: 'object',
-      properties: { url: { type: 'string', description: 'the page URL' } },
-      required: ['url']
-    },
+    name: readUrlTool.name,
+    description: readUrlTool.description ?? '',
+    parameters: readUrlTool.inputSchema,
     run: async (a) => {
-      let url = String(a.url ?? '').trim()
-      if (!url) return 'Error: empty url.'
-      if (!/^https?:\/\//i.test(url)) url = 'https://' + url
+      const raw = String(a.url ?? '').trim()
+      if (!raw) return 'Error: empty url.'
       try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-        if (!res.ok) return `Error: HTTP ${res.status}`
-        const text = htmlToText(await res.text())
-        return text ? text.slice(0, 6000) : 'No readable text on the page.'
+        const url = normalizeToolUrl(raw)
+        return readUrlResultText(await readUrlText(url), { url })
       } catch (e) {
         return 'Error: could not fetch — ' + (e as Error).message
       }
     }
   },
   {
-    name: 'calculator',
-    description: 'Evaluate a basic arithmetic expression and return the numeric result.',
-    parameters: {
-      type: 'object',
-      properties: { expression: { type: 'string', description: 'e.g. "(3+4)*2/7"' } },
-      required: ['expression']
-    },
+    name: calculatorTool.name,
+    description: calculatorTool.description ?? '',
+    parameters: calculatorTool.inputSchema,
     run: (a) => {
       const expr = String(a.expression ?? '')
       try {
@@ -324,7 +298,8 @@ const TOOLS: ToolDef[] = [
     run: (args, context) =>
       searchMemoryToolResult(String(args.query ?? ''), {
         limit: Number(args.limit) || 8,
-        excludeChatId: context.conversationId
+        excludeChatId: context.conversationId,
+        temporalQuery: context.userQuery
       })
   },
   {
@@ -339,8 +314,10 @@ const TOOLS: ToolDef[] = [
         return { text: 'No active project — the knowledge base needs an open project.' }
       }
       try {
-        const { ragService } = await import('./rag')
-        const handler = makeSearchKnowledgeBaseHandler(ragService)
+        const handler = makeSearchKnowledgeBaseHandler({
+          searchProject: async (projectId, query) =>
+            requireApplicationOutcome(await desktopRag.search(projectId, query))
+        })
         return { text: await handler({ query: String(a.query ?? '') }, ctx.projectId) }
       } catch (e) {
         return { text: 'Error searching the knowledge base: ' + (e as Error).message }
@@ -349,9 +326,9 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'get_datetime',
-    description: 'Get the current local date and time.',
-    parameters: { type: 'object', properties: {} },
-    run: () => new Date().toString()
+    description: dateTimeTool.description ?? '',
+    parameters: dateTimeTool.inputSchema,
+    run: () => executePortableTool('get_datetime', {}) ?? new Date().toString()
   },
   {
     // generate_image is DEFERRED: run() never generates. It records the requested
@@ -373,6 +350,9 @@ const TOOLS: ToolDef[] = [
       return prompt
         ? {
             text: 'Image generation started - it will appear in the chat.',
+            // Native generation runs after the text-model loop. This step is not complete until
+            // that deferred boundary returns a real artifact.
+            status: 'pending',
             imageRequest: { prompt }
           }
         : { text: 'Error: no image prompt provided.' }
@@ -392,22 +372,12 @@ const TOOLS: ToolDef[] = [
 
 // generate_image is gated on an image model being available and is never offered
 // otherwise; every other built-in obeys only the disabled-set.
-function schemas(
-  imageAvailable: boolean,
-  scope: { projectActive: boolean; allMemory: boolean; proposalDeck: boolean }
-): unknown[] {
-  const off = disabledSet()
-  return (
-    TOOLS.filter((t) => !off.has(t.name))
-      .filter((t) => t.name !== 'generate_image' || imageAvailable)
-      .filter((t) => t.name !== PROPOSAL_DECK_TOOL_NAME || scope.proposalDeck)
-      // Memory tools (search_knowledge_base / search_memory) follow the chat's memory scope.
-      .filter((t) => isMemoryToolAllowed(t.name, scope))
-      .map((t) => ({
-        type: 'function',
-        function: { name: t.name, description: t.description, parameters: t.parameters }
-      }))
-  )
+function builtInDefinitions(): GenerationToolDefinition[] {
+  return TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.parameters
+  }))
 }
 
 /** Normalize a tool's return (bare string or structured) to a ToolResult. */
@@ -517,6 +487,8 @@ export async function toolChat(
     thinking?: boolean
     signal?: AbortSignal
     onDelta?: (text: string, kind: 'content' | 'reasoning') => void
+    onRoute?: (model: RuntimeModel) => void
+    onFallback?: (failed: RuntimeModel, next: RuntimeModel, error: unknown) => void
     onStep?: (call: { name: string; args: Record<string, unknown> }) => void
     onToolResult?: (call: { name: string; result: string; status: ToolCallStatus }) => void
     onActivity?: (activity: ToolActivity) => void
@@ -530,6 +502,8 @@ export async function toolChat(
   imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string }
+  /** Speed and token facts of the answer generation, when the engine reported them. */
+  metrics?: GenerationMetrics
 }> {
   if (opts.conversationId) {
     const decision = await callHookAsync<{ answer: string } | null>(
@@ -545,16 +519,6 @@ export async function toolChat(
       }
     }
   }
-  const plannerUnavailable = await llm.toolPlannerPreflight()
-  if (plannerUnavailable) {
-    return {
-      answer: plannerUnavailable,
-      toolCalls: [],
-      unified: [],
-      imageRequests: []
-    }
-  }
-  await llm.init() // respects pause; ensures the server is up
   const onDelta = opts.onDelta ?? ((): void => {})
   const toolContext: ToolContext = {
     conversationId: opts.conversationId,
@@ -564,36 +528,23 @@ export async function toolChat(
     onActivity: opts.onActivity
   }
 
-  // Offer generate_image only when an image model is available. The renderer passes
-  // this; fall back to the main-process check so a caller that omits it still gates
-  // correctly (single source of truth for "can we make an image right now").
-  let imageAvailable = opts.imageAvailable ?? false
-  if (opts.imageAvailable === undefined) {
-    try {
-      const { activeImageModel } = await import('./imagegen')
-      imageAvailable = !!activeImageModel()
-    } catch {
-      /* no image runtime -> stay false */
-    }
-  }
-
   // Opt-in: pull in tools from registered pro extensions (e.g. MCP connectors)
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
   const exts = selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
-  const extSchemas: unknown[] = []
+  const extDefinitions: GenerationToolDefinition[] = []
   const hints: string[] = []
   const disabled = disabledSet()
   for (const e of exts) {
     try {
       const s = await e.schemas()
-      const enabledSchemas = s.filter((schema) => {
-        const name = (schema as { function?: { name?: unknown } }).function?.name
-        return typeof name !== 'string' || !disabled.has(name)
+      const definitions = s.flatMap((schema) => {
+        const definition = openAIToolToDefinition(schema)
+        return definition ? [definition] : []
       })
-      if (enabledSchemas.length) {
-        extSchemas.push(...enabledSchemas)
+      if (definitions.length) {
+        extDefinitions.push(...definitions)
         if (e.systemHint) hints.push(e.systemHint())
       }
     } catch (err) {
@@ -603,60 +554,41 @@ export async function toolChat(
   const proposalDeckActive =
     /# Skill:\s*proposal-deck\b|\/proposal-deck\b/i.test(query) ||
     (!!opts.conversationId && !!proposalDeckService().get(opts.conversationId))
-  const builtins = schemas(imageAvailable, {
-    projectActive: !!opts.projectId,
-    allMemory: !!opts.allMemory,
-    proposalDeck: proposalDeckActive
+  const memoryScope = { projectActive: !!opts.projectId, allMemory: !!opts.allMemory }
+  const builtins = selectAvailableToolDefinitions(builtInDefinitions(), {
+    disabledToolNames: disabled,
+    memoryScope,
+    imageAvailable: opts.imageAvailable ?? false,
+    proposalDeckAvailable: proposalDeckActive,
+    proposalDeckToolName: PROPOSAL_DECK_TOOL_NAME
   })
-  const rawTools = extSchemas.length ? [...builtins, ...extSchemas] : builtins
-  // Keep the tool payload within the model's context. llama-server inlines every
-  // tool schema into the prompt AND compiles it to a grammar, so a big connector
-  // set can blow past the context window and 400 the whole turn. Budget to a
-  // fraction of the effective context (leaving room for system + history +
-  // answer); prune verbose schemas first, drop connector tools only if needed.
-  // Smart routing: rank connector tools by relevance to this turn's message BEFORE
-  // budgeting, so the budgeter (which drops from the end) keeps the tools that
-  // actually match the request rather than whichever were last. Built-ins keep
-  // their position. Prefer SEMANTIC ranking (embedding similarity — matches on
-  // meaning, e.g. "meetings" → a calendar tool); fall back to lexical term-overlap
-  // if the embeddings backend isn't ready. No-op with 0-1 connector tools.
-  let rankedTools = rawTools
-  if (rawTools.length - builtins.length > 1) {
-    try {
-      const { embeddings } = await import('./embeddings')
-      const { rankConnectorToolsSemantic } = await import('./tools/tool-embedding-ranking')
-      rankedTools = await rankConnectorToolsSemantic(query, rawTools, builtins.length, {
-        embed: (t) => embeddings.generateEmbedding(t)
-      })
-    } catch {
-      const { rankConnectorTools } = await import('./tools/tool-ranking')
-      rankedTools = rankConnectorTools(query, rawTools, builtins.length)
-    }
-  }
-  const { budgetTools } = await import('./tools/tool-budget')
-  const ctx = llm.effectiveContextSize()
-  // Cap tool tokens in ABSOLUTE terms too, not just as a fraction of context:
-  // llama-server re-processes the entire tool prompt every tool round (gemma-4's
-  // sliding-window attention defeats the prompt cache), so on CPU-only inference a
-  // large tool payload dominates latency. ~4k keeps a useful connector set while
-  // roughly halving per-round prompt cost vs the old 45%-of-a-big-context budget.
-  const MAX_TOOL_TOKENS = 4000
-  const toolBudget = Math.max(1024, Math.min(Math.floor(ctx * 0.4), MAX_TOOL_TOKENS))
-  const budgeted = budgetTools(rankedTools, toolBudget, builtins.length)
-  if (budgeted.pruned || budgeted.droppedCount) {
+  const extensions = selectAvailableToolDefinitions(extDefinitions, {
+    disabledToolNames: disabled,
+    memoryScope,
+    imageAvailable: false,
+    proposalDeckAvailable: false
+  })
+  const toolBudget = toolSchemaTokenBudget(desktopToolContextSize())
+  const routed = await toolRoutingService().select({
+    messages: buildAgentToolMessages({ query, history }),
+    builtInTools: builtins,
+    externalTools: extensions,
+    remoteModel: false,
+    embeddingRouting: true,
+    modelRouting: false,
+    lexicalFallback: true,
+    schemaTokenLimit: toolBudget
+  })
+  if (routed.droppedCount) {
     console.warn(
-      `[tools] context budget ${toolBudget} tok: pruned schemas${budgeted.droppedCount ? `, dropped ${budgeted.droppedCount} connector tool(s)` : ''} to fit (final ~${budgeted.estTokens} tok)`
+      `[tools] context budget ${toolBudget} tok: dropped ${routed.droppedCount} connector tool(s) to fit (final ~${routed.estimatedTokens} tok)`
     )
-    if (budgeted.droppedCount)
-      hints.push(
-        `Note: ${budgeted.droppedCount} connector tool(s) were omitted this turn to fit the context window; ask the user to disable some connectors if a needed tool is missing.`
-      )
+    hints.push(
+      `Note: ${routed.droppedCount} connector tool(s) were omitted this turn to fit the context window; ask the user to disable some connectors if a needed tool is missing.`
+    )
   }
-  const tools = budgeted.tools
-  const sys =
-    'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
-    (hints.length ? ' ' + hints.join(' ') : '') +
-    (proposalDeckActive ? ` ${proposalDeckSystemHint(opts.conversationId)}` : '')
+  const tools = routed.tools.map(definitionToOpenAITool)
+  if (proposalDeckActive) hints.push(proposalDeckSystemHint(opts.conversationId))
 
   // Attached images ride on the current user turn so the vision model can read
   // them even in tools/connectors mode (otherwise they were silently dropped).
@@ -664,179 +596,99 @@ export async function toolChat(
   // of truth (the renderer's flag is fetched once per mount and can be stale). A
   // text-only model given image_url parts either ignores them (silent wrong answer)
   // or errors, so drop the attachments when there's no vision projector.
-  const decodedImages = opts.images?.length && llm.hasVision() ? readImages(opts.images) : []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [
-    { role: 'system', content: sys },
-    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user', content: buildContentParts(query, decodedImages) }
-  ]
+  const decodedImages = readSupportedToolImages(opts.images ?? [])
+  const messages = buildAgentToolMessages({
+    query,
+    history,
+    systemHints: hints,
+    imageParts: decodedImages.map((image) => ({
+      type: 'image' as const,
+      mimeType: image.mime,
+      data: image.base64
+    }))
+  })
   const toolCalls: ToolCall[] = []
   const unified: UnifiedSource[] = []
   const unifiedKeys = new Set<string>()
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
-  const imageRequests: (ProposalDeferredImageRequest | { prompt: string })[] = []
-  const resultWithImages = (result: {
-    answer: string
-    toolCalls: ToolCall[]
-    unified: UnifiedSource[]
-  }): {
-    answer: string
-    toolCalls: ToolCall[]
-    unified: UnifiedSource[]
-    imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
-    imageRequest?: { prompt: string }
-  } => {
-    const finalImageRequest = imageRequests.at(-1)
-    return {
-      ...result,
-      imageRequests,
-      ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
-    }
-  }
+  const imageRequests = new DeferredImageRequestCollector<
+    ProposalDeferredImageRequest | { prompt: string }
+  >()
 
-  const maxToolCalls = llm.getSettings().maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS
-  let round = 0
-  while (toolCalls.length < maxToolCalls) {
-    // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
-    // are accumulated and returned. A tool-calling round streams thinking (and no content);
-    // the final round streams the answer. tool temperature stays 0.3 (was the blocking path).
-    const { content, toolCalls: calls } = await llm.streamChat(messages, onDelta, {
+  const maxToolRounds = normalizeMaxToolCalls(desktopToolCallLimit() ?? DEFAULT_MAX_TOOL_CALLS)
+  let streamedContent = ''
+  const turnId = `desktop-tools:${randomUUID()}`
+  try {
+    const result = await generateDesktopMessages(messages, {
+      operation: { type: 'text' },
       tools,
       toolChoice: 'auto',
-      temperature: 0.3,
-      // No hardcoded output cap: the round that produces the FINAL answer (no tool calls) must be
-      // free to write a long response. Inherit the user's Max-output setting (auto by default →
-      // until EOS / window fills). A tool-selection round stays short on its own (it emits a call).
+      profile: 'tool-loop',
       thinking: opts.thinking,
-      signal: opts.signal
-    })
-
-    // Stop pressed during the round: streamCompletion resolves with the partial
-    // tool_calls it assembled (it doesn't reject on abort), so we MUST NOT execute
-    // them — a cancelled turn fires no side effects (e.g. an MCP send/create).
-    // Return what we have; the renderer treats the turn as cancelled.
-    if (opts.signal?.aborted)
-      return resultWithImages({ answer: content.trim(), toolCalls, unified })
-
-    // Native tool_calls are preferred; but small on-device models (the gemma-4 we
-    // ship) often emit a call as TEXT instead of on the tool_calls channel. When
-    // the native channel is empty, recover any text-form call so the turn isn't a
-    // dead narration ("I would search for…"). Normalize both into one shape with
-    // args already parsed to an object.
-    const effective =
-      calls.length > 0
-        ? calls.map((c) => ({
-            id: c.id,
-            name: c.name,
-            args: safeParseArgs(c.arguments),
-            rawArgs: c.arguments || '{}'
-          }))
-        : parseToolCallsFromText(content).map((c, i) => ({
-            id: `txt-${String(round)}-${String(i)}`,
-            name: c.name,
-            args: c.args,
-            rawArgs: JSON.stringify(c.args)
-          }))
-
-    if (effective.length) {
-      // One model round can request several tools in parallel. Count the actual calls, as Mobile
-      // does, and execute only the remaining allowance so the configured ceiling stays truthful.
-      const remaining = maxToolCalls - toolCalls.length
-      const callsToRun = effective.slice(0, remaining)
-      // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
-      messages.push({
-        role: 'assistant',
-        content: content || null,
-        tool_calls: callsToRun.map((c) => ({
-          id: c.id,
-          type: 'function',
-          function: { name: c.name, arguments: c.rawArgs }
-        }))
-      })
-      for (const c of callsToRun) {
-        // Small models sometimes call a search tool with no query — backfill the
-        // user's message so the search isn't empty (rather than erroring out).
-        if (
-          (c.name === 'web_search' || c.name === 'brave_search') &&
-          !String((c.args as { query?: unknown }).query ?? '').trim()
-        ) {
-          c.args = { ...c.args, query }
-        }
-        opts.onStep?.({ name: c.name, args: c.args }) // surface the tool activity BEFORE running it
-        // Uniform dispatch — every tool owns its own result. Merge any structured
-        // side channels: sources are deduped into `unified` across rounds; image requests retain
-        // call order for deferred generation after the turn.
-        const res = await runTool(c.name, c.args, toolContext, exts)
-        for (const s of res.sources ?? []) {
-          if (unifiedKeys.has(s.key)) continue
-          unifiedKeys.add(s.key)
-          unified.push(s)
-        }
-        if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
-        else if (res.imageRequest) imageRequests.push(res.imageRequest)
-        const status = res.status ?? 'completed'
-        toolCalls.push({ name: c.name, args: c.args, result: res.text, status })
-        // Surface the COMPLETED call (with its result) live, so the UI can show each
-        // tool call + result as it lands, not only in the final batch.
-        opts.onToolResult?.({ name: c.name, result: res.text, status })
-        messages.push({ role: 'tool', tool_call_id: c.id, content: res.text })
-        if (res.authoritative) {
-          onDelta(res.text, 'content')
-          return resultWithImages({ answer: res.text, toolCalls, unified })
+      signal: opts.signal,
+      maxToolRounds,
+      maxToolCalls: maxToolRounds,
+      identity: {
+        conversationId: opts.conversationId ?? turnId,
+        turnId,
+        projectId: opts.projectId
+      },
+      events: {
+        chunk: (chunk) => {
+          if (chunk.reasoning) onDelta(chunk.reasoning, 'reasoning')
+          if (chunk.content) {
+            streamedContent += chunk.content
+            onDelta(chunk.content, 'content')
+          }
+        },
+        route: opts.onRoute,
+        fallback: opts.onFallback
+      },
+      toolExecution: {
+        prepare: (call) => prepareToolCallWithQueryFallback(call, query),
+        execute: async (call: GenerationToolCall) => {
+          if (opts.signal?.aborted) throw opts.signal.reason
+          const args = parseToolArguments(call.arguments)
+          opts.onStep?.({ name: call.name, args })
+          const res = await runTool(call.name, args, toolContext, exts)
+          for (const source of res.sources ?? []) {
+            if (unifiedKeys.has(source.key)) continue
+            unifiedKeys.add(source.key)
+            unified.push(source)
+          }
+          imageRequests.add(res)
+          const status = res.status ?? 'completed'
+          toolCalls.push({ name: call.name, args, result: res.text, status })
+          opts.onToolResult?.({ name: call.name, result: res.text, status })
+          if (res.authoritative) onDelta(res.text, 'content')
+          return {
+            content: res.text,
+            isError: status === 'failed',
+            terminal: res.authoritative,
+            metadata: {
+              status,
+              sources: res.sources,
+              imageRequest: res.imageRequest,
+              imageRequests: res.imageRequests
+            }
+          }
         }
       }
-      round += 1
-      continue // let the model use the results
+    })
+    return {
+      ...imageRequests.project({ answer: result.content.trim(), toolCalls, unified }),
+      metrics: desktopGenerationObservations.takeMetrics(turnId)
     }
-    // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: content.trim(), toolCalls, unified })
-  }
-  // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
-  // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
-  // user gets a real response built from the results gathered so far.
-  if (opts.signal?.aborted) {
-    return resultWithImages({ answer: '', toolCalls, unified })
-  }
-  const final = await llm.streamChat(messages, onDelta, {
-    temperature: 0.3,
-    // Forced final answer — inherit the user's Max-output setting (auto by default), never a fixed
-    // 1024 cap that truncated the response mid-sentence.
-    thinking: false,
-    signal: opts.signal
-  })
-  return resultWithImages({
-    answer: final.content.trim() || 'Stopped after too many tool steps.',
-    toolCalls,
-    unified
-  })
-}
-
-const TOOL_HISTORY_TURNS = 8
-const TOOL_HISTORY_CHARS_PER_TURN = 1_500
-
-function boundedToolHistory(history: { role: string; content: string }[]): ToolConversationTurn[] {
-  return history
-    .filter(
-      (turn): turn is { role: 'user' | 'assistant'; content: string } =>
-        (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string'
-    )
-    .slice(-TOOL_HISTORY_TURNS)
-    .map((turn) => ({
-      role: turn.role,
-      content: turn.content.slice(0, TOOL_HISTORY_CHARS_PER_TURN)
-    }))
-}
-
-/** Parse a tool-call arguments JSON string to an object; empty object on failure. */
-function safeParseArgs(raw: string | undefined): Record<string, unknown> {
-  try {
-    const v = JSON.parse(raw || '{}')
-    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
-  } catch {
-    return {}
+  } catch (error) {
+    if (opts.signal?.aborted) {
+      return imageRequests.project({ answer: streamedContent.trim(), toolCalls, unified })
+    }
+    if (error instanceof Error && error.cause instanceof ModelCapabilityError) {
+      return imageRequests.project({ answer: error.message, toolCalls, unified })
+    }
+    throw error
   }
 }
 

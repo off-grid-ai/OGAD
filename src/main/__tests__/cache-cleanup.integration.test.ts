@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #134 at the owning main-process seam. Electron's cache
+ * This covers cache cleanup at the owning main-process seam. Electron's cache
  * store is the only controlled boundary; the production cleanup receives no path
  * to any durable Off Grid AI store.
  */
@@ -39,14 +39,22 @@ beforeEach(() => {
 
 describe('ephemeral cache cleanup', () => {
   it('allowlists only Electron cache data and reports reclaimed bytes (#134)', async () => {
-    await expect(clearEphemeralCache()).resolves.toEqual({ success: true, freedBytes: 8_192 })
+    await expect(clearEphemeralCache()).resolves.toEqual({
+      success: true,
+      freedBytes: 8_192,
+      incompleteDownloadsRemoved: 0
+    })
     expect(boundary.clearCalls).toEqual([{ dataTypes: ['cache'] }])
   })
 
   it('still clears when Electron cannot measure the cache size', async () => {
     boundary.measurementFails = true
 
-    await expect(clearEphemeralCache()).resolves.toEqual({ success: true, freedBytes: null })
+    await expect(clearEphemeralCache()).resolves.toEqual({
+      success: true,
+      freedBytes: null,
+      incompleteDownloadsRemoved: 0
+    })
     expect(boundary.clearCalls).toEqual([{ dataTypes: ['cache'] }])
   })
 

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { isMemoryToolAllowed, KB_TOOL_NAME, MEMORY_TOOL_NAME } from '../memory-scope'
+import {
+  isMemoryToolAllowed,
+  KNOWLEDGE_BASE_TOOL_ID as KB_TOOL_NAME,
+  ALL_MEMORY_TOOL_ID as MEMORY_TOOL_NAME
+} from '@offgrid/models'
 
 const project = { projectActive: true, allMemory: false }
 const all = { projectActive: false, allMemory: true }

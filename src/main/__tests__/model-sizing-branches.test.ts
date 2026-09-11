@@ -1,16 +1,16 @@
-// Branch fill for model-sizing.ts. model-sizing.test.ts covers the headline fixes;
+// Branch fill for the shared text-runtime policy. model-sizing.test.ts covers the headline fixes;
 // this drives the remaining branches: the null-coalescing defaults on missing model
 // fields, preferredModelIds' conservative-vs-other split under 24GB, and the deeper
 // chooseChatModel fallback ladder (comfy -> smallest eligible -> smallest text -> null).
 import { describe, it, expect } from 'vitest'
 import {
-  totalBytes,
-  chooseChatModel,
-  preferredModelIds,
-  recommendedParamCeiling,
-  modeBudget,
+  modelFileBytes as totalBytes,
+  chooseTextModel as chooseChatModel,
+  preferredTextModelIds as preferredModelIds,
+  recommendedTextModelParamCeiling as recommendedParamCeiling,
+  textRuntimeModeBudget as modeBudget,
   type SizingModel
-} from '../model-sizing'
+} from '@offgrid/models'
 
 describe('recommendedParamCeiling - every RAM tier per mode', () => {
   it('conservative steps 1.5 -> 2 -> 4 -> 8 across the tiers', () => {

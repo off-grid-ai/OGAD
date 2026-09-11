@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ModelPicker } from '../ModelPicker'
 import { OPEN_MODEL_SETTINGS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
+import { modelControlBoundary } from './harness/model-control-snapshot'
 
 afterEach(() => {
   cleanup()
@@ -11,74 +12,94 @@ afterEach(() => {
 })
 
 function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
+  const computerUse = {
+    strategy: 'text_plus_specialist',
+    strategyLabel: 'Text + Specialist',
+    models: [
+      {
+        role: 'reasoner',
+        modelId: 'remote/reasoner',
+        modelName: 'Qwen Reasoner',
+        remote: true
+      },
+      {
+        role: 'grounding_specialist',
+        modelId: 'local/ui-tars',
+        modelName: 'UI-TARS 1.5 7B',
+        remote: false
+      }
+    ]
+  }
+  const models = [
+    {
+      id: 'local/qwen',
+      name: 'Qwen 3.5 2B',
+      kind: 'text',
+      files: [{ name: 'qwen.gguf', role: 'primary' }]
+    }
+  ]
+  // One owner for the model-control read and write. `ModelPicker` refreshes through
+  // `control({ type: 'refresh' })` on mount, so a fixture without the write door fails the whole
+  // load and renders an empty picker.
+  const modelControl = modelControlBoundary({
+    kinds: ['text'],
+    models,
+    installed: ['local/qwen'],
+    computerUse
+  })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
-    getModelCatalog: vi.fn().mockResolvedValue({
-      models: [
-        {
-          id: 'local/qwen',
-          name: 'Qwen 3.5 2B',
-          kind: 'text',
-          files: [{ name: 'qwen.gguf', role: 'primary' }]
-        }
-      ]
-    }),
+    getModelControlProjection: modelControl.getModelControlProjection,
+    onModelControlProjection: modelControl.onModelControlProjection,
+    controlModel: modelControl.controlModel,
+    getModelCatalog: vi.fn().mockResolvedValue({ models }),
     getInstalledModels: vi.fn().mockResolvedValue(['local/qwen']),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({}),
     getActiveModelIds: vi.fn().mockResolvedValue([]),
-    getComputerUseActiveModels: vi.fn().mockResolvedValue({
-      strategy: 'text_plus_specialist',
-      strategyLabel: 'Text + Specialist',
-      models: [
-        {
-          role: 'reasoner',
-          modelId: 'remote/reasoner',
-          modelName: 'Qwen Reasoner',
-          remote: true
-        },
-        {
-          role: 'grounding_specialist',
-          modelId: 'local/ui-tars',
-          modelName: 'UI-TARS 1.5 7B',
-          remote: false
-        }
-      ]
-    })
+    getComputerUseActiveModels: vi.fn().mockResolvedValue(computerUse)
   }
   render(<ModelPicker onClose={onClose} />)
   return onClose
 }
 
-function renderPickerWithRemote(): ReturnType<typeof vi.fn> {
-  const activateModel = vi.fn().mockResolvedValue({ success: true })
+const REMOTE_MODEL_ID = 'remote-vision:home:google%2Fgemma-4'
+
+function renderPickerWithRemote(): ReturnType<typeof modelControlBoundary> {
+  const models = [
+    {
+      id: REMOTE_MODEL_ID,
+      name: 'google/gemma-4',
+      kind: 'vision',
+      files: [],
+      remoteServerId: 'home'
+    }
+  ]
+  const modelControl = modelControlBoundary({
+    kinds: ['vision'],
+    models,
+    installed: [REMOTE_MODEL_ID],
+    computerUse: { strategy: 'same_as_chat', strategyLabel: 'Same as Chat', models: [] }
+  })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
-    getModelCatalog: vi.fn().mockResolvedValue({
-      models: [
-        {
-          id: 'remote-vision:home:google%2Fgemma-4',
-          name: 'google/gemma-4',
-          kind: 'vision',
-          files: [],
-          remoteServerId: 'home'
-        }
-      ]
-    }),
-    getInstalledModels: vi.fn().mockResolvedValue(['remote-vision:home:google%2Fgemma-4']),
+    getModelControlProjection: modelControl.getModelControlProjection,
+    onModelControlProjection: modelControl.onModelControlProjection,
+    controlModel: modelControl.controlModel,
+    getModelCatalog: vi.fn().mockResolvedValue({ models }),
+    getInstalledModels: vi.fn().mockResolvedValue([REMOTE_MODEL_ID]),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({}),
-    getActiveModelIds: vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(['remote-vision:home:google%2Fgemma-4']),
+    getActiveModelIds: vi.fn().mockImplementation(async () => modelControl.projection().activeIds),
     getComputerUseActiveModels: vi.fn().mockResolvedValue({
       strategy: 'same_as_chat',
       strategyLabel: 'Same as Chat',
       models: []
     }),
-    activateModel
+    // Activation assesses fit first through the shared service; a remote model has no
+    // local footprint, so the boundary reports "nothing to assess".
+    estimateModelFit: vi.fn().mockResolvedValue(null)
   }
   render(<ModelPicker onClose={vi.fn()} />)
-  return activateModel
+  return modelControl
 }
 
 describe('<ModelPicker/> dismissal', () => {
@@ -101,13 +122,19 @@ describe('<ModelPicker/> dismissal', () => {
   })
 
   it('shows and activates a saved remote model through the shared model seam', async () => {
-    const activateModel = renderPickerWithRemote()
+    const modelControl = renderPickerWithRemote()
     const button = (await screen.findByText('google/gemma-4')).closest('button')
     expect(button).toBeTruthy()
     fireEvent.click(button as HTMLButtonElement)
-    await waitFor(() =>
-      expect(activateModel).toHaveBeenCalledWith('remote-vision:home:google%2Fgemma-4')
-    )
+    // The saved remote model really holds the Text & Vision route now. `activateModel` was the
+    // pre-cutover door for this; the picker issues one `activate` intent through model control.
+    await waitFor(() => expect(modelControl.projection().active.text.modelId).toBe(REMOTE_MODEL_ID))
+    expect(modelControl.intents).toContainEqual({
+      type: 'activate',
+      modelId: REMOTE_MODEL_ID,
+      surface: 'text',
+      operationId: expect.any(String)
+    })
     expect(await screen.findByText('Remote')).toBeTruthy()
   })
 

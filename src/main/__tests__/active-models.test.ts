@@ -7,7 +7,7 @@
  * production decision logic can be exercised directly.
  */
 import { describe, it, expect } from 'vitest'
-import { modalityForKind, isModelActive } from '../active-models-logic'
+import { modalityForKind, isModelActive } from '@offgrid/models'
 
 const NONE = { computer_use: null, image: null, speech: null, transcription: null } as const
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 /**
- * RELEASE_TEST_CHECKLIST #16 - denied capture permissions recover through the real
+ * Denied capture permissions recover through the real
  * permission owner and rendered setup surface. Only macOS TCC, Electron transport,
  * and opening System Settings are controlled boundaries.
  */
@@ -9,6 +9,10 @@ import React from 'react'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EMPTY_MODELS_OPERATIONS } from '@offgrid/application'
+import { modelControlSnapshot } from '@renderer/components/__tests__/harness/model-control-snapshot'
+
+const VISION_MODEL_ID = 'synthetic/vision-model'
 
 const boundary = vi.hoisted(() => ({
   accessibility: false,
@@ -77,7 +81,12 @@ function installApi(): void {
       permissions.openMicrophoneSettings()
       return true
     },
-    checkModelStatus: async () => ({ downloaded: true, modelsDir: '/synthetic/models' }),
+    checkModelStatus: async () => ({
+      configured: true,
+      status: 'configured',
+      downloaded: true,
+      modelsDir: '/synthetic/models'
+    }),
     getLlmSettings: async () => ({ performanceMode: 'balanced' }),
     setupPlan: async () => ({
       mode: 'balanced',
@@ -86,9 +95,19 @@ function installApi(): void {
       totalDownloadGb: 0
     }),
     onSetupProgress: () => () => undefined,
-    getActiveModel: async () => 'synthetic/vision-model',
+    getActiveModel: async () => VISION_MODEL_ID,
+    getModelControlProjection: async () =>
+      modelControlSnapshot({
+        kinds: ['vision'],
+        models: [{ id: VISION_MODEL_ID, name: 'Synthetic vision model', kind: 'vision', files: [] }],
+        installed: [VISION_MODEL_ID],
+        activeIds: [VISION_MODEL_ID],
+        active: { text: VISION_MODEL_ID }
+      }),
+    getModelOperationsProjection: async () => EMPTY_MODELS_OPERATIONS,
+    onModelOperationsProjection: () => () => undefined,
     getModelVisionStatus: async () => ({
-      'synthetic/vision-model': { supportsVision: true, projectorInstalled: true }
+      [VISION_MODEL_ID]: { supportsVision: true, projectorInstalled: true }
     }),
     proInvoke: async (channel: string) => {
       if (channel === 'capture:status') {

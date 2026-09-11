@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PermissionGate } from '../PermissionGate'
 import { closeTaskWorkspace, openTaskSidePanel } from '../../lib/task-side-panel'
+import { installAppBoundary } from '../../__tests__/harness/app-boundary'
 
 let openLocalNetworkSettings: ReturnType<typeof vi.fn>
 let requestScreenRecordingPermission: ReturnType<typeof vi.fn>
@@ -32,25 +33,19 @@ beforeEach(() => {
     localNetwork: false,
     allGranted: false
   }
-  Object.defineProperty(window, 'api', {
-    configurable: true,
-    value: {
-      isPro: true,
-      getPermissionStatus: async () => permissionStatus,
-      checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
-      getActiveModel: async () => null,
-      getModelVisionStatus: async () => ({}),
-      proInvoke: async (channel: string) =>
-        channel === 'capture:status' ? { running: false, paused: false, visionReady: true } : null,
-      proOn: () => () => {},
-      onModelProgress: () => () => {},
-      openLocalNetworkSettings,
-      requestScreenRecordingPermission,
-      openScreenRecordingSettings,
-      relaunchForPermissions,
-      setupPlan: async () => null,
-      getLlmSettings: async () => ({ performanceMode: 'balanced' })
-    }
+  // The whole Electron preload comes from the canonical renderer boundary fixture; only the doors
+  // this journey drives are named here.
+  installAppBoundary({
+    isPro: true,
+    getPermissionStatus: async () => permissionStatus,
+    proInvoke: async (channel: string) =>
+      channel === 'capture:status' ? { running: false, paused: false, visionReady: true } : null,
+    openLocalNetworkSettings,
+    requestScreenRecordingPermission,
+    openScreenRecordingSettings,
+    relaunchForPermissions,
+    setupPlan: async () => null,
+    getLlmSettings: async () => ({ performanceMode: 'balanced' })
   })
 })
 

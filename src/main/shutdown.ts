@@ -80,9 +80,33 @@ export class ShutdownRegistry {
   private readonly owners = new Map<string, ShutdownOwner>()
   private shutdownPromise: Promise<ShutdownFailure[]> | null = null
 
+  constructor(
+    private readonly reportUncollectedFailure: (failure: ShutdownFailure) => void = (failure) => {
+      console.error(`[shutdown] ${failure.owner} failed after shutdown completed`, failure.error)
+    }
+  ) {}
+
+  private reportLateFailure(owner: string, error: unknown): void {
+    try {
+      this.reportUncollectedFailure({ owner, error })
+    } catch (reportError) {
+      // The application is already leaving and has no caller left. The process diagnostic channel
+      // is the final boundary, but both failures remain visible instead of becoming an unhandled
+      // rejection or disappearing behind a second faulty observer.
+      console.error(`[shutdown] ${owner} failed after shutdown completed`, error)
+      console.error('[shutdown] the late-failure reporter also failed', reportError)
+    }
+  }
+
   register(owner: ShutdownOwner): () => void {
     if (this.shutdownPromise) {
-      void Promise.resolve(owner.shutdown()).catch(() => {})
+      void (async () => {
+        try {
+          await owner.shutdown()
+        } catch (error) {
+          this.reportLateFailure(owner.name, error)
+        }
+      })()
       return () => {}
     }
     if (this.owners.has(owner.name)) {
@@ -125,20 +149,16 @@ export class ShutdownRegistry {
 export interface CoreShutdownResources {
   stopGateway(): void | Promise<void>
   stopMediaServer(): void | Promise<void>
-  stopModelRuntimes(): void | Promise<void>
-  stopModelDownloads(): void | Promise<void>
 }
 
-/** Register Core resources in construction order. The registry reverses this on
- * shutdown so model workers stop before their host sockets disappear. */
+/** Register Core resources in construction order. The Models facade owns its download workers and
+ * releases them with the application root; this registry owns only independent Core resources. */
 export function registerCoreShutdownOwners(
   registry: ShutdownRegistry,
   resources: CoreShutdownResources
 ): void {
   registry.register({ name: 'core:model-gateway', shutdown: resources.stopGateway })
   registry.register({ name: 'core:media-server', shutdown: resources.stopMediaServer })
-  registry.register({ name: 'core:model-runtimes', shutdown: resources.stopModelRuntimes })
-  registry.register({ name: 'core:model-downloads', shutdown: resources.stopModelDownloads })
 }
 
 /** Connect the registry to the real Electron quit seam. The subscription removes

@@ -60,7 +60,6 @@ interface DashboardStats {
 
 type RagConversation = import('../../shared/ipc-contracts').RagConversationContract
 
-type RagMessage = import('../../shared/ipc-contracts').RagMessageContract
 type RagChatResult = import('../../shared/ipc-contracts').RagChatResultContract
 
 // DUPLICATE (ambient decl). Canonical shape: the `reprocess:progress` IPC payload
@@ -114,6 +113,34 @@ interface SessionEntityRecord {
 type ArtifactKind = import('../../shared/ipc-contracts').ArtifactKindContract
 
 interface RendererAPIOverrides {
+    godTwin?: {
+      wake: () => Promise<boolean>
+      getEnabled: () => Promise<boolean>
+      setEnabled: (enabled: boolean) => Promise<boolean>
+      getPreferences: () => Promise<{
+        state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+        spinning: boolean
+      }>
+      setPreferences: (preferences: {
+        state?: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+        spinning?: boolean
+      }) => Promise<{
+        state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+        spinning: boolean
+      }>
+      setListening: (listening: boolean) => void
+      setState: (state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting') => void
+      resize: (
+        edge: 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw',
+        deltaX: number,
+        deltaY: number
+      ) => void
+      onWake: (callback: () => void) => () => void
+      onListening: (callback: (listening: boolean) => void) => () => void
+      onState: (
+        callback: (state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting') => void
+      ) => () => void
+    }
   // Open-core bridge
   isPro?: boolean
   proEntitlementBootstrapEnabled?: boolean
@@ -122,10 +149,15 @@ interface RendererAPIOverrides {
   platform?: string
   /** Approval UX v2: the inline gate card + outcome/undo feed. */
   actions?: {
+    getProjection: () => Promise<import('@offgrid/application').UseSnapshot>
+    onProjection: (cb: (snapshot: import('@offgrid/application').UseSnapshot) => void) => () => void
+    retry: (
+      actionId: string
+    ) => Promise<
+      import('@offgrid/application').Outcome<boolean, import('@offgrid/application').UseFailure>
+    >
     resolveGate: (actionId: string, decision: unknown) => Promise<boolean>
     undo: (record: unknown) => Promise<{ ok: boolean; detail?: string }>
-    onGatePending: (cb: (request: unknown) => void) => () => void
-    onOutcome: (cb: (outcome: unknown) => void) => () => void
   }
   tasks?: {
     list: (limit?: number) => Promise<
@@ -183,8 +215,8 @@ interface RendererAPIOverrides {
       owner: 'docked' | 'floating',
       rect: { x: number; y: number; width: number; height: number } | null
     ) => void
-    newTab: () => Promise<{ sessionId: string }>
-    openUrl: (url: string) => Promise<{ sessionId: string } | null>
+    newTab: (journeyId?: string) => Promise<{ sessionId: string }>
+    openUrl: (url: string, journeyId?: string) => Promise<{ sessionId: string } | null>
     getSessions: () => Promise<{
       activeSessionId: string | null
       sessions: Array<{
@@ -238,7 +270,7 @@ interface RendererAPIOverrides {
   // Keygen licensing (activation + status for the upgrade/settings UI)
   license?: {
     status: () => Promise<ProLicenseInfo>
-    activate: (key: string) => Promise<import('@offgrid/sync').PersonalMeshActivationResult>
+    activate: (key: string) => Promise<import('@offgrid/application').PersonalMeshActivationResult>
     listDevices: () => Promise<
       Array<{
         id: string
@@ -303,28 +335,25 @@ interface RendererAPIOverrides {
   >
   cancelRag: (streamId: string) => void
 
-  // RAG Conversations
-  createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
-  getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
-  onRagConversationsChanged?: (
-    callback: (data: { conversationId: string; projectId: string | null }) => void
-  ) => () => void
-  setRagConversationProject: (id: string, projectId: string | null) => Promise<boolean>
-  getRagConversation: (id: string) => Promise<RagConversation | null>
-  getRagMessages: (conversationId: string) => Promise<RagMessage[]>
-  addRagMessage: (
+  // Chat persistence
+  readChatSessionTurns: (
+    conversationId: string
+  ) => Promise<import('@offgrid/application').ChatTurn[]>
+  writeChatSessionTurns: (
     conversationId: string,
-    role: 'user' | 'assistant',
-    content: string,
-    context?: unknown
-  ) => Promise<{ id: number; uuid: string }>
-  truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
+    turns: readonly import('@offgrid/application').ChatTurn[]
+  ) => Promise<void>
   updateRagConversationTitle: (id: string, title: string) => Promise<RagConversation>
-  deleteRagConversation: (id: string) => Promise<void>
 
   // App Settings
   getSettings: () => Promise<AppSettings>
   saveSetting: (key: string, value: unknown) => Promise<void>
+  getComputerUseSettings: () => Promise<
+    import('../../shared/computer-use-settings').ComputerUseSettingsPortResult
+  >
+  patchComputerUseSettings: (
+    patch: import('../../shared/computer-use-settings').ComputerUseSettingsPatch
+  ) => Promise<import('../../shared/computer-use-settings').ComputerUseSettingsPortResult>
   consoleEnroll: (
     url: string,
     token: string
@@ -431,7 +460,12 @@ interface RendererAPIOverrides {
     }) => void
   ) => () => void
   onReprocessProgress: (callback: (data: ReprocessProgress) => void) => () => void
-  onUpdateDownloaded: (callback: (data: { version: string }) => void) => () => void
+  onUpdateDownloaded: (
+    callback: (data: import('../../shared/ipc-contracts').UpdateDownloadedContract) => void
+  ) => () => void
+  onSetupProgress: (
+    callback: (data: import('../../shared/ipc-contracts').SetupProgressContract) => void
+  ) => () => void
   getStagedUpdateVersion: () => Promise<string | null>
   installUpdate: () => Promise<void>
 

@@ -11,15 +11,26 @@ import { parseActionRecord } from '@offgrid/use'
 import { parseGateDecision, resolveActionGate } from './gate-host'
 import { getActionsRuntime } from './use-runtime'
 
+const ACTION_HANDLER_CHANNELS = [
+  'actions:get-projection',
+  'actions:resolve-gate',
+  'actions:undo',
+  'actions:retry'
+] as const
+
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(channel, payload)
   }
 }
 
-export function registerActionsIpc(): void {
+export function registerActionsIpc(): () => void {
   const runtime = getActionsRuntime()
-  runtime.onOutcome(({ outcome, undoable }) => {
+  ipcMain.handle('actions:get-projection', () => runtime.snapshot())
+  const stopProjection = runtime.subscribe((snapshot) => {
+    broadcast('actions:projection-changed', snapshot)
+  })
+  const stopOutcomes = runtime.onOutcome(({ outcome, undoable }) => {
     broadcast('actions:outcome', { ...outcome, undoable })
   })
 
@@ -38,4 +49,23 @@ export function registerActionsIpc(): void {
     }
     return runtime.undo(parsed.value)
   })
+
+  ipcMain.handle('actions:retry', (_event, actionId: unknown) => {
+    if (typeof actionId !== 'string' || actionId.length === 0) {
+      return {
+        ok: false,
+        failure: { kind: 'runtime', operation: 'retry', message: 'invalid action id' }
+      }
+    }
+    return runtime.retry(actionId)
+  })
+
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    stopProjection()
+    stopOutcomes()
+    for (const channel of ACTION_HANDLER_CHANNELS) ipcMain.removeHandler(channel)
+  }
 }

@@ -10,11 +10,13 @@ import {
   onOpenTaskSidePanel,
   type OpenTaskPanelRequest
 } from '@renderer/lib/task-side-panel'
+import { setActiveConversationId } from '@renderer/lib/active-conversation'
 
 describe('ChatMarkdown links', () => {
   beforeEach(() => {
     resetTaskSessionStoreForTests()
     closeTaskWorkspace()
+    setActiveConversationId(null)
   })
 
   afterEach(() => {
@@ -24,13 +26,15 @@ describe('ChatMarkdown links', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens a web link in the Off Grid AI browser and refuses unsafe links', () => {
+  it('opens a web link in the Off Grid AI browser bound to the active chat and refuses unsafe links', () => {
     const openExternal = vi.fn()
     const openUrl = vi.fn(async () => ({ sessionId: 'manual-1' }))
     Object.defineProperty(window, 'api', {
       configurable: true,
       value: { openExternal, browser: { openUrl } }
     })
+    // The page opens into whichever chat the user is in, so the docked pane scopes it there.
+    setActiveConversationId('conv-42')
 
     render(
       <ChatMarkdown content="[Docs](https://example.com/docs) [Unsafe](javascript:alert(1))" />
@@ -39,7 +43,7 @@ describe('ChatMarkdown links', () => {
     fireEvent.click(screen.getByText('Unsafe'))
 
     expect(openUrl).toHaveBeenCalledTimes(1)
-    expect(openUrl).toHaveBeenCalledWith('https://example.com/docs')
+    expect(openUrl).toHaveBeenCalledWith('https://example.com/docs', 'conv-42')
     expect(openExternal).not.toHaveBeenCalled()
   })
 

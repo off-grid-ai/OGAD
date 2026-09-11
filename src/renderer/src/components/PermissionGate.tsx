@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion } from 'motion/react'
 import { GridBackdrop } from './ui/grid-backdrop'
 import { X, Cpu } from '@phosphor-icons/react'
@@ -7,34 +7,103 @@ import { deviceNoun } from '@renderer/lib/device'
 import { PermissionsPanel } from './PermissionsPanel'
 import { usePermissionController } from './use-permission-controller'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
-import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress, type ProgressLike } from '@offgrid/ui'
-import { formatStorageBytes } from './setup/storage-format'
+import { downloadProgressSummary } from '@renderer/lib/download-progress'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
-import { useModelDownloadProgress } from '@renderer/hooks/useModelDownloadProgress'
+import { useCaptureReadiness } from './use-capture-readiness'
+import type { CaptureReadinessProjection } from '@offgrid/application'
 
 interface PermissionGateProps {
   children: React.ReactNode
 }
 
-type VisionIssue =
-  | { kind: 'missing-projector'; modelId: string; modelName: string }
-  | { kind: 'choose-vision-model'; modelId: string | null; modelName: string | null }
+type RepairableCaptureProjection = Extract<
+  CaptureReadinessProjection,
+  { kind: 'missing-projector' | 'choose-vision-model' }
+>
 
-export function PermissionGate({ children }: PermissionGateProps) {
+function openModelLibrary(): void {
+  window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'models' }))
+  window.history.replaceState(null, '', '/models')
+}
+
+function repairableCapture(
+  ready: boolean,
+  dismissed: boolean,
+  projection: CaptureReadinessProjection | null
+): RepairableCaptureProjection | null {
+  if (!ready || dismissed || !projection) return null
+  return projection.kind === 'missing-projector' || projection.kind === 'choose-vision-model'
+    ? projection
+    : null
+}
+
+interface NudgeCopyInput {
+  issue?: RepairableCaptureProjection['kind']
+  modelName?: string | null
+  missingModel?: boolean
+  missingLocalNetwork?: boolean
+  repairing: boolean
+  presentedProgress: ReturnType<typeof projectProgress> | null
+}
+
+function nudgeCta(input: NudgeCopyInput): string {
+  if (input.repairing) {
+    return input.presentedProgress?.determinate
+      ? `Downloading ${Math.round(input.presentedProgress.percentage ?? 0)}%`
+      : 'Downloading'
+  }
+  if (input.issue === 'missing-projector') return 'Download vision support'
+  if (input.issue === 'choose-vision-model') return 'Choose model'
+  return input.missingModel ? 'Configure' : 'Set up'
+}
+
+function projectNudgeCopy(input: NudgeCopyInput): { title: string; detail: string; cta: string } {
+  if (input.issue === 'missing-projector') {
+    return {
+      title: 'Capture needs vision support',
+      detail: `${input.modelName ?? 'The active model'} can read images after its vision projector is downloaded.`,
+      cta: nudgeCta(input)
+    }
+  }
+  if (input.issue === 'choose-vision-model') {
+    return {
+      title: 'Capture needs a vision model',
+      detail: `${input.modelName ?? 'The active model'} cannot analyze Replay frames. Choose a vision-capable chat model.`,
+      cta: nudgeCta(input)
+    }
+  }
+  if (input.missingModel) {
+    return {
+      title: 'Set up your local AI',
+      detail: `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`,
+      cta: nudgeCta(input)
+    }
+  }
+  return {
+    title: input.missingLocalNetwork ? 'Allow Local Network access' : 'Finish setting up capture',
+    detail: input.missingLocalNetwork
+      ? 'Allow this Mac to find and sync directly with your devices.'
+      : 'Grant screen and accessibility access so Off Grid AI can see and remember.',
+    cta: nudgeCta(input)
+  }
+}
+
+export function PermissionGate({ children }: PermissionGateProps): React.JSX.Element {
   const { isPro } = useRendererEntitlement()
-  const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(
-    null
-  )
+  const [modelStatus, setModelStatus] = useState<Awaited<
+    ReturnType<typeof window.api.checkModelStatus>
+  > | null>(null)
   // Pro setup is NON-blocking: users go straight into the shell to look around.
   // The detailed setup screen opens on demand; a slim nudge can be dismissed.
   const [showSetup, setShowSetup] = useState(false)
+  const [modelStatusError, setModelStatusError] = useState<string | null>(null)
+  const checkingModel = useRef(false)
   const [setupDismissed, setSetupDismissed] = useState(false)
-  const [visionIssue, setVisionIssue] = useState<VisionIssue | null>(null)
-  const [visionDownloadProgress, setVisionDownloadProgress] = useState<ProgressLike | null>(null)
   const permissions = usePermissionController(isPro)
   const permissionStatus = permissions.status
   const isChecking = permissions.checking
+  const captureReadiness = useCaptureReadiness(isPro)
 
   // Capture permissions (Accessibility + Screen Recording) are only needed by the
   // Pro "sees" layer. The free build runs chat/projects/models and gates on the
@@ -42,112 +111,46 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const permsOk = isPro ? (permissionStatus?.allGranted ?? false) : true
 
   const checkModelStatus = useCallback(async () => {
+    if (checkingModel.current) return undefined
+    checkingModel.current = true
+    let deadline: ReturnType<typeof setTimeout> | undefined
     try {
-      const status = await window.api.checkModelStatus()
-      console.log('Model status:', status)
+      const status = await Promise.race([
+        window.api.checkModelStatus(),
+        new Promise<never>((_resolve, reject) => {
+          deadline = setTimeout(() => reject(new Error('Setup status timed out.')), 10000)
+        })
+      ])
       setModelStatus(status)
-      return status.downloaded
+      setModelStatusError(null)
+      return status.configured
     } catch (e) {
       console.error('Failed to check model status:', e)
-      return false
+      setModelStatusError('Your saved setup could not be checked.')
+      return undefined
+    } finally {
+      if (deadline) clearTimeout(deadline)
+      checkingModel.current = false
     }
   }, [])
 
-  const checkCaptureVision = useCallback(async () => {
-    if (!isPro || !window.api.proInvoke) return
-    try {
-      const [activeId, statuses, capture] = await Promise.all([
-        window.api.getActiveModel?.(),
-        window.api.getModelVisionStatus?.(),
-        window.api.proInvoke('capture:status')
-      ])
-      const status = capture as
-        | { running?: boolean; paused?: boolean; visionReady?: boolean }
-        | undefined
-      if (!status?.running || status.paused || status.visionReady) {
-        setVisionIssue(null)
-        return
-      }
-      const activeStatus = activeId ? statuses?.[activeId] : undefined
-      if (activeId && activeStatus?.supportsVision && !activeStatus.projectorInstalled) {
-        setVisionIssue({
-          kind: 'missing-projector',
-          modelId: activeId,
-          modelName: activeId.split('/').pop() ?? activeId
-        })
-        return
-      }
-      if (activeId && activeStatus?.supportsVision && activeStatus.projectorInstalled) {
-        setVisionIssue(null)
-        return
-      }
-      setVisionIssue({
-        kind: 'choose-vision-model',
-        modelId: activeId ?? null,
-        modelName: activeId ? (activeId.split('/').pop() ?? activeId) : null
-      })
-    } catch (error) {
-      console.error('Failed to check capture vision readiness:', error)
-    }
-  }, [isPro])
-
   // Initial check
   useEffect(() => {
-    checkModelStatus()
-    void checkCaptureVision()
-  }, [checkModelStatus, checkCaptureVision])
-
-  useEffect(() => {
-    if (!isPro) return
-    const offCapture = window.api.proOn?.('capture:changed', () => void checkCaptureVision())
-    return () => {
-      if (typeof offCapture === 'function') offCapture()
-    }
-  }, [checkCaptureVision, isPro])
-
-  useModelDownloadProgress((progress) => {
-    if (progress.modelId !== visionIssue?.modelId) return
-    if (progress.status === 'completed') {
-      setVisionDownloadProgress(null)
-      void checkCaptureVision()
-    } else if (progress.status === 'failed' || progress.status === 'cancelled') {
-      setVisionDownloadProgress(null)
-    } else {
-      setVisionDownloadProgress(progress)
-    }
-  }, isPro)
+    const timeoutId = window.setTimeout(() => void checkModelStatus(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [checkModelStatus])
 
   // Permission polling is owned by usePermissionController. Keep model polling here
   // because model readiness is a separate setup boundary.
   useEffect(() => {
-    if (modelStatus?.downloaded) return
+    if (modelStatus?.configured || modelStatusError) return
 
     const interval = setInterval(() => {
       checkModelStatus()
     }, 2000)
 
     return () => clearInterval(interval)
-  }, [modelStatus?.downloaded, checkModelStatus])
-
-  const openModels = (): void => {
-    window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'models' }))
-    window.history.replaceState(null, '', '/models')
-  }
-
-  const handleVisionAction = (): void => {
-    if (visionIssue?.kind === 'missing-projector') {
-      setVisionDownloadProgress({ percent: 0 })
-      void window.api
-        .downloadModel?.(visionIssue.modelId)
-        .catch((error) => console.error('Failed to download capture vision support:', error))
-        .finally(() => {
-          setVisionDownloadProgress(null)
-          void checkCaptureVision()
-        })
-      return
-    }
-    openModels()
-  }
+  }, [modelStatus?.configured, modelStatusError, checkModelStatus])
 
   // Loading state
   if (isChecking && !permissionStatus) {
@@ -172,7 +175,8 @@ export function PermissionGate({ children }: PermissionGateProps) {
   // free this is just "has a model". Either way it's a dismissible nudge, never a
   // wall — so free users also get the "Configure for me" prompt when they have no
   // model yet (the most useful first-run action).
-  const ready = permsOk && !!modelStatus?.downloaded
+  const ready = permsOk && !!modelStatus?.configured
+  const captureIssue = repairableCapture(ready, setupDismissed, captureReadiness.projection)
 
   // Default (NON-blocking): drop straight into the shell so people can look around.
   // Show a slim, dismissible nudge when capture perms or a model are still missing.
@@ -180,23 +184,33 @@ export function PermissionGate({ children }: PermissionGateProps) {
     return (
       <>
         {children}
-        {!ready && !setupDismissed && (
+        {modelStatusError && (
+          <div role="alert" className="fixed bottom-4 right-4 z-50 border p-3 font-mono text-xs">
+            {modelStatusError}
+            <button className="ml-2 underline" onClick={() => void checkModelStatus()}>
+              Retry
+            </button>
+          </div>
+        )}
+        {!ready && !modelStatusError && !setupDismissed && (
           <SetupNudge
-            missingModel={!modelStatus?.downloaded}
+            missingModel={modelStatus?.status === 'needs-setup'}
             missingLocalNetwork={isPro && permissionStatus?.localNetwork === false}
             onOpen={() => setShowSetup(true)}
             onDismiss={() => setSetupDismissed(true)}
           />
         )}
-        {ready && visionIssue && !setupDismissed && (
+        {captureIssue ? (
           <SetupNudge
-            issue={visionIssue.kind}
-            modelName={visionIssue.modelName}
-            progress={visionDownloadProgress}
-            onOpen={handleVisionAction}
+            issue={captureIssue.kind}
+            modelName={captureIssue.modelName}
+            progress={captureReadiness.progress}
+            repairing={captureReadiness.repairing}
+            failure={captureReadiness.failure}
+            onOpen={() => void captureReadiness.repair()}
             onDismiss={() => setSetupDismissed(true)}
           />
-        )}
+        ) : null}
       </>
     )
   }
@@ -264,7 +278,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
                   // app shell (already mounted behind this gate) listens for og:navigate
                   // and switches view — replaceState alone wouldn't re-derive it. Keep
                   // the URL in sync, then dismiss the gate.
-                  openModels()
+                  openModelLibrary()
                   setSetupDismissed(true)
                   setShowSetup(false)
                 }}
@@ -323,78 +337,59 @@ function SetupNudge({
   issue,
   modelName,
   progress,
+  repairing = false,
+  failure,
   onOpen,
   onDismiss
 }: {
   missingModel?: boolean
   missingLocalNetwork?: boolean
-  issue?: VisionIssue['kind']
+  issue?: RepairableCaptureProjection['kind']
   modelName?: string | null
   progress?: ProgressLike | null
+  repairing?: boolean
+  failure?: string | null
   onOpen: () => void
   onDismiss: () => void
-}) {
+}): React.JSX.Element | null {
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
   const [taskLeft, setTaskLeft] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!taskWorkspaceOpen) {
-      setTaskLeft(null)
-      return
-    }
+    if (!taskWorkspaceOpen) return
     const taskPane = document.querySelector<HTMLElement>('[data-testid="task-side-panel"]')
     if (!taskPane) return
     const measure = (): void => setTaskLeft(taskPane.getBoundingClientRect().left)
-    measure()
+    const frameId = window.requestAnimationFrame(measure)
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(taskPane)
     window.addEventListener('resize', measure)
     return () => {
+      window.cancelAnimationFrame(frameId)
       observer?.disconnect()
       window.removeEventListener('resize', measure)
     }
   }, [taskWorkspaceOpen])
 
+  const visibleTaskLeft = taskWorkspaceOpen ? taskLeft : null
+
   // Model-first wording. Missing a model is the thing that actually blocks you, and
   // "Configure for me" handles it in one click — so lead with that for both tiers.
   // Capture permissions (Pro-only) are the secondary, optional step.
-  const title =
-    issue === 'missing-projector'
-      ? 'Capture needs vision support'
-      : issue === 'choose-vision-model'
-        ? 'Capture needs a vision model'
-        : missingModel
-          ? 'Set up your local AI'
-          : missingLocalNetwork
-            ? 'Allow Local Network access'
-            : 'Finish setting up capture'
-  const detail =
-    issue === 'missing-projector'
-      ? `${modelName ?? 'The active model'} can read images after its vision projector is downloaded.`
-      : issue === 'choose-vision-model'
-        ? `${modelName ?? 'The active model'} cannot analyze Replay frames. Choose a vision-capable chat model.`
-        : missingModel
-          ? `Pick a model yourself, or let Off Grid AI configure one for your ${deviceNoun()}.`
-          : missingLocalNetwork
-            ? 'Allow this Mac to find and sync directly with your devices.'
-            : 'Grant screen and accessibility access so Off Grid AI can see and remember.'
   const presentedProgress = progress ? projectProgress(progress) : null
-  const cta =
-    progress != null
-      ? presentedProgress?.determinate
-        ? `Downloading ${Math.round(presentedProgress.percentage ?? 0)}%`
-        : 'Downloading'
-      : issue === 'missing-projector'
-        ? 'Download vision support'
-        : issue === 'choose-vision-model'
-          ? 'Choose model'
-          : missingModel
-            ? 'Configure'
-            : 'Set up'
+  const summary = presentedProgress ? downloadProgressSummary(presentedProgress) : null
+  const { title, detail, cta } = projectNudgeCopy({
+    issue,
+    modelName,
+    missingModel,
+    missingLocalNetwork,
+    repairing,
+    presentedProgress
+  })
   // When Tasks consumes the whole usable workspace, defer this non-blocking
   // prompt. In split mode, keep it wholly inside Chat and away from native
   // browser content.
-  if (taskLeft !== null && taskLeft < 520) return null
+  if (visibleTaskLeft !== null && visibleTaskLeft < 520) return null
 
   return (
     <motion.div
@@ -402,26 +397,28 @@ function SetupNudge({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
       className="fixed bottom-14 z-50 flex max-w-[min(560px,calc(100vw-2rem))] items-center gap-3 rounded-xl border border-green-500/30 bg-background/95 px-4 py-3 text-foreground shadow-xl backdrop-blur-xl"
-      style={{ right: taskLeft === null ? 16 : window.innerWidth - taskLeft + 16 }}
+      style={{ right: visibleTaskLeft === null ? 16 : window.innerWidth - visibleTaskLeft + 16 }}
     >
       <Cpu className="h-4 w-4 shrink-0 text-green-500" />
       <div className="text-xs leading-tight">
         <div className="font-medium text-foreground">{title}</div>
         <div className="text-muted-foreground">{detail}</div>
-        {presentedProgress ? (
+        {failure ? (
+          // The reason the last attempt failed, next to the button that will retry it. Without
+          // this the user reads a re-enabled button as "the click did nothing".
+          <div role="status" className="mt-1 text-red-400">
+            {failure}
+          </div>
+        ) : null}
+        {summary ? (
           <div className="mt-1 tabular-nums text-muted-foreground">
-            {presentedProgress.totalBytes !== undefined
-              ? `${formatStorageBytes(presentedProgress.currentBytes)} / ${formatStorageBytes(presentedProgress.totalBytes)}`
-              : 'Total size unavailable'}
-            {presentedProgress.bytesPerSecond !== undefined
-              ? ` · ${formatTransferSpeed(presentedProgress.bytesPerSecond)}`
-              : ''}
+            {summary.bytes} · {summary.rate}
           </div>
         ) : null}
       </div>
       <button
         onClick={onOpen}
-        disabled={progress != null}
+        disabled={repairing}
         className="ml-1 whitespace-nowrap rounded-lg bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-500"
       >
         {cta}

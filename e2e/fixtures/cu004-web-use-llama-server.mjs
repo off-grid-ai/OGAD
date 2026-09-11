@@ -9,7 +9,7 @@ import http from 'node:http'
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-const MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
+const MODEL_ID = 'unsloth/Qwen3.5-0.8B-GGUF'
 const VISUAL_TOOLS = ['complete_milestone', 'perform_action', 'rethink', 'call_user']
 const args = process.argv.slice(2)
 const portFlag = Math.max(args.indexOf('--port'), args.indexOf('-p'))

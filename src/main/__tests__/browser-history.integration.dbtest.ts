@@ -22,14 +22,14 @@ describe('manual browser history persistence', () => {
     const firstDb = new Database(file)
     const first = new BrowserHistoryStore(firstDb, () => 1_000)
     first.migrate()
-    const tasks = new TaskHistoryStore(firstDb, () => 1_000)
+    const tasks = new TaskHistoryStore(firstDb)
     tasks.migrate()
     first.upsert({
       historyId: 'manual-1',
       title: 'Example documentation',
       url: 'https://example.com/docs'
     })
-    expect(tasks.list()).toEqual([])
+    expect(tasks.load()).toEqual([])
     firstDb.close()
 
     const reopenedDb = new Database(file)

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  displayRemoteModelName,
+  type RemoteModelCatalog,
+  type RemoteModelModality,
+  type RemoteModalitySelections
+} from '@offgrid/application'
+import {
   remoteVisionApiBase,
   remoteVisionProviderForEndpoint,
   type RemoteVisionConnectionResult,
@@ -26,6 +32,8 @@ interface ServerForm {
   model: string
   hasApiKey: boolean
   screenFramesAllowed: boolean
+  selections: RemoteModalitySelections
+  catalog: RemoteModelCatalog
 }
 
 const EMPTY_FORM: ServerForm = {
@@ -34,12 +42,30 @@ const EMPTY_FORM: ServerForm = {
   endpoint: '',
   model: '',
   hasApiKey: false,
-  screenFramesAllowed: false
+  screenFramesAllowed: false,
+  selections: {},
+  catalog: {}
 }
 
 interface RemoteModelOption {
   id: string
   name: string
+  modality: RemoteModelModality
+}
+
+const MEDIA_MODALITIES: readonly RemoteModelModality[] = [
+  'image',
+  'transcription',
+  'voice',
+  'embedding'
+]
+
+const MODALITY_LABEL: Readonly<Record<RemoteModelModality, string>> = {
+  text: 'Text and vision',
+  image: 'Image',
+  transcription: 'Transcription',
+  voice: 'Voice',
+  embedding: 'Embeddings'
 }
 
 function formFromServer(server: RemoteVisionSavedServer): ServerForm {
@@ -49,36 +75,18 @@ function formFromServer(server: RemoteVisionSavedServer): ServerForm {
     endpoint: server.endpoint,
     model: server.model,
     hasApiKey: server.hasApiKey,
-    screenFramesAllowed: server.screenFramesAllowed
+    screenFramesAllowed: server.screenFramesAllowed,
+    selections: server.selections ?? (server.model ? { text: server.model } : {}),
+    catalog: server.catalog ?? {}
   }
 }
 
+/** A server saved without a name is called by its host (main applies the same default). */
 function serverNameFromEndpoint(endpoint: string): string {
   try {
     return new URL(endpoint).host
   } catch {
     return 'Remote server'
-  }
-}
-
-function normalizeSettings(value: RemoteVisionServerSettings): RemoteVisionServerSettings {
-  if (Array.isArray(value.servers)) return value
-  const legacyServer: RemoteVisionSavedServer | null =
-    value.provider !== 'local' && value.endpoint && value.model
-      ? {
-          id: 'migrated-server',
-          name: serverNameFromEndpoint(value.endpoint),
-          provider: value.provider,
-          endpoint: value.endpoint,
-          model: value.model,
-          hasApiKey: value.hasApiKey,
-          screenFramesAllowed: false
-        }
-      : null
-  return {
-    ...value,
-    activeServerId: legacyServer?.id ?? null,
-    servers: legacyServer ? [legacyServer] : []
   }
 }
 
@@ -96,14 +104,23 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const selectServer = (server: RemoteVisionSavedServer): void => {
     setForm(formFromServer(server))
     setApiKey('')
-    setModels(server.model ? [{ id: server.model, name: server.model }] : [])
+    setModels(
+      Object.entries(server.catalog ?? {}).flatMap(([modality, options]) =>
+        options.map((model) => ({
+          id: model.id,
+          name: model.name,
+          modality: modality as RemoteModelModality
+        }))
+      )
+    )
     setModelQuery(server.model)
     setShowModels(false)
     setStatus(server.id === settings.activeServerId ? 'This server is active.' : 'Ready to edit.')
   }
 
-  const applySettings = (value: RemoteVisionServerSettings): void => {
-    const normalized = normalizeSettings(value)
+  // Main returns the version 4 shape (a server list with a derived active id); the legacy singleton
+  // is migrated there by the shared migration, so nothing is reshaped here.
+  const applySettings = (normalized: RemoteVisionServerSettings): void => {
     setSettings(normalized)
     setRemoteEnabled(normalized.activeServerId !== null)
     const selected =
@@ -120,8 +137,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   useEffect(() => {
     window.api
       .getRemoteVisionServer()
-      .then((value: RemoteVisionServerSettings) => {
-        const normalized = normalizeSettings(value)
+      .then((normalized: RemoteVisionServerSettings) => {
         setSettings(normalized)
         setRemoteEnabled(normalized.activeServerId !== null)
         const selected =
@@ -129,7 +145,15 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
           normalized.servers[0]
         if (selected) {
           setForm(formFromServer(selected))
-          setModels(selected.model ? [{ id: selected.model, name: selected.model }] : [])
+          setModels(
+            Object.entries(selected.catalog ?? {}).flatMap(([modality, options]) =>
+              options.map((model) => ({
+                id: model.id,
+                name: model.name,
+                modality: modality as RemoteModelModality
+              }))
+            )
+          )
           setModelQuery(selected.model)
         }
         setStatus(normalized.activeServerId ? 'Remote server is active.' : 'Local model is active.')
@@ -140,7 +164,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const filteredModels = useMemo(() => {
     const query = modelQuery.trim().toLowerCase()
     return models
-      .filter((model) => !query || `${model.name} ${model.id}`.toLowerCase().includes(query))
+      .filter(
+        (model) =>
+          model.modality === 'text' &&
+          (!query || `${model.name} ${model.id}`.toLowerCase().includes(query))
+      )
       .slice(0, 75)
   }, [modelQuery, models])
 
@@ -154,7 +182,9 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       serverId: form.id ?? undefined,
       name: form.name,
       ...(apiKey ? { apiKey } : {}),
-      screenFramesAllowed: form.screenFramesAllowed
+      screenFramesAllowed: form.screenFramesAllowed,
+      selections: form.selections,
+      catalog: form.catalog
     }
   }
 
@@ -168,16 +198,37 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       const result = (await window.api.testRemoteVisionServer(
         update
       )) as RemoteVisionConnectionResult
+      const discovered = result.ok ? (result.models ?? []) : []
+      const nextSelections = result.ok ? (result.selections ?? {}) : {}
+      const catalog = result.ok ? (result.catalog ?? {}) : {}
+      const nextModel = result.ok
+        ? (nextSelections.text ??
+          (discovered.some((model) => model.id === selectedModel && model.modality === 'text')
+            ? selectedModel
+            : ''))
+        : ''
+      const mediaModels = Object.entries(catalog).flatMap(([modality, options]) =>
+        modality === 'text'
+          ? []
+          : options.map((model) => ({
+              id: model.id,
+              name: model.name,
+              modality: modality as RemoteModelModality
+            }))
+      )
+      setModels([...discovered.filter((model) => model.modality === 'text'), ...mediaModels])
+      setForm((current) => ({
+        ...current,
+        model: nextModel,
+        selections: nextSelections,
+        catalog
+      }))
+      setModelQuery(nextModel)
+      setShowModels(result.ok)
       if (!result.ok) {
         setStatus(result.error || 'Connection failed.')
         return
       }
-      const discovered = result.models ?? []
-      const nextModel = discovered.some((model) => model.id === selectedModel) ? selectedModel : ''
-      setModels(discovered)
-      setForm((current) => ({ ...current, model: nextModel }))
-      setModelQuery(nextModel)
-      setShowModels(true)
       setStatus(
         discovered.length > 0
           ? `Connected in ${result.latencyMs} ms. ${discovered.length} model${discovered.length === 1 ? '' : 's'} found.`
@@ -226,8 +277,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       setStatus('Enter a server name first.')
       return
     }
-    if (remoteEnabled && !form.model) {
-      setStatus('Test the connection and select a model first.')
+    if (remoteEnabled && !Object.values(form.selections).some(Boolean)) {
+      setStatus('Test the connection and select at least one model first.')
       return
     }
     setBusy(true)
@@ -302,7 +353,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 >
                   <span className="block truncate text-xs text-neutral-200">{server.name}</span>
                   <span className="block truncate text-[10px] text-neutral-600">
-                    {server.endpoint} · {server.model}
+                    {server.endpoint} ·{' '}
+                    {Object.values(server.selections ?? {}).filter(Boolean).length} selected
                   </span>
                 </button>
                 {settings.activeServerId === server.id ? (
@@ -390,7 +442,9 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     ...current,
                     endpoint: event.target.value,
                     model: '',
-                    screenFramesAllowed: false
+                    screenFramesAllowed: false,
+                    selections: {},
+                    catalog: {}
                   }))
                   setModels([])
                   setModelQuery('')
@@ -419,7 +473,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 }}
                 autoComplete="off"
                 placeholder={
-                  form.hasApiKey ? 'Stored key - enter a new value to replace it' : 'API key'
+                  form.hasApiKey ? '••••••••••••••••  stored key, type to replace' : 'API key'
                 }
                 className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
               />
@@ -456,9 +510,9 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 </Row>
               </div>
             ) : null}
-            {models.length > 0 ? (
+            {models.some((model) => model.modality === 'text') ? (
               <Row
-                label="Model"
+                label={MODALITY_LABEL.text}
                 controlId="remote-server-model-search"
                 hint={form.model ? `Selected: ${form.model}` : 'Search and select one model.'}
               >
@@ -469,7 +523,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     onFocus={() => setShowModels(true)}
                     onChange={(event) => {
                       setModelQuery(event.target.value)
-                      setForm((current) => ({ ...current, model: '' }))
+                      setForm((current) => ({
+                        ...current,
+                        model: '',
+                        selections: { ...current.selections, text: undefined }
+                      }))
                       setShowModels(true)
                     }}
                     placeholder="Search models"
@@ -484,19 +542,20 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                             key={model.id}
                             type="button"
                             onClick={() => {
-                              setForm((current) => ({ ...current, model: model.id }))
-                              setModelQuery(model.name)
+                              setForm((current) => ({
+                                ...current,
+                                model: model.id,
+                                selections: { ...current.selections, text: model.id }
+                              }))
+                              setModelQuery(displayRemoteModelName(model.name || model.id))
                               setShowModels(false)
                               setStatus('Not saved.')
                             }}
                             className="block w-full px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 hover:text-white"
                           >
-                            <span className="block truncate">{model.name}</span>
-                            {model.name !== model.id ? (
-                              <span className="block truncate text-[9px] text-neutral-600">
-                                {model.id}
-                              </span>
-                            ) : null}
+                            <span className="block truncate">
+                              {displayRemoteModelName(model.name || model.id)}
+                            </span>
                           </button>
                         ))
                       ) : (
@@ -509,6 +568,60 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 </div>
               </Row>
             ) : null}
+            {MEDIA_MODALITIES.map((modality) => {
+              const options = models.filter((model) => model.modality === modality)
+              // Image, transcription, and voice are always on offer, so an absence reads as the
+              // server's, not the app's. Embeddings stay quiet until a server has one.
+              if (!options.length && modality === 'embedding') return null
+              if (!options.length) {
+                return (
+                  <Row
+                    key={modality}
+                    label={MODALITY_LABEL[modality]}
+                    controlId={`remote-server-model-${modality}`}
+                    hint={`This server lists no ${MODALITY_LABEL[modality].toLowerCase()} models.`}
+                  >
+                    <select
+                      id={`remote-server-model-${modality}`}
+                      value=""
+                      disabled
+                      className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-500 outline-none"
+                    >
+                      <option value="">No {MODALITY_LABEL[modality].toLowerCase()} models on this server</option>
+                    </select>
+                  </Row>
+                )
+              }
+              return (
+                <Row
+                  key={modality}
+                  label={MODALITY_LABEL[modality]}
+                  controlId={`remote-server-model-${modality}`}
+                  hint={`Choose the ${MODALITY_LABEL[modality].toLowerCase()} model used on this server.`}
+                >
+                  <select
+                    id={`remote-server-model-${modality}`}
+                    value={form.selections[modality] ?? ''}
+                    onChange={(event) => {
+                      const selection = event.target.value
+                      setForm((current) => ({
+                        ...current,
+                        selections: { ...current.selections, [modality]: selection || undefined }
+                      }))
+                      setStatus('Not saved.')
+                    }}
+                    className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus-visible:border-green-500"
+                  >
+                    <option value="">Do not use this modality</option>
+                    {options.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
+                </Row>
+              )
+            })}
           </>
         ) : null}
       </div>

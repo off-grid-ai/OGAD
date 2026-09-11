@@ -1,96 +1,82 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
-import os from 'os'
-import { Mutex } from 'async-mutex'
-import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
 import * as fs from 'fs'
 import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
-import {
-  computeSafeCtx,
-  modeBudget,
-  loadAttempts,
-  capContextToModel,
-  type KvCacheType,
-  type PerformanceMode
-} from './model-sizing'
-import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from './llm/gen-params'
 import { classifyLlamaError, modelPortConflictReason } from './llama-error'
-import type { ManagedRuntime } from './runtime-manager'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
 import {
   DEFAULT_CTX_SIZE,
   DEFAULT_MAX_TOOL_CALLS,
-  normalizeMaxToolCalls
-} from '../shared/llm-defaults'
-import { REASONING_BUDGET_AUTO, reasoningBudgetPayload } from '@offgrid/models'
-import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
+  DESKTOP_TEXT_SETTINGS_DEFAULTS,
+  REASONING_BUDGET_AUTO,
+  MAX_TOKENS_AUTO,
+  reasoningControlFromChatTemplate,
+  reasoningMetadataFromChatTemplate,
+  resolveMaxTokens,
+  shouldAutoRecoverRuntime as shouldAutoRecover,
+  engineReadinessAction,
+  modelReadinessIssue,
+  textRuntimeLoadAttempts,
+  textRuntimeLoadFailureAction,
+  textRuntimeAdmissionAction,
+  applyTextRuntimeModePreset,
+  llamaServerCompletionPayload,
+  normalizeMaxToolCalls,
+  llamaServerLaunchArgs,
+  textRuntimeLaunchChanged,
+  textRuntimeCrashRecoveryPlan,
+  isGrounderModel,
+  isPerformanceMode,
+  isReasoningEffort,
+  type PresetField,
+  type ModelReasoningMetadata,
+  type ReasoningEffort,
+  type ResidentReclaim
+} from '@offgrid/models'
+import type { DesktopManagedRuntime } from './model-runtime-port'
 import {
-  applyModePreset,
-  samplingPayload,
-  launchArgsChanged,
-  buildLaunchArgs,
-  type PresetField
-} from './llm/settings-math'
-import { buildMessages, thinkingPayload, type ChatMessage } from './llm/chat-payload'
-import { readImages } from './llm/read-images'
-import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dialect'
-import { isValidGgufFile } from './models/gguf'
-import { isGrounderModel } from '@offgrid/models'
+  createProcessTeardown,
+  requireNoStrandedProcess,
+  type ProcessTeardown
+} from './process-teardown'
+import { acceleratorForEngine, type EngineAccelerator } from '../shared/engine-accelerator'
+import { verifyArtifactFile } from './models/gguf'
 import { readGgufContextLength } from './models/gguf-metadata'
 import { pickFreePort, isPortFree } from './free-port'
-import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
-import { shouldAutoRecover } from './llm/crash-policy'
 import { streamCompletion, type StreamResult } from './llm/stream'
-import {
-  nativeToolPlannerUnavailableMessage,
-  remoteNativeToolCapability,
-  streamRemoteChatCompletion,
-  type RemoteTextModelConnection
-} from './llm/remote-chat'
-import {
-  terminateEngine,
-  ENGINE_TEARDOWN_GRACE_MS,
-  type TeardownOutcome
-} from './llm/engine-teardown'
+import type { RemoteTextModelConnection } from './llm/remote-chat'
+import type { TeardownOutcome } from './llm/engine-teardown'
 import { emitChangedLlmSettings } from './sync-mutation'
 import { loadGatedVisionModelAdapter } from './vision/model-adapters/registry'
 import type { VisionModelArtifacts } from './vision/model-adapters/types'
-import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
-import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
+import type {
+  KvCacheType,
+  LlmSettings,
+  LlmSettingsUpdateOptions,
+  LlmSettingsUpdateResult,
+  PerformanceMode,
+  StreamChatOptions
+} from './llm/contracts'
+import {
+  quarantineUnreadableConfig,
+  readJsonConfig,
+  readJsonConfigOrNull,
+  resolveActiveModelPaths,
+  storedLlmSettings
+} from './llm/config-files'
+import { safeTextContextSize } from './llm/context-budget'
+import { completeRemoteChat } from './llm/remote-completion'
 
-export type { KvCacheType, PerformanceMode }
-
-export interface LlmSettings {
-  performanceMode?: PerformanceMode
-  temperature?: number
-  ctxSize?: number
-  topP?: number
-  topK?: number
-  minP?: number
-  repeatPenalty?: number
-  maxTokens?: number
-  maxToolCalls?: number
-  reasoningBudget?: number
-  systemPrompt?: string
-  // Launch-time (require a server respawn to take effect):
-  kvCacheType?: KvCacheType // quantize the KV cache to cut memory (needs flash-attn)
-  flashAttn?: boolean // FlashAttention: faster + lower memory; required for quantized KV
-  gpuLayers?: number // -ngl: layers offloaded to the GPU. 99 = all.
-  threads?: number // CPU threads for inference
-  batchSize?: number // -b: prompt batch size
-}
-
-export interface LlmSettingsUpdateOptions {
-  /** Remote sync applies the winning value without creating a new local op. */
-  emitSync?: boolean
-}
-
-export interface ChatStreamResult extends StreamResult {
-  /** The resolved request cap, included so callers never duplicate settings lookup. */
-  maxTokens: number
-}
+export type {
+  KvCacheType,
+  LlmSettings,
+  LlmSettingsUpdateOptions,
+  LlmSettingsUpdateResult,
+  PerformanceMode,
+  StreamChatOptions
+} from './llm/contracts'
 
 export class LLMService {
   private readonly healthInvalidationListeners = new Set<() => void>()
@@ -135,18 +121,17 @@ export class LLMService {
   }
   // User-tunable inference settings (persisted). Context window needs a server
   // respawn to take effect (it's a launch arg); temperature is per-request.
-  private temperature = 0.7
+  private temperature: number = DESKTOP_TEXT_SETTINGS_DEFAULTS.temperature
   private ctxSize = DEFAULT_CTX_SIZE // modest default — context is a ceiling, not a fill-RAM target (KV cache is the bulk of memory). Raise it or use Extreme for more.
   // ONE local gemma server, but many callers (capture distill, day-plan, the
   // secretary, action extraction…). Concurrent requests contend and time out.
   // Serialize them so each gets the server to itself; the per-call timeout sits
   // INSIDE the lock, so it measures execution, not time spent waiting in line.
-  private chatMutex = new Mutex()
   // Advanced sampling (LM Studio-style). undefined = let llama.cpp use its default.
-  private topP: number | undefined
-  private topK: number | undefined
-  private minP: number | undefined
-  private repeatPenalty: number | undefined
+  private topP: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.topP
+  private topK: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.topK
+  private minP: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.minP
+  private repeatPenalty: number | undefined = DESKTOP_TEXT_SETTINGS_DEFAULTS.repeatPenalty
   // Auto by default: a reply runs until the model stops (EOS) or the window fills, instead of a
   // fixed 2048-token cap that truncated long answers regardless of the (large) context window.
   private maxTokens = MAX_TOKENS_AUTO
@@ -154,6 +139,8 @@ export class LLMService {
   // Thinking budget: caps the tokens a reasoning model spends thinking before it answers.
   // Auto (0) = unrestricted. Applied per request; no reload needed.
   private reasoningBudget = REASONING_BUDGET_AUTO
+  private reasoningEffort: ReasoningEffort | undefined
+  private thinkingEnabled = false
   private systemPrompt = ''
   // Resource-usage preset. Governs the RAM budget the context clamp targets and
   // the default ctx/KV preset. 'balanced' preserves prior behavior.
@@ -177,8 +164,24 @@ export class LLMService {
   // a server that keeps dying (e.g. memory pressure on a too-large model) can NOT
   // thrash-respawn a multi-GB process forever.
   private restartTimes: number[] = []
+  // Launch-setting restarts are serialized and last-wins. A slider drag or a fast
+  // sequence of settings writes used to call stop()+init() once per change, so several
+  // spawns raced and an EARLIER one could win and leave the engine running arguments the
+  // user had already moved past. Each request takes the next id; a request whose id is no
+  // longer the latest is superseded and never spawns, and at most one spawn is ever in
+  // flight.
   // Last ~50 stderr lines from llama-server, so we can explain WHY it died on
   // load (unknown arch / OOM / OS-too-old) instead of a blank "Down".
+  /**
+   * Processes that would not die. THE SAME owner the image and transcription servers use.
+   *
+   * This trap has now been found at three layers of this one path - the port's answer channel,
+   * those two servers, and here - and each time the code above it read as if the question had been
+   * asked. That is why a DERIVED answer is dangerous even while it is correct: it survives the
+   * change that makes it wrong. The only thing that can answer "did the memory come back" later is
+   * a retained reference to the process that was holding it.
+   */
+  private readonly teardown: ProcessTeardown = createProcessTeardown('chat engine')
   private stderrTail: string[] = []
   // Human, actionable reason the server failed to come up (null when healthy).
   private lastErrorMsg: string | null = null
@@ -188,40 +191,20 @@ export class LLMService {
 
   constructor() {
     this.resolveModel()
-    try {
-      const s = JSON.parse(fs.readFileSync(this.settingsFile, 'utf-8'))
-      if (typeof s.temperature === 'number') this.temperature = s.temperature
-      if (typeof s.ctxSize === 'number') this.ctxSize = s.ctxSize
-      if (typeof s.topP === 'number') this.topP = s.topP
-      if (typeof s.topK === 'number') this.topK = s.topK
-      if (typeof s.minP === 'number') this.minP = s.minP
-      if (typeof s.repeatPenalty === 'number') this.repeatPenalty = s.repeatPenalty
-      if (typeof s.maxTokens === 'number') this.maxTokens = s.maxTokens
-      if (typeof s.maxToolCalls === 'number')
-        this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
-      if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
-      if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
-      if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
-        this.kvCacheType = s.kvCacheType
-      if (typeof s.flashAttn === 'boolean') this.flashAttn = s.flashAttn
-      if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
-      if (typeof s.threads === 'number') this.threads = s.threads
-      if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
-      if (
-        s.performanceMode === 'conservative' ||
-        s.performanceMode === 'balanced' ||
-        s.performanceMode === 'extreme'
-      )
-        this.performanceMode = s.performanceMode
-      // Restore which preset fields the user pinned, so a plain restart keeps an
-      // explicit KV/ctx/flash-attn choice instead of letting the mode preset win.
-      if (Array.isArray(s.userExplicit)) {
-        for (const f of s.userExplicit)
-          if (f === 'ctxSize' || f === 'kvCacheType' || f === 'flashAttn') this.userExplicit.add(f)
-      }
-    } catch {
-      /* defaults */
+    const stored = readJsonConfig(this.settingsFile)
+    // CORRUPTION, not absence: an unreadable settings file is the user's context size, GPU layers,
+    // KV choice and pins. It is moved aside before anything can overwrite it, and it is said out
+    // loud; only then do we continue on defaults.
+    if (stored.kind === 'unreadable') {
+      quarantineUnreadableConfig(this.settingsFile, stored.reason)
     }
+    if (stored.kind === 'ok') {
+      const parsed = storedLlmSettings(stored.value)
+      Object.assign(this, parsed.settings)
+      for (const field of parsed.explicit) this.userExplicit.add(field)
+    }
+    // `absent` needs no branch: a first launch has no settings file, and the field defaults above
+    // are already the answer. That is the one case here that is genuinely expected absence.
   }
 
   /** Subscribe to process-lifecycle invalidations. This does not define health
@@ -274,43 +257,14 @@ export class LLMService {
   }
 
   private safeCtxSize(requestedRaw: number): number {
-    // First cap to the model's trained window (pure), THEN clamp to what RAM can hold.
-    const trained = this.trainedContext()
-    const requested = capContextToModel(requestedRaw, trained)
-    try {
-      const totalGb = os.totalmem() / 1e9
-      let weightsGb = 0
-      try {
-        weightsGb += fs.statSync(this.modelPath).size / 1e9
-      } catch {
-        /* unknown */
-      }
-      try {
-        if (this.mmProjPath) weightsGb += fs.statSync(this.mmProjPath).size / 1e9
-      } catch {
-        /* unknown */
-      }
-      const { frac, reserveGb } = modeBudget(this.performanceMode)
-      const rounded = computeSafeCtx({
-        requested,
-        totalGb,
-        weightsGb,
-        kvType: this.kvCacheType,
-        frac,
-        reserveGb
-      })
-      if (rounded < requested) {
-        console.warn(
-          `[LLMService] Clamping context ${requested} -> ${rounded} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`
-        )
-      }
-      // computeSafeCtx has a 2048-token floor (Math.max(2048, …)); re-cap to the trained window so a
-      // model trained BELOW that floor (e.g. 1024) is never run past its context.
-      return capContextToModel(rounded, trained)
-    } catch {
-      // If anything goes wrong reading sizes, fall back to a universally-safe value.
-      return capContextToModel(Math.min(requested, 8192), trained)
-    }
+    return safeTextContextSize({
+      requested: requestedRaw,
+      trainedContext: this.trainedContext(),
+      modelPath: this.modelPath,
+      projectorPath: this.mmProjPath,
+      kvType: this.kvCacheType,
+      performanceMode: this.performanceMode
+    })
   }
 
   /** The EFFECTIVE (RAM-clamped) context window the server is actually running
@@ -330,7 +284,7 @@ export class LLMService {
     })
   }
 
-  getSettings(): LlmSettings {
+  private settingsSnapshot(): LlmSettings & Record<string, unknown> {
     return {
       temperature: this.temperature,
       ctxSize: this.ctxSize,
@@ -341,13 +295,21 @@ export class LLMService {
       maxTokens: this.maxTokens,
       maxToolCalls: this.maxToolCalls,
       reasoningBudget: this.reasoningBudget,
+      reasoningEffort: this.reasoningEffort,
+      thinkingEnabled: this.thinkingEnabled,
       systemPrompt: this.systemPrompt,
       kvCacheType: this.kvCacheType,
       flashAttn: this.flashAttn,
       gpuLayers: this.gpuLayers,
       threads: this.threads,
       batchSize: this.batchSize,
-      performanceMode: this.performanceMode,
+      performanceMode: this.performanceMode
+    }
+  }
+
+  getSettings(): LlmSettings {
+    return {
+      ...this.settingsSnapshot(),
       // Report the EFFECTIVE (clamped) context so the UI can show what's really used, plus the
       // model's trained maximum so the UI can offer the slider up to it (not a hardcoded cap),
       // plus the accelerator the running engine chose so the UI never has to guess one.
@@ -361,9 +323,14 @@ export class LLMService {
     }
   }
 
+  /** Resolve the configured output cap for a shared generation request. */
+  generationMaxTokens(requested?: number): number {
+    return resolveMaxTokens(requested, this.maxTokens)
+  }
+
   /** The exact argv handed to `llama-server` for the CURRENT settings — the terminal
    *  artifact of the whole settings→persist→reload path. Delegates to the pure
-   *  `buildLaunchArgs` (single source of truth) after applying the impure RAM clamp,
+   *  the shared launch policy after applying the impure RAM observations,
    *  so `_doInit` and tests build args the same way. */
   launchArgs(): string[] {
     return this.launchArgsFor(this.safeCtxSize(this.ctxSize), this.gpuLayers)
@@ -373,7 +340,7 @@ export class LLMService {
    *  source used by both `launchArgs()` and the OOM fallback ladder, so every
    *  attempt is constructed the same way (only ctx + ngl vary). */
   private launchArgsFor(effectiveCtxSize: number, gpuLayers: number): string[] {
-    return buildLaunchArgs({
+    return llamaServerLaunchArgs({
       modelPath: this.modelPath,
       mmProjPath: this.mmProjPath,
       port: this.port,
@@ -398,35 +365,75 @@ export class LLMService {
    *  `userExplicit` pin-set (which fields the user set granularly), so a plain restart
    *  restores the pins and a mode preset can't reclobber an explicit KV/ctx choice. */
   private persist(): void {
+    // DEVICE/IO FAILURE, and it no longer disappears. This write CREATES the file, so nothing
+    // about it is expected absence: a full disk, a read-only profile or a permissions problem used
+    // to mean the user changed a setting, was told it was saved, and found it gone after a
+    // restart. It throws now, so the settings command's write fails and the panel says so.
+    const destination = this.settingsFile
+    fs.mkdirSync(path.dirname(destination), { recursive: true })
+    const temporaryDirectory = fs.mkdtempSync(
+      path.join(path.dirname(destination), '.llm-settings-')
+    )
+    const temporary = path.join(temporaryDirectory, 'settings.json')
     try {
-      fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
       fs.writeFileSync(
-        this.settingsFile,
-        JSON.stringify({ ...this.getSettings(), userExplicit: [...this.userExplicit] })
+        temporary,
+        JSON.stringify({ ...this.getSettings(), userExplicit: [...this.userExplicit] }),
+        { flag: 'wx', mode: 0o600 }
       )
-    } catch {
-      /* ignore */
+      fs.renameSync(temporary, destination)
+    } finally {
+      // Cleanup cannot turn an already committed rename into a refused settings save.
+      try {
+        fs.rmSync(temporary, { force: true })
+        fs.rmdirSync(temporaryDirectory)
+      } catch (error) {
+        console.warn('[LLMService] Could not remove settings temporary file', error)
+      }
     }
-  }
-
-  /** Sampling params to merge into a request payload (only those the user set). */
-  private samplingPayload(): Record<string, number> {
-    return samplingPayload({
-      topP: this.topP,
-      topK: this.topK,
-      minP: this.minP,
-      repeatPenalty: this.repeatPenalty
-    })
   }
 
   /** Read each image off disk and decode to base64 + mime (the one impure step of
    *  payload building). A file that can't be read is logged and skipped so a broken
    *  path never fails the whole request. */
 
-  /** Update inference settings; respawns the server if any launch-time arg changed
-   *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
-  async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
+  /**
+   * Apply committed inference settings and say whether a launch argument moved.
+   *
+   * It does NOT restart. A launch argument (context, KV-cache type, flash-attn, GPU layers,
+   * threads, batch) only takes effect on a fresh spawn, and who gets to ask for that spawn - once,
+   * with the newest arguments - is the settings command's decision, not this class's. Callers that
+   * reach this method directly are telling the engine what to hold; a caller that wants the change
+   * to take effect goes through `models.settings.save`, which persists through this method and
+   * then asks the restart coordinator exactly once.
+   */
+  async setSettings(
+    s: LlmSettings,
+    options: LlmSettingsUpdateOptions = {}
+  ): Promise<LlmSettingsUpdateResult> {
+    const previous = this.settingsSnapshot()
+    const previousPins = [...this.userExplicit]
     const before = options.emitSync === false ? undefined : this.getSettings()
+    let launchChanged: boolean
+    try {
+      launchChanged = this.applySettingsPatch(s)
+      this.persist()
+    } catch (error) {
+      Object.assign(this, previous)
+      this.userExplicit.clear()
+      for (const field of previousPins) this.userExplicit.add(field)
+      throw error
+    }
+    if (before) {
+      emitChangedLlmSettings(
+        before as Record<string, unknown>,
+        this.getSettings() as Record<string, unknown>
+      )
+    }
+    return { launchChanged: launchChanged && !this.paused }
+  }
+
+  private applySettingsPatch(s: LlmSettings): boolean {
     // Granular launch-time fields the user sets in THIS patch become pinned: a mode
     // preset (now or on a future restart / mode re-pick) must NOT clobber them. Pin
     // BEFORE applying the preset so an explicit q8_0 in the same patch survives.
@@ -438,14 +445,9 @@ export class LLMService {
     // preset fields the user has NOT pinned, so it can't wipe an explicit KV choice.
     // Always treated as a launch change.
     let modeChanged = false
-    if (
-      (s.performanceMode === 'conservative' ||
-        s.performanceMode === 'balanced' ||
-        s.performanceMode === 'extreme') &&
-      s.performanceMode !== this.performanceMode
-    ) {
+    if (isPerformanceMode(s.performanceMode) && s.performanceMode !== this.performanceMode) {
       this.performanceMode = s.performanceMode
-      const merged = applyModePreset(
+      const merged = applyTextRuntimeModePreset(
         { ctxSize: this.ctxSize, kvCacheType: this.kvCacheType, flashAttn: this.flashAttn },
         s.performanceMode,
         this.userExplicit
@@ -456,7 +458,7 @@ export class LLMService {
       modeChanged = true
     }
     // Launch-time args: changing any of these requires a server respawn.
-    const launchChanged = launchArgsChanged(
+    const launchChanged = textRuntimeLaunchChanged(
       s,
       {
         ctxSize: this.ctxSize,
@@ -478,6 +480,8 @@ export class LLMService {
     if (typeof s.maxToolCalls === 'number')
       this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
     if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
+    if (isReasoningEffort(s.reasoningEffort)) this.reasoningEffort = s.reasoningEffort
+    if (typeof s.thinkingEnabled === 'boolean') this.thinkingEnabled = s.thinkingEnabled
     if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
     if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
       this.kvCacheType = s.kvCacheType
@@ -487,41 +491,33 @@ export class LLMService {
     if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
-    this.persist()
-    if (before) {
-      emitChangedLlmSettings(
-        before as Record<string, unknown>,
-        this.getSettings() as Record<string, unknown>
-      )
-    }
-    if (launchChanged && !this.paused) {
-      this.stop()
-      await this.init()
-    }
+    return launchChanged
+  }
+
+  /**
+   * Restart so the committed launch arguments take effect. The plain effect, nothing more.
+   *
+   * This class used to own restart POLICY too - a request counter and a single-file queue, so a
+   * slider drag could not leave an earlier spawn's arguments running. That rule is shared's now
+   * (`createLaunchRestartCoordinator`, reached through `models.settings`), and keeping a second
+   * copy of it here would mean two owners deciding which restart wins.
+   */
+  async restartForLaunchSettings(): Promise<void> {
+    this.stop()
+    await this.init()
   }
 
   // Resolve the active model's files. The Models screen writes active-model.json
   // ({ id, primary, mmproj }) after resolving a catalog entry; default to the
   // bundled Qwen3-VL vision model when nothing is selected yet.
+  private readActiveModelSelection(): Record<string, unknown> | null {
+    return readJsonConfigOrNull(this.activeModelFile)
+  }
+
   private resolveModel(): void {
-    const modelsDir = getModelsDir()
-    try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.primary) {
-        this.modelPath = path.join(modelsDir, cfg.primary)
-        this.mmProjPath = cfg.mmproj ? path.join(modelsDir, cfg.mmproj) : ''
-        return
-      }
-    } catch {
-      // no active selection yet
-    }
-    // No active selection yet. Point at a real catalog vision model so that IF
-    // its files happen to be present we still load; otherwise modelsExist() is
-    // false and setup ("Configure for me") downloads + activates a fitting model.
-    // (The old default named a non-existent Qwen3-VL-4B and dead-ended fresh
-    // installs at a 502 — never auto-resolvable. Keep this aligned with the catalog.)
-    this.modelPath = path.join(modelsDir, 'gemma-4-E4B-it-Q4_K_M.gguf')
-    this.mmProjPath = path.join(modelsDir, 'mmproj-gemma-4-E4B-it-F16.gguf')
+    const paths = resolveActiveModelPaths(getModelsDir(), this.readActiveModelSelection())
+    this.modelPath = paths.modelPath
+    this.mmProjPath = paths.projectorPath
   }
 
   private applyModelReload(): void {
@@ -531,6 +527,7 @@ export class LLMService {
       this.server = null
     }
     this.initialized = false
+    this.reasoningMetadata = undefined
     this.restartTimes = [] // new model — start its crash budget fresh
     this.resolveModel()
     this.invalidateHealth()
@@ -570,16 +567,6 @@ export class LLMService {
     return !!this.mmProjPath && fs.existsSync(this.mmProjPath)
   }
 
-  /** Refuse image-bearing work before starting or contacting llama-server when the
-   *  active model has no projector. Callers may choose a text-only fallback before
-   *  invoking chat; this remains the engine-boundary invariant that protects every
-   *  explicit image entry point if selection changes between capability check and use. */
-  private assertImageInputSupported(images: string[]): void {
-    if (images.length > 0 && !this.hasVision()) {
-      throw new Error('Active chat model does not support image input (no vision projector)')
-    }
-  }
-
   modelsExist(): boolean {
     this.resolveModel()
     return fs.existsSync(this.modelPath)
@@ -598,12 +585,11 @@ export class LLMService {
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = path.basename(this.modelPath)
-    try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.id) id = cfg.id
-    } catch {
-      /* fall back to the filename */
-    }
+    // EXPECTED ABSENCE: before the first activation there is no selection file, and the weight
+    // filename is the right id to show. An unreadable file is handled (and reported) by the
+    // reader, so this call site has one case left, not two.
+    const cfg = this.readActiveModelSelection()
+    if (typeof cfg?.id === 'string' && cfg.id) id = cfg.id
     return { id, vision: !!this.mmProjPath && fs.existsSync(this.mmProjPath) }
   }
 
@@ -612,12 +598,11 @@ export class LLMService {
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = path.basename(this.modelPath)
-    try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.id) id = cfg.id
-    } catch {
-      /* fall back to the filename */
-    }
+    // EXPECTED ABSENCE: before the first activation there is no selection file, and the weight
+    // filename is the right id to show. An unreadable file is handled (and reported) by the
+    // reader, so this call site has one case left, not two.
+    const cfg = this.readActiveModelSelection()
+    if (typeof cfg?.id === 'string' && cfg.id) id = cfg.id
     const primaryFile = path.basename(this.modelPath)
     const projectorFile = this.mmProjPath ? path.basename(this.mmProjPath) : null
     return {
@@ -637,8 +622,8 @@ export class LLMService {
    *  than a few bytes. Catches truncated/corrupt downloads before we hand the file
    *  to llama-server (which would otherwise crash on load). Delegates to the shared
    *  models/gguf implementation (single source of truth with models-manager). */
-  private validateGguf(p: string): boolean {
-    return isValidGgufFile(p, fs)
+  private async validateGguf(p: string): Promise<boolean> {
+    return (await verifyArtifactFile(p, fs, 'runtime')).valid
   }
 
   async init(): Promise<void> {
@@ -651,8 +636,12 @@ export class LLMService {
       // and leaves chat without a server (the bug this replaces).
       try {
         this.resumeFromPauseHook?.()
-      } catch {
-        /* ignore */
+      } catch (error) {
+        // SILENT PARTIAL LOSS, now stated: the image server may not have released its memory, so
+        // the spawn below may fail to allocate. Clearing the pause ourselves is still right - init
+        // must never silently no-op and leave chat with no server - but the reason the next
+        // failure happens has to be readable.
+        console.error('[LLMService] on-demand image-server eviction failed before init', error)
       }
       this.paused = false
     }
@@ -668,10 +657,20 @@ export class LLMService {
   private async _doInit(): Promise<void> {
     if (this.initialized) return
 
+    // No fresh engine beside a live orphan: two processes holding weights on one port while
+    // residency believes none do. Only the stranded one's proven exit reopens this path.
+    await requireNoStrandedProcess(this.teardown)
+
     this.resolveModel()
 
-    // Check if models exist
-    if (!this.modelsExist()) {
+    const primaryExists = this.modelsExist()
+    if (
+      modelReadinessIssue({
+        primaryExists,
+        projectorRequired: false,
+        projectorExists: false
+      }) === 'primary-missing'
+    ) {
       console.error(`[LLMService] Models not found. Please download them first.`)
       console.error(`[LLMService] Expected model: ${this.modelPath}`)
       console.error(`[LLMService] Expected mmproj: ${this.mmProjPath}`)
@@ -680,7 +679,15 @@ export class LLMService {
 
     // Integrity check: a corrupt/truncated weights file would crash llama-server
     // on load. Fail with a clear message so the UI can prompt a re-download.
-    if (!this.validateGguf(this.modelPath)) {
+    const primaryValid = await this.validateGguf(this.modelPath)
+    if (
+      modelReadinessIssue({
+        primaryExists,
+        primaryValid,
+        projectorRequired: false,
+        projectorExists: false
+      }) === 'primary-invalid'
+    ) {
       console.error(
         `[LLMService] Model file failed GGUF validation (corrupt/truncated): ${this.modelPath}`
       )
@@ -694,12 +701,22 @@ export class LLMService {
       // UI-Mate is a screenshot policy, not a text fallback. The exact paired
       // projector is mandatory at the engine boundary.
       loadGatedAdapter.assertCapabilities(activeArtifacts)
-      if (!this.mmProjPath || !this.validateGguf(this.mmProjPath)) {
+      const projectorExists = !!this.mmProjPath && fs.existsSync(this.mmProjPath)
+      const projectorValid = projectorExists ? await this.validateGguf(this.mmProjPath) : false
+      if (
+        modelReadinessIssue({
+          primaryExists,
+          primaryValid,
+          projectorRequired: true,
+          projectorExists,
+          projectorValid
+        }) !== null
+      ) {
         throw new Error('The UI-Mate mmproj file is corrupt or incomplete. Re-download it.')
       }
     }
     // Other model families keep the existing optional-projector behavior.
-    if (this.mmProjPath && !this.validateGguf(this.mmProjPath)) {
+    if (this.mmProjPath && !(await this.validateGguf(this.mmProjPath))) {
       console.warn(`[LLMService] mmproj failed validation; loading text-only: ${this.mmProjPath}`)
       this.mmProjPath = ''
     }
@@ -735,7 +752,9 @@ export class LLMService {
       try {
         this.server.kill('SIGKILL')
       } catch {
-        /* ignore */
+        // EXPECTED ABSENCE: the process this handle refers to may already have exited, and
+        // signalling a dead pid throws ESRCH. There is nothing to report and nothing to do - the
+        // goal was "not running", and it is not running.
       }
       this.server = null
     }
@@ -754,9 +773,9 @@ export class LLMService {
    *  context on GPU → smaller contexts → CPU-only at 2048). We only step DOWN the
    *  ladder on an out-of-memory failure — any other failure (unsupported arch,
    *  missing dylib) won't be fixed by less context, so we move to the next engine.
-   *  launchArgs()/buildLaunchArgs stays the single source for the argv shape. */
+   *  the Shared launch policy stays the single source for the argv shape. */
   private async launchWithFallback(serverPaths: string[]): Promise<boolean> {
-    const attempts = loadAttempts(this.safeCtxSize(this.ctxSize), this.gpuLayers)
+    const attempts = textRuntimeLoadAttempts(this.safeCtxSize(this.ctxSize), this.gpuLayers)
     for (const serverPath of serverPaths) {
       if (!serverPath) continue
       for (let a = 0; a < attempts.length; a++) {
@@ -776,7 +795,14 @@ export class LLMService {
         await this.prepareModelPort()
         // Advance down the ladder ONLY for a memory failure; anything else means a
         // smaller context won't help, so give up on this engine and try the next.
-        if (classifyLlamaError(this.stderrTail.join('\n'))?.code !== 'out_of_memory') break
+        const failureCode = classifyLlamaError(this.stderrTail.join('\n'))?.code
+        if (
+          textRuntimeLoadFailureAction({
+            failureCode,
+            hasNextAttempt: a + 1 < attempts.length
+          }) === 'next-engine'
+        )
+          break
       }
     }
     return false
@@ -857,6 +883,7 @@ export class LLMService {
       this.intentionalStop = false
       this.server = null
       this.initialized = false
+      this.reasoningMetadata = undefined
       // If it died on its own (not our stop/swap), translate the stderr into a
       // human reason so the Health panel can say WHY instead of a blank "Down".
       const deliberateClose = wasIntentional || signal === 'SIGKILL' || signal === 'SIGTERM'
@@ -896,7 +923,8 @@ export class LLMService {
       try {
         proc.kill('SIGKILL')
       } catch {
-        /* already gone */
+        // EXPECTED ABSENCE: the engine that just failed to start has very likely exited on its
+        // own, and ESRCH from signalling it means exactly the state we wanted.
       }
       if (this.server === proc) {
         this.server = null
@@ -911,10 +939,13 @@ export class LLMService {
    *  init, and fail loudly if init didn't take. Single source of truth so the
    *  three chat methods don't each re-implement it. */
   private async ensureReady(): Promise<void> {
-    if (this.paused) throw new Error('LLM paused during image generation — deferred')
-    if (!this.initialized) {
+    const action = textRuntimeAdmissionAction({
+      paused: this.paused,
+      initialized: this.initialized
+    })
+    if (action === 'reject-paused') throw new Error('LLM paused during image generation — deferred')
+    if (action === 'initialize') {
       await this.init()
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- init() flips `initialized` across the await; TS narrows the field to its pre-await `false` and can't see the mutation.
       if (!this.initialized) throw new Error('LLM Service not ready')
     }
   }
@@ -943,7 +974,7 @@ export class LLMService {
     if (await isPortFree(this.port)) {
       return
     }
-    const free = await pickFreePort(this.port, (p) => isPortFree(p))
+    const free = await pickFreePort(this.port, { host: '127.0.0.1' })
     if (free === null) {
       this.lastErrorMsg = modelPortConflictReason(this.port)
       console.error(`[LLMService] ${this.lastErrorMsg}`)
@@ -965,27 +996,37 @@ export class LLMService {
     // Prevents thrash-respawning a multi-GB process when the model is too heavy for
     // the machine (memory-pressure kills). Surface it; the user can pick a smaller
     // model / Conservative mode or hit Health → Restart.
-    const now = Date.now()
-    this.restartTimes = this.restartTimes.filter((t) => now - t < 120_000)
-    if (this.restartTimes.length >= 3) {
+    const plan = textRuntimeCrashRecoveryPlan({
+      now: Date.now(),
+      restartTimes: this.restartTimes,
+      currentContext: this.ctxSize
+    })
+    this.restartTimes = plan.restartTimes
+    if (!plan.shouldRestart) {
       console.error(
         `[LLMService] llama-server died ${this.restartTimes.length + 1}× in 2min (last code ${code}); NOT auto-restarting — likely memory pressure. Pick a smaller model or Conservative mode.`
       )
       return
     }
-    this.restartTimes.push(now)
-    // On a repeat death in the window, halve the context — usually OOM/overcommit.
-    if (this.restartTimes.length >= 2) {
-      const reduced = Math.max(2048, Math.floor(this.ctxSize / 2 / 1024) * 1024)
-      if (reduced < this.ctxSize) {
-        console.warn(
-          `[LLMService] reducing context ${this.ctxSize} -> ${reduced} after repeated crashes`
-        )
-        this.ctxSize = reduced
+    // On a repeat death in the window, use the shared reduced-context plan.
+    if (plan.nextContext < this.ctxSize) {
+      console.warn(
+        `[LLMService] reducing context ${this.ctxSize} -> ${plan.nextContext} after repeated crashes`
+      )
+      this.ctxSize = plan.nextContext
+      try {
         this.persist()
+      } catch (error) {
+        // Crash recovery, not a user command: the reduced context applies to THIS session either
+        // way, so a failed write must not stop the restart. Recorded because the reduction will
+        // silently not survive a relaunch.
+        console.error(
+          '[LLMService] could not persist the reduced context for the next launch',
+          error
+        )
       }
     }
-    await new Promise((r) => setTimeout(r, 1000 * this.restartTimes.length))
+    await new Promise((r) => setTimeout(r, plan.delayMs))
     if (this.paused || this.intentionalStop) return
     console.log(`[LLMService] auto-restarting llama-server (attempt ${this.restartTimes.length})`)
     this.init().catch(() => {})
@@ -1000,18 +1041,29 @@ export class LLMService {
   /** Which thinking controls the LOADED model understands. Resolved once per load from the
    *  template llama-server publishes at /props; 'enable-thinking' until then, which is the
    *  behaviour every model got before this was resolved at all. */
-  private thinkingDialect: ThinkingDialect = 'enable-thinking'
+  private thinkingDialect: ModelReasoningMetadata['control'] = 'enable-thinking'
+  private reasoningMetadata: ModelReasoningMetadata | undefined
+
+  getReasoningMetadata(): ModelReasoningMetadata | undefined {
+    return this.reasoningMetadata
+  }
 
   /** Read the loaded model's chat template and remember which thinking dialect it speaks.
    *  Best-effort: a server that will not answer /props keeps the safe default rather than
    *  retaining the dialect of the model that was loaded before it. */
   private async resolveThinkingDialect(): Promise<void> {
     this.thinkingDialect = 'enable-thinking'
+    this.reasoningMetadata = undefined
     try {
       const res = await fetch(`http://127.0.0.1:${this.port}/props`)
       if (!res.ok) return
       const body = (await res.json()) as { chat_template?: string }
-      this.thinkingDialect = detectThinkingDialect(body.chat_template)
+      this.thinkingDialect = reasoningControlFromChatTemplate(body.chat_template)
+      this.reasoningMetadata = reasoningMetadataFromChatTemplate(
+        'llama-server',
+        body.chat_template,
+        { supportsTokenBudget: true, reasoningFormat: 'deepseek' }
+      )
       console.log(`[LLMService] thinking dialect: ${this.thinkingDialect}`)
     } catch (e) {
       console.warn('[LLMService] could not read /props for the thinking dialect:', e)
@@ -1021,9 +1073,8 @@ export class LLMService {
   private async waitForReady(timeout = 60000): Promise<void> {
     const start = Date.now()
     let healthOk = false
-    while (Date.now() - start < timeout) {
-      // The server died during startup (e.g. model load failure) — stop waiting.
-      if (!this.server) throw new Error('llama-server exited during startup — model failed to load')
+    for (;;) {
+      let modelReady = false
       try {
         if (!healthOk) {
           const res = await fetch(`http://127.0.0.1:${this.port}/health`)
@@ -1034,353 +1085,87 @@ export class LLMService {
           if (res.ok) {
             const body = await res.json().catch(() => null)
             if (Array.isArray(body?.data) && body.data.length > 0) {
-              await this.resolveThinkingDialect()
-              return
+              modelReady = true
             }
           }
         }
       } catch {
-        /* not up yet */
+        // EXPECTED ABSENCE, and the normal case: this is a poll loop against a server that is
+        // still binding its port, so ECONNREFUSED is what "starting" looks like. A server that
+        // never comes up is NOT swallowed here - the loop ends at its deadline and reports through
+        // `lastErrorMsg` with the engine's own stderr tail.
       }
+      const action = engineReadinessAction({
+        processAlive: this.server !== null,
+        probeReady: modelReady,
+        elapsedMs: Date.now() - start,
+        timeoutMs: timeout
+      })
+      if (action === 'ready') {
+        await this.resolveThinkingDialect()
+        return
+      }
+      if (action === 'failed')
+        throw new Error('llama-server exited during startup — model failed to load')
+      if (action === 'timed-out')
+        throw new Error('Server started but no model was loaded within the timeout')
       await new Promise((r) => setTimeout(r, 500))
     }
-    throw new Error('Server started but no model was loaded within the timeout')
   }
 
-  // Use Node http module instead of fetch to avoid undici's headersTimeout (300s)
-  // which kills long-running LLM requests before they can respond. Delegates to the
-  // electron-free postCompletionOnce so the fresh-connection contract lives in one place
-  // (see llm/http-post.ts) and is integration-tested against a real socket-closing server.
-  private httpPost(body: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
-    return postCompletionOnce(this.port, body, timeoutMs, signal)
-  }
-
-  /** Resolve the selected text model once at request admission. Every text
-   * method uses this seam, so no caller needs local/remote branches. */
-  private activeRemoteTextModel(): RemoteTextModelConnection | null {
-    const screenTask = currentRemoteScreenTaskSession()
-    return screenTask ? screenTask.activeServer : getActiveRemoteVisionServer()
-  }
-
-  /** A tool turn must fail before generation when the selected remote model cannot plan actions. */
-  async toolPlannerPreflight(): Promise<string | null> {
-    const remote = this.activeRemoteTextModel()
-    if (!remote) return null
-    const capability = await remoteNativeToolCapability(remote)
-    return capability.status === 'unsupported'
-      ? nativeToolPlannerUnavailableMessage(capability)
-      : null
-  }
-
-  private completeRemote(
+  /** Raw remote-engine boundary. Routing policy belongs to the shared model service. */
+  streamChatRemote(
     remote: RemoteTextModelConnection,
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
-    options: {
-      timeoutMs: number
-      maxTokens?: number
-      temperature?: number
-      topP?: number
-      thinking?: boolean
-      signal?: AbortSignal
-      responseFormat?: unknown
-      tools?: unknown[]
-      toolChoice?: string
-    }
+    opts: StreamChatOptions = {},
+    timeoutMs?: number
   ): Promise<StreamResult> {
-    return streamRemoteChatCompletion({
+    return completeRemoteChat({
       remote,
-      request: {
-        messages,
-        maxTokens: maxTokensForWire(resolveMaxTokens(options.maxTokens, this.maxTokens)),
-        temperature: options.temperature ?? this.temperature,
-        topP: options.topP ?? this.topP,
-        thinking: options.thinking,
-        // Same setting the local engine gets — one remote seam, so every remote caller
-        // (chat, Web Use, Computer Use) honours the configured thinking cap.
-        reasoningBudget: this.reasoningBudget,
-        responseFormat: options.responseFormat,
-        tools: options.tools,
-        toolChoice: options.toolChoice
-      },
+      messages,
       onDelta,
-      options: { signal: options.signal, timeoutMs: options.timeoutMs }
-    })
-  }
-
-  async chat(
-    message: string,
-    images: string[] = [],
-    timeoutMs: number = 300000,
-    maxTokens?: number,
-    opts: {
-      responseFormat?: unknown
-      temperature?: number
-      disableThinking?: boolean
-      signal?: AbortSignal
-    } = {}
-  ): Promise<string> {
-    const messages = buildMessages(message, readImages(images), this.systemPrompt)
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      return (
-        await this.completeRemote(remote, messages, () => {}, {
-          timeoutMs,
-          maxTokens,
-          temperature: opts.temperature,
-          signal: opts.signal,
-          responseFormat: opts.responseFormat
-        })
-      ).content
-    }
-    await this.beginGeneration()
-    try {
-      this.assertImageInputSupported(images)
-      return await this.completeMessages(messages, timeoutMs, maxTokens, opts)
-    } finally {
-      this.finishGeneration()
-    }
-  }
-
-  /** Send an exact OpenAI-style message history for model-family policy adapters. */
-  async chatMessages(
-    messages: ChatMessage[],
-    timeoutMs = 300000,
-    maxTokens?: number,
-    opts: {
-      responseFormat?: unknown
-      temperature?: number
-      topP?: number
-      enableThinking?: boolean
-      disableThinking?: boolean
-      separateReasoning?: boolean
-      signal?: AbortSignal
-    } = {}
-  ): Promise<string> {
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      return (
-        await this.completeRemote(remote, messages, () => {}, {
-          timeoutMs,
-          maxTokens,
-          temperature: opts.temperature,
-          topP: opts.topP,
-          thinking: opts.enableThinking === true && opts.disableThinking !== true,
-          signal: opts.signal,
-          responseFormat: opts.responseFormat
-        })
-      ).content
-    }
-    await this.beginGeneration()
-    try {
-      const hasImages = messages.some(
-        (message) =>
-          Array.isArray(message.content) &&
-          message.content.some((part) => part.type === 'image_url')
-      )
-      this.assertImageInputSupported(hasImages ? ['message-image'] : [])
-      return await this.completeMessages(messages, timeoutMs, maxTokens, opts)
-    } finally {
-      this.finishGeneration()
-    }
-  }
-
-  private async completeMessages(
-    messages: ChatMessage[],
-    timeoutMs: number,
-    maxTokens: number | undefined,
-    opts: {
-      responseFormat?: unknown
-      temperature?: number
-      topP?: number
-      enableThinking?: boolean
-      disableThinking?: boolean
-      separateReasoning?: boolean
-      signal?: AbortSignal
-    }
-  ): Promise<string> {
-    await this.ensureReady()
-    return this.chatMutex.runExclusive(async () => {
-      try {
-        const payload: Record<string, unknown> = {
-          messages: messages,
-          max_tokens: maxTokensForWire(resolveMaxTokens(maxTokens, this.maxTokens)),
-          temperature: opts.temperature ?? this.temperature,
-          ...this.samplingPayload(),
-          ...(opts.topP === undefined ? {} : { top_p: opts.topP })
-        }
-        // Grammar-constrained output: llama.cpp converts the JSON schema to a
-        // GBNF grammar so the model can ONLY emit valid matching JSON.
-        if (opts.responseFormat) payload.response_format = opts.responseFormat
-        // Specialist adapters can require inline <think> output as part of
-        // their official protocol. General models use the separated reasoning
-        // channel so a long thought does not hide the final policy answer.
-        if (opts.enableThinking !== undefined) {
-          if (opts.separateReasoning) {
-            Object.assign(
-              payload,
-              thinkingPayload(opts.enableThinking, this.thinkingDialect),
-              reasoningBudgetPayload(opts.enableThinking, this.reasoningBudget)
-            )
-          } else {
-            payload.chat_template_kwargs = { enable_thinking: opts.enableThinking }
-          }
-        } else if (opts.disableThinking) {
-          // Turn off the model's reasoning channel for fast, direct output (its
-          // chain-of-thought otherwise eats the token budget and leaves content empty).
-          Object.assign(payload, thinkingPayload(false, this.thinkingDialect))
-        }
-        const body = JSON.stringify(payload)
-
-        console.log(
-          `[LLMService] Starting LLM request (timeout: ${timeoutMs / 1000}s, body: ${body.length} chars)...`
-        )
-
-        const raw = await this.httpPost(body, timeoutMs, opts.signal)
-        const data = JSON.parse(raw) as {
-          usage?: { total_tokens?: number }
-          choices?: { message?: { content?: string; reasoning_content?: string } }[]
-        }
-        console.log('[LLMService] LLM request completed')
-        // Best-effort fleet audit: record the local model call if enrolled in a
-        // console. The fleet console is a pro feature — it registers this hook in
-        // its activation; the free build has no hook and this is a no-op.
-        try {
-          const tokens = data.usage?.total_tokens ?? 0
-          const modelName = path.basename(this.modelPath) || 'local-llm'
-          callHook('console.recordModelCall', modelName, tokens, 'ok', false)
-        } catch {
-          /* audit is never load-bearing */
-        }
-        const message = data.choices?.[0]?.message
-        const content = message?.content ?? ''
-        const reasoning = message?.reasoning_content?.trim() ?? ''
-        if (opts.enableThinking && reasoning && !/<think\b[^>]*>/i.test(content)) {
-          return `<think>${reasoning}</think>\n${content}`
-        }
-        return content
-      } catch (e: unknown) {
-        console.error('[LLMService] Chat error:', e instanceof Error ? e.message : e)
-        throw e
+      options: { ...opts, timeoutMs },
+      settings: {
+        maxTokens: this.maxTokens,
+        temperature: this.temperature,
+        topP: this.topP,
+        reasoningBudget: this.reasoningBudget
       }
     })
   }
 
-  // Streaming variant of chat(): posts with stream:true and invokes `onDelta`
-  // for each token as it arrives. Separates the model's reasoning channel
-  // (delta.reasoning_content, or text inside <think>…</think>) from the answer
-  // (delta.content). Returns the full answer text when the stream ends.
-  async chatStream(
-    message: string,
-    images: string[] = [],
-    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    opts: { temperature?: number; thinking?: boolean; signal?: AbortSignal } = {},
-    maxTokens?: number,
-    timeoutMs: number = 300000
-  ): Promise<ChatStreamResult> {
-    const messages = buildMessages(message, readImages(images), this.systemPrompt)
-    const resolvedMaxTokens = resolveMaxTokens(maxTokens, this.maxTokens)
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      const result = await this.completeRemote(remote, messages, onDelta, {
-        timeoutMs,
-        maxTokens: resolvedMaxTokens,
-        temperature: opts.temperature,
-        thinking: opts.thinking,
-        signal: opts.signal
-      })
-      return { ...result, maxTokens: resolvedMaxTokens }
-    }
-    await this.beginGeneration()
-    try {
-      this.assertImageInputSupported(images)
-      await this.ensureReady()
-      const payload: Record<string, unknown> = {
-        messages,
-        max_tokens: maxTokensForWire(resolvedMaxTokens),
-        temperature: opts.temperature ?? this.temperature,
-        ...this.samplingPayload(),
-        stream: true,
-        // Ask for the token counts. Without this the final chunk carries no usage, so the app can
-        // report how long a generation took but never how many tokens it produced.
-        stream_options: { include_usage: true },
-        // Thinking control: when on, ask the template to emit reasoning and have
-        // llama.cpp split it into reasoning_content (deepseek-style); when off,
-        // suppress it so the token budget goes to the answer.
-        ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
-        ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
-      }
-      const body = JSON.stringify(payload)
-
-      // Single SSE transport (llm/stream.ts). The plain chat path sends no tools, so
-      // the returned toolCalls are always empty — take only the answer text.
-      const result = await streamCompletion(this.port, body, onDelta, {
-        signal: opts.signal,
-        timeoutMs
-      })
-      return { ...result, maxTokens: resolvedMaxTokens }
-    } finally {
-      this.finishGeneration()
-    }
-  }
-
-  // Lower-level streaming turn over a RAW messages array with optional tool-calling.
-  // Powers the agentic tool loop (tools.ts): streams reasoning + answer via `onDelta`
-  // (same channels as chatStream) AND accumulates any tool_calls the model emits, so a
-  // tools turn streams thinking -> (the loop surfaces the tool step) -> the answer, all
-  // through one path. Returns the streamed answer text + the assembled tool calls for
-  // this round (empty when the model answered instead of calling a tool).
-  async streamChat(
+  /** Raw local-engine boundary. Routing policy belongs to the shared model service. */
+  async streamChatLocal(
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
-    opts: {
-      temperature?: number
-      topP?: number
-      thinking?: boolean
-      signal?: AbortSignal
-      tools?: unknown[]
-      toolChoice?: string
-      maxTokens?: number
-      responseFormat?: unknown
-    } = {},
-    timeoutMs: number = 300000
+    opts: StreamChatOptions = {},
+    timeoutMs?: number
   ): Promise<StreamResult> {
-    const remote = this.activeRemoteTextModel()
-    if (remote) {
-      return this.completeRemote(remote, messages, onDelta, {
-        timeoutMs,
-        maxTokens: opts.maxTokens,
-        temperature: opts.temperature,
-        topP: opts.topP,
+    await this.beginGeneration()
+    try {
+      await this.ensureReady()
+      const payload = llamaServerCompletionPayload({
+        messages,
+        requestedMaxTokens: opts.maxTokens,
+        savedMaxTokens: this.maxTokens,
+        temperature: opts.temperature ?? this.temperature,
+        sampling: {
+          topP: this.topP,
+          topK: this.topK,
+          minP: this.minP,
+          repeatPenalty: this.repeatPenalty
+        },
+        topPOverride: opts.topP,
+        stream: true,
+        reasoningWire: opts.reasoningWire,
         thinking: opts.thinking,
-        signal: opts.signal,
+        reasoningControl: this.thinkingDialect,
+        reasoningBudget: this.reasoningBudget,
         responseFormat: opts.responseFormat,
         tools: opts.tools,
         toolChoice: opts.toolChoice
       })
-    }
-    await this.beginGeneration()
-    try {
-      await this.ensureReady()
-      const payload: Record<string, unknown> = {
-        messages,
-        max_tokens: maxTokensForWire(resolveMaxTokens(opts.maxTokens, this.maxTokens)),
-        temperature: opts.temperature ?? this.temperature,
-        ...this.samplingPayload(),
-        ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
-        stream: true,
-        // Ask for the token counts. Without this the final chunk carries no usage, so the app can
-        // report how long a generation took but never how many tokens it produced.
-        stream_options: { include_usage: true },
-        ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
-        ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
-      }
-      if (opts.responseFormat) payload.response_format = opts.responseFormat
-      if (opts.tools && opts.tools.length) {
-        payload.tools = opts.tools
-        payload.tool_choice = opts.toolChoice ?? 'auto'
-      }
       const body = JSON.stringify(payload)
 
       // Single SSE transport (llm/stream.ts) — same path as chatStream, but the
@@ -1404,50 +1189,12 @@ export class LLMService {
     }
   }
 
-  /** Resolve true if `proc` exits within `timeoutMs`, false on timeout — the wait primitive the
-   *  teardown escalation polls between SIGTERM and SIGKILL. */
-  private waitForProcExit(proc: ChildProcess, timeoutMs: number): Promise<boolean> {
-    if (proc.exitCode !== null || proc.signalCode !== null) {
-      return Promise.resolve(true)
-    }
-    return new Promise((resolve) => {
-      const onExit = (): void => {
-        clearTimeout(timer)
-        resolve(true)
-      }
-      const timer = setTimeout(() => {
-        proc.off('close', onExit)
-        resolve(false)
-      }, timeoutMs)
-      proc.once('close', onExit)
-    })
-  }
-
   /**
    * Cleanly unload the engine: stop generating, terminate llama-server (SIGTERM → SIGKILL if it
    * hangs on a Metal/GGML shutdown abort), WAIT for it to actually die, then reap anything still
    * bound to the port. Awaitable so the UI (and app-quit) can confirm the port is free — this is
    * the fix for "the engine can't be unloaded without a force-quit / reboot" that blocked LM Studio.
    */
-  /** SIGTERM→SIGKILL a specific process and wait for it to actually exit. Rechecks liveness inside
-   *  terminateEngine so a race with natural exit doesn't mislabel the outcome. */
-  private terminateProc(proc: ChildProcess): Promise<TeardownOutcome> {
-    return terminateEngine(
-      {
-        isAlive: () => proc.exitCode === null && proc.signalCode === null,
-        sendSignal: (sig) => {
-          try {
-            proc.kill(sig)
-          } catch {
-            /* already gone */
-          }
-        },
-        waitForExit: (ms) => this.waitForProcExit(proc, ms)
-      },
-      ENGINE_TEARDOWN_GRACE_MS
-    )
-  }
-
   async unload(): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
     this.paused = true // stop the on-demand respawn path from warming a new server mid-teardown
     let outcome: TeardownOutcome = 'already-dead'
@@ -1460,8 +1207,12 @@ export class LLMService {
       this.intentionalStop = true
       const proc = this.server
       if (proc) {
-        outcome = await this.terminateProc(proc)
-        if (this.server === proc) {
+        // Through the tracker, so a process that survives SIGKILL is RETAINED. The handle used to
+        // be cleared unconditionally - `outcome` was not consulted - so a stuck engine was
+        // forgotten here and the next call started at `already-dead` with nothing left to ask.
+        const terminated = await this.teardown.terminate(proc)
+        outcome = terminated.outcome
+        if (this.server === proc && outcome !== 'stuck') {
           this.server = null
         }
       }
@@ -1474,12 +1225,36 @@ export class LLMService {
     this.initialized = false
     // Safety net: reap any llama-server WE own still holding the port (a forked/stuck child).
     // liveOwners are OTHER apps' engines — we never touch those, so the port isn't "ours to free".
-    const reap = this.reapOrphansOnPort(this.port)
+    //
+    // NOTHING is concluded from what it returns. Its `killed` count means "we sent SIGKILL", not
+    // "it died": there is no wait for exit and no recheck, and SIGKILL does not return memory from
+    // a process in an uninterruptible wait, which is exactly the case that matters here. The old
+    // `outcome !== 'stuck' && liveOwners.length === 0` read like a port-free check and touched no
+    // port; `liveOwners` structurally cannot see our own orphan, by design.
+    this.reapOrphansOnPort(this.port)
     // Leave the engine down but allow a future explicit start; releasePause clears the block
     // without warming a server (on-demand — the next chat/tool turn respawns).
     this.paused = false
     this.invalidateHealth()
-    return { outcome, portFree: outcome !== 'stuck' && reap.liveOwners.length === 0 }
+    // PROBED, not derived, and it answers a different question from the reclaim: "can another app
+    // bind :8439 now" is what this unload is FOR (freeing the port for LM Studio), and it is what
+    // the renderer shows. Whether the memory came back is `reclaimResidentMemory`, which proves an
+    // exit. Two facts, each measured; never one standing in for the other.
+    return { outcome, portFree: await isPortFree(this.port) }
+  }
+
+  /**
+   * Release this engine's resident memory and say whether it happened.
+   *
+   * The authoritative answer, and the only one residency acts on: it comes from the tracker, which
+   * proves the exit of every process this engine has failed to kill. A process that never exits
+   * keeps this at `reclaimed: false` permanently, which is the honest terminal state - better than
+   * a timeout that guesses, and better than the port probe, which answers a related but different
+   * question.
+   */
+  async reclaimResidentMemory(): Promise<ResidentReclaim> {
+    await this.unload()
+    return this.teardown.recheck()
   }
 
   /** Set by the image runtime (imagegen.ts): how to evict a resident image server
@@ -1509,18 +1284,35 @@ export class LLMService {
     this.paused = false
   }
 
-  /** This engine as a ManagedRuntime for the shared residency seam (runtime-manager),
+  /** This engine as a raw runtime port for the shared residency service,
    *  so the chat model is managed identically to image/STT/TTS — one code path. */
-  get runtime(): ManagedRuntime {
+  get runtime(): DesktopManagedRuntime {
     return {
       modality: 'llm',
-      evict: () => {
-        try {
-          this.pause()
-        } catch {
-          /* ignore */
-        }
-      },
+      /**
+       * Release the engine's memory and say whether it happened.
+       *
+       * This called `pause()`, which is NOT a memory release: it sets the no-respawn flag and then
+       * `stop()` sends one SIGTERM, nulls the handle, and returns without waiting. So the previous
+       * code reported a non-release as a reclaim - not because the kill failed, but because it
+       * never waited to find out, and llama-server can hang on shutdown in a Metal/GGML abort
+       * holding its port and its weights.
+       *
+       * `unload()` is what actually answers: it escalates SIGTERM to SIGKILL and WAITS, races an
+       * in-flight init so a fresh spawn cannot survive the teardown, reaps orphans of ours still
+       * holding the port, and returns `{ outcome, portFree }`. It also sets the same `paused` flag
+       * `pause()` did, so `warm`/`release` keep working exactly as before.
+       *
+       * `pause` reads as "stop respawning" and `unload` reads as "release the memory". Residency
+       * asked for the second and was being given the first.
+       */
+      /**
+       * `pause()` is NOT a memory release - it sets the no-respawn flag and sends one un-awaited
+       * SIGTERM - so this used to report a non-release as a reclaim. It asks the engine to release
+       * and prove it instead, and the proof is a retained process observed to exit, not a handle
+       * we just cleared.
+       */
+      evict: () => llm.reclaimResidentMemory(),
       warm: () => {
         this.resume()
       },

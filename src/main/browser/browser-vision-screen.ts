@@ -6,13 +6,13 @@ import {
   SCREENSHOT_MAX_EDGE,
   SCREENSHOT_RESIZE_KERNEL,
   type ComputerUseSettings
-} from '../../shared/computer-use-settings'
-import { WEB_USE_DESKTOP_VIEWPORT } from '../../shared/browser-session'
+} from '@offgrid/automation'
+import { WEB_USE_DESKTOP_VIEWPORT } from '@offgrid/automation'
 import { getTaskExecutionDevice, recordTaskRun, taskScreenshotPath } from '../tasks/task-history'
 import type { VisionAction } from '../vision/vision-action'
 import { RecoverableVisionError, type VisionScreen } from '../vision/vision-agent'
 import type { BrowserDriver } from './browser-driver'
-import { createBrowserCoordinateTransform } from '../../shared/browser-coordinate-transform'
+import { createBrowserCoordinateTransform } from '@offgrid/automation'
 import { browserPageHasVisualContent } from './browser-page-evidence'
 import { alignPixelSize, planAspectPreservingResize } from '../vision/screenshot-geometry'
 

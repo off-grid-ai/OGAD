@@ -7,21 +7,21 @@
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import {
-  createRagConversation,
-  addRagMessage,
-  getRagConversations,
-  deleteRagConversation,
-  getSetting,
-  saveSetting
-} from './database'
-import { createProject, deleteProject } from './rag/store'
-import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts'
+import { getSetting, saveSetting } from './database'
+import { removeProjectArtifactsForRecovery, saveArtifact } from './artifacts'
 import { saveSkill } from './skills'
 import { addConnector, listConnectors } from './mcp'
-import { llm } from './llm'
-import { generateImage, listImageModels } from './imagegen'
-import { ragService } from './rag/index'
+import { desktopRag, desktopWorkspaceContent } from './composition/application-access'
+import { requireApplicationOutcome } from './composition/application-outcome'
+import { generateDesktopText } from './desktop-generation'
+import { removeDesktopGeneratedImage } from './imagegen/gallery-repository'
+import { generateImage, listGeneratedImages, listImageModels } from './imagegen'
+import {
+  DEFAULT_IMAGE_MIME,
+  type ConversationRecord,
+  type MessageRecord,
+  type ProjectRecord
+} from '@offgrid/application'
 
 const PROJECT_ID = 'offgrid-demo'
 
@@ -62,24 +62,69 @@ function extractCode(text: string): string | null {
 
 async function gen(prompt: string): Promise<string | null> {
   try {
-    const out = await llm.chat(prompt, [], 120_000, 1500, { disableThinking: true })
-    return out.trim() || null
+    const out = await generateDesktopText(prompt, { profile: 'long-form' })
+    return out.content.trim() || null
   } catch (e) {
-    console.error('[seed] llm.chat failed', e)
+    console.error('[seed] generation failed', e)
     return null
   }
 }
 
-function chatTurn(
-  slug: string,
-  title: string,
-  user: string,
-  assistant: string,
-  ctx?: unknown
-): string {
-  const id = createRagConversation(`demo-${slug}`, title, PROJECT_ID)
-  addRagMessage(id, 'user', user)
-  addRagMessage(id, 'assistant', assistant, ctx)
+interface DemoContent {
+  readonly conversations: ConversationRecord[]
+  readonly messages: MessageRecord[]
+  readonly timestamp: string
+}
+
+interface DemoChatTurn {
+  readonly slug: string
+  readonly title: string
+  readonly user: string
+  readonly assistant: string
+  readonly imagePath?: string
+}
+
+function chatTurn(demo: DemoContent, turn: DemoChatTurn): string {
+  const id = `demo-${turn.slug}`
+  demo.conversations.push({
+    id,
+    title: turn.title,
+    modelId: null,
+    projectId: PROJECT_ID,
+    createdAt: demo.timestamp,
+    updatedAt: demo.timestamp
+  })
+  demo.messages.push(
+    {
+      id: `${id}-user`,
+      conversationId: id,
+      turnId: null,
+      position: 0,
+      portable: { role: 'user', content: turn.user },
+      createdAt: demo.timestamp,
+      updatedAt: demo.timestamp
+    },
+    {
+      id: `${id}-assistant`,
+      conversationId: id,
+      turnId: null,
+      position: 1,
+      portable: {
+        role: 'assistant',
+        content: turn.imagePath
+          ? [
+              { type: 'text', text: turn.assistant },
+              { type: 'image', id: `${id}-image`, mimeType: DEFAULT_IMAGE_MIME }
+            ]
+          : turn.assistant
+      },
+      ...(turn.imagePath
+        ? { local: { contentLocations: [{ index: 1, uri: turn.imagePath }] } }
+        : {}),
+      createdAt: demo.timestamp,
+      updatedAt: demo.timestamp
+    }
+  )
   return id
 }
 
@@ -134,52 +179,114 @@ async function seedKnowledge(): Promise<void> {
         )
     }
   ]
+  const failures: unknown[] = []
   for (const f of files) {
     try {
       f.write()
       const p = path.join(dir, f.name)
-      await ragService.indexDocument(
-        { projectId: PROJECT_ID, path: p, fileName: f.name, size: fs.statSync(p).size },
-        () => {}
+      requireApplicationOutcome(
+        await desktopRag.addDocument(
+          { projectId: PROJECT_ID, path: p, fileName: f.name, size: fs.statSync(p).size },
+          () => undefined
+        )
       )
       console.log('[seed] indexed', f.name)
     } catch (e) {
       console.error('[seed] index failed', f.name, e)
+      failures.push(e)
     }
   }
+  if (failures.length) throw new AggregateError(failures, 'Demo knowledge indexing failed.')
 }
 
-function cleanup(): void {
-  for (const c of getRagConversations(PROJECT_ID)) deleteRagConversation(c.id)
-  for (const a of listArtifacts({ projectId: PROJECT_ID })) deleteArtifact(a.id)
-  try {
-    deleteProject(PROJECT_ID)
-  } catch {
-    /* fresh */
+async function replaceDemoContent(
+  project: ProjectRecord,
+  demo: Pick<DemoContent, 'conversations' | 'messages'>
+): Promise<void> {
+  const snapshot = desktopWorkspaceContent.snapshot()
+  if (snapshot.status !== 'ready') throw new Error('Workspace Content is not ready for demo seed.')
+  const removedConversationIds = new Set(
+    snapshot.conversations
+      .filter(
+        (conversation) =>
+          conversation.projectId === PROJECT_ID || conversation.id.startsWith('demo-')
+      )
+      .map((conversation) => conversation.id)
+  )
+  requireApplicationOutcome(
+    await desktopWorkspaceContent.execute({
+      type: 'replace_workspace_content',
+      origin: 'restore',
+      projects: [...snapshot.projects.filter((item) => item.id !== PROJECT_ID), project],
+      conversations: [
+        ...snapshot.conversations.filter((item) => !removedConversationIds.has(item.id)),
+        ...demo.conversations
+      ],
+      messages: [
+        ...snapshot.messages.filter((item) => !removedConversationIds.has(item.conversationId)),
+        ...demo.messages
+      ],
+      chatTurns: snapshot.chatTurns.filter(
+        (item) => !removedConversationIds.has(item.conversationId)
+      )
+    })
+  )
+}
+
+async function cleanup(project: ProjectRecord): Promise<void> {
+  requireApplicationOutcome(await desktopRag.removeProjectDocuments(PROJECT_ID))
+  removeProjectArtifactsForRecovery(PROJECT_ID)
+  for (const image of listGeneratedImages({ projectId: PROJECT_ID })) {
+    if (!image.syncId) {
+      throw new Error(`Demo image cleanup failed: ${path.basename(image.path)} has no gallery id`)
+    }
+    const removal = await removeDesktopGeneratedImage(image.syncId)
+    if (removal.status === 'failed') {
+      throw new Error(`Demo image cleanup failed: ${removal.message}`)
+    }
   }
+  await replaceDemoContent(project, { conversations: [], messages: [] })
 }
 
-export async function seedDemo(live = false): Promise<void> {
-  if (!live && getSetting<boolean>('demo:seeded', false)) {
+function shouldGenerateLive(force: boolean, modelReady: boolean): boolean {
+  return force && modelReady
+}
+
+/**
+ * @param force Re-seed even if this profile is already seeded. What `OFFGRID_SEED=force` means.
+ * @param modelReady Whether the ONE startup text prepare settled successfully. Decides whether
+ *   artifacts are generated live or written from their curated fallbacks - it never re-seeds less.
+ */
+export async function seedDemo(force = false, modelReady = false): Promise<void> {
+  if (!force && getSetting<boolean>('demo:seeded', false)) {
     console.log('[seed] already seeded — skipping')
     return
   }
+  // Live generation needs BOTH: the caller asked to re-seed, and the model actually became
+  // resident. The seeder never prepares one itself - startup owns the single prepare, and a
+  // duplicate here claimed the newest-wins lane and refused startup's own request.
+  const generateLive = shouldGenerateLive(force, modelReady)
+  console.log(
+    generateLive
+      ? '[seed] model ready — generating demo artifacts live'
+      : `[seed] curated demo artifacts (${force ? 'model not ready' : 'seed-once mode'})`
+  )
   try {
-    cleanup()
-    createProject({
+    // A failed forced replacement must not leave the prior success marker over partial data.
+    saveSetting('demo:seeded', false)
+    const timestamp = new Date().toISOString()
+    const project: ProjectRecord = {
       id: PROJECT_ID,
       name: 'Off Grid AI',
       description: 'Demo workspace showcasing Off Grid AI.',
-      icon: '🟢'
-    })
-    if (live) {
-      try {
-        await llm.init()
-      } catch (e) {
-        console.error('[seed] llm init', e)
-      }
+      systemPrompt: '',
+      icon: '🟢',
+      includeMemory: true,
+      createdAt: timestamp,
+      updatedAt: timestamp
     }
-
+    const demo: DemoContent = { conversations: [], messages: [], timestamp }
+    await cleanup(project)
     // Knowledge base: index a few docs (md + txt + pdf) into the project.
     await seedKnowledge()
 
@@ -194,12 +301,17 @@ export async function seedDemo(live = false): Promise<void> {
       fallback: string
     ): Promise<void> => {
       let code = fallback
-      if (live) {
+      if (generateLive) {
         const out = await gen(prompt)
         const c = out && extractCode(out)
         if (c) code = c
       }
-      const id = chatTurn(slug, title, user, `Here you go:\n\n\`\`\`${lang}\n${code}\n\`\`\``)
+      const id = chatTurn(demo, {
+        slug,
+        title,
+        user,
+        assistant: `Here you go:\n\n\`\`\`${lang}\n${code}\n\`\`\``
+      })
       saveArtifact({ kind, code, title, conversationId: id, projectId: PROJECT_ID })
     }
 
@@ -234,12 +346,13 @@ export async function seedDemo(live = false): Promise<void> {
     )
 
     // Voice + speech (speakable reply; record to test STT).
-    chatTurn(
-      'voice',
-      'Voice & speech',
-      'Say one line about Off Grid AI I can listen to.',
-      'Off Grid AI is private, on-device AI — your models and your data never leave your machine. Tap the speaker to hear this, or hold the mic to talk back.'
-    )
+    chatTurn(demo, {
+      slug: 'voice',
+      title: 'Voice & speech',
+      user: 'Say one line about Off Grid AI I can listen to.',
+      assistant:
+        'Off Grid AI is private, on-device AI — your models and your data never leave your machine. Tap the speaker to hear this, or hold the mic to talk back.'
+    })
 
     // Skills — a manual /skill pack + a chat using it.
     saveSkill({
@@ -252,13 +365,18 @@ export async function seedDemo(live = false): Promise<void> {
       const u = 'we run AI models on your computer without the internet'
       let a =
         'Off Grid AI runs open models entirely on your device — no cloud, no accounts, nothing ever leaves your machine.'
-      if (live) {
+      if (generateLive) {
         const out = await gen(
           `Rewrite as one confident Off Grid AI sentence (private, on-device, no cloud; no hype, no emojis): "${u}"`
         )
         if (out) a = out.replace(/^["']|["']$/g, '')
       }
-      chatTurn('skills', 'Skills', `/offgrid-pitch ${u}`, a)
+      chatTurn(demo, {
+        slug: 'skills',
+        title: 'Skills',
+        user: `/offgrid-pitch ${u}`,
+        assistant: a
+      })
     }
 
     // Connectors — add a demo MCP server (no-auth) so Integrations has an entry.
@@ -270,12 +388,13 @@ export async function seedDemo(live = false): Promise<void> {
         args: ['-y', '@modelcontextprotocol/server-everything']
       })
     }
-    chatTurn(
-      'connectors',
-      'Connectors',
-      'What tools does my connected MCP server expose?',
-      'Your "Demo MCP" exposes example tools (echo, add, longRunningOperation, …). Turn Connectors on in the composer to call them right from chat — reads run inline.'
-    )
+    chatTurn(demo, {
+      slug: 'connectors',
+      title: 'Connectors',
+      user: 'What tools does my connected MCP server expose?',
+      assistant:
+        'Your "Demo MCP" exposes example tools (echo, add, longRunningOperation, …). Turn Connectors on in the composer to call them right from chat — reads run inline.'
+    })
 
     // 7) Images LAST (image-gen pauses the LLM). Generate one per installed image
     //    model so every model is exercised in its own chat. Skip CoreML dirs +
@@ -295,20 +414,22 @@ export async function seedDemo(live = false): Promise<void> {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .slice(0, 28)
-    const models = live
+    // Image generation has its own models and does not use the text prepare, so this follows the
+    // caller's live INTENT rather than text readiness - a curated text seed can still render images.
+    const models = force
       ? listImageModels().filter((m) => /\.(gguf|safetensors)$/i.test(m) && !/^ae\./i.test(m))
       : []
     let madeAny = false
     for (const model of models) {
       try {
-        const out = await generateImage({ prompt, model, width: 768, height: 512, steps: 18 })
-        const id = chatTurn(
-          `image-${slugify(model)}`,
-          `Image · ${pretty(model)}`,
-          `Generate an Off Grid AI scene with ${pretty(model)}.`,
-          `Generated for: ${prompt}\n\nModel: ${model}`,
-          { image: out.path }
-        )
+        const out = await generateImage({ prompt, model, width: 768, height: 512 })
+        const id = chatTurn(demo, {
+          slug: `image-${slugify(model)}`,
+          title: `Image · ${pretty(model)}`,
+          user: `Generate an Off Grid AI scene with ${pretty(model)}.`,
+          assistant: `Generated for: ${prompt}\n\nModel: ${model}`,
+          imagePath: out.path
+        })
         try {
           fs.writeFileSync(
             `${out.path}.json`,
@@ -333,13 +454,13 @@ export async function seedDemo(live = false): Promise<void> {
         const dest = path.join(imgDir, 'offgrid-demo-mark.png')
         try {
           fs.copyFileSync(src, dest)
-          const id = chatTurn(
-            'image',
-            'Brand mark (image)',
-            'Generate the Off Grid AI brand mark.',
-            'Generated for: Off Grid AI brand mark',
-            { image: dest }
-          )
+          const id = chatTurn(demo, {
+            slug: 'image',
+            title: 'Brand mark (image)',
+            user: 'Generate the Off Grid AI brand mark.',
+            assistant: 'Generated for: Off Grid AI brand mark',
+            imagePath: dest
+          })
           fs.writeFileSync(
             `${dest}.json`,
             JSON.stringify({ conversationId: id, projectId: PROJECT_ID })
@@ -350,9 +471,13 @@ export async function seedDemo(live = false): Promise<void> {
       }
     }
 
+    await replaceDemoContent(project, demo)
     saveSetting('demo:seeded', true)
-    console.log(`[seed] demo project seeded ✓ (live=${live})`)
+    process.stdout.write(
+      `[seed] demo project seeded ✓ (force=${force} generateLive=${generateLive})\n`
+    )
   } catch (e) {
     console.error('[seed] failed', e)
+    throw e
   }
 }

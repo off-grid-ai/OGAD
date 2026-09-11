@@ -12,6 +12,14 @@ type HookFn = (...args: any[]) => any
 
 const hooks: Record<string, HookFn> = {}
 
+/** Stable core-to-Pro contract for a terminal Action owned by an existing Chat. */
+export interface ChatActionResult {
+  actionId: string
+  conversationId: string
+  status: 'done' | 'failed'
+  summary: string
+}
+
 export function registerHook(name: string, fn: HookFn): void {
   hooks[name] = fn
 }
@@ -60,10 +68,13 @@ export const HOOKS = {
   /** (mutation: SyncMutation) => void - record a committed core data change in Pro sync. */
   syncRecordLocalMutation: 'sync.recordLocalMutation',
   /**
-   * (mutation: KnowledgeDocumentMutation) => void - a committed RAG document lifecycle change.
-   * Pro transfers/reconciles it; free builds leave the hook unregistered.
+   * () => readonly string[] - connected peer IDs from the existing Pro transport runtime.
    */
-  syncKnowledgeDocumentMutation: 'sync.knowledgeDocumentMutation',
+  syncConnectedDeviceIds: 'sync.connectedDeviceIds',
+  /**
+   * (deviceId, document) => Promise<void> - send one Shared-approved knowledge document.
+   */
+  syncSendKnowledgeDocument: 'sync.sendKnowledgeDocument',
   /**
    * (mutation: LocalSharedFileMutation) => void - committed generated media or attachment bytes.
    * Pro owns transfer and consent; free builds leave this inert.
@@ -85,6 +96,9 @@ export const HOOKS = {
   /** (task: TaskRunSnapshot) => void - lets Pro project the normal task outcome onto the
    * approval that started the task. Core task state remains the single source of truth. */
   actionsObserveTaskResult: 'actions:observeTaskResult',
+  /** (result: ChatActionResult) => void - lets Pro project a terminal Chat-owned Action onto the
+   * approval that started that Chat. The action engine remains the execution source of truth. */
+  actionsObserveChatActionResult: 'actions:observeChatActionResult',
   /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
    *  that has not yet migrated still gates connector writes; remove once
    *  desktop-pro registers actionsProposeApproval. */

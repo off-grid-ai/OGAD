@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { configureRuntime } from '../runtime-env'
 import { transcriptionService } from '../transcription/whisper-cli'
-import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '../../shared/transcription-recovery'
+import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '@offgrid/models'
 
 describe('Hindi transcription native recovery journey', () => {
   let root = ''

@@ -1,5 +1,5 @@
 /**
- * RELEASE_TEST_CHECKLIST #43 - conversation state survives a full database close/reopen.
+ * Conversation state survives a full database close/reopen.
  * The Electron profile and Keychain are native boundaries; every conversation and message
  * operation uses the production database API against a real disposable SQLite file.
  */
@@ -25,7 +25,9 @@ import {
   getDB,
   getRagConversation,
   getRagConversations,
-  getRagMessages
+  getRagMessages,
+  readChatSessionTurns,
+  writeChatSessionTurns
 } from '../database'
 
 afterAll(() => {
@@ -34,6 +36,26 @@ afterAll(() => {
 })
 
 describe('chat persistence across relaunch', () => {
+  it('reopens admitted Shared chat turns for lifecycle recovery', () => {
+    const conversationId = 'release-chat-turn-recovery'
+    createRagConversation(conversationId, 'Interrupted response')
+    writeChatSessionTurns(conversationId, [
+      {
+        id: 'turn-a',
+        conversationId,
+        userMessage: { role: 'user', content: 'Finish this answer' },
+        status: 'generating',
+        request: { operation: { type: 'text' }, request: {} }
+      }
+    ])
+
+    getDB().close()
+
+    expect(readChatSessionTurns(conversationId)).toEqual([
+      expect.objectContaining({ id: 'turn-a', status: 'generating' })
+    ])
+  })
+
   it('reopens the same conversation, ordered messages, and message context (#43)', () => {
     const conversationId = 'release-chat-relaunch'
     createRagConversation(conversationId, 'Release relaunch fixture')

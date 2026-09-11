@@ -1,4 +1,6 @@
+import { computerUseAdapterProfile } from '@offgrid/models/computer-use'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
+import { serializeComputerUsePolicyResponse } from '@offgrid/models'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import type {
   VisionModelAdapter,
@@ -12,7 +14,6 @@ import {
   prepareVisionGrounding,
   runPreparedVisionGrounder,
   runVisionPolicyRequest,
-  serializeVisionPolicyResponse,
   type PreparedVisionGrounding
 } from './vision-policy-runner'
 
@@ -199,7 +200,7 @@ function reasonerOutcome(response: VisionPolicyResponse): ReasonerOutcome {
   return { error: `unsupported hybrid reasoner tool ${JSON.stringify(call.name)}` }
 }
 
-function taskContext(input: VisionPolicyInput): string {
+function taskContext(input: VisionPolicyInput, guidance: readonly string[]): string {
   return [
     `Task brief:\n${input.goal}`,
     input.currentMilestone ? `Current milestone:\n${input.currentMilestone}` : '',
@@ -210,32 +211,33 @@ function taskContext(input: VisionPolicyInput): string {
     input.olderVisualFacts.length
       ? `Older task outcomes. These can be stale:\n${input.olderVisualFacts.join('\n')}`
       : '',
+    guidance.length
+      ? `Authoritative user guidance for the next decision:\n${guidance.map((item) => `- ${item}`).join('\n')}`
+      : '',
     'Inspect this exact screen and call one transition tool.'
   ]
     .filter(Boolean)
     .join('\n\n')
 }
 
-function reasonerRequest(input: VisionPolicyInput): VisionPolicyRequest {
+function reasonerRequest(
+  input: VisionPolicyInput,
+  guidance: readonly string[]
+): VisionPolicyRequest {
   return {
     messages: [
       { role: 'system', content: HYBRID_REASONER_SYSTEM_PROMPT },
       {
         role: 'user',
         content: [
-          { type: 'text', text: taskContext(input) },
+          { type: 'text', text: taskContext(input, guidance) },
           { type: 'image_url', image_url: { url: input.currentScreenshotDataUrl } }
         ]
       }
     ],
-    maxTokens: 900,
-    timeoutMs: 90_000,
-    maxAttempts: 2,
+    ...computerUseAdapterProfile('hybrid-reasoner'),
     tools: [...HYBRID_REASONER_TOOLS],
     toolChoice: 'required',
-    temperature: 0.1,
-    topP: 0.9,
-    enableThinking: true,
     separateReasoning: true,
     validateResponse: (response) => !('error' in reasonerOutcome(response)),
     responseValidationError: (response) => {
@@ -275,7 +277,15 @@ export interface HybridVisionGrounderDependencies {
     onReasoningDelta?: (text: string) => void
   ): Promise<VisionPolicyResponse>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
-  activeSpecialistAdapter(): VisionModelAdapter
+  activeSpecialistAdapter(): VisionModelAdapter | Promise<VisionModelAdapter>
+  runSpecialist?(
+    adapter: VisionModelAdapter,
+    input: VisionGroundingInput,
+    prepared: PreparedVisionGrounding,
+    policyInput: VisionPolicyInput
+  ): Promise<VisionGroundingResult>
+  reasonerRouteId?: string
+  specialistRouteId?: string
 }
 
 /** Compose one text reasoner and one grounding specialist inside the existing
@@ -286,10 +296,14 @@ export function createHybridVisionGrounder(
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
     const prepared = await prepareVisionGrounding(input, environment)
-    const request = reasonerRequest(prepared.policyInput)
-    const response = await dependencies.runReasoner(request, input.signal, input.reportReasoning)
+    const request = reasonerRequest(prepared.policyInput, input.guidance)
+    const response = await dependencies.runReasoner(
+      { ...request, generationRouteId: dependencies.reasonerRouteId },
+      input.signal,
+      input.reportReasoning
+    )
     const outcome = reasonerOutcome(response)
-    const serializedReasoner = serializeVisionPolicyResponse(response)
+    const serializedReasoner = serializeComputerUsePolicyResponse(response)
     if ('error' in outcome) {
       return {
         response: serializedReasoner,
@@ -307,13 +321,14 @@ export function createHybridVisionGrounder(
       }
     }
     const { result: grounded } = await dependencies.withSpecialist(async () => {
-      const adapter = dependencies.activeSpecialistAdapter()
-      const result = await runPreparedVisionGrounder(
-        adapter,
-        input,
-        prepared,
-        specialistInput(prepared, outcome.delegation)
-      )
+      const adapter = await dependencies.activeSpecialistAdapter()
+      const policyInput = {
+        ...specialistInput(prepared, outcome.delegation),
+        generationRouteId: dependencies.specialistRouteId
+      }
+      const result = dependencies.runSpecialist
+        ? await dependencies.runSpecialist(adapter, input, prepared, policyInput)
+        : await runPreparedVisionGrounder(adapter, input, prepared, policyInput)
       if (result.decision?.kind !== 'actions') {
         return {
           ...result,

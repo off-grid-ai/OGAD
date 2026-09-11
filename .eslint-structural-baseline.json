@@ -1,0 +1,1363 @@
+{
+  "version": 1,
+  "files": {
+    "src/main/accessibility/ax-agent.ts": {
+      "complexity": [
+        24
+      ],
+      "max-lines-per-function": [
+        268
+      ],
+      "max-lines": [
+        552
+      ]
+    },
+    "src/main/accessibility/ax-host.ts": {
+      "max-params": [
+        6
+      ],
+      "complexity": [
+        40
+      ],
+      "no-console": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "src/main/accessibility/ax-rail.ts": {
+      "no-console": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "src/main/accessibility/native-app-macos.ts": {
+      "no-empty": [
+        1
+      ]
+    },
+    "src/main/actions/use-runtime.ts": {
+      "max-params": [
+        6
+      ]
+    },
+    "src/main/api-docs.ts": {
+      "@typescript-eslint/no-shadow": [
+        1,
+        1
+      ],
+      "max-lines-per-function": [
+        719
+      ],
+      "max-lines": [
+        784
+      ]
+    },
+    "src/main/bootstrap/loadProFeaturesMain.ts": {
+      "no-console": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "src/main/browser/browser-driver.ts": {
+      "max-lines": [
+        773
+      ],
+      "max-params": [
+        4
+      ],
+      "complexity": [
+        31,
+        23
+      ]
+    },
+    "src/main/browser/browser-host.ts": {
+      "max-lines": [
+        1051
+      ],
+      "max-lines-per-function": [
+        393
+      ],
+      "complexity": [
+        42
+      ],
+      "no-console": [
+        1,
+        1
+      ]
+    },
+    "src/main/chat-stream-state.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/main/database.ts": {
+      "no-console": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "@typescript-eslint/no-shadow": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "complexity": [
+        16
+      ],
+      "max-lines": [
+        1334
+      ],
+      "no-else-return": [
+        1
+      ],
+      "max-params": [
+        5
+      ]
+    },
+    "src/main/dev-seed.ts": {
+      "max-params": [
+        7
+      ],
+      "no-console": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "complexity": [
+        19
+      ]
+    },
+    "src/main/diagnostics-log.ts": {
+      "max-params": [
+        5,
+        4
+      ],
+      "no-console": [
+        1,
+        1
+      ]
+    },
+    "src/main/files.ts": {
+      "complexity": [
+        20
+      ]
+    },
+    "src/main/imagegen/args.ts": {
+      "complexity": [
+        16
+      ]
+    },
+    "src/main/imagegen.ts": {
+      "max-lines": [
+        930
+      ],
+      "complexity": [
+        21,
+        18
+      ],
+      "max-lines-per-function": [
+        288
+      ]
+    },
+    "src/main/ipc-query-logic.ts": {
+      "prefer-template": [
+        1
+      ]
+    },
+    "src/main/ipc.ts": {
+      "max-params": [
+        10,
+        5,
+        4,
+        4,
+        4
+      ],
+      "max-lines": [
+        2078
+      ],
+      "complexity": [
+        25,
+        24,
+        21,
+        18
+      ],
+      "prefer-template": [
+        1,
+        1
+      ],
+      "max-lines-per-function": [
+        1441,
+        316
+      ],
+      "no-console": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "@typescript-eslint/no-shadow": [
+        1,
+        1,
+        1
+      ]
+    },
+    "src/main/kill-orphan-port.ts": {
+      "no-console": [
+        1,
+        1
+      ]
+    },
+    "src/main/llm/http-post.ts": {
+      "max-params": [
+        4,
+        4
+      ]
+    },
+    "src/main/llm/stream.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/main/llm.ts": {
+      "complexity": [
+        29,
+        16
+      ],
+      "max-lines": [
+        1362
+      ],
+      "no-console": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "max-params": [
+        5,
+        4
+      ]
+    },
+    "src/main/mcp-auth.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "src/main/mcp-ipc.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/main/mcp-server.ts": {
+      "max-params": [
+        6
+      ]
+    },
+    "src/main/mcp.ts": {
+      "complexity": [
+        21
+      ],
+      "no-console": [
+        1,
+        1
+      ]
+    },
+    "src/main/mflux.ts": {
+      "prefer-template": [
+        1
+      ]
+    },
+    "src/main/model-generation-adapters.ts": {
+      "max-params": [
+        5,
+        5
+      ]
+    },
+    "src/main/model-selection-persistence.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/main/model-server.ts": {
+      "max-params": [
+        7
+      ],
+      "max-lines": [
+        1173
+      ],
+      "complexity": [
+        51,
+        19,
+        18
+      ],
+      "max-lines-per-function": [
+        289
+      ],
+      "no-console": [
+        1
+      ]
+    },
+    "src/main/models/gguf.ts": {
+      "max-params": [
+        5
+      ]
+    },
+    "src/main/models-manager.ts": {
+      "max-lines": [
+        1156
+      ]
+    },
+    "src/main/permissions.ts": {
+      "no-console": [
+        1,
+        1
+      ]
+    },
+    "src/main/preload-path.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "src/main/renderer-path.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "src/main/sd-server.ts": {
+      "complexity": [
+        19,
+        19
+      ]
+    },
+    "src/main/search-ranking.ts": {
+      "prefer-template": [
+        1
+      ]
+    },
+    "src/main/tasks/remote-task-control.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/main/tasks/task-history-store.ts": {
+      "complexity": [
+        23,
+        19
+      ]
+    },
+    "src/main/tasks/task-history.ts": {
+      "max-params": [
+        4,
+        4
+      ]
+    },
+    "src/main/tools/nativeActionToolExtension.ts": {
+      "max-params": [
+        5
+      ],
+      "complexity": [
+        19
+      ]
+    },
+    "src/main/tools.ts": {
+      "prefer-template": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "max-lines": [
+        707
+      ],
+      "max-params": [
+        4
+      ],
+      "complexity": [
+        23
+      ]
+    },
+    "src/main/updater.ts": {
+      "no-console": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "src/main/vision/hybrid-vision-grounder.ts": {
+      "complexity": [
+        16
+      ]
+    },
+    "src/main/vision/model-adapters/ui-mate/policy.ts": {
+      "max-lines": [
+        529
+      ]
+    },
+    "src/main/vision/model-adapters/ui-mate.ts": {
+      "complexity": [
+        22
+      ]
+    },
+    "src/main/vision/remote-vision-server.ts": {
+      "complexity": [
+        25,
+        17
+      ]
+    },
+    "src/main/vision/vision-actuation.ts": {
+      "complexity": [
+        18
+      ]
+    },
+    "src/main/vision/vision-controller.ts": {
+      "max-params": [
+        4,
+        4,
+        4
+      ],
+      "complexity": [
+        24
+      ]
+    },
+    "src/main/vision/vision-host.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/main/vision/vision-policy-runner.ts": {
+      "max-params": [
+        4,
+        4
+      ]
+    },
+    "src/main/vision/vision-task-graph.ts": {
+      "max-lines": [
+        877
+      ],
+      "complexity": [
+        39,
+        20,
+        18
+      ]
+    },
+    "src/main/vision.ts": {
+      "no-console": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "src/main/window-zoom.ts": {
+      "complexity": [
+        17
+      ]
+    },
+    "src/preload/index.ts": {
+      "no-console": [
+        1,
+        1
+      ],
+      "max-params": [
+        9,
+        4
+      ],
+      "max-lines": [
+        1046
+      ]
+    },
+    "src/renderer/src/App.tsx": {
+      "max-lines-per-function": [
+        1154
+      ],
+      "complexity": [
+        45
+      ],
+      "max-lines": [
+        1497
+      ]
+    },
+    "src/renderer/src/bootstrap/loadProFeaturesRenderer.ts": {
+      "no-console": [
+        1,
+        1
+      ]
+    },
+    "src/renderer/src/components/ChatDetail.tsx": {
+      "max-lines-per-function": [
+        505
+      ],
+      "complexity": [
+        22
+      ],
+      "max-lines": [
+        791
+      ]
+    },
+    "src/renderer/src/components/ChatToolRows.tsx": {
+      "complexity": [
+        36,
+        25
+      ]
+    },
+    "src/renderer/src/components/ConnectorsScreen.tsx": {
+      "max-lines-per-function": [
+        606
+      ],
+      "max-lines": [
+        843
+      ],
+      "complexity": [
+        34
+      ]
+    },
+    "src/renderer/src/components/MemoryChat.tsx": {
+      "max-lines": [
+        5184
+      ],
+      "complexity": [
+        163,
+        161
+      ],
+      "max-lines-per-function": [
+        4630,
+        816
+      ]
+    },
+    "src/renderer/src/components/ModelsScreen.tsx": {
+      "max-lines-per-function": [
+        1051
+      ],
+      "complexity": [
+        47
+      ],
+      "max-lines": [
+        1276
+      ]
+    },
+    "src/renderer/src/components/Onboarding.tsx": {
+      "max-lines-per-function": [
+        351
+      ],
+      "max-lines": [
+        509
+      ]
+    },
+    "src/renderer/src/components/PermissionGate.tsx": {
+      "complexity": [
+        21
+      ]
+    },
+    "src/renderer/src/components/ProjectsScreen.tsx": {
+      "max-lines": [
+        598
+      ]
+    },
+    "src/renderer/src/components/RemoteVisionSettingsTab.tsx": {
+      "max-lines-per-function": [
+        562
+      ],
+      "complexity": [
+        18
+      ],
+      "max-lines": [
+        654
+      ]
+    },
+    "src/renderer/src/components/SettingsPanel.tsx": {
+      "max-lines-per-function": [
+        683
+      ],
+      "complexity": [
+        68
+      ],
+      "max-lines": [
+        787
+      ]
+    },
+    "src/renderer/src/components/SoftwareUpdateSection.tsx": {
+      "complexity": [
+        29
+      ]
+    },
+    "src/renderer/src/components/VoiceBubble.tsx": {
+      "complexity": [
+        36
+      ]
+    },
+    "src/renderer/src/components/actions/ApprovalSetup.tsx": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/renderer/src/components/connectorCatalog.ts": {
+      "max-lines": [
+        664
+      ]
+    },
+    "src/renderer/src/components/explore/presetCatalog.ts": {
+      "max-lines": [
+        845
+      ]
+    },
+    "src/renderer/src/components/setup/SetupPanel.tsx": {
+      "complexity": [
+        29
+      ]
+    },
+    "src/renderer/src/components/setup/StoragePanel.tsx": {
+      "max-lines-per-function": [
+        481
+      ],
+      "complexity": [
+        20
+      ],
+      "max-lines": [
+        537
+      ]
+    },
+    "src/renderer/src/components/tasks/ComputerUseStepDetails.tsx": {
+      "complexity": [
+        31
+      ]
+    },
+    "src/renderer/src/components/use-chat-voice-turns.ts": {
+      "max-lines-per-function": [
+        422
+      ],
+      "max-lines": [
+        552
+      ]
+    },
+    "src/renderer/src/lib/chat-history.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/renderer/src/lib/desktop-chat-generation-adapter.ts": {
+      "complexity": [
+        18
+      ],
+      "max-params": [
+        4
+      ]
+    },
+    "src/renderer/src/lib/persist-toggle.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "src/renderer/src/lib/pro-navigation.ts": {
+      "complexity": [
+        21
+      ]
+    },
+    "src/shared/generation-metrics.ts": {
+      "complexity": [
+        28
+      ]
+    },
+    "pro/main/clipboard-store.ts": {
+      "max-lines-per-function": [
+        306
+      ],
+      "max-lines": [
+        509
+      ]
+    },
+    "pro/main/clipboard.ts": {
+      "no-console": [
+        1,
+        1,
+        1
+      ],
+      "max-params": [
+        5
+      ],
+      "max-lines": [
+        549
+      ]
+    },
+    "pro/main/console.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "pro/main/crm/actions.ts": {
+      "complexity": [
+        20
+      ]
+    },
+    "pro/main/crm/agent.ts": {
+      "complexity": [
+        19
+      ],
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/crm/approval-lifecycle.ts": {
+      "complexity": [
+        22
+      ]
+    },
+    "pro/main/crm/calendar.ts": {
+      "max-params": [
+        4
+      ],
+      "complexity": [
+        16
+      ]
+    },
+    "pro/main/crm/cleanup.ts": {
+      "prefer-template": [
+        1,
+        1
+      ],
+      "complexity": [
+        17
+      ]
+    },
+    "pro/main/crm/extract.ts": {
+      "max-lines": [
+        609
+      ],
+      "complexity": [
+        58
+      ],
+      "no-console": [
+        1,
+        1
+      ]
+    },
+    "pro/main/crm/observations.ts": {
+      "complexity": [
+        26
+      ]
+    },
+    "pro/main/crm/organize.ts": {
+      "complexity": [
+        24
+      ]
+    },
+    "pro/main/crm/reflect.ts": {
+      "complexity": [
+        18
+      ]
+    },
+    "pro/main/crm/reprocess.ts": {
+      "complexity": [
+        17
+      ]
+    },
+    "pro/main/crm/resolve.ts": {
+      "max-params": [
+        4,
+        4
+      ],
+      "complexity": [
+        21
+      ],
+      "max-lines": [
+        516
+      ],
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/crm/schema.ts": {
+      "complexity": [
+        20
+      ]
+    },
+    "pro/main/crm/session.ts": {
+      "max-params": [
+        4
+      ],
+      "complexity": [
+        16
+      ]
+    },
+    "pro/main/crm/skills-engine.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/crm/synthesize.ts": {
+      "prefer-template": [
+        1,
+        1
+      ]
+    },
+    "pro/main/crm/text-sim.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "pro/main/crm-ipc.ts": {
+      "no-console": [
+        1,
+        1,
+        1
+      ],
+      "max-params": [
+        5,
+        4,
+        4,
+        4
+      ]
+    },
+    "pro/main/deferred-window-presentation.ts": {
+      "no-console": [
+        1
+      ],
+      "complexity": [
+        18
+      ]
+    },
+    "pro/main/dev-seed.ts": {
+      "max-lines": [
+        871
+      ],
+      "max-lines-per-function": [
+        329,
+        297
+      ],
+      "no-console": [
+        1,
+        1,
+        1
+      ],
+      "complexity": [
+        21
+      ],
+      "@typescript-eslint/no-shadow": [
+        1
+      ]
+    },
+    "pro/main/dictation/controller.ts": {
+      "complexity": [
+        16,
+        16
+      ],
+      "max-params": [
+        4
+      ],
+      "no-console": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "max-lines": [
+        653
+      ]
+    },
+    "pro/main/dictation/interpret-hotkey.ts": {
+      "max-params": [
+        5
+      ],
+      "complexity": [
+        18
+      ]
+    },
+    "pro/main/dictation/overlay.ts": {
+      "no-console": [
+        1,
+        1,
+        1
+      ],
+      "max-params": [
+        5
+      ]
+    },
+    "pro/main/focus.ts": {
+      "no-console": [
+        1,
+        1,
+        1
+      ]
+    },
+    "pro/main/google-rest.ts": {
+      "@typescript-eslint/no-shadow": [
+        1
+      ],
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/identity-discovery.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/identity-inference.ts": {
+      "max-params": [
+        6
+      ]
+    },
+    "pro/main/index.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/ingest.ts": {
+      "@typescript-eslint/no-shadow": [
+        1
+      ],
+      "no-console": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "complexity": [
+        33,
+        16
+      ],
+      "max-params": [
+        4
+      ],
+      "prefer-template": [
+        1
+      ]
+    },
+    "pro/main/licensing/license-service.ts": {
+      "max-lines": [
+        730
+      ],
+      "no-console": [
+        1,
+        1,
+        1
+      ]
+    },
+    "pro/main/meeting-controller.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/meeting-native.ts": {
+      "no-console": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "complexity": [
+        21,
+        20
+      ],
+      "max-lines": [
+        546
+      ]
+    },
+    "pro/main/meetings.ts": {
+      "no-console": [
+        1,
+        1,
+        1
+      ],
+      "complexity": [
+        23,
+        16
+      ],
+      "max-lines": [
+        697
+      ]
+    },
+    "pro/main/services.ts": {
+      "no-console": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "max-lines-per-function": [
+        265
+      ],
+      "max-lines": [
+        528
+      ]
+    },
+    "pro/main/sync/blob-frame-cipher.ts": {
+      "max-params": [
+        4,
+        4
+      ]
+    },
+    "pro/main/sync/chat-stream-service.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "pro/main/sync/controlled-file-trace.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/sync/macos-proximity.ts": {
+      "max-params": [
+        4
+      ],
+      "max-lines": [
+        552
+      ],
+      "complexity": [
+        25
+      ],
+      "@typescript-eslint/no-shadow": [
+        1
+      ]
+    },
+    "pro/main/sync/model-transfer-service.ts": {
+      "max-params": [
+        4
+      ],
+      "complexity": [
+        21
+      ],
+      "max-lines": [
+        600
+      ]
+    },
+    "pro/main/sync/shared-file-sync-service.ts": {
+      "max-lines": [
+        2009
+      ],
+      "max-params": [
+        4,
+        4,
+        4
+      ],
+      "no-console": [
+        1,
+        1,
+        1
+      ]
+    },
+    "pro/main/sync/shared-file-transfer.ts": {
+      "max-params": [
+        5
+      ]
+    },
+    "pro/main/sync/state-bridge.ts": {
+      "max-params": [
+        6,
+        5,
+        5,
+        5,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "complexity": [
+        21,
+        18
+      ],
+      "max-lines": [
+        703
+      ]
+    },
+    "pro/main/sync/sync-facade-state-bridge-lifecycle.ts": {
+      "max-params": [
+        5
+      ]
+    },
+    "pro/main/sync/sync-service.ts": {
+      "max-lines": [
+        817
+      ]
+    },
+    "pro/main/sync/sync-store.ts": {
+      "max-lines": [
+        1024
+      ]
+    },
+    "pro/main/sync/task-control-sync.ts": {
+      "max-params": [
+        5
+      ]
+    },
+    "pro/main/sync/task-run-projection.ts": {
+      "complexity": [
+        24
+      ]
+    },
+    "pro/main/sync/tool-grant-mesh.ts": {
+      "max-params": [
+        4,
+        4
+      ]
+    },
+    "pro/main/sync-ipc.ts": {
+      "max-params": [
+        4
+      ]
+    },
+    "pro/main/text-injection.ts": {
+      "no-console": [
+        1
+      ]
+    },
+    "pro/main/vault/vault-service.ts": {
+      "max-params": [
+        8
+      ],
+      "prefer-template": [
+        1
+      ]
+    },
+    "pro/renderer/components/DeviceActions.tsx": {
+      "complexity": [
+        19
+      ]
+    },
+    "pro/renderer/components/FilePreviewSurface.tsx": {
+      "complexity": [
+        21
+      ]
+    },
+    "pro/renderer/components/browser/WatchedBrowserPane.tsx": {
+      "complexity": [
+        19
+      ]
+    },
+    "pro/renderer/components/browser/tasks/TaskExecutionPlanView.tsx": {
+      "complexity": [
+        33,
+        23,
+        18
+      ]
+    },
+    "pro/renderer/components/browser/tasks/TaskGuideComposer.tsx": {
+      "complexity": [
+        18
+      ]
+    },
+    "pro/renderer/components/browser/tasks/TaskHistoryList.tsx": {
+      "complexity": [
+        18
+      ]
+    },
+    "pro/renderer/components/browser/tasks/TaskLiveActivity.tsx": {
+      "complexity": [
+        30
+      ]
+    },
+    "pro/renderer/components/vision/ComputerUseSupervisor.tsx": {
+      "complexity": [
+        32,
+        16
+      ]
+    },
+    "pro/renderer/proView.tsx": {
+      "complexity": [
+        16
+      ]
+    },
+    "pro/renderer/screens/ActionsScreen.tsx": {
+      "max-lines-per-function": [
+        461
+      ],
+      "complexity": [
+        25,
+        18
+      ],
+      "max-lines": [
+        572
+      ]
+    },
+    "pro/renderer/screens/DayView.tsx": {
+      "complexity": [
+        18
+      ],
+      "max-lines": [
+        1336
+      ],
+      "max-lines-per-function": [
+        416
+      ]
+    },
+    "pro/renderer/screens/DevicesScreen.tsx": {
+      "max-lines": [
+        3017
+      ],
+      "max-lines-per-function": [
+        2666
+      ],
+      "complexity": [
+        187,
+        24,
+        23,
+        16
+      ],
+      "max-params": [
+        4
+      ]
+    },
+    "pro/renderer/screens/EntitiesScreen.tsx": {
+      "max-lines-per-function": [
+        388,
+        314
+      ],
+      "complexity": [
+        28,
+        22
+      ],
+      "max-lines": [
+        1694
+      ]
+    },
+    "pro/renderer/screens/MeetingActivitySection.tsx": {
+      "complexity": [
+        16
+      ]
+    },
+    "pro/renderer/screens/MeetingsScreen.tsx": {
+      "max-lines-per-function": [
+        429
+      ],
+      "complexity": [
+        42
+      ],
+      "max-lines": [
+        464
+      ]
+    },
+    "pro/renderer/screens/NotificationList.tsx": {
+      "max-lines-per-function": [
+        386
+      ],
+      "complexity": [
+        16
+      ],
+      "max-lines": [
+        581
+      ]
+    },
+    "pro/renderer/screens/ReflectScreen.tsx": {
+      "complexity": [
+        22
+      ],
+      "max-lines": [
+        611
+      ]
+    },
+    "pro/renderer/screens/ReplayScreen.tsx": {
+      "max-lines-per-function": [
+        530
+      ],
+      "complexity": [
+        21
+      ],
+      "max-lines": [
+        589
+      ]
+    },
+    "pro/renderer/screens/TodoCard.tsx": {
+      "complexity": [
+        45
+      ]
+    },
+    "pro/renderer/screens/VaultScreen.tsx": {
+      "max-lines-per-function": [
+        270
+      ],
+      "complexity": [
+        22,
+        18
+      ],
+      "prefer-template": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "max-lines": [
+        1304
+      ]
+    },
+    "pro/renderer/screens/VoiceScreen.tsx": {
+      "max-lines": [
+        984
+      ],
+      "complexity": [
+        28
+      ]
+    },
+    "pro/renderer/settings-sections.tsx": {
+      "complexity": [
+        24
+      ],
+      "max-lines": [
+        555
+      ]
+    }
+  }
+}

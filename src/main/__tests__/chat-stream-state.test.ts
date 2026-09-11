@@ -206,11 +206,20 @@ describe('the reply being generated, as published to anything that follows it', 
     noteChatStreamToolStarted('stream-a', 'generate_image')
     expect(published.at(-1)?.tools).toEqual([{ name: 'generate_image', status: 'running' }])
 
-    noteChatStreamToolCompleted('stream-a', 'generate_image', 'Image generation started')
+    noteChatStreamToolCompleted('stream-a', 'generate_image', 'Image generation started', 'pending')
     expect(published.at(-1)?.tools).toEqual([
       {
         name: 'generate_image',
-        status: 'completed',
+        status: 'pending',
+        result: 'Image generation started'
+      }
+    ])
+
+    expect(continueChatStreamWithImage('stream-a')).toBe(true)
+    expect(published.at(-1)?.tools).toEqual([
+      {
+        name: 'generate_image',
+        status: 'running',
         result: 'Image generation started'
       }
     ])

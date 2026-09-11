@@ -1,21 +1,27 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   resolveImageParams,
   setOverride,
   type ImageParamOverride,
   type ImageParamStore
 } from '@renderer/lib/image-params'
-import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
+import { publishActiveImageModelChanged } from '@renderer/lib/active-image-model-events'
+import { SettingsNumberField } from './SettingsNumberField'
 import { SettingsSelect } from './SettingsSelect'
+import { SettingsTextField, type SettingsWriteOutcome } from './SettingsTextField'
+import { failed, modelFileDisplayName, modelsFailureMessage, ok } from '@offgrid/application'
+import { normalizeImageParameterStore } from '@offgrid/application'
+import { modelControlClient } from '@renderer/lib/model-control-client'
 
-type ImageSettings = {
+interface ImageSettings {
   imageParams?: ImageParamStore
   imgSeed?: string
   imgNegative?: string
   enhanceImagePrompts?: boolean
 }
+type ImageSettingKey = keyof ImageSettings
 
-const modelLabel = (model: string): string => model.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')
+const modelLabel = modelFileDisplayName
 
 export function ImageSettingsTab(): React.JSX.Element {
   const [models, setModels] = useState<string[]>([])
@@ -24,44 +30,107 @@ export function ImageSettingsTab(): React.JSX.Element {
   const [seed, setSeed] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [enhance, setEnhance] = useState(true)
+  const [saveFailure, setSaveFailure] = useState('')
 
   useEffect(() => {
-    void Promise.all([window.api.imageGenStatus(), window.api.getSettings()])
+    const apply = (settings: Record<string, unknown>): void => {
+      if (settings.imageParams && typeof settings.imageParams === 'object')
+        setParams(normalizeImageParameterStore(settings.imageParams))
+      if (typeof settings.imgSeed === 'string') setSeed(settings.imgSeed)
+      if (typeof settings.imgNegative === 'string') setNegativePrompt(settings.imgNegative)
+      if (typeof settings.enhanceImagePrompts === 'boolean')
+        setEnhance(settings.enhanceImagePrompts)
+    }
+    const release = window.api.onModelSettingsProjection(apply)
+    void Promise.all([window.api.imageGenStatus(), window.api.getLlmSettings()])
       .then(([status, settings]) => {
         const available = status?.models ?? []
-        const active = status?.active ?? available[0] ?? ''
-        const saved = settings as ImageSettings
+        const active = status?.defaultModel ?? ''
         setModels(available)
         setModel(active)
-        setParams(saved.imageParams ?? {})
-        setSeed(saved.imgSeed ?? '')
-        setNegativePrompt(saved.imgNegative ?? '')
-        setEnhance(saved.enhanceImagePrompts ?? true)
+        setParams(normalizeImageParameterStore(settings.imageParams))
+        setSeed(typeof settings.imgSeed === 'string' ? settings.imgSeed : '')
+        setNegativePrompt(typeof settings.imgNegative === 'string' ? settings.imgNegative : '')
+        setEnhance(
+          typeof settings.enhanceImagePrompts === 'boolean' ? settings.enhanceImagePrompts : true
+        )
       })
       .catch(() => {})
+    return release
   }, [])
 
   const effective = resolveImageParams(model, params)
 
-  const persist = (key: string, value: unknown): void => {
-    void Promise.resolve(window.api.saveSetting(key, value))
-      .then(announceImageSettingsChanged)
-      .catch(() => {})
+  // One write path for this tab: save, then tell the rest of the app what changed. A failed
+  // write is returned as a typed failure so the field or the tab can show it, never dropped.
+  const save = useCallback(
+    async <K extends ImageSettingKey>(
+      key: K,
+      value: NonNullable<ImageSettings[K]>
+    ): Promise<SettingsWriteOutcome> => {
+      try {
+        const outcome = await window.api.setLlmSettings({ [key]: value })
+        if (!outcome.ok) return failed({ message: modelsFailureMessage(outcome.failure) })
+        const committed = outcome.value.settings
+        if (committed.imageParams) setParams(normalizeImageParameterStore(committed.imageParams))
+        if (typeof committed.imgSeed === 'string') setSeed(committed.imgSeed)
+        if (typeof committed.imgNegative === 'string') setNegativePrompt(committed.imgNegative)
+        if (typeof committed.enhanceImagePrompts === 'boolean')
+          setEnhance(committed.enhanceImagePrompts)
+        return ok(undefined)
+      } catch {
+        return failed({ message: 'This setting could not be saved.' })
+      }
+    },
+    []
+  )
+
+  const persist = <K extends ImageSettingKey>(
+    key: K,
+    value: NonNullable<ImageSettings[K]>
+  ): void => {
+    void save(key, value).then((outcome) => {
+      setSaveFailure(outcome.ok ? '' : outcome.failure.message)
+    })
   }
+
+  const commitSeed = useCallback((value: string) => save('imgSeed', value), [save])
+  const commitNegativePrompt = useCallback((value: string) => save('imgNegative', value), [save])
 
   const chooseModel = (nextModel: string): void => {
+    const previous = model
     setModel(nextModel)
-    void Promise.resolve(window.api.setActiveModalModel('image', nextModel))
-      .then(announceImageSettingsChanged)
-      .catch(() => {})
+    void modelControlClient
+      .control({ type: 'select', surface: 'image', modelId: nextModel })
+      .then((outcome) => {
+        if (!outcome.ok) throw new Error(modelsFailureMessage(outcome.failure))
+        if (outcome.value.status === 'completed') publishActiveImageModelChanged()
+        else setModel(previous)
+      })
+      .catch(() => setModel(previous))
   }
 
+  const writeOverride = useCallback(
+    async (key: keyof ImageParamOverride, value: number): Promise<SettingsWriteOutcome> => {
+      if (!model) return ok(undefined)
+      const next = setOverride(params, model, key, value)
+      setParams(next)
+      return save('imageParams', next)
+    },
+    [model, params, save]
+  )
+
   const saveOverride = (key: keyof ImageParamOverride, value: number): void => {
-    if (!model) return
-    const next = setOverride(params, model, key, value)
-    setParams(next)
-    persist('imageParams', next)
+    void writeOverride(key, value).then((outcome) => {
+      setSaveFailure(outcome.ok ? '' : outcome.failure.message)
+    })
   }
+
+  const commitSteps = useCallback((value: number) => writeOverride('steps', value), [writeOverride])
+  const commitGuidance = useCallback(
+    (value: number) => writeOverride('cfgScale', value),
+    [writeOverride]
+  )
 
   if (!model) {
     return (
@@ -106,15 +175,14 @@ export function ImageSettingsTab(): React.JSX.Element {
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Steps
           </span>
-          <input
-            aria-label="Image steps"
-            type="number"
+          <SettingsNumberField
+            key={`${model}-steps`}
+            id="image-steps"
+            label="Image steps"
             min={4}
             max={50}
             value={effective.steps}
-            onChange={(event) =>
-              saveOverride('steps', Math.max(4, Math.min(50, Number(event.target.value) || 4)))
-            }
+            commit={commitSteps}
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
           />
         </label>
@@ -122,16 +190,15 @@ export function ImageSettingsTab(): React.JSX.Element {
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Guidance
           </span>
-          <input
-            aria-label="Image guidance"
-            type="number"
+          <SettingsNumberField
+            key={`${model}-guidance`}
+            id="image-guidance"
+            label="Image guidance"
             min={0}
             max={20}
             step={0.5}
             value={effective.cfgScale}
-            onChange={(event) =>
-              saveOverride('cfgScale', Math.max(0, Math.min(20, Number(event.target.value) || 0)))
-            }
+            commit={commitGuidance}
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
           />
         </label>
@@ -139,14 +206,12 @@ export function ImageSettingsTab(): React.JSX.Element {
           <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
             Seed
           </span>
-          <input
-            aria-label="Image seed"
-            value={seed}
-            onChange={(event) => {
-              const next = event.target.value.replace(/[^0-9]/g, '')
-              setSeed(next)
-              persist('imgSeed', next)
-            }}
+          <SettingsTextField
+            id="image-seed"
+            label="Image seed"
+            initialValue={seed}
+            sanitize={(value) => value.replace(/[^0-9]/g, '')}
+            commit={commitSeed}
             placeholder="random"
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-700 outline-none focus:border-green-500"
           />
@@ -157,13 +222,11 @@ export function ImageSettingsTab(): React.JSX.Element {
         <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
           Negative prompt
         </span>
-        <textarea
-          aria-label="Negative prompt"
-          value={negativePrompt}
-          onChange={(event) => {
-            setNegativePrompt(event.target.value)
-            persist('imgNegative', event.target.value)
-          }}
+        <SettingsTextField
+          id="image-negative-prompt"
+          label="Negative prompt"
+          initialValue={negativePrompt}
+          commit={commitNegativePrompt}
           rows={3}
           className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
         />
@@ -186,6 +249,12 @@ export function ImageSettingsTab(): React.JSX.Element {
           </span>
         </span>
       </label>
+
+      {saveFailure ? (
+        <p role="alert" className="text-[10px] text-red-400">
+          {saveFailure}
+        </p>
+      ) : null}
     </div>
   )
 }

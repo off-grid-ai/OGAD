@@ -49,11 +49,9 @@ describe('buildPlannerPrompt', () => {
     const p = buildPlannerPrompt('play X on YouTube', [], catalog)
     expect(p).toContain('- web_use:')
     expect(p).toContain('play X on YouTube')
-    // Post-pivot rule: any website task (incl play/watch) -> web_use, which runs
-    // in Off Grid AI's built-in browser; open_url only opens a link.
-    expect(p).toMatch(/is web_use/i)
-    expect(p).toMatch(/built-in browser/i)
-    expect(p).toMatch(/NOT open_url/i)
+    // Website interaction routes to web_use. open_url remains navigation only.
+    expect(p).toMatch(/task on a WEBSITE[\s\S]*is web_use/i)
+    expect(p).toMatch(/open_url ONLY opens a link or app scheme/i)
     expect(p).toMatch(/Fill EVERY required argument/i)
     expect(p).toMatch(/\{"steps":\[\]\}/) // the conversational escape hatch
   })

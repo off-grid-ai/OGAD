@@ -8,7 +8,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { effectIdFrom, mapActionToCommand, makeSemanticRailExecutor } from '../semantic-rail'
 import type { NativeActionCommand } from '../native-helper-logic'
 
-const action = (type: string, args: Record<string, unknown> = {}) =>
+const action = (
+  type: string,
+  args: Record<string, unknown> = {}
+): Parameters<typeof mapActionToCommand>[0] =>
   ({ type, args }) as Parameters<typeof mapActionToCommand>[0]
 
 describe('mapActionToCommand', () => {
@@ -55,7 +58,10 @@ describe('mapActionToCommand', () => {
 })
 
 describe('makeSemanticRailExecutor', () => {
-  const record = (type: string, args: Record<string, unknown> = {}) =>
+  const record = (
+    type: string,
+    args: Record<string, unknown> = {}
+  ): Parameters<ReturnType<typeof makeSemanticRailExecutor>>[0] =>
     ({ type, args }) as Parameters<ReturnType<typeof makeSemanticRailExecutor>>[0]
 
   it('executes a mapped action through the runner and reports ok', async () => {

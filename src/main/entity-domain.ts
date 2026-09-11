@@ -3,7 +3,7 @@ import {
   type EntityAdmissionContext,
   type EntityAdmissionRejection,
   type EntityCandidate
-} from './entity-admission-policy'
+} from '@offgrid/memory'
 import { deleteEntityRecord, resolveEntityRecord } from './database'
 
 export type EntityResolution =

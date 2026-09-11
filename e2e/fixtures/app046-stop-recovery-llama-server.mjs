@@ -56,7 +56,13 @@ const server = http.createServer((request, response) => {
   request.on('end', () => {
     const payload = JSON.parse(body)
     const secondTurn = body.includes('Prove the engine accepts the next prompt.')
-    audit({ event: 'completion-started', secondTurn, stream: payload.stream === true })
+    const classifier = payload.response_format?.type === 'json_schema'
+    audit({
+      event: 'completion-started',
+      secondTurn,
+      classifier,
+      stream: payload.stream === true
+    })
 
     // Conversation-title generation uses the same endpoint without streaming.
     // Answer it immediately so the product can proceed to the user's streamed turn.
@@ -77,6 +83,17 @@ const server = http.createServer((request, response) => {
       'Cache-Control': 'no-cache',
       Connection: 'close'
     })
+
+    // The production intent classifier now uses the same streamed model boundary
+    // as the answer. Complete that contract before the cancellable user reply starts.
+    if (classifier) {
+      response.write(delta(JSON.stringify({ intent: 'chat', urls: [] })))
+      response.write(delta('', 'stop'))
+      response.write('data: [DONE]\n\n')
+      response.end()
+      audit({ event: 'classifier-finished' })
+      return
+    }
 
     if (secondTurn) {
       response.write(delta('APP-046 engine recovered exactly once.'))

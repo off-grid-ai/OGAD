@@ -2,10 +2,11 @@
  * ExecuTorch speech journey across the real asset cache, native process protocol, and WAV output.
  * Network and the heavyweight native executable are the only controlled boundaries.
  */
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { OffGridApplication } from '@offgrid/application'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-executorch-tts-'))
 const dataDir = path.join(root, 'data')
@@ -15,6 +16,8 @@ const inputRecord = path.join(root, 'speech-input.txt')
 const voiceRecord = path.join(root, 'speech-voice.txt')
 const originalDataDir = process.env.OFFGRID_DATA_DIR
 const originalResourceDir = process.env.OFFGRID_RESOURCE_DIR
+let application: OffGridApplication
+let releaseApplication: (() => void) | undefined
 
 process.env.OFFGRID_DATA_DIR = dataDir
 process.env.OFFGRID_RESOURCE_DIR = resourceDir
@@ -38,7 +41,22 @@ function restoreEnv(name: string, value: string | undefined): void {
   else process.env[name] = value
 }
 
-afterAll(() => {
+beforeAll(async () => {
+  const [applicationModule, applicationAccess, modelServices] = await Promise.all([
+    import('@offgrid/application'),
+    import('../composition/application-access'),
+    import('../model-services')
+  ])
+  application = applicationModule.createOffGridApplication({
+    models: modelServices.desktopModelWorkspacePorts
+  })
+  releaseApplication = applicationAccess.registerDesktopApplication(application)
+  await application.start()
+})
+
+afterAll(async () => {
+  await application.stop()
+  releaseApplication?.()
   restoreEnv('OFFGRID_DATA_DIR', originalDataDir)
   restoreEnv('OFFGRID_RESOURCE_DIR', originalResourceDir)
   fs.rmSync(root, { recursive: true, force: true })
@@ -88,6 +106,15 @@ process.stdin.on('end', () => {
     expect(requestedUrls.length).toBeGreaterThan(0)
     expect(progress.at(-1)).toBe(100)
     const downloadsAfterPrepare = requestedUrls.length
+
+    const selection = await application.models.select({
+      modality: 'voice',
+      modelId: 'software-mansion/executorch-kokoro'
+    })
+    if (!selection.ok)
+      throw new Error(
+        `The prepared voice model could not be selected: ${JSON.stringify(selection.failure)}`
+      )
 
     const spoken = await synthesize('A local reply with code', 'af_river')
 

@@ -182,6 +182,43 @@ describe('<App/> live Pro entitlement integration', () => {
     expect(window.location.pathname).toBe('/day')
   })
 
+  it('restores paid capabilities when Keygen renews the open session', async () => {
+    window.history.replaceState(null, '', '/day')
+    const boundary = installLicenseBoundary({
+      initialIsPro: false,
+      status: {
+        isPro: false,
+        tier: null,
+        expiry: '2026-08-01T00:00:00.000Z',
+        verifiedAt: 10
+      }
+    })
+
+    renderApp()
+
+    await waitFor(() => {
+      expect(getRegisteredSettingsSections()).toEqual([])
+      expect(getSlot(SLOTS.connectorSetup)).toBeUndefined()
+      expect(renderProView('day', proViewContext())).toBeNull()
+    })
+
+    act(() => {
+      boundary.emit({
+        isPro: true,
+        tier: 'monthly',
+        expiry: '2030-01-01T00:00:00.000Z',
+        verifiedAt: 11
+      })
+    })
+
+    await waitFor(() => {
+      expect(getRegisteredSettingsSections().length).toBeGreaterThan(0)
+      expect(getSlot(SLOTS.connectorSetup)).toBeDefined()
+      expect(renderProView('day', proViewContext())).not.toBeNull()
+      expect(screen.queryByRole('button', { name: /Get Pro/ })).toBeNull()
+    })
+  })
+
   it('keeps lifetime access active and leaves a first-time free install on Models', async () => {
     window.history.replaceState(null, '', '/day')
     const lifetime = installLicenseBoundary({

@@ -427,6 +427,10 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     steps: { type: 'integer' },
                     seed: { type: 'integer' },
                     cfg_scale: { type: 'number' },
+                    allow_unsafe_memory_override: {
+                      type: 'boolean',
+                      description: 'Load the model even when it is above the memory comfort limit.'
+                    },
                     negative_prompt: { type: 'string' },
                     model: { type: 'string', ...imgEnum },
                     response_format: {

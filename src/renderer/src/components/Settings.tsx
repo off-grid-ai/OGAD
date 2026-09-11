@@ -18,6 +18,7 @@ import { ProcessingControls } from './ProcessingControls'
 import { BackupRestoreSection } from './BackupRestoreSection'
 import { SettingsPermissionsPanel } from './PermissionsPanel'
 import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
+import { GodTwinSettings } from './GodTwinSettings'
 export { ModelPipelineSection } from './ProcessingControls'
 
 const SETTINGS_SECTION_TITLES: Record<string, string> = {
@@ -26,6 +27,7 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   capture: 'Capture & processing',
   'computer-use': 'Computer use',
   remote: 'Remote model server',
+  'god-twin': 'God Twin',
   sync: 'Device sync',
   identity: 'You',
   secretary: 'What Off Grid AI has learned',
@@ -153,7 +155,7 @@ export function Settings({
             {/* Each section is a collapsed-by-default accordion (SettingsCard). */}
             <SettingsCard
               title="Setup & health"
-              summary="Set up your local AI, manage storage, and see live component health."
+          summary="See or change your resource mode, set up local AI, and manage storage."
               delay={0.13}
             >
               <SetupPanel />
@@ -195,6 +197,14 @@ export function Settings({
               delay={0.16}
             >
               <RemoteVisionSettingsTab />
+            </SettingsCard>
+
+            <SettingsCard
+              title="God Twin"
+              summary="Show or hide Ares on your desktop."
+              delay={0.17}
+            >
+              <GodTwinSettings />
             </SettingsCard>
 
             {/* Remaining Pro Settings sections (You / What Off Grid AI has learned /

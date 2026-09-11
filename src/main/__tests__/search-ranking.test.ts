@@ -343,6 +343,21 @@ describe('rankResults — filter then sort', () => {
     expect(out.map((r) => r.key)).toContain('obs:1')
   })
 
+  it('applies a half-open absolute time range and excludes older records', () => {
+    const out = rankResults(results(), {
+      query: 'x',
+      timeRange: { startMs: NOW - 6 * DAY, endMs: NOW }
+    })
+
+    expect(out.map((result) => result.key)).toEqual(['chat:1', 'mem:1'])
+  })
+
+  it('rejects an invalid time range instead of silently dropping the constraint', () => {
+    expect(() =>
+      rankResults(results(), { query: 'x', timeRange: { startMs: NOW, endMs: NOW } })
+    ).toThrow('Invalid search time range')
+  })
+
   it('empty input → empty output', () => {
     expect(rankResults([], { query: 'x' })).toEqual([])
   })

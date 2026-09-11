@@ -51,8 +51,9 @@ function flattenTrigger(
       action,
       connectors
     }
-  if (t.kind === 'event' && (t.on === 'calendar' || t.on === 'approval'))
+  if (t.kind === 'event') {
     return { triggerKind: 'event', triggerConfig: t.on, action, connectors }
+  }
   return { triggerKind: '', triggerConfig: '', action: '', connectors: true }
 }
 
@@ -117,7 +118,9 @@ export function SkillsPanel({
   }, [])
 
   useEffect(() => {
-    if (initialSkillName) void openSkill(initialSkillName)
+    if (!initialSkillName) return
+    const load = window.setTimeout(() => void openSkill(initialSkillName), 0)
+    return () => window.clearTimeout(load)
   }, [initialSkillName, openSkill])
 
   const save = async (): Promise<void> => {

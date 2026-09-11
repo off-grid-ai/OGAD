@@ -1,5 +1,5 @@
 import React from 'react'
-import { safeChatExternalUrl } from '@offgrid/sync'
+import { safeChatExternalUrl } from '@offgrid/application'
 import { openChatLink } from '@renderer/lib/chat-link'
 import type { Components } from 'react-markdown'
 

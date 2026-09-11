@@ -17,7 +17,7 @@ interface SidebarContextProps {
 
 const SidebarContext = createContext<SidebarContextProps | undefined>(undefined)
 
-export const useSidebar = () => {
+const useSidebar = (): SidebarContextProps => {
   const context = useContext(SidebarContext)
   if (!context) {
     throw new Error('useSidebar must be used within a SidebarProvider')
@@ -35,7 +35,7 @@ export const SidebarProvider = ({
   open?: boolean
   setOpen?: React.Dispatch<React.SetStateAction<boolean>>
   animate?: boolean
-}) => {
+}): React.JSX.Element => {
   const [openState, setOpenState] = useState(false)
 
   const open = openProp !== undefined ? openProp : openState
@@ -58,7 +58,7 @@ export const Sidebar = ({
   open?: boolean
   setOpen?: React.Dispatch<React.SetStateAction<boolean>>
   animate?: boolean
-}) => {
+}): React.JSX.Element => {
   return (
     <SidebarProvider open={open} setOpen={setOpen} animate={animate}>
       {children}
@@ -66,7 +66,7 @@ export const Sidebar = ({
   )
 }
 
-export const SidebarBody = (props: React.ComponentProps<typeof motion.div>) => {
+export const SidebarBody = (props: React.ComponentProps<typeof motion.div>): React.JSX.Element => {
   return (
     <>
       <DesktopSidebar {...props} />
@@ -79,7 +79,7 @@ export const DesktopSidebar = ({
   className,
   children,
   ...props
-}: React.ComponentProps<typeof motion.div>) => {
+}: React.ComponentProps<typeof motion.div>): React.JSX.Element => {
   const { open, animate } = useSidebar()
   const reduceMotion = useReducedMotion()
   return (
@@ -112,7 +112,14 @@ export const DesktopSidebar = ({
 // so a narrow window never strands the user without navigation.
 export const MobileSidebar = (_props: React.ComponentProps<'div'>): null => null
 
-export const SidebarLink = ({ link, className, ...props }: { link: Links; className?: string }) => {
+export const SidebarLink = ({
+  link,
+  className,
+  ...props
+}: {
+  link: Links
+  className?: string
+}): React.JSX.Element => {
   const { open, animate } = useSidebar()
   return (
     <a

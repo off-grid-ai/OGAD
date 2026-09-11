@@ -3,11 +3,17 @@
 // ArtifactCanvas and ProjectsScreen; a third, LONGER-form fallback title
 // ("HTML page", "React component") lives in main/artifacts.ts labelFor and is a
 // separate concern (a title fallback, not a badge) — deliberately NOT merged here.
+import type { ArtifactKind as CanonicalArtifactKind } from '@offgrid/artifacts'
 
-export type ArtifactKind = 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'
+export type { ArtifactKind } from '@offgrid/artifacts'
+
+/** Kinds shown in the badge chip. `code` is a runnable-artifact concept with no
+ *  badge of its own, so it is excluded from this presentation-only subset rather
+ *  than given a made-up label. */
+export type DisplayArtifactKind = Exclude<CanonicalArtifactKind, 'code'>
 
 /** The short badge label shown in the artifact chip. */
-export const ARTIFACT_KIND_LABELS: Record<ArtifactKind, string> = {
+export const ARTIFACT_KIND_LABELS: Record<DisplayArtifactKind, string> = {
   html: 'HTML',
   svg: 'SVG',
   mermaid: 'Diagram',

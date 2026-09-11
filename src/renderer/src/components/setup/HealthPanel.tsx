@@ -59,8 +59,8 @@ export function HealthPanel(): React.ReactElement {
     const request = api
       .systemHealth()
       .then(setHealth)
-      .catch(() => {
-        /* ignore — keep last snapshot */
+      .catch((cause: unknown) => {
+        console.error('System health refresh failed; keeping the last snapshot:', cause)
       })
       .finally(() => {
         if (activeRefresh.current === request) activeRefresh.current = null
@@ -74,15 +74,15 @@ export function HealthPanel(): React.ReactElement {
       if (document.visibilityState === 'visible') void refresh()
     }
     void refresh()
-    const stopChatHealth = api.onChatHealthChanged?.(() => void refresh())
+    const stopChatHealth = api.onChatHealthChanged(() => void refresh())
     window.addEventListener('focus', refreshWhenVisible)
     document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
-      if (typeof stopChatHealth === 'function') stopChatHealth()
+      stopChatHealth()
       window.removeEventListener('focus', refreshWhenVisible)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
-  }, [refresh])
+  }, [api, refresh])
 
   const restart = async (id: string): Promise<void> => {
     setRestarting(id)

@@ -1,6 +1,12 @@
-import type { ChatStreamTool, ProjectedSyncedTool } from '@offgrid/sync'
+import {
+  toolWorkStatus,
+  type ChatStreamTool,
+  type ProjectedSyncedTool,
+  type ToolWorkStatus
+} from '@offgrid/application'
 import { CaretDown, Check, Circle, Warning, Wrench, X } from '@phosphor-icons/react'
 import { ChatMarkdown } from './ChatMarkdown'
+import { ChatThinkingBlock } from './ChatThinkingBlock'
 import {
   Collapsible,
   CollapsibleContent,
@@ -15,18 +21,28 @@ import {
 import { ComputerUseStepDetails } from './tasks/ComputerUseStepDetails'
 import { RetryTaskButton } from './tasks/RetryTaskButton'
 import { taskReferenceFromResult, visibleToolResult } from './chat-tool-projection'
+import { ContextDetails } from './ChatMessageContext'
+import { contextResultCount, type ContextNavigation } from './chat-message-projection'
+import type { RagContext } from '@renderer/lib/chat-transcript-types'
 
-type DisplayTool =
+type DisplayTool = (
   | Pick<ProjectedSyncedTool, 'name' | 'arguments' | 'result' | 'status' | 'durationMs' | 'error'>
   | ChatStreamTool
+) & {
+  /** The model's thought process right before this step, when the transcript kept it. */
+  reasoning?: string
+}
 
 interface ChatToolRowsProps {
   tools?: readonly DisplayTool[]
   /** The task that belongs to this live Chat turn before its tool result contains a task id. */
   liveTask?: TaskSession
+  /** Retrieved evidence belongs to the search step that produced it. */
+  context?: RagContext
+  navigation?: ContextNavigation
 }
 
-type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
+type WorkStatus = ToolWorkStatus
 
 const PROPOSAL_STAGE_LABELS: Record<string, string> = {
   start: 'Started proposal',
@@ -105,7 +121,12 @@ function titleFromIdentifier(name: string): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1)
 }
 
-function workStepLabel(tool: DisplayTool): string {
+function isMemorySearch(tool: DisplayTool): boolean {
+  const key = normalizedToolKey(tool.name)
+  return key === 'search_memory' || key === 'search_meetings'
+}
+
+function workStepLabel(tool: DisplayTool, memoryResultCount = 0): string {
   const key = normalizedToolKey(tool.name)
   if (key === 'proposal_deck') {
     const action = String(
@@ -113,22 +134,26 @@ function workStepLabel(tool: DisplayTool): string {
     )
     return PROPOSAL_STAGE_LABELS[action] ?? 'Updated proposal deck'
   }
+  if (isMemorySearch(tool) && memoryResultCount > 0) {
+    return `Searched your memory — ${memoryResultCount} result${memoryResultCount === 1 ? '' : 's'}`
+  }
   return TOOL_LABELS[key] ?? titleFromIdentifier(key)
 }
 
+/** Project this row's shape onto the one shared rule for what a tool call's status means. */
 function workStatus(tool: DisplayTool): WorkStatus {
-  const result = visibleToolResult(tool.result)
-  if ('error' in tool && tool.error?.trim()) return 'failed'
-  if (/^\s*(error|failed)\s*:/i.test(result)) return 'failed'
-  if (tool.status === 'failed') return 'failed'
-  if (tool.status === 'pending' || tool.status === 'cancelled') return 'needs attention'
-  if (tool.status === 'running') return 'running'
-  return 'complete'
+  return toolWorkStatus({
+    name: normalizedToolKey(tool.name),
+    status: tool.status,
+    result: visibleToolResult(tool.result),
+    error: 'error' in tool ? tool.error : undefined
+  })
 }
 
 function shortResult(tool: DisplayTool, status = workStatus(tool), taskSummary?: string): string {
   if (taskSummary?.trim()) return taskSummary.trim()
   if (status === 'running') return 'In progress.'
+  if (status === 'cancelled') return 'Cancelled.'
   if (status === 'needs attention') return 'Waiting for your attention.'
   const key = normalizedToolKey(tool.name)
   if (key === 'read_file') {
@@ -172,6 +197,9 @@ function statusIcon(status: WorkStatus): React.JSX.Element {
     return <Check className="h-3 w-3 text-green-500" aria-hidden="true" />
   }
   if (status === 'failed') return <X className="h-3 w-3 text-red-500" aria-hidden="true" />
+  if (status === 'cancelled') {
+    return <X className="h-3 w-3 text-neutral-500" aria-hidden="true" />
+  }
   if (status === 'needs attention') {
     return <Warning className="h-3 w-3 text-amber-500" aria-hidden="true" />
   }
@@ -183,6 +211,8 @@ function statusIcon(status: WorkStatus): React.JSX.Element {
 function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
   const statuses = tools.map(workStatus)
   if (statuses.includes('running')) return 'running'
+  // You stopped it: that is the outcome, whatever a step before it returned.
+  if (statuses.includes('cancelled')) return 'cancelled'
   if (statuses.includes('failed')) return 'failed'
   if (statuses.includes('needs attention')) return 'needs attention'
   return 'complete'
@@ -190,7 +220,9 @@ function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
 
 function taskWorkStatus(task: TaskSession | undefined): WorkStatus | undefined {
   if (!task) return undefined
-  if (task.status === 'failed' || task.status === 'stopped') return 'failed'
+  if (task.status === 'failed') return 'failed'
+  // You stopped it. That is not a failure, and the card must not say it is.
+  if (task.status === 'stopped') return 'cancelled'
   if (task.status === 'paused' || task.status === 'waiting') return 'needs attention'
   if (task.status === 'running' || task.status === 'reconnecting') return 'running'
   return 'complete'
@@ -200,6 +232,7 @@ function workHeading(status: WorkStatus): string {
   if (status === 'running') return 'Working'
   if (status === 'needs attention') return 'Action needed'
   if (status === 'failed') return 'Work failed'
+  if (status === 'cancelled') return 'Work stopped'
   return 'Work done'
 }
 
@@ -233,10 +266,65 @@ function liveTaskToolIndex(
   return -1
 }
 
+interface WorkStepDisclosureProps {
+  details: string | undefined
+  reasoning: string | undefined
+  ownsContext: boolean
+  context: RagContext | undefined
+  navigation: ContextNavigation | undefined
+  linkedTask: TaskSession | undefined
+  taskWorkspaceOpen: boolean
+}
+
+function WorkStepDisclosure({
+  details,
+  reasoning,
+  ownsContext,
+  context,
+  navigation,
+  linkedTask,
+  taskWorkspaceOpen
+}: WorkStepDisclosureProps): React.JSX.Element {
+  return (
+    <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
+      {reasoning ? <ChatThinkingBlock content={reasoning} className="mb-1.5" /> : null}
+      {details ? <ChatMarkdown content={details} /> : null}
+      {ownsContext ? (
+        <div className="mt-2 max-h-[400px] overflow-y-auto border-t border-neutral-800 pt-2">
+          <ContextDetails context={context!} navigation={navigation!} />
+        </div>
+      ) : null}
+      <ComputerUseStepDetails details={linkedTask?.stepDetails} />
+      {linkedTask ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="mt-2 border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-neutral-500"
+            onClick={() =>
+              taskWorkspaceOpen
+                ? closeTaskWorkspace()
+                : openTaskSidePanel({
+                    taskId: linkedTask.taskId,
+                    kind: linkedTask.kind,
+                    detail: true
+                  })
+            }
+          >
+            {taskWorkspaceOpen ? 'Close task details' : 'Open task details'}
+          </button>
+          <RetryTaskButton task={linkedTask} />
+        </div>
+      ) : null}
+    </CollapsibleContent>
+  )
+}
+
 /** One persisted execution timeline for both live previews and durable assistant turns. */
 export function ChatToolRows({
   tools,
-  liveTask
+  liveTask,
+  context,
+  navigation
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
@@ -262,14 +350,18 @@ export function ChatToolRows({
       linkedTaskForReference(tasks, taskId) ?? (index === liveToolIndex ? liveTask : undefined)
     return { tool, taskId, linkedTask, status: taskWorkStatus(linkedTask) ?? workStatus(tool) }
   })
+  const memoryResultCount = context ? contextResultCount(context) : 0
+  const contextStepIndex = projected.findIndex(({ tool }) => isMemorySearch(tool))
   const projectedStatuses = projected.map((item) => item.status)
   const status = projectedStatuses.includes('running')
     ? 'running'
-    : projectedStatuses.includes('failed')
-      ? 'failed'
-      : projectedStatuses.includes('needs attention')
-        ? 'needs attention'
-        : overallStatus(visible)
+    : projectedStatuses.includes('cancelled')
+      ? 'cancelled'
+      : projectedStatuses.includes('failed')
+        ? 'failed'
+        : projectedStatuses.includes('needs attention')
+          ? 'needs attention'
+          : overallStatus(visible)
 
   return (
     <Collapsible
@@ -299,7 +391,18 @@ export function ChatToolRows({
             const details = taskSummary || error || result
             const durationMs = 'durationMs' in tool ? tool.durationMs : undefined
             const hasComputerDetails = Boolean(linkedTask?.stepDetails?.length)
-            const hasDisclosure = Boolean(details) || hasComputerDetails || Boolean(linkedTask)
+            const reasoning = tool.reasoning?.trim()
+            const ownsContext =
+              index === contextStepIndex &&
+              memoryResultCount > 0 &&
+              context !== undefined &&
+              navigation !== undefined
+            const hasDisclosure =
+              Boolean(details) ||
+              hasComputerDetails ||
+              Boolean(linkedTask) ||
+              Boolean(reasoning) ||
+              Boolean(ownsContext)
             return (
               <li key={`${tool.name}:${index}`} className="relative pb-2 pl-4 last:pb-0">
                 <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
@@ -309,7 +412,7 @@ export function ChatToolRows({
                   <CollapsibleTrigger
                     disabled={!hasDisclosure}
                     className="group flex w-full items-start gap-2 text-left disabled:cursor-default"
-                    aria-label={`${workStepLabel(tool)}, ${stepStatus}`}
+                    aria-label={`${workStepLabel(tool, memoryResultCount)}, ${stepStatus}`}
                     onClick={() => {
                       if (linkedTask) {
                         openTaskSidePanel({
@@ -321,7 +424,9 @@ export function ChatToolRows({
                     }}
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block text-xs text-neutral-300">{workStepLabel(tool)}</span>
+                      <span className="block text-xs text-neutral-300">
+                        {workStepLabel(tool, memoryResultCount)}
+                      </span>
                       <span className="mt-0.5 block text-[10px] leading-relaxed text-neutral-500 group-data-[state=open]:hidden">
                         {shortResult(tool, stepStatus, rowSummary)}
                       </span>
@@ -338,30 +443,15 @@ export function ChatToolRows({
                     ) : null}
                   </CollapsibleTrigger>
                   {hasDisclosure ? (
-                    <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
-                      {details ? <ChatMarkdown content={details} /> : null}
-                      <ComputerUseStepDetails details={linkedTask?.stepDetails} />
-                      {linkedTask ? (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            className="mt-2 border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-neutral-500"
-                            onClick={() =>
-                              taskWorkspaceOpen
-                                ? closeTaskWorkspace()
-                                : openTaskSidePanel({
-                                    taskId: linkedTask.taskId,
-                                    kind: linkedTask.kind,
-                                    detail: true
-                                  })
-                            }
-                          >
-                            {taskWorkspaceOpen ? 'Close task details' : 'Open task details'}
-                          </button>
-                          <RetryTaskButton task={linkedTask} />
-                        </div>
-                      ) : null}
-                    </CollapsibleContent>
+                    <WorkStepDisclosure
+                      details={details}
+                      reasoning={reasoning}
+                      ownsContext={ownsContext}
+                      context={context}
+                      navigation={navigation}
+                      linkedTask={linkedTask}
+                      taskWorkspaceOpen={taskWorkspaceOpen}
+                    />
                   ) : null}
                 </Collapsible>
               </li>

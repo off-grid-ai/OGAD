@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { transcriptionRecoveryMessage } from '../../../shared/transcription-recovery'
 import {
-  SpeechEndpointTimer,
-  audioFilename,
   chooseRecorderMime,
+  type SpeechEndpointTimer,
   type VoiceTurnMode
-} from '@offgrid/speech'
+} from '@offgrid/application'
+import { createSpeechEndpointTimer } from '@renderer/composition/speech-endpoint'
 
 /*
  * These effects are transition inputs to one voice state machine: mode, generation, playback, and
@@ -28,10 +27,17 @@ interface ChatVoiceTurnOptions {
   speakerDrainMs: number
   isGenerating: boolean
   isPlaybackActive: boolean
-  transcribeAudio: (audio: Uint8Array, extension: string, requestId: string) => Promise<string>
-  cancelTranscription?: (requestId: string) => Promise<boolean>
   getTranscriptionLabel?: () => Promise<{ label: string }>
-  onTranscript: (text: string, clip: ChatVoiceClip | null) => void
+  /**
+   * The captured audio, handed over once.
+   *
+   * This hook used to transcribe it, judge the transcript, and then start a chat turn - three
+   * phases of a sequence `workflows.askByVoice` owns. It captures now, and nothing else: what
+   * happens to the audio, and every failure along the way, belongs to the run its owner starts.
+   */
+  onCapture: (audio: Uint8Array, mimeType: string, clip: ChatVoiceClip | null) => void
+  /** The user discarded the capture. The owner cancels whatever run it started for it. */
+  onAbandon?: () => void
 }
 
 interface CaptureResources {
@@ -113,6 +119,7 @@ function microphoneFailure(cause: unknown): { denied: boolean; message: string }
   }
 }
 
+
 /**
  * One owner for a chat voice turn.
  *
@@ -148,7 +155,6 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const sawPlaybackRef = useRef(false)
   const previousPlaybackRef = useRef(false)
   const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const transcriptionRequestRef = useRef<string | null>(null)
 
   const updatePhase = useCallback((next: ChatVoicePhase): void => {
     phaseRef.current = next
@@ -181,11 +187,10 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   const discardCapture = useCallback(
     (notify = true): void => {
       sequenceRef.current += 1
-      const transcriptionRequest = transcriptionRequestRef.current
-      transcriptionRequestRef.current = null
-      if (transcriptionRequest) {
-        void optionsRef.current.cancelTranscription?.(transcriptionRequest).catch(() => {})
-      }
+      // One canceller: the owner holds the run's id, and the run's signal is what stops the phase
+      // in flight - transcription, the turn, or the answer being spoken. This hook cancelling a
+      // transcription id of its own would be a second stop for one turn.
+      optionsRef.current.onAbandon?.()
       const resources = resourcesRef.current
       resourcesRef.current = null
       chunksRef.current = []
@@ -206,7 +211,15 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     [stopAnalysis, stopTracks]
   )
 
-  const transcribeRecording = useCallback(
+  /**
+   * Hand the recording over. The one thing this hook does with audio.
+   *
+   * Empty audio is still judged here, because that is a fact about the CAPTURE - the microphone
+   * produced nothing - and starting a run for zero bytes would ask the workflow to transcribe
+   * silence. Everything after the hand-off, including "didn't catch that" and every transcription
+   * failure, arrives as a workflow event and is the owner's to show.
+   */
+  const handOffRecording = useCallback(
     async ({ sequence, chunks, mime, duration }: CompletedCapture): Promise<void> => {
       const blob = new Blob(chunks, { type: mime })
       if (blob.size === 0) {
@@ -219,19 +232,8 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       }
 
       try {
-        const extension = audioFilename(mime).split('.').pop() ?? 'webm'
         const bytes = new Uint8Array(await blob.arrayBuffer())
-        const requestId = crypto.randomUUID()
-        transcriptionRequestRef.current = requestId
-        const text = (await optionsRef.current.transcribeAudio(bytes, extension, requestId)).trim()
         if (!mountedRef.current || sequence !== sequenceRef.current) return
-        if (!text) {
-          setError("Didn't catch that. Tap the microphone and try again.")
-          updateSuspended(optionsRef.current.mode === 'handsfree')
-          updatePhase('idle')
-          return
-        }
-
         setError(null)
         updatePhase('idle')
         if (optionsRef.current.voiceMode) {
@@ -239,21 +241,18 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           sawPlaybackRef.current = false
           setAwaitingReply(true)
         }
-        optionsRef.current.onTranscript(
-          text,
+        optionsRef.current.onCapture(
+          bytes,
+          mime,
           optionsRef.current.voiceMode ? { url: URL.createObjectURL(blob), duration } : null
         )
       } catch (cause) {
-        console.error('Transcription failed', cause)
+        // Reading the recorder's own blob failed: a capture problem, not a speech one.
+        console.error('Reading the recording failed', cause)
         if (!mountedRef.current || sequence !== sequenceRef.current) return
-        setError(
-          transcriptionRecoveryMessage(cause) ??
-            'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
-        )
+        setError('The recording could not be read. Tap the microphone and try again.')
         updateSuspended(optionsRef.current.mode === 'handsfree')
         updatePhase('idle')
-      } finally {
-        if (sequence === sequenceRef.current) transcriptionRequestRef.current = null
       }
     },
     [updatePhase, updateSuspended]
@@ -326,7 +325,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           if (discardRef.current || sequence !== sequenceRef.current) return
           const chunks = chunksRef.current
           chunksRef.current = []
-          void transcribeRecording({
+          void handOffRecording({
             sequence,
             chunks,
             mime: mimeRef.current,
@@ -342,7 +341,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           analyser.fftSize = 2048
           source.connect(analyser)
           const samples = new Float32Array(analyser.fftSize)
-          const endpoint = new SpeechEndpointTimer(() => finishCaptureRef.current(false))
+          const endpoint = createSpeechEndpointTimer(() => finishCaptureRef.current(false))
           endpoint.begin(Date.now(), {
             handsFree: mode === 'handsfree',
             silenceAfterSpeechMs: current.silenceAfterSpeechMs
@@ -378,7 +377,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       refreshTranscriptionLabel,
       stopAnalysis,
       stopTracks,
-      transcribeRecording,
+      handOffRecording,
       updatePhase,
       updateSuspended
     ]

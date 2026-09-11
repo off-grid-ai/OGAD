@@ -4,6 +4,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
+import type { OffGridApplication } from '@offgrid/application'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-active-text-model-'))
 
@@ -18,11 +19,14 @@ vi.mock('electron', () => ({
 
 import { llm } from '../llm'
 import {
+  getSelectedRemoteVisionServer,
   removeRemoteVisionServer,
   setRemoteVisionServerSettings
 } from '../vision/remote-vision-server'
 import { planTask } from '../tools/planner'
 import { toolChat } from '../tools'
+import { generateDesktopMessages } from '../desktop-generation'
+import { remoteReasoningMetadata } from '../llm/remote-chat'
 
 interface RecordedRequest {
   body: Record<string, unknown>
@@ -41,6 +45,28 @@ const turns: RemoteTurn[] = []
 const requests: RecordedRequest[] = []
 let remoteServer: http.Server
 let remoteServerId = ''
+let application: OffGridApplication
+const platformFetch = globalThis.fetch.bind(globalThis)
+
+/**
+ * The test server is a plain loopback socket, while the stored credentialed endpoint
+ * must remain HTTPS. This boundary represents local TLS termination and forwards only
+ * this test origin to the loopback server. All Off Grid URL policy, authorization,
+ * routing, request shaping, and response parsing remain production code.
+ */
+function installLoopbackTlsBoundary(port: number): void {
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+    const raw =
+      typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const url = new URL(raw)
+    if (url.protocol === 'https:' && url.hostname === '127.0.0.1' && url.port === String(port)) {
+      url.protocol = 'http:'
+      if (input instanceof Request) return platformFetch(new Request(url, input), init)
+      return platformFetch(url, init)
+    }
+    return platformFetch(input, init)
+  })
+}
 
 function completionFrames(turn: RemoteTurn): string[] {
   const frame = (delta: Record<string, unknown>, finishReason: string | null = null): string =>
@@ -81,7 +107,11 @@ function startRemoteServer(): Promise<http.Server> {
               {
                 id: 'openai/gpt-5.6',
                 name: 'GPT-5.6',
-                supported_parameters: ['tools', 'temperature', 'top_p']
+                supported_parameters: ['tools', 'temperature', 'top_p'],
+                reasoning: {
+                  supported_efforts: ['low', 'medium', 'high'],
+                  default_effort: 'medium'
+                }
               },
               {
                 id: 'bytedance-research/ui-tars-1.5-7b',
@@ -127,16 +157,54 @@ function startRemoteServer(): Promise<http.Server> {
 }
 
 beforeAll(async () => {
+  const { configureRuntime } = await import('../runtime-env')
+  configureRuntime({ dataDir: TMP_DIR })
   remoteServer = await startRemoteServer()
   const port = (remoteServer.address() as AddressInfo).port
-  const settings = setRemoteVisionServerSettings({
+  installLoopbackTlsBoundary(port)
+  const [{ createOffGridApplication }, { desktopModelWorkspacePorts }, applicationAccess] =
+    await Promise.all([
+      import('@offgrid/application'),
+      import('../model-services'),
+      import('../composition/application-access')
+    ])
+  application = createOffGridApplication({ models: desktopModelWorkspacePorts })
+  applicationAccess.registerDesktopApplication(application)
+  await application.start()
+  const settings = await setRemoteVisionServerSettings({
     provider: 'openrouter',
     name: 'Test OpenRouter',
-    endpoint: `http://127.0.0.1:${port}`,
+    endpoint: `https://127.0.0.1:${port}`,
     model: 'openai/gpt-5.6',
+    selections: { text: 'openai/gpt-5.6' },
+    catalog: {
+      text: [
+        {
+          id: 'openai/gpt-5.6',
+          name: 'GPT-5.6',
+          capabilities: {
+            supportsVision: true,
+            supportsToolCalling: true,
+            supportsThinking: true
+          }
+        },
+        {
+          id: 'bytedance-research/ui-tars-1.5-7b',
+          name: 'UI-TARS 1.5 7B',
+          capabilities: {
+            supportsVision: true,
+            supportsToolCalling: false,
+            supportsThinking: false
+          }
+        }
+      ]
+    },
     apiKey: 'test-api-key'
   })
   remoteServerId = settings.activeServerId ?? ''
+  const activeRemote = getSelectedRemoteVisionServer('text')
+  if (!activeRemote) throw new Error('The selected remote fixture was not persisted.')
+  await remoteReasoningMetadata(activeRemote)
 })
 
 beforeEach(() => {
@@ -145,7 +213,9 @@ beforeEach(() => {
 })
 
 afterAll(async () => {
-  if (remoteServerId) removeRemoteVisionServer(remoteServerId)
+  if (remoteServerId) await removeRemoteVisionServer(remoteServerId)
+  await application.stop()
+  vi.unstubAllGlobals()
   await new Promise<void>((resolve, reject) => {
     remoteServer.close((error) => (error ? reject(error) : resolve()))
   })
@@ -158,6 +228,21 @@ afterAll(async () => {
 
 describe('active text model transport', () => {
   it('uses the selected OpenRouter model for planner, chat, and tools', async () => {
+    await application.models.refresh()
+    const inventory = application.models.snapshot().inventory
+    const remoteText = inventory.find(
+      (model) => model.serverId === remoteServerId && model.modality === 'text'
+    )
+    expect(application.models.snapshot().active.text).toMatchObject({
+      selectedRouteId: remoteText?.routeId,
+      model: { serverId: remoteServerId, id: 'openai/gpt-5.6' }
+    })
+    const remoteToolSelection = inventory.find(
+      (model) => model.serverId === remoteServerId && model.modality === 'tool_selection'
+    )
+    expect(remoteToolSelection?.capabilities.thinking).toBe(remoteText?.capabilities.thinking)
+    expect(remoteToolSelection?.capabilities.thinking).toBe(true)
+
     turns.push(
       { content: JSON.stringify({ steps: [] }) },
       { reasoning: 'Use the active remote model.', content: 'Remote chat answer.' },
@@ -170,13 +255,19 @@ describe('active text model transport', () => {
     await expect(planTask('Answer directly.', [], [])).resolves.toEqual({ steps: [] })
 
     const deltas: Array<{ text: string; kind: 'content' | 'reasoning' }> = []
-    const chatResult = await llm.chatStream(
-      'Use the selected model.',
-      [],
-      (text, kind) => deltas.push({ text, kind }),
-      { thinking: true },
-      700,
-      5_000
+    const chatResult = await generateDesktopMessages(
+      [{ role: 'user', content: 'Use the selected model.' }],
+      {
+        thinking: true,
+        maxTokens: 700,
+        timeoutMs: 5_000,
+        events: {
+          chunk: (chunk) => {
+            if (chunk.reasoning) deltas.push({ text: chunk.reasoning, kind: 'reasoning' })
+            if (chunk.content) deltas.push({ text: chunk.content, kind: 'content' })
+          }
+        }
+      }
     )
     expect(chatResult.content).toBe('Remote chat answer.')
     expect(deltas).toEqual([
@@ -184,9 +275,8 @@ describe('active text model transport', () => {
       { text: 'Remote chat answer.', kind: 'content' }
     ])
 
-    const toolResult = await llm.streamChat(
+    const toolResult = await generateDesktopMessages(
       [{ role: 'user', content: 'What time is it?' }],
-      () => {},
       {
         thinking: true,
         topP: 0.8,
@@ -197,9 +287,10 @@ describe('active text model transport', () => {
             function: { name: 'get_datetime', parameters: { type: 'object' } }
           }
         ],
-        toolChoice: 'auto'
-      },
-      5_000
+        toolChoice: 'auto',
+        toolHandling: 'return',
+        timeoutMs: 5_000
+      }
     )
     expect(toolResult.toolCalls).toEqual([
       { id: 'call_time', name: 'get_datetime', arguments: '{}' }
@@ -244,47 +335,44 @@ describe('active text model transport', () => {
   })
 
   it('does not send tools to a selected OpenRouter model without native tool support', async () => {
-    setRemoteVisionServerSettings({
+    await setRemoteVisionServerSettings({
       serverId: remoteServerId,
       provider: 'openrouter',
       name: 'Test OpenRouter',
-      endpoint: `http://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
+      endpoint: `https://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
       model: 'bytedance-research/ui-tars-1.5-7b',
+      selections: { text: 'bytedance-research/ui-tars-1.5-7b' },
       apiKey: 'test-api-key'
     })
 
     try {
-      const result = await toolChat('Send a message to Ali.', [])
-      expect(result).toMatchObject({
-        answer: expect.stringContaining('UI-TARS 1.5 7B cannot act as the Chat tool planner'),
-        toolCalls: []
-      })
-      expect(result.answer).toContain('Select it as the Computer Use specialist instead')
+      await expect(toolChat('Send a message to Ali.', [])).rejects.toThrow(
+        'UI-TARS 1.5 7B cannot act as the Chat tool planner'
+      )
       expect(requests).toHaveLength(0)
 
       await expect(
-        llm.streamChat(
-          [{ role: 'user', content: 'Send a message.' }],
-          () => {},
-          {
-            tools: [
-              {
-                type: 'function',
-                function: { name: 'send_message', parameters: { type: 'object' } }
-              }
-            ]
-          },
-          5_000
-        )
+        generateDesktopMessages([{ role: 'user', content: 'Send a message.' }], {
+          tools: [
+            {
+              type: 'function',
+              function: { name: 'send_message', parameters: { type: 'object' } }
+            }
+          ],
+          toolHandling: 'return',
+          timeoutMs: 5_000,
+          profile: 'tool-loop'
+        })
       ).rejects.toThrow('UI-TARS 1.5 7B cannot act as the Chat tool planner')
       expect(requests).toHaveLength(0)
     } finally {
-      setRemoteVisionServerSettings({
+      await setRemoteVisionServerSettings({
         serverId: remoteServerId,
         provider: 'openrouter',
         name: 'Test OpenRouter',
-        endpoint: `http://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
+        endpoint: `https://127.0.0.1:${(remoteServer.address() as AddressInfo).port}`,
         model: 'openai/gpt-5.6',
+        selections: { text: 'openai/gpt-5.6' },
         apiKey: 'test-api-key'
       })
     }
@@ -294,14 +382,15 @@ describe('active text model transport', () => {
     turns.push({ content: 'Partial remote answer.', hold: true })
     const controller = new AbortController()
 
-    const result = await llm.chatStream(
-      'Stop this request.',
-      [],
+    const remote = getSelectedRemoteVisionServer('text')
+    expect(remote).not.toBeNull()
+    const result = await llm.streamChatRemote(
+      remote!,
+      [{ role: 'user', content: 'Stop this request.' }],
       (_text, kind) => {
         if (kind === 'content') controller.abort()
       },
       { signal: controller.signal },
-      500,
       5_000
     )
 
@@ -323,8 +412,12 @@ describe('active text model transport', () => {
     })
 
     await expect(
-      llm.chatMessages([{ role: 'user', content: 'Use the selected model.' }], 5_000, 200)
-    ).rejects.toThrow('Remote text model returned HTTP 429 from OpenRouter: Try again later.')
+      generateDesktopMessages([{ role: 'user', content: 'Use the selected model.' }], {
+        profile: 'chat',
+        timeoutMs: 5_000,
+        maxTokens: 200
+      })
+    ).rejects.toThrow('Try again later.')
     expect(requests).toHaveLength(1)
   })
 })

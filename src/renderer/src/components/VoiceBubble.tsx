@@ -8,17 +8,82 @@
  *
  *  - User voice notes carry a recorded clip (`audioUrl`) → we decode its REAL
  *    envelope and play the file directly.
- *  - Assistant replies have no file → we synthesize on-device (Kokoro) the first
- *    time Play is pressed, cache the result, and draw a deterministic
- *    transcript-derived envelope (stable before/during playback).
+ *  - Assistant replies have no file → Shared Speech owns synthesis and playback;
+ *    this component projects its correlated lifecycle events.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Pause, CaretDown, Copy, ArrowsClockwise, Check } from '@phosphor-icons/react'
+import { nextPlaybackSpeed, speechOutcomeMessage } from '@offgrid/application'
+import { useSpeechProjection, type SpeechProjection } from '@renderer/hooks/useSpeechProjection'
 import { claimVoicePlayback, onVoicePlaybackClaim } from '@renderer/lib/voice-playback-bus'
+import type { PlaybackOperationSnapshot } from '@offgrid/application'
 import { LoadingDots } from './ui/loading-dots'
 
 const WAVEFORM_BARS = 48
-const SPEED_STEPS = [0.5, 0.8, 1.0, 1.25, 1.5, 2.0]
+type VoiceStatus = 'idle' | 'loading' | 'playing' | 'paused' | 'unavailable'
+
+function findSpeechOperation(
+  projection: SpeechProjection,
+  operationId: string | null
+): PlaybackOperationSnapshot | null {
+  if (!operationId || !projection.snapshot) return null
+  const { active, recent } = projection.snapshot.playbackOperations
+  return active?.operationId === operationId
+    ? active
+    : (recent.find((operation) => operation.operationId === operationId) ?? null)
+}
+
+function projectAssistantSpeech(
+  projection: SpeechProjection,
+  operationId: string | null
+): {
+  status: VoiceStatus
+  error: string | null
+} {
+  const operation = findSpeechOperation(projection, operationId)
+  let status: VoiceStatus = operationId && !operation ? 'loading' : 'idle'
+  if (projection.status === 'failed' && !projection.snapshot) status = 'unavailable'
+  if (operation?.status === 'active') {
+    status = projection.snapshot?.playback.status === 'synthesizing' ? 'loading' : 'playing'
+  }
+  if (projection.status === 'failed') return { status, error: projection.failure.message }
+  if (operation?.status === 'active' || !operation?.outcome) return { status, error: null }
+  const successful = ['spoken', 'interrupted', 'nothing-to-speak'].includes(operation.outcome.kind)
+  return { status, error: successful ? null : speechOutcomeMessage(operation.outcome) }
+}
+
+interface TranscriptDisclosure {
+  trigger: boolean
+  open: boolean
+}
+
+function useTranscriptDisclosure(
+  showInitially: boolean,
+  transcript: string,
+  loading: boolean
+): [TranscriptDisclosure, React.Dispatch<React.SetStateAction<TranscriptDisclosure>>] {
+  const ready = Boolean(showInitially && transcript && !loading)
+  const [disclosure, setDisclosure] = useState<TranscriptDisclosure>({
+    trigger: ready,
+    open: showInitially
+  })
+  if (disclosure.trigger !== ready) {
+    setDisclosure({ trigger: ready, open: ready || disclosure.open })
+  }
+  return [disclosure, setDisclosure]
+}
+
+function selectVoiceValue<T>(audioUrl: string | undefined, file: T, assistant: T): T {
+  return audioUrl ? file : assistant
+}
+
+function selectVoiceError(
+  audioUrl: string | undefined,
+  local: string | null,
+  assistant: string | null
+): string | null {
+  return audioUrl ? local : assistant || local
+}
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0:00'
@@ -61,6 +126,44 @@ function normalize(data: number[]): number[] {
   return data.map((v) => v / max)
 }
 
+/** One empty envelope, so the derived value keeps its identity between renders. */
+const NO_DECODED_WAVE: number[] = []
+
+/**
+ * How long the clip is and how far through it we are.
+ *
+ * The real duration once the audio element reports one, the estimate until then, and a fraction
+ * that cannot exceed 1 - clamped because `currentTime` can pass an ESTIMATED duration, and a
+ * progress bar past its own end is a visible glitch. Pure, and out here so the component does not
+ * carry the branches.
+ */
+function playbackProgress(input: {
+  readonly loadedDuration: number
+  readonly estDuration: number
+  readonly currentTime: number
+}): { totalDuration: number; progress: number } {
+  const totalDuration = input.loadedDuration || input.estDuration
+  const progress = totalDuration ? Math.min(1, input.currentTime / totalDuration) : 0
+  return { totalDuration, progress }
+}
+
+/** A decoded envelope, and the clip it was decoded from. */
+interface DecodedWave {
+  readonly url: string
+  readonly wave: number[]
+}
+
+/**
+ * The envelope that belongs to THIS clip, or none.
+ *
+ * Derived rather than kept in sync, and derived out here so the component's own complexity does not
+ * pay for it: a decoded wave is only this clip's wave if it was decoded from this clip's url.
+ */
+function waveForClip(audioUrl: string | undefined, decoded: DecodedWave | null): number[] {
+  if (!audioUrl || decoded?.url !== audioUrl) return NO_DECODED_WAVE
+  return decoded.wave
+}
+
 /** Decode a real audio file's envelope once (recordings). */
 async function decodeFileWaveform(url: string, points: number): Promise<number[]> {
   try {
@@ -91,10 +194,10 @@ interface VoiceBubbleProps {
   durationSeconds?: number
   transcript: string
   isUser?: boolean
-  /** Assistant reply still generating — shows pulsing dots, no playback. */
+  /** Assistant reply still generating — a quiet waveform placeholder, no playback. */
   isLoading?: boolean
-  /** Synthesize text → playable dataUrl on-device (assistant replies). */
-  synthesize: (text: string) => Promise<{ dataUrl: string }>
+  /** @deprecated Generated playback is owned by the Shared Speech facade. */
+  synthesize?: (text: string) => Promise<{ dataUrl: string }>
   /** Play once automatically when ready (a just-finished assistant reply). */
   autoPlay?: boolean
   /** The latest assistant voice reply opens its transcript without another click. */
@@ -116,7 +219,6 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   transcript,
   isUser = false,
   isLoading = false,
-  synthesize,
   autoPlay = false,
   showTranscriptInitially = false,
   defaultSpeed = 1,
@@ -126,21 +228,47 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   onRetry
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const srcRef = useRef<string | null>(null) // cached synthesized dataUrl
-  const [status, setStatus] = useState<'idle' | 'loading' | 'playing' | 'paused'>('idle')
+  const [speechOperationId, setSpeechOperationId] = useState<string | null>(null)
+  const speechOperationRef = useRef<string | null>(null)
+  const speechProjection = useSpeechProjection()
+  const assistantSpeech = projectAssistantSpeech(speechProjection, speechOperationId)
+  const { status: assistantStatus } = assistantSpeech
+  const speechActiveRef = useRef(false)
+  const [fileStatus, setFileStatus] = useState<VoiceStatus>('idle')
   const [currentTime, setCurrentTime] = useState(0)
   const [loadedDuration, setLoadedDuration] = useState(0)
   const [speed, setSpeed] = useState(defaultSpeed)
-  const [showTranscript, setShowTranscript] = useState(showTranscriptInitially)
-  const [playbackError, setPlaybackError] = useState<string | null>(null)
+  /**
+   * The persisted speed preference changed, so the chip goes back to it.
+   *
+   * React's "adjusting state when a prop changes": compare against the PREVIOUS prop value during
+   * render, rather than copying the prop into state from an effect. It fires on exactly the
+   * transitions the effect did - once per change of `defaultSpeed`, including a change back to a
+   * value the user had once overridden - and it does it before anything renders with the stale
+   * value instead of after a second pass.
+   */
+  const [appliedDefaultSpeed, setAppliedDefaultSpeed] = useState(defaultSpeed)
+  if (appliedDefaultSpeed !== defaultSpeed) {
+    setAppliedDefaultSpeed(defaultSpeed)
+    setSpeed(defaultSpeed)
+  }
+  const [disclosure, setDisclosure] = useTranscriptDisclosure(
+    showTranscriptInitially,
+    transcript,
+    isLoading
+  )
+  const [localPlaybackError, setLocalPlaybackError] = useState<string | null>(null)
+  const status = selectVoiceValue(audioUrl, fileStatus, assistantStatus)
+  const playbackError = selectVoiceError(audioUrl, localPlaybackError, assistantSpeech.error)
   const playbackActive = status === 'loading' || status === 'playing'
 
   useEffect(() => {
-    if (showTranscriptInitially && transcript && !isLoading) setShowTranscript(true)
-  }, [isLoading, showTranscriptInitially, transcript])
+    speechActiveRef.current = assistantStatus === 'loading' || assistantStatus === 'playing'
+  }, [assistantStatus])
 
+  // Telling the audio element about a new preference IS updating an external system, which is what
+  // an effect is for. Resetting the chip is not - see `chosenSpeed`.
   useEffect(() => {
-    setSpeed(defaultSpeed)
     if (audioRef.current) audioRef.current.playbackRate = defaultSpeed
   }, [defaultSpeed])
 
@@ -151,21 +279,28 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
     }
   }, [onPlaybackStateChange, playbackActive])
 
-  // Stable waveform: real decoded envelope for a recording, else transcript-derived.
-  const [fileWave, setFileWave] = useState<number[]>([])
+  /**
+   * Stable waveform: the real decoded envelope for a recording, else transcript-derived.
+   *
+   * The decoded envelope is stored WITH the clip it came from, so "which wave belongs to this
+   * clip" is derived rather than kept in sync by clearing state in an effect. That also closes a
+   * real gap: the old effect only cleared on no clip at all, so between one clip's url changing
+   * and the new one finishing decoding, the bubble drew the PREVIOUS recording's envelope. It now
+   * falls back to the transcript-derived shape for that window, which is what it already does
+   * before any clip has decoded.
+   */
+  const [decodedWave, setDecodedWave] = useState<DecodedWave | null>(null)
   useEffect(() => {
-    if (!audioUrl) {
-      setFileWave([])
-      return
-    }
+    if (!audioUrl) return
     let cancelled = false
-    void decodeFileWaveform(audioUrl, WAVEFORM_BARS).then((w) => {
-      if (!cancelled) setFileWave(w)
+    void decodeFileWaveform(audioUrl, WAVEFORM_BARS).then((wave) => {
+      if (!cancelled) setDecodedWave({ url: audioUrl, wave })
     })
     return () => {
       cancelled = true
     }
   }, [audioUrl])
+  const fileWave = waveForClip(audioUrl, decodedWave)
 
   const bars = useMemo(() => {
     const raw = fileWave.length ? fileWave : waveformFromText(transcript, WAVEFORM_BARS)
@@ -178,98 +313,136 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
     const words = transcript.trim().split(/\s+/).filter(Boolean).length
     return Math.max(1, words / (2.5 * speed))
   }, [durationSeconds, transcript, speed])
-  const totalDuration = loadedDuration || estDuration
-  const progress = totalDuration ? Math.min(1, currentTime / totalDuration) : 0
+  const { totalDuration, progress } = playbackProgress({ loadedDuration, estDuration, currentTime })
 
   // Pause when another bubble takes over playback.
   useEffect(() => {
     return onVoicePlaybackClaim((id) => {
       if (id !== messageId && audioRef.current && !audioRef.current.paused) {
         audioRef.current.pause()
-        setStatus('paused')
+        setFileStatus('paused')
+      }
+      if (id !== messageId && (assistantStatus === 'loading' || assistantStatus === 'playing')) {
+        void window.api.speechCommands.interrupt().catch((error) => {
+          console.error('[voice] interrupt failed', error)
+          setLocalPlaybackError(
+            'Speech could not be stopped. Check your audio output, then try again.'
+          )
+        })
       }
     })
-  }, [messageId])
+  }, [assistantStatus, messageId])
 
   useEffect(
     () => () => {
+      const activeSpeechOperation = speechOperationRef.current
       audioRef.current?.pause()
       audioRef.current = null
+      speechOperationRef.current = null
+      if (activeSpeechOperation && speechActiveRef.current) {
+        void window.api.speechCommands.interrupt().catch((error) => {
+          console.error('[voice] interrupt failed', error)
+        })
+      }
     },
     []
   )
 
-  const wire = useCallback(
-    (audio: HTMLAudioElement) => {
-      audio.playbackRate = speed
-      audio.ontimeupdate = () => setCurrentTime(audio.currentTime)
-      audio.onloadedmetadata = () => {
-        if (Number.isFinite(audio.duration)) setLoadedDuration(audio.duration)
-      }
-      audio.onended = () => {
-        setStatus('idle')
-        setCurrentTime(0)
-      }
-      audio.onerror = () => setStatus('idle')
-    },
-    [speed]
-  )
+  const wire = (audio: HTMLAudioElement): void => {
+    audio.playbackRate = speed
+    audio.ontimeupdate = () => setCurrentTime(audio.currentTime)
+    audio.onloadedmetadata = () => {
+      if (Number.isFinite(audio.duration)) setLoadedDuration(audio.duration)
+    }
+    audio.onended = () => {
+      setFileStatus('idle')
+      setCurrentTime(0)
+    }
+    audio.onerror = () => setFileStatus('idle')
+  }
 
-  const handlePlayPause = useCallback(async () => {
+  const handlePlayPause = async (): Promise<void> => {
     const audio = audioRef.current
+    if (!audioUrl && (assistantStatus === 'loading' || assistantStatus === 'playing')) {
+      try {
+        await window.api.speechCommands.interrupt()
+      } catch (error) {
+        console.error('[voice] interrupt failed', error)
+        setLocalPlaybackError(
+          'Speech could not be stopped. Check your audio output, then try again.'
+        )
+      }
+      return
+    }
     if (status === 'playing' && audio) {
       audio.pause()
-      setStatus('paused')
+      setFileStatus('paused')
       return
     }
     if (status === 'paused' && audio) {
       claimVoicePlayback(messageId)
       await audio.play()
-      setStatus('playing')
+      setFileStatus('playing')
       return
     }
-    // idle → resolve a source (cached synth / recording), then play.
-    setPlaybackError(null)
-    setStatus('loading')
-    try {
-      let src = audioUrl || srcRef.current
-      if (!src) {
-        const { dataUrl } = await synthesize(transcript)
-        if (!dataUrl) throw new Error('no audio')
-        srcRef.current = dataUrl
-        src = dataUrl
+    // Shared owns generated speech. Record the ID before the command so a fast
+    // terminal event cannot arrive before this component can correlate it.
+    setLocalPlaybackError(null)
+    if (!audioUrl) {
+      const operationId = crypto.randomUUID()
+      speechOperationRef.current = operationId
+      setSpeechOperationId(operationId)
+      claimVoicePlayback(messageId)
+      try {
+        await window.api.speechCommands.feedStream({
+          operationId,
+          delta: transcript,
+          speed
+        })
+        await window.api.speechCommands.finishStream(operationId)
+      } catch (error) {
+        console.error('[voice] speech stream failed', error)
+        if (speechOperationRef.current !== operationId) return
+        speechOperationRef.current = null
+        setSpeechOperationId(null)
+        setLocalPlaybackError(
+          'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
+        )
       }
-      const audioEl = new Audio(src)
+      return
+    }
+    try {
+      const audioEl = new Audio(audioUrl)
       audioRef.current = audioEl
       wire(audioEl)
       claimVoicePlayback(messageId)
       await audioEl.play()
-      setStatus('playing')
+      setFileStatus('playing')
     } catch (e) {
       console.error('[voice] playback failed', e)
-      setStatus('idle')
-      setPlaybackError(
+      setFileStatus('idle')
+      setLocalPlaybackError(
         audioUrl
           ? 'Voice note could not be played. Check your audio output, then try again.'
           : 'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
       )
     }
-  }, [status, audioUrl, transcript, synthesize, wire, messageId])
+  }
 
-  const cycleSpeed = useCallback(() => {
+  const cycleSpeed = (): void => {
     setSpeed((prev) => {
-      const next = SPEED_STEPS[(SPEED_STEPS.indexOf(prev) + 1) % SPEED_STEPS.length] ?? 1.0
+      const next = nextPlaybackSpeed(prev)
       if (audioRef.current) audioRef.current.playbackRate = next
       return next
     })
-  }, [])
+  }
 
-  const seekTo = useCallback((fraction: number) => {
+  const seekTo = (fraction: number): void => {
     const audio = audioRef.current
     if (!audio || !Number.isFinite(audio.duration)) return
     audio.currentTime = Math.max(0, Math.min(1, fraction)) * audio.duration
     setCurrentTime(audio.currentTime)
-  }, [])
+  }
 
   // Auto-play once a freshly-finished assistant reply is ready.
   const autoPlayedRef = useRef(false)
@@ -306,7 +479,13 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
         {/* Waveform (click to seek) */}
         <div className="flex h-10 flex-1 items-center gap-[1.5px] overflow-hidden">
           {isLoading && !isUser ? (
-            <LoadingDots className="mx-1" />
+            // The turn's thinking header already animates while the reply streams; a
+            // second animation here read as two loaders. Hold a quiet waveform placeholder.
+            <span
+              aria-hidden
+              data-testid="voice-waveform-pending"
+              className="block h-[6px] w-full rounded-sm bg-green-500/20"
+            />
           ) : (
             bars.map((shape, i) => {
               const played = progress > 0 && i / bars.length < progress
@@ -337,14 +516,14 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
         {transcript ? (
           <button
             type="button"
-            onClick={() => setShowTranscript((v) => !v)}
+            onClick={() => setDisclosure((value) => ({ ...value, open: !value.open }))}
             className="flex cursor-pointer items-center gap-1 text-[11px] text-neutral-500 transition-colors hover:text-neutral-300"
           >
-            {showTranscript ? 'Hide transcript' : 'Show transcript'}
+            {disclosure.open ? 'Hide transcript' : 'Show transcript'}
             <CaretDown
               size={11}
               weight="bold"
-              className={`transition-transform ${showTranscript ? 'rotate-180' : ''}`}
+              className={`transition-transform ${disclosure.open ? 'rotate-180' : ''}`}
             />
           </button>
         ) : (
@@ -399,7 +578,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
         </div>
       </div>
 
-      {showTranscript && transcript ? (
+      {disclosure.open && transcript ? (
         <div className="max-h-40 overflow-y-auto whitespace-pre-wrap border-t border-neutral-800 pt-2 text-xs leading-relaxed text-neutral-300">
           {transcript}
         </div>

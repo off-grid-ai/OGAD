@@ -1,67 +1,22 @@
 import fs from 'node:fs'
 import sharp from 'sharp'
-import { COLORS_DARK, COLORS_LIGHT } from '@offgrid/design'
-import { llm } from '../llm'
+import {
+  runComputerUsePolicy,
+  serializeComputerUsePolicyResponse,
+  type ComputerUsePolicyGenerationPort
+} from '@offgrid/models'
+import { generateDesktopMessages } from '../desktop-generation'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import type { VisionAction } from './vision-action'
 import type {
   VisionModelAdapter,
   VisionPolicyInput,
-  VisionPolicyMessage,
   VisionPolicyRequest,
   VisionPolicyResponse
 } from './model-adapters/types'
 import { serializeVisionPolicyMessages } from './model-adapters/model-input'
-
-/** Return the answer after private reasoning. Policy decisions must never be
- * inferred from an unfinished reasoning channel. */
-export function answerAfterThinking(response: string): string {
-  const withoutClosedThinking = response.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
-  if (/<think\b[^>]*>/i.test(withoutClosedThinking)) return ''
-  return withoutClosedThinking.trim()
-}
-
-/** Normalize presentation wrappers without weakening the adapter schema. The
- * same final-answer boundary is used for local and remote models. */
-export function normalizedPolicyAnswer(response: string): string {
-  const answer = answerAfterThinking(response)
-  const fenced = answer.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
-  return (fenced?.[1] ?? answer).trim()
-}
-
-const MALFORMED_POLICY_RETRY =
-  'Use the exact required decision contract. Do not rename, omit, or add fields or tool calls.'
-
-/** One retry policy for every vision transport. */
-export function visionPolicyMessagesForAttempt(
-  messages: VisionPolicyMessage[],
-  attempt: number,
-  priorInvalidAnswer?: string,
-  priorValidationError?: string
-): VisionPolicyMessage[] {
-  if (attempt === 1) return messages
-  return [
-    ...messages,
-    ...(priorInvalidAnswer
-      ? [{ role: 'assistant' as const, content: priorInvalidAnswer.slice(0, 4_000) }]
-      : []),
-    {
-      // A USER turn, not a system one. Several chat templates (Holo 3.1 among them) require the
-      // system message to be FIRST and raise on a later one - appending a trailing system message
-      // made every retry fail with "Jinja Exception: System message must be at the beginning",
-      // turning a recoverable step into a hard 500. A late correction is a user turn anyway: it is
-      // feedback about the last answer, not a change to the model's standing instructions.
-      role: 'user',
-      content: [
-        priorValidationError
-          ? `The prior final answer failed validation: ${priorValidationError}.`
-          : 'The prior final answer failed validation.',
-        MALFORMED_POLICY_RETRY
-      ].join(' ')
-    }
-  ]
-}
+import { VISION_ANNOTATION_COLORS } from '../../shared/vision-coordinate-grid'
 
 /** Keep remote transport errors useful without exposing endpoints, headers, or
  * request contents. Node's fetch puts the real network reason on `cause`. */
@@ -78,145 +33,50 @@ export function remoteVisionTransportError(error: unknown): Error {
   )
 }
 
-interface RemoteVisionResponseBody {
-  error?: {
-    message?: string
-    code?: string | number
-    metadata?: { raw?: string; provider_name?: string }
-  }
-  choices?: { message?: { content?: string } }[]
-}
-
-/** Preserve the provider's useful, non-secret failure reason. Some gateways use
- * a generic top-level message and put the actionable cause in metadata.raw. */
-export function remoteVisionProviderError(status: number, body: RemoteVisionResponseBody): Error {
-  const detail = body.error?.metadata?.raw?.trim() || body.error?.message?.trim()
-  const provider = body.error?.metadata?.provider_name?.trim()
-  return new Error(
-    `Remote model server returned HTTP ${status}${provider ? ` from ${provider}` : ''}${detail ? `: ${detail}` : '.'}`
-  )
-}
-
 export async function runVisionPolicyRequest(
   request: VisionPolicyRequest,
   signal?: AbortSignal,
   onReasoningDelta?: (text: string) => void
 ): Promise<VisionPolicyResponse> {
-  let lastError: unknown
-  let priorInvalidAnswer: string | undefined
-  let priorValidationError: string | undefined
-  for (let attempt = 1; attempt <= request.maxAttempts; attempt += 1) {
-    signal?.throwIfAborted()
-    try {
-      const messages = visionPolicyMessagesForAttempt(
-        request.messages,
-        attempt,
-        priorInvalidAnswer,
-        priorValidationError
+  return runComputerUsePolicy(request, desktopVisionGeneration, {
+    signal,
+    onReasoningDelta,
+    onRejectedDecision({ reason, response }) {
+      console.warn(
+        `[vision-policy] model decision rejected: ${reason || 'unknown validation error'}; response=${JSON.stringify(response)}`
       )
-      // Kept per attempt for two reasons: to tell a model that DECLINED to act (reasoned, called
-      // nothing) from a genuinely empty response, and to hand its own reasoning back on the retry.
-      let reasoningText = ''
-      const useStream = Boolean(
-        request.tools?.length || (onReasoningDelta && request.separateReasoning)
-      )
-      const rawResponse = useStream
-        ? await llm.streamChat(
-            messages,
-            (text, kind) => {
-              if (kind !== 'reasoning') return
-              reasoningText += text
-              onReasoningDelta?.(text)
-            },
-            {
-              temperature: request.temperature,
-              topP: request.topP,
-              thinking: request.enableThinking === true && request.disableThinking !== true,
-              responseFormat: request.responseFormat,
-              tools: request.tools,
-              toolChoice: request.toolChoice,
-              maxTokens: request.maxTokens,
-              signal
-            },
-            request.timeoutMs
-          )
-        : {
-            content: await llm.chatMessages(messages, request.timeoutMs, request.maxTokens, {
-              temperature: request.temperature,
-              topP: request.topP,
-              responseFormat: request.responseFormat,
-              enableThinking: request.enableThinking,
-              disableThinking: request.disableThinking,
-              separateReasoning: request.separateReasoning,
-              signal
-            }),
-            toolCalls: []
-          }
-      if (!rawResponse.content.trim() && rawResponse.toolCalls.length === 0) {
-        // Reasoning but no action is the model DECLINING to act, not a dead connection - a real
-        // run reasoned 1,249 tokens to a full stop ("...all the visible information about this
-        // single flight option.") and then called nothing, on a page where it could not satisfy
-        // the goal. tool_choice: 'required' is already sent; a provider is free to ignore it.
-        //
-        // The retry loop above can correct this, but only if it is TOLD to: with no prior answer
-        // and no validation error recorded, attempt 2 re-sent a byte-identical request and failed
-        // identically. Feeding the existing nudge seam is the fix - the mechanism was already
-        // here, this path just never used it.
-        // Hand the model its OWN reasoning back. It reached a conclusion in prose and then failed
-        // only to express it as a tool call, so replaying that conclusion asks it to finish the
-        // job rather than re-derive it from the screenshot with no memory of what it just decided.
-        priorInvalidAnswer = reasoningText.trim() || undefined
-        priorValidationError = reasoningText.trim()
-          ? 'you reasoned to a conclusion but called no tool, so the decision was lost. Restate that same conclusion as exactly one tool call. Every outcome has a tool: complete_milestone when the phase is done, perform_action to act, rethink when the plan is wrong, call_user when the page cannot satisfy the goal. Answering with nothing is never correct'
-          : 'the response was empty. Call exactly one tool'
-        throw new Error(
-          reasoningText.trim()
-            ? 'Computer-use model reasoned but called no tool.'
-            : 'Computer-use model returned no response.'
-        )
-      }
-      const response: VisionPolicyResponse = {
-        content: normalizedPolicyAnswer(rawResponse.content),
-        toolCalls: rawResponse.toolCalls
-      }
-      const answer = response.content
-      if (request.requireFinalAnswer && !answer) {
-        throw new Error('Computer-use model returned reasoning without a final answer.')
-      }
-      if (request.validateResponse && !request.validateResponse(response)) {
-        priorInvalidAnswer = serializeVisionPolicyResponse(response)
-        const reason = request.responseValidationError?.(response)
-        priorValidationError = reason
-        console.warn(
-          `[vision-policy] model decision rejected: ${reason || 'unknown validation error'}; response=${JSON.stringify(priorInvalidAnswer.slice(0, 4_000))}`
-        )
-        // Return the final malformed decision to the graph after the bounded
-        // same-frame retry. The adapter supplies an invalid transition, and
-        // LangGraph captures a fresh frame instead of ending the task.
-        if (attempt === request.maxAttempts) return response
-        throw new Error(
-          `Computer-use model returned an invalid final answer${reason ? `: ${reason}` : ''}.`
-        )
-      }
-      return response
-    } catch (error) {
-      if (signal?.aborted) throw error
-      lastError = error
     }
+  })
+}
+
+const desktopVisionGeneration: ComputerUsePolicyGenerationPort = {
+  async generate(input) {
+    return generateDesktopMessages(
+      input.messages.map((message) => ({
+        role: message.role,
+        content: Array.isArray(message.content)
+          ? message.content.map((part) =>
+              part.type === 'text'
+                ? part
+                : { type: 'image' as const, uri: part.image_url.url, detail: 'high' as const }
+            )
+          : message.content
+      })),
+      {
+        ...input.profile,
+        signal: input.signal,
+        events: {
+          chunk: (chunk) => {
+            if (chunk.reasoning) input.onReasoningDelta?.(chunk.reasoning)
+          }
+        }
+      }
+    )
   }
-  throw lastError instanceof Error ? lastError : new Error('Computer-use model request failed.')
 }
 
 /** Stable audit/history form. Tool arguments are already model output; this
  * serialization never controls a transition. */
-export function serializeVisionPolicyResponse(response: VisionPolicyResponse): string {
-  if (response.toolCalls.length === 0) return response.content
-  return JSON.stringify({
-    ...(response.content ? { content: response.content } : {}),
-    tool_calls: response.toolCalls
-  })
-}
-
 interface PreviousClickMarker {
   x: number
   y: number
@@ -245,7 +105,7 @@ function normalizedCoordinateGrid(width: number, height: number): Buffer {
     yLabels.push(`<text x="3" y="${labelY}">${value}</text>`)
   }
   return Buffer.from(
-    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g stroke="${COLORS_LIGHT.primary}" stroke-width="1" stroke-dasharray="4 6" opacity="0.22">${verticalLines.join('')}${horizontalLines.join('')}</g><g fill="${COLORS_LIGHT.primaryDark}" stroke="${COLORS_LIGHT.background}" stroke-width="2" paint-order="stroke" font-family="Menlo,monospace" font-size="11" font-weight="700" opacity="0.8">${xLabels.join('')}${yLabels.join('')}</g></svg>`
+    `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><g stroke="${VISION_ANNOTATION_COLORS.grid}" stroke-width="1" stroke-dasharray="4 6" opacity="0.22">${verticalLines.join('')}${horizontalLines.join('')}</g><g fill="${VISION_ANNOTATION_COLORS.gridLabel}" stroke="${VISION_ANNOTATION_COLORS.halo}" stroke-width="2" paint-order="stroke" font-family="Menlo,monospace" font-size="11" font-weight="700" opacity="0.8">${xLabels.join('')}${yLabels.join('')}</g></svg>`
   )
 }
 
@@ -341,7 +201,7 @@ export async function modelScreenshot(input: VisionGroundingInput): Promise<{
     const radius = markerSize / 2
     overlays.push({
       input: Buffer.from(
-        `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="${COLORS_DARK.primary}" stroke="${COLORS_LIGHT.background}" stroke-width="2"/></svg>`
+        `<svg width="${markerSize}" height="${markerSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${radius}" cy="${radius}" r="${Math.max(2, radius - 2)}" fill="${VISION_ANNOTATION_COLORS.marker}" stroke="${VISION_ANNOTATION_COLORS.halo}" stroke-width="2"/></svg>`
       ),
       left: Math.max(0, Math.min(expected.width - markerSize, Math.round(marker.x - radius))),
       top: Math.max(0, Math.min(expected.height - markerSize, Math.round(marker.y - radius)))
@@ -412,9 +272,10 @@ export async function runPreparedVisionGrounder(
   policyInput: VisionPolicyInput = prepared.policyInput
 ): Promise<VisionGroundingResult> {
   const request = adapter.buildRequest(policyInput)
+  request.generationRouteId = policyInput.generationRouteId
   input.reportProgress?.('Reviewing direction, milestone, and next action')
   const policyResponse = await runVisionPolicyRequest(request, input.signal, input.reportReasoning)
-  const response = serializeVisionPolicyResponse(policyResponse)
+  const response = serializeComputerUsePolicyResponse(policyResponse)
   const bounds = input.coordinateFrame?.encoded ?? { width: 0, height: 0 }
   const decision = adapter.parsePolicyResponse
     ? adapter.parsePolicyResponse(policyResponse, bounds, input.coordinateFrame)
@@ -435,10 +296,14 @@ export async function runPreparedVisionGrounder(
  * specialist adapters keep their native one-call protocol. */
 export function createVisionGrounder(
   adapter: VisionModelAdapter,
-  operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop'
+  operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop',
+  routeId?: string
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
     const prepared = await prepareVisionGrounding(input, operatorEnvironment)
-    return runPreparedVisionGrounder(adapter, input, prepared)
+    return runPreparedVisionGrounder(adapter, input, prepared, {
+      ...prepared.policyInput,
+      generationRouteId: routeId
+    })
   }
 }

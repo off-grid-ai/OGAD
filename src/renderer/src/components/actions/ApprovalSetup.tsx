@@ -1,15 +1,12 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { ArrowLeft, CheckCircle } from '@phosphor-icons/react'
+import {
+  ArrowCounterClockwiseIcon,
+  ArrowLeft,
+  CheckCircle,
+  WarningCircleIcon
+} from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
-
-export interface ApprovalSetupRecord {
-  id: number
-  title: string
-  detail: string | null
-  connector: string | null
-  tool: string | null
-  args: string | null
-}
+import type { ApprovalSetupRecord } from '@renderer/lib/approval-intake'
 
 const placeholder = (value: string): boolean => /^\s*(?:<[^>]+>|\[[^\]]+\])\s*$/.test(value)
 
@@ -23,12 +20,13 @@ function parsedArgs(record: ApprovalSetupRecord): Record<string, string> {
         return [key, placeholder(text) ? '' : text]
       })
     )
-  } catch {
+  } catch (cause: unknown) {
+    console.error('Approval arguments could not be parsed:', cause)
     return {}
   }
 }
 
-export function buildApprovalChatPrompt(
+function buildApprovalChatPrompt(
   record: ApprovalSetupRecord,
   instruction: string,
   context: string,
@@ -144,5 +142,43 @@ export function ApprovalSetup({
         </div>
       </div>
     </form>
+  )
+}
+
+export function ApprovalIntakeFailure({
+  message,
+  onRetry,
+  onCancel
+}: {
+  message: string
+  onRetry: () => void
+  onCancel: () => void
+}): React.ReactElement {
+  return (
+    <section
+      aria-labelledby="approval-intake-error-title"
+      className="w-full max-w-xl rounded-md border border-red-500/40 bg-card p-4 text-left text-card-foreground"
+    >
+      <div className="flex items-start gap-3">
+        <WarningCircleIcon className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden="true" />
+        <div>
+          <h2 id="approval-intake-error-title" className="text-sm text-foreground">
+            Approval could not be opened
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{message}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            The approval is unchanged. Retry the read or return to Approvals.
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex justify-end gap-2 border-t border-border pt-3">
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+          <ArrowLeft /> Close
+        </Button>
+        <Button type="button" size="sm" onClick={onRetry}>
+          <ArrowCounterClockwiseIcon /> Retry
+        </Button>
+      </div>
+    </section>
   )
 }

@@ -64,7 +64,8 @@ export function mapActionToCommand(action: Pick<ActionRecord, 'type' | 'args'>):
           error: `lookup kind '${kind}' is not one of ${Object.keys(LOOKUP_COMMANDS).join(', ')}`
         }
       }
-      const { kind: _dropped, ...args } = action.args
+      const args = { ...action.args }
+      delete args.kind
       return { ok: true, command: { command, args } }
     }
     default:

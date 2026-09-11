@@ -1,17 +1,17 @@
 import type { ActionRecord, ExecuteResult } from '@offgrid/use'
 import { getComputerUseSettings } from '../computer-use-settings'
-import { getActiveRemoteVisionServer } from '../vision/remote-vision-server'
+import { getSelectedRemoteVisionServer } from '../vision/remote-vision-server'
 import { remoteScreenDecision, type ScreenTaskKind } from '../../shared/remote-screen-privacy'
 import { runWithRemoteScreenTaskSession } from './remote-screen-session'
 
 interface RemoteScreenGateDependencies {
   modelStrategy(): 'same_as_chat' | 'separate_specialist' | 'text_plus_specialist'
-  activeServer(): ReturnType<typeof getActiveRemoteVisionServer>
+  activeServer(): ReturnType<typeof getSelectedRemoteVisionServer>
 }
 
 const productionDependencies: RemoteScreenGateDependencies = {
   modelStrategy: () => getComputerUseSettings().modelStrategy,
-  activeServer: getActiveRemoteVisionServer
+  activeServer: () => getSelectedRemoteVisionServer('text')
 }
 
 /** Stop a screen task before its host captures or sends the first frame. */

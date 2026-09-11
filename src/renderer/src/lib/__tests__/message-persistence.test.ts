@@ -1,7 +1,76 @@
 import { describe, it, expect } from 'vitest'
-import { buildAssistantContext, readReasoning, readResponseCutoff } from '../message-persistence'
+import {
+  buildAssistantContext,
+  readPersistedChatSessionTurn,
+  readReasoning,
+  readResponseCutoff
+} from '../message-persistence'
+import { mapRagMessage, restoredChatSessionTurns } from '../chat-transcript-projection'
 
 describe('message-persistence carrier', () => {
+  it('round-trips the canonical Shared transcript and keeps old rows compatible', () => {
+    const responseMessages = [
+      {
+        role: 'assistant' as const,
+        content: '',
+        toolCalls: [{ id: 'call-a', name: 'weather', arguments: '{}' }]
+      },
+      { role: 'tool' as const, content: 'Clear', toolCallId: 'call-a', name: 'weather' },
+      { role: 'assistant' as const, content: 'It is clear.' }
+    ]
+    const ctx = buildAssistantContext(undefined, {
+      session: {
+        turnId: 'turn-a',
+        status: 'completed',
+        responseMessages,
+        reasoningRequested: true
+      }
+    })
+
+    expect(readPersistedChatSessionTurn(ctx)).toEqual({
+      turnId: 'turn-a',
+      status: 'completed',
+      responseMessages,
+      reasoningRequested: true
+    })
+    expect(readPersistedChatSessionTurn({ reasoning: 'legacy row' })).toBeUndefined()
+  })
+
+  it('restores a requested Thinking turn even when the model returned no reasoning text', () => {
+    const context = buildAssistantContext(undefined, {
+      session: {
+        turnId: 'turn-thinking',
+        status: 'completed',
+        responseMessages: [{ role: 'assistant', content: 'Answer without a reasoning channel.' }],
+        reasoningRequested: true
+      }
+    })
+    const raw = [
+      {
+        id: 1,
+        role: 'user' as const,
+        content: 'Think about this.',
+        created_at: '2026-09-05T02:50:00.000Z'
+      },
+      {
+        id: 2,
+        role: 'assistant' as const,
+        content: 'Answer without a reasoning channel.',
+        context: JSON.stringify(context),
+        created_at: '2026-09-05T02:50:01.000Z'
+      }
+    ]
+
+    expect(mapRagMessage(raw[1]!)[0]).toMatchObject({
+      role: 'assistant',
+      reasoningRequested: true,
+      reasoning: undefined
+    })
+    expect(restoredChatSessionTurns('conversation-a', raw)[0]?.request.request).toMatchObject({
+      reasoning: { enabled: true }
+    })
+  })
+
   it('round-trips reasoning through the context blob', () => {
     const ctx = buildAssistantContext(undefined, { reasoning: 'weighing the options' })
     expect(readReasoning(ctx)).toBe('weighing the options')
@@ -30,10 +99,6 @@ describe('message-persistence carrier', () => {
     const ctx = buildAssistantContext(base, { reasoning: 'because X' })
     expect(ctx).toMatchObject(base)
     expect(readReasoning(ctx)).toBe('because X')
-    // Mirror mapRagMessages' restore of the other fields.
-    expect((ctx as any).toolCalls).toEqual(base.toolCalls)
-    expect((ctx as any).image).toBe('img/123.png')
-    expect((ctx as any).attachments).toEqual(base.attachments)
   })
 
   it('keeps base context intact when no reasoning is provided', () => {

@@ -2,6 +2,32 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { modelsDir } from '../runtime-env'
+import {
+  GENERATION_PROFILES,
+  REMOTE_FETCH_REDIRECT_POLICY,
+  type RemoteServerApplicationPorts,
+  firstEnabledRemoteServer,
+  canReconcileCredentialedEndpoint,
+  catalogFromDiscovery,
+  defaultRemoteSelections,
+  discoveryFromRemoteModelList,
+  migrateRemoteServerConfiguration,
+  normalizeRemoteServerConfiguration,
+  mergeRemoteSelections,
+  hasRemoteServerSelection,
+  remoteAuthorizationHeaders,
+  remoteErrorBodyMessage,
+  remoteModelListUrl,
+  type ModelModality,
+  type RemoteModelCatalog,
+  type RemoteModalitySelections,
+  type PersistedRemoteServer
+} from '@offgrid/models'
+import {
+  desktopModels,
+  modelsFailureMessage,
+  refreshDesktopModels
+} from '../composition/application-access'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
 import {
   REMOTE_VISION_PROVIDERS,
@@ -15,7 +41,7 @@ import {
 } from '../../shared/remote-vision-server'
 
 const LEGACY_API_KEY_SECRET = 'remote-vision-server:api-key'
-const CONFIG_VERSION = 3
+const CONFIG_VERSION = 4
 
 interface StoredRemoteVisionServer {
   id: string
@@ -23,12 +49,20 @@ interface StoredRemoteVisionServer {
   provider: Exclude<RemoteVisionProvider, 'local'>
   endpoint: string
   model: string
+  selections: RemoteModalitySelections
+  catalog: RemoteModelCatalog
   screenFramesAllowed: boolean
+  /** "Use this server". Absent means true (records written before the flag existed). */
+  enabled?: boolean
 }
 
+/**
+ * On disk since version 4. Files written before 2026-09-03 also carry an `activeServerId`; the
+ * settings fallback is derived from the list (shared `firstEnabledRemoteServer`), so that field is
+ * read past. Execution never uses this fallback.
+ */
 interface StoredRemoteVisionConfig {
-  version: 3
-  activeServerId: string | null
+  version: 4
   servers: StoredRemoteVisionServer[]
 }
 
@@ -36,6 +70,10 @@ interface LegacyStoredRemoteVisionServer {
   provider: RemoteVisionProvider
   endpoint: string
   model: string
+}
+
+export type RemoteVisionServerConnection = Omit<RemoteVisionSavedServer, 'hasApiKey'> & {
+  apiKey: string
 }
 
 function configPath(): string {
@@ -64,21 +102,71 @@ function validProvider(provider: unknown): provider is RemoteVisionProvider {
 function normalizeServer(
   value: Partial<StoredRemoteVisionServer>
 ): StoredRemoteVisionServer | null {
-  if (!value.id || !value.endpoint || !value.model || !validProvider(value.provider)) return null
+  if (!validProvider(value.provider)) return null
+  const normalized = normalizeRemoteServerConfiguration({
+    ...value,
+    provider: sharedProvider(value.provider)
+  })
+  if (
+    !normalized ||
+    !Object.values(normalized.selections ?? {}).some(
+      (selection) => typeof selection === 'string' && selection.trim()
+    )
+  )
+    return null
   return {
-    id: value.id,
-    name: value.name?.trim() || defaultServerName(value.endpoint),
-    provider: value.provider,
-    endpoint: remoteVisionApiBase(remoteVisionEndpoint(value.provider, value.endpoint)),
-    model: value.model.trim(),
-    screenFramesAllowed: value.screenFramesAllowed === true
+    id: normalized.id,
+    name: normalized.name,
+    provider: desktopProvider(normalized.provider),
+    endpoint: normalized.endpoint,
+    model: normalized.selections?.text?.trim() || '',
+    selections: normalized.selections ?? {},
+    catalog: normalized.catalog ?? {},
+    screenFramesAllowed: normalized.screenFramesAllowed === true,
+    ...(normalized.enabled === false ? { enabled: false } : {})
   }
 }
 
-function isStoredConfig(
-  value: StoredRemoteVisionConfig | LegacyStoredRemoteVisionServer
-): value is StoredRemoteVisionConfig {
-  return 'servers' in value && Array.isArray(value.servers)
+function sharedConfiguration(
+  stored: StoredRemoteVisionConfig
+): ReturnType<typeof migrateRemoteServerConfiguration> {
+  return {
+    version: 1,
+    activeServerId: firstEnabledRemoteServer(stored.servers)?.id ?? null,
+    servers: stored.servers.map((server) => ({ ...server, provider: sharedProvider(server.provider) }))
+  }
+}
+
+// Desktop's provider vocabulary ('ogad', 'custom') and shared's ('offgrid-desktop',
+// 'openai-compatible', 'anthropic') meet in these two functions and nowhere else in this file.
+function desktopProvider(
+  provider: PersistedRemoteServer['provider']
+): Exclude<RemoteVisionProvider, 'local'> {
+  if (provider === 'offgrid-desktop') return 'ogad'
+  if (provider === 'ollama' || provider === 'lmstudio' || provider === 'openrouter') return provider
+  return 'custom'
+}
+
+function sharedProvider(
+  provider: Exclude<RemoteVisionProvider, 'local'>
+): PersistedRemoteServer['provider'] {
+  if (provider === 'ogad') return 'offgrid-desktop'
+  if (provider === 'custom') return 'openai-compatible'
+  return provider
+}
+
+function storedFromShared(server: PersistedRemoteServer): StoredRemoteVisionServer {
+  return {
+    id: server.id,
+    name: server.name,
+    provider: desktopProvider(server.provider),
+    endpoint: server.endpoint,
+    model: server.selections?.text ?? '',
+    selections: server.selections ?? {},
+    catalog: server.catalog ?? {},
+    screenFramesAllowed: server.screenFramesAllowed === true,
+    enabled: server.enabled !== false
+  }
 }
 
 function readStored(): StoredRemoteVisionConfig {
@@ -86,42 +174,18 @@ function readStored(): StoredRemoteVisionConfig {
     const value = JSON.parse(fs.readFileSync(configPath(), 'utf8')) as
       | StoredRemoteVisionConfig
       | LegacyStoredRemoteVisionServer
-    if (isStoredConfig(value)) {
-      const servers = value.servers.flatMap((server) => {
-        const normalized = normalizeServer(server)
-        return normalized ? [normalized] : []
+    const migrated = migrateRemoteServerConfiguration(value)
+    const servers = migrated.servers.flatMap((server) => {
+      const normalized = normalizeServer({
+        ...server,
+        provider: desktopProvider(server.provider),
+        model: server.selections?.text ?? ''
       })
-      return {
-        version: CONFIG_VERSION,
-        activeServerId: servers.some((server) => server.id === value.activeServerId)
-          ? value.activeServerId
-          : null,
-        servers
-      }
-    }
-    if (
-      !validProvider(value.provider) ||
-      value.provider === 'local' ||
-      !value.endpoint ||
-      !value.model
-    ) {
-      return { version: CONFIG_VERSION, activeServerId: null, servers: [] }
-    }
-    const id = 'migrated-server'
-    const server = normalizeServer({
-      id,
-      name: defaultServerName(value.endpoint),
-      provider: value.provider,
-      endpoint: value.endpoint,
-      model: value.model
+      return normalized ? [normalized] : []
     })
-    return {
-      version: CONFIG_VERSION,
-      activeServerId: server ? id : null,
-      servers: server ? [server] : []
-    }
+    return { version: CONFIG_VERSION, servers }
   } catch {
-    return { version: CONFIG_VERSION, activeServerId: null, servers: [] }
+    return { version: CONFIG_VERSION, servers: [] }
   }
 }
 
@@ -138,13 +202,81 @@ function serverApiKey(serverId: string): string {
   )
 }
 
+function transportApiKey(server: StoredRemoteVisionServer): string {
+  const key = serverApiKey(server.id)
+  return key && canReconcileCredentialedEndpoint(server.endpoint, true) ? key : ''
+}
+
 function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer {
   return { ...server, hasApiKey: Boolean(serverApiKey(server.id)) }
 }
 
+/**
+ * Desktop's remote-server I/O, handed to the shared ModelWorkspace. Selection is NOT a port here:
+ * the workspace resolves a server's model to this device's route and writes it through the one
+ * selection authority.
+ */
+export const desktopRemoteServerPorts: Omit<RemoteServerApplicationPorts, 'select' | 'clearSelections'> = {
+    configuration: {
+      read: () => sharedConfiguration(readStored()),
+      async write(value) {
+        writeStored({ version: CONFIG_VERSION, servers: value.servers.map(storedFromShared) })
+        await refreshDesktopModels()
+      }
+    },
+    credentials: {
+      async read(serverId) { return serverApiKey(serverId) || null },
+      async write(serverId, value) { setSecret(secretKey(serverId), value) },
+      async remove(serverId) { deleteSecret(secretKey(serverId)) }
+    },
+    providers: {
+      // Desktop has no provider registry: the workspace inventory reads saved servers directly.
+      async register() {
+        /* see above */
+      },
+      async update() {
+        /* see above */
+      },
+      async unregister() {
+        /* see above */
+      }
+    },
+    async test(server, credential) {
+      const startedAt = Date.now()
+      try {
+        const response = await fetch(remoteModelListUrl(server.endpoint), {
+          headers: remoteAuthorizationHeaders(server.endpoint, credential),
+          signal: AbortSignal.timeout(10_000),
+          redirect: REMOTE_FETCH_REDIRECT_POLICY
+        })
+        if (!response.ok) throw new Error(remoteErrorBodyMessage(await response.text(), response.status))
+        const evidence = discoveryFromRemoteModelList(await response.json())
+        if (!evidence) throw new Error('The server returned an invalid model list.')
+        const catalog = catalogFromDiscovery(evidence)
+        return {
+          success: true,
+          latency: Date.now() - startedAt,
+          models: evidence.models,
+          catalog,
+          selections: mergeRemoteSelections(
+            server.selections,
+            defaultRemoteSelections(catalog),
+            server.modelManagement === 'offgrid-desktop-v1'
+          )
+        }
+      } catch (error) {
+        return {
+          success: false,
+          latency: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : 'Connection failed.'
+        }
+      }
+    }
+}
+
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId)
+  const active = firstEnabledRemoteServer(stored.servers)
   return {
     provider: active?.provider ?? 'local',
     endpoint: active?.endpoint ?? '',
@@ -155,102 +287,104 @@ export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   }
 }
 
-export function getActiveRemoteVisionServer():
-  | (StoredRemoteVisionServer & { apiKey: string })
-  | null {
-  const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId)
-  return active ? { ...active, apiKey: serverApiKey(active.id) } : null
+/** Resolve one persisted server for a route selected by the shared model service. */
+export function getRemoteVisionServer(serverId: string): RemoteVisionServerConnection | null {
+  const server = readStored().servers.find((candidate) => candidate.id === serverId)
+  return server ? { ...server, apiKey: transportApiKey(server) } : null
 }
 
-export function activateRemoteVisionModel(serverId: string, modelId: string): boolean {
-  const stored = readStored()
-  const server = stored.servers.find(
-    (candidate) => candidate.id === serverId && candidate.model === modelId
-  )
-  if (!server) return false
-  writeStored({ ...stored, activeServerId: server.id })
-  return true
+/** Join Shared's strict selected route to this device's remote-server transport. */
+export function getSelectedRemoteVisionServer(
+  modality: ModelModality
+): RemoteVisionServerConnection | null {
+  const selected = desktopModels.resolve({
+    modality,
+    allowFallback: GENERATION_PROFILES.chat.allowFallback
+  }).selected
+  return selected?.serverId ? getRemoteVisionServer(selected.serverId) : null
 }
 
-export function deactivateRemoteVisionModel(): void {
-  const stored = readStored()
-  if (stored.activeServerId === null) return
-  writeStored({ ...stored, activeServerId: null })
-}
-
-export function setRemoteVisionServerSettings(
+export async function setRemoteVisionServerSettings(
   update: RemoteVisionServerUpdate
-): RemoteVisionServerSettings {
-  const stored = readStored()
+): Promise<RemoteVisionServerSettings> {
   if (update.provider === 'local') {
-    writeStored({ ...stored, activeServerId: null })
+    // "Off uses models on this device": one shared rule, every modality. The last local text model
+    // is the preferred fallback for text.
+    for (const server of readStored().servers) {
+      if (server.enabled === false) continue
+      await desktopModels.setRemoteServerEnabled(server.id, false)
+    }
     return getRemoteVisionServerSettings()
   }
   if (!validProvider(update.provider)) throw new Error('Unknown model server.')
   const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
   const model = update.model.trim()
-  if (!endpoint || !model) throw new Error('Remote model server and model are required.')
+  if (!endpoint) throw new Error('Remote model server is required.')
   const id = update.serverId || randomUUID()
-  const next: StoredRemoteVisionServer = {
+  const existing = desktopModels.remoteServer(id)
+  const catalog =
+    update.catalog ??
+    existing?.catalog ??
+    // A model named without a catalog row is listed by name only; its capabilities come from the
+    // shared capability policy once the server is probed, never from a guess written to disk.
+    (model ? { text: [{ id: model, name: model }] } : {})
+  const selections = update.selections ?? existing?.selections ?? (model ? { text: model } : {})
+  if (!hasRemoteServerSelection({ selections })) throw new Error('Select at least one remote model.')
+  const saved = await desktopModels.saveRemoteServer({
     id,
     name: update.name?.trim() || defaultServerName(endpoint),
-    provider: update.provider,
+    provider: sharedProvider(update.provider),
     endpoint,
-    model,
-    screenFramesAllowed: update.screenFramesAllowed === true
+    selections,
+    catalog,
+    screenFramesAllowed: update.screenFramesAllowed === true,
+    // Saving a server is the "on" side of the toggle.
+    enabled: true,
+    credential: update.apiKey?.trim() || undefined,
+    clearCredential: update.clearApiKey === true
+  })
+  if (!saved.ok) throw new Error(modelsFailureMessage(saved.failure))
+  for (const [remoteModality, selectedModel] of Object.entries(selections)) {
+    if (typeof selectedModel !== 'string' || !selectedModel) continue
+    const activated = await desktopModels.activateOnServer(
+      id,
+      remoteModality as 'text' | 'image' | 'transcription' | 'voice' | 'embedding',
+      selectedModel
+    )
+    if (!activated.ok) throw new Error(modelsFailureMessage(activated.failure))
   }
-  const servers = stored.servers.some((server) => server.id === id)
-    ? stored.servers.map((server) => (server.id === id ? next : server))
-    : [...stored.servers, next]
-  if (update.clearApiKey) deleteSecret(secretKey(id))
-  else if (update.apiKey?.trim()) setSecret(secretKey(id), update.apiKey.trim())
-  writeStored({ version: CONFIG_VERSION, activeServerId: id, servers })
   return getRemoteVisionServerSettings()
 }
 
-export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSettings {
-  const stored = readStored()
-  deleteSecret(secretKey(serverId))
-  writeStored({
-    version: CONFIG_VERSION,
-    activeServerId: stored.activeServerId === serverId ? null : stored.activeServerId,
-    servers: stored.servers.filter((server) => server.id !== serverId)
-  })
+export async function removeRemoteVisionServer(
+  serverId: string
+): Promise<RemoteVisionServerSettings> {
+  await desktopModels.removeRemoteServer(serverId)
   return getRemoteVisionServerSettings()
 }
 
 export async function testRemoteVisionServer(
   update: RemoteVisionServerUpdate
 ): Promise<RemoteVisionConnectionResult> {
-  const startedAt = Date.now()
-  try {
-    const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
-    if (update.provider === 'local') return { ok: true, latencyMs: 0 }
-    if (!endpoint) throw new Error('Remote model server is required.')
-    const key = update.apiKey?.trim() || (update.serverId ? serverApiKey(update.serverId) : '')
-    const response = await fetch(`${endpoint}/models`, {
-      headers: key ? { Authorization: `Bearer ${key}` } : undefined,
-      signal: AbortSignal.timeout(10_000)
-    })
-    if (!response.ok) throw new Error(`Server returned HTTP ${response.status}.`)
-    const body = (await response.json()) as {
-      data?: Array<{ id?: unknown; name?: unknown }>
-      models?: Array<{ id?: unknown; name?: unknown; model?: unknown }>
-    }
-    const entries: Array<{ id?: unknown; name?: unknown; model?: unknown }> =
-      body.data ?? body.models ?? []
-    const models = entries.flatMap((entry) => {
-      const id =
-        typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
-      return id ? [{ id, name: typeof entry.name === 'string' ? entry.name : id }] : []
-    })
-    return { ok: true, latencyMs: Date.now() - startedAt, models }
-  } catch (error) {
-    return {
-      ok: false,
-      latencyMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : 'Connection failed.'
-    }
+  if (update.provider === 'local') return { ok: true, latencyMs: 0 }
+  const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
+  if (!endpoint) return { ok: false, latencyMs: 0, error: 'Remote model server is required.' }
+  const current = update.serverId ? desktopModels.remoteServer(update.serverId) : null
+  const result = await desktopModels.checkRemoteServerCandidate({
+    id: update.serverId || 'connection-test',
+    name: update.name?.trim() || defaultServerName(endpoint),
+    endpoint,
+    provider: sharedProvider(update.provider),
+    selections: current?.selections ?? {},
+    catalog: current?.catalog ?? {},
+    ...(update.provider === 'ogad' ? { modelManagement: 'offgrid-desktop-v1' as const } : {})
+  }, update.apiKey?.trim() || (update.serverId ? serverApiKey(update.serverId) : '') || null)
+  return {
+    ok: result.success,
+    latencyMs: result.latency ?? 0,
+    error: result.error,
+    models: result.models as RemoteVisionConnectionResult['models'],
+    catalog: result.catalog as RemoteModelCatalog | undefined,
+    selections: result.selections
   }
 }

@@ -5,12 +5,7 @@
 // binary expects. The standard builder CALLS standardModelDefaults from the
 // shared single-source-of-truth module — it never re-implements the defaults.
 
-import { standardModelDefaults } from '../../shared/image-defaults'
-
-/** A general-purpose negative prompt that meaningfully lifts quality when the
- *  caller doesn't supply one. Kept conservative so it doesn't fight most prompts. */
-export const DEFAULT_NEGATIVE =
-  'blurry, low quality, low resolution, jpeg artifacts, deformed, disfigured, bad anatomy, extra limbs, watermark, text, signature, grainy, oversaturated'
+import { DEFAULT_IMAGE_NEGATIVE_PROMPT, standardImageModelDefaults } from '@offgrid/models'
 
 export interface CoreMLArgsInput {
   model: string
@@ -55,6 +50,7 @@ export interface ZImageArgsInput {
   seed: number
   threads: string
   previewArgs: string[]
+  sampleMethod?: string
 }
 
 /** Z-Image is a separate stack: diffusion transformer + Qwen3-4B text encoder
@@ -85,7 +81,7 @@ export function buildZImageArgs(i: ZImageArgsInput): string[] {
     '--cfg-scale',
     String(i.cfgScale ?? 1.0),
     '--sampling-method',
-    'euler',
+    i.sampleMethod ?? 'euler',
     // Keep weights + VAE off the Metal device between/at use so the resident
     // footprint (DiT + 4B encoder + VAE) doesn't spike past unified memory.
     '--offload-to-cpu',
@@ -122,14 +118,15 @@ export interface StandardArgsInput {
   /** Init image path for img2img (undefined for txt2img). */
   initImage?: string
   strength?: number
+  sampleMethod?: string
+  scheduler?: string
 }
 
 /** Standard sd-cli checkpoint. Per-model defaults come from the shared
  *  standardModelDefaults (single source of truth) — NOT re-derived here. */
 export function buildStandardArgs(i: StandardArgsInput): string[] {
-  const { defaultSize, defaultSteps, defaultCfg, sampler, scheduler, isXL } = standardModelDefaults(
-    i.base
-  )
+  const { defaultSize, defaultSteps, defaultCfg, sampler, scheduler, isXL } =
+    standardImageModelDefaults(i.base)
   const args = [
     '-M',
     'img_gen',
@@ -147,9 +144,9 @@ export function buildStandardArgs(i: StandardArgsInput): string[] {
     '--cfg-scale',
     String(i.cfgScale ?? defaultCfg),
     '--sampling-method',
-    sampler,
+    i.sampleMethod ?? sampler,
     '--scheduler',
-    scheduler,
+    i.scheduler ?? scheduler,
     '--diffusion-fa',
     '-t',
     i.threads,
@@ -164,7 +161,7 @@ export function buildStandardArgs(i: StandardArgsInput): string[] {
   // low-res draft. When present it makes VAE-tiling moot, so prefer it.
   if (i.taesdPath) args.push('--taesd', i.taesdPath)
   else if (isXL && Math.max(effW, effH) > 768) args.push('--vae-tiling')
-  args.push('-n', i.negativePrompt?.trim() || DEFAULT_NEGATIVE)
+  args.push('-n', i.negativePrompt?.trim() || DEFAULT_IMAGE_NEGATIVE_PROMPT)
   // img2img (not supported by Z-Image gen-only turbo).
   if (i.initImage) {
     args.push('-i', i.initImage, '--strength', String(i.strength ?? 0.75))

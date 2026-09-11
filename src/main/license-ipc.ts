@@ -11,6 +11,7 @@
 import { ipcMain, BrowserWindow, app, shell } from 'electron'
 import {
   deactivateProFeaturesMain,
+  loadProFeaturesMain,
   proEnabled,
   proEntitlementBootstrapEnabled
 } from './bootstrap/loadProFeaturesMain'
@@ -29,18 +30,39 @@ import {
 import { effectiveProLicenseInfo } from './licensing/effective-license'
 
 export function setupLicenseIpc(): void {
+  let entitlementRevision = 0
   // Push entitlement changes to every window and stop live paid services when
   // access closes.
   setLicenseChangeNotifier((info: ProLicenseInfo) => {
+    const revision = ++entitlementRevision
     const effectiveInfo = effectiveProLicenseInfo(info, proEnabled())
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('license:changed', effectiveInfo)
+    const publish = (current: ProLicenseInfo): void => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        try {
+          win.webContents.send('license:changed', current)
+        } catch (error) {
+          console.error('[pro] license observer failed', error)
+        }
+      }
     }
-    if (!effectiveInfo.isPro) {
-      void deactivateProFeaturesMain().catch((error) => {
-        console.error('[pro] entitlement-loss shutdown failed', error)
-      })
+    if (effectiveInfo.isPro) {
+      // Restore the paid runtime before the renderer receives access. This prevents a renewed
+      // session from showing controls whose main-process handlers are not ready yet.
+      void loadProFeaturesMain()
+        .then(() => {
+          if (revision !== entitlementRevision) return
+          const current = effectiveProLicenseInfo(getProLicenseInfo(), proEnabled())
+          if (current.isPro) publish(current)
+        })
+        .catch((error) => {
+          console.error('[pro] entitlement-gain activation failed', error)
+        })
+      return
     }
+    publish(effectiveInfo)
+    void deactivateProFeaturesMain().catch((error) => {
+      console.error('[pro] entitlement-loss shutdown failed', error)
+    })
   })
 
   // SYNC: preload reads this once to seed window.api.isPro. Must be registered
