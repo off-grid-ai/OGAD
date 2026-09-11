@@ -2389,14 +2389,31 @@ export function MemoryChat({
   const textRecordButtonLabel = textRecordingButtonLabel(voiceTurns.phase)
   const textRecordTooltip = textRecordingTooltip(voiceTurns.phase, voiceTurns.transcriptionLabel)
   const toggleRecording = transcribing ? voiceTurns.cancel : voiceTurns.toggle
+  const handledGodTwinWakeRequestRef = useRef(0)
 
   useEffect(() => {
     if (godTwinWakeRequest === 0) return
-    void window.api.speechCommands.savePreferences({
-      voiceMode: true,
-      turnMode: 'handsfree'
-    })
+    persistedPreferenceValues.current.composerVoiceMode = true
+    persistedPreferenceValues.current.composerVoiceTurnMode = 'handsfree'
+    setVoiceMode(true)
+    setVoiceTurnMode('handsfree')
+    void Promise.all([
+      window.api.saveSetting('composerVoiceMode', true),
+      window.api.saveSetting('composerVoiceTurnMode', 'handsfree')
+    ])
   }, [godTwinWakeRequest])
+
+  useEffect(() => {
+    if (
+      godTwinWakeRequest === 0 ||
+      handledGodTwinWakeRequestRef.current === godTwinWakeRequest ||
+      !voiceMode ||
+      voiceTurnMode !== 'handsfree'
+    )
+      return
+    handledGodTwinWakeRequestRef.current = godTwinWakeRequest
+    voiceTurns.start()
+  }, [godTwinWakeRequest, voiceMode, voiceTurnMode, voiceTurns.start])
 
   useEffect(() => {
     const listening =
