@@ -41,7 +41,11 @@ import {
   type VisionStatus
 } from './models/catalog-logic'
 import { writeDiagnosticLog } from './diagnostics-log'
-import { modelPackageIdentity, type TransferredModelManifest } from '@offgrid/sync'
+import {
+  modelPackageIdentity,
+  modelTransferManifestFileError,
+  type TransferredModelManifest
+} from '@offgrid/sync'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import {
   parseRemoteVisionModelId,
@@ -938,33 +942,14 @@ function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
   }
 }
 
-function safeTransferredFileName(name: string): boolean {
-  return (
-    name.length > 0 &&
-    name.length <= 255 &&
-    path.basename(name) === name &&
-    name !== '.' &&
-    name !== '..'
-  )
-}
-
 function transferredFilesOnDisk(
   dir: string,
   files: Array<{ name: string; sizeBytes: number }>
 ): { error?: string; files?: TransferableModelFile[] } {
-  if (files.length === 0) return { error: 'model has no transferable files' }
-  const names = new Set<string>()
+  const manifestError = modelTransferManifestFileError(files)
+  if (manifestError) return { error: manifestError }
   const resolved: TransferableModelFile[] = []
   for (const file of files) {
-    if (
-      !safeTransferredFileName(file.name) ||
-      !Number.isSafeInteger(file.sizeBytes) ||
-      file.sizeBytes <= 0 ||
-      names.has(file.name)
-    ) {
-      return { error: 'model manifest contains an invalid file' }
-    }
-    names.add(file.name)
     const filePath = path.join(dir, file.name)
     let actualSize = 0
     try {
