@@ -523,6 +523,61 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
+  it('shows successful tool output when the final model turn is empty', async () => {
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+      { content: '' }
+    )
+    const deltas: string[] = []
+
+    const result = await toolChat('what is 2+2', [], {
+      onDelta: (text, kind) => {
+        if (kind === 'content') deltas.push(text)
+      }
+    })
+
+    expect(result.answer).toBe('4')
+    expect(deltas.join('')).toBe('4')
+  })
+
+  it('bounds each tool result to the room left in the active model window', async () => {
+    const raw = 'x'.repeat(30_000)
+    const extension = {
+      id: 'large-result-ext',
+      schemas: () => [
+        {
+          type: 'function',
+          function: {
+            name: 'large_result',
+            description: 'Return a large result',
+            parameters: { type: 'object', properties: {} }
+          }
+        }
+      ],
+      canHandle: (name: string) => name === 'large_result',
+      execute: async () => raw
+    }
+    registerToolExtension(extension)
+    const service = llm as unknown as { ctxSize: number }
+    const previousContext = service.ctxSize
+    service.ctxSize = 2_048
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        { toolCalls: [{ name: 'large_result', args: {} }] },
+        { content: 'Used the bounded result.' }
+      )
+
+      const result = await toolChat('read it', [], { connectors: true })
+
+      expect(result.toolCalls[0]!.result.length).toBeLessThan(raw.length)
+      expect(result.toolCalls[0]!.result).toMatch(/result truncated: showing the first 1000/)
+      expect(JSON.stringify(fake.requests[1])).not.toContain(raw)
+    } finally {
+      service.ctxSize = previousContext
+      unregisterToolExtension(extension.id, extension)
+    }
+  })
+
   it('rejects a non-arithmetic calculator expression (real guard branch)', async () => {
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'calculator', args: { expression: 'process.exit(1)' } }] },
