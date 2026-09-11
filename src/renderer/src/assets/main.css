@@ -128,6 +128,14 @@ body {
   user-select: none;
 }
 
+.god-twin-drag {
+  -webkit-app-region: drag;
+}
+
+.god-twin-no-drag {
+  -webkit-app-region: no-drag;
+}
+
 /* Body disables selection for native-feel app chrome; re-enable it for actual
    text content so chat messages (yours and the responses) can be selected/copied. */
 p,

@@ -1,6 +1,8 @@
 import type { DemoPreset } from '../explore/presetCatalog'
 
 export interface MemoryChatProps {
+  /** Ares requested a hands-free voice turn. Incremented for each request. */
+  readonly godTwinWakeRequest?: number
   readonly onNavigateToMemory?: (memoryId: number) => void
   readonly onNavigateToChat?: (sessionId: string) => void
   readonly onNavigateToMeeting?: (meetingId: number) => void

@@ -25,6 +25,7 @@ import { setupDesktopBackupIPC } from './backup/ipc'
 import { preloadPath } from './preload-path'
 import { rendererHtmlPath } from './renderer-path'
 import { setMainWindow } from './main-window'
+import { registerGodTwinWindowIpc, showGodTwinWindow } from './god-twin-window'
 import { startModelServer, stopModelServer } from './model-server'
 import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { capturePathFromUrl, serveCaptureFile } from './ogcapture-serve'
@@ -464,7 +465,9 @@ app.whenReady().then(async () => {
     }
   ])
 
+  registerGodTwinWindowIpc()
   createWindow()
+  if (windowPresentation.showWindow) showGodTwinWindow()
 
   // Network checks, model work, and optional services now run beside the visible shell.
   void runIndependentStartupStages([

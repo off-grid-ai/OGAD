@@ -197,6 +197,7 @@ import {
 } from './utlis'
 
 export function MemoryChat({
+  godTwinWakeRequest = 0,
   onNavigateToMemory,
   onNavigateToChat,
   onNavigateToMeeting,
@@ -774,7 +775,14 @@ export function MemoryChat({
   // queue decision; generatingConvs mirrors it for rendering.
   const generatingRef = useRef<Set<string>>(new Set())
   const [generatingConvs, setGeneratingConvs] = useState<Set<string>>(new Set())
+  const godTwinRestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const markGenerating = useCallback((cid: string, on: boolean): void => {
+    if (godTwinRestTimerRef.current) clearTimeout(godTwinRestTimerRef.current)
+    if (on) window.api.godTwin?.setState('running')
+    else {
+      window.api.godTwin?.setState('resting')
+      godTwinRestTimerRef.current = setTimeout(() => window.api.godTwin?.setState('idle'), 900)
+    }
     if (on) generatingRef.current.add(cid)
     else generatingRef.current.delete(cid)
     setGeneratingConvs(new Set(generatingRef.current))
@@ -2382,6 +2390,23 @@ export function MemoryChat({
   const textRecordTooltip = textRecordingTooltip(voiceTurns.phase, voiceTurns.transcriptionLabel)
   const toggleRecording = transcribing ? voiceTurns.cancel : voiceTurns.toggle
 
+  useEffect(() => {
+    if (godTwinWakeRequest === 0) return
+    void window.api.speechCommands.savePreferences({
+      voiceMode: true,
+      turnMode: 'handsfree'
+    })
+  }, [godTwinWakeRequest])
+
+  useEffect(() => {
+    const listening =
+      voiceTurns.phase === 'starting' ||
+      voiceTurns.phase === 'listening' ||
+      voiceTurns.phase === 'recording'
+    window.api.godTwin?.setListening(listening)
+    return () => window.api.godTwin?.setListening(false)
+  }, [voiceTurns.phase])
+
   // Stop the in-flight generation for a conversation: abort the model stream (main
   // keeps whatever streamed so far) or the image job, drop any queued follow-ups, and
   // return the UI to idle now. The in-flight sendMessage sees cancelledRef and bails at
@@ -2795,6 +2820,12 @@ export function MemoryChat({
           )
           .catch((error) => console.warn('Could not save the compaction notice', error))
         return
+      }
+      if (data.type === 'step') {
+        const step = data.step as { kind?: unknown } | undefined
+        if (step?.kind === 'running_tool') window.api.godTwin?.setState('fighting')
+      } else if (data.type === 'tool_result') {
+        window.api.godTwin?.setState('running')
       }
       // Mirror reasoning into a ref as it streams, so persistence can read it
       // deterministically (not via a state-updater side effect). Rendering still
