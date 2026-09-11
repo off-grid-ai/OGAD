@@ -28,6 +28,7 @@ import type {
 import type { TaskGuideInput } from '../shared/task-guidance'
 import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
 import type { StartupSnapshot } from '../shared/startup-contract'
+import type { ProjectDeleteOutcome } from '../shared/project-delete-outcome'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
 
 console.log('PRELOAD SCRIPT LOADED')
@@ -771,7 +772,8 @@ const offGridApi = {
   }) => ipcRenderer.invoke('projects:create', p),
   updateProject: (id: string, patch: Record<string, unknown>) =>
     ipcRenderer.invoke('projects:update', id, patch),
-  deleteProject: (id: string) => ipcRenderer.invoke('projects:delete', id),
+  deleteProject: (id: string) =>
+    ipcRenderer.invoke('projects:delete', id) as Promise<ProjectDeleteOutcome>,
   listProjectDocuments: (projectId: string) =>
     ipcRenderer.invoke('projects:list-documents', projectId),
   addProjectDocuments: (projectId: string) =>

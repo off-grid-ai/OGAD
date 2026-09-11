@@ -6,6 +6,7 @@ import fs from 'fs'
 import { randomUUID } from 'node:crypto'
 import { ragService, listProjects, createProject, updateProject, deleteProject } from './rag'
 import { uploadPickerExtensions } from './files-classify'
+import { projectDeleteFailure, type ProjectDeleteOutcome } from '../shared/project-delete-outcome'
 
 // Built from the router's classify sets (files-classify) so the picker allowlist
 // and the processor can never drift: it used to hardcode a subset that omitted
@@ -29,7 +30,16 @@ export function setupRagIPC(): void {
     updateProject(id, patch)
   })
 
-  ipcMain.handle('projects:delete', (_e, id: string) => deleteProject(id))
+  ipcMain.handle('projects:delete', (_e, id: string): ProjectDeleteOutcome => {
+    try {
+      // The RAG store owns one transaction for the project, its documents, and its chat links.
+      // Report that transaction's result before the renderer drops its local projection.
+      deleteProject(id)
+      return { ok: true }
+    } catch (error) {
+      return projectDeleteFailure(error)
+    }
+  })
 
   // --- Knowledge base (documents) ------------------------------------------
   ipcMain.handle('projects:list-documents', (_e, projectId: string) =>
