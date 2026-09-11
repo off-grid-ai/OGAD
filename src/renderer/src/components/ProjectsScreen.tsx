@@ -19,6 +19,10 @@ import { ArtifactCanvas, type Artifact } from './ArtifactCanvas'
 import { artifactKindLabel } from '@renderer/lib/artifact-labels'
 import { timeAgo } from '@renderer/lib/time'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import {
+  PROJECT_DELETE_FALLBACK_REASON,
+  type ProjectDeleteOutcome
+} from '../../../shared/project-delete-outcome'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api
@@ -133,6 +137,7 @@ export function ProjectsScreen({
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [view, setView] = useState<'chat' | 'artifacts' | 'config'>('chat')
+  const [deleteFailure, setDeleteFailure] = useState('')
 
   const refreshProjects = useCallback(async () => {
     const list = (await api.listProjects?.()) ?? []
@@ -176,7 +181,12 @@ export function ProjectsScreen({
     ) {
       return
     }
-    await api.deleteProject?.(id)
+    setDeleteFailure('')
+    const outcome = (await api.deleteProject?.(id)) as ProjectDeleteOutcome | undefined
+    if (!outcome?.ok) {
+      setDeleteFailure(outcome?.reason || PROJECT_DELETE_FALLBACK_REASON)
+      return
+    }
     selectProject(null)
     await refreshProjects()
   }
@@ -195,6 +205,11 @@ export function ProjectsScreen({
             <IconPlus className="h-4 w-4" />
           </button>
         </div>
+        {deleteFailure ? (
+          <p role="alert" className="mx-4 mb-2 text-[11px] text-red-400">
+            {deleteFailure}
+          </p>
+        ) : null}
         <div className="flex-1 overflow-y-auto px-2">
           {creating && (
             <input
