@@ -869,11 +869,6 @@ function AppContent(): React.ReactElement {
       label: 'Discover',
       icon: <IconSparkles className="h-5 w-5 shrink-0" />,
       items: navItems(
-        {
-          label: 'Explore',
-          icon: <IconCompass className="h-5 w-5 shrink-0" />,
-          view: 'explore' as ViewMode
-        },
         proItem('search'),
         proItem('day'),
         proItem('replay'),
@@ -896,6 +891,11 @@ function AppContent(): React.ReactElement {
           label: 'Chat',
           icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
           view: 'memory-chat' as ViewMode
+        },
+        {
+          label: 'Explore',
+          icon: <IconCompass className="h-5 w-5 shrink-0" />,
+          view: 'explore' as ViewMode
         },
         {
           label: 'Tasks',
