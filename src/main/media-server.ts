@@ -195,13 +195,13 @@ function serveFile(req: http.IncomingMessage, res: http.ServerResponse, filePath
   rs.pipe(res)
 }
 
-/** Start the loopback media server (idempotent). Call after app is ready. */
-export function startMediaServer(): void {
+/** Start the loopback media server (idempotent). Resolves only after the socket is ready. */
+export function startMediaServer(): Promise<void> {
   productionServer ??= new LoopbackMediaServer({
     roots: localMediaRoots(app.getPath('userData'), resourceDirs()),
     port: MEDIA_PORT
   })
-  void productionServer.start().catch((error) => console.error('[media-server]', error))
+  return productionServer.start()
 }
 
 /** Build a loopback URL only after the production socket is ready. */

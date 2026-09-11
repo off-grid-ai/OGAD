@@ -27,6 +27,8 @@ import type {
 } from '../shared/browser-session'
 import type { TaskGuideInput } from '../shared/task-guidance'
 import type { RemoteVisionServerUpdate } from '../shared/remote-vision-server'
+import type { StartupSnapshot } from '../shared/startup-contract'
+import type { ProjectDeleteOutcome } from '../shared/project-delete-outcome'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
 
 console.log('PRELOAD SCRIPT LOADED')
@@ -513,6 +515,13 @@ const offGridApi = {
     return unsubscribe('model:download-progress', subscription)
   },
 
+  startupStatus: (): Promise<StartupSnapshot> => ipcRenderer.invoke('app:startup-status'),
+  onStartupStatusChanged: (callback: (snapshot: StartupSnapshot) => void) => {
+    const subscription = (_event: unknown, snapshot: StartupSnapshot): void => callback(snapshot)
+    ipcRenderer.on('app:startup-status-changed', subscription)
+    return unsubscribe('app:startup-status-changed', subscription)
+  },
+
   // Setup + system health
   chatHealth: (): Promise<SystemHealthComponentContract> =>
     ipcRenderer.invoke('system:chat-health'),
@@ -763,7 +772,8 @@ const offGridApi = {
   }) => ipcRenderer.invoke('projects:create', p),
   updateProject: (id: string, patch: Record<string, unknown>) =>
     ipcRenderer.invoke('projects:update', id, patch),
-  deleteProject: (id: string) => ipcRenderer.invoke('projects:delete', id),
+  deleteProject: (id: string) =>
+    ipcRenderer.invoke('projects:delete', id) as Promise<ProjectDeleteOutcome>,
   listProjectDocuments: (projectId: string) =>
     ipcRenderer.invoke('projects:list-documents', projectId),
   addProjectDocuments: (projectId: string) =>

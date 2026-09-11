@@ -498,6 +498,32 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
+  it('never saves a second Gemma tool request as the final answer after the limit', async () => {
+    await llm.setSettings({ maxToolCalls: 1 })
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+        {
+          content: '<|tool_call>call:web_use{query:<|"|>Off Grid AI information<|"|>}<tool_call|>'
+        }
+      )
+      const deltas: string[] = []
+
+      const result = await toolChat('calculate 2+2, then search for Off Grid AI', [], {
+        onDelta: (text, kind) => {
+          if (kind === 'content') deltas.push(text)
+        }
+      })
+
+      expect(result.toolCalls).toHaveLength(1)
+      expect(result.answer).toBe('4')
+      expect(result.answer).not.toMatch(/tool_call|web_use/i)
+      expect(deltas.join('')).toBe('4')
+    } finally {
+      await llm.setSettings({ maxToolCalls: 25 })
+    }
+  })
+
   it('counts parallel tool calls against the configured emergency limit', async () => {
     await llm.setSettings({ maxToolCalls: 2 })
     try {
@@ -520,6 +546,61 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       expect(lastReq.tools ?? []).toHaveLength(0)
     } finally {
       await llm.setSettings({ maxToolCalls: 25 })
+    }
+  })
+
+  it('shows successful tool output when the final model turn is empty', async () => {
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+      { content: '' }
+    )
+    const deltas: string[] = []
+
+    const result = await toolChat('what is 2+2', [], {
+      onDelta: (text, kind) => {
+        if (kind === 'content') deltas.push(text)
+      }
+    })
+
+    expect(result.answer).toBe('4')
+    expect(deltas.join('')).toBe('4')
+  })
+
+  it('bounds each tool result to the room left in the active model window', async () => {
+    const raw = 'x'.repeat(30_000)
+    const extension = {
+      id: 'large-result-ext',
+      schemas: () => [
+        {
+          type: 'function',
+          function: {
+            name: 'large_result',
+            description: 'Return a large result',
+            parameters: { type: 'object', properties: {} }
+          }
+        }
+      ],
+      canHandle: (name: string) => name === 'large_result',
+      execute: async () => raw
+    }
+    registerToolExtension(extension)
+    const service = llm as unknown as { ctxSize: number }
+    const previousContext = service.ctxSize
+    service.ctxSize = 2_048
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        { toolCalls: [{ name: 'large_result', args: {} }] },
+        { content: 'Used the bounded result.' }
+      )
+
+      const result = await toolChat('read it', [], { connectors: true })
+
+      expect(result.toolCalls[0]!.result.length).toBeLessThan(raw.length)
+      expect(result.toolCalls[0]!.result).toMatch(/result truncated: showing the first 1000/)
+      expect(JSON.stringify(fake.requests[1])).not.toContain(raw)
+    } finally {
+      service.ctxSize = previousContext
+      unregisterToolExtension(extension.id, extension)
     }
   })
 

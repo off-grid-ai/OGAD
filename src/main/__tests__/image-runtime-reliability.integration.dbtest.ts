@@ -526,7 +526,7 @@ describe('multimodal runtime reliability', () => {
 
     expect(imageLibrary.listGeneratedImages({ conversationId: 'image-release-chat' })).toEqual([
       expect.objectContaining({
-        path: image.path,
+        path: fs.realpathSync(image.path),
         conversationId: 'image-release-chat',
         projectId: 'image-release-project'
       })
@@ -544,7 +544,10 @@ describe('multimodal runtime reliability', () => {
     const reopenedImages = await import('../imagegen')
     const reopenedArtifacts = await import('../artifacts')
     expect(reopenedImages.listGeneratedImages({ projectId: 'image-release-project' })).toEqual([
-      expect.objectContaining({ path: image.path, conversationId: 'image-release-chat' })
+      expect.objectContaining({
+        path: fs.realpathSync(image.path),
+        conversationId: 'image-release-chat'
+      })
     ])
     expect(reopenedArtifacts.listArtifacts({ conversationId: 'image-release-chat' })).toEqual([
       expect.objectContaining({ id: savedArtifact.id, kind: 'image', code: image.path })

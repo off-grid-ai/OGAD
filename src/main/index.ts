@@ -1,7 +1,6 @@
+import { restoreCanonicalProductName } from './bootstrap/user-data'
 import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
-import { join } from 'path'
 import { tmpdir } from 'os'
-import fs from 'fs'
 
 // Custom scheme to serve local capture screenshots to the renderer (file:// is
 // blocked there). Registered before app 'ready'; handled after.
@@ -58,13 +57,13 @@ import { PRODUCT_NAME } from '../shared/product-identity'
 import { installMediaPermissionHandler } from './media-permission'
 import { localMediaRoots } from './media-roots'
 import { resourceDirs } from './runtime-env'
-import { beginProductIdentityBootstrap } from './product-identity-lifecycle'
-import { repairMissingDefaultKeychainAtBootstrap } from './secure-storage-bootstrap'
 import {
   installDiagnosticConsoleCapture,
   installIpcDiagnostics,
   writeDiagnosticLog
 } from './diagnostics-log'
+import { registerStartupStatusIpc } from './startup-ipc'
+import { runIndependentStartupStages, runStartupStage } from './startup-stages'
 import {
   applicationShutdown,
   commitApplicationRelaunch,
@@ -77,60 +76,6 @@ import { shutdownModelDownloads } from './models/download-queue'
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
 guardConsoleStreams([process.stdout, process.stderr])
-
-// Electron asks macOS for its safeStorage password during early bootstrap. Repair
-// the one safe, known-bad state before that lookup can trigger SecurityAgent's
-// generic "Keychain Not Found" dialog. This never creates or resets a Keychain.
-const secureStorageBootstrap = repairMissingDefaultKeychainAtBootstrap(
-  process.platform,
-  app.isPackaged
-)
-if (secureStorageBootstrap?.status === 'repaired') {
-  console.warn(`[secure-storage] ${secureStorageBootstrap.detail}`)
-} else if (secureStorageBootstrap && secureStorageBootstrap.status !== 'healthy') {
-  console.error(`[secure-storage] ${secureStorageBootstrap.detail}`)
-}
-
-// Pin one canonical userData dir ("Off Grid AI Desktop") regardless of package
-// name, and migrate data from the legacy split dirs ("My Memories" had the
-// models, "my-memories" had the DB) so nothing is lost / re-downloaded. Must run
-// before app 'ready' and before any getPath('userData') usage.
-// Preserve the Keychain namespace used by every existing install during Electron's
-// early safeStorage bootstrap. The returned callback restores the canonical visible
-// product name at the beginning of the ready phase.
-const restoreCanonicalProductName = beginProductIdentityBootstrap(app, process.platform)
-;(function unifyUserDataPath(): void {
-  try {
-    // Test/CI seam: let a harness isolate userData (e.g. screenshot capture of
-    // a fresh, pre-onboarding profile). Harmless in production (unset).
-    if (process.env.OFFGRID_USER_DATA) {
-      fs.mkdirSync(process.env.OFFGRID_USER_DATA, { recursive: true })
-      app.setPath('userData', process.env.OFFGRID_USER_DATA)
-      console.log('[userData] override path:', process.env.OFFGRID_USER_DATA)
-      return
-    }
-    const appData = app.getPath('appData')
-    const canonical = join(appData, 'Off Grid AI Desktop')
-    fs.mkdirSync(canonical, { recursive: true })
-    const move = (fromDir: string, name: string): void => {
-      try {
-        const src = join(fromDir, name)
-        const dst = join(canonical, name)
-        if (fs.existsSync(src) && !fs.existsSync(dst)) fs.renameSync(src, dst)
-      } catch (e) {
-        console.warn('[userData] migrate skip', name, e)
-      }
-    }
-    move(join(appData, 'My Memories'), 'models')
-    move(join(appData, 'my-memories'), 'models')
-    move(join(appData, 'my-memories'), 'memories.db')
-    move(join(appData, 'My Memories'), 'memories.db')
-    app.setPath('userData', canonical)
-    console.log('[userData] canonical path:', canonical)
-  } catch (e) {
-    console.error('[userData] unify failed', e)
-  }
-})()
 
 installDiagnosticConsoleCapture()
 writeDiagnosticLog('app', 'bootstrap.started', {
@@ -402,97 +347,181 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // 2. Setup IPC Handlers (core) + the local model gateway
-  try {
-    installIpcDiagnostics(ipcMain)
-    // Licensing first: load the cached Keygen entitlement into memory and register
-    // the SYNC `pro:is-enabled` handler BEFORE createWindow() (line below) so the
-    // preload's sendSync resolves and window.api.isPro reflects the real license.
-    await loadProEntitlementProvider()
-    initLicensing()
-    await revalidateProEntitlement('launch')
-    setupLicenseIpc()
-    const entitlementRefresh = setInterval(() => {
-      refreshCachedProEntitlement()
-      void revalidateProEntitlement('foreground')
-    }, PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS)
-    entitlementRefresh.unref()
-    applicationShutdown.register({
-      name: 'pro:entitlement-refresh',
-      shutdown: () => clearInterval(entitlementRefresh)
-    })
-    setupIPC()
-    setupRagIPC()
-    setupMcpIpc() // basic MCP connectors (management + chat tool extension)
-    registerNativeActionTools(registerToolExtension) // the assistant's tools (macOS full set; Windows Outlook subset)
-    const { registerActionsIpc } = await import('./actions/actions-ipc')
-    registerActionsIpc() // Approval UX v2: inline gate cards + outcome/undo feed
-    const { registerBrowserViewIpc } = await import('./browser/browser-host')
-    registerBrowserViewIpc() // dock the live browser view to the pane's region
-    const { registerVisionIpc } = await import('./vision/vision-controller')
-    registerVisionIpc() // the vision rail's supervisor Stop/Pause/Resume
-    const { registerSupervisorWindowIpc } = await import('./vision/supervisor-window')
-    registerSupervisorWindowIpc()
-    const { registerTaskHistoryIpc } = await import('./tasks/task-history-ipc')
-    registerTaskHistoryIpc() // one durable Web Use + Computer Use history
-    setupDesktopBackupIPC()
-    // one OpenAI-compatible local gateway (LLM + STT); auto-picks a free port. Async, so handle a
-    // rejection on the promise (a try/catch around a fire-and-forget async call can't catch it).
-    startModelServer().catch((e) => console.error('[model-server] start failed', e))
-    startMediaServer() // loopback HTTP for seekable local media (meeting videos)
-    // Heal a stale active-model.json whose model gained a vision projector after it was
-    // activated (e.g. Gemma 4 E2B) — turns vision on at launch if the projector is now
-    // on disk, without waiting for a re-activate.
-    void import('./models-manager').then((m) => m.reconcileActiveModelProjector()).catch(() => {})
-    ipcMain.handle('media:url', (_e, absPath: string) => mediaUrlFor(absPath))
-    // (clipboard is now a pro feature — setupClipboard runs in pro's activateMain)
-    // Pro features (capture, CRM, meetings, connectors, secretary, proactive,
-    // skills engine, console, tray) register their own IPC + intervals/capture loop
-    // here. No-op in the free build (the pro submodule is absent → stub).
-    void loadProFeaturesMain().catch((e) => console.error('[pro] load failed', e))
-    // Demo seeder for testing: OFFGRID_SEED=1 seeds once; OFFGRID_SEED=force re-seeds.
-    if (process.env.OFFGRID_SEED) {
-      void import('./dev-seed')
-        .then((m) => m.seedDemo(process.env.OFFGRID_SEED === 'force'))
-        .catch((e) => console.error('[seed]', e))
-    }
-    console.log('IPC Handlers Registered.')
-  } catch (e) {
-    console.error('FATAL: IPC Setup failed', e)
-  }
-
-  // 3. Initialize LLM (Async)
-  // We don't await this to avoid blocking window creation
-  import('./llm').then(({ llm }) => {
-    // Register the chat engine through the shared residency seam (runtime-manager),
-    // exactly like every other engine — the queue evicts it before a competing
-    // heavy job and re-warms it mode-aware (resident = reload; on-demand = release
-    // the pause block so it lazily respawns on next use, freeing RAM meanwhile).
-    registerRuntime(llm.runtime)
-    // Apply persisted queue settings (defaults: enabled, tier-1 coexists) — the
-    // keys + apply live in modality-queue/config so the settings UI shares them.
-    applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
-    llm.init().catch((err) => console.error('Failed to init LLM:', err))
+  installIpcDiagnostics(ipcMain)
+  applicationShutdown.register({
+    name: 'startup:status-ipc',
+    shutdown: registerStartupStatusIpc()
   })
-  // Every other engine joins the SAME residency seam (runtime-manager), lazily so
-  // module load never blocks window creation. Registration only stores hooks — it
-  // doesn't spawn anything until the engine is actually used.
-  import('./tts').then(({ ttsRuntime }) => registerRuntime(ttsRuntime)).catch(() => {})
-  import('./imagegen').then(({ imageRuntime }) => registerRuntime(imageRuntime)).catch(() => {})
-  import('./transcription/select')
-    .then(({ sttRuntime }) => registerRuntime(sttRuntime))
-    .catch(() => {})
+
+  // The cached entitlement is the only asynchronous decision that must precede the shell. It is
+  // local and fail-closed: if it misses the bound, Pro stays unavailable until the provider lands.
+  await runStartupStage({
+    name: 'pro.entitlement.load-cached',
+    deadlineMs: 5_000,
+    required: true,
+    lateEffect: 'keep',
+    run: () => loadProEntitlementProvider()
+  })
+  initLicensing()
+  setupLicenseIpc()
+  const entitlementRefresh = setInterval(() => {
+    refreshCachedProEntitlement()
+    void revalidateProEntitlement('foreground')
+  }, PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS)
+  entitlementRefresh.unref()
+  applicationShutdown.register({
+    name: 'pro:entitlement-refresh',
+    shutdown: () => clearInterval(entitlementRefresh)
+  })
+
+  await runStartupStage({
+    name: 'core.ipc',
+    deadlineMs: 10_000,
+    required: true,
+    lateEffect: 'guard',
+    run: ({ commit }) =>
+      commit('core.ipc.handlers', () => {
+        setupIPC()
+        setupRagIPC()
+        setupMcpIpc()
+        registerNativeActionTools(registerToolExtension)
+        setupDesktopBackupIPC()
+        ipcMain.handle('media:url', (_event, absPath: string) => mediaUrlFor(absPath))
+      })
+  })
+
+  // These registrations are independent. They load together, and each failure remains isolated.
+  await runIndependentStartupStages([
+    {
+      name: 'actions.ipc',
+      deadlineMs: 10_000,
+      lateEffect: 'guard',
+      run: ({ commit }) =>
+        import('./actions/actions-ipc').then((module) =>
+          commit('actions.ipc.handlers', module.registerActionsIpc)
+        )
+    },
+    {
+      name: 'browser.view.ipc',
+      deadlineMs: 10_000,
+      lateEffect: 'guard',
+      run: ({ commit }) =>
+        import('./browser/browser-host').then((module) =>
+          commit('browser.view.ipc.handlers', module.registerBrowserViewIpc)
+        )
+    },
+    {
+      name: 'vision.ipc',
+      deadlineMs: 10_000,
+      lateEffect: 'guard',
+      run: ({ commit }) =>
+        import('./vision/vision-controller').then((module) =>
+          commit('vision.ipc.handlers', module.registerVisionIpc)
+        )
+    },
+    {
+      name: 'vision.supervisor-window',
+      deadlineMs: 10_000,
+      lateEffect: 'guard',
+      run: ({ commit }) =>
+        import('./vision/supervisor-window').then((module) =>
+          commit('vision.supervisor-window.handlers', module.registerSupervisorWindowIpc)
+        )
+    },
+    {
+      name: 'tasks.history.ipc',
+      deadlineMs: 10_000,
+      lateEffect: 'guard',
+      run: ({ commit }) =>
+        import('./tasks/task-history-ipc').then((module) =>
+          commit('tasks.history.ipc.handlers', module.registerTaskHistoryIpc)
+        )
+    }
+  ])
 
   createWindow()
 
-  // Update IPC is always registered (the renderer queries staged-version on startup
-  // in every build); the auto-download engine runs production-only (dev has no feed).
-  import('./updater')
-    .then((m) => {
-      m.registerUpdateIpc()
-      if (!is.dev) m.startAutoUpdates()
-    })
-    .catch((e) => console.error('[update] init', e))
+  // Network checks, model work, and optional services now run beside the visible shell.
+  void runIndependentStartupStages([
+    {
+      name: 'pro.entitlement.revalidate',
+      deadlineMs: 30_000,
+      lateEffect: 'keep',
+      run: () => revalidateProEntitlement('launch')
+    },
+    {
+      name: 'models.gateway.start',
+      deadlineMs: 30_000,
+      lateEffect: 'keep',
+      run: () => startModelServer()
+    },
+    {
+      name: 'media.server.start',
+      deadlineMs: 10_000,
+      lateEffect: 'keep',
+      run: () => startMediaServer()
+    },
+    {
+      name: 'models.text.prepare',
+      deadlineMs: 180_000,
+      lateEffect: 'keep',
+      run: async () => {
+        const { llm } = await import('./llm')
+        registerRuntime(llm.runtime)
+        applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
+        if (llm.modelsExist()) await llm.init()
+      }
+    },
+    {
+      name: 'modalities.runtime.register',
+      deadlineMs: 30_000,
+      lateEffect: 'guard',
+      run: async ({ commit }) => {
+        const [{ ttsRuntime }, { imageRuntime }, { sttRuntime }] = await Promise.all([
+          import('./tts'),
+          import('./imagegen'),
+          import('./transcription/select')
+        ])
+        commit('modalities.runtime.registrations', () => {
+          registerRuntime(ttsRuntime)
+          registerRuntime(imageRuntime)
+          registerRuntime(sttRuntime)
+        })
+      }
+    },
+    {
+      name: 'models.projector.reconcile',
+      deadlineMs: 15_000,
+      lateEffect: 'keep',
+      run: () => import('./models-manager').then((module) => module.reconcileActiveModelProjector())
+    },
+    {
+      name: 'pro.features.load',
+      deadlineMs: 30_000,
+      lateEffect: 'keep',
+      run: () => loadProFeaturesMain()
+    },
+    {
+      name: 'updater.ipc',
+      deadlineMs: 15_000,
+      lateEffect: 'guard',
+      run: ({ commit }) =>
+        import('./updater').then((module) =>
+          commit('updater.ipc.handlers', () => {
+            module.registerUpdateIpc()
+            if (!is.dev) module.startAutoUpdates()
+          })
+        )
+    }
+  ])
+
+  // Demo seeding already runs beside the shell. Keep its existing persistence semantics instead of
+  // pretending an in-progress database write can be cancelled by a timer.
+  if (process.env.OFFGRID_SEED) {
+    void import('./dev-seed')
+      .then((module) => module.seedDemo(process.env.OFFGRID_SEED === 'force'))
+      .catch((error) => console.error('[seed]', error))
+  }
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

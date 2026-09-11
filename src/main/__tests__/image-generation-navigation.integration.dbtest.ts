@@ -33,6 +33,8 @@ vi.mock('electron', () => ({
 }))
 
 const IMAGE_MODEL = 'navigation-image-fixture.safetensors'
+const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111'
+const MESSAGE_ID = '22222222-2222-4222-8222-222222222222'
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
@@ -80,7 +82,7 @@ describe('image generation across feature navigation', () => {
     const generation = jobs.start({
       prompt: 'A green cabin rendered while navigating',
       model: IMAGE_MODEL,
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       projectId: 'project-navigation',
       seed: 91,
       width: 512,
@@ -89,7 +91,7 @@ describe('image generation across feature navigation', () => {
     })
     expect(jobs.status()).toMatchObject({
       phase: 'running',
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       projectId: 'project-navigation'
     })
 
@@ -103,16 +105,35 @@ describe('image generation across feature navigation', () => {
     expect(returnedScreen).toContain('succeeded')
     expect(jobs.status()).toMatchObject({
       phase: 'succeeded',
-      conversationId: 'conversation-navigation',
+      conversationId: CONVERSATION_ID,
       outputPath: image.path
+    })
+    expect(JSON.parse(fs.readFileSync(`${image.path}.json`, 'utf8'))).toMatchObject({
+      syncId: image.syncId,
+      conversationId: CONVERSATION_ID
     })
 
     const refreshed: string[] = []
     const detachRefresh = jobs.onConversationUpdated((conversationId) =>
       refreshed.push(conversationId)
     )
-    expect(jobs.acknowledgeConversation('conversation-navigation')).toBe(true)
-    expect(refreshed).toEqual(['conversation-navigation'])
+    const { getDB } = await import('../database')
+    getDB()
+      .prepare(
+        `INSERT INTO rag_conversations (id, title)
+         VALUES (?, ?)`
+      )
+      .run(CONVERSATION_ID, 'Navigation image')
+    getDB()
+      .prepare(
+        `INSERT INTO rag_messages (uuid, conversation_id, role, content)
+         VALUES (?, ?, 'assistant', ?)`
+      )
+      .run(MESSAGE_ID, CONVERSATION_ID, 'Generated image')
+    expect(
+      jobs.acknowledgeConversation(CONVERSATION_ID, MESSAGE_ID)
+    ).toBe(true)
+    expect(refreshed).toEqual([CONVERSATION_ID])
     detachRefresh()
     detachReturned()
   }, 15_000)

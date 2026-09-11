@@ -668,6 +668,8 @@ function standardMessageRowClass(message: ChatMessage): string {
   return `${margin} flex flex-col ${alignment}`
 }
 
+const IMAGE_MESSAGE_COLUMN_WIDTH = 'w-full max-w-2xl'
+
 function standardMessageBubbleClass(message: ChatMessage, editing: boolean): string {
   const emptyAssistant =
     message.role === 'assistant' &&
@@ -681,7 +683,9 @@ function standardMessageBubbleClass(message: ChatMessage, editing: boolean): str
   // as its prompt - some 1700px on a maximised window - and a picture told to fill that width was
   // gigantic. The same cap makes the two kinds of picture behave the same way.
   const width =
-    editing || message.image || message.attachments?.length ? 'w-full max-w-2xl' : 'max-w-[85%]'
+    editing || message.image || message.attachments?.length
+      ? IMAGE_MESSAGE_COLUMN_WIDTH
+      : 'max-w-[85%]'
   const color = message.context?.taskGuidance
     ? 'border border-green-500/50 bg-green-500/5 text-foreground'
     : message.role === 'user'
@@ -1984,6 +1988,7 @@ function MessageBubble({
           path={message.imagePath}
           metadata={message.imageMetadata}
           className="mb-2 w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"
+          fill
           onOpen={actions.openImage}
         />
       ) : null}
@@ -5427,11 +5432,13 @@ export function MemoryChat({
                             />
                           ) : null}
                           {mode === 'image' ? (
-                            <StylePresetPicker
-                              activeStyle={activeStyle}
-                              styleThumbs={styleThumbs}
-                              onChange={setActiveStyle}
-                            />
+                            showImageOptions ? (
+                              <StylePresetPicker
+                                activeStyle={activeStyle}
+                                styleThumbs={styleThumbs}
+                                onChange={setActiveStyle}
+                              />
+                            ) : null
                           ) : (
                             <div className="mt-6 grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
                               {examples.map((ex) => (
@@ -5513,7 +5520,9 @@ export function MemoryChat({
                             Off Grid AI
                           </div>
                           {mode === 'image' || generatingImage ? (
-                            <div className="flex w-full flex-col items-start gap-2">
+                            <div
+                              className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start gap-2`}
+                            >
                               {imageJobStage === 'enhancing' || streamingEnhancedPrompt ? (
                                 <ChatThinkingBlock
                                   content={streamingEnhancedPrompt || 'Starting…'}
@@ -5715,7 +5724,7 @@ export function MemoryChat({
                     )}
 
                     <AnimatePresence initial={false}>
-                      {mode === 'image' && messages.length > 0 ? (
+                      {mode === 'image' && showImageOptions && messages.length > 0 ? (
                         <motion.div
                           key="inline-image-style-picker"
                           role="region"

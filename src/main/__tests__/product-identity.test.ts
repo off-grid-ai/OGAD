@@ -64,12 +64,21 @@ describe('installed product identity', () => {
     expect(localBuild).not.toMatch(/-c\.productName="Off Grid AI(?: Pro)?"/)
 
     const main = fs.readFileSync(path.join(root, 'src/main/index.ts'), 'utf8')
-    const bootstrap = main.indexOf('beginProductIdentityBootstrap(app, process.platform)')
+    const userDataBootstrap = fs.readFileSync(
+      path.join(root, 'src/main/bootstrap/user-data.ts'),
+      'utf8'
+    )
+    const firstImport = main.indexOf(
+      "import { restoreCanonicalProductName } from './bootstrap/user-data'"
+    )
     const ready = main.indexOf('app.whenReady().then')
     const restore = main.indexOf('restoreCanonicalProductName()', ready)
     const serverOnly = main.indexOf("process.argv.includes('--server-only')", ready)
-    expect(bootstrap).toBeGreaterThan(-1)
-    expect(bootstrap).toBeLessThan(ready)
+    expect(firstImport).toBe(0)
+    expect(userDataBootstrap).toContain('beginProductIdentityBootstrap(app, process.platform)')
+    expect(userDataBootstrap).toContain("app.setPath('userData', process.env.OFFGRID_USER_DATA)")
+    expect(userDataBootstrap).toContain('app.exit(1)')
+    expect(userDataBootstrap).toContain('throw error')
     expect(restore).toBeGreaterThan(ready)
     expect(restore).toBeLessThan(serverOnly)
     expect(main).toContain('applicationName: PRODUCT_NAME')
