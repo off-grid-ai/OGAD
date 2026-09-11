@@ -260,6 +260,52 @@ const offGridApi = {
     return unsubscribe(channel, sub)
   },
   proOff: (channel: string) => ipcRenderer.removeAllListeners(channel),
+  godTwin: {
+    wake: (): Promise<boolean> => ipcRenderer.invoke('god-twin:wake'),
+    getEnabled: (): Promise<boolean> => ipcRenderer.invoke('god-twin:enabled:get'),
+    setEnabled: (enabled: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('god-twin:enabled:set', enabled),
+    getPreferences: (): Promise<{
+      state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+      spinning: boolean
+    }> => ipcRenderer.invoke('god-twin:preferences:get'),
+    setPreferences: (preferences: {
+      state?: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+      spinning?: boolean
+    }): Promise<{
+      state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+      spinning: boolean
+    }> => ipcRenderer.invoke('god-twin:preferences:set', preferences),
+    setListening: (listening: boolean): void =>
+      ipcRenderer.send('god-twin:listening', listening),
+    setState: (state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'): void =>
+      ipcRenderer.send('god-twin:state', state),
+    resize: (
+      edge: 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw',
+      deltaX: number,
+      deltaY: number
+    ): void => ipcRenderer.send('god-twin:resize', { edge, deltaX, deltaY }),
+    onWake: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('god-twin:wake', listener)
+      return unsubscribe('god-twin:wake', listener)
+    },
+    onListening: (callback: (listening: boolean) => void): (() => void) => {
+      const listener = (_event: unknown, listening: boolean): void => callback(listening)
+      ipcRenderer.on('god-twin:listening', listener)
+      return unsubscribe('god-twin:listening', listener)
+    },
+    onState: (
+      callback: (state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting') => void
+    ): (() => void) => {
+      const listener = (
+        _event: unknown,
+        state: 'idle' | 'walking' | 'running' | 'fighting' | 'resting'
+      ): void => callback(state)
+      ipcRenderer.on('god-twin:state', listener)
+      return unsubscribe('god-twin:state', listener)
+    }
+  },
   // Loopback HTTP URL for seekable local media (meeting recordings) — <video>
   // can't reliably stream large files over the custom protocol, so use real HTTP.
   getMediaUrl: (absPath: string) => ipcRenderer.invoke('media:url', absPath),

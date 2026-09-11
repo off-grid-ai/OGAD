@@ -8,6 +8,8 @@ export interface DesktopChatStreamEvent {
   streamId: string
   type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'route' | 'fallback' | 'done'
   text?: string
+  step?: unknown
+  call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
   /** `route`: the model that took the turn. */
   model?: RuntimeModel
   /** `fallback`: the shared generation moved the turn to another model. */
