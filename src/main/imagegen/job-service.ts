@@ -27,6 +27,19 @@ export type ImageGenerationJobRequest = ImageGenerationRequestContract & {
 type JobListener = (snapshot: ImageGenerationJobContract) => void
 type ConversationListener = (conversationId: string) => void
 
+export class ImageGenerationPersistenceError extends Error {
+  readonly code = 'IMAGE_GENERATION_PERSISTENCE_FAILED'
+
+  constructor(
+    readonly syncId: string,
+    readonly imagePath: string,
+    options: { cause: unknown }
+  ) {
+    super('The generated image could not be committed to the image library.', options)
+    this.name = 'ImageGenerationPersistenceError'
+  }
+}
+
 /** A finished image, and the name it answers to on every device. */
 export type ImageGenerationResult = ImageGenerationResultContract
 
@@ -75,6 +88,7 @@ const idleSnapshot = (): ImageGenerationJobContract => ({
 export class ImageGenerationJobService {
   private snapshot: ImageGenerationJobContract = idleSnapshot()
   private active = false
+  private messageId: string | null = null
   private readonly listeners = new Set<JobListener>()
   private readonly conversationListeners = new Set<ConversationListener>()
 
@@ -104,6 +118,7 @@ export class ImageGenerationJobService {
   async start(request: ImageGenerationJobRequest): Promise<ImageGenerationResult> {
     this.assertCanStart()
     this.active = true
+    this.messageId = request.messageId ?? null
     const id = randomUUID()
     this.snapshot = {
       id,
@@ -135,42 +150,42 @@ export class ImageGenerationJobService {
       // conversation; without it the gallery and the file record name the same picture differently.
       // Kept BEFORE the facts are written, so the record names a copy this app owns rather than a
       // path on the user's disk that can be moved the moment the generation ends.
+      if (!result.path) {
+        throw new ImageGenerationPersistenceError(id, '', {
+          cause: new Error('The native image runtime did not return an owned output path.')
+        })
+      }
       const keptSource = request.initImage
         ? this.runtime.preserveSource(id, request.initImage)
         : null
-      if (result.path) {
-        try {
-          this.runtime.saveScope(result.path, {
-            syncId: id,
-            ...(keptSource ? { initImage: keptSource } : {}),
-            ...(request.conversationId ? { conversationId: request.conversationId } : {}),
-            ...(request.messageId ? { messageId: request.messageId } : {}),
-            projectId: request.projectId ?? null,
-            createdAt: new Date(this.snapshot.startedAt ?? Date.now()).toISOString(),
-            ...(request.width ? { width: request.width } : {}),
-            ...(request.height ? { height: request.height } : {}),
-            // The shared names, so the phone reads what this Mac wrote. It wrote `model` and the
-            // phone reads `modelId`, so every image made here arrived with its model reading
-            // "synced" and its steps reading 0.
-            metadataJson: generatedImageMetadataJson({
-              prompt: result.prompt,
-              ...(request.negativePrompt === undefined
-                ? {}
-                : { negativePrompt: request.negativePrompt }),
-              ...(request.steps === undefined ? {} : { steps: request.steps }),
-              seed: result.seed,
-              modelId: result.model
-            })
+      try {
+        this.runtime.saveScope(result.path, {
+          syncId: id,
+          ...(keptSource ? { initImage: keptSource } : {}),
+          ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+          ...(request.messageId ? { messageId: request.messageId } : {}),
+          projectId: request.projectId ?? null,
+          createdAt: new Date(this.snapshot.startedAt ?? Date.now()).toISOString(),
+          ...(request.width ? { width: request.width } : {}),
+          ...(request.height ? { height: request.height } : {}),
+          metadataJson: generatedImageMetadataJson({
+            prompt: result.prompt,
+            ...(request.negativePrompt === undefined
+              ? {}
+              : { negativePrompt: request.negativePrompt }),
+            ...(request.steps === undefined ? {} : { steps: request.steps }),
+            seed: result.seed,
+            modelId: result.model
           })
-        } catch (scopeError) {
-          console.error(
-            `[image-job] ${JSON.stringify({
-              event: 'save-scope-failed',
-              id,
-              error: scopeError instanceof Error ? scopeError.message : String(scopeError)
-            })}`
-          )
-        }
+        })
+      } catch (cause) {
+        throw new ImageGenerationPersistenceError(id, result.path, { cause })
+      }
+      const hasReservedMessageAssociation = Boolean(request.conversationId && request.messageId)
+      if (hasReservedMessageAssociation && !this.runtime.share(result.path)) {
+        throw new ImageGenerationPersistenceError(id, result.path, {
+          cause: new Error('The committed generated image could not be described for sharing.')
+        })
       }
       this.snapshot = {
         ...this.snapshot,
@@ -180,10 +195,6 @@ export class ImageGenerationJobService {
         progress: null,
         finishedAt: Date.now()
       }
-      // Described from the sidecar just written, by the one function the chat link also calls, so a
-      // picture offered when it is made and the same picture offered once its message exists cannot
-      // be described two different ways.
-      if (result.path) this.runtime.share(result.path)
       this.publish()
       console.log(`[image-job] ${JSON.stringify({ event: 'succeeded', id, path: result.path })}`)
       return { ...result, syncId: id }
@@ -238,8 +249,17 @@ export class ImageGenerationJobService {
       this.snapshot.conversationId !== conversationId
     )
       return false
+    const syncId = this.snapshot.id
+    if (!syncId) return false
+    if (!this.messageId && !messageId) return false
     if (messageId && this.snapshot.outputPath) {
-      this.runtime.noteMessage(this.snapshot.outputPath, { conversationId, messageId })
+      try {
+        if (!this.runtime.noteMessage(this.snapshot.outputPath, { conversationId, messageId })) {
+          throw new Error('The generated image could not be linked to its conversation message.')
+        }
+      } catch (cause) {
+        throw new ImageGenerationPersistenceError(syncId, this.snapshot.outputPath, { cause })
+      }
     }
     for (const listener of this.conversationListeners) {
       try {
