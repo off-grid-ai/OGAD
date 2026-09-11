@@ -11,6 +11,7 @@ import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
 import { getSetting } from './database'
+import { resolveImageParameters, type ImageParameterStore } from '@offgrid/models'
 import {
   generatedImageSidecarPath,
   readGeneratedImageSidecar,
@@ -127,20 +128,23 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
     let all = fs
       .readdirSync(dir)
       .filter((f) => /\.png$/i.test(f) && !f.startsWith('preview-'))
-      .map((f) => {
-        const p = path.join(dir, f)
+      .flatMap((f) => {
+        const ownedImage = resolveExistingOwnedEntry(dir, f)
+        if (!ownedImage) return []
         // The sidecar is the one owner of what is known about an image besides its bytes, including
         // the syncId that names it on the mesh. Read through that module so this scan and the sync
         // receiver cannot disagree about the shape.
-        const meta = readGeneratedImageSidecar(p)
-        return {
-          path: p,
-          name: f,
-          mtime: fs.statSync(p).mtimeMs,
-          syncId: meta.syncId,
-          conversationId: meta.conversationId,
-          projectId: meta.projectId ?? null
-        }
+        const meta = readGeneratedImageSidecar(ownedImage)
+        return [
+          {
+            path: ownedImage,
+            name: f,
+            mtime: fs.statSync(ownedImage).mtimeMs,
+            syncId: meta.syncId,
+            conversationId: meta.conversationId,
+            projectId: meta.projectId ?? null
+          }
+        ]
       })
       .sort((a, b) => b.mtime - a.mtime)
     if (scope?.conversationId) all = all.filter((r) => r.conversationId === scope.conversationId)
@@ -520,7 +524,22 @@ export async function generateImage(
   // image job below evicts the LLM, so the text pass must precede it. Gated by a
   // setting; failure/timeout silently keeps the original prompt.
   const enhanced = await maybeEnhancePrompt(params.prompt, onUpdate)
-  const effective = enhanced === params.prompt ? params : { ...params, prompt: enhanced }
+  const selectedModel = params.model ?? activeImageModel()
+  const modelParameters = selectedModel
+    ? resolveImageParameters(
+        { id: selectedModel },
+        getSetting<ImageParameterStore>('imageParams', {})
+      )
+    : null
+  const effective = {
+    ...params,
+    prompt: enhanced,
+    steps: params.steps ?? modelParameters?.steps,
+    cfgScale: params.cfgScale ?? modelParameters?.cfgScale,
+    // Keep source-derived dimensions for img2img when the caller did not choose a size.
+    width: params.width ?? (params.initImage ? undefined : modelParameters?.size),
+    height: params.height ?? (params.initImage ? undefined : modelParameters?.size)
+  }
   onUpdate?.({ stage: 'preparing', enhancedPrompt: enhanced })
   const progressObserver = onUpdate
     ? (progress: ImageGenProgress & { preview?: string }) =>
