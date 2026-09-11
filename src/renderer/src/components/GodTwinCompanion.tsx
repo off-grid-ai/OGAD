@@ -210,7 +210,11 @@ export function GodTwinCompanion(): React.ReactElement {
           if (clip && mixer) actions.set(state, mixer.clipAction(makeInPlace(clip)))
         }
         addAction('running', findClip('running', 'run'))
-        addAction('walking', findClip('walking', 'walk'))
+        addAction(
+          'walking',
+          gltf.animations.find((clip) => clip.name.toLowerCase().includes('walk_fight_forward')) ??
+            findClip('walking', 'walk')
+        )
         addAction('fighting', findClip('attack', 'fight', 'combat'))
         addAction('idle', findClip('cautious crouch', 'hide', 'crouch'))
         addAction('resting', findClip('restpose', 'rest', 'idle'))
