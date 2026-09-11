@@ -7,6 +7,38 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### REC-F6-001 (P1) - Desktop recovery backlog items need final review
+
+**Status:** open; reported during the cumulative F6 manual pass on 2026-09-11. These items are
+observations and possible earlier product work. They are not approved implementation scope and have
+not yet been classified against the pre-migration baseline.
+
+Review these items together at the end of the current manual pass so none are lost:
+
+1. **Chat typing speed:** typing in the Desktop chat composer is slow. The user reports that an
+   earlier change fixed this, but that change does not appear to be integrated into the cumulative
+   F6 state. Reproduce and measure input latency before classifying or recovering the earlier work.
+2. **Connector-backed chat queries:** review the earlier work that made enabled connectors available
+   to chat queries. Prove the missing user outcome on the baseline and distinguish useful connector
+   query support from Shared-model migration or migration-regression work.
+3. **Multiple Google accounts:** review the earlier support for adding more than one Google account
+   through the connector integration. Verify account identity, separate credentials, selection,
+   reconnect, and query routing without exposing one account's data or token to another account.
+4. **Image intent from normal chat:** a prompt such as "Draw a dog" does not start image generation
+   unless the user first selects Image mode. Review whether the normal chat planner should route a
+   clear image request to image generation while keeping Image mode as an explicit direct control.
+5. **Startup loader:** Desktop startup shows a spinning loader instead of the intended three-dot
+   loader. Restore the standard startup indicator and verify the loading, ready, and failure states.
+6. **Two-way model transfer:** sending a model must work in both directions: Desktop to Mobile and
+   Mobile to Desktop. Verify discovery, transfer progress, completion, cancellation, failure,
+   retry, and that the received model is usable after each app restarts.
+
+**Evidence required to close:** classify each item through the chronological recovery audit; obtain
+approval before changing code; then run the accepted real Desktop journey. For typing, record input
+latency before and after. For connector queries and multiple Google accounts, use real connector and
+provider boundaries with redacted evidence. For model transfer, run the same accepted journey in
+both directions with real Desktop and Mobile devices.
+
 ### CU-004 (P1) - The current vision-first paths lack complete live control proof
 
 **Earlier Web Use evidence (2026-08-25):** `scripts/qa-agentic-studio.mjs` ran a deterministic Web
