@@ -8,6 +8,7 @@
 
 import { llm } from './llm'
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
+import { stripChatControlTokens } from '@offgrid/sync'
 import { isMemoryToolAllowed } from './tools/memory-scope'
 import { parseToolCallsFromText } from './tools/tool-call-parse'
 import { getSetting, saveSetting } from './database'
@@ -30,6 +31,7 @@ import {
   callsWithinToolBudget,
   finalResponseFromToolResults,
   normalizeMaxToolCalls,
+  toolLimitFinalAnswerInstruction,
   toolPromptChars,
   toolResultCharBudget
 } from '@offgrid/models'
@@ -708,8 +710,9 @@ export async function toolChat(
   const settings = llm.getSettings()
   const maxToolCalls = normalizeMaxToolCalls(settings.maxToolCalls)
   const answerFrom = (content: string): string => {
-    const answer = finalResponseFromToolResults(content, successfulToolResults)
-    if (!content.trim() && answer) onDelta(answer, 'content')
+    const visibleContent = stripChatControlTokens(content)
+    const answer = finalResponseFromToolResults(visibleContent, successfulToolResults)
+    if (!visibleContent && answer) onDelta(answer, 'content')
     return answer
   }
   let round = 0
@@ -823,7 +826,11 @@ export async function toolChat(
   if (opts.signal?.aborted) {
     return resultWithImages({ answer: '', toolCalls, unified })
   }
-  const final = await llm.streamChat(messages, onDelta, {
+  const finalMessages = [
+    { role: 'system', content: toolLimitFinalAnswerInstruction(maxToolCalls) },
+    ...messages.filter((message) => message.role !== 'system')
+  ]
+  const final = await llm.streamChat(finalMessages, onDelta, {
     temperature: 0.3,
     // Forced final answer — inherit the user's Max-output setting (auto by default), never a fixed
     // 1024 cap that truncated the response mid-sentence.

@@ -498,6 +498,32 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
+  it('never saves a second Gemma tool request as the final answer after the limit', async () => {
+    await llm.setSettings({ maxToolCalls: 1 })
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+        {
+          content: '<|tool_call>call:web_use{query:<|"|>Off Grid AI information<|"|>}<tool_call|>'
+        }
+      )
+      const deltas: string[] = []
+
+      const result = await toolChat('calculate 2+2, then search for Off Grid AI', [], {
+        onDelta: (text, kind) => {
+          if (kind === 'content') deltas.push(text)
+        }
+      })
+
+      expect(result.toolCalls).toHaveLength(1)
+      expect(result.answer).toBe('4')
+      expect(result.answer).not.toMatch(/tool_call|web_use/i)
+      expect(deltas.join('')).toBe('4')
+    } finally {
+      await llm.setSettings({ maxToolCalls: 25 })
+    }
+  })
+
   it('counts parallel tool calls against the configured emergency limit', async () => {
     await llm.setSettings({ maxToolCalls: 2 })
     try {
