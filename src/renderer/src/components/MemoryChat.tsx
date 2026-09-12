@@ -101,6 +101,7 @@ import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { TaskPanelTrigger } from '@renderer/components/tasks/TaskPanelTrigger'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
 import { useWorkspacePaneController } from './workspace/useWorkspacePaneController'
+import { ActiveConversationProvider } from '@renderer/lib/ActiveConversationProvider'
 import {
   guidanceTaskForJourney,
   useTaskSessions,
@@ -4979,9 +4980,11 @@ export function MemoryChat({
     : null
 
   return (
-    <div
-      className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-      style={{
+    <ActiveConversationProvider conversationId={activeConversationId}>
+      {/* prettier-ignore */}
+      <div
+        className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
+        style={{
         // Only the code/artifact canvas reflows content beside it (a deliberate
         // side-by-side edit surface). The drawers (settings, models, skills, gallery,
         // lightbox) are fixed overlays with their own opaque backdrop — they draw ON
@@ -4991,8 +4994,8 @@ export function MemoryChat({
             ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
             : 'max(360px, 30vw)'
           : undefined
-      }}
-    >
+        }}
+      >
       {/* Header */}
       <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
         <button
@@ -6831,6 +6834,7 @@ export function MemoryChat({
           </SidePanel>
         )}
       </AnimatePresence>
-    </div>
+      </div>
+    </ActiveConversationProvider>
   )
 }

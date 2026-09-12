@@ -1,9 +1,29 @@
 import React from 'react'
 import { safeChatExternalUrl } from '@offgrid/sync'
 import { openChatLink } from '@renderer/lib/chat-link'
+import { useActiveConversationId } from '@renderer/lib/active-conversation'
 import type { Components } from 'react-markdown'
 
 const element = React.createElement
+
+function ChatMarkdownLink({
+  href,
+  children
+}: Readonly<{ href?: string; children?: React.ReactNode }>): React.JSX.Element {
+  const conversationId = useActiveConversationId()
+  return element(
+    'a',
+    {
+      href: safeChatExternalUrl(href) ?? undefined,
+      className: 'text-green-500 underline',
+      onClick: (event: React.MouseEvent) => {
+        event.preventDefault()
+        openChatLink(href, conversationId)
+      }
+    },
+    children
+  )
+}
 
 export const chatMarkdownComponents: Components = {
   h1: ({ children }) =>
@@ -63,19 +83,7 @@ export const chatMarkdownComponents: Components = {
       children
     ),
   hr: () => element('hr', { className: 'my-3 border-neutral-800' }),
-  a: ({ href, children }) =>
-    element(
-      'a',
-      {
-        href: safeChatExternalUrl(href) ?? undefined,
-        className: 'text-green-500 underline',
-        onClick: (event: React.MouseEvent) => {
-          event.preventDefault()
-          openChatLink(href)
-        }
-      },
-      children
-    ),
+  a: ChatMarkdownLink,
   code: ({ children, ...props }) =>
     element(
       'code',

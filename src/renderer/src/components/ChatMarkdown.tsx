@@ -1,6 +1,7 @@
 import { preprocessChatMarkdown } from '@offgrid/sync'
 import { safeChatExternalUrl } from '@offgrid/sync'
 import { openChatLink } from '@renderer/lib/chat-link'
+import { useActiveConversationId } from '@renderer/lib/active-conversation'
 import { openTaskSidePanel } from '@renderer/lib/task-side-panel'
 import { useTaskSessions } from '@renderer/lib/task-session-store'
 import ReactMarkdown, { type Components } from 'react-markdown'
@@ -18,13 +19,14 @@ function ExternalChatLink({
   href?: string
   children?: React.ReactNode
 }): React.JSX.Element {
+  const conversationId = useActiveConversationId()
   return (
     <a
       href={safeChatExternalUrl(href) ?? undefined}
       className="text-green-500 underline"
       onClick={(event) => {
         event.preventDefault()
-        openChatLink(href)
+        openChatLink(href, conversationId)
       }}
     >
       {children}
