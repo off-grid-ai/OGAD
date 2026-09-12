@@ -1,3 +1,5 @@
+import { compactMessageHistory } from '@offgrid/models'
+
 // Pure builder for the model-facing history of a chat send. Kept Electron-free and
 // component-free so it's unit-tested directly — and, more importantly, so the
 // history is a function of the messages you PASS it, forcing the caller to pass the
@@ -13,6 +15,7 @@ export interface HistoryTurn {
   role: string
   content: string
   context?: { taskGuidance?: unknown } | null
+  notice?: boolean
 }
 
 /** Build the last `limit` turns of history for a send.
@@ -29,7 +32,7 @@ export function buildSendHistory<T extends HistoryTurn>(
   // Task guidance is shown in Chat for continuity, but the operator already
   // consumed it. Do not replay it as another user prompt to the resident LLM.
   const flat = convMsgs
-    .filter((message) => !message.context?.taskGuidance)
+    .filter((message) => !message.context?.taskGuidance && !message.notice)
     .map((m) => ({ role: m.role, content: m.content }))
   let base: HistoryTurn[]
   if (regen) {
@@ -38,5 +41,13 @@ export function buildSendHistory<T extends HistoryTurn>(
   } else {
     base = [...flat, { role: 'user', content: newUserText }]
   }
-  return base.slice(-limit)
+  if (base.length <= limit) return base
+  const lastUserIndex = base.map((message) => message.role).lastIndexOf('user')
+  const protectedTailCount = lastUserIndex < 0 ? 1 : base.length - lastUserIndex
+  return compactMessageHistory({
+    messages: base.map((message, index) => ({ id: String(index), ...message })),
+    maxChars: 16_000,
+    protectedTailCount,
+    compactedMessage: (_id, content) => ({ id: 'context-compacted', role: 'assistant', content })
+  }).messages.map(({ role, content }) => ({ role, content }))
 }

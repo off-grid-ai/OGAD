@@ -35,6 +35,33 @@ afterEach(() => {
 })
 
 describe('<ChatToolRows/> work timeline', () => {
+  it('reports a stopped task as stopped even when an earlier step failed', async () => {
+    window.api.tasks!.list = vi.fn(async () => [
+      {
+        taskId: 'web-stopped',
+        journeyId: 'conversation-a',
+        kind: 'web_use' as const,
+        title: 'Find the release notes',
+        status: 'stopped' as const,
+        steps: [],
+        startedAt: 1,
+        finishedAt: 2,
+        updatedAt: 2
+      }
+    ])
+    render(
+      <ChatToolRows
+        tools={[
+          { name: 'read_url', result: 'Error: HTTP 404', status: 'completed' },
+          { name: 'web_use', result: 'Task reference: web-stopped.', status: 'pending' }
+        ]}
+      />
+    )
+
+    await waitFor(() => expect(screen.getByText('Work stopped')).toBeTruthy())
+    expect(screen.queryByText('Work failed')).toBeNull()
+  })
+
   it('uses the meeting search result for the collapsed summary', async () => {
     const user = userEvent.setup()
     render(
