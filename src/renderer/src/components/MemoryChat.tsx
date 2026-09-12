@@ -24,9 +24,7 @@ import {
   type ProjectedSyncedTool,
   type RecordProvenance,
   type SyncedMessageRole,
-  type SyncedTurnStatus,
-  groupWorkRuns,
-  type WorkRunStep
+  type SyncedTurnStatus
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
 import { contextCompactedNoticeText, fallbackNoticeText } from '@offgrid/models'
@@ -732,33 +730,27 @@ function PromptEnhancementMessageRow({
   )
 }
 
-function workRunStepsEqual(
-  previous: readonly WorkRunStep<ChatMessage>[],
-  next: readonly WorkRunStep<ChatMessage>[]
+function toolMessagesEqual(
+  previous: readonly ChatMessage[],
+  next: readonly ChatMessage[]
 ): boolean {
-  return (
-    previous.length === next.length &&
-    previous.every(
-      (step, index) => step.tool === next[index]?.tool && step.reasoning === next[index]?.reasoning
-    )
-  )
+  return previous.length === next.length && previous.every((message, index) => message === next[index])
 }
 
 const ToolMessageTimelineRow = memo(
-  function ToolMessageTimelineRow({
-    steps
-  }: Readonly<{ steps: WorkRunStep<ChatMessage>[] }>): React.JSX.Element {
+  function ToolMessageTimelineRowView({
+    messages
+  }: Readonly<{ messages: ChatMessage[] }>): React.JSX.Element {
     return (
       <div
         className="mb-2 flex flex-col items-start"
-        data-testid={`chat-tool-timeline-${steps[0]?.tool.id ?? 'unknown'}`}
+        data-testid={`chat-tool-timeline-${messages[0]?.id ?? 'unknown'}`}
       >
         <ChatToolRows
-          tools={steps.map(({ tool: message, reasoning }) => ({
+          tools={messages.map((message) => ({
             name: message.toolName || 'Tool result',
             result: message.content,
             status: message.turnStatus === 'failed' ? 'failed' : 'completed',
-            ...(reasoning ? { reasoning } : {}),
             ...(message.generationTimeMs === undefined
               ? {}
               : { durationMs: message.generationTimeMs })
@@ -767,7 +759,7 @@ const ToolMessageTimelineRow = memo(
       </div>
     )
   },
-  (previous, next) => workRunStepsEqual(previous.steps, next.steps)
+  (previous, next) => toolMessagesEqual(previous.messages, next.messages)
 )
 
 function VoiceMessageRow({
@@ -2185,7 +2177,7 @@ function MessageRow({
   } else if (isPromptEnhancementMessage(message)) {
     body = <PromptEnhancementMessageRow message={message} />
   } else if (message.role === 'tool') {
-    body = <ToolMessageTimelineRow steps={[{ tool: message }]} />
+    body = <ToolMessageTimelineRow messages={[message]} />
   } else if (voiceMode) {
     body = (
       <VoiceMessageRow
@@ -4667,6 +4659,9 @@ export function MemoryChat({
         markGenerating(cid, false)
         return
       }
+      if (data.type === 'answer_reset') {
+        answerByStream.current[data.streamId] = ''
+      }
       // Mirror reasoning into a ref as it streams, so persistence can read it
       // deterministically (not via a state-updater side effect). Rendering still
       // uses message.reasoning below; this is the durable source for the saved blob.
@@ -5525,17 +5520,24 @@ export function MemoryChat({
                     </div>
                   ) : (
                     <div className="w-full px-6 py-5">
-                      {groupWorkRuns(messages, isSupportingMessage).map((entry, entryIndex, entries) => {
-                        if (entry.kind === 'work') {
-                          return <ToolMessageTimelineRow key={entry.id} steps={entry.steps} />
+                      {messages.map((message, messageIndex) => {
+                        if (message.role === 'tool') {
+                          if (messages[messageIndex - 1]?.role === 'tool') return null
+                          const run: ChatMessage[] = []
+                          for (
+                            let index = messageIndex;
+                            messages[index]?.role === 'tool';
+                            index += 1
+                          ) {
+                            run.push(messages[index]!)
+                          }
+                          return <ToolMessageTimelineRow key={message.id} messages={run} />
                         }
-                        const { message } = entry
-                        const next = entries[entryIndex + 1]
                         return (
                           <MemoizedMessageRow
                             key={message.id}
                             message={message}
-                            nextMessageRole={next?.kind === 'work' ? 'tool' : next?.message.role}
+                            nextMessageRole={messages[messageIndex + 1]?.role}
                             liveTask={
                               message.streaming ? (liveJourneyTask ?? undefined) : undefined
                             }

@@ -1,5 +1,6 @@
 /** Electron IPC payloads shared by main, preload, and renderer type-checks. */
 import type { GenerationMetrics } from './generation-metrics'
+import type { ChatWorkTimelineEntry } from '@offgrid/sync'
 
 export interface UserProfileContract {
   role?: string
@@ -74,6 +75,8 @@ export interface ActiveChatStreamContract {
     status: 'running' | 'completed' | 'failed' | 'pending'
     result?: string
   }>
+  /** Ordered model/tool events. Flat fields above remain for older consumers. */
+  workTimeline?: ChatWorkTimelineEntry[]
 }
 
 export interface PermissionStatusContract {

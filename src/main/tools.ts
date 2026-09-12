@@ -28,11 +28,14 @@ import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/ser
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import {
   boundToolResult,
+  generationOutputTokenBudget,
   callsWithinToolBudget,
-  finalResponseFromToolResults,
+  finalAnswerInstruction,
+  needsFinalAnswerSynthesis,
   normalizeMaxToolCalls,
   toolLimitFinalAnswerInstruction,
   toolPromptChars,
+  toolSchemaTokenBudget,
   toolResultCharBudget
 } from '@offgrid/models'
 
@@ -530,6 +533,8 @@ export async function toolChat(
     onToolResult?: (call: { name: string; result: string; status: ToolCallStatus }) => void
     onActivity?: (activity: ToolActivity) => void
     onFallback?: (fallback: { failed: string; next: string; error: unknown }) => void
+    /** Remove text from a tool-selection round before its tool work becomes visible. */
+    onAnswerReset?: () => void
     /** The orchestrator's plan for this turn, emitted once before its steps run. */
     onPlan?: (steps: { tool: string; why: string }[]) => void
   } = {}
@@ -645,13 +650,26 @@ export async function toolChat(
   }
   const { budgetTools } = await import('./tools/tool-budget')
   const ctx = llm.effectiveContextSize()
-  // Cap tool tokens in ABSOLUTE terms too, not just as a fraction of context:
-  // llama-server re-processes the entire tool prompt every tool round (gemma-4's
-  // sliding-window attention defeats the prompt cache), so on CPU-only inference a
-  // large tool payload dominates latency. ~4k keeps a useful connector set while
-  // roughly halving per-round prompt cost vs the old 45%-of-a-big-context budget.
-  const MAX_TOOL_TOKENS = 4000
-  const toolBudget = Math.max(1024, Math.min(Math.floor(ctx * 0.4), MAX_TOOL_TOKENS))
+  const settings = llm.getSettings()
+  const baseSystemPrompt =
+    'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
+    (hints.length ? ' ' + hints.join(' ') : '') +
+    (proposalDeckActive ? ` ${proposalDeckSystemHint(opts.conversationId)}` : '')
+  const promptWithoutSchemas = [
+    { role: 'system', content: baseSystemPrompt },
+    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: query }
+  ]
+  const replyReserveTokens = generationOutputTokenBudget({
+    contextLength: ctx,
+    requestedMaxTokens: settings.maxTokens,
+    autoMaxTokens: 512
+  })
+  const toolBudget = toolSchemaTokenBudget({
+    contextLength: ctx,
+    promptChars: toolPromptChars(promptWithoutSchemas),
+    replyReserveTokens
+  })
   const budgeted = budgetTools(rankedTools, toolBudget, builtins.length)
   if (budgeted.pruned || budgeted.droppedCount) {
     console.warn(
@@ -708,16 +726,28 @@ export async function toolChat(
     }
   }
 
-  const settings = llm.getSettings()
   const maxToolCalls = normalizeMaxToolCalls(settings.maxToolCalls)
-  const answerFrom = (content: string): string => {
-    const visibleContent = stripChatControlTokens(content)
-    const answer = finalResponseFromToolResults(visibleContent, successfulToolResults)
-    if (!visibleContent && answer) onDelta(answer, 'content')
-    return answer
-  }
+  const answerFrom = (content: string): string => stripChatControlTokens(content).trim()
   let round = 0
   let forceLocal = false
+  const streamFinalAnswer = (instruction: string): ReturnType<typeof llm.streamChat> =>
+    llm.streamChat(
+      [
+        { role: 'system', content: instruction },
+        ...messages.filter((message) => message.role !== 'system')
+      ],
+      onDelta,
+      {
+        temperature: 0.3,
+        thinking: false,
+        signal: opts.signal,
+        forceLocal,
+        onFallback: (fallback) => {
+          forceLocal = true
+          opts.onFallback?.(fallback)
+        }
+      }
+    )
   while (toolCalls.length < maxToolCalls) {
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
     // are accumulated and returned. A tool-calling round streams thinking (and no content);
@@ -766,6 +796,9 @@ export async function toolChat(
           }))
 
     if (effective.length) {
+      // A model can emit prose or raw context before its tool call. That text belongs to the
+      // selection round, not to the final answer bubble.
+      opts.onAnswerReset?.()
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
       const callsToRun = callsWithinToolBudget(effective, toolCalls.length, maxToolCalls)
@@ -796,7 +829,7 @@ export async function toolChat(
         const resultBudget = toolResultCharBudget({
           contextLength: llm.effectiveContextSize(),
           promptChars: toolPromptChars(messages, tools),
-          replyReserveTokens: settings.maxTokens
+          replyReserveTokens
         })
         const res = {
           ...rawResult,
@@ -825,7 +858,21 @@ export async function toolChat(
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: answerFrom(content), toolCalls, unified })
+    const answer = answerFrom(content)
+    if (!needsFinalAnswerSynthesis(answer)) {
+      return resultWithImages({ answer, toolCalls, unified })
+    }
+    // A reasoning-only or tool-using round can end without answer text. Run one answer-only pass.
+    // Raw tool payload stays in the work timeline and never becomes assistant prose.
+    opts.onAnswerReset?.()
+    const final = await streamFinalAnswer(
+      finalAnswerInstruction(successfulToolResults.some((result) => result.trim()))
+    )
+    const finalAnswer = answerFrom(final.content)
+    if (needsFinalAnswerSynthesis(finalAnswer)) {
+      throw new Error('The model completed its work but returned no final answer.')
+    }
+    return resultWithImages({ answer: finalAnswer, toolCalls, unified })
   }
   // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
   // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
@@ -833,24 +880,16 @@ export async function toolChat(
   if (opts.signal?.aborted) {
     return resultWithImages({ answer: '', toolCalls, unified })
   }
-  const finalMessages = [
-    { role: 'system', content: toolLimitFinalAnswerInstruction(maxToolCalls) },
-    ...messages.filter((message) => message.role !== 'system')
-  ]
-  const final = await llm.streamChat(finalMessages, onDelta, {
-    temperature: 0.3,
-    // Forced final answer — inherit the user's Max-output setting (auto by default), never a fixed
-    // 1024 cap that truncated the response mid-sentence.
-    thinking: false,
-    signal: opts.signal,
-    forceLocal,
-    onFallback: (fallback) => {
-      forceLocal = true
-      opts.onFallback?.(fallback)
-    }
-  })
+  opts.onAnswerReset?.()
+  // Forced final answer inherits the user's Max-output setting (auto by default), never a fixed
+  // 1024 cap that truncates the response mid-sentence.
+  const final = await streamFinalAnswer(toolLimitFinalAnswerInstruction(maxToolCalls))
+  const finalAnswer = answerFrom(final.content)
+  if (needsFinalAnswerSynthesis(finalAnswer)) {
+    throw new Error('The model reached the tool limit but returned no final answer.')
+  }
   return resultWithImages({
-    answer: answerFrom(final.content) || 'Stopped after too many tool steps.',
+    answer: finalAnswer,
     toolCalls,
     unified
   })

@@ -6,7 +6,7 @@
 import { completeChatStreamTool, startChatStreamTool, type ChatStreamTool } from '@offgrid/sync'
 
 export interface StreamEvent {
-  type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
+  type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'answer_reset' | 'done'
   text?: string
   step?: unknown
   call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
@@ -35,6 +35,7 @@ export function hasLiveStreamActivity(message: StreamedMessage): boolean {
 
 export function applyStreamEvent<T extends StreamedMessage>(m: T, e: StreamEvent): T {
   if (e.type === 'done') return m
+  if (e.type === 'answer_reset') return { ...m, content: '' }
   if (e.type === 'content') {
     // Answer tokens clear the live "Running…" activity as the reply takes over.
     return { ...m, content: (m.content || '') + (e.text || ''), activity: undefined }

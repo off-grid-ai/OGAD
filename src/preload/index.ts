@@ -242,7 +242,14 @@ const offGridApi = {
   onRagStream: (
     callback: (data: {
       streamId: string
-      type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'fallback' | 'done'
+      type:
+        | 'content'
+        | 'reasoning'
+        | 'step'
+        | 'tool_result'
+        | 'answer_reset'
+        | 'fallback'
+        | 'done'
       text?: string
       step?: unknown
       call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }
@@ -253,7 +260,14 @@ const offGridApi = {
       _: unknown,
       data: {
         streamId: string
-        type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'fallback' | 'done'
+        type:
+          | 'content'
+          | 'reasoning'
+          | 'step'
+          | 'tool_result'
+          | 'answer_reset'
+          | 'fallback'
+          | 'done'
         text?: string
         step?: unknown
         call?: { name: string; result: string; status: 'completed' | 'failed' | 'pending' }

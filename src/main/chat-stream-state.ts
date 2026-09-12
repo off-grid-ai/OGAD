@@ -13,12 +13,16 @@
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import {
   completeChatStreamTool,
+  appendChatWorkTimelineText,
+  completeChatWorkTimelineTool,
   startChatStreamTool,
+  startChatWorkTimelineTool,
   type ChatStreamCompletion,
   type ChatStreamPhase,
   type ChatStreamProgress,
   type ChatStreamTool,
-  type ChatStreamToolResultStatus
+  type ChatStreamToolResultStatus,
+  type ChatWorkTimelineEntry
 } from '@offgrid/sync'
 import type { ActiveChatStreamContract } from '../shared/ipc-contracts'
 
@@ -30,6 +34,7 @@ interface ActiveStream {
   phase: ChatStreamPhase
   progress?: ChatStreamProgress
   tools?: ChatStreamTool[]
+  workTimeline?: ChatWorkTimelineEntry[]
   /**
    * The id this reply will be STORED under, when the caller named it before the first token.
    *
@@ -52,7 +57,10 @@ export function activeChatStreamSnapshots(): ActiveChatStreamContract[] {
     reasoning: stream.reasoning,
     reasoningRequested: stream.reasoningRequested,
     phase: stream.phase,
-    ...(stream.tools?.length ? { tools: stream.tools.map((tool) => ({ ...tool })) } : {})
+    ...(stream.tools?.length ? { tools: stream.tools.map((tool) => ({ ...tool })) } : {}),
+    ...(stream.workTimeline?.length
+      ? { workTimeline: stream.workTimeline.map((entry) => structuredClone(entry)) }
+      : {})
   }))
 }
 
@@ -137,9 +145,11 @@ export function noteChatStreamDelta(
   if (!stream) return
   if (kind === 'reasoning') {
     stream.reasoning += text
+    stream.workTimeline = appendChatWorkTimelineText(stream.workTimeline, 'reasoning', text)
     stream.phase = 'thinking'
   } else {
     stream.content += text
+    stream.workTimeline = appendChatWorkTimelineText(stream.workTimeline, 'assistant', text)
     stream.phase = 'answering'
   }
   delete stream.progress
@@ -153,7 +163,19 @@ export function resetChatStreamOutput(streamId: string | undefined): void {
   if (!stream) return
   stream.content = ''
   stream.reasoning = ''
+  delete stream.workTimeline
   stream.phase = stream.reasoningRequested ? 'thinking' : 'waiting'
+  publish(streamId)
+}
+
+/** Remove provisional answer text while keeping reasoning and completed tool work. */
+export function resetChatStreamAnswer(streamId: string | undefined): void {
+  if (!streamId) return
+  const stream = active.get(streamId)
+  if (!stream) return
+  stream.content = ''
+  stream.phase = stream.reasoning ? 'thinking' : stream.reasoningRequested ? 'thinking' : 'waiting'
+  delete stream.progress
   publish(streamId)
 }
 
@@ -163,6 +185,7 @@ export function noteChatStreamToolStarted(streamId: string | undefined, name: st
   const stream = active.get(streamId)
   if (!stream) return
   stream.tools = startChatStreamTool(stream.tools, name)
+  stream.workTimeline = startChatWorkTimelineTool(stream.workTimeline, name)
   publish(streamId)
 }
 
@@ -177,6 +200,12 @@ export function noteChatStreamToolCompleted(
   const stream = active.get(streamId)
   if (!stream) return
   stream.tools = completeChatStreamTool(stream.tools, name, result, status)
+  stream.workTimeline = completeChatWorkTimelineTool(
+    stream.workTimeline,
+    name,
+    result,
+    status
+  )
   publish(streamId)
 }
 

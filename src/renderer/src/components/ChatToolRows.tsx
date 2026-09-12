@@ -1,5 +1,5 @@
 import type { ChatStreamTool, ProjectedSyncedTool } from '@offgrid/sync'
-import { CaretDown, Check, Circle, Warning, Wrench, X } from '@phosphor-icons/react'
+import { CaretDown, Check, Circle, Warning, X } from '@phosphor-icons/react'
 import { ChatMarkdown } from './ChatMarkdown'
 import { ChatThinkingBlock } from './ChatThinkingBlock'
 import {
@@ -188,15 +188,6 @@ function statusIcon(status: WorkStatus): React.JSX.Element {
   )
 }
 
-function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
-  const statuses = tools.map(workStatus)
-  if (statuses.includes('running')) return 'running'
-  if (statuses.includes('cancelled')) return 'cancelled'
-  if (statuses.includes('failed')) return 'failed'
-  if (statuses.includes('needs attention')) return 'needs attention'
-  return 'complete'
-}
-
 function taskWorkStatus(task: TaskSession | undefined): WorkStatus | undefined {
   if (!task) return undefined
   if (task.status === 'failed') return 'failed'
@@ -204,14 +195,6 @@ function taskWorkStatus(task: TaskSession | undefined): WorkStatus | undefined {
   if (task.status === 'paused' || task.status === 'waiting') return 'needs attention'
   if (task.status === 'running' || task.status === 'reconnecting') return 'running'
   return 'complete'
-}
-
-function workHeading(status: WorkStatus): string {
-  if (status === 'running') return 'Working'
-  if (status === 'needs attention') return 'Action needed'
-  if (status === 'failed') return 'Work failed'
-  if (status === 'cancelled') return 'Work stopped'
-  return 'Work done'
 }
 
 function linkedTaskForReference(
@@ -273,120 +256,89 @@ export function ChatToolRows({
       linkedTaskForReference(tasks, taskId) ?? (index === liveToolIndex ? liveTask : undefined)
     return { tool, taskId, linkedTask, status: taskWorkStatus(linkedTask) ?? workStatus(tool) }
   })
-  const projectedStatuses = projected.map((item) => item.status)
-  const status = projectedStatuses.includes('running')
-    ? 'running'
-    : projectedStatuses.includes('cancelled')
-      ? 'cancelled'
-      : projectedStatuses.includes('failed')
-        ? 'failed'
-        : projectedStatuses.includes('needs attention')
-          ? 'needs attention'
-          : overallStatus(visible)
-
   return (
-    <Collapsible
-      defaultOpen={status === 'running' || status === 'needs attention'}
-      className="mt-1 w-full max-w-[85%] rounded-sm border border-neutral-800 text-neutral-500"
-    >
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] transition-colors hover:text-neutral-300">
-        <Wrench className="h-3.5 w-3.5 shrink-0 text-neutral-600" aria-hidden="true" />
-        <span className="min-w-0 flex-1 font-medium text-neutral-300">{workHeading(status)}</span>
-        <span className="text-[10px] text-neutral-600">
-          {visible.length} {visible.length === 1 ? 'step' : 'steps'} · {status}
-        </span>
-        <CaretDown
-          className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
-          aria-hidden="true"
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t border-neutral-800 px-2.5 py-2">
-        <ol className="ml-1 border-l border-neutral-800">
-          {projected.map(({ tool, linkedTask, status: stepStatus }, index) => {
-            const result = visibleToolResult(tool.result)
-            const error = 'error' in tool ? tool.error?.trim() : undefined
-            const taskSummary = linkedTask?.summary?.trim()
-            const liveTaskLine =
-              stepStatus === 'running' ? linkedTask?.currentAction?.trim() : undefined
-            const rowSummary = liveTaskLine || taskSummary
-            const details = taskSummary || error || result
-            const durationMs = 'durationMs' in tool ? tool.durationMs : undefined
-            const hasComputerDetails = Boolean(linkedTask?.stepDetails?.length)
-            const reasoning = tool.reasoning?.trim()
-            const hasDisclosure =
-              Boolean(details) || hasComputerDetails || Boolean(linkedTask) || Boolean(reasoning)
-            return (
-              <li key={`${tool.name}:${index}`} className="relative pb-2 pl-4 last:pb-0">
-                <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
-                  {statusIcon(stepStatus)}
+    <ol className="mt-1 ml-1 w-full max-w-[85%] border-l border-neutral-800 text-neutral-500">
+      {projected.map(({ tool, linkedTask, status: stepStatus }, index) => {
+        const result = visibleToolResult(tool.result)
+        const error = 'error' in tool ? tool.error?.trim() : undefined
+        const taskSummary = linkedTask?.summary?.trim()
+        const liveTaskLine =
+          stepStatus === 'running' ? linkedTask?.currentAction?.trim() : undefined
+        const rowSummary = liveTaskLine || taskSummary
+        const details = taskSummary || error || result
+        const durationMs = 'durationMs' in tool ? tool.durationMs : undefined
+        const hasComputerDetails = Boolean(linkedTask?.stepDetails?.length)
+        const reasoning = tool.reasoning?.trim()
+        const hasDisclosure =
+          Boolean(details) || hasComputerDetails || Boolean(linkedTask) || Boolean(reasoning)
+        return (
+          <li key={`${tool.name}:${index}`} className="relative pb-2 pl-4 last:pb-0">
+            <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
+              {statusIcon(stepStatus)}
+            </span>
+            <Collapsible>
+              <CollapsibleTrigger
+                disabled={!hasDisclosure}
+                className="group flex w-full items-start gap-2 text-left disabled:cursor-default"
+                aria-label={`${workStepLabel(tool)}, ${stepStatus}`}
+                onClick={() => {
+                  if (linkedTask) {
+                    openTaskSidePanel({
+                      taskId: linkedTask.taskId,
+                      kind: linkedTask.kind,
+                      detail: true
+                    })
+                  }
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs text-neutral-300">{workStepLabel(tool)}</span>
+                  <span className="mt-0.5 block text-[10px] leading-relaxed text-neutral-500 group-data-[state=open]:hidden">
+                    {shortResult(tool, stepStatus, rowSummary)}
+                  </span>
                 </span>
-                <Collapsible>
-                  <CollapsibleTrigger
-                    disabled={!hasDisclosure}
-                    className="group flex w-full items-start gap-2 text-left disabled:cursor-default"
-                    aria-label={`${workStepLabel(tool)}, ${stepStatus}`}
-                    onClick={() => {
-                      if (linkedTask) {
-                        openTaskSidePanel({
-                          taskId: linkedTask.taskId,
-                          kind: linkedTask.kind,
-                          detail: true
-                        })
-                      }
-                    }}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-xs text-neutral-300">{workStepLabel(tool)}</span>
-                      <span className="mt-0.5 block text-[10px] leading-relaxed text-neutral-500 group-data-[state=open]:hidden">
-                        {shortResult(tool, stepStatus, rowSummary)}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-[9px] text-neutral-600">
-                      {durationMs !== undefined ? `${Math.round(durationMs)} ms · ` : ''}
-                      {stepStatus}
-                    </span>
-                    {hasDisclosure ? (
-                      <CaretDown
-                        className="mt-0.5 h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                  </CollapsibleTrigger>
-                  {hasDisclosure ? (
-                    <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
-                      {reasoning ? (
-                        <ChatThinkingBlock content={reasoning} className="mb-1.5" />
-                      ) : null}
-                      {details ? <ChatMarkdown content={details} /> : null}
-                      <ComputerUseStepDetails details={linkedTask?.stepDetails} />
-                      {linkedTask ? (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            className="mt-2 border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-neutral-500"
-                            onClick={() =>
-                              taskWorkspaceOpen
-                                ? closeTaskWorkspace()
-                                : openTaskSidePanel({
-                                    taskId: linkedTask.taskId,
-                                    kind: linkedTask.kind,
-                                    detail: true
-                                  })
-                            }
-                          >
-                            {taskWorkspaceOpen ? 'Close task details' : 'Open task details'}
-                          </button>
-                          <RetryTaskButton task={linkedTask} />
-                        </div>
-                      ) : null}
-                    </CollapsibleContent>
+                <span className="shrink-0 text-[9px] text-neutral-600">
+                  {durationMs !== undefined ? `${Math.round(durationMs)} ms · ` : ''}
+                  {stepStatus}
+                </span>
+                {hasDisclosure ? (
+                  <CaretDown
+                    className="mt-0.5 h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </CollapsibleTrigger>
+              {hasDisclosure ? (
+                <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
+                  {reasoning ? <ChatThinkingBlock content={reasoning} className="mb-1.5" /> : null}
+                  {details ? <ChatMarkdown content={details} /> : null}
+                  <ComputerUseStepDetails details={linkedTask?.stepDetails} />
+                  {linkedTask ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="mt-2 border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-neutral-500"
+                        onClick={() =>
+                          taskWorkspaceOpen
+                            ? closeTaskWorkspace()
+                            : openTaskSidePanel({
+                                taskId: linkedTask.taskId,
+                                kind: linkedTask.kind,
+                                detail: true
+                              })
+                        }
+                      >
+                        {taskWorkspaceOpen ? 'Close task details' : 'Open task details'}
+                      </button>
+                      <RetryTaskButton task={linkedTask} />
+                    </div>
                   ) : null}
-                </Collapsible>
-              </li>
-            )
-          })}
-        </ol>
-      </CollapsibleContent>
-    </Collapsible>
+                </CollapsibleContent>
+              ) : null}
+            </Collapsible>
+          </li>
+        )
+      })}
+    </ol>
   )
 }

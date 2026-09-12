@@ -106,6 +106,7 @@ import {
   endChatStreamForConversation,
   noteChatStreamImageProgress,
   noteChatStreamDelta,
+  resetChatStreamAnswer,
   resetChatStreamOutput,
   noteChatStreamToolCompleted,
   noteChatStreamToolStarted,
@@ -1936,6 +1937,14 @@ export function setupIPC() {
                   type: 'fallback',
                   fallback: { failed, next, reason: fallbackReasonText(error) }
                 })
+              } catch {
+                /* window gone */
+              }
+            },
+            onAnswerReset: () => {
+              resetChatStreamAnswer(streamId)
+              try {
+                sender.send('rag:stream', { streamId, type: 'answer_reset' })
               } catch {
                 /* window gone */
               }
