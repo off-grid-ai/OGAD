@@ -90,6 +90,18 @@ export interface LlmSettingsUpdateOptions {
 export interface ChatStreamResult extends StreamResult {
   /** The resolved request cap, included so callers never duplicate settings lookup. */
   maxTokens: number
+  /** The model that produced the visible answer after a request-local fallback. */
+  modelName: string
+}
+
+interface LocalStreamOptions {
+  temperature?: number
+  topP?: number
+  thinking?: boolean
+  signal?: AbortSignal
+  tools?: unknown[]
+  toolChoice?: string
+  responseFormat?: unknown
 }
 
 export class LLMService {
@@ -1051,7 +1063,7 @@ export class LLMService {
   // which kills long-running LLM requests before they can respond. Delegates to the
   // electron-free postCompletionOnce so the fresh-connection contract lives in one place
   // (see llm/http-post.ts) and is integration-tested against a real socket-closing server.
-  private httpPost(body: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
+  private httpPost(body: string, timeoutMs: number | undefined, signal?: AbortSignal): Promise<string> {
     return postCompletionOnce(this.port, body, timeoutMs, signal)
   }
 
@@ -1077,7 +1089,7 @@ export class LLMService {
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: {
-      timeoutMs: number
+      timeoutMs?: number
       maxTokens?: number
       temperature?: number
       topP?: number
@@ -1111,7 +1123,7 @@ export class LLMService {
   async chat(
     message: string,
     images: string[] = [],
-    timeoutMs: number = 300000,
+    timeoutMs?: number,
     maxTokens?: number,
     opts: {
       responseFormat?: unknown
@@ -1145,7 +1157,7 @@ export class LLMService {
   /** Send an exact OpenAI-style message history for model-family policy adapters. */
   async chatMessages(
     messages: ChatMessage[],
-    timeoutMs = 300000,
+    timeoutMs?: number,
     maxTokens?: number,
     opts: {
       responseFormat?: unknown
@@ -1187,7 +1199,7 @@ export class LLMService {
 
   private async completeMessages(
     messages: ChatMessage[],
-    timeoutMs: number,
+    timeoutMs: number | undefined,
     maxTokens: number | undefined,
     opts: {
       responseFormat?: unknown
@@ -1233,7 +1245,7 @@ export class LLMService {
         const body = JSON.stringify(payload)
 
         console.log(
-          `[LLMService] Starting LLM request (timeout: ${timeoutMs / 1000}s, body: ${body.length} chars)...`
+          `[LLMService] Starting LLM request (timeout: ${timeoutMs === undefined ? 'none' : `${timeoutMs / 1000}s`}, body: ${body.length} chars)...`
         )
 
         const raw = await this.httpPost(body, timeoutMs, opts.signal)
@@ -1275,26 +1287,49 @@ export class LLMService {
     images: string[] = [],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    opts: { temperature?: number; thinking?: boolean; signal?: AbortSignal } = {},
+    opts: {
+      temperature?: number
+      thinking?: boolean
+      signal?: AbortSignal
+      onFallback?: (fallback: { failed: string; next: string; error: unknown }) => void
+    } = {},
     maxTokens?: number,
-    timeoutMs: number = 300000
+    timeoutMs?: number
   ): Promise<ChatStreamResult> {
     const messages = buildMessages(message, readImages(images), this.systemPrompt)
     const resolvedMaxTokens = resolveMaxTokens(maxTokens, this.maxTokens)
     const remote = this.activeRemoteTextModel()
     if (remote) {
-      const result = await this.completeRemote(remote, messages, onDelta, {
-        timeoutMs,
-        maxTokens: resolvedMaxTokens,
-        temperature: opts.temperature,
-        thinking: opts.thinking,
-        signal: opts.signal
-      })
-      return { ...result, maxTokens: resolvedMaxTokens }
+      try {
+        const result = await this.completeRemote(remote, messages, onDelta, {
+          timeoutMs,
+          maxTokens: resolvedMaxTokens,
+          temperature: opts.temperature,
+          thinking: opts.thinking,
+          signal: opts.signal
+        })
+        return { ...result, maxTokens: resolvedMaxTokens, modelName: remote.name || remote.model }
+      } catch (error) {
+        if (opts.signal?.aborted || !this.modelPath) throw error
+        this.assertImageInputSupported(images)
+        const next = path.basename(this.modelPath) || 'Local model'
+        opts.onFallback?.({ failed: remote.name || remote.model, next, error })
+        return this.streamLocalMessages(messages, onDelta, opts, resolvedMaxTokens, timeoutMs)
+      }
     }
+    this.assertImageInputSupported(images)
+    return this.streamLocalMessages(messages, onDelta, opts, resolvedMaxTokens, timeoutMs)
+  }
+
+  private async streamLocalMessages(
+    messages: unknown[],
+    onDelta: (text: string, kind: 'content' | 'reasoning') => void,
+    opts: LocalStreamOptions,
+    resolvedMaxTokens: number,
+    timeoutMs?: number
+  ): Promise<ChatStreamResult> {
     await this.beginGeneration()
     try {
-      this.assertImageInputSupported(images)
       await this.ensureReady()
       const payload: Record<string, unknown> = {
         messages,
@@ -1319,7 +1354,11 @@ export class LLMService {
         signal: opts.signal,
         timeoutMs
       })
-      return { ...result, maxTokens: resolvedMaxTokens }
+      return {
+        ...result,
+        maxTokens: resolvedMaxTokens,
+        modelName: path.basename(this.modelPath) || 'Local model'
+      }
     } finally {
       this.finishGeneration()
     }
@@ -1343,55 +1382,33 @@ export class LLMService {
       toolChoice?: string
       maxTokens?: number
       responseFormat?: unknown
+      forceLocal?: boolean
+      onFallback?: (fallback: { failed: string; next: string; error: unknown }) => void
     } = {},
-    timeoutMs: number = 300000
+    timeoutMs?: number
   ): Promise<StreamResult> {
-    const remote = this.activeRemoteTextModel()
+    const resolvedMaxTokens = resolveMaxTokens(opts.maxTokens, this.maxTokens)
+    const remote = opts.forceLocal ? null : this.activeRemoteTextModel()
     if (remote) {
-      return this.completeRemote(remote, messages, onDelta, {
-        timeoutMs,
-        maxTokens: opts.maxTokens,
-        temperature: opts.temperature,
-        topP: opts.topP,
-        thinking: opts.thinking,
-        signal: opts.signal,
-        responseFormat: opts.responseFormat,
-        tools: opts.tools,
-        toolChoice: opts.toolChoice
-      })
-    }
-    await this.beginGeneration()
-    try {
-      await this.ensureReady()
-      const payload: Record<string, unknown> = {
-        messages,
-        max_tokens: maxTokensForWire(resolveMaxTokens(opts.maxTokens, this.maxTokens)),
-        temperature: opts.temperature ?? this.temperature,
-        ...this.samplingPayload(),
-        ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
-        stream: true,
-        // Ask for the token counts. Without this the final chunk carries no usage, so the app can
-        // report how long a generation took but never how many tokens it produced.
-        stream_options: { include_usage: true },
-        ...thinkingPayload(!!opts.thinking, this.thinkingDialect),
-        ...reasoningBudgetPayload(!!opts.thinking, this.reasoningBudget)
+      try {
+        return await this.completeRemote(remote, messages, onDelta, {
+          timeoutMs,
+          maxTokens: resolvedMaxTokens,
+          temperature: opts.temperature,
+          topP: opts.topP,
+          thinking: opts.thinking,
+          signal: opts.signal,
+          responseFormat: opts.responseFormat,
+          tools: opts.tools,
+          toolChoice: opts.toolChoice
+        })
+      } catch (error) {
+        if (opts.signal?.aborted || !this.modelPath) throw error
+        const next = path.basename(this.modelPath) || 'Local model'
+        opts.onFallback?.({ failed: remote.name || remote.model, next, error })
       }
-      if (opts.responseFormat) payload.response_format = opts.responseFormat
-      if (opts.tools && opts.tools.length) {
-        payload.tools = opts.tools
-        payload.tool_choice = opts.toolChoice ?? 'auto'
-      }
-      const body = JSON.stringify(payload)
-
-      // Single SSE transport (llm/stream.ts) — same path as chatStream, but the
-      // assembled tool calls are surfaced too (this powers the agentic loop).
-      return await streamCompletion(this.port, body, onDelta, {
-        signal: opts.signal,
-        timeoutMs
-      })
-    } finally {
-      this.finishGeneration()
     }
+    return this.streamLocalMessages(messages, onDelta, opts, resolvedMaxTokens, timeoutMs)
   }
 
   stop(): void {

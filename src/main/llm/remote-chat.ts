@@ -30,7 +30,7 @@ export interface RemoteChatRequest {
 
 export interface RemoteChatOptions {
   signal?: AbortSignal
-  timeoutMs: number
+  timeoutMs?: number
 }
 
 export interface RemoteNativeToolCapability {
@@ -149,7 +149,8 @@ export function remoteTextModelProviderError(status: number, rawBody: string): E
 /** The OpenAI-compatible request body. Pure: what we send, with nothing about how we send it. */
 function completionRequestBody(
   remote: RemoteTextModelConnection,
-  request: RemoteChatRequest
+  request: RemoteChatRequest,
+  omitReasoningOverride = false
 ): string {
   return JSON.stringify({
     model: remote.model,
@@ -163,11 +164,14 @@ function completionRequestBody(
       : {}),
     // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
     // cap was dropped for every remote model and the budget setting did nothing.
-    ...(remote.provider === 'openrouter'
+    ...(!omitReasoningOverride && remote.provider === 'openrouter'
       ? openRouterReasoningPayload(
           request.thinking === true,
           request.reasoningBudget ?? REASONING_BUDGET_AUTO
         )
+      : {}),
+    ...(!omitReasoningOverride && remote.provider === 'ollama'
+      ? { think: request.thinking === true }
       : {}),
     stream: true
   })
@@ -194,12 +198,13 @@ interface IdleWatchdog {
  * the compiler cannot order against a later read, so a plain flag narrowed to `false` and made the
  * timeout branch look statically dead.
  */
-function createIdleWatchdog(timeoutMs: number, callerSignal?: AbortSignal): IdleWatchdog {
+function createIdleWatchdog(timeoutMs: number | undefined, callerSignal?: AbortSignal): IdleWatchdog {
   const controller = new AbortController()
   const firedRef = { current: false }
   let timer: ReturnType<typeof setTimeout> | undefined
   const arm = (): void => {
     if (timer) clearTimeout(timer)
+    if (timeoutMs === undefined) return
     timer = setTimeout(() => {
       firedRef.current = true
       controller.abort()
@@ -276,18 +281,37 @@ export async function streamRemoteChatCompletion(input: {
 
   const watchdog = createIdleWatchdog(options.timeoutMs, options.signal)
   try {
-    const response = await fetch(`${remote.endpoint}/chat/completions`, {
+    const send = (omitReasoningOverride = false): Promise<Response> =>
+      fetch(`${remote.endpoint}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {})
       },
-      body: completionRequestBody(remote, request),
+      body: completionRequestBody(remote, request, omitReasoningOverride),
       signal: watchdog.signal
     })
+    let response = await send()
     watchdog.arm()
     if (!response.ok) {
       const body = (await response.text()).slice(0, 4_096)
+      if (
+        remote.provider === 'openrouter' &&
+        request.thinking === false &&
+        /reasoning is mandatory|cannot be disabled/i.test(body)
+      ) {
+        response = await send(true)
+        watchdog.arm()
+        if (response.ok) {
+          if (!response.body) {
+            throw new Error('Remote text model returned an empty response stream.')
+          }
+          await drainCompletionStream(response.body, accumulator, watchdog.arm)
+          return accumulator.finish()
+        }
+        const retryBody = (await response.text()).slice(0, 4_096)
+        throw remoteTextModelProviderError(response.status, retryBody)
+      }
       throw remoteTextModelProviderError(response.status, body)
     }
     if (!response.body) throw new Error('Remote text model returned an empty response stream.')

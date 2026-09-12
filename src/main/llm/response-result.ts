@@ -14,10 +14,14 @@ export function toResponseGenerationResult(result: {
   finishReason: string | null
   maxTokens: number
   metrics?: GenerationMetrics
+  modelName?: string
 }): ResponseGenerationResult {
+  const metrics = result.modelName
+    ? { ...result.metrics, modelName: result.modelName }
+    : result.metrics
   return {
     answer: result.content.trim(),
-    ...(result.metrics ? { metrics: result.metrics } : {}),
+    ...(metrics ? { metrics } : {}),
     ...(result.finishReason === 'length'
       ? { cutoff: { reason: 'max_tokens' as const, maxTokens: result.maxTokens } }
       : {})

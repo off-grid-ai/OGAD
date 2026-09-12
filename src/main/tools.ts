@@ -29,12 +29,16 @@ import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import {
   boundToolResult,
   callsWithinToolBudget,
-  finalResponseFromToolResults,
   normalizeMaxToolCalls,
   toolLimitFinalAnswerInstruction,
   toolPromptChars,
   toolResultCharBudget
 } from '@offgrid/models'
+import { ModelServerError } from './llm/http-post'
+import { compactDesktopMessages } from './chat-compaction'
+
+const toolResultsFinalAnswerInstruction = (): string =>
+  'The tool work is complete. Answer the user now using the completed tool results in the conversation. Do not call another tool, output tool-call syntax, or repeat raw tool output without explaining it.'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -529,6 +533,8 @@ export async function toolChat(
     onStep?: (call: { name: string; args: Record<string, unknown> }) => void
     onToolResult?: (call: { name: string; result: string; status: ToolCallStatus }) => void
     onActivity?: (activity: ToolActivity) => void
+    onCompacted?: (before: number, after: number) => void
+    onFallback?: (fallback: { failed: string; next: string; error: unknown }) => void
     /** The orchestrator's plan for this turn, emitted once before its steps run. */
     onPlan?: (steps: { tool: string; why: string }[]) => void
   } = {}
@@ -675,13 +681,12 @@ export async function toolChat(
   // or errors, so drop the attachments when there's no vision projector.
   const decodedImages = opts.images?.length && llm.hasVision() ? readImages(opts.images) : []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const messages: any[] = [
+  let messages: any[] = [
     { role: 'system', content: sys },
     ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: buildContentParts(query, decodedImages) }
   ]
   const toolCalls: ToolCall[] = []
-  const successfulToolResults: string[] = []
   const unified: UnifiedSource[] = []
   const unifiedKeys = new Set<string>()
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
@@ -711,25 +716,48 @@ export async function toolChat(
   const maxToolCalls = normalizeMaxToolCalls(settings.maxToolCalls)
   const answerFrom = (content: string): string => {
     const visibleContent = stripChatControlTokens(content)
-    const answer = finalResponseFromToolResults(visibleContent, successfulToolResults)
-    if (!visibleContent && answer) onDelta(answer, 'content')
-    return answer
+    return visibleContent.trim()
   }
   let round = 0
+  let forceLocal = false
   while (toolCalls.length < maxToolCalls) {
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
     // are accumulated and returned. A tool-calling round streams thinking (and no content);
     // the final round streams the answer. tool temperature stays 0.3 (was the blocking path).
-    const { content, toolCalls: calls } = await llm.streamChat(messages, onDelta, {
-      tools,
-      toolChoice: 'auto',
-      temperature: 0.3,
-      // No hardcoded output cap: the round that produces the FINAL answer (no tool calls) must be
-      // free to write a long response. Inherit the user's Max-output setting (auto by default →
-      // until EOS / window fills). A tool-selection round stays short on its own (it emits a call).
-      thinking: opts.thinking,
-      signal: opts.signal
-    })
+    let response: Awaited<ReturnType<typeof llm.streamChat>>
+    try {
+      response = await llm.streamChat(messages, onDelta, {
+        tools,
+        toolChoice: 'auto',
+        temperature: 0.3,
+        thinking: opts.thinking,
+        signal: opts.signal,
+        forceLocal,
+        onFallback: (fallback) => {
+          forceLocal = true
+          opts.onFallback?.(fallback)
+        }
+      })
+    } catch (error) {
+      if (!(error instanceof ModelServerError) || error.kind !== 'overflow') throw error
+      const compacted = await compactDesktopMessages(messages)
+      if (!compacted) throw error
+      messages = compacted.messages
+      opts.onCompacted?.(compacted.before, compacted.after)
+      response = await llm.streamChat(messages, onDelta, {
+        tools,
+        toolChoice: 'auto',
+        temperature: 0.3,
+        thinking: opts.thinking,
+        signal: opts.signal,
+        forceLocal,
+        onFallback: (fallback) => {
+          forceLocal = true
+          opts.onFallback?.(fallback)
+        }
+      })
+    }
+    const { content, toolCalls: calls } = response
 
     // Stop pressed during the round: streamCompletion resolves with the partial
     // tool_calls it assembled (it doesn't reject on abort), so we MUST NOT execute
@@ -803,22 +831,38 @@ export async function toolChat(
         if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
         else if (res.imageRequest) imageRequests.push(res.imageRequest)
         const status = res.status ?? 'completed'
-        if (status === 'completed' && res.text.trim()) successfulToolResults.push(res.text)
         toolCalls.push({ name: c.name, args: c.args, result: res.text, status })
         // Surface the COMPLETED call (with its result) live, so the UI can show each
         // tool call + result as it lands, not only in the final batch.
         opts.onToolResult?.({ name: c.name, result: res.text, status })
         messages.push({ role: 'tool', tool_call_id: c.id, content: res.text })
-        if (res.authoritative) {
-          onDelta(res.text, 'content')
-          return resultWithImages({ answer: res.text, toolCalls, unified })
-        }
       }
       round += 1
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: answerFrom(content), toolCalls, unified })
+    const answer = answerFrom(content)
+    if (answer || toolCalls.length === 0) {
+      return resultWithImages({ answer, toolCalls, unified })
+    }
+    const final = await llm.streamChat(
+      [
+        { role: 'system', content: toolResultsFinalAnswerInstruction() },
+        ...messages.filter((message) => message.role !== 'system')
+      ],
+      onDelta,
+      {
+        temperature: 0.3,
+        thinking: false,
+        signal: opts.signal,
+        forceLocal,
+        onFallback: (fallback) => {
+          forceLocal = true
+          opts.onFallback?.(fallback)
+        }
+      }
+    )
+    return resultWithImages({ answer: answerFrom(final.content), toolCalls, unified })
   }
   // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
   // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
@@ -835,7 +879,12 @@ export async function toolChat(
     // Forced final answer — inherit the user's Max-output setting (auto by default), never a fixed
     // 1024 cap that truncated the response mid-sentence.
     thinking: false,
-    signal: opts.signal
+    signal: opts.signal,
+    forceLocal,
+    onFallback: (fallback) => {
+      forceLocal = true
+      opts.onFallback?.(fallback)
+    }
   })
   return resultWithImages({
     answer: answerFrom(final.content) || 'Stopped after too many tool steps.',
