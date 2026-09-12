@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
@@ -726,6 +726,17 @@ function PromptEnhancementMessageRow({
   )
 }
 
+/** Electron prefixes main-process failures. Keep the useful reason and remove only that wrapper. */
+function generationErrorContent(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  const message = raw
+    .replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 800)
+  return message || 'Something went wrong while generating the response.'
+}
+
 function ToolMessageTimelineRow({
   messages
 }: Readonly<{ messages: ChatMessage[] }>): React.JSX.Element {
@@ -747,6 +758,13 @@ function ToolMessageTimelineRow({
     </div>
   )
 }
+
+const MemoizedToolMessageTimelineRow = memo(
+  ToolMessageTimelineRow,
+  (previous, next) =>
+    previous.messages.length === next.messages.length &&
+    previous.messages.every((message, index) => message === next.messages[index])
+)
 
 function VoiceMessageRow({
   message,
@@ -2038,8 +2056,8 @@ function StandardMessageRow({
   return (
     <div className={standardMessageRowClass(message)} data-testid={`chat-message-${message.id}`}>
       <MessageThinkingHeader message={message} />
-      <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
       <ChatToolRows tools={message.toolCalls} liveTask={liveTask} />
+      <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
       {message.role === 'user' ? (
         message.context?.taskGuidance ? (
           <div className="mt-1.5 flex items-center gap-3">
@@ -2195,6 +2213,46 @@ function MessageRow({
   }
   return body
 }
+
+function messageRowPropsEqual(previous: MessageRowProps, next: MessageRowProps): boolean {
+  if (
+    previous.message !== next.message ||
+    previous.nextMessageRole !== next.nextMessageRole ||
+    previous.liveTask !== next.liveTask ||
+    previous.voiceMode !== next.voiceMode
+  ) {
+    return false
+  }
+  const messageId = previous.message.id
+  const previousState = previous.state
+  const nextState = next.state
+  const incomingFilesEqual =
+    previousState.incomingFiles.length === nextState.incomingFiles.length &&
+    previousState.incomingFiles.every(
+      (file, index) => file === nextState.incomingFiles[index]
+    )
+  return (
+    (previousState.autoPlayId === messageId) === (nextState.autoPlayId === messageId) &&
+    (previousState.copiedKey === messageId) === (nextState.copiedKey === messageId) &&
+    (previousState.editingId === messageId) === (nextState.editingId === messageId) &&
+    (previousState.editingId !== messageId || previousState.editText === nextState.editText) &&
+    previousState.loading === nextState.loading &&
+    (previousState.speakingId === messageId) === (nextState.speakingId === messageId) &&
+    (previousState.speakLoadingId === messageId) === (nextState.speakLoadingId === messageId) &&
+    previousState.speakError?.id === nextState.speakError?.id &&
+    previousState.speakError?.message === nextState.speakError?.message &&
+    previousState.ttsEnabled === nextState.ttsEnabled &&
+    previousState.ttsSpeed === nextState.ttsSpeed &&
+    (previousState.latestVoiceAssistantId === messageId) ===
+      (nextState.latestVoiceAssistantId === messageId) &&
+    previousState.askSelections[messageId] === nextState.askSelections[messageId] &&
+    incomingFilesEqual &&
+    previousState.showGenerationDetails === nextState.showGenerationDetails &&
+    previousState.regenerationDisabled === nextState.regenerationDisabled
+  )
+}
+
+const MemoizedMessageRow = memo(MessageRow, messageRowPropsEqual)
 
 // Core (free) suggestions — generic chat/build/image. Pro adds memory-aware ones.
 const ASK_EXAMPLES = [
@@ -4186,15 +4244,7 @@ export function MemoryChat({
         return
       }
       console.error('RAG chat failed', e)
-      const errorMessage = e instanceof Error ? e.message : ''
-      const remoteErrorStart = errorMessage.indexOf('Remote text model')
-      const errorContent =
-        remoteErrorStart >= 0
-          ? errorMessage
-              .slice(remoteErrorStart, remoteErrorStart + 800)
-              .replace(/\s+/g, ' ')
-              .trim()
-          : 'Sorry, something went wrong while generating a response.'
+      const errorContent = generationErrorContent(e)
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
       setConvMessages(convId, (prev) => {
@@ -4600,6 +4650,58 @@ export function MemoryChat({
         markGenerating(cid, false)
         return
       }
+      if (data.type === 'compaction') {
+        if (
+          typeof data.before === 'number' &&
+          typeof data.after === 'number' &&
+          data.after < data.before
+        ) {
+          const content = `_Context compacted: ${data.before} → ${data.after} messages_`
+          const notice: ChatMessage = {
+            id: `notice-compacted-${data.streamId}-${Date.now()}`,
+            role: 'assistant',
+            content,
+            notice: true
+          }
+          setConvMessages(cid, (previous) => {
+            const placeholder = previous.findIndex((message) => message.id === data.streamId)
+            return placeholder < 0
+              ? [...previous, notice]
+              : [
+                  ...previous.slice(0, placeholder),
+                  notice,
+                  ...previous.slice(placeholder)
+                ]
+          })
+          void window.api.addRagMessage(cid, 'assistant', content).catch(() => undefined)
+        }
+        return
+      }
+      if (data.type === 'fallback' && data.fallback) {
+        const { failed, next, reason } = data.fallback
+        const content = `_${failed} could not answer (${reason}). ${next} answered instead._`
+        const notice: ChatMessage = {
+          id: `notice-fallback-${data.streamId}-${Date.now()}`,
+          role: 'assistant',
+          content,
+          notice: true
+        }
+        reasoningByStream.current[data.streamId] = ''
+        answerByStream.current[data.streamId] = ''
+        setConvMessages(cid, (previous) => {
+          const placeholder = previous.findIndex((message) => message.id === data.streamId)
+          if (placeholder < 0) return [...previous, notice]
+          const live = { ...previous[placeholder]!, content: '', reasoning: '' }
+          return [
+            ...previous.slice(0, placeholder),
+            notice,
+            live,
+            ...previous.slice(placeholder + 1)
+          ]
+        })
+        void window.api.addRagMessage(cid, 'assistant', content).catch(() => undefined)
+        return
+      }
       // Mirror reasoning into a ref as it streams, so persistence can read it
       // deterministically (not via a state-updater side effect). Rendering still
       // uses message.reasoning below; this is the durable source for the saved blob.
@@ -4616,7 +4718,12 @@ export function MemoryChat({
       }
       setConvMessages(cid, (prev) =>
         prev.map((m) =>
-          m.id === data.streamId && m.streaming ? (applyStreamEvent(m, data) as ChatMessage) : m
+          m.id === data.streamId && m.streaming
+            ? (applyStreamEvent(
+                m,
+                data as Parameters<typeof applyStreamEvent>[1]
+              ) as ChatMessage)
+            : m
         )
       )
     })
@@ -5471,10 +5578,10 @@ export function MemoryChat({
                           ) {
                             run.push(messages[index]!)
                           }
-                          return <ToolMessageTimelineRow key={message.id} messages={run} />
+                          return <MemoizedToolMessageTimelineRow key={message.id} messages={run} />
                         }
                         return (
-                          <MessageRow
+                          <MemoizedMessageRow
                             key={message.id}
                             message={message}
                             nextMessageRole={messages[messageIndex + 1]?.role}

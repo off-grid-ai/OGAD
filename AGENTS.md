@@ -104,7 +104,7 @@ When iterating (a request, a fix, a tweak the user just confirmed), add a test t
 - **Prompt and contract fixes are behavior too.** Exercise the real prompt composer/consumer or contract owner through its public boundary and assert the resulting user-visible or downstream behavior. Do not read source files and regex-match implementation text as the primary regression test.
 - **Tests guard the architecture too (SOLID + DRY).** Prove the seam through a real second implementation or integration harness so a test fails the moment a caller starts branching on a concrete type (`kind === 'x'`, `instanceof`) instead of the interface. Guard DRY by driving the public owner rather than re-hardcoding its mapping or rule in the test.
 - **E2E** — Playwright Electron tour in `e2e/` (`npm run test:e2e`), DOM-driven, fresh temp profile, `OFFGRID_PRO=0`. Assert new surfaces render. Screenshot key states via `page.screenshot({ path: 'e2e/screenshots/<name>.png' })`; include those screenshots in the PR body.
-- Before declaring a change done: `npx tsc --noEmit -p tsconfig.node.json && npx tsc --noEmit -p tsconfig.web.json && npm test` — fix failures first. When you touched logic, run `npm run test:coverage` and keep every metric at or above the 85% floor.
+- Before declaring a change locally ready, commit it and push normally. The pre-push hook is the required local quality gate and owns typecheck, applicable tests, and the coverage ratchet. Never bypass it with `--no-verify`. Run the full commands separately only when needed to diagnose a failed hook.
 
 ## E2E capture — SYNTHETIC data only, seeded via the demo script
 

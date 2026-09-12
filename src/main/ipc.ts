@@ -66,6 +66,8 @@ import {
 import { requestApplicationRelaunch } from './shutdown'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import { notifyRagConversationChanged } from './rag-conversation-events'
+import { ModelServerError } from './llm/http-post'
+import { compactDesktopMessages } from './chat-compaction'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Incrementally update master memory with a new conversation summary
@@ -105,12 +107,40 @@ import {
   endChatStreamForConversation,
   noteChatStreamImageProgress,
   noteChatStreamDelta,
+  resetChatStreamOutput,
   noteChatStreamToolCompleted,
   noteChatStreamToolStarted,
   takeChatStreamMessageId
 } from './chat-stream-state'
 
 const streamControllers = new Map<string, AbortController>()
+
+function fallbackReasonText(error: unknown): string {
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  const firstLine = raw.trim().split('\n')[0]?.trim() || 'unknown error'
+  return firstLine.length > 160 ? `${firstLine.slice(0, 157).trimEnd()}...` : firstLine
+}
+
+function publishFallback(
+  sender: { send: (channel: string, payload: unknown) => void },
+  streamId: string,
+  fallback: { failed: string; next: string; error: unknown }
+): void {
+  resetChatStreamOutput(streamId)
+  try {
+    sender.send('rag:stream', {
+      streamId,
+      type: 'fallback',
+      fallback: {
+        failed: fallback.failed,
+        next: fallback.next,
+        reason: fallbackReasonText(fallback.error)
+      }
+    })
+  } catch {
+    /* window gone */
+  }
+}
 
 async function streamAnswer(
   event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
@@ -157,7 +187,11 @@ async function streamAnswer(
             /* window gone */
           }
         },
-        { thinking, signal: controller.signal }
+        {
+          thinking,
+          signal: controller.signal,
+          onFallback: (fallback) => publishFallback(sender, streamId, fallback)
+        }
       )
       return toResponseGenerationResult(result)
     })
@@ -1004,12 +1038,13 @@ export function setupIPC() {
         /* skills optional */
       }
 
-      const prompt = getPrompt('ragChat', {
-        HISTORY_BLOCK: historyBlock,
+      const buildPrompt = (history: string): string => getPrompt('ragChat', {
+        HISTORY_BLOCK: history,
         QUERY: query,
         CONTEXT_BLOCK: contextBlock + unifiedBlock,
         SKILLS_BLOCK: skillsBlock
       })
+      let prompt = buildPrompt(historyBlock)
 
       try {
         if (streamId)
@@ -1042,19 +1077,46 @@ export function setupIPC() {
           }
         }
       } catch (e) {
-        console.error('[RAG] LLM chat failed:', e)
-        return {
-          answer: 'Sorry, I could not generate a response right now.',
-          context: {
-            masterMemory: null,
-            memories,
-            messages,
-            summaries,
-            entities,
-            entityFacts,
-            unified: unifiedHits
+        if (
+          e instanceof ModelServerError &&
+          e.kind === 'overflow' &&
+          conversationHistory?.length
+        ) {
+          const compacted = await compactDesktopMessages(conversationHistory)
+          if (compacted) {
+            const compactedLines = compacted.messages
+              .filter((message) => message.role !== 'system')
+              .map(
+                (message) =>
+                  `${message.role === 'user' ? 'User' : 'Assistant'}: ${clipText(String(message.content ?? ''), 2_000)}`
+              )
+              .join('\n\n')
+            prompt = buildPrompt(`\nCONVERSATION HISTORY:\n${compactedLines}\n`)
+            if (streamId) {
+              event.sender.send('rag:stream', {
+                streamId,
+                type: 'compaction',
+                before: compacted.before,
+                after: compacted.after
+              })
+            }
+            const completion = await streamAnswer(event, streamId, prompt, thinking, imgs)
+            return {
+              ...completion,
+              context: {
+                masterMemory: null,
+                memories,
+                messages,
+                summaries,
+                entities,
+                entityFacts,
+                unified: unifiedHits
+              }
+            }
           }
         }
+        console.error('[RAG] LLM chat failed:', e)
+        throw e
       }
     }
   )
@@ -1924,6 +1986,20 @@ export function setupIPC() {
                 /* window gone */
               }
             },
+            onCompacted: (before, after) => {
+              if (before === after) return
+              try {
+                sender.send('rag:stream', {
+                  streamId,
+                  type: 'compaction',
+                  before,
+                  after
+                })
+              } catch {
+                /* window gone */
+              }
+            },
+            onFallback: (fallback) => publishFallback(sender, streamId, fallback),
             onStep: (call) => {
               noteChatStreamToolStarted(streamId, call.name)
               try {
