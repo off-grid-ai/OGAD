@@ -726,6 +726,17 @@ function PromptEnhancementMessageRow({
   )
 }
 
+/** Electron prefixes main-process failures. Keep the useful reason and remove only that wrapper. */
+function generationErrorContent(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  const message = raw
+    .replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 800)
+  return message || 'Something went wrong while generating the response.'
+}
+
 function ToolMessageTimelineRow({
   messages
 }: Readonly<{ messages: ChatMessage[] }>): React.JSX.Element {
@@ -4233,15 +4244,7 @@ export function MemoryChat({
         return
       }
       console.error('RAG chat failed', e)
-      const errorMessage = e instanceof Error ? e.message : ''
-      const remoteErrorStart = errorMessage.indexOf('Remote text model')
-      const errorContent =
-        remoteErrorStart >= 0
-          ? errorMessage
-              .slice(remoteErrorStart, remoteErrorStart + 800)
-              .replace(/\s+/g, ' ')
-              .trim()
-          : 'Sorry, something went wrong while generating a response.'
+      const errorContent = generationErrorContent(e)
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
       setConvMessages(convId, (prev) => {
@@ -4647,6 +4650,58 @@ export function MemoryChat({
         markGenerating(cid, false)
         return
       }
+      if (data.type === 'compaction') {
+        if (
+          typeof data.before === 'number' &&
+          typeof data.after === 'number' &&
+          data.after < data.before
+        ) {
+          const content = `_Context compacted: ${data.before} → ${data.after} messages_`
+          const notice: ChatMessage = {
+            id: `notice-compacted-${data.streamId}-${Date.now()}`,
+            role: 'assistant',
+            content,
+            notice: true
+          }
+          setConvMessages(cid, (previous) => {
+            const placeholder = previous.findIndex((message) => message.id === data.streamId)
+            return placeholder < 0
+              ? [...previous, notice]
+              : [
+                  ...previous.slice(0, placeholder),
+                  notice,
+                  ...previous.slice(placeholder)
+                ]
+          })
+          void window.api.addRagMessage(cid, 'assistant', content).catch(() => undefined)
+        }
+        return
+      }
+      if (data.type === 'fallback' && data.fallback) {
+        const { failed, next, reason } = data.fallback
+        const content = `_${failed} could not answer (${reason}). ${next} answered instead._`
+        const notice: ChatMessage = {
+          id: `notice-fallback-${data.streamId}-${Date.now()}`,
+          role: 'assistant',
+          content,
+          notice: true
+        }
+        reasoningByStream.current[data.streamId] = ''
+        answerByStream.current[data.streamId] = ''
+        setConvMessages(cid, (previous) => {
+          const placeholder = previous.findIndex((message) => message.id === data.streamId)
+          if (placeholder < 0) return [...previous, notice]
+          const live = { ...previous[placeholder]!, content: '', reasoning: '' }
+          return [
+            ...previous.slice(0, placeholder),
+            notice,
+            live,
+            ...previous.slice(placeholder + 1)
+          ]
+        })
+        void window.api.addRagMessage(cid, 'assistant', content).catch(() => undefined)
+        return
+      }
       // Mirror reasoning into a ref as it streams, so persistence can read it
       // deterministically (not via a state-updater side effect). Rendering still
       // uses message.reasoning below; this is the durable source for the saved blob.
@@ -4663,7 +4718,12 @@ export function MemoryChat({
       }
       setConvMessages(cid, (prev) =>
         prev.map((m) =>
-          m.id === data.streamId && m.streaming ? (applyStreamEvent(m, data) as ChatMessage) : m
+          m.id === data.streamId && m.streaming
+            ? (applyStreamEvent(
+                m,
+                data as Parameters<typeof applyStreamEvent>[1]
+              ) as ChatMessage)
+            : m
         )
       )
     })
