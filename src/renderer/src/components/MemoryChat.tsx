@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
@@ -24,9 +24,12 @@ import {
   type ProjectedSyncedTool,
   type RecordProvenance,
   type SyncedMessageRole,
-  type SyncedTurnStatus
+  type SyncedTurnStatus,
+  groupWorkRuns,
+  type WorkRunStep
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
+import { contextCompactedNoticeText, fallbackNoticeText } from '@offgrid/models'
 import ReactMarkdown, { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -45,6 +48,8 @@ import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
 import { VoiceBubble } from './VoiceBubble'
 import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from './ChatVoiceComposer'
+import { ChatDraftInput, ChatDraftSendButton, type ChatDraftInputHandle } from './ChatDraftInput'
+import { createChatDraftStore } from './chat-draft-store'
 import { ExploreSection } from './explore/ExploreSection'
 import { PresetSetup } from './explore/PresetSetup'
 import { ApprovalSetup, type ApprovalSetupRecord } from './actions/ApprovalSetup'
@@ -62,6 +67,7 @@ import { OPEN_ACTIVE_MODELS_PANEL_EVENT } from '@renderer/lib/model-settings-pan
 import { LoadingDots } from './ui/loading-dots'
 import { SidePanel } from './SidePanel'
 import { ConversationTitleActions } from './ConversationTitleActions'
+import { NewProjectNameField } from './NewProjectNameField'
 import { ImageLightbox } from './media/ImageLightbox'
 import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
 import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
@@ -726,27 +732,43 @@ function PromptEnhancementMessageRow({
   )
 }
 
-function ToolMessageTimelineRow({
-  messages
-}: Readonly<{ messages: ChatMessage[] }>): React.JSX.Element {
+function workRunStepsEqual(
+  previous: readonly WorkRunStep<ChatMessage>[],
+  next: readonly WorkRunStep<ChatMessage>[]
+): boolean {
   return (
-    <div
-      className="mb-2 flex flex-col items-start"
-      data-testid={`chat-tool-timeline-${messages[0]?.id ?? 'unknown'}`}
-    >
-      <ChatToolRows
-        tools={messages.map((message) => ({
-          name: message.toolName || 'Tool result',
-          result: message.content,
-          status: message.turnStatus === 'failed' ? 'failed' : 'completed',
-          ...(message.generationTimeMs === undefined
-            ? {}
-            : { durationMs: message.generationTimeMs })
-        }))}
-      />
-    </div>
+    previous.length === next.length &&
+    previous.every(
+      (step, index) => step.tool === next[index]?.tool && step.reasoning === next[index]?.reasoning
+    )
   )
 }
+
+const ToolMessageTimelineRow = memo(
+  function ToolMessageTimelineRow({
+    steps
+  }: Readonly<{ steps: WorkRunStep<ChatMessage>[] }>): React.JSX.Element {
+    return (
+      <div
+        className="mb-2 flex flex-col items-start"
+        data-testid={`chat-tool-timeline-${steps[0]?.tool.id ?? 'unknown'}`}
+      >
+        <ChatToolRows
+          tools={steps.map(({ tool: message, reasoning }) => ({
+            name: message.toolName || 'Tool result',
+            result: message.content,
+            status: message.turnStatus === 'failed' ? 'failed' : 'completed',
+            ...(reasoning ? { reasoning } : {}),
+            ...(message.generationTimeMs === undefined
+              ? {}
+              : { durationMs: message.generationTimeMs })
+          }))}
+        />
+      </div>
+    )
+  },
+  (previous, next) => workRunStepsEqual(previous.steps, next.steps)
+)
 
 function VoiceMessageRow({
   message,
@@ -993,27 +1015,26 @@ function MessageAttachments({
 
 function MessageEditor({
   messageId,
-  text,
-  onChange,
+  initialText,
   onCancel,
   onSave
 }: Readonly<{
   messageId: string
-  text: string
-  onChange: (text: string) => void
+  initialText: string
   onCancel: () => void
-  onSave: (messageId: string) => void
+  onSave: (messageId: string, text: string) => void
 }>): React.JSX.Element {
+  const [text, setText] = useState(initialText)
   return (
     <div className="flex flex-col gap-2">
       <textarea
         autoFocus
         value={text}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
-            onSave(messageId)
+            onSave(messageId, text)
           }
           if (event.key === 'Escape') onCancel()
         }}
@@ -1023,7 +1044,7 @@ function MessageEditor({
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => onSave(messageId)}
+          onClick={() => onSave(messageId, text)}
           className="rounded-md bg-green-600 px-3 py-1 text-xs text-white transition-colors hover:bg-green-500"
         >
           Save & submit
@@ -1903,7 +1924,6 @@ type MessageRowState = Readonly<{
   autoPlayId: string | null
   copiedKey: string | null
   editingId: string | null
-  editText: string
   loading: boolean
   speakingId: string | null
   speakLoadingId: string | null
@@ -1930,9 +1950,8 @@ type MessageRowActions = Readonly<{
   openImage: (image: OpenImage) => void
   openAttachment: (attachment: StoredMessageAttachment) => void
   startEdit: (message: ChatMessage) => void
-  changeEditText: (text: string) => void
   cancelEdit: () => void
-  saveEdit: (messageId: string) => void
+  saveEdit: (messageId: string, text: string) => void
   retryImageMemory: (retry: NonNullable<ChatMessage['imageMemoryRetry']>) => void
   openArtifact: (artifact: Artifact) => void
   selectAskOption: (selection: AskOptionSelection) => void
@@ -1996,8 +2015,7 @@ function MessageBubble({
       {editing ? (
         <MessageEditor
           messageId={message.id}
-          text={state.editText}
-          onChange={actions.changeEditText}
+          initialText={message.content}
           onCancel={actions.cancelEdit}
           onSave={actions.saveEdit}
         />
@@ -2167,7 +2185,7 @@ function MessageRow({
   } else if (isPromptEnhancementMessage(message)) {
     body = <PromptEnhancementMessageRow message={message} />
   } else if (message.role === 'tool') {
-    body = <ToolMessageTimelineRow messages={[message]} />
+    body = <ToolMessageTimelineRow steps={[{ tool: message }]} />
   } else if (voiceMode) {
     body = (
       <VoiceMessageRow
@@ -2195,6 +2213,38 @@ function MessageRow({
   }
   return body
 }
+
+function incomingFilesEqual(
+  previous: readonly IncomingSharedFile[],
+  next: readonly IncomingSharedFile[]
+): boolean {
+  return previous.length === next.length && previous.every((file, index) => file === next[index])
+}
+
+const MemoizedMessageRow = memo(MessageRow, (previous, next) => {
+  const previousState = previous.state
+  const nextState = next.state
+  return (
+    previous.message === next.message &&
+    previous.nextMessageRole === next.nextMessageRole &&
+    previous.liveTask === next.liveTask &&
+    previous.voiceMode === next.voiceMode &&
+    previousState.autoPlayId === nextState.autoPlayId &&
+    previousState.copiedKey === nextState.copiedKey &&
+    previousState.editingId === nextState.editingId &&
+    previousState.loading === nextState.loading &&
+    previousState.speakingId === nextState.speakingId &&
+    previousState.speakLoadingId === nextState.speakLoadingId &&
+    previousState.speakError === nextState.speakError &&
+    previousState.ttsEnabled === nextState.ttsEnabled &&
+    previousState.ttsSpeed === nextState.ttsSpeed &&
+    previousState.latestVoiceAssistantId === nextState.latestVoiceAssistantId &&
+    previousState.askSelections[previous.message.id] === nextState.askSelections[next.message.id] &&
+    incomingFilesEqual(previousState.incomingFiles, nextState.incomingFiles) &&
+    previousState.showGenerationDetails === nextState.showGenerationDetails &&
+    previousState.regenerationDisabled === nextState.regenerationDisabled
+  )
+})
 
 // Core (free) suggestions — generic chat/build/image. Pro adds memory-aware ones.
 const ASK_EXAMPLES = [
@@ -2469,7 +2519,7 @@ export function MemoryChat({
     },
     [loadLatestConversationMessages, replaceDurableMessages]
   )
-  const [input, setInput] = useState('')
+  const [draftStore] = useState(createChatDraftStore)
   // A curated run collects its complete brief inside Chat before any model request starts.
   const [presetSetup, setPresetSetup] = useState<DemoPreset | null>(null)
   const [approvalSetup, setApprovalSetup] = useState<ApprovalSetupRecord | null>(null)
@@ -2670,16 +2720,6 @@ export function MemoryChat({
   const [noMemory, setNoMemory] = useState(!isPro)
   const [, setProjectMenuOpen] = useState(false)
   const [projCreating, setProjCreating] = useState(false)
-  const [projNewName, setProjNewName] = useState('')
-  const projInputRef = useRef<HTMLInputElement>(null)
-  // Focus the new-project input AFTER the dropdown returns focus to its trigger,
-  // otherwise Radix's focus-return blurs the input immediately and onBlur tears it
-  // down before the user can type. A short delay lands focus after that hand-off.
-  useEffect(() => {
-    if (!projCreating) return
-    const t = setTimeout(() => projInputRef.current?.focus(), 80)
-    return () => clearTimeout(t)
-  }, [projCreating])
   const [toolsOn, setToolsOn] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
@@ -2876,7 +2916,6 @@ export function MemoryChat({
     renderer?: 'image' | 'document' | 'audio' | 'video' | 'text'
   } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editText, setEditText] = useState('')
   const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null)
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
@@ -2912,7 +2951,7 @@ export function MemoryChat({
   const [artifacts, setArtifacts] = useState<
     (Artifact & { id: string; title: string; created: number })[]
   >([])
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const draftInputRef = useRef<ChatDraftInputHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -3142,7 +3181,6 @@ export function MemoryChat({
       setActiveProjectId(projectId)
       setProjectMenuOpen(false)
       setProjCreating(false)
-      setProjNewName('')
       if (activeConversationId) {
         try {
           await window.api.setRagConversationProject(activeConversationId, projectId)
@@ -3156,20 +3194,23 @@ export function MemoryChat({
   )
 
   // Create a project inline and assign the current chat to it.
-  const createAndAssignProject = useCallback(async () => {
-    const name = projNewName.trim()
-    if (!name) {
-      setProjCreating(false)
-      return
-    }
-    try {
-      const id = await window.api.createProject?.({ name })
-      await loadProjects()
-      if (id) await assignProject(id)
-    } catch (e) {
-      console.error('Failed to create project', e)
-    }
-  }, [projNewName, loadProjects, assignProject])
+  const createAndAssignProject = useCallback(
+    async (typedName: string) => {
+      const name = typedName.trim()
+      if (!name) {
+        setProjCreating(false)
+        return
+      }
+      try {
+        const id = await window.api.createProject?.({ name })
+        await loadProjects()
+        if (id) await assignProject(id)
+      } catch (e) {
+        console.error('Failed to create project', e)
+      }
+    },
+    [loadProjects, assignProject]
+  )
 
   useEffect(() => {
     // Follow the stream to the bottom ONLY while the user hasn't scrolled up. followBottomRef is
@@ -3382,7 +3423,7 @@ export function MemoryChat({
             const approval = await window.api.proInvoke?.('approvals:for-execution-chat', convId)
             setApprovalSetup((approval as ApprovalSetupRecord | null | undefined) ?? null)
           }
-          if (openTarget.draftPrompt) setInput(openTarget.draftPrompt)
+          if (openTarget.draftPrompt) draftStore.set(openTarget.draftPrompt)
         } else if (openTarget.projectId) {
           setActiveConversationId(null)
           setConvMessages(null, [])
@@ -3396,10 +3437,10 @@ export function MemoryChat({
           setActiveConversationId(null)
           setConvMessages(null, [])
           setActiveProjectId(null)
-          setInput(openTarget.draftPrompt)
+          draftStore.set(openTarget.draftPrompt)
         }
         if (openTarget.openGallery) setShowGallery(true)
-        if (openTarget.draftPrompt) requestAnimationFrame(() => inputRef.current?.focus())
+        if (openTarget.draftPrompt) requestAnimationFrame(() => draftInputRef.current?.focus())
         await loadConversations()
       } catch (e) {
         console.error('Failed to open chat target:', e)
@@ -3494,7 +3535,7 @@ export function MemoryChat({
     const atts =
       opts?.atts ??
       (isInput ? attachments.filter((a) => a.status === 'ready' && (a.text || a.path)) : [])
-    const typed = (override ?? input).trim()
+    const typed = (override ?? draftStore.getSnapshot()).trim()
     // The user sees `trimmed`; the model also gets the attachment text folded in.
     const trimmed =
       typed || (atts.length ? `(${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '')
@@ -3534,7 +3575,7 @@ export function MemoryChat({
             return
           }
           if (isInput) {
-            setInput('')
+            draftStore.set('')
             setAttachments([])
           }
           setAttachWarn(null)
@@ -3551,7 +3592,7 @@ export function MemoryChat({
       queuedRef.current = enqueue(queuedRef.current, targetConv as string, item)
       setQueuedByConv({ ...queuedRef.current })
       if (isInput) {
-        setInput('')
+        draftStore.set('')
         setAttachments([])
       }
       return
@@ -3639,7 +3680,7 @@ export function MemoryChat({
       }
       setConvMessages(convId, (prev) => [...prev, userMessage])
     }
-    setInput('')
+    draftStore.set('')
     setLoading(true)
 
     // Persist user message (skip on regen — it's already in the thread). Stash
@@ -3820,6 +3861,21 @@ export function MemoryChat({
       // active tab's `messages`) — a drained-queue or background send is bound to
       // `convId`, so its history must come from that conversation (D8).
       const history = buildSendHistory(messagesByConv[convId] ?? EMPTY_MSGS, !!regen, trimmed)
+      if (history[0]?.content.startsWith('Earlier conversation (compacted):')) {
+        const before =
+          (messagesByConv[convId] ?? EMPTY_MSGS).filter((message) => !message.notice).length +
+          (regen ? 0 : 1)
+        const notice: ChatMessage = {
+          id: `notice-compacted-${Date.now()}`,
+          role: 'assistant',
+          content: `_${contextCompactedNoticeText(before, history.length)}_`,
+          notice: true
+        }
+        setConvMessages(convId, (previous) => [...previous, notice])
+        void window.api
+          .addRagMessage(convId, 'assistant', notice.content, { notice: true })
+          .catch(() => undefined)
+      }
 
       // Agentic tools path (opt-in, non-project). The model calls built-in tools,
       // plus (when Connectors is on) MCP connector tools. STREAMS like the RAG path:
@@ -4186,15 +4242,12 @@ export function MemoryChat({
         return
       }
       console.error('RAG chat failed', e)
-      const errorMessage = e instanceof Error ? e.message : ''
-      const remoteErrorStart = errorMessage.indexOf('Remote text model')
       const errorContent =
-        remoteErrorStart >= 0
-          ? errorMessage
-              .slice(remoteErrorStart, remoteErrorStart + 800)
-              .replace(/\s+/g, ' ')
-              .trim()
-          : 'Sorry, something went wrong while generating a response.'
+        (e instanceof Error ? e.message : String(e ?? ''))
+          .replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 800) || 'Generation failed without an error message.'
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
       setConvMessages(convId, (prev) => {
@@ -4202,13 +4255,22 @@ export function MemoryChat({
         if (hasPlaceholder)
           return prev.map((m) =>
             m.id === sid
-              ? { ...m, content: errorContent, activity: undefined, streaming: false }
+              ? {
+                  ...m,
+                  content: errorContent,
+                  activity: undefined,
+                  streaming: false,
+                  notice: true
+                }
               : m
           )
-        return [...prev, { id: `a-${Date.now()}`, role: 'assistant', content: errorContent }]
+        return [
+          ...prev,
+          { id: `a-${Date.now()}`, role: 'assistant', content: errorContent, notice: true }
+        ]
       })
       try {
-        await window.api.addRagMessage(convId, 'assistant', errorContent)
+        await window.api.addRagMessage(convId, 'assistant', errorContent, { notice: true })
       } catch {
         /* ignore */
       }
@@ -4254,7 +4316,7 @@ export function MemoryChat({
         void sendMessage(text, { voiceClip: clip })
         return
       }
-      setInput((previous) => `${previous}${previous ? ' ' : ''}${text}`)
+      draftStore.update((previous) => `${previous}${previous ? ' ' : ''}${text}`)
     }
   })
   const recording =
@@ -4390,28 +4452,6 @@ export function MemoryChat({
     },
     [activeConversationId, messagesByConv, markGenerating, imageGenConv]
   )
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Slash skill autocomplete: while typing "/name" (before any space), Tab —
-    // or Enter on a not-yet-complete name — fills in the top matching skill.
-    const sq = input.startsWith('/') && !/\s/.test(input) ? input.slice(1).toLowerCase() : null
-    if (sq !== null) {
-      const matches = skills.filter((s) => s.name.toLowerCase().includes(sq))
-      const exact = skills.some((s) => s.name.toLowerCase() === sq)
-      if (matches.length > 0 && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !exact))) {
-        e.preventDefault()
-        setInput(`/${matches[0]!.name} `) // matches.length > 0
-        inputRef.current?.focus()
-        return
-      }
-    }
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      // Don't send while an attachment is still processing — it would be dropped.
-      if (attachments.some((a) => a.status === 'loading')) return
-      sendMessage()
-    }
-  }
 
   // Voice output: synthesize a message on-device (Kokoro) and play it. Toggling
   // the same message stops playback.
@@ -4571,14 +4611,6 @@ export function MemoryChat({
     }
   }, [])
 
-  // Auto-grow the composer with its content, up to a cap (then it scrolls).
-  useEffect(() => {
-    const el = inputRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 208)}px`
-  }, [input])
-
   useEffect(() => {
     window.api
       .listSkills()
@@ -4595,6 +4627,41 @@ export function MemoryChat({
     const off = window.api.onRagStream((data) => {
       const cid = streamConvRef.current.get(data.streamId)
       if (!cid) return
+      if (data.type === 'fallback') {
+        if (!data.fallback) return
+        reasoningByStream.current[data.streamId] = ''
+        answerByStream.current[data.streamId] = ''
+        const content = `_${fallbackNoticeText(
+          { name: data.fallback.failed },
+          { name: data.fallback.next },
+          data.fallback.reason
+        )}_`
+        const notice: ChatMessage = {
+          id: `notice-fallback-${data.streamId}-${Date.now()}`,
+          role: 'assistant',
+          content,
+          notice: true
+        }
+        setConvMessages(cid, (previous) => {
+          const streamIndex = previous.findIndex((message) => message.id === data.streamId)
+          if (streamIndex < 0) return [...previous, notice]
+          const reset = {
+            ...previous[streamIndex]!,
+            content: '',
+            reasoning: undefined
+          }
+          return [
+            ...previous.slice(0, streamIndex),
+            notice,
+            reset,
+            ...previous.slice(streamIndex + 1)
+          ]
+        })
+        void window.api
+          .addRagMessage(cid, 'assistant', content, { notice: true })
+          .catch(() => undefined)
+        return
+      }
       if (data.type === 'done') {
         streamConvRef.current.delete(data.streamId)
         markGenerating(cid, false)
@@ -4614,9 +4681,17 @@ export function MemoryChat({
         answerByStream.current[data.streamId] =
           (answerByStream.current[data.streamId] || '') + (data.text || '')
       }
+      const streamEvent = {
+        type: data.type,
+        text: data.text,
+        step: data.step,
+        call: data.call
+      }
       setConvMessages(cid, (prev) =>
         prev.map((m) =>
-          m.id === data.streamId && m.streaming ? (applyStreamEvent(m, data) as ChatMessage) : m
+          m.id === data.streamId && m.streaming
+            ? (applyStreamEvent(m, streamEvent) as ChatMessage)
+            : m
         )
       )
     })
@@ -4711,8 +4786,8 @@ export function MemoryChat({
   )
 
   // Edit a sent message: replace its text, drop everything after it, re-run.
-  const saveEdit = (id: string): void => {
-    const text = editText.trim()
+  const saveEdit = (id: string, editedText: string): void => {
+    const text = editedText.trim()
     setEditingId(null)
     if (!text) return
     const idx = messages.findIndex((m) => m.id === id)
@@ -4882,14 +4957,6 @@ export function MemoryChat({
   if (mode === 'image') examples = IMAGE_EXAMPLES
   else if (isPro) examples = ASK_EXAMPLES_PRO
 
-  // Slash-command autocomplete: typing "/" (before any space) lists matching skills.
-  const slashQuery =
-    mode === 'ask' && input.startsWith('/') && !/\s/.test(input)
-      ? input.slice(1).toLowerCase()
-      : null
-  const skillMatches =
-    slashQuery !== null ? skills.filter((s) => s.name.toLowerCase().includes(slashQuery)) : []
-
   const messageNavigation: ContextNavigation = {
     onNavigateToMemory,
     onNavigateToChat,
@@ -4934,9 +5001,7 @@ export function MemoryChat({
     startEdit: (message) => {
       void stopLiveWebUseForConversation(activeConversationId)
       setEditingId(message.id)
-      setEditText(message.content)
     },
-    changeEditText: setEditText,
     cancelEdit: () => setEditingId(null),
     saveEdit,
     retryImageMemory: (retry) => {
@@ -5460,24 +5525,17 @@ export function MemoryChat({
                     </div>
                   ) : (
                     <div className="w-full px-6 py-5">
-                      {messages.map((message, messageIndex) => {
-                        if (message.role === 'tool') {
-                          if (messages[messageIndex - 1]?.role === 'tool') return null
-                          const run: ChatMessage[] = []
-                          for (
-                            let index = messageIndex;
-                            messages[index]?.role === 'tool';
-                            index += 1
-                          ) {
-                            run.push(messages[index]!)
-                          }
-                          return <ToolMessageTimelineRow key={message.id} messages={run} />
+                      {groupWorkRuns(messages, isSupportingMessage).map((entry, entryIndex, entries) => {
+                        if (entry.kind === 'work') {
+                          return <ToolMessageTimelineRow key={entry.id} steps={entry.steps} />
                         }
+                        const { message } = entry
+                        const next = entries[entryIndex + 1]
                         return (
-                          <MessageRow
+                          <MemoizedMessageRow
                             key={message.id}
                             message={message}
-                            nextMessageRole={messages[messageIndex + 1]?.role}
+                            nextMessageRole={next?.kind === 'work' ? 'tool' : next?.message.role}
                             liveTask={
                               message.streaming ? (liveJourneyTask ?? undefined) : undefined
                             }
@@ -5486,7 +5544,6 @@ export function MemoryChat({
                               autoPlayId,
                               copiedKey,
                               editingId,
-                              editText,
                               loading,
                               speakingId,
                               speakLoadingId,
@@ -5749,23 +5806,10 @@ export function MemoryChat({
                     </AnimatePresence>
 
                     {projCreating && (
-                      <div className="mb-2">
-                        <input
-                          ref={projInputRef}
-                          value={projNewName}
-                          onChange={(e) => setProjNewName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') createAndAssignProject()
-                            if (e.key === 'Escape') {
-                              setProjCreating(false)
-                              setProjNewName('')
-                            }
-                          }}
-                          onBlur={createAndAssignProject}
-                          placeholder="New project name…  (Enter to create, Esc to cancel)"
-                          className="w-full rounded-md border border-green-500 bg-neutral-900 px-3 py-2 text-xs text-white placeholder-neutral-600 outline-none"
-                        />
-                      </div>
+                      <NewProjectNameField
+                        onCreate={createAndAssignProject}
+                        onCancel={() => setProjCreating(false)}
+                      />
                     )}
 
                     {queuedCount(queuedByConv, activeConversationId) > 0 && (
@@ -5866,31 +5910,6 @@ export function MemoryChat({
                           Drop files to attach
                         </div>
                       ) : null}
-                      {skillMatches.length > 0 && (
-                        <div className="absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-md border border-border bg-popover py-1 text-sm text-popover-foreground shadow-lg">
-                          <div className="flex items-center justify-between px-3 py-1 text-[10px] uppercase tracking-wide text-neutral-600">
-                            <span>Skills</span>
-                            <span className="normal-case text-neutral-700">Tab to complete</span>
-                          </div>
-                          {skillMatches.slice(0, 6).map((s, i) => (
-                            <button
-                              key={s.name}
-                              onClick={() => {
-                                setInput(`/${s.name} `)
-                                inputRef.current?.focus()
-                              }}
-                              className={`flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left transition-colors hover:bg-neutral-900 ${i === 0 ? 'bg-neutral-900/60' : ''}`}
-                            >
-                              <span className="text-green-500">/{s.name}</span>
-                              {s.description ? (
-                                <span className="line-clamp-1 text-[11px] text-neutral-500">
-                                  {s.description}
-                                </span>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -6046,21 +6065,17 @@ export function MemoryChat({
                           onToggleRecording={toggleRecording}
                         />
                       ) : (
-                        <textarea
-                          ref={inputRef}
-                          value={input}
-                          onChange={(e) => setInput(e.target.value)}
-                          onKeyDown={handleKeyDown}
+                        <ChatDraftInput
+                          ref={draftInputRef}
+                          store={draftStore}
+                          skills={skills}
+                          mode={mode}
+                          activeProjectName={activeProjectName ?? undefined}
+                          attachmentPending={attachments.some(
+                            (attachment) => attachment.status === 'loading'
+                          )}
                           onPaste={handlePaste}
-                          rows={1}
-                          placeholder={
-                            mode === 'image'
-                              ? 'Describe an image to generate…'
-                              : activeProjectName
-                                ? `Ask about “${activeProjectName}”…`
-                                : 'Ask anything…'
-                          }
-                          className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+                          onSubmit={() => void sendMessage()}
                         />
                       )}
                       <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-2 px-2.5 pb-2.5 pt-1">
@@ -6474,41 +6489,14 @@ export function MemoryChat({
                               Stop
                             </Button>
                           ) : voiceMode ? null : (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  onClick={() => sendMessage()}
-                                  disabled={
-                                    (!input.trim() && attachments.length === 0) ||
-                                    attachments.some((a) => a.status === 'loading')
-                                  }
-                                  title={
-                                    attachments.some((a) => a.status === 'loading')
-                                      ? 'Waiting for attachment to finish processing…'
-                                      : 'Send'
-                                  }
-                                  className="size-8 rounded-full"
-                                >
-                                  {/* Always sendable — generating doesn't block; messages queue. */}
-                                  <svg
-                                    className="h-4 w-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M5 10l7-7m0 0l7 7m-7-7v18"
-                                    />
-                                  </svg>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Send</TooltipContent>
-                            </Tooltip>
+                            <ChatDraftSendButton
+                              store={draftStore}
+                              hasAttachments={attachments.length > 0}
+                              attachmentPending={attachments.some(
+                                (attachment) => attachment.status === 'loading'
+                              )}
+                              onSubmit={() => void sendMessage()}
+                            />
                           )}
                         </div>
                       </div>

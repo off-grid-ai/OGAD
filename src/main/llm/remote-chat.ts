@@ -1,4 +1,9 @@
-import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
+import {
+  REASONING_BUDGET_AUTO,
+  reasoningWireFragment,
+  resolveReasoningPlan,
+  type ReasoningMetadata
+} from '@offgrid/models'
 import type { RemoteVisionProvider } from '../../shared/remote-vision-server'
 import {
   createCompletionStreamAccumulator,
@@ -30,7 +35,7 @@ export interface RemoteChatRequest {
 
 export interface RemoteChatOptions {
   signal?: AbortSignal
-  timeoutMs: number
+  timeoutMs?: number
 }
 
 export interface RemoteNativeToolCapability {
@@ -151,6 +156,24 @@ function completionRequestBody(
   remote: RemoteTextModelConnection,
   request: RemoteChatRequest
 ): string {
+  const reasoningMetadata: ReasoningMetadata =
+    remote.provider === 'openrouter'
+      ? { transport: 'openrouter', control: 'provider-native', supportsTokenBudget: true }
+      : remote.provider === 'ollama'
+        ? { transport: 'ollama', control: 'boolean' }
+        : remote.provider === 'ogad'
+          ? { transport: 'llama-server', control: 'enable-thinking', supportsTokenBudget: true }
+          : { transport: 'openai-compatible', control: 'no-control' }
+  const reasoning = reasoningWireFragment(
+    resolveReasoningPlan(
+      {
+        enabled: request.thinking === true,
+        budgetTokens: request.reasoningBudget ?? REASONING_BUDGET_AUTO,
+        effort: 'medium'
+      },
+      reasoningMetadata
+    )
+  )
   return JSON.stringify({
     model: remote.model,
     messages: request.messages,
@@ -163,12 +186,7 @@ function completionRequestBody(
       : {}),
     // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
     // cap was dropped for every remote model and the budget setting did nothing.
-    ...(remote.provider === 'openrouter'
-      ? openRouterReasoningPayload(
-          request.thinking === true,
-          request.reasoningBudget ?? REASONING_BUDGET_AUTO
-        )
-      : {}),
+    ...reasoning,
     stream: true
   })
 }
@@ -194,12 +212,16 @@ interface IdleWatchdog {
  * the compiler cannot order against a later read, so a plain flag narrowed to `false` and made the
  * timeout branch look statically dead.
  */
-function createIdleWatchdog(timeoutMs: number, callerSignal?: AbortSignal): IdleWatchdog {
+function createIdleWatchdog(
+  timeoutMs: number | undefined,
+  callerSignal?: AbortSignal
+): IdleWatchdog {
   const controller = new AbortController()
   const firedRef = { current: false }
   let timer: ReturnType<typeof setTimeout> | undefined
   const arm = (): void => {
     if (timer) clearTimeout(timer)
+    if (timeoutMs === undefined) return
     timer = setTimeout(() => {
       firedRef.current = true
       controller.abort()

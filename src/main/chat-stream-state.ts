@@ -146,6 +146,17 @@ export function noteChatStreamDelta(
   publish(streamId)
 }
 
+/** Discard output from a failed route before a request-local fallback starts. */
+export function resetChatStreamOutput(streamId: string | undefined): void {
+  if (!streamId) return
+  const stream = active.get(streamId)
+  if (!stream) return
+  stream.content = ''
+  stream.reasoning = ''
+  stream.phase = stream.reasoningRequested ? 'thinking' : 'waiting'
+  publish(streamId)
+}
+
 /** Publish a tool row as soon as the model starts it, before its result exists. */
 export function noteChatStreamToolStarted(streamId: string | undefined, name: string): void {
   if (!streamId || !name) return

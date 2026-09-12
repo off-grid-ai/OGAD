@@ -529,6 +529,7 @@ export async function toolChat(
     onStep?: (call: { name: string; args: Record<string, unknown> }) => void
     onToolResult?: (call: { name: string; result: string; status: ToolCallStatus }) => void
     onActivity?: (activity: ToolActivity) => void
+    onFallback?: (fallback: { failed: string; next: string; error: unknown }) => void
     /** The orchestrator's plan for this turn, emitted once before its steps run. */
     onPlan?: (steps: { tool: string; why: string }[]) => void
   } = {}
@@ -716,6 +717,7 @@ export async function toolChat(
     return answer
   }
   let round = 0
+  let forceLocal = false
   while (toolCalls.length < maxToolCalls) {
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
     // are accumulated and returned. A tool-calling round streams thinking (and no content);
@@ -728,7 +730,12 @@ export async function toolChat(
       // free to write a long response. Inherit the user's Max-output setting (auto by default →
       // until EOS / window fills). A tool-selection round stays short on its own (it emits a call).
       thinking: opts.thinking,
-      signal: opts.signal
+      signal: opts.signal,
+      forceLocal,
+      onFallback: (fallback) => {
+        forceLocal = true
+        opts.onFallback?.(fallback)
+      }
     })
 
     // Stop pressed during the round: streamCompletion resolves with the partial
@@ -835,7 +842,12 @@ export async function toolChat(
     // Forced final answer — inherit the user's Max-output setting (auto by default), never a fixed
     // 1024 cap that truncated the response mid-sentence.
     thinking: false,
-    signal: opts.signal
+    signal: opts.signal,
+    forceLocal,
+    onFallback: (fallback) => {
+      forceLocal = true
+      opts.onFallback?.(fallback)
+    }
   })
   return resultWithImages({
     answer: answerFrom(final.content) || 'Stopped after too many tool steps.',

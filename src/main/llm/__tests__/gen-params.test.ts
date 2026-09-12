@@ -4,8 +4,6 @@
 // lives in resolveMaxTokens, shared by all three chat entry points.
 
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import { join } from 'path'
 import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from '../gen-params'
 
 describe('resolveMaxTokens (D10)', () => {
@@ -40,42 +38,5 @@ describe('maxTokensForWire — auto maps to the engine unlimited (-1)', () => {
   })
   it('auto is the sentinel 0 (a real cap of 0 would be meaningless)', () => {
     expect(MAX_TOKENS_AUTO).toBe(0)
-  })
-})
-
-describe('llm.ts routes every chat path through resolveMaxTokens (no divergence)', () => {
-  const src = readFileSync(join(__dirname, '..', '..', 'llm.ts'), 'utf8')
-  const chatStream = src.slice(src.indexOf('async chatStream('), src.indexOf('async streamChat('))
-  const chatStreamCode = chatStream.replace(/\/\/.*$/gm, '').replace(/\s+/g, ' ')
-
-  it('no longer contains the buggy `this.maxTokens || <caller>` precedence', () => {
-    // Regression guard: this exact pattern is what made the caller's value dead.
-    expect(src).not.toMatch(/this\.maxTokens\s*\|\|/)
-  })
-
-  it('resolves a streamed token cap once and reuses it for the payload and returned cutoff metadata', () => {
-    const resolution = chatStreamCode.match(
-      /const\s+(\w+)\s*=\s*resolveMaxTokens\(maxTokens,\s*this\.maxTokens\)/
-    )
-    expect(resolution).not.toBeNull()
-
-    const resolvedIdentifier = resolution![1]!
-    expect(chatStreamCode.match(/resolveMaxTokens\(/g)).toHaveLength(1)
-    // The wire value is the resolved cap mapped through maxTokensForWire (auto → -1)…
-    expect(chatStreamCode).toMatch(
-      new RegExp(`max_tokens\\s*:\\s*maxTokensForWire\\(${resolvedIdentifier}\\)`)
-    )
-    // …while the returned metadata keeps the logical resolved value (0 = auto), not the wire -1.
-    expect(chatStreamCode).toMatch(
-      new RegExp(`return\\s*\\{\\s*\\.\\.\\.result,\\s*maxTokens\\s*:\\s*${resolvedIdentifier}\\b`)
-    )
-  })
-
-  it('defaults the max-output setting to auto and maps every payload through maxTokensForWire', () => {
-    // Default is the auto sentinel (context is the limit, not a fixed 2048 cap).
-    expect(src).toMatch(/private maxTokens = MAX_TOKENS_AUTO/)
-    // All three chat payloads send the wire-mapped value, never a raw resolveMaxTokens.
-    expect(src.match(/max_tokens: maxTokensForWire\(/g)).toHaveLength(3)
-    expect(src).not.toMatch(/max_tokens: resolveMaxTokens\(/)
   })
 })

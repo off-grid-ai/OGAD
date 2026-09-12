@@ -47,7 +47,21 @@ describe('buildSendHistory (D8)', () => {
 
   it('caps to the last `limit` turns', () => {
     const many = Array.from({ length: 30 }, (_, i) => turn(i % 2 ? 'assistant' : 'user', `m${i}`))
-    expect(buildSendHistory(many, false, 'newest', 20)).toHaveLength(20)
+    const result = buildSendHistory(many, false, 'newest', 20)
+    expect(result.length).toBeLessThanOrEqual(20)
+    expect(result.at(-1)).toEqual(turn('user', 'newest'))
+    expect(result[0]!.content).toContain('Earlier conversation (compacted)')
+  })
+
+  it('compacts older history without dropping the active turn', () => {
+    const history = Array.from({ length: 24 }, (_, index) =>
+      turn(index % 2 ? 'assistant' : 'user', `old-${index}-${'x'.repeat(900)}`)
+    )
+
+    const compacted = buildSendHistory(history, false, 'active question', 20)
+
+    expect(compacted.at(-1)).toEqual(turn('user', 'active question'))
+    expect(compacted[0]!.content).toContain('Earlier conversation (compacted)')
   })
 })
 
