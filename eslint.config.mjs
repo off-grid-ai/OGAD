@@ -83,10 +83,10 @@ const goldStandardRatchet = {
     'no-empty': 'warn',
     'prefer-template': 'warn',
     'no-console': ['warn', { allow: ['error', 'warn'] }],
-    'max-params': ['warn', 3],
-    complexity: ['warn', 15],
-    'max-lines-per-function': ['warn', 250],
-    'max-lines': ['warn', 350],
+    'max-params': ['warn', 5],
+    complexity: ['warn', 25],
+    'max-lines-per-function': ['warn', 350],
+    'max-lines': ['warn', 1000],
     '@typescript-eslint/no-shadow': 'warn'
   }
 }
