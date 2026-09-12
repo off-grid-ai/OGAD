@@ -49,7 +49,7 @@ jobs:
           # Don't leave the cross-repo PAT in ./pro/.git/config where a later
           # PR-controlled step could reuse it — we only need it for the clone.
           persist-credentials: false
-      - name: Fall back to pro main if no matching branch
+      - name: Fall back to the Pro base branch if no matching branch
         if: ${{ steps.pro_branch.outcome != 'success' || hashFiles('pro/tsconfig.json') == '' }}
         continue-on-error: true
         uses: actions/checkout@v4
@@ -57,6 +57,7 @@ jobs:
           repository: off-grid-ai/desktop-pro
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           path: pro
+          ref: ${{ github.base_ref || 'main' }}
           fetch-depth: 0
           persist-credentials: false
       # pro MUST be present: without it the guarded typecheck/coverage path is skipped and
@@ -90,7 +91,7 @@ jobs:
           path: _shared
           ref: ${{ github.head_ref || github.ref_name }}
           persist-credentials: false
-      - name: Fall back to shared main
+      - name: Fall back to the Shared base branch
         if: ${{ steps.shared_branch.outcome != 'success' }}
         continue-on-error: true
         uses: actions/checkout@v4
@@ -98,6 +99,7 @@ jobs:
           repository: off-grid-ai/shared
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           path: _shared
+          ref: ${{ github.base_ref || 'main' }}
           persist-credentials: false
       - name: Put shared beside this checkout
         run: |
