@@ -63,6 +63,17 @@ describe('persisted response limit over the production local stream', () => {
         answer: result.content,
         cutoff: { reason: 'max_tokens', maxTokens: RAISED_MAX_TOKENS }
       })
+
+      fake.enqueue({ content: 'tool-cap' }, { content: 'plain-cap' })
+      await reloaded.streamChat([{ role: 'user', content: 'Use the stream path' }], () => {})
+      await reloaded.chat('Use the plain path')
+
+      expect(fake.requests).toHaveLength(3)
+      expect(fake.requests.map((request) => request.max_tokens)).toEqual([
+        RAISED_MAX_TOKENS,
+        RAISED_MAX_TOKENS,
+        RAISED_MAX_TOKENS
+      ])
     } finally {
       await fake.close()
       fs.rmSync(dataDir, { recursive: true, force: true })
