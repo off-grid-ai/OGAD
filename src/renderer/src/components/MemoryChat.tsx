@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
@@ -747,6 +747,13 @@ function ToolMessageTimelineRow({
     </div>
   )
 }
+
+const MemoizedToolMessageTimelineRow = memo(
+  ToolMessageTimelineRow,
+  (previous, next) =>
+    previous.messages.length === next.messages.length &&
+    previous.messages.every((message, index) => message === next.messages[index])
+)
 
 function VoiceMessageRow({
   message,
@@ -2038,8 +2045,8 @@ function StandardMessageRow({
   return (
     <div className={standardMessageRowClass(message)} data-testid={`chat-message-${message.id}`}>
       <MessageThinkingHeader message={message} />
-      <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
       <ChatToolRows tools={message.toolCalls} liveTask={liveTask} />
+      <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
       {message.role === 'user' ? (
         message.context?.taskGuidance ? (
           <div className="mt-1.5 flex items-center gap-3">
@@ -2195,6 +2202,46 @@ function MessageRow({
   }
   return body
 }
+
+function messageRowPropsEqual(previous: MessageRowProps, next: MessageRowProps): boolean {
+  if (
+    previous.message !== next.message ||
+    previous.nextMessageRole !== next.nextMessageRole ||
+    previous.liveTask !== next.liveTask ||
+    previous.voiceMode !== next.voiceMode
+  ) {
+    return false
+  }
+  const messageId = previous.message.id
+  const previousState = previous.state
+  const nextState = next.state
+  const incomingFilesEqual =
+    previousState.incomingFiles.length === nextState.incomingFiles.length &&
+    previousState.incomingFiles.every(
+      (file, index) => file === nextState.incomingFiles[index]
+    )
+  return (
+    (previousState.autoPlayId === messageId) === (nextState.autoPlayId === messageId) &&
+    (previousState.copiedKey === messageId) === (nextState.copiedKey === messageId) &&
+    (previousState.editingId === messageId) === (nextState.editingId === messageId) &&
+    (previousState.editingId !== messageId || previousState.editText === nextState.editText) &&
+    previousState.loading === nextState.loading &&
+    (previousState.speakingId === messageId) === (nextState.speakingId === messageId) &&
+    (previousState.speakLoadingId === messageId) === (nextState.speakLoadingId === messageId) &&
+    previousState.speakError?.id === nextState.speakError?.id &&
+    previousState.speakError?.message === nextState.speakError?.message &&
+    previousState.ttsEnabled === nextState.ttsEnabled &&
+    previousState.ttsSpeed === nextState.ttsSpeed &&
+    (previousState.latestVoiceAssistantId === messageId) ===
+      (nextState.latestVoiceAssistantId === messageId) &&
+    previousState.askSelections[messageId] === nextState.askSelections[messageId] &&
+    incomingFilesEqual &&
+    previousState.showGenerationDetails === nextState.showGenerationDetails &&
+    previousState.regenerationDisabled === nextState.regenerationDisabled
+  )
+}
+
+const MemoizedMessageRow = memo(MessageRow, messageRowPropsEqual)
 
 // Core (free) suggestions — generic chat/build/image. Pro adds memory-aware ones.
 const ASK_EXAMPLES = [
@@ -5471,10 +5518,10 @@ export function MemoryChat({
                           ) {
                             run.push(messages[index]!)
                           }
-                          return <ToolMessageTimelineRow key={message.id} messages={run} />
+                          return <MemoizedToolMessageTimelineRow key={message.id} messages={run} />
                         }
                         return (
-                          <MessageRow
+                          <MemoizedMessageRow
                             key={message.id}
                             message={message}
                             nextMessageRole={messages[messageIndex + 1]?.role}

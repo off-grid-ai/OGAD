@@ -1,5 +1,5 @@
 import type { ChatStreamTool, ProjectedSyncedTool } from '@offgrid/sync'
-import { CaretDown, Check, Circle, Warning, Wrench, X } from '@phosphor-icons/react'
+import { CaretDown, Check, Circle, Warning, X } from '@phosphor-icons/react'
 import { ChatMarkdown } from './ChatMarkdown'
 import {
   Collapsible,
@@ -180,27 +180,12 @@ function statusIcon(status: WorkStatus): React.JSX.Element {
   )
 }
 
-function overallStatus(tools: readonly DisplayTool[]): WorkStatus {
-  const statuses = tools.map(workStatus)
-  if (statuses.includes('running')) return 'running'
-  if (statuses.includes('failed')) return 'failed'
-  if (statuses.includes('needs attention')) return 'needs attention'
-  return 'complete'
-}
-
 function taskWorkStatus(task: TaskSession | undefined): WorkStatus | undefined {
   if (!task) return undefined
   if (task.status === 'failed' || task.status === 'stopped') return 'failed'
   if (task.status === 'paused' || task.status === 'waiting') return 'needs attention'
   if (task.status === 'running' || task.status === 'reconnecting') return 'running'
   return 'complete'
-}
-
-function workHeading(status: WorkStatus): string {
-  if (status === 'running') return 'Working'
-  if (status === 'needs attention') return 'Action needed'
-  if (status === 'failed') return 'Work failed'
-  return 'Work done'
 }
 
 function linkedTaskForReference(
@@ -262,34 +247,10 @@ export function ChatToolRows({
       linkedTaskForReference(tasks, taskId) ?? (index === liveToolIndex ? liveTask : undefined)
     return { tool, taskId, linkedTask, status: taskWorkStatus(linkedTask) ?? workStatus(tool) }
   })
-  const projectedStatuses = projected.map((item) => item.status)
-  const status = projectedStatuses.includes('running')
-    ? 'running'
-    : projectedStatuses.includes('failed')
-      ? 'failed'
-      : projectedStatuses.includes('needs attention')
-        ? 'needs attention'
-        : overallStatus(visible)
-
   return (
-    <Collapsible
-      defaultOpen={status === 'running' || status === 'needs attention'}
-      className="mt-1 w-full max-w-[85%] rounded-sm border border-neutral-800 text-neutral-500"
-    >
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] transition-colors hover:text-neutral-300">
-        <Wrench className="h-3.5 w-3.5 shrink-0 text-neutral-600" aria-hidden="true" />
-        <span className="min-w-0 flex-1 font-medium text-neutral-300">{workHeading(status)}</span>
-        <span className="text-[10px] text-neutral-600">
-          {visible.length} {visible.length === 1 ? 'step' : 'steps'} · {status}
-        </span>
-        <CaretDown
-          className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
-          aria-hidden="true"
-        />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="border-t border-neutral-800 px-2.5 py-2">
-        <ol className="ml-1 border-l border-neutral-800">
-          {projected.map(({ tool, linkedTask, status: stepStatus }, index) => {
+    <div className="mt-1 w-full max-w-[85%] text-neutral-500">
+      <ol className="ml-1 space-y-1 border-l border-neutral-800">
+        {projected.map(({ tool, linkedTask, status: stepStatus }, index) => {
             const result = visibleToolResult(tool.result)
             const error = 'error' in tool ? tool.error?.trim() : undefined
             const taskSummary = linkedTask?.summary?.trim()
@@ -366,9 +327,8 @@ export function ChatToolRows({
                 </Collapsible>
               </li>
             )
-          })}
-        </ol>
-      </CollapsibleContent>
-    </Collapsible>
+        })}
+      </ol>
+    </div>
   )
 }
