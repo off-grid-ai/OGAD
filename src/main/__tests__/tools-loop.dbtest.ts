@@ -596,7 +596,10 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       const result = await toolChat('read it', [], { connectors: true })
 
       expect(result.toolCalls[0]!.result.length).toBeLessThan(raw.length)
-      expect(result.toolCalls[0]!.result).toMatch(/result truncated: showing the first 1000/)
+      expect(result.toolCalls[0]!.result).toMatch(
+        /result truncated: showing the first \d+ of 30000 characters/
+      )
+      expect(result.toolCalls[0]!.result.length).toBeLessThanOrEqual(2_048 * 4)
       expect(JSON.stringify(fake.requests[1])).not.toContain(raw)
     } finally {
       service.ctxSize = previousContext
