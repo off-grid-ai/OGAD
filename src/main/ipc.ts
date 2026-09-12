@@ -65,6 +65,7 @@ import {
 } from './ipc-query-logic'
 import { requestApplicationRelaunch } from './shutdown'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
+import { fallbackReasonText } from '@offgrid/models'
 import { notifyRagConversationChanged } from './rag-conversation-events'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
@@ -105,6 +106,7 @@ import {
   endChatStreamForConversation,
   noteChatStreamImageProgress,
   noteChatStreamDelta,
+  resetChatStreamOutput,
   noteChatStreamToolCompleted,
   noteChatStreamToolStarted,
   takeChatStreamMessageId
@@ -157,7 +159,22 @@ async function streamAnswer(
             /* window gone */
           }
         },
-        { thinking, signal: controller.signal }
+        {
+          thinking,
+          signal: controller.signal,
+          onFallback: ({ failed, next, error }) => {
+            resetChatStreamOutput(streamId)
+            try {
+              sender.send('rag:stream', {
+                streamId,
+                type: 'fallback',
+                fallback: { failed, next, reason: fallbackReasonText(error) }
+              })
+            } catch {
+              /* window gone */
+            }
+          }
+        }
       )
       return toResponseGenerationResult(result)
     })
@@ -716,7 +733,6 @@ export function setupIPC() {
       if (noMemory) {
         const { llm } = await import('./llm')
         const hist = (conversationHistory ?? [])
-          .slice(-10)
           .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
           .join('\n')
         const prompt = [
@@ -760,7 +776,6 @@ export function setupIPC() {
               .join('\n')
           : ''
         const hist = (conversationHistory ?? [])
-          .slice(-8)
           .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
           .join('\n')
         const prompt = [
@@ -1043,18 +1058,7 @@ export function setupIPC() {
         }
       } catch (e) {
         console.error('[RAG] LLM chat failed:', e)
-        return {
-          answer: 'Sorry, I could not generate a response right now.',
-          context: {
-            masterMemory: null,
-            memories,
-            messages,
-            summaries,
-            entities,
-            entityFacts,
-            unified: unifiedHits
-          }
-        }
+        throw e
       }
     }
   )
@@ -1920,6 +1924,18 @@ export function setupIPC() {
               noteChatStreamDelta(streamId, text, kind)
               try {
                 sender.send('rag:stream', { streamId, type: kind, text })
+              } catch {
+                /* window gone */
+              }
+            },
+            onFallback: ({ failed, next, error }) => {
+              resetChatStreamOutput(streamId)
+              try {
+                sender.send('rag:stream', {
+                  streamId,
+                  type: 'fallback',
+                  fallback: { failed, next, reason: fallbackReasonText(error) }
+                })
               } catch {
                 /* window gone */
               }

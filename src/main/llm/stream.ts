@@ -37,7 +37,7 @@ export interface StreamResult {
 
 export interface StreamOptions {
   signal?: AbortSignal
-  timeoutMs: number
+  timeoutMs?: number
 }
 
 export interface CompletionStreamAccumulator {
@@ -152,6 +152,7 @@ export function streamCompletion(
     // mid-stream the moment output was uncapped ("LLM request timed out" at ~5 min).
     const armIdleTimer = (): void => {
       clearTimeout(idleTimer)
+      if (opts.timeoutMs === undefined) return
       idleTimer = setTimeout(() => {
         timedOut = true
         cleanup()

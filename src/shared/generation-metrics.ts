@@ -27,6 +27,8 @@ interface ServerTimings {
  * is the truth.
  */
 export interface GenerationMetrics {
+  /** The model that produced the visible answer, after any request-local fallback. */
+  modelName?: string
   /** Seconds from request to the first visible token. Measured here, so always available. */
   timeToFirstTokenSeconds?: number
   /** Seconds from request to the end of the stream. Measured here, so always available. */
@@ -79,13 +81,13 @@ export function generationMetrics(input: {
   return {
     ...(timeToFirstTokenSeconds === undefined ? {} : { timeToFirstTokenSeconds }),
     ...(totalSeconds === undefined ? {} : { totalSeconds }),
-    ...(serverDecodeRate ?? estimatedDecodeRate
+    ...((serverDecodeRate ?? estimatedDecodeRate)
       ? { decodeTokensPerSecond: serverDecodeRate ?? estimatedDecodeRate }
       : {}),
     ...(positive(timings?.prompt_per_second) === undefined
       ? {}
       : { prefillTokensPerSecond: positive(timings?.prompt_per_second) }),
-    ...(positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n)
+    ...((positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n))
       ? { promptTokens: positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n) }
       : {}),
     ...(completionTokens === undefined ? {} : { completionTokens })
@@ -95,6 +97,7 @@ export function generationMetrics(input: {
 /** The compact one-line summary, in the order mobile shows it. Empty when nothing was measured. */
 export function formatGenerationMetrics(metrics: GenerationMetrics): string[] {
   const parts: string[] = []
+  if (metrics.modelName) parts.push(metrics.modelName)
   if (metrics.prefillTokensPerSecond) {
     parts.push(`prefill ${metrics.prefillTokensPerSecond.toFixed(0)} tok/s`)
   }
