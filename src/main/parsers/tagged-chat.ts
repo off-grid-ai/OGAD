@@ -105,6 +105,7 @@ export function parseTaggedChatOutput(
   const messages: ParseResult['messages'] = []
   let currentRole: MessageRole | undefined
   let currentContent: string[] = []
+  let currentTimestamp = ''
   const metadata: TaggedChatMetadata = { lastTimestamp: '' }
 
   const commitCurrent = (): void => {
@@ -114,7 +115,7 @@ export function parseTaggedChatOutput(
 
     const content = currentContent.join('\n').trim()
     if (!isNoiseLine(content)) {
-      messages.push({ role: currentRole, content, timestamp: metadata.lastTimestamp })
+      messages.push({ role: currentRole, content, timestamp: currentTimestamp })
     }
   }
 
@@ -123,6 +124,7 @@ export function parseTaggedChatOutput(
       commitCurrent()
       currentRole = role
       currentContent = []
+      currentTimestamp = metadata.lastTimestamp
     }
     if (content && !isNoiseLine(content)) {
       currentContent.push(content)
@@ -138,6 +140,7 @@ export function parseTaggedChatOutput(
       commitCurrent()
       currentRole = roleLabel.role
       currentContent = []
+      currentTimestamp = metadata.lastTimestamp
       if (roleLabel.remainder && !isNoiseLine(roleLabel.remainder)) {
         currentContent.push(roleLabel.remainder)
       }
