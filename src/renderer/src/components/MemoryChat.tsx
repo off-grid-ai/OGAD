@@ -2303,7 +2303,7 @@ function StandardMessageRow({
         liveTask={liveTask}
       />
       <div
-        className={`flex w-fit flex-col items-end ${message.image || message.attachments?.length || state.editingId === message.id ? 'max-w-2xl' : 'max-w-[85%]'}`}
+        className={`flex w-fit flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'max-w-2xl' : 'max-w-[85%]'}`}
       >
         <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
         {message.role === 'user' ||
