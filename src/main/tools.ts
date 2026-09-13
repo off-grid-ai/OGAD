@@ -543,6 +543,7 @@ export async function toolChat(
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string }
   toolsOffered?: string[]
+  metrics?: GenerationMetrics
 }> {
   if (opts.conversationId) {
     const decision = await callHookAsync<{ answer: string } | null>(
@@ -567,7 +568,10 @@ export async function toolChat(
       imageRequests: []
     }
   }
-  await llm.init() // respects pause; ensures the server is up
+  // A selected remote model does not need the local server to be installed or warm.
+  if (!(await import('./vision/remote-vision-server')).getActiveRemoteVisionServer()) {
+    await llm.init() // respects pause; ensures the local server is up
+  }
   const onDelta = opts.onDelta ?? ((): void => {})
   const toolContext: ToolContext = {
     conversationId: opts.conversationId,

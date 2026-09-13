@@ -561,7 +561,9 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
 function mapRagMessage(message: RawRagMessage): ChatMessage[] {
   const context = parseRagContext(message.context)
   const provenance = readRagProvenance(message)
-  if (context?.notice && noticeText(message.content) === 'Compacted') {
+  if (context?.notice && (
+    noticeText(message.content) === 'Compacted' || message.content.startsWith('Model changed: ')
+  )) {
     const id = String(message.uuid ?? message.id ?? '')
     return id ? [{ id, role: 'assistant', content: message.content, notice: true }] : []
   }
@@ -4821,6 +4823,33 @@ export function MemoryChat({
       if (data.type === 'done') {
         streamConvRef.current.delete(data.streamId)
         markGenerating(cid, false)
+        return
+      }
+      if (
+        data.type === 'step' && data.step && typeof data.step === 'object' &&
+        'kind' in data.step && data.step.kind === 'model_changed'
+      ) {
+        const failed = 'failed' in data.step && typeof data.step.failed === 'string'
+          ? data.step.failed : 'The selected model'
+        const next = 'next' in data.step && typeof data.step.next === 'string'
+          ? data.step.next : 'another model'
+        const content = `Model changed: ${failed} could not answer. ${next} is answering.`
+        const noticeId = crypto.randomUUID()
+        reasoningByStream.current[data.streamId] = ''
+        answerByStream.current[data.streamId] = ''
+        timelineByStream.current[data.streamId] = []
+        setConvMessages(cid, (previous) => {
+          const streamIndex = previous.findIndex((message) => message.id === data.streamId)
+          const notice: ChatMessage = { id: noticeId, role: 'assistant', content, notice: true }
+          if (streamIndex < 0) return [...previous, notice]
+          const clean = { ...previous[streamIndex]!, content: '', reasoning: '', timeline: [], toolCalls: [] }
+          return [...previous.slice(0, streamIndex), notice, clean, ...previous.slice(streamIndex + 1)]
+        })
+        void window.api.addRagMessage(cid, 'assistant', content, { notice: true })
+          .then((stored) => setConvMessages(cid, (previous) => previous.map((message) =>
+            message.id === noticeId ? { ...message, id: stored.uuid } : message
+          )))
+          .catch((error) => console.warn('Could not save the model-change notice', error))
         return
       }
       if (

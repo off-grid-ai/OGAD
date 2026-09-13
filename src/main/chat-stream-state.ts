@@ -146,6 +146,17 @@ export function noteChatStreamDelta(
   publish(streamId)
 }
 
+/** A failed model's partial is not part of the next model's answer. Keep the reply identity. */
+export function resetChatStreamPartial(streamId: string | undefined): void {
+  if (!streamId) return
+  const stream = active.get(streamId)
+  if (!stream) return
+  stream.content = ''
+  stream.reasoning = ''
+  stream.phase = 'waiting'
+  publish(streamId)
+}
+
 /** Publish a tool row as soon as the model starts it, before its result exists. */
 export function noteChatStreamToolStarted(streamId: string | undefined, name: string): void {
   if (!streamId || !name) return
