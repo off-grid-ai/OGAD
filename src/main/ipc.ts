@@ -1043,18 +1043,7 @@ export function setupIPC() {
         }
       } catch (e) {
         console.error('[RAG] LLM chat failed:', e)
-        return {
-          answer: 'Sorry, I could not generate a response right now.',
-          context: {
-            masterMemory: null,
-            memories,
-            messages,
-            summaries,
-            entities,
-            entityFacts,
-            unified: unifiedHits
-          }
-        }
+        throw e
       }
     }
   )

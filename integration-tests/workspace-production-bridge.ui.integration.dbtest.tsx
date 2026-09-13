@@ -129,16 +129,11 @@ let TooltipProvider: typeof import('../src/renderer/src/components/ui/tooltip').
 async function bootProductionMain(): Promise<void> {
   bridge.handlers.clear()
   bridge.mainListeners.clear()
-  const [{ setupIPC }, { setupRagIPC }, { llm }, { registerTaskHistoryIpc }] = await Promise.all([
+  const [{ setupIPC }, { setupRagIPC }, { registerTaskHistoryIpc }] = await Promise.all([
     import('../src/main/ipc'),
     import('../src/main/rag-ipc'),
-    import('../src/main/llm'),
     import('../src/main/tasks/task-history-ipc')
   ])
-  const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
-  service.port = fake.port
-  service.initialized = true
-  service.paused = false
   setupIPC()
   setupRagIPC()
   registerTaskHistoryIpc()
@@ -157,6 +152,11 @@ beforeAll(async () => {
   fake = await startFakeLlamaServer()
   await bootProductionMain()
   await import('../src/preload/index')
+  await window.api.setRemoteVisionServer({
+    provider: 'custom',
+    endpoint: `http://127.0.0.1:${fake.port}/v1`,
+    model: 'integration-model'
+  })
   ;({ MemoryChat } = await import('../src/renderer/src/components/MemoryChat'))
   ;({ ProjectsScreen } = await import('../src/renderer/src/components/ProjectsScreen'))
   ;({ TooltipProvider } = await import('../src/renderer/src/components/ui/tooltip'))
@@ -194,7 +194,7 @@ afterAll(async () => {
  *
  * The rail is the <aside> (role complementary), so anything outside it is transcript.
  */
-async function inTranscript(text: string): Promise<HTMLElement> {
+async function inTranscript(text: string | RegExp): Promise<HTMLElement> {
   return waitFor(() => {
     const rail = screen.queryByRole('complementary')
     const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
@@ -229,6 +229,63 @@ describe('production workspace bridge', () => {
       ])
     })
     expect(fake.requests).toHaveLength(2)
+  })
+
+  it('shows the real memory-chat failure instead of a fabricated answer', async () => {
+    fake.enqueue(
+      { content: '{"intent":"chat","urls":[]}' },
+      {
+        errorStatus: 503,
+        errorBody: JSON.stringify({ error: { message: 'Memory model is unavailable.' } })
+      }
+    )
+    const user = userEvent.setup()
+    renderChat()
+
+    const composer = await screen.findByPlaceholderText(/^ask /i)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    fireEvent.change(composer, { target: { value: 'What did I work on today?' } })
+    await user.click(screen.getByRole('button', { name: /^send$/i }))
+
+    expect(await inTranscript(/Memory model is unavailable/)).toBeTruthy()
+    expect(screen.queryByText('Sorry, I could not generate a response right now.')).toBeNull()
+  })
+
+  it('shows and saves a compaction notice when the chat reaches 80% of its context', async () => {
+    const longAnswer = `Stored answer ${'A'.repeat(54_000)}`
+    fake.enqueue(
+      { content: '{"intent":"chat","urls":[]}' },
+      { content: longAnswer },
+      { content: '{"intent":"chat","urls":[]}' },
+      { content: 'The next answer still works.' }
+    )
+    const user = userEvent.setup()
+    renderChat()
+
+    const composer = await screen.findByPlaceholderText(/^ask /i)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    fireEvent.change(composer, { target: { value: 'Start a long conversation' } })
+    await user.click(screen.getByRole('button', { name: /^send$/i }))
+    expect(await inTranscript(longAnswer)).toBeTruthy()
+
+    fireEvent.change(composer, { target: { value: 'Continue after the context fills' } })
+    await user.click(screen.getByRole('button', { name: /^send$/i }))
+    expect(await inTranscript('The next answer still works.')).toBeTruthy()
+    expect(
+      await screen.findByText('Compacted conversation to make room for more messages.')
+    ).toBeTruthy()
+    const nextModelRequest = JSON.stringify(fake.requests.at(-1))
+    expect(nextModelRequest).toContain('Earlier chat excerpts')
+    expect(nextModelRequest).not.toContain(longAnswer)
+
+    const { getRagConversations, getRagMessages } = await import('../src/main/database')
+    const conversation = getRagConversations().find(
+      ({ title }) => title === 'Start a long conversation'
+    )
+    expect(conversation).toBeTruthy()
+    expect(getRagMessages(conversation!.id)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ content: '_Compacted_' })])
+    )
   })
 
   it('renders projects, chats, messages, and artifacts after the real database reopens', async () => {
