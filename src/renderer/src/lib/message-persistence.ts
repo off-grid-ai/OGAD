@@ -134,10 +134,13 @@ export function readGenerationMetrics(ctx: unknown): GenerationMetrics | undefin
     'contextWindowTokens',
     'estimatedPromptTokens'
   ] as const
-  const metrics: Record<string, number> = {}
+  const metrics: Record<string, number | string> = {}
   for (const key of keys) {
     const value = source[key]
     if (typeof value === 'number' && Number.isFinite(value) && value > 0) metrics[key] = value
+  }
+  if (typeof source.modelName === 'string' && source.modelName.trim()) {
+    metrics.modelName = source.modelName.trim()
   }
   return Object.keys(metrics).length ? (metrics as GenerationMetrics) : undefined
 }

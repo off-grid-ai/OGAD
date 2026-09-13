@@ -10,7 +10,7 @@ type Event = {
   streamId: string
   type: 'reasoning' | 'content' | 'step' | 'tool_result'
   text?: string
-  step?: { kind: 'running_tool'; name: string }
+  step?: { kind: 'running_tool'; name: string } | { kind: 'model_changed'; failed: string; next: string }
   call?: { name: string; result: string; status: 'completed' }
 }
 
@@ -21,7 +21,7 @@ function chatBoundary(
 ): {
   status: () => { streamId: string; messages: string[]; voice: string; syntheses: string[] }
   emit: (event: Omit<Event, 'streamId'>) => void
-  finish: () => void
+  finish: (modelName?: string) => void
 } {
   const conversation = {
     id: 'timeline-chat',
@@ -145,9 +145,10 @@ function chatBoundary(
       syntheses
     }),
     emit: (event) => onStream?.({ ...event, streamId }),
-    finish: () =>
+    finish: (modelName) =>
       finishTurn?.({
         answer: 'The answer is ready.',
+        metrics: modelName ? { modelName } : undefined,
         toolCalls: [
           { name: 'web_search', result: 'Search results', status: 'completed' },
           { name: 'read_url', result: 'Page content', status: 'completed' }
@@ -171,6 +172,50 @@ function timelineLabels(): string[] {
 afterEach(cleanup)
 
 describe('<MemoryChat/> ordered tool turn', () => {
+  it('replaces failed model text with the new answer and keeps the model-change row after reload', async () => {
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+    const boundary = chatBoundary(undefined, false, true)
+    const user = userEvent.setup()
+    const chat = render(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'timeline-chat' }} />
+      </TooltipProvider>
+    )
+
+    await screen.findByText('Earlier question')
+    const composer = await screen.findByPlaceholderText(/^ask /i)
+    fireEvent.change(composer, { target: { value: 'Answer this' } })
+    await user.click(screen.getByRole('button', { name: /^send$/i }))
+    await waitFor(() => expect(boundary.status().streamId).not.toBe(''))
+
+    await act(async () => {
+      boundary.emit({ type: 'content', text: 'Failed route partial.' })
+      boundary.emit({ type: 'reasoning', text: 'Failed route thought.' })
+      boundary.emit({ type: 'step', step: {
+        kind: 'model_changed', failed: 'First model', next: 'Backup model'
+      } })
+      boundary.emit({ type: 'content', text: 'The answer is ready.' })
+      boundary.finish('Backup model')
+    })
+
+    expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
+    expect(screen.queryByText('Failed route partial.')).toBeNull()
+    expect(screen.queryByText('Failed route thought.')).toBeNull()
+
+    chat.unmount()
+    render(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'timeline-chat' }} />
+      </TooltipProvider>
+    )
+    expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
+    expect(screen.queryByText('Failed route partial.')).toBeNull()
+  })
+
   it('interleaves reasoning with tools live and keeps the same completed timeline after reload', async () => {
     ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     const boundary = chatBoundary()
