@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import type { ChatStreamTool, ProjectedSyncedTool } from '@offgrid/sync'
 import { CaretDown, Check, Circle, Warning, X } from '@phosphor-icons/react'
 import { ChatMarkdown } from './ChatMarkdown'
+import { ChatThinkingBlock } from './ChatThinkingBlock'
+import type { AssistantTimelineEntry } from '@renderer/lib/message-persistence'
 import {
   Collapsible,
   CollapsibleContent,
@@ -24,6 +26,9 @@ type DisplayTool =
 interface ChatToolRowsProps {
   tools?: readonly DisplayTool[]
   thinking?: ReactNode
+  timeline?: readonly AssistantTimelineEntry[]
+  thinkingLive?: boolean
+  memorySources?: { count: number; content: ReactNode }
   /** The task that belongs to this live Chat turn before its tool result contains a task id. */
   liveTask?: TaskSession
 }
@@ -224,6 +229,9 @@ function liveTaskToolIndex(
 export function ChatToolRows({
   tools,
   thinking,
+  timeline,
+  thinkingLive = false,
+  memorySources,
   liveTask
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
@@ -242,20 +250,39 @@ export function ChatToolRows({
             status: 'running'
           }
         ]
-  if (visible.length === 0 && !thinking) return null
+  if (visible.length === 0 && !thinking && !timeline?.length) return null
   const liveToolIndex = liveTaskToolIndex(visible, liveTask)
+  const firstMemoryToolIndex = visible.findIndex(
+    (tool) => normalizedToolKey(tool.name) === 'search_memory' && workStatus(tool) === 'complete'
+  )
   const projected = visible.map((tool, index) => {
     const taskId = taskReferenceFromResult(tool.result)
     const linkedTask =
       linkedTaskForReference(tasks, taskId) ?? (index === liveToolIndex ? liveTask : undefined)
     return { tool, taskId, linkedTask, status: taskWorkStatus(linkedTask) ?? workStatus(tool) }
   })
+  const ordered: AssistantTimelineEntry[] = timeline?.length
+    ? [
+        ...timeline,
+        ...projected.flatMap((_, index) =>
+          timeline.some((entry) => entry.kind === 'tool' && entry.toolIndex === index)
+            ? []
+            : [{ kind: 'tool' as const, toolIndex: index }]
+        )
+      ]
+    : projected.map((_, index) => ({ kind: 'tool', toolIndex: index }))
+  const hasOrderedThinking = ordered.some((entry) => entry.kind === 'thinking')
+  // The ephemeral mesh preview retains only its newest tools. Durable toolCalls has every call.
+  const toolOffset = Math.max(
+    0,
+    ordered.filter((entry) => entry.kind === 'tool').length - projected.length
+  )
   return (
     <ol
       className="ml-1 mt-1 w-full max-w-[85%] border-l border-neutral-800 text-neutral-500"
-      aria-label={thinking ? 'Thinking and tool calls' : 'Tool calls'}
+      aria-label={thinking || hasOrderedThinking ? 'Thinking and tool calls' : 'Tool calls'}
     >
-      {thinking ? (
+      {thinking && !hasOrderedThinking ? (
         <li className="relative pb-2 pl-4">
           <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
             <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
@@ -263,7 +290,32 @@ export function ChatToolRows({
           {thinking}
         </li>
       ) : null}
-      {projected.map(({ tool, linkedTask, status: stepStatus }, index) => {
+      {ordered.map((entry, orderIndex) => {
+        if (entry.kind === 'thinking') {
+          return (
+            <li key={`thinking:${orderIndex}`} className="relative pb-2 pl-4 last:pb-0">
+              <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
+                <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
+              </span>
+              <ChatThinkingBlock
+                content={entry.text}
+                live={thinkingLive && orderIndex === ordered.length - 1}
+                className="max-w-full"
+              />
+            </li>
+          )
+        }
+        const projectedTool = projected[entry.toolIndex - toolOffset]
+        if (!projectedTool) return null
+        const { tool, linkedTask, status: stepStatus } = projectedTool
+        const memoryTool = normalizedToolKey(tool.name) === 'search_memory'
+        const showMemorySources = Boolean(
+          memorySources && entry.toolIndex === firstMemoryToolIndex + toolOffset
+        )
+        const sourceCount = memorySources?.count ?? 0
+        const stepLabel = showMemorySources
+          ? `Searched your memory — ${sourceCount} result${sourceCount === 1 ? '' : 's'}`
+          : workStepLabel(tool)
         const result = visibleToolResult(tool.result)
         const error = 'error' in tool ? tool.error?.trim() : undefined
         const taskSummary = linkedTask?.summary?.trim()
@@ -273,9 +325,12 @@ export function ChatToolRows({
         const details = taskSummary || error || result
         const durationMs = 'durationMs' in tool ? tool.durationMs : undefined
         const hasComputerDetails = Boolean(linkedTask?.stepDetails?.length)
-        const hasDisclosure = Boolean(details) || hasComputerDetails || Boolean(linkedTask)
+        const hasDisclosure =
+          showMemorySources ||
+          (!(memorySources && memoryTool && stepStatus === 'complete') &&
+            (Boolean(details) || hasComputerDetails || Boolean(linkedTask)))
         return (
-          <li key={`${tool.name}:${index}`} className="relative pb-2 pl-4 last:pb-0">
+          <li key={`${tool.name}:${entry.toolIndex}`} className="relative pb-2 pl-4 last:pb-0">
             <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
               {statusIcon(stepStatus)}
             </span>
@@ -283,7 +338,7 @@ export function ChatToolRows({
               <CollapsibleTrigger
                 disabled={!hasDisclosure}
                 className="group flex w-full items-start gap-2 text-left disabled:cursor-default"
-                aria-label={`${workStepLabel(tool)}, ${stepStatus}`}
+                aria-label={`${stepLabel}, ${stepStatus}`}
                 onClick={() => {
                   if (linkedTask) {
                     openTaskSidePanel({
@@ -295,10 +350,12 @@ export function ChatToolRows({
                 }}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-xs text-neutral-300">{workStepLabel(tool)}</span>
-                  <span className="mt-0.5 block text-[10px] leading-relaxed text-neutral-500 group-data-[state=open]:hidden">
-                    {shortResult(tool, stepStatus, rowSummary)}
-                  </span>
+                  <span className="block text-xs text-neutral-300">{stepLabel}</span>
+                  {!showMemorySources ? (
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-neutral-500 group-data-[state=open]:hidden">
+                      {shortResult(tool, stepStatus, rowSummary)}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="shrink-0 text-[9px] text-neutral-600">
                   {durationMs !== undefined ? `${Math.round(durationMs)} ms · ` : ''}
@@ -312,8 +369,18 @@ export function ChatToolRows({
                 ) : null}
               </CollapsibleTrigger>
               {hasDisclosure ? (
-                <CollapsibleContent className="mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500">
-                  {details ? <ChatMarkdown content={details} /> : null}
+                <CollapsibleContent
+                  className={
+                    showMemorySources
+                      ? 'mt-1 max-h-[400px] overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm'
+                      : 'mt-1 border-l-2 border-neutral-800 pl-3 text-xs leading-relaxed text-neutral-500'
+                  }
+                >
+                  {showMemorySources ? (
+                    memorySources?.content
+                  ) : details ? (
+                    <ChatMarkdown content={details} />
+                  ) : null}
                   <ComputerUseStepDetails details={linkedTask?.stepDetails} />
                   {linkedTask ? (
                     <div className="flex flex-wrap gap-2">
