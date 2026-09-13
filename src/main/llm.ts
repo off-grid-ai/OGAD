@@ -1,5 +1,4 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
-import os from 'os'
 import { Mutex } from 'async-mutex'
 import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
@@ -7,10 +6,7 @@ import * as fs from 'fs'
 import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
 import {
-  computeSafeCtx,
-  modeBudget,
   loadAttempts,
-  capContextToModel,
   type KvCacheType,
   type PerformanceMode
 } from './model-sizing'
@@ -121,9 +117,8 @@ export class LLMService {
   private initPromise: Promise<void> | null = null
   private modelPath = ''
   private mmProjPath = '' // empty for text-only models (no vision projector)
-  // The model's TRAINED context window (from GGUF metadata), memoized per model path. Used as the
-  // ceiling so a user can run up to the model's own limit (like LM Studio) instead of an arbitrary
-  // cap — and so we never exceed the trained window, which is what "breaks above 16k". null = unknown.
+  // The model's trained context window (from GGUF metadata), memoized per model path.
+  // Reported to the settings UI; the selected launch context is never silently reduced.
   private modelMaxCtx: number | null = null
   private modelMaxCtxFor = ''
   private initialized = false
@@ -173,8 +168,7 @@ export class LLMService {
   // Auto (0) = unrestricted. Applied per request; no reload needed.
   private reasoningBudget = REASONING_BUDGET_AUTO
   private systemPrompt = ''
-  // Resource-usage preset. Governs the RAM budget the context clamp targets and
-  // the default ctx/KV preset. 'balanced' preserves prior behavior.
+  // Resource-usage preset. Governs model choice and default context/KV settings.
   private performanceMode: PerformanceMode = 'balanced'
   // Launch-time params (need a respawn). Defaults match prior hardcoded behavior.
   private kvCacheType: KvCacheType = 'f16'
@@ -260,16 +254,9 @@ export class LLMService {
     }
   }
 
-  // Clamp the requested context window to what THIS machine + THIS model can hold
-  // without overcommitting unified memory. A big -c allocates a KV cache up front
-  // (with -ngl 99 it's resident in unified memory alongside the weights); on a
-  // 16GB Mac an 8B model at 64k blew past physical RAM and FROZE macOS. We size a
-  // KV budget from total RAM minus the model weights minus headroom for the OS,
-  // Electron, and Metal compute, then cap context to fit. Better a shorter context
-  // than a hard freeze; users on big machines still get a large window (it scales).
   /** The current model's trained context window (GGUF `<arch>.context_length`), memoized per model
    *  path so we read the file's header at most once per model. null when it can't be determined
-   *  (unreadable file / missing key) — in which case only the RAM clamp applies. */
+   *  (unreadable file / missing key). */
   private trainedContext(): number | null {
     if (this.modelMaxCtxFor !== this.modelPath) {
       this.modelMaxCtx = this.modelPath ? readGgufContextLength(this.modelPath, fs) : null
@@ -291,51 +278,9 @@ export class LLMService {
     return this.port
   }
 
-  private safeCtxSize(requestedRaw: number): number {
-    // First cap to the model's trained window (pure), THEN clamp to what RAM can hold.
-    const trained = this.trainedContext()
-    const requested = capContextToModel(requestedRaw, trained)
-    try {
-      const totalGb = os.totalmem() / 1e9
-      let weightsGb = 0
-      try {
-        weightsGb += fs.statSync(this.modelPath).size / 1e9
-      } catch {
-        /* unknown */
-      }
-      try {
-        if (this.mmProjPath) weightsGb += fs.statSync(this.mmProjPath).size / 1e9
-      } catch {
-        /* unknown */
-      }
-      const { frac, reserveGb } = modeBudget(this.performanceMode)
-      const rounded = computeSafeCtx({
-        requested,
-        totalGb,
-        weightsGb,
-        kvType: this.kvCacheType,
-        frac,
-        reserveGb
-      })
-      if (rounded < requested) {
-        console.warn(
-          `[LLMService] Clamping context ${requested} -> ${rounded} (RAM ${totalGb.toFixed(0)}GB, weights ${weightsGb.toFixed(1)}GB) to avoid memory overcommit`
-        )
-      }
-      // computeSafeCtx has a 2048-token floor (Math.max(2048, …)); re-cap to the trained window so a
-      // model trained BELOW that floor (e.g. 1024) is never run past its context.
-      return capContextToModel(rounded, trained)
-    } catch {
-      // If anything goes wrong reading sizes, fall back to a universally-safe value.
-      return capContextToModel(Math.min(requested, 8192), trained)
-    }
-  }
-
-  /** The selected app context cap. Local inference also needs the RAM clamp;
-   *  remote inference uses the configured cap without the local model's clamp. */
+  /** The selected app context cap for local and remote inference. */
   effectiveContextSize(): number {
-    if (this.activeRemoteTextModel()) return this.ctxSize
-    return this.safeCtxSize(this.ctxSize)
+    return this.ctxSize
   }
 
   /** The accelerator the RUNNING engine offloads to, or null when none is up (or when the
@@ -367,10 +312,10 @@ export class LLMService {
       threads: this.threads,
       batchSize: this.batchSize,
       performanceMode: this.performanceMode,
-      // Report the EFFECTIVE (clamped) context so the UI can show what's really used, plus the
+      // Report the selected context so the UI can show what's used, plus the
       // model's trained maximum so the UI can offer the slider up to it (not a hardcoded cap),
       // plus the accelerator the running engine chose so the UI never has to guess one.
-      effectiveCtxSize: this.safeCtxSize(this.ctxSize),
+      effectiveCtxSize: this.ctxSize,
       modelMaxCtx: this.trainedContext(),
       gpuAccelerator: this.activeAccelerator()
     } as LlmSettings & {
@@ -380,17 +325,13 @@ export class LLMService {
     }
   }
 
-  /** The exact argv handed to `llama-server` for the CURRENT settings — the terminal
-   *  artifact of the whole settings→persist→reload path. Delegates to the pure
-   *  `buildLaunchArgs` (single source of truth) after applying the impure RAM clamp,
-   *  so `_doInit` and tests build args the same way. */
+  /** The exact argv handed to `llama-server` for the current settings.
+   *  Both `_doInit` and tests use the same `buildLaunchArgs` path. */
   launchArgs(): string[] {
-    return this.launchArgsFor(this.safeCtxSize(this.ctxSize), this.gpuLayers)
+    return this.launchArgsFor(this.ctxSize, this.gpuLayers)
   }
 
-  /** Build the argv for a SPECIFIC context size + GPU-layer count — the single
-   *  source used by both `launchArgs()` and the OOM fallback ladder, so every
-   *  attempt is constructed the same way (only ctx + ngl vary). */
+  /** Build argv for the selected context and a GPU-layer count. */
   private launchArgsFor(effectiveCtxSize: number, gpuLayers: number): string[] {
     return buildLaunchArgs({
       modelPath: this.modelPath,
@@ -768,14 +709,10 @@ export class LLMService {
     console.error('[LLMService] all llama-server engines failed to load the model')
   }
 
-  /** Try to load the model, degrading instead of failing so the user is never told
-   *  "can't load". For each engine binary we walk the loadAttempts ladder (requested
-   *  context on GPU → smaller contexts → CPU-only at 2048). We only step DOWN the
-   *  ladder on an out-of-memory failure — any other failure (unsupported arch,
-   *  missing dylib) won't be fixed by less context, so we move to the next engine.
-   *  launchArgs()/buildLaunchArgs stays the single source for the argv shape. */
+  /** Try each engine at the selected context, with a CPU attempt after GPU OOM.
+   *  For other failures, try the next engine. Every attempt uses `buildLaunchArgs`. */
   private async launchWithFallback(serverPaths: string[]): Promise<boolean> {
-    const attempts = loadAttempts(this.safeCtxSize(this.ctxSize), this.gpuLayers)
+    const attempts = loadAttempts(this.ctxSize, this.gpuLayers)
     for (const serverPath of serverPaths) {
       if (!serverPath) continue
       for (let a = 0; a < attempts.length; a++) {
@@ -793,8 +730,7 @@ export class LLMService {
         }
         // launchServer already tore its process down; free the port before any retry.
         await this.prepareModelPort()
-        // Advance down the ladder ONLY for a memory failure; anything else means a
-        // smaller context won't help, so give up on this engine and try the next.
+        // Try CPU only for a memory failure; other failures move to the next engine.
         if (classifyLlamaError(this.stderrTail.join('\n'))?.code !== 'out_of_memory') break
       }
     }
@@ -976,9 +912,7 @@ export class LLMService {
     this.lastErrorMsg = null
   }
 
-  /** Auto-recover from an unexpected llama-server crash. Backs off, and on repeated
-   *  crashes shrinks the context (the usual culprit is memory pressure) before
-   *  retrying. Gives up after a few attempts so we never spin forever. */
+  /** Auto-recover from an unexpected llama-server crash without changing saved settings. */
   private async handleCrash(code: number): Promise<void> {
     // Rolling 2-minute window: if it has already died 3× recently, STOP recovering.
     // Prevents thrash-respawning a multi-GB process when the model is too heavy for
@@ -993,17 +927,6 @@ export class LLMService {
       return
     }
     this.restartTimes.push(now)
-    // On a repeat death in the window, halve the context — usually OOM/overcommit.
-    if (this.restartTimes.length >= 2) {
-      const reduced = Math.max(2048, Math.floor(this.ctxSize / 2 / 1024) * 1024)
-      if (reduced < this.ctxSize) {
-        console.warn(
-          `[LLMService] reducing context ${this.ctxSize} -> ${reduced} after repeated crashes`
-        )
-        this.ctxSize = reduced
-        this.persist()
-      }
-    }
     await new Promise((r) => setTimeout(r, 1000 * this.restartTimes.length))
     if (this.paused || this.intentionalStop) return
     console.log(`[LLMService] auto-restarting llama-server (attempt ${this.restartTimes.length})`)

@@ -329,24 +329,18 @@ describe('never-block loading — context fallback ladder', () => {
   })
 })
 
-describe('never-block loading — loadAttempts (GPU → smaller ctx → CPU)', () => {
-  it('starts on GPU at the requested ctx, halves ctx, then ends CPU-only at 2048', () => {
+describe('never-block loading — loadAttempts keeps the selected context', () => {
+  it('tries GPU and then CPU at the same selected context', () => {
     const attempts = loadAttempts(16384, 99)
-    expect(attempts[0]).toEqual({ ctxSize: 16384, gpuLayers: 99, reason: 'requested' })
-    // GPU rungs descend by halving
-    const gpuRungs = attempts.filter((a) => a.gpuLayers === 99)
-    for (let i = 1; i < gpuRungs.length; i++) {
-      expect(gpuRungs[i]!.ctxSize).toBeLessThan(gpuRungs[i - 1]!.ctxSize)
-    }
-    // the final attempt is the CPU-only floor
-    const last = attempts[attempts.length - 1]!
-    expect(last).toEqual({ ctxSize: 2048, gpuLayers: 0, reason: 'CPU-only, context 2048' })
+    expect(attempts).toEqual([
+      { ctxSize: 16384, gpuLayers: 99, reason: 'requested' },
+      { ctxSize: 16384, gpuLayers: 0, reason: 'CPU-only' }
+    ])
   })
 
-  it('omits the extra CPU pass when GPU offload is already off (no duplicate 2048)', () => {
-    const attempts = loadAttempts(4096, 0)
-    expect(attempts.every((a) => a.gpuLayers === 0)).toBe(true)
-    // only one attempt sits at ctx 2048 (the ladder floor), not a duplicated CPU pass
-    expect(attempts.filter((a) => a.ctxSize === 2048)).toHaveLength(1)
+  it('does not retry a CPU-only request at another context', () => {
+    expect(loadAttempts(4096, 0)).toEqual([
+      { ctxSize: 4096, gpuLayers: 0, reason: 'requested' }
+    ])
   })
 })
