@@ -1,5 +1,6 @@
 import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
 import type { RemoteVisionProvider } from '../../shared/remote-vision-server'
+import { detectThinkingDialect, type ThinkingDialect } from './thinking-dialect'
 import {
   createCompletionStreamAccumulator,
   type CompletionStreamAccumulator,
@@ -42,9 +43,17 @@ interface OpenRouterModelMetadata {
   id?: unknown
   name?: unknown
   supported_parameters?: unknown
+  reasoning?: { mandatory?: boolean }
 }
 
 const nativeToolCapabilities = new Map<string, Promise<RemoteNativeToolCapability>>()
+type RemoteReasoningControl = ThinkingDialect | 'openrouter' | 'ollama'
+interface RemoteReasoningCapability {
+  control: RemoteReasoningControl
+  mandatory?: boolean
+  tokenBudget?: boolean
+}
+const reasoningCapabilities = new Map<string, Promise<RemoteReasoningCapability>>()
 
 function capabilityKey(remote: RemoteTextModelConnection): string {
   return `${remote.provider}\n${remote.endpoint}\n${remote.model}`
@@ -100,6 +109,59 @@ export function remoteNativeToolCapability(
   return discovered
 }
 
+/** Read the server's model/template facts, never its display name. Failed probes are retried. */
+async function remoteReasoningCapability(
+  remote: RemoteTextModelConnection
+): Promise<RemoteReasoningCapability> {
+  const key = capabilityKey(remote)
+  const cached = reasoningCapabilities.get(key)
+  if (cached) return cached
+  const discovered = (async (): Promise<RemoteReasoningCapability> => {
+    if (remote.provider === 'openrouter') {
+      const response = await fetch(`${remote.endpoint}/models`, {
+        headers: remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {},
+        signal: AbortSignal.timeout(5_000)
+      })
+      if (!response.ok) throw new Error('reasoning metadata unavailable')
+      const body = (await response.json()) as { data?: OpenRouterModelMetadata[] }
+      const model = body.data?.find((candidate) => candidate.id === remote.model)
+      return {
+        control: model?.reasoning ? 'openrouter' : 'none',
+        mandatory: model?.reasoning?.mandatory === true
+      }
+    }
+    if (remote.provider === 'ollama') {
+      const response = await fetch(`${remote.endpoint.replace(/\/v1\/?$/i, '')}/api/show`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: remote.model }),
+        signal: AbortSignal.timeout(5_000)
+      })
+      if (!response.ok) throw new Error('reasoning metadata unavailable')
+      const body = (await response.json()) as { capabilities?: unknown; template?: unknown }
+      const template = typeof body.template === 'string' ? body.template : ''
+      const supportsThinking =
+        (Array.isArray(body.capabilities) && body.capabilities.includes('thinking')) ||
+        /\.Think|\.Thinking|\.IsThinkSet/.test(template)
+      return { control: supportsThinking ? 'ollama' : 'none' }
+    }
+    const response = await fetch(`${remote.endpoint.replace(/\/v1\/?$/i, '')}/props`, {
+      signal: AbortSignal.timeout(5_000)
+    })
+    if (response.ok) {
+      const body = (await response.json()) as { chat_template?: string }
+      return { control: detectThinkingDialect(body.chat_template), tokenBudget: true }
+    }
+    // LM Studio accepts this per-request switch even though its model list has no template.
+    return { control: remote.provider === 'lmstudio' ? 'enable-thinking' : 'none' }
+  })().catch(() => {
+    reasoningCapabilities.delete(key)
+    return { control: remote.provider === 'openrouter' ? 'openrouter' : 'none' } as const
+  })
+  reasoningCapabilities.set(key, discovered)
+  return discovered
+}
+
 export function nativeToolPlannerUnavailableMessage(
   capability: RemoteNativeToolCapability
 ): string {
@@ -149,8 +211,32 @@ export function remoteTextModelProviderError(status: number, rawBody: string): E
 /** The OpenAI-compatible request body. Pure: what we send, with nothing about how we send it. */
 function completionRequestBody(
   remote: RemoteTextModelConnection,
-  request: RemoteChatRequest
+  request: RemoteChatRequest,
+  capability: RemoteReasoningCapability
 ): string {
+  const thinking = request.thinking
+  const budget = request.reasoningBudget ?? REASONING_BUDGET_AUTO
+  const ollamaEffort =
+    budget > 0 ? (budget <= 1024 ? 'low' : budget <= 4096 ? 'medium' : 'high') : 'medium'
+  const reasoning =
+    thinking === undefined || capability.control === 'none'
+      ? {}
+      : capability.control === 'openrouter'
+        ? thinking
+          ? openRouterReasoningPayload(true, budget)
+          : capability.mandatory
+            ? {}
+            : { reasoning: { effort: 'none' } }
+        : capability.control === 'ollama'
+          ? { reasoning_effort: thinking ? ollamaEffort : 'none' }
+          : capability.control === 'reasoning-strength'
+            ? { chat_template_kwargs: { reasoning_strength: thinking ? 'high' : 'none' } }
+            : {
+                chat_template_kwargs: { enable_thinking: thinking },
+                ...(thinking && capability.tokenBudget && budget > 0
+                  ? { reasoning_budget_tokens: budget }
+                  : {})
+              }
   return JSON.stringify({
     model: remote.model,
     messages: request.messages,
@@ -161,14 +247,7 @@ function completionRequestBody(
     ...(request.tools?.length
       ? { tools: request.tools, tool_choice: request.toolChoice ?? 'auto' }
       : {}),
-    // Carry the user's configured thinking cap, not just a coarse effort hint. Without this the
-    // cap was dropped for every remote model and the budget setting did nothing.
-    ...(remote.provider === 'openrouter'
-      ? openRouterReasoningPayload(
-          request.thinking === true,
-          request.reasoningBudget ?? REASONING_BUDGET_AUTO
-        )
-      : {}),
+    ...reasoning,
     stream: true
   })
 }
@@ -276,13 +355,17 @@ export async function streamRemoteChatCompletion(input: {
 
   const watchdog = createIdleWatchdog(options.timeoutMs, options.signal)
   try {
+    const reasoning =
+      request.thinking === undefined
+        ? { control: 'none' as const }
+        : await remoteReasoningCapability(remote)
     const response = await fetch(`${remote.endpoint}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(remote.apiKey ? { Authorization: `Bearer ${remote.apiKey}` } : {})
       },
-      body: completionRequestBody(remote, request),
+      body: completionRequestBody(remote, request, reasoning),
       signal: watchdog.signal
     })
     watchdog.arm()
