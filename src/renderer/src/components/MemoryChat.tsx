@@ -8,7 +8,11 @@ import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { toSpeakableText } from '@renderer/lib/speakable'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
-import { applyStreamEvent, hasLiveStreamActivity } from '@renderer/lib/stream-reducer'
+import {
+  appendTimelineEvent,
+  applyStreamEvent,
+  hasLiveStreamActivity
+} from '@renderer/lib/stream-reducer'
 import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
 import {
@@ -78,9 +82,11 @@ import {
 import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-intent'
 import {
   buildAssistantContext,
+  readAssistantTimeline,
   readReasoning,
   readResponseCutoff,
-  readGenerationMetrics
+  readGenerationMetrics,
+  type AssistantTimelineEntry
 } from '../lib/message-persistence'
 import { formatGenerationMetrics, type GenerationMetrics } from '../../../shared/generation-metrics'
 import {
@@ -217,6 +223,7 @@ type ChatMessage = {
   metrics?: GenerationMetrics
   provenance?: RecordProvenance
   reasoning?: string
+  timeline?: AssistantTimelineEntry[]
   /** Keep the live Thinking row visible before the first reasoning token arrives. */
   reasoningRequested?: boolean
   cutoff?: ResponseCutoffContract
@@ -535,6 +542,7 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     content: projectedTurnContent(turn),
     context,
     reasoning: turn.reasoning ?? readReasoning(context),
+    timeline: readAssistantTimeline(context),
     cutoff: readResponseCutoff(context),
     metrics: readGenerationMetrics(context),
     toolsOffered: turn.toolsOffered,
@@ -768,6 +776,8 @@ function ToolMessageTimelineRow({
 
 function VoiceMessageRow({
   message,
+  liveTask,
+  navigation,
   autoPlay,
   copied,
   showTranscriptInitially,
@@ -778,6 +788,8 @@ function VoiceMessageRow({
   onRegenerate
 }: Readonly<{
   message: ChatMessage
+  liveTask?: TaskSession
+  navigation: ContextNavigation
   autoPlay: boolean
   copied: boolean
   showTranscriptInitially: boolean
@@ -792,6 +804,20 @@ function VoiceMessageRow({
     (active: boolean) => onPlaybackStateChange(message.id, active),
     [message.id, onPlaybackStateChange]
   )
+  const toolTimeline =
+    message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
+  const thinking =
+    toolTimeline &&
+    !message.timeline?.some((entry) => entry.kind === 'thinking') &&
+    (message.streaming || message.reasoning?.trim() || message.reasoningRequested)
+      ? <MessageThinkingHeader message={message} timeline />
+      : undefined
+  const memorySources = hasInlineMemorySources(message)
+    ? {
+        count: message.context.unified.length,
+        content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
+      }
+    : undefined
   let body: React.JSX.Element
   if (message.role === 'user') {
     body = (
@@ -827,7 +853,15 @@ function VoiceMessageRow({
   } else {
     body = (
       <>
-        <MessageThinkingHeader message={message} />
+        {toolTimeline ? null : <MessageThinkingHeader message={message} />}
+        <ChatToolRows
+          tools={message.toolCalls}
+          thinking={thinking}
+          timeline={toolTimeline ? message.timeline : undefined}
+          thinkingLive={Boolean(message.streaming && !message.content)}
+          memorySources={memorySources}
+          liveTask={liveTask}
+        />
         <VoiceBubble
           messageId={message.id}
           transcript={messageToSpeakable(selectedMessageContent(message))}
@@ -944,7 +978,7 @@ function MessageThinkingHeader({
     >
       <ChatThinkingBlock
         content={readableContent}
-        label={reasoning ? (message.reasoningLabel ?? (timeline ? 'Thinking' : undefined)) : 'Thinking unavailable'}
+        label={reasoning ? message.reasoningLabel : 'Thinking unavailable'}
         className={timeline ? 'max-w-full' : undefined}
       />
     </div>
@@ -1687,6 +1721,21 @@ type ContextNavigation = Readonly<{
 
 type UnifiedContextItem = NonNullable<RagContext['unified']>[number]
 
+function hasInlineMemorySources(
+  message: ChatMessage
+): message is ChatMessage & { context: RagContext & { unified: UnifiedContextItem[] } } {
+  return Boolean(
+    message.role === 'assistant' &&
+      message.context?.unified?.length &&
+      message.toolCalls?.some(
+        (tool) =>
+          tool.name === 'search_memory' &&
+          tool.status !== 'failed' &&
+          !/^\s*(error|failed)\s*:/i.test(tool.result)
+      )
+  )
+}
+
 function openUnifiedContext(item: UnifiedContextItem, navigation: ContextNavigation): void {
   navigateSearchHit(
     {
@@ -2119,13 +2168,28 @@ function StandardMessageRow({
   const toolTimeline =
     message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
   const thinking =
-    toolTimeline && (message.streaming || message.reasoning?.trim() || message.reasoningRequested)
+    toolTimeline &&
+    !message.timeline?.some((entry) => entry.kind === 'thinking') &&
+    (message.streaming || message.reasoning?.trim() || message.reasoningRequested)
       ? <MessageThinkingHeader message={message} timeline />
       : undefined
+  const memorySources = hasInlineMemorySources(message)
+    ? {
+        count: message.context.unified.length,
+        content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
+      }
+    : undefined
   return (
     <div className={standardMessageRowClass(message)} data-testid={`chat-message-${message.id}`}>
       {toolTimeline ? null : <MessageThinkingHeader message={message} />}
-      <ChatToolRows tools={message.toolCalls} thinking={thinking} liveTask={liveTask} />
+      <ChatToolRows
+        tools={message.toolCalls}
+        thinking={thinking}
+        timeline={toolTimeline ? message.timeline : undefined}
+        thinkingLive={Boolean(message.streaming && !message.content)}
+        memorySources={memorySources}
+        liveTask={liveTask}
+      />
       <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
       {message.role === 'user' ? (
         message.context?.taskGuidance ? (
@@ -2163,7 +2227,10 @@ function StandardMessageRow({
         <GenerationMetricsRow metrics={message.metrics} />
       ) : null}
       {message.role === 'assistant' ? (
-        <ContextDisclosure context={message.context} navigation={navigation} />
+        <ContextDisclosure
+          context={memorySources ? { ...message.context, unified: [] } : message.context}
+          navigation={navigation}
+        />
       ) : null}
     </div>
   )
@@ -2265,6 +2332,8 @@ function MessageRow({
     body = (
       <VoiceMessageRow
         message={message}
+        liveTask={liveTask}
+        navigation={navigation}
         autoPlay={state.autoPlayId === message.id}
         copied={state.copiedKey === message.id}
         showTranscriptInitially={state.latestVoiceAssistantId === message.id}
@@ -3046,6 +3115,7 @@ export function MemoryChat({
   // read could see undefined and the persisted 'Thinking' block would vanish on
   // reload (the exact T1f bug). A ref is written synchronously and read directly.
   const reasoningByStream = useRef<Record<string, string>>({})
+  const timelineByStream = useRef<Record<string, AssistantTimelineEntry[]>>({})
   /** What the model has actually said so far, per stream — see the stream handler for why. */
   const answerByStream = useRef<Record<string, string>>({})
   // Conversations the user hit "stop" on. The in-flight send checks this at each of
@@ -4008,7 +4078,9 @@ export function MemoryChat({
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
         const toolReasoning = reasoningByStream.current[toolStreamId]
+        const toolTimeline = timelineByStream.current[toolStreamId]
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
+        delete timelineByStream.current[toolStreamId]
         delete answerByStream.current[toolStreamId]
         // Finalize the streamed placeholder in place (never append a second bubble).
         setConvMessages(convId, (prev) =>
@@ -4019,6 +4091,7 @@ export function MemoryChat({
                   content: answer,
                   context,
                   toolCalls,
+                  timeline: toolTimeline,
                   toolsOffered: tr?.toolsOffered,
                   metrics: tr?.metrics,
                   activity: undefined,
@@ -4029,6 +4102,7 @@ export function MemoryChat({
         )
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
+          timeline: toolTimeline,
           metrics: tr?.metrics
         })
         // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
@@ -4348,7 +4422,10 @@ export function MemoryChat({
       setLoading(false)
       await loadConversations()
       drainQueue(convId)
-      if (activeStreamId) streamConvRef.current.delete(activeStreamId)
+      if (activeStreamId) {
+        streamConvRef.current.delete(activeStreamId)
+        delete timelineByStream.current[activeStreamId]
+      }
     }
   }
 
@@ -4435,8 +4512,10 @@ export function MemoryChat({
       }
     ): Promise<void> => {
       const reasoning = reasoningByStream.current[streamId]?.trim() || undefined
+      const timeline = timelineByStream.current[streamId]
       const streamed = answerByStream.current[streamId] || ''
       delete reasoningByStream.current[streamId]
+      delete timelineByStream.current[streamId]
       delete answerByStream.current[streamId]
 
       const answer = (settled?.answer ?? streamed).trim()
@@ -4452,6 +4531,7 @@ export function MemoryChat({
                 ...m,
                 content: answer,
                 reasoning,
+                timeline,
                 context: settled?.context ?? m.context,
                 cutoff: settled?.cutoff ?? m.cutoff,
                 toolCalls: settled?.toolCalls ?? m.toolCalls,
@@ -4469,6 +4549,7 @@ export function MemoryChat({
           answer,
           buildAssistantContext(settled?.persistContext ?? settled?.context, {
             reasoning,
+            timeline,
             cutoff: settled?.cutoff
           })
         )
@@ -4770,6 +4851,10 @@ export function MemoryChat({
         reasoningByStream.current[data.streamId] =
           (reasoningByStream.current[data.streamId] || '') + (data.text || '')
       }
+      if (data.type === 'reasoning' || data.type === 'step') {
+        const timeline = appendTimelineEvent(timelineByStream.current[data.streamId], data)
+        if (timeline) timelineByStream.current[data.streamId] = timeline
+      }
       // The answer is mirrored for the same reason: when the user stops, the call can REJECT
       // rather than return, and then there is no result to read the partial answer out of. This
       // ref is the one place that always has what arrived.
@@ -4789,6 +4874,12 @@ export function MemoryChat({
         for (const stream of streams) {
           streamConvRef.current.set(stream.streamId, stream.conversationId)
           reasoningByStream.current[stream.streamId] = stream.reasoning
+          timelineByStream.current[stream.streamId] = [
+            ...(stream.reasoning.trim()
+              ? [{ kind: 'thinking' as const, text: stream.reasoning }]
+              : []),
+            ...(stream.tools ?? []).map((_, toolIndex) => ({ kind: 'tool' as const, toolIndex }))
+          ]
           answerByStream.current[stream.streamId] = stream.content
           markGenerating(stream.conversationId, true)
           setConvMessages(stream.conversationId, (previous) => {
@@ -4797,6 +4888,7 @@ export function MemoryChat({
               role: 'assistant',
               content: stream.content,
               reasoning: stream.reasoning,
+              timeline: timelineByStream.current[stream.streamId],
               reasoningRequested: stream.reasoningRequested,
               streaming: true,
               toolCalls: stream.tools?.map((tool) => ({
