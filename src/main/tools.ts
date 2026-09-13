@@ -77,7 +77,9 @@ export interface ToolConversationTurn {
 
 export type ToolCallStatus = 'completed' | 'failed' | 'pending'
 
-export type ToolActivity = { kind: 'planning'; label: 'Planning next action…' }
+export type ToolActivity =
+  | { kind: 'planning'; label: 'Planning next action…' }
+  | { kind: 'compacted'; label: 'Compacted' }
 
 // A tool's structured result. Most tools just return text (a bare string, which the
 // loop normalizes to { text }); a tool may ALSO emit side channels — `sources`
@@ -678,9 +680,40 @@ export async function toolChat(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const messages: any[] = [
     { role: 'system', content: sys },
-    ...history.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+    ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: buildContentParts(query, decodedImages) }
   ]
+  const compactAtChars = Math.floor(ctx * 0.8) * 4
+  if (toolPromptChars(messages, tools) >= compactAtChars && history.length) {
+    const older: { role: string; content: string }[] = []
+    const recent = history.slice()
+    let compacted = messages
+    while (recent.length && toolPromptChars(compacted, tools) >= compactAtChars) {
+      older.push(recent.shift()!)
+      const excerptTurns = [older[0]!, ...older.slice(-3).filter((turn) => turn !== older[0])]
+      const excerpts = excerptTurns.map(
+        (turn) =>
+          `${turn.role === 'assistant' ? 'Assistant' : 'User'}: ${turn.content.slice(0, 90)}`
+      )
+      const excerpt = {
+        role: 'user',
+        content:
+          `Earlier chat excerpts (${older.length} turns; some details omitted): ${excerpts.join(' | ')}`.slice(
+            0,
+            400
+          )
+      }
+      compacted = [messages[0], excerpt, ...recent, messages[messages.length - 1]]
+    }
+    if (toolPromptChars(compacted, tools) < toolPromptChars(messages, tools)) {
+      messages.splice(0, messages.length, ...compacted)
+      opts.onActivity?.({ kind: 'compacted', label: 'Compacted' })
+    }
+  }
+  // The 80% decision includes initially selected schemas. The first model round
+  // updates this estimate if safety fitting changes those schemas. Later tool
+  // results are transient; they must not make the displayed meter fall.
+  let retainedPromptTokens = Math.ceil(toolPromptChars(messages, tools) / 4)
   const toolCalls: ToolCall[] = []
   const successfulToolResults: string[] = []
   const unified: UnifiedSource[] = []
@@ -705,6 +738,11 @@ export async function toolChat(
     const finalImageRequest = imageRequests.at(-1)
     return {
       ...result,
+      metrics: {
+        ...result.metrics,
+        contextWindowTokens: result.metrics?.contextWindowTokens ?? ctx,
+        estimatedPromptTokens: retainedPromptTokens
+      },
       imageRequests,
       ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
     }
@@ -712,6 +750,10 @@ export async function toolChat(
 
   const settings = llm.getSettings()
   const maxToolCalls = normalizeMaxToolCalls(settings.maxToolCalls)
+  // Tool chat compacts at 80% above. Fit schemas around the retained turns and
+  // reserve space for the reply; never discard another turn without a notice.
+  const replyReserve = Math.min(1024, Math.max(256, Math.floor(ctx * 0.1)))
+  const maxPromptChars = Math.max(0, ctx - replyReserve) * 4
   const answerFrom = (content: string): string => {
     const visibleContent = stripChatControlTokens(content)
     const answer = finalResponseFromToolResults(visibleContent, successfulToolResults)
@@ -720,16 +762,41 @@ export async function toolChat(
   }
   let round = 0
   while (toolCalls.length < maxToolCalls) {
+    if (toolPromptChars(messages) > maxPromptChars) {
+      return resultWithImages({ answer: 'Context is full.', toolCalls, unified })
+    }
+    const availableToolTokens = Math.max(
+      0,
+      Math.floor((maxPromptChars - toolPromptChars(messages)) / 4)
+    )
+    const fittedTools = budgetTools(tools, availableToolTokens, builtins.length)
+    const roundTools = fittedTools.estTokens <= availableToolTokens ? fittedTools.tools : []
+    if (round === 0) retainedPromptTokens = Math.ceil(toolPromptChars(messages, roundTools) / 4)
+    const remainingOutputTokens = Math.max(
+      1,
+      ctx - Math.ceil(toolPromptChars(messages, roundTools) / 4) - 32
+    )
+    const roundMaxTokens =
+      typeof settings.maxTokens === 'number' && settings.maxTokens > 0
+        ? Math.min(settings.maxTokens, remainingOutputTokens)
+        : remainingOutputTokens
+    if (tools.length && !roundTools.length) {
+      console.warn('[tools] no tool schemas fit beside the retained conversation')
+    }
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
     // are accumulated and returned. A tool-calling round streams thinking (and no content);
     // the final round streams the answer. tool temperature stays 0.3 (was the blocking path).
-    const { content, toolCalls: calls, metrics } = await llm.streamChat(messages, onDelta, {
-      tools,
-      toolChoice: 'auto',
+    const {
+      content,
+      toolCalls: calls,
+      metrics
+    } = await llm.streamChat(messages, onDelta, {
+      tools: roundTools,
+      toolChoice: roundTools.length ? 'auto' : undefined,
       temperature: 0.3,
-      // No hardcoded output cap: the round that produces the FINAL answer (no tool calls) must be
-      // free to write a long response. Inherit the user's Max-output setting (auto by default →
-      // until EOS / window fills). A tool-selection round stays short on its own (it emits a call).
+      // Keep the user's lower Max Output setting, but never request more than
+      // this round has room to generate inside the configured context window.
+      maxTokens: roundMaxTokens,
       thinking: opts.thinking,
       signal: opts.signal
     })
@@ -746,8 +813,9 @@ export async function toolChat(
     // the native channel is empty, recover any text-form call so the turn isn't a
     // dead narration ("I would search for…"). Normalize both into one shape with
     // args already parsed to an object.
-    const effective =
-      calls.length > 0
+    const effective = !roundTools.length
+      ? []
+      : calls.length > 0
         ? calls.map((c) => ({
             id: c.id,
             name: c.name,
@@ -791,12 +859,28 @@ export async function toolChat(
         const rawResult = await runTool(c.name, c.args, toolContext, exts)
         const resultBudget = toolResultCharBudget({
           contextLength: llm.effectiveContextSize(),
-          promptChars: toolPromptChars(messages, tools),
+          promptChars: toolPromptChars(messages, roundTools),
           replyReserveTokens: settings.maxTokens
         })
+        const resultRoom = Math.max(
+          0,
+          maxPromptChars -
+            toolPromptChars([...messages, { role: 'tool', tool_call_id: c.id, content: '' }])
+        )
+        const boundedText = boundToolResult(
+          c.name,
+          rawResult.text,
+          rawResult.authoritative
+            ? resultBudget
+            : Math.min(resultBudget, Math.max(0, resultRoom - 100))
+        )
         const res = {
           ...rawResult,
-          text: boundToolResult(c.name, rawResult.text, resultBudget)
+          text: rawResult.authoritative
+            ? boundedText
+            : resultRoom <= 100
+              ? rawResult.text.slice(0, resultRoom)
+              : boundedText.slice(0, resultRoom)
         }
         for (const s of res.sources ?? []) {
           if (unifiedKeys.has(s.key)) continue
@@ -833,10 +917,17 @@ export async function toolChat(
     { role: 'system', content: toolLimitFinalAnswerInstruction(maxToolCalls) },
     ...messages.filter((message) => message.role !== 'system')
   ]
+  if (toolPromptChars(finalMessages) > maxPromptChars) {
+    return resultWithImages({ answer: answerFrom('') || 'Context is full.', toolCalls, unified })
+  }
+  const finalOutputRoom = Math.max(1, ctx - Math.ceil(toolPromptChars(finalMessages) / 4) - 32)
   const final = await llm.streamChat(finalMessages, onDelta, {
     temperature: 0.3,
-    // Forced final answer — inherit the user's Max-output setting (auto by default), never a fixed
-    // 1024 cap that truncated the response mid-sentence.
+    // Forced final answer obeys the same context-bound cap as every tool round.
+    maxTokens:
+      typeof settings.maxTokens === 'number' && settings.maxTokens > 0
+        ? Math.min(settings.maxTokens, finalOutputRoom)
+        : finalOutputRoom,
     thinking: false,
     signal: opts.signal
   })
