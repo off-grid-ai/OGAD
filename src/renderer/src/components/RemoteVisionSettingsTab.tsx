@@ -234,14 +234,6 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       setStatus('Test the connection and select a model first.')
       return
     }
-    if (
-      form.contextWindowTokens &&
-      (!Number.isSafeInteger(Number(form.contextWindowTokens)) ||
-        Number(form.contextWindowTokens) < 1024)
-    ) {
-      setStatus('Enter a context window of at least 1024 tokens.')
-      return
-    }
     setBusy(true)
     setStatus('Saving...')
     try {
@@ -527,25 +519,6 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 </div>
               </Row>
             ) : null}
-            <Row
-              label="Context window"
-              controlId="remote-context-window"
-              hint="Tokens for this remote model. Leave empty if unknown."
-            >
-              <input
-                id="remote-context-window"
-                type="number"
-                min={1024}
-                step={1024}
-                value={form.contextWindowTokens}
-                onChange={(event) => {
-                  setForm((current) => ({ ...current, contextWindowTokens: event.target.value }))
-                  setStatus('Not saved.')
-                }}
-                placeholder="e.g., 131072"
-                className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
-              />
-            </Row>
           </>
         ) : null}
       </div>

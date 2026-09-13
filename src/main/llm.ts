@@ -331,9 +331,10 @@ export class LLMService {
     }
   }
 
-  /** The EFFECTIVE (RAM-clamped) context window the server is actually running
-   *  with — the real ceiling for prompt + tools + answer. */
+  /** The selected app context cap. Local inference also needs the RAM clamp;
+   *  remote inference uses the configured cap without the local model's clamp. */
   effectiveContextSize(): number {
+    if (this.activeRemoteTextModel()) return this.ctxSize
     return this.safeCtxSize(this.ctxSize)
   }
 
@@ -1309,7 +1310,9 @@ export class LLMService {
         signal: opts.signal
       })
       return {
-        ...withContextMetrics(result, messages, { contextWindowTokens: remote.contextWindowTokens }),
+        ...withContextMetrics(result, messages, {
+          contextWindowTokens: this.effectiveContextSize()
+        }),
         maxTokens: resolvedMaxTokens
       }
     }
@@ -1384,7 +1387,7 @@ export class LLMService {
         toolChoice: opts.toolChoice
       })
       return withContextMetrics(result, messages, {
-        contextWindowTokens: remote.contextWindowTokens,
+        contextWindowTokens: this.effectiveContextSize(),
         tools: opts.tools
       })
     }
