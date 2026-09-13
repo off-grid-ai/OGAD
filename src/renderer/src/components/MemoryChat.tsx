@@ -3899,11 +3899,6 @@ export function MemoryChat({
           console.warn('Could not save the compaction notice', error)
         }
       }
-      const conversationContextMetrics: GenerationMetrics = {
-        estimatedPromptTokens: Math.ceil(JSON.stringify(history).length / 4),
-        ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {})
-      }
-
       // Agentic tools path (opt-in, non-project). The model calls built-in tools,
       // plus (when Connectors is on) MCP connector tools. STREAMS like the RAG path:
       // a streamId placeholder fills in live - thinking, then each tool-call activity
@@ -4136,7 +4131,6 @@ export function MemoryChat({
         thinkingEnabled,
         imagePaths
       )
-      const ragMetrics: GenerationMetrics = { ...result.metrics, ...conversationContextMetrics }
       const resultContext = result.context as RagContext | undefined
 
       // Stopped mid-stream — one owner decides what survives (finalizeStoppedTurn).
@@ -4225,7 +4219,7 @@ export function MemoryChat({
                   // On the LIVE message too, not only in the persisted context: the numbers are
                   // about the turn that just finished, so waiting for a reload to show them defeats
                   // the point.
-                  metrics: ragMetrics,
+                  metrics: result.metrics,
                   streaming: false,
                   variants: allVariants,
                   variantIndex: allVariants ? allVariants.length - 1 : undefined
@@ -4257,7 +4251,7 @@ export function MemoryChat({
             buildAssistantContext(resultContext, {
               reasoning: ragReasoning,
               cutoff: result.cutoff,
-              metrics: ragMetrics
+              metrics: result.metrics
             })
           )
           setConvMessages(convId, (previous) =>
