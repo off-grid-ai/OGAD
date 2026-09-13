@@ -1070,7 +1070,11 @@ export class LLMService {
   // which kills long-running LLM requests before they can respond. Delegates to the
   // electron-free postCompletionOnce so the fresh-connection contract lives in one place
   // (see llm/http-post.ts) and is integration-tested against a real socket-closing server.
-  private httpPost(body: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
+  private httpPost(
+    body: string,
+    timeoutMs: number | undefined,
+    signal?: AbortSignal
+  ): Promise<string> {
     return postCompletionOnce(this.port, body, timeoutMs, signal)
   }
 
@@ -1096,7 +1100,7 @@ export class LLMService {
     messages: unknown[],
     onDelta: (text: string, kind: 'content' | 'reasoning') => void,
     options: {
-      timeoutMs: number
+      timeoutMs?: number
       maxTokens?: number
       temperature?: number
       topP?: number
@@ -1130,7 +1134,7 @@ export class LLMService {
   async chat(
     message: string,
     images: string[] = [],
-    timeoutMs: number = 300000,
+    timeoutMs?: number,
     maxTokens?: number,
     opts: {
       responseFormat?: unknown
@@ -1164,7 +1168,7 @@ export class LLMService {
   /** Send an exact OpenAI-style message history for model-family policy adapters. */
   async chatMessages(
     messages: ChatMessage[],
-    timeoutMs = 300000,
+    timeoutMs?: number,
     maxTokens?: number,
     opts: {
       responseFormat?: unknown
@@ -1206,7 +1210,7 @@ export class LLMService {
 
   private async completeMessages(
     messages: ChatMessage[],
-    timeoutMs: number,
+    timeoutMs: number | undefined,
     maxTokens: number | undefined,
     opts: {
       responseFormat?: unknown
@@ -1252,7 +1256,7 @@ export class LLMService {
         const body = JSON.stringify(payload)
 
         console.log(
-          `[LLMService] Starting LLM request (timeout: ${timeoutMs / 1000}s, body: ${body.length} chars)...`
+          `[LLMService] Starting LLM request (timeout: ${timeoutMs === undefined ? 'none' : `${timeoutMs / 1000}s`}, body: ${body.length} chars)...`
         )
 
         const raw = await this.httpPost(body, timeoutMs, opts.signal)
@@ -1296,7 +1300,7 @@ export class LLMService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     opts: { temperature?: number; thinking?: boolean; signal?: AbortSignal } = {},
     maxTokens?: number,
-    timeoutMs: number = 300000
+    timeoutMs?: number
   ): Promise<ChatStreamResult> {
     const messages = buildMessages(message, readImages(images), this.systemPrompt)
     const resolvedMaxTokens = resolveMaxTokens(maxTokens, this.maxTokens)
@@ -1371,7 +1375,7 @@ export class LLMService {
       maxTokens?: number
       responseFormat?: unknown
     } = {},
-    timeoutMs: number = 300000
+    timeoutMs?: number
   ): Promise<StreamResult> {
     const remote = this.activeRemoteTextModel()
     if (remote) {
