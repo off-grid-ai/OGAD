@@ -66,6 +66,7 @@ import {
 import { requestApplicationRelaunch } from './shutdown'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import { notifyRagConversationChanged } from './rag-conversation-events'
+import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
 
 // Incrementally update master memory with a new conversation summary
@@ -105,12 +106,70 @@ import {
   endChatStreamForConversation,
   noteChatStreamImageProgress,
   noteChatStreamDelta,
+  resetChatStreamPartial,
   noteChatStreamToolCompleted,
   noteChatStreamToolStarted,
   takeChatStreamMessageId
 } from './chat-stream-state'
 
 const streamControllers = new Map<string, AbortController>()
+
+/** Retry a failed model round without re-running any tool call that already started. */
+async function runChatWithFallback<T>(
+  run: () => Promise<T>,
+  options: {
+    signal?: AbortSignal
+    canRetry?: () => boolean
+    onModelChanged?: (failed: string, next: string) => void
+  } = {}
+): Promise<{ result: T; modelName?: string }> {
+  let lastError: unknown
+  try {
+    return { result: await run() }
+  } catch (error) {
+    if (options.signal?.aborted || options.canRetry?.() === false) throw error
+    lastError = error
+  }
+  const models = await import('./models-manager')
+  const { getRemoteVisionServerSettings } = await import('./vision/remote-vision-server')
+  const remote = getRemoteVisionServerSettings()
+  const selectedLocal = models.getActiveModel()
+  const selectedRemote = remote.servers.find((server) => server.id === remote.activeServerId)
+  const installed = (await models.getStorageInfo()).models
+    .filter((model) => model.kind === 'text' || model.kind === 'vision')
+    .map((model) => model.id)
+  const alternatives = [
+    ...(selectedRemote
+      ? remote.servers
+          .filter((server) => server.id !== selectedRemote.id)
+          .map((server) => ({ id: remoteVisionModelId(server.id, server.model), name: server.model }))
+      : []),
+    ...installed
+      .filter((id) => !parseRemoteVisionModelId(id) && (selectedRemote || id !== selectedLocal))
+      .sort((a, b) => (a === selectedLocal ? -1 : b === selectedLocal ? 1 : 0))
+      .map((id) => ({ id, name: id }))
+  ]
+  let failedName = selectedRemote?.model ?? selectedLocal ?? 'Selected model'
+  for (const next of alternatives) {
+    if (options.signal?.aborted || options.canRetry?.() === false) throw lastError
+    try {
+      const activated = await models.activateModel(next.id, 'text')
+      if (!activated.success) continue
+    } catch {
+      continue
+    }
+    if (options.signal?.aborted) throw lastError
+    options.onModelChanged?.(failedName, next.name)
+    try {
+      return { result: await run(), modelName: next.name }
+    } catch (error) {
+      if (options.signal?.aborted || options.canRetry?.() === false) throw error
+      failedName = next.name
+      lastError = error
+    }
+  }
+  throw lastError
+}
 
 async function streamAnswer(
   event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
@@ -130,9 +189,13 @@ async function streamAnswer(
     // screen-replay (Tier 3) defers to it. Chat runs ON the 'llm' engine, so it
     // evicts nothing (evicting 'llm' would evict itself). run()'s finally releases
     // the slot even if fn throws, so we let errors propagate from inside.
-    return modalityQueue.run(CHAT_JOB, async () =>
-      toResponseGenerationResult(await llm.chatStream(prompt, images, () => {}, { thinking }))
-    )
+    return modalityQueue.run(CHAT_JOB, async () => {
+      const { result, modelName } = await runChatWithFallback(() =>
+        llm.chatStream(prompt, images, () => {}, { thinking })
+      )
+      const response = toResponseGenerationResult(result)
+      return modelName ? { ...response, metrics: { ...response.metrics, modelName } } : response
+    })
   }
 
   const sender = event.sender
@@ -146,20 +209,34 @@ async function streamAnswer(
     // the run() callback so the queue slot is held for the whole generation; the
     // cancel path aborts via the controller registered above.
     return await modalityQueue.run(CHAT_JOB, async () => {
-      const result = await llm.chatStream(
-        prompt,
-        images,
-        (text, kind) => {
-          noteChatStreamDelta(streamId, text, kind)
-          try {
-            sender.send('rag:stream', { streamId, type: kind, text })
-          } catch {
-            /* window gone */
+      const { result, modelName } = await runChatWithFallback(
+        () => llm.chatStream(
+          prompt,
+          images,
+          (text, kind) => {
+            noteChatStreamDelta(streamId, text, kind)
+            try {
+              sender.send('rag:stream', { streamId, type: kind, text })
+            } catch {
+              /* window gone */
+            }
+          },
+          { thinking, signal: controller.signal }
+        ),
+        {
+          signal: controller.signal,
+          onModelChanged: (failed, next) => {
+            resetChatStreamPartial(streamId)
+            try {
+              sender.send('rag:stream', { streamId, type: 'step', step: { kind: 'model_changed', failed, next } })
+            } catch {
+              /* window gone */
+            }
           }
-        },
-        { thinking, signal: controller.signal }
+        }
       )
-      return toResponseGenerationResult(result)
+      const response = toResponseGenerationResult(result)
+      return modelName ? { ...response, metrics: { ...response.metrics, modelName } } : response
     })
   } finally {
     streamControllers.delete(streamId)
@@ -1891,7 +1968,12 @@ export function setupIPC() {
       const sender = event.sender
       // Non-stream fallback (no streamId): buffer, no live deltas (matches streamAnswer).
       if (!streamId) {
-        return modalityQueue.run(CHAT_JOB, () => toolChat(query, history || [], opts || {}))
+        return modalityQueue.run(CHAT_JOB, async () => {
+          const { result, modelName } = await runChatWithFallback(() =>
+            toolChat(query, history || [], opts || {})
+          )
+          return modelName ? { ...result, metrics: { ...result.metrics, modelName } } : result
+        })
       }
       // Streaming: same channel/queue/abort as streamAnswer, so a tools turn streams
       // thinking -> tool-call activity -> answer, and the stop button (rag:cancel) aborts it.
@@ -1899,9 +1981,10 @@ export function setupIPC() {
       streamControllers.set(streamId, controller)
       bindChatStream(streamId, opts.conversationId, opts.thinking ? 'thinking' : 'waiting')
       let continuesAsImage = false
+      let toolStarted = false
       try {
-        const result = await modalityQueue.run(CHAT_JOB, () =>
-          toolChat(query, history || [], {
+        const { result, modelName } = await modalityQueue.run(CHAT_JOB, () =>
+          runChatWithFallback(() => toolChat(query, history || [], {
             ...opts,
             thinking: opts.thinking,
             signal: controller.signal,
@@ -1914,6 +1997,7 @@ export function setupIPC() {
               }
             },
             onStep: (call) => {
+              toolStarted = true
               noteChatStreamToolStarted(streamId, call.name)
               try {
                 sender.send('rag:stream', {
@@ -1933,9 +2017,21 @@ export function setupIPC() {
               }
             },
             onToolResult: (call) => {
+              toolStarted = true
               noteChatStreamToolCompleted(streamId, call.name, call.result, call.status)
               try {
                 sender.send('rag:stream', { streamId, type: 'tool_result', call })
+              } catch {
+                /* window gone */
+              }
+            }
+          }), {
+            signal: controller.signal,
+            canRetry: () => !toolStarted,
+            onModelChanged: (failed, next) => {
+              resetChatStreamPartial(streamId)
+              try {
+                sender.send('rag:stream', { streamId, type: 'step', step: { kind: 'model_changed', failed, next } })
               } catch {
                 /* window gone */
               }
@@ -1945,7 +2041,7 @@ export function setupIPC() {
         if (result.imageRequests.length > 0) {
           continuesAsImage = continueChatStreamWithImage(streamId)
         }
-        return result
+        return modelName ? { ...result, metrics: { ...result.metrics, modelName } } : result
       } finally {
         streamControllers.delete(streamId)
         if (!continuesAsImage) {
