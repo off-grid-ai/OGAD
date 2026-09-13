@@ -149,15 +149,22 @@ export function ImageSettingsTab(): React.JSX.Element {
             Guidance
           </span>
           <input
+            key={model}
             aria-label="Image guidance"
             type="number"
             min={0}
             max={20}
             step={0.5}
-            value={effective.cfgScale}
-            onChange={(event) =>
-              saveOverride('cfgScale', Math.max(0, Math.min(20, Number(event.target.value) || 0)))
-            }
+            defaultValue={effective.cfgScale}
+            onChange={(event) => {
+              if (!event.target.value) return
+              saveOverride('cfgScale', Math.max(0, Math.min(20, Number(event.target.value))))
+            }}
+            onBlur={(event) => {
+              const guidance = Math.max(0, Math.min(20, Number(event.target.value) || 0))
+              event.target.value = String(guidance)
+              saveOverride('cfgScale', guidance)
+            }}
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
           />
         </label>

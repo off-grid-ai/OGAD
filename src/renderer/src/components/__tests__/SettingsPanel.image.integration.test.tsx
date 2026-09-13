@@ -79,7 +79,7 @@ describe('<SettingsPanel/> image settings', () => {
     expect(setActiveModalModel).toHaveBeenCalledWith('image', 'juggernaut-xl-v9.gguf')
   })
 
-  it('keeps Steps editable and restores the saved value when Image settings reopens', async () => {
+  it('keeps Steps and Guidance editable and restores them when Image settings reopens', async () => {
     const settings: Record<string, unknown> = {
       imageParams: { 'dreamshaper-xl-v2-turbo.gguf': { size: 512, steps: 12, cfgScale: 3 } }
     }
@@ -110,6 +110,11 @@ describe('<SettingsPanel/> image settings', () => {
     await user.type(steps, '45')
     expect((steps as HTMLInputElement).value).toBe('45')
 
+    const guidance = screen.getByRole('spinbutton', { name: 'Image guidance' })
+    await user.clear(guidance)
+    await user.type(guidance, '1.5')
+    expect((guidance as HTMLInputElement).value).toBe('1.5')
+
     panel.unmount()
     render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)
     await waitFor(() =>
@@ -117,5 +122,8 @@ describe('<SettingsPanel/> image settings', () => {
         (screen.getByRole('spinbutton', { name: 'Image steps' }) as HTMLInputElement).value
       ).toBe('45')
     )
+    expect(
+      (screen.getByRole('spinbutton', { name: 'Image guidance' }) as HTMLInputElement).value
+    ).toBe('1.5')
   })
 })
