@@ -98,12 +98,11 @@ function withContextMetrics(
   options: { contextWindowTokens?: number; tools?: unknown[] }
 ): StreamResult {
   const { contextWindowTokens, tools } = options
-  if (!contextWindowTokens || contextWindowTokens <= 0) return result
   return {
     ...result,
     metrics: {
       ...result.metrics,
-      contextWindowTokens,
+      ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {}),
       ...(result.metrics?.promptTokens
         ? {}
         : { estimatedPromptTokens: Math.ceil(JSON.stringify({ messages, tools }).length / 4) })

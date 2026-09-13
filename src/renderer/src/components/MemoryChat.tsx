@@ -1197,16 +1197,20 @@ function GenerationMetricsRow({
     promptTokens && contextWindowTokens && contextWindowTokens > 0
       ? Math.round((promptTokens / contextWindowTokens) * 100)
       : null
-  if (!parts.length && contextPercent === null) return null
+  const contextLabel =
+    contextPercent !== null
+      ? `Context: ${metrics?.promptTokens ? '' : '~'}${contextPercent}% used`
+      : promptTokens
+        ? `Context: ${metrics?.promptTokens ? '' : '~'}${promptTokens} tokens used (limit unknown)`
+        : null
+  if (!parts.length && contextLabel === null) return null
   return (
     <p
       className="mt-2 font-mono text-[10px] tabular-nums text-neutral-500"
       data-testid="generation-metrics"
     >
       {[
-        ...(contextPercent === null
-          ? []
-          : [`Context: ${metrics?.promptTokens ? '' : '~'}${contextPercent}% used`]),
+        ...(contextLabel === null ? [] : [contextLabel]),
         ...parts
       ].join(' · ')}
     </p>
