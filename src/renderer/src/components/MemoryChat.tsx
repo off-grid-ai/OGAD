@@ -717,7 +717,7 @@ function NoticeMessageRow({ message }: Readonly<{ message: ChatMessage }>): Reac
     return (
       <div className="mb-2 flex items-start" aria-live="polite">
         <span className="rounded-sm border border-neutral-800 px-2.5 py-2 text-[11px] text-neutral-500">
-          {text}
+          Compacted conversation to make room for more messages.
         </span>
       </div>
     )
