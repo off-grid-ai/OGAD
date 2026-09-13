@@ -63,6 +63,7 @@ function installApi(
     addRagMessage: vi.fn(async () => ({ id: 1, uuid: 'project-message-1' })),
     saveArtifact: vi.fn(async () => ''),
     getSettings: vi.fn(async () => ({})),
+    getLlmSettings: vi.fn(async () => ({})),
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => [project]),
     styleThumbs: vi.fn(async () => ({})),
