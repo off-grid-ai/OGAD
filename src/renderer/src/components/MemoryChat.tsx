@@ -1268,15 +1268,16 @@ function GenerationMetricsRow({
 }: Readonly<{ metrics?: GenerationMetrics }>): React.JSX.Element | null {
   const parts = metrics ? formatGenerationMetrics(metrics) : []
   const contextWindowTokens = metrics?.contextWindowTokens
-  const promptTokens = metrics?.estimatedPromptTokens ?? metrics?.promptTokens
-  const estimated = metrics?.estimatedPromptTokens !== undefined
+  const promptTokens = metrics?.promptTokens ?? metrics?.estimatedPromptTokens
+  const estimated =
+    metrics?.promptTokens === undefined && metrics?.estimatedPromptTokens !== undefined
   const contextPercent =
     promptTokens && contextWindowTokens && contextWindowTokens > 0
       ? Math.round((promptTokens / contextWindowTokens) * 100)
       : null
   const contextLabel =
     contextPercent !== null
-      ? `Context: ${estimated ? '~' : ''}${contextPercent}% used`
+      ? `Context: ${estimated ? '~' : ''}${contextPercent}% used (${estimated ? '~' : ''}${promptTokens} prompt tokens / ${contextWindowTokens} context)`
       : promptTokens
         ? `Context: ${estimated ? '~' : ''}${promptTokens} tokens used (limit unknown)`
         : null

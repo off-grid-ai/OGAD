@@ -715,9 +715,7 @@ export async function toolChat(
       opts.onActivity?.({ kind: 'compacted', label: 'Compacted' })
     }
   }
-  // The 80% decision includes initially selected schemas. The first model round
-  // updates this estimate if safety fitting changes those schemas. Later tool
-  // results are transient; they must not make the displayed meter fall.
+  // Track the prompt sent on the latest model round, including tool results.
   let retainedPromptTokens = Math.ceil(toolPromptChars(messages, tools) / 4)
   const offeredTools = new Set<string>()
   const toolCalls: ToolCall[] = []
@@ -748,7 +746,7 @@ export async function toolChat(
       metrics: {
         ...result.metrics,
         contextWindowTokens: result.metrics?.contextWindowTokens ?? ctx,
-        estimatedPromptTokens: retainedPromptTokens
+        ...(result.metrics?.promptTokens ? {} : { estimatedPromptTokens: retainedPromptTokens })
       },
       imageRequests,
       ...(offeredTools.size ? { toolsOffered: [...offeredTools] } : {}),
@@ -779,7 +777,7 @@ export async function toolChat(
     )
     const fittedTools = budgetTools(tools, availableToolTokens, builtins.length)
     const roundTools = fittedTools.estTokens <= availableToolTokens ? fittedTools.tools : []
-    if (round === 0) retainedPromptTokens = Math.ceil(toolPromptChars(messages, roundTools) / 4)
+    retainedPromptTokens = Math.ceil(toolPromptChars(messages, roundTools) / 4)
     const remainingOutputTokens = Math.max(
       1,
       ctx - Math.ceil(toolPromptChars(messages, roundTools) / 4) - 32

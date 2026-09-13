@@ -45,7 +45,7 @@ it('shows portable generation details from a synced reply after reload', async (
   expect(details.textContent).toContain('Context: ~25% used')
   expect(details.textContent).toContain('42.5 tok/s')
   expect(details.textContent).toContain('TTFT 0.37s')
-  expect(details.textContent).toContain('128 tokens')
+  expect(details.textContent).toContain('128 output tokens')
   expect(details.textContent).toContain('3.4s total')
   expect(await screen.findByRole('button', { name: 'Tools sent in request (1)' })).toBeTruthy()
 
