@@ -3560,6 +3560,9 @@ export function MemoryChat({
       if (convId === activeConversationId) return
       setActiveConversationId(convId)
       setActiveProjectId(conversations.find((c) => c.id === convId)?.project_id ?? null)
+      // Open tabs already own their rendered messages. A fresh read here rebuilt the
+      // whole transcript and rendered it a second time on every idle tab switch.
+      if (messagesByConv[convId]) return
       try {
         const nextMessages = await loadLatestConversationMessages(convId)
         if (!nextMessages) return
@@ -3569,10 +3572,9 @@ export function MemoryChat({
         )
       } catch (e) {
         console.error('Failed to load messages:', e)
-        setMessagesByConv((prev) => (prev[convId] ? prev : { ...prev, [convId]: [] }))
       }
     },
-    [activeConversationId, conversations, loadLatestConversationMessages]
+    [activeConversationId, conversations, loadLatestConversationMessages, messagesByConv]
   )
 
   // Close a chat tab; fall back to another open tab (or a fresh chat) if it was active.
@@ -3604,12 +3606,18 @@ export function MemoryChat({
     const off = window.api.onRagConversationsChanged?.(({ conversationId }) => {
       void (async () => {
         try {
-          if (
-            conversationId &&
-            conversationId === activeConversationId &&
-            !generatingRef.current.has(conversationId)
-          ) {
-            await refreshConversationMessages(conversationId)
+          if (conversationId && !generatingRef.current.has(conversationId)) {
+            if (conversationId === activeConversationId) {
+              await refreshConversationMessages(conversationId)
+            } else {
+              // The next visit must load a peer's new messages, not the old tab cache.
+              setMessagesByConv((prev) => {
+                if (!prev[conversationId]) return prev
+                const next = { ...prev }
+                delete next[conversationId]
+                return next
+              })
+            }
           }
           scheduleConversationListRefresh()
         } catch (error) {

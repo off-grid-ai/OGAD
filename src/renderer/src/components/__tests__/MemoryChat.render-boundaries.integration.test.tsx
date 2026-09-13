@@ -133,3 +133,23 @@ it('creates a project from the composer and sends into it', async () => {
   await act(async () => boundary.resolve(0, 'The Desktop chat changed.'))
   expect(await screen.findByText('The Desktop chat changed.')).toBeTruthy()
 })
+
+it('switches between saved chats and shows a peer update to an inactive chat', async () => {
+  const boundary = new ChatBoundary()
+  await boundary.addRagMessage('conversation-a', 'assistant', 'Answer in the first chat')
+  installBoundary(boundary)
+  const user = userEvent.setup()
+  renderChat({ conversationId: 'conversation-a' })
+
+  expect(await screen.findByText('Answer in the first chat')).toBeTruthy()
+  await user.click(await screen.findByText('Conversation B'))
+  expect(await screen.findByText('Conversation B baseline')).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: 'Conversation A' }))
+  expect(await screen.findByText('Answer in the first chat')).toBeTruthy()
+
+  await boundary.addRagMessage('conversation-b', 'assistant', 'A peer added this answer')
+  await act(async () => boundary.emitConversationChanged('conversation-b'))
+  await user.click(screen.getByRole('button', { name: 'Conversation B' }))
+  expect(await screen.findByText('A peer added this answer')).toBeTruthy()
+  expect(screen.queryByText('Answer in the first chat')).toBeNull()
+})
