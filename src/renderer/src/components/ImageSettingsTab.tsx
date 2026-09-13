@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   resolveImageParams,
   setOverride,
@@ -24,6 +24,17 @@ export function ImageSettingsTab(): React.JSX.Element {
   const [seed, setSeed] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [enhance, setEnhance] = useState(true)
+  const settingsChangedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (settingsChangedTimer.current) {
+        clearTimeout(settingsChangedTimer.current)
+        announceImageSettingsChanged()
+      }
+    },
+    []
+  )
 
   useEffect(() => {
     void Promise.all([window.api.imageGenStatus(), window.api.getSettings()])
@@ -43,9 +54,17 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   const effective = resolveImageParams(model, params)
 
+  const announceAfterTyping = (): void => {
+    if (settingsChangedTimer.current) clearTimeout(settingsChangedTimer.current)
+    settingsChangedTimer.current = setTimeout(() => {
+      settingsChangedTimer.current = null
+      announceImageSettingsChanged()
+    }, 180)
+  }
+
   const persist = (key: string, value: unknown): void => {
     void Promise.resolve(window.api.saveSetting(key, value))
-      .then(announceImageSettingsChanged)
+      .then(announceAfterTyping)
       .catch(() => {})
   }
 
@@ -107,14 +126,21 @@ export function ImageSettingsTab(): React.JSX.Element {
             Steps
           </span>
           <input
+            key={model}
             aria-label="Image steps"
             type="number"
             min={4}
             max={50}
-            value={effective.steps}
-            onChange={(event) =>
-              saveOverride('steps', Math.max(4, Math.min(50, Number(event.target.value) || 4)))
-            }
+            defaultValue={effective.steps}
+            onChange={(event) => {
+              if (!event.target.value) return
+              saveOverride('steps', Math.max(4, Math.min(50, Number(event.target.value))))
+            }}
+            onBlur={(event) => {
+              const steps = Math.max(4, Math.min(50, Number(event.target.value) || 4))
+              event.target.value = String(steps)
+              saveOverride('steps', steps)
+            }}
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
           />
         </label>

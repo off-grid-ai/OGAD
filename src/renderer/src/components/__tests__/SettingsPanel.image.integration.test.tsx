@@ -78,4 +78,44 @@ describe('<SettingsPanel/> image settings', () => {
     await user.click(screen.getByRole('menuitemradio', { name: 'juggernaut-xl-v9' }))
     expect(setActiveModalModel).toHaveBeenCalledWith('image', 'juggernaut-xl-v9.gguf')
   })
+
+  it('keeps Steps editable and restores the saved value when Image settings reopens', async () => {
+    const settings: Record<string, unknown> = {
+      imageParams: { 'dreamshaper-xl-v2-turbo.gguf': { size: 512, steps: 12, cfgScale: 3 } }
+    }
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getLlmSettings: async () => ({}),
+      getModelCatalog: async () => ({ models: [] }),
+      getActiveModel: async () => null,
+      imageGenStatus: async () => ({
+        available: true,
+        active: 'dreamshaper-xl-v2-turbo.gguf',
+        models: ['dreamshaper-xl-v2-turbo.gguf']
+      }),
+      getSettings: async () => settings,
+      saveSetting: async (key: string, value: unknown) => {
+        settings[key] = value
+      },
+      ttsVoices: async () => [],
+      prepareTtsVoice: async () => ({ ready: true }),
+      onTtsVoiceProgress: () => () => {},
+      listTools: async () => [],
+      mcpList: async () => []
+    }
+    const user = userEvent.setup()
+    const panel = render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)
+    const steps = await screen.findByRole('spinbutton', { name: 'Image steps' })
+
+    await user.clear(steps)
+    await user.type(steps, '45')
+    expect((steps as HTMLInputElement).value).toBe('45')
+
+    panel.unmount()
+    render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)
+    await waitFor(() =>
+      expect(
+        (screen.getByRole('spinbutton', { name: 'Image steps' }) as HTMLInputElement).value
+      ).toBe('45')
+    )
+  })
 })
