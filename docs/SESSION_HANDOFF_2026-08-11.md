@@ -27,23 +27,24 @@ The generative cause of nearly every bug in this codebase is narrower than "logi
 > asked the wrong question — move the branch and ask for its result instead.**
 
 That is Tell, Don't Ask. The last session's worst bug was `getSharedSecret(deviceId): string | undefined`
-— an interface asking for *data* when the caller needed a *decision*. So the decision leaked into one
+— an interface asking for _data_ when the caller needed a _decision_. So the decision leaked into one
 host, the other host made the opposite one, and the two phones could never connect.
 
 Two checks that catch this class mechanically, and cost seconds:
 
 1. **Callback audit.** For every function a host passes into shared, ask: is this a fact I own, or a
-   judgement? `hasCredential` is a fact. Returning undefined *because the pairing looked broken* is a
+   judgement? `hasCredential` is a fact. Returning undefined _because the pairing looked broken_ is a
    judgement wearing a fact's clothes.
 2. **Parity diff.** `grep` the same option name across `desktop/pro` and `mobile/pro` and read both
    together. Divergence here is invisible — nothing errors, a device just quietly never connects.
 
 Also from `rules.md`, and I failed to follow it last session: **debugging starts with the SSOT
 questions, not with a log.** Ask "who owns this fact, does anything else answer it, would one owner fix
-it" BEFORE pulling a device log. The device playbook is for *verifying* a fix, not for *locating* an
+it" BEFORE pulling a device log. The device playbook is for _verifying_ a fix, not for _locating_ an
 owner.
 
 Relevant architecture, already in the tree:
+
 - `shared/packages/sync/src/peer-link.ts` + `peer-link-service.ts` own "what is my relationship with
   each peer". Pure reducer, thin service, adopted by the orchestrator last session. Do not add a
   second answer anywhere.
@@ -100,17 +101,17 @@ the evidence it asks for.
 
 **Nine desktop capture / permissions / catalog items, all P1:**
 
-| Id | One line |
-|---|---|
-| DEF-001 | Replay's capture control reports a state that is not factual |
-| DEF-002 | Permission status and recovery are not independently discoverable |
-| DEF-003 | Capture exposes raw JSON parser failures and strands failed frames |
-| DEF-004 | Oversized capture analysis stays pending and retries forever |
-| DEF-005 | Settings Pro previews are dead ends and omit Proactive delivery |
-| DEF-006 | Screen Recording recovery returns to a blank, stale Settings scroll |
+| Id      | One line                                                              |
+| ------- | --------------------------------------------------------------------- |
+| DEF-001 | Replay's capture control reports a state that is not factual          |
+| DEF-002 | Permission status and recovery are not independently discoverable     |
+| DEF-003 | Capture exposes raw JSON parser failures and strands failed frames    |
+| DEF-004 | Oversized capture analysis stays pending and retries forever          |
+| DEF-005 | Settings Pro previews are dead ends and omit Proactive delivery       |
+| DEF-006 | Screen Recording recovery returns to a blank, stale Settings scroll   |
 | DEF-008 | Catalog model downloads have a checksum gate but no trusted checksums |
-| BLK-001 | APP-106 is green but its provider trace was not retained |
-| AUT-001 | APP-142 proves recorder lifecycle, not finalized meeting persistence |
+| BLK-001 | APP-106 is green but its provider trace was not retained              |
+| AUT-001 | APP-142 proves recorder lifecycle, not finalized meeting persistence  |
 
 DEF-001 and DEF-002 are the same shape as last session's bugs and should be done together: several
 surfaces (Replay, Settings, tray) each interpret `running` / `paused` / permission for themselves.

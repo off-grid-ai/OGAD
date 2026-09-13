@@ -207,10 +207,9 @@ test('copies an assistant reply through production IPC to the real OS clipboard 
   await expect(replyInTranscript).toBeVisible()
 
   await app!.evaluate(({ clipboard }) => clipboard.writeText('synthetic clipboard sentinel'))
-  const assistantTurn = replyInTranscript
-    .locator(
-      'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " mb-5 ")][1]'
-    )
+  const assistantTurn = replyInTranscript.locator(
+    'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " mb-5 ")][1]'
+  )
   await assistantTurn.getByTitle('Copy').click()
 
   await expect(assistantTurn.getByText('Copied', { exact: true })).toBeVisible()

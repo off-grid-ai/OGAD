@@ -172,9 +172,7 @@ describe('transcriptionActiveInfo', () => {
     )
 
     expect(result.language).toBe('auto')
-    expect(result.options).toEqual([
-      { id: null, name: 'Whisper (built-in)', active: true }
-    ])
+    expect(result.options).toEqual([{ id: null, name: 'Whisper (built-in)', active: true }])
   })
 
   it('marks built-in Whisper active when the saved model is no longer installed', () => {
@@ -379,7 +377,6 @@ describe('transcriptionProvenance — display label for the active STT choice', 
     )
   })
 })
-
 
 describe('transcriptionModelOptions — switchable models for the picker', () => {
   const installed = [

@@ -85,7 +85,7 @@ export function generationMetrics(input: {
   return {
     ...(timeToFirstTokenSeconds === undefined ? {} : { timeToFirstTokenSeconds }),
     ...(totalSeconds === undefined ? {} : { totalSeconds }),
-    ...(serverDecodeRate ?? estimatedDecodeRate
+    ...((serverDecodeRate ?? estimatedDecodeRate)
       ? { decodeTokensPerSecond: serverDecodeRate ?? estimatedDecodeRate }
       : {}),
     ...(positive(timings?.prompt_per_second) === undefined

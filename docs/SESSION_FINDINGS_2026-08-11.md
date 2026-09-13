@@ -6,14 +6,14 @@ Six bugs today. Every one is the same shape.
 
 **A consumer decides a fact that only the owner can decide.**
 
-| # | The owner knew | The consumer decided | Cost |
-|---|---|---|---|
-| 1 | the model server knew it refused a request permanently | capture called it a temporary outage | one frame retried 34 times over 2 days |
-| 2 | the pairing store knew a device was gone | nothing settled the rows parented by it | 2,292 deliveries + 211 history rows counted forever |
-| 3 | the transport knew Windows was offline | the delivery layer called it a failure | 1,928 rows marked failed for a closed laptop |
-| 4 | the delivery row carried its device name | the card re-derived it from a live list | every history card read "Paired device" |
-| 5 | the host stored UTC | the renderer read it as local | "Last observation" wrong by 5h30m |
-| 6 | the pairing store owns "this device is ours" | Evict told only the entitlement path | forget never removed the pairing row |
+| #   | The owner knew                                         | The consumer decided                    | Cost                                                |
+| --- | ------------------------------------------------------ | --------------------------------------- | --------------------------------------------------- |
+| 1   | the model server knew it refused a request permanently | capture called it a temporary outage    | one frame retried 34 times over 2 days              |
+| 2   | the pairing store knew a device was gone               | nothing settled the rows parented by it | 2,292 deliveries + 211 history rows counted forever |
+| 3   | the transport knew Windows was offline                 | the delivery layer called it a failure  | 1,928 rows marked failed for a closed laptop        |
+| 4   | the delivery row carried its device name               | the card re-derived it from a live list | every history card read "Paired device"             |
+| 5   | the host stored UTC                                    | the renderer read it as local           | "Last observation" wrong by 5h30m                   |
+| 6   | the pairing store owns "this device is ours"           | Evict told only the entitlement path    | forget never removed the pairing row                |
 
 The rule for all six: **a host contract carries facts, not verdicts.**
 
@@ -67,7 +67,7 @@ machine at 16K. Keep with corrected copy, or drop. Mac's call.
 1. **1,928 Windows rows marked failed for "device is not connected".** Not a failure. Reachability
    is the transport's fact. No link means no outcome, and the row stays queued.
 2. **Vision may be regressed.** `mtmd_tokenize: number of media markers in text (0) does not match
-   number of bitmaps (1)` repeating; every frame falls back to text only. Unknown whether today's
+number of bitmaps (1)` repeating; every frame falls back to text only. Unknown whether today's
    changes caused it. Check by reverting the two llm-path changes and running one frame.
 3. **The old Nord's eviction is stuck at `pending`**, never `tombstone`, and retries at every launch.
 4. 423 of 8,529 observations are prompt-template placeholders, running at ~40/day. Parked by Mac.

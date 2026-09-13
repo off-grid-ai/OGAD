@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createGrounderRunner } from '../../vision/grounder-loader'
 import { uiMateAdapter } from '../../vision/model-adapters/ui-mate'
-import {
-  browserVisionStepDetail,
-  withActiveBrowserVision
-} from '../browser-visual-task'
+import { browserVisionStepDetail, withActiveBrowserVision } from '../browser-visual-task'
 
 describe('browser visual task boundary', () => {
   it('keeps the captured screenshot and structured judge evidence in task details', () => {

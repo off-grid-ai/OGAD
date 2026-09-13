@@ -41,7 +41,10 @@ export function authorizeBearer(headerValue: string | undefined, token: string):
  *  authorizes only if its bearer matches one that is LIVE right now. An empty list (no paired
  *  device may run tools) never authorizes - fail closed. Checks every token (no early return on
  *  a match) so the time taken does not reveal which device matched. */
-export function authorizeBearerAny(headerValue: string | undefined, tokens: readonly string[]): boolean {
+export function authorizeBearerAny(
+  headerValue: string | undefined,
+  tokens: readonly string[]
+): boolean {
   let authorized = false
   for (const token of tokens) {
     if (authorizeBearer(headerValue, token)) {

@@ -37,11 +37,7 @@ if (process.argv.includes('--synthesize')) {
   try {
     const { ExecutorchSpeechRuntime } = await import('@offgrid/executorch-speech')
     const bundledAssets = path.join(app, 'Contents', 'Resources', 'speech-assets')
-    const runtime = new ExecutorchSpeechRuntime(
-      path.join(temp, 'cache'),
-      executable,
-      bundledAssets
-    )
+    const runtime = new ExecutorchSpeechRuntime(path.join(temp, 'cache'), executable, bundledAssets)
     await runtime.synthesize({
       text: 'Off Grid AI speech is ready.',
       voiceId: 'af_heart',

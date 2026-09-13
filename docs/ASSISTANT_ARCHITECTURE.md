@@ -1,7 +1,7 @@
 # The assistant - system architecture (the act pipeline)
 
 **Status:** high-level design, August 13, 2026, from the architecture discussion. For team review.
-Companion to `COMPUTER_USE.md` (the product model), `COMPUTER_USE_PLAN.md` (the build doc + schedule), and `PORTING_MAP.md` (port-vs-bespoke). This is the *design reference* for the system that executes actions - how it stays reliable on a weak local model and identical across desktop and mobile. The build order and timeline live in `COMPUTER_USE_PLAN.md`; follow that to build.
+Companion to `COMPUTER_USE.md` (the product model), `COMPUTER_USE_PLAN.md` (the build doc + schedule), and `PORTING_MAP.md` (port-vs-bespoke). This is the _design reference_ for the system that executes actions - how it stays reliable on a weak local model and identical across desktop and mobile. The build order and timeline live in `COMPUTER_USE_PLAN.md`; follow that to build.
 
 ---
 
@@ -24,7 +24,7 @@ The model does the smallest, most-constrained job (produce a valid Action), and 
 
 > **Reliability lives in the system, not the model.**
 
-A capable model makes the *proposals* better (fewer rejections, better resolution). It never changes whether an approved action actually executes. That is what lets us swap in a smaller or fine-tuned model later with no change to the guarantee.
+A capable model makes the _proposals_ better (fewer rejections, better resolution). It never changes whether an approved action actually executes. That is what lets us swap in a smaller or fine-tuned model later with no change to the guarantee.
 
 ## 3. The Action: a durable record and a state machine
 
@@ -72,16 +72,16 @@ Per the lead's steer, the assistant is not a general "call any tool" agent - it 
 
 The v1 scope (things you do on your own machine), grouped by type and honest about reliability tier:
 
-| Action type | Examples | Rail | Reliability in v1 |
-| --- | --- | --- | --- |
-| Message | send a text | semantic (AppleScript / iMessage) | high |
-| Email | send / compose | semantic (Mail, or Gmail connector) | high |
-| Calendar and reminders | create event / reminder | semantic (EventKit) | high |
-| Open / launch | open tabs, a URL, a YouTube video, an app | semantic (deep link / open) | high |
-| Look up | contacts, "what's on my calendar" | semantic (read, inline) | high |
-| File share | share a file over WhatsApp | GUI vision (Catalyst, dead AX tree) | best-effort, supervised |
-| Web task | flight check-in, book a hotel, order | agent browser + takeover | best-effort, supervised |
-| Proactive notice | "flight tonight, not checked in", "you promised the deck" | reasoning engine -> feeds the above | new, memory-driven |
+| Action type            | Examples                                                  | Rail                                | Reliability in v1       |
+| ---------------------- | --------------------------------------------------------- | ----------------------------------- | ----------------------- |
+| Message                | send a text                                               | semantic (AppleScript / iMessage)   | high                    |
+| Email                  | send / compose                                            | semantic (Mail, or Gmail connector) | high                    |
+| Calendar and reminders | create event / reminder                                   | semantic (EventKit)                 | high                    |
+| Open / launch          | open tabs, a URL, a YouTube video, an app                 | semantic (deep link / open)         | high                    |
+| Look up                | contacts, "what's on my calendar"                         | semantic (read, inline)             | high                    |
+| File share             | share a file over WhatsApp                                | GUI vision (Catalyst, dead AX tree) | best-effort, supervised |
+| Web task               | flight check-in, book a hotel, order                      | agent browser + takeover            | best-effort, supervised |
+| Proactive notice       | "flight tonight, not checked in", "you promised the deck" | reasoning engine -> feeds the above | new, memory-driven      |
 
 The pipeline is identical across all of them; only the rail and the reliability differ. Two tiers to set expectations honestly: **semantic actions (text, email, reminders, open) are solid; GUI and web tasks (WhatsApp file share, check-in, booking) are supervised and improving.** Same product, honestly tiered.
 
@@ -134,6 +134,7 @@ flowchart TB
 **Shared core (platform-free):** the Action model + durable queue + state machine; the reasoning engine (commitment / gap detection); the resolver (slot-filling over memory, with confidence); the router (cheapest reliable rail); verification + retry / idempotency policy; the action-handler registry; the gate seam (a callback the host implements).
 
 **Per-platform adapters (behind interfaces the core calls):**
+
 - **The rails (behind the `DeviceController` interface)** - how to actually run a thing. **Desktop v1 is macOS + Windows, in scope from day 1.** macOS: the Swift helper (EventKit / AppleScript), the agent browser, AX + CGEvent, vision. Windows: **local Outlook automation (COM / PowerShell) first** where Outlook exists - like the mac rail, a local write that syncs when the network returns - with Microsoft Graph as the fallback for setups without a local Outlook, and online-only actions labeled honestly; the shell for open / launch; the agent browser (shared, Electron); UI Automation + SendInput; vision. Android: intents + content providers + an accessibility-service portal. iOS: App Intents / Shortcuts only (no GUI or vision rail - the platform forbids reading or driving other apps).
 - **Accessibility is primarily the eyes, not a fourth pair of hands.** The AX / UIA tree is the observation and verification layer serving every rail: anchors for recorded traces, read-back for verification, drift checks. Actuation through it stays deliberately capped - macOS keeps `AXPress` / set-value only (the Swift helper already has them; set-value beats replaying keystrokes), and Windows acts through SendInput at UIA-located targets rather than growing a second actuation surface. One maintenance surface less, per platform.
 - **Offline scope, stated precisely:** the brain - detection, resolution, gating, the queue, verification logic - runs with zero network on every platform. An action whose effect lives on an external service (send an email, book a flight) needs that service reachable at execution time on any OS; the design preference is local-app rails whose writes land locally and sync later, which is exactly why local Outlook beats Graph as the Windows default.
@@ -163,42 +164,48 @@ So "the core stays the same" is concrete: the queue, resolver, router, reasoning
 Each is a real decision with a tradeoff. Where we have a lean, it is stated so the team reacts to a proposal rather than a blank.
 
 ### 8.1 Exactly-once per rail
+
 **What it is.** The guarantee that an action runs one time and only one time, even across a retry or a crash. Example: the executor sends an iMessage, then the app crashes before recording success; on restart it must not send a second copy.
 **Why it matters.** Double-sending a message, or creating two calendar events, is a visible, trust-damaging failure - worse than a clean failure.
-**Options.** (a) *Idempotency key* - tell the target "this is operation X, ignore a duplicate" (works only if the target supports it). (b) *Check-before-act* - before creating, ask "does this already exist?" (c) *Verify-after* - after the attempt, look for the effect and only retry if it is missing. Feasibility is per-rail: calendar / reminders / mail are verifiable and roughly idempotent; iMessage / WhatsApp / a website form are fuzzy (no key, and "did it send?" is hard to answer cleanly).
+**Options.** (a) _Idempotency key_ - tell the target "this is operation X, ignore a duplicate" (works only if the target supports it). (b) _Check-before-act_ - before creating, ask "does this already exist?" (c) _Verify-after_ - after the attempt, look for the effect and only retry if it is missing. Feasibility is per-rail: calendar / reminders / mail are verifiable and roughly idempotent; iMessage / WhatsApp / a website form are fuzzy (no key, and "did it send?" is hard to answer cleanly).
 **The decision.** Do we require every action handler to declare a verification or existence-check capability? And for the fuzzy rails, is the policy single-attempt-behind-the-gate, or verify-then-accept-a-small-residual-risk?
 **Our lean.** Handlers declare how they verify; reversible actions retry-once with verify; irreversible fuzzy actions (an outbound send) are single-attempt behind the gate, so a wrong verify can never double-fire. Escalating to another rail is a re-fire under the same rule (Section 4, item 7) - a non-retryable action never escalates.
 
 ### 8.2 Scheduling and triggers
+
 **What it is.** How a routine fires at 09:00, or an event trigger fires ("when I open Slack", "20 minutes before a meeting").
 **Why it matters.** Proactive delivery and routines depend on triggers, and they must work when the app is backgrounded or killed - especially on mobile, where the OS controls wakeups.
-**Options.** (a) *Core-owned trigger model* - the shared core holds the trigger definitions and a durable schedule table, and a thin platform adapter wakes the worker (launchd / a timer on Mac, WorkManager / BackgroundTasks on mobile). (b) *Platform-native scheduling wrapped* - each OS's scheduler owns the timing, the core just registers callbacks.
+**Options.** (a) _Core-owned trigger model_ - the shared core holds the trigger definitions and a durable schedule table, and a thin platform adapter wakes the worker (launchd / a timer on Mac, WorkManager / BackgroundTasks on mobile). (b) _Platform-native scheduling wrapped_ - each OS's scheduler owns the timing, the core just registers callbacks.
 **The decision.** How much scheduling logic lives in the core vs the OS, and how we survive the app being closed.
 **Our lean.** Core owns the trigger model and the durable schedule; a thin per-platform adapter is responsible only for waking the worker at the right time.
 
 ### 8.3 Trust graduation (Suggest to Auto)
+
 **What it is.** When an action or routine moves from Suggest (ask before each run) to Auto (runs unattended).
 **Why it matters.** This is the whole "proactive but safe" arc. Too eager feels invasive or dangerous; too timid and it never saves time.
-**Options.** (a) *Per action type* - reads auto, sends always ask. (b) *User-set per routine* - a manual Suggest/Auto toggle. (c) *Confidence threshold* - auto when confidence is high and the action is reversible. (d) *Learned* - auto after N successful approvals of the same shape.
+**Options.** (a) _Per action type_ - reads auto, sends always ask. (b) _User-set per routine_ - a manual Suggest/Auto toggle. (c) _Confidence threshold_ - auto when confidence is high and the action is reversible. (d) _Learned_ - auto after N successful approvals of the same shape.
 **The decision.** What is the default, who controls the dial, and do irreversible actions ever run Auto.
 **Our lean.** Default Suggest; the user promotes a routine to Auto; irreversible actions always gate even inside an Auto routine; reversible high-confidence actions may auto after a few confirmations.
 
 ### 8.4 Mobile v1 target
+
 **What it is.** What actually ships on mobile first, given the same core but very different rails.
 **Why it matters.** The rail capabilities differ enormously by platform, and this sets expectations. Android can host the full stack (an accessibility-service portal plus intents and content providers). iOS is intents-only - Apple forbids an app from reading or driving other apps, so there is no GUI or vision rail there. Also, the mobile app does not consume the shared monorepo yet, which is a prerequisite regardless.
 **The decision.** Is mobile v1 Android-first (full experience), iOS-first (intents-only, limited), or desktop-only for v1 with mobile as a fast-follow - and on what timeline.
 **Our lean.** Desktop v1; mobile as an adapter project afterward, Android-first for the full experience, iOS shipped as intents-only with honest scope.
 
 ### 8.5 Open-core placement
+
 **What it is.** Which parts of the pipeline are open core (AGPL, in `shared` / the public repo) vs pro (in `desktop-pro`).
 **Why it matters.** Open-core is a hard rule - pro business logic must not live in core. The reasoning engine, the resolver policy, the approval-queue UI, and routines are the "act pillar" and follow the existing pro spine; the rail primitives and the queue engine are closer to infrastructure.
 **The decision.** Draw the line: what is the inert core shell vs the pro business logic.
 **Our lean.** The queue engine, the action-handler interfaces, and the rail primitives live in `shared` / core (infrastructure); the reasoning engine, the resolver's policy, the approval and feed UI, and routines live in `desktop-pro`.
 
 ### 8.6 Verification depth per rail
+
 **What it is.** How thoroughly we confirm an action's effect actually happened before marking it `done`.
 **Why it matters.** Verification is what makes retry-once safe and catches silent failures and false confirmations (the field's number-one trust failure is an agent saying "done" when the backend failed).
-**Options.** (a) *None* - trust the executor's return. (b) *Light* - parse the return / status. (c) *Full re-observe* - query the world (is the event in the calendar, is the mail in Sent, re-read the AX tree or screenshot). Cost vs safety, and it differs per rail.
+**Options.** (a) _None_ - trust the executor's return. (b) _Light_ - parse the return / status. (c) _Full re-observe_ - query the world (is the event in the calendar, is the mail in Sent, re-read the AX tree or screenshot). Cost vs safety, and it differs per rail.
 **The decision.** The minimum verification bar per rail, and whether irreversible or GUI actions require full effect-verification.
 **Our lean.** At least "executor reported success and the effect is observable" for every mutation; full re-observe for irreversible actions and for the GUI / vision rail, where drift is most likely.
 

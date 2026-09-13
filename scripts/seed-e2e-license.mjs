@@ -20,7 +20,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-const FIXTURE_DIR = process.env.OFFGRID_E2E_LICENSE_FIXTURE ?? path.join(os.homedir(), '.offgrid-e2e-license')
+const FIXTURE_DIR =
+  process.env.OFFGRID_E2E_LICENSE_FIXTURE ?? path.join(os.homedir(), '.offgrid-e2e-license')
 const PROFILE_DIR = path.join(FIXTURE_DIR, 'profile')
 const KEY_FILE = path.join(FIXTURE_DIR, 'key.txt')
 const COPY_OUT = ['license.json', 'device-fingerprint']
@@ -71,7 +72,9 @@ try {
     }, key)
     const reason = result.ok ? result.value?.reason : undefined
     if (result.ok && result.value?.ok) break
-    console.log(`[seed-license] attempt ${attempt}: ${result.ok ? (reason ?? 'refused') : result.error}`)
+    console.log(
+      `[seed-license] attempt ${attempt}: ${result.ok ? (reason ?? 'refused') : result.error}`
+    )
     if (result.ok && reason && reason !== 'network_unavailable') break
     await new Promise((resolve) => setTimeout(resolve, 4000))
   }

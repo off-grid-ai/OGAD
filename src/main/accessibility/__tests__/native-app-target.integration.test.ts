@@ -50,9 +50,7 @@ describe('Computer Use native application targeting', () => {
       runningName: 'WhatsApp'
     })
     expect(native.launches).toEqual(['net.whatsapp.WhatsApp'])
-    expect(native.activations).toEqual([
-      { id: 'net.whatsapp.WhatsApp', runningName: 'WhatsApp' }
-    ])
+    expect(native.activations).toEqual([{ id: 'net.whatsapp.WhatsApp', runningName: 'WhatsApp' }])
   })
 
   it('uses an existing app window without relaunching', async () => {
@@ -64,9 +62,7 @@ describe('Computer Use native application targeting', () => {
     const target = await targeter.resolve('Open Slack and find Ali')
     await expect(targeter.ensureReady(target!)).resolves.toMatchObject({ runningName: 'Slack' })
     expect(native.launches).toEqual([])
-    expect(native.activations).toEqual([
-      { id: 'com.tinyspeck.slackmacgap', runningName: 'Slack' }
-    ])
+    expect(native.activations).toEqual([{ id: 'com.tinyspeck.slackmacgap', runningName: 'Slack' }])
     expect(target?.id).toBe('com.tinyspeck.slackmacgap')
   })
 

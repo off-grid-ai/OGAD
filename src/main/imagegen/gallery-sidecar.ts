@@ -44,9 +44,7 @@ export function generatedImageSidecarPath(imagePath: string): string {
  *  predate it, and a gallery entry can be deleted while a scan is walking it. */
 export function readGeneratedImageSidecar(imagePath: string): GeneratedImageSidecar {
   try {
-    const raw = JSON.parse(
-      fs.readFileSync(generatedImageSidecarPath(imagePath), 'utf8')
-    ) as unknown
+    const raw = JSON.parse(fs.readFileSync(generatedImageSidecarPath(imagePath), 'utf8')) as unknown
     if (!raw || typeof raw !== 'object') return {}
     const record = raw as Record<string, unknown>
     return {
@@ -76,10 +74,7 @@ export function readGeneratedImageSidecar(imagePath: string): GeneratedImageSide
  * replaced the file would drop the identity the mesh had just given it. Promoted by rename so a
  * reader never sees a half-written sidecar and decides the image has no identity.
  */
-export function writeGeneratedImageSidecar(
-  imagePath: string,
-  facts: GeneratedImageSidecar
-): void {
+export function writeGeneratedImageSidecar(imagePath: string, facts: GeneratedImageSidecar): void {
   const sidecar = generatedImageSidecarPath(imagePath)
   const temporary = `${sidecar}.tmp`
   const merged: GeneratedImageSidecar = { ...readGeneratedImageSidecar(imagePath), ...facts }

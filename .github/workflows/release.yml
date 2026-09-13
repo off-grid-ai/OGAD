@@ -114,7 +114,8 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.sha }} # the exact bumped commit
           fetch-depth: 0
-          lfs: false # Smudge nothing on checkout; pull only the shipped, non-rebuilt
+          lfs:
+            false # Smudge nothing on checkout; pull only the shipped, non-rebuilt
             # binaries below. Fetching everything (~200 MB) blew the org's monthly LFS
             # bandwidth budget and failed the release checkout ("exceeded its LFS budget").
       - name: Pull shipped LFS binaries (skip the ones rebuilt below)

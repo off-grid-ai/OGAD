@@ -24,13 +24,13 @@ Companion to `COMPUTER_USE.md` (the product model), `ASSISTANT_ARCHITECTURE.md` 
 
 ## Releases
 
-| Release | What ships | Status |
-| --- | --- | --- |
-| **R1. Chat actions on the durable engine** | The semantic rail in chat on macOS (reminders, calendar, messages, mail, open, lookups) through the `@offgrid/use` engine: durable queue, payload-hash gate, retry-once-with-verify, read-back verification, effect journal. Windows toolchain green (installer artifact); the Windows semantic rail (local Outlook COM) built behind the port. | **Done.** PRs: OGAD #81, shared #4. Record: `R1_CHECKLIST.md` |
-| **R2. Full rails in chat, both platforms + Approval UX v2** | Windows chat exposure; the browser rail (watched web tasks, takeover at login); the vision rail (supervised GUI actions, UI-TARS-1.5-7B); the approval experience rebuilt (inline in chat, outcome feedback, risk-tiered auto-run); the safety pass. ~5-6 working days. | **next** |
-| **R3. Notices you** (was R2) | Reasoning + resolve + gate: commitment/gap detection over Replay, memory-resolved slots with confidence, the proactive Day surface. Cross-platform (memory + LLM). Pro-side code lands in desktop-pro (access in place). ~3 days. | after R2 |
-| **R4. Routines** (was R3) | Record-by-showing + self-healing, per-step-verified replay (OpenAdapt design). macOS-first; the Windows UIA adapter as the fast-follow (napi-rs over the `uiautomation` crate + SendInput, Terminator head-start). ~2-3 days + fast-follow. | after R3 |
-| **R5. Model-agnostic computer use** (the tiered rail) | Demote the vision grounder to a last-resort fallback so computer use runs on the user's NORMAL chat model for the common case. **Tier 1: the accessibility driving rail** - extend the shipped macOS AX helper to emit structured interactive elements; the model picks by label; act via AXPress/click. Any chat model, no grounder, covers most native + Electron apps. **Tier 2: set-of-marks** - a small OmniParser-class detector numbers elements on dead-AX apps for a general vision model. Router prefers AX -> set-of-marks -> vision. Tier 3 (the R2 UI-TARS grounder) stays as the on-demand fallback, deferred here. | **building (pulled forward, before R3/R4)** |
+| Release                                                     | What ships                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Status                                                        |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| **R1. Chat actions on the durable engine**                  | The semantic rail in chat on macOS (reminders, calendar, messages, mail, open, lookups) through the `@offgrid/use` engine: durable queue, payload-hash gate, retry-once-with-verify, read-back verification, effect journal. Windows toolchain green (installer artifact); the Windows semantic rail (local Outlook COM) built behind the port.                                                                                                                                                                                                                                                                                   | **Done.** PRs: OGAD #81, shared #4. Record: `R1_CHECKLIST.md` |
+| **R2. Full rails in chat, both platforms + Approval UX v2** | Windows chat exposure; the browser rail (watched web tasks, takeover at login); the vision rail (supervised GUI actions, UI-TARS-1.5-7B); the approval experience rebuilt (inline in chat, outcome feedback, risk-tiered auto-run); the safety pass. ~5-6 working days.                                                                                                                                                                                                                                                                                                                                                           | **next**                                                      |
+| **R3. Notices you** (was R2)                                | Reasoning + resolve + gate: commitment/gap detection over Replay, memory-resolved slots with confidence, the proactive Day surface. Cross-platform (memory + LLM). Pro-side code lands in desktop-pro (access in place). ~3 days.                                                                                                                                                                                                                                                                                                                                                                                                 | after R2                                                      |
+| **R4. Routines** (was R3)                                   | Record-by-showing + self-healing, per-step-verified replay (OpenAdapt design). macOS-first; the Windows UIA adapter as the fast-follow (napi-rs over the `uiautomation` crate + SendInput, Terminator head-start). ~2-3 days + fast-follow.                                                                                                                                                                                                                                                                                                                                                                                       | after R3                                                      |
+| **R5. Model-agnostic computer use** (the tiered rail)       | Demote the vision grounder to a last-resort fallback so computer use runs on the user's NORMAL chat model for the common case. **Tier 1: the accessibility driving rail** - extend the shipped macOS AX helper to emit structured interactive elements; the model picks by label; act via AXPress/click. Any chat model, no grounder, covers most native + Electron apps. **Tier 2: set-of-marks** - a small OmniParser-class detector numbers elements on dead-AX apps for a general vision model. Router prefers AX -> set-of-marks -> vision. Tier 3 (the R2 UI-TARS grounder) stays as the on-demand fallback, deferred here. | **building (pulled forward, before R3/R4)**                   |
 
 The split: `shared` holds the durable cross-platform brain (`@offgrid/use`, reused by mobile later); this repo holds the rails, surfaces, and product integration; pro business logic lands in `desktop-pro`.
 
@@ -101,24 +101,24 @@ The R2 vision rail grounds every click through a specialized 7B model (UI-TARS):
 
 ## Dependencies
 
-| What | Needed by | Note |
-| --- | --- | --- |
-| shared #4 merged before OGAD #81 | now | main's CI resolves `@offgrid/use` from shared main |
-| Windows signing cert | R2 release | wiring exists (WIN_CSC_LINK secrets); publishes unsigned until then |
-| A human on a real Windows machine | R2 | browser/vision click-through + the model-load smoke (`WINDOWS_TEST_PLAN.md`) |
-| UI-TARS-1.5-7B GGUF + mmproj catalog entry | R2-D | the vision model install |
-| desktop-pro access | R2-B, R3 | in place (cloned at pro/) |
-| Seeded memory fixtures | R3 | detection + resolution tests without a live profile |
-| OpenAdapt trace/replay port + the `axuielement` napi addon | R4 | the recorder + the mac AX read |
+| What                                                       | Needed by  | Note                                                                         |
+| ---------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------- |
+| shared #4 merged before OGAD #81                           | now        | main's CI resolves `@offgrid/use` from shared main                           |
+| Windows signing cert                                       | R2 release | wiring exists (WIN_CSC_LINK secrets); publishes unsigned until then          |
+| A human on a real Windows machine                          | R2         | browser/vision click-through + the model-load smoke (`WINDOWS_TEST_PLAN.md`) |
+| UI-TARS-1.5-7B GGUF + mmproj catalog entry                 | R2-D       | the vision model install                                                     |
+| desktop-pro access                                         | R2-B, R3   | in place (cloned at pro/)                                                    |
+| Seeded memory fixtures                                     | R3         | detection + resolution tests without a live profile                          |
+| OpenAdapt trace/replay port + the `axuielement` napi addon | R4         | the recorder + the mac AX read                                               |
 
 ## Risks
 
-| Risk | Mitigation |
-| --- | --- |
-| Vision reliability (the frontier ceiling) on a local 7B | supervised tier, labeled; cheapest-rail-first routing; set-of-marks fallback; the gate on everything consequential |
-| Approval UX v2 touches the live chat surface | behavior tests per branch; the plain path stays untouched for non-action turns |
-| The Windows human-testing gap | recorded dependency; release notes honest about machine-verified vs human-verified |
-| Solo schedule | releases independently valuable; scope trims at the tail (the vision showcase, Windows polish), never the shipped core |
+| Risk                                                    | Mitigation                                                                                                             |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Vision reliability (the frontier ceiling) on a local 7B | supervised tier, labeled; cheapest-rail-first routing; set-of-marks fallback; the gate on everything consequential     |
+| Approval UX v2 touches the live chat surface            | behavior tests per branch; the plain path stays untouched for non-action turns                                         |
+| The Windows human-testing gap                           | recorded dependency; release notes honest about machine-verified vs human-verified                                     |
+| Solo schedule                                           | releases independently valuable; scope trims at the tail (the vision showcase, Windows polish), never the shipped core |
 
 ## Out of scope (unchanged)
 

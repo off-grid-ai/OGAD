@@ -36,7 +36,9 @@ describe('lanAddresses', () => {
 
 describe('primaryLanAddress', () => {
   it('returns the best candidate, or null when none', () => {
-    expect(primaryLanAddress({ en0: [ip('10.0.0.4')], en1: [ip('192.168.0.9')] })).toBe('192.168.0.9')
+    expect(primaryLanAddress({ en0: [ip('10.0.0.4')], en1: [ip('192.168.0.9')] })).toBe(
+      '192.168.0.9'
+    )
     expect(primaryLanAddress({ lo0: [ip('127.0.0.1', { internal: true })] })).toBeNull()
   })
 })

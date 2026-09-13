@@ -48,10 +48,7 @@ const proEntitled = (): boolean => true
 // reads, etc.). Without it the extension defaults to process.platform, and on
 // a Linux CI runner specsForPlatform('linux') is empty - every tool unknown.
 const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
-  new NativeActionToolExtension(
-    { run, isProEntitled: proEntitled, actions },
-    'darwin'
-  )
+  new NativeActionToolExtension({ run, isProEntitled: proEntitled, actions }, 'darwin')
 
 describe('the tool-to-action-type map', () => {
   it('covers exactly the mutating tools', () => {
@@ -165,13 +162,21 @@ describe('the engine path', () => {
     }
 
     await extension.execute('web_use', { goal: 'Open example.com' }, context)
-    await extension.execute('web_use', { goal: 'Open example.com' }, {
-      ...context,
-      taskLaunch: { ...context.taskLaunch, launchId: 'launch-2' }
-    })
+    await extension.execute(
+      'web_use',
+      { goal: 'Open example.com' },
+      {
+        ...context,
+        taskLaunch: { ...context.taskLaunch, launchId: 'launch-2' }
+      }
+    )
 
-    expect(port.proposalMeta[0]).toMatchObject({ idempotencyKey: expect.stringMatching(/^web_use:/) })
-    expect(port.proposalMeta[1]).toMatchObject({ idempotencyKey: expect.stringMatching(/^web_use:/) })
+    expect(port.proposalMeta[0]).toMatchObject({
+      idempotencyKey: expect.stringMatching(/^web_use:/)
+    })
+    expect(port.proposalMeta[1]).toMatchObject({
+      idempotencyKey: expect.stringMatching(/^web_use:/)
+    })
     expect((port.proposalMeta[0] as { idempotencyKey: string }).idempotencyKey).toBe(
       (port.proposalMeta[1] as { idempotencyKey: string }).idempotencyKey
     )
@@ -356,10 +361,7 @@ describe('the engine path', () => {
 
   it('fails honestly without an engine', async () => {
     run.mockClear()
-    const extension = new NativeActionToolExtension(
-      { run, isProEntitled: proEntitled },
-      'darwin'
-    )
+    const extension = new NativeActionToolExtension({ run, isProEntitled: proEntitled }, 'darwin')
     const reply = await extension.execute('reminders_create', { title: 'x' })
     expect(reply).toMatch(/on-device action engine/)
     expect(run).not.toHaveBeenCalled()
@@ -408,10 +410,7 @@ describe('the engine path', () => {
   })
 
   it('web_use refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
-    const extension = new NativeActionToolExtension(
-      { run, isProEntitled: proEntitled },
-      'darwin'
-    )
+    const extension = new NativeActionToolExtension({ run, isProEntitled: proEntitled }, 'darwin')
     const reply = await extension.execute('web_use', { goal: 'x' })
     expect(reply).toMatchObject({
       text: expect.stringMatching(/on-device action engine/),

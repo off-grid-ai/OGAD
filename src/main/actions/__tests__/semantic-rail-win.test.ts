@@ -75,7 +75,10 @@ describe('buildOutlookScript', () => {
   })
 
   it('reminder: a task with optional due', () => {
-    const script = buildOutlookScript('reminder', { title: 'Send the deck', due: '2026-08-15T18:00:00' })
+    const script = buildOutlookScript('reminder', {
+      title: 'Send the deck',
+      due: '2026-08-15T18:00:00'
+    })
     expect(script).toContain('CreateItem(3)')
     expect(script).toContain("$i.DueDate = [datetime]'2026-08-15T18:00:00'")
     const noDue = buildOutlookScript('reminder', { title: 'Send the deck' })
@@ -94,7 +97,9 @@ describe('isOutlookUnavailable', () => {
   it('matches the COM-not-registered shapes and nothing else', () => {
     expect(isOutlookUnavailable('80040154 Class not registered')).toBe(true)
     expect(isOutlookUnavailable('Cannot create a COM object')).toBe(true)
-    expect(isOutlookUnavailable("Retrieving the COM class factory for Outlook.Application failed")).toBe(true)
+    expect(
+      isOutlookUnavailable('Retrieving the COM class factory for Outlook.Application failed')
+    ).toBe(true)
     expect(isOutlookUnavailable('The operation was cancelled by the user')).toBe(false)
   })
 })

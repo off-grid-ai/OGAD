@@ -32,9 +32,9 @@ describe('UI-Mate official response fixtures', () => {
     const response =
       '<action>Click the lower-right target.</action><tool_call><function=computer_use><parameter=action>left_click</parameter><parameter=coordinate>[999, 999]</parameter></function></tool_call>'
 
-    expect(parseUIMateResponse(response, { width: 832, height: 732 }).actions[0]?.coordinate).toEqual(
-      [831, 731]
-    )
+    expect(
+      parseUIMateResponse(response, { width: 832, height: 732 }).actions[0]?.coordinate
+    ).toEqual([831, 731])
   })
 })
 

@@ -81,7 +81,9 @@ describe('makeReadBackVerifiers', () => {
   it('a calendar event with an unparseable start verifies false without listing', async () => {
     const run = vi.fn()
     const verifiers = makeReadBackVerifiers(run)
-    expect(await verifiers.calendar(action('calendar', { title: 'x', start: 'whenever' }))).toBe(false)
+    expect(await verifiers.calendar(action('calendar', { title: 'x', start: 'whenever' }))).toBe(
+      false
+    )
     expect(run).not.toHaveBeenCalled()
   })
 
@@ -95,9 +97,9 @@ describe('makeReadBackVerifiers', () => {
     const run = vi.fn()
     const verifiers = makeReadBackVerifiers(run)
     expect(await verifiers.reminder(action('reminder', {}))).toBe(false)
-    expect(await verifiers.calendar(action('calendar', { start: '2026-08-14T09:30:00.000Z' }))).toBe(
-      false
-    )
+    expect(
+      await verifiers.calendar(action('calendar', { start: '2026-08-14T09:30:00.000Z' }))
+    ).toBe(false)
     expect(run).not.toHaveBeenCalled()
   })
 })

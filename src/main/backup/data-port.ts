@@ -90,9 +90,7 @@ export class DesktopBackupDataPort implements BackupDataPort<
    * as it did before this change, which is a worse outcome than being embedded but a much better one than
    * losing the restore entirely.
    */
-  private async embedArchiveChunks(
-    data: DesktopBackupData
-  ): Promise<Map<string, string | null>> {
+  private async embedArchiveChunks(data: DesktopBackupData): Promise<Map<string, string | null>> {
     const vectors = new Map<string, string | null>()
     for (const project of data.projects) {
       for (const document of project.documents) {
@@ -248,12 +246,8 @@ export class DesktopBackupDataPort implements BackupDataPort<
         for (const message of conversation.messages) {
           if (
             exists &&
-            alreadyHere.get(
-              conversation.id,
-              message.role,
-              message.content,
-              message.createdAt
-            ) !== undefined
+            alreadyHere.get(conversation.id, message.role, message.content, message.createdAt) !==
+              undefined
           ) {
             continue
           }

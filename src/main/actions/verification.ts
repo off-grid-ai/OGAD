@@ -32,9 +32,7 @@ export function listContainsTitle(
   }
   return items.some(
     (item) =>
-      typeof item === 'object' &&
-      item !== null &&
-      (item as Record<string, unknown>).title === title
+      typeof item === 'object' && item !== null && (item as Record<string, unknown>).title === title
   )
 }
 
@@ -46,9 +44,9 @@ const PAD_MS = 60 * 1000
  * minute (the helper defaults a missing end to start plus one hour).
  * Undefined when the start is unparseable - nothing sane to verify against.
  */
-export function calendarVerifyWindow(args: Record<string, unknown>):
-  | { start: string; end: string }
-  | undefined {
+export function calendarVerifyWindow(
+  args: Record<string, unknown>
+): { start: string; end: string } | undefined {
   const startMs = Date.parse(String(args.start ?? ''))
   if (Number.isNaN(startMs)) {
     return undefined

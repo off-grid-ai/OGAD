@@ -31,7 +31,8 @@ const u64 = (n: number): Buffer => {
   b.writeBigUInt64LE(BigInt(n))
   return b
 }
-const gstr = (s: string): Buffer => Buffer.concat([u64(Buffer.byteLength(s)), Buffer.from(s, 'utf8')])
+const gstr = (s: string): Buffer =>
+  Buffer.concat([u64(Buffer.byteLength(s)), Buffer.from(s, 'utf8')])
 const kvString = (k: string, v: string): Buffer => Buffer.concat([gstr(k), u32(8), gstr(v)])
 const kvU32 = (k: string, v: number): Buffer => Buffer.concat([gstr(k), u32(4), u32(v)])
 const writeGguf = (p: string, arch: string, ctx: number): void => {

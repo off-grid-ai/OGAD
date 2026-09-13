@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BundleError } from '@offgrid/sync/portable'
 import { DesktopBackupFileMapper, isSafeBackupKey } from '../file-mapper'
-import type {
-  DesktopBackupData,
-  DesktopBackupDocument,
-  DesktopBackupProject
-} from '../types'
+import type { DesktopBackupData, DesktopBackupDocument, DesktopBackupProject } from '../types'
 
 /**
  * How a project's documents travel inside a backup bundle, and why the keys are not their paths.

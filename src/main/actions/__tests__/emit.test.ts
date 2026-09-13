@@ -60,7 +60,9 @@ describe('parseEmission - one case per repair branch', () => {
   })
 
   it('surrounding prose is cut away', () => {
-    const result = parseEmission(`Sure, here's the action you asked for:\n${validJson}\nLet me know!`)
+    const result = parseEmission(
+      `Sure, here's the action you asked for:\n${validJson}\nLet me know!`
+    )
     expect(result.ok).toBe(true)
   })
 
@@ -118,10 +120,7 @@ describe('emitActionProposal - bounded retry with the error fed back', () => {
   })
 
   it('a bad first answer retries once with the validation error in the feedback', async () => {
-    const ask = vi
-      .fn()
-      .mockResolvedValueOnce('cannot do')
-      .mockResolvedValueOnce(validJson)
+    const ask = vi.fn().mockResolvedValueOnce('cannot do').mockResolvedValueOnce(validJson)
     const result = await emitActionProposal(ask)
     expect(result.ok).toBe(true)
     expect(ask).toHaveBeenCalledTimes(2)

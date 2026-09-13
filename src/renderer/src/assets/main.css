@@ -499,9 +499,17 @@ code {
   animation-delay: 300ms;
 }
 @keyframes offgrid-loading-dot-wave {
-  0%, 100% { transform: translateY(0); }
-  16.667%, 50% { transform: translateY(-5px); }
-  66.667% { transform: translateY(0); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  16.667%,
+  50% {
+    transform: translateY(-5px);
+  }
+  66.667% {
+    transform: translateY(0);
+  }
 }
 
 @keyframes offgrid-collapsible-open {

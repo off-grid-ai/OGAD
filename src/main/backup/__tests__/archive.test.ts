@@ -88,7 +88,10 @@ describe('the backup archive, against a real filesystem', () => {
 
     it('refuses to overwrite a different file that already sits at the destination', async () => {
       const source = await file(path.join(workspace, 'src', 'Contract.pdf'), 'the real contract')
-      const destination = await file(path.join(workspace, 'stage', 'files', 'a.pdf'), 'something else')
+      const destination = await file(
+        path.join(workspace, 'stage', 'files', 'a.pdf'),
+        'something else'
+      )
 
       // Same path, different content. Overwriting would destroy a file the user already had; the size
       // check alone would not catch a same-length substitution, which is why the checksum is compared.
@@ -198,7 +201,10 @@ describe('the backup archive, against a real filesystem', () => {
       const zip = new JSZip()
       for (const [name, contents] of Object.entries(entries)) zip.file(name, contents)
       if (options.withDirectory) zip.folder(options.withDirectory)
-      const output = path.join(workspace, `in-${Object.keys(entries).length}-${Math.abs(hash(entries))}.zip`)
+      const output = path.join(
+        workspace,
+        `in-${Object.keys(entries).length}-${Math.abs(hash(entries))}.zip`
+      )
       await fs.promises.writeFile(
         output,
         await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
@@ -289,9 +295,9 @@ describe('the backup archive, against a real filesystem', () => {
       expect(await archive.readText(path.join(output, 'backup.json'))).toBe(
         '{"surface":"offgrid-desktop"}'
       )
-      expect(
-        await archive.readText(path.join(output, 'files', 'documents', 'p1', '0-a.txt'))
-      ).toBe('alpha')
+      expect(await archive.readText(path.join(output, 'files', 'documents', 'p1', '0-a.txt'))).toBe(
+        'alpha'
+      )
     })
   })
 

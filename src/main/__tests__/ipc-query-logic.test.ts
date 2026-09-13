@@ -113,9 +113,17 @@ describe('ftsMatchExpression', () => {
 
     it('never throws on hyphenated or punctuation-heavy input', () => {
       withFts((db) => {
-        for (const q of ['e-commerce back-end co-founder', 'twenty-first', 'a---b', 'x: y', '"quoted"']) {
+        for (const q of [
+          'e-commerce back-end co-founder',
+          'twenty-first',
+          'a---b',
+          'x: y',
+          '"quoted"'
+        ]) {
           expect(() =>
-            db.prepare('SELECT name FROM entity_fts WHERE entity_fts MATCH ?').all(ftsMatchExpression(q))
+            db
+              .prepare('SELECT name FROM entity_fts WHERE entity_fts MATCH ?')
+              .all(ftsMatchExpression(q))
           ).not.toThrow()
         }
       })

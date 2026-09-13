@@ -33,9 +33,21 @@ const kvU64 = (key: string, val: number): Buffer =>
 // run off the end of the buffer (throw). Used to prove the parser short-circuits before the
 // tokenizer array and never touches it.
 const kvOversizedStringArray = (key: string): Buffer =>
-  Buffer.concat([gstr(key), u32(9 /* ARRAY */), u32(8 /* STRING elem */), u64(1_000_000), gstr('a')])
+  Buffer.concat([
+    gstr(key),
+    u32(9 /* ARRAY */),
+    u32(8 /* STRING elem */),
+    u64(1_000_000),
+    gstr('a')
+  ])
 const buildGguf = (kvs: Buffer[], version = 3): Buffer =>
-  Buffer.concat([Buffer.from('GGUF', 'ascii'), u32(version), u64(0 /* tensors */), u64(kvs.length), ...kvs])
+  Buffer.concat([
+    Buffer.from('GGUF', 'ascii'),
+    u32(version),
+    u64(0 /* tensors */),
+    u64(kvs.length),
+    ...kvs
+  ])
 
 describe('parseGgufMetadata', () => {
   it('reads architecture and the trained context_length (UINT32)', () => {

@@ -6,7 +6,10 @@
 import { describe, expect, it } from 'vitest'
 import { makeUseDriver, type DatabaseLike, type StatementLike } from '../use-driver'
 
-function fakeDb(reader: boolean, rows: unknown[] = [{ id: 1 }, { id: 2 }]): {
+function fakeDb(
+  reader: boolean,
+  rows: unknown[] = [{ id: 1 }, { id: 2 }]
+): {
   db: DatabaseLike
   calls: string[]
 } {

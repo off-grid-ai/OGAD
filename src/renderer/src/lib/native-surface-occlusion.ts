@@ -29,9 +29,7 @@ export function nativeSurfaceIsOccluded(): boolean {
   return owners > 0
 }
 
-export function onNativeSurfaceOcclusion(
-  listener: NativeSurfaceOcclusionListener
-): () => void {
+export function onNativeSurfaceOcclusion(listener: NativeSurfaceOcclusionListener): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
 }

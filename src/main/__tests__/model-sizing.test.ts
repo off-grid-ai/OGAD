@@ -339,8 +339,6 @@ describe('never-block loading — loadAttempts keeps the selected context', () =
   })
 
   it('does not retry a CPU-only request at another context', () => {
-    expect(loadAttempts(4096, 0)).toEqual([
-      { ctxSize: 4096, gpuLayers: 0, reason: 'requested' }
-    ])
+    expect(loadAttempts(4096, 0)).toEqual([{ ctxSize: 4096, gpuLayers: 0, reason: 'requested' }])
   })
 })

@@ -17,7 +17,7 @@ function runProbe(executable: '/usr/bin/true' | '/usr/bin/false'): {
 }
 
 describe('Electron SQLite restoration probe', () => {
-  it('uses Electron\'s cross-platform package shim by default', () => {
+  it("uses Electron's cross-platform package shim by default", () => {
     expect(fs.readFileSync(PROBE, 'utf8')).toContain(
       'electron_binary="${2:-./node_modules/.bin/electron}"'
     )

@@ -130,9 +130,7 @@ describe('image generation across feature navigation', () => {
          VALUES (?, ?, 'assistant', ?)`
       )
       .run(MESSAGE_ID, CONVERSATION_ID, 'Generated image')
-    expect(
-      jobs.acknowledgeConversation(CONVERSATION_ID, MESSAGE_ID)
-    ).toBe(true)
+    expect(jobs.acknowledgeConversation(CONVERSATION_ID, MESSAGE_ID)).toBe(true)
     expect(refreshed).toEqual([CONVERSATION_ID])
     detachRefresh()
     detachReturned()

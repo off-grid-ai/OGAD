@@ -272,7 +272,9 @@ async function main() {
       `  ${B}f: ${perCall.toFixed(0)} ms/call · ${mean(prompt).toFixed(0)} prompt tok · ` +
         `${(perCall / base).toFixed(2)}× a single call · ` +
         `per-frame ${(perCall / B).toFixed(0)} ms · ${(base / (perCall / B)).toFixed(2)}× throughput vs 1-by-1` +
-        (q != null ? ` · Q ${q.toFixed(2)}/5${baseQ != null ? ` (${(q - baseQ >= 0 ? '+' : '') + (q - baseQ).toFixed(2)} vs single)` : ''} (n=${scores.length})` : '')
+        (q != null
+          ? ` · Q ${q.toFixed(2)}/5${baseQ != null ? ` (${(q - baseQ >= 0 ? '+' : '') + (q - baseQ).toFixed(2)} vs single)` : ''} (n=${scores.length})`
+          : '')
     )
   }
   if (tmpMade) rmSync(TMP, { recursive: true, force: true })

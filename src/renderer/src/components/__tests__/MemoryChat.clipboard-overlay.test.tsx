@@ -84,13 +84,21 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
     const { bridgeWrite, browserWrite } = installApi()
     renderConversation()
 
-    const reply = (await screen.findByText('assistant reply copied exactly')).closest('[data-testid^="chat-message-"]') as HTMLElement
-    fireEvent.pointerDown(within(reply).getByRole('button', { name: 'Message actions' }), { button: 0, ctrlKey: false })
+    const reply = (await screen.findByText('assistant reply copied exactly')).closest(
+      '[data-testid^="chat-message-"]'
+    ) as HTMLElement
+    fireEvent.pointerDown(within(reply).getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
     await user.click(screen.getByRole('menuitem', { name: 'Copy' }))
 
     await waitFor(() => expect(browserWrite).toHaveBeenCalledWith('assistant reply copied exactly'))
     expect(bridgeWrite).toHaveBeenCalledWith('assistant reply copied exactly')
-    fireEvent.pointerDown(within(reply).getByRole('button', { name: 'Message actions' }), { button: 0, ctrlKey: false })
+    fireEvent.pointerDown(within(reply).getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
     expect(screen.getByRole('menuitem', { name: 'Copied' })).toBeTruthy()
   })
 
@@ -101,13 +109,21 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
     browserWrite.mockRejectedValueOnce(new Error('clipboard permission denied'))
     renderConversation()
 
-    const message = (await screen.findByText('copy this exact text')).closest('[data-testid^="chat-message-"]') as HTMLElement
-    fireEvent.pointerDown(within(message).getByRole('button', { name: 'Message actions' }), { button: 0, ctrlKey: false })
+    const message = (await screen.findByText('copy this exact text')).closest(
+      '[data-testid^="chat-message-"]'
+    ) as HTMLElement
+    fireEvent.pointerDown(within(message).getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
     await user.click(screen.getByRole('menuitem', { name: 'Copy' }))
 
     await waitFor(() => expect(browserWrite).toHaveBeenCalledWith('copy this exact text'))
     expect(bridgeWrite).toHaveBeenCalledWith('copy this exact text')
-    fireEvent.pointerDown(within(message).getByRole('button', { name: 'Message actions' }), { button: 0, ctrlKey: false })
+    fireEvent.pointerDown(within(message).getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
     expect(screen.queryByRole('menuitem', { name: 'Copied' })).toBeNull()
   })
 

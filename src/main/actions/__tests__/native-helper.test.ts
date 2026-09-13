@@ -21,7 +21,9 @@ let existingPaths = new Set<string>()
 
 // promisify(execFile) consumes the callback-style mock; script it per-case.
 type ExecCallback = (error: Error | null, result: { stdout: string; stderr: string }) => void
-function scriptExec(behavior: (cmd: string) => { error?: Error & { stdout?: string }; stdout?: string }): void {
+function scriptExec(
+  behavior: (cmd: string) => { error?: Error & { stdout?: string }; stdout?: string }
+): void {
   execFileMock.mockImplementation(
     (bin: string, _args: string[], _opts: unknown, callback: ExecCallback) => {
       const out = behavior(bin)
@@ -43,7 +45,10 @@ describe('runNativeAction', () => {
   it('reports helper-not-available when no candidate exists, without spawning', async () => {
     const { runNativeAction } = await import('../native-helper')
     const res = await runNativeAction({ command: 'reminders.list', args: {} })
-    expect(res).toEqual({ ok: false, error: 'the native actions helper is not available in this build' })
+    expect(res).toEqual({
+      ok: false,
+      error: 'the native actions helper is not available in this build'
+    })
     expect(execFileMock).not.toHaveBeenCalled()
   })
 
