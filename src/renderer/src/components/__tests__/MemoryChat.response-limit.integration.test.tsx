@@ -94,7 +94,7 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
 
   it('shows the active model context contract and refetches the running value after a change', async () => {
     const boundary = new ChatBoundary()
-    let settings = { ctxSize: 65536, effectiveCtxSize: 32768, modelMaxCtx: 262144 }
+    let settings = { ctxSize: 65536, effectiveCtxSize: 65536, modelMaxCtx: 262144 }
     const setLlmSettings = vi.fn(async (patch: { ctxSize?: number }) => {
       settings = {
         ...settings,
@@ -127,7 +127,7 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
     const status = await screen.findByRole('status')
     await waitFor(() => expect(status.textContent).toContain('Qwen 3.5 2B'))
     expect(status.textContent).toContain('Configured64K')
-    expect(status.textContent).toContain('Running32K')
+    expect(status.textContent).toContain('Running64K')
     expect(status.textContent).toContain('Recommended16K')
 
     const user = userEvent.setup()

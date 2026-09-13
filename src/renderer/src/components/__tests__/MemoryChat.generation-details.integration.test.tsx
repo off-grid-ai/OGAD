@@ -80,7 +80,9 @@ describe('<MemoryChat/> generation details', () => {
     ]
     renderChat({ conversationId: 'conversation-a' })
 
-    const reply = (await screen.findByText('the answer')).closest('[data-testid^="chat-message-"]') as HTMLElement
+    const reply = (await screen.findByText('the answer')).closest(
+      '[data-testid^="chat-message-"]'
+    ) as HTMLElement
     const actions = within(reply).getByRole('button', { name: 'Message actions' })
     expect(within(reply).queryByRole('menuitem', { name: 'Copy' })).toBeNull()
     expect(within(reply).getByText(/\d{1,2}:\d{2}\s*[AP]M/)).toBeTruthy()
@@ -127,9 +129,14 @@ describe('<MemoryChat/> generation details', () => {
     expect(row.textContent).toContain('42.5 tok/s')
     expect(row.textContent).toContain('prefill 910 tok/s')
     expect(row.textContent).toContain('TTFT 0.37s')
-    expect(row.textContent).toContain('128 tokens')
-    const reply = screen.getByText('the answer').closest('[data-testid^="chat-message-"]') as HTMLElement
-    fireEvent.pointerDown(within(reply).getByRole('button', { name: 'Message actions' }), { button: 0, ctrlKey: false })
+    expect(row.textContent).toContain('128 output tokens')
+    const reply = screen
+      .getByText('the answer')
+      .closest('[data-testid^="chat-message-"]') as HTMLElement
+    fireEvent.pointerDown(within(reply).getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
     expect(screen.getByRole('menuitem', { name: 'Regenerate' })).toBeTruthy()
   })
 
