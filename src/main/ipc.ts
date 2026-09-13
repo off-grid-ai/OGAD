@@ -217,7 +217,7 @@ async function classifyIntent(
     ]
       .filter(Boolean)
       .join('\n\n')
-    const raw = await llm.chat(prompt, [], 60000, 200, {
+    const raw = await llm.chat(prompt, [], undefined, 200, {
       disableThinking: true,
       responseFormat: {
         type: 'json_schema',
@@ -651,7 +651,7 @@ export function setupIPC() {
         const desc = (
           await (
             await import('./llm')
-          ).llm.chat(imgPrompt, [], 60000, 200, { disableThinking: true })
+          ).llm.chat(imgPrompt, [], undefined, 200, { disableThinking: true })
         )
           .trim()
           .replace(/^["']|["']$/g, '')

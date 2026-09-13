@@ -31,7 +31,7 @@ export interface RemoteChatRequest {
 
 export interface RemoteChatOptions {
   signal?: AbortSignal
-  timeoutMs: number
+  timeoutMs?: number
 }
 
 export interface RemoteNativeToolCapability {
@@ -273,12 +273,16 @@ interface IdleWatchdog {
  * the compiler cannot order against a later read, so a plain flag narrowed to `false` and made the
  * timeout branch look statically dead.
  */
-function createIdleWatchdog(timeoutMs: number, callerSignal?: AbortSignal): IdleWatchdog {
+function createIdleWatchdog(
+  timeoutMs: number | undefined,
+  callerSignal?: AbortSignal
+): IdleWatchdog {
   const controller = new AbortController()
   const firedRef = { current: false }
   let timer: ReturnType<typeof setTimeout> | undefined
   const arm = (): void => {
     if (timer) clearTimeout(timer)
+    if (timeoutMs === undefined) return
     timer = setTimeout(() => {
       firedRef.current = true
       controller.abort()

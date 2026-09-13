@@ -37,7 +37,7 @@ export interface StreamResult {
 
 export interface StreamOptions {
   signal?: AbortSignal
-  timeoutMs: number
+  timeoutMs?: number
 }
 
 export interface CompletionStreamAccumulator {
@@ -145,13 +145,11 @@ export function streamCompletion(
       clearTimeout(idleTimer)
       if (onAbort && opts.signal) opts.signal.removeEventListener('abort', onAbort)
     }
-    // IDLE timeout, re-armed on every chunk — NOT a total-duration cap. A long but healthy stream
-    // (output is no longer capped at 1024, so a real answer can run for minutes) must never be killed
-    // while tokens keep flowing; only a genuinely stalled/hung generation (no data for opts.timeoutMs)
-    // times out. This was previously a single total-duration timer that killed long responses
-    // mid-stream the moment output was uncapped ("LLM request timed out" at ~5 min).
+    // An explicit idle timeout, when supplied, is re-armed on each chunk. Without one, the
+    // request stays open until it finishes or the caller aborts it.
     const armIdleTimer = (): void => {
       clearTimeout(idleTimer)
+      if (opts.timeoutMs === undefined) return
       idleTimer = setTimeout(() => {
         timedOut = true
         cleanup()
