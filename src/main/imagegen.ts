@@ -583,8 +583,7 @@ async function maybeEnhancePrompt(
               if (kind === 'content') onText(text)
             },
             { temperature: 0.7, thinking: false },
-            200,
-            60_000
+            200
           )
           .then((result) => result.content)
       )
