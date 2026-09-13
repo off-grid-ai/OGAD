@@ -282,7 +282,6 @@ function proxyToSelectedRemote(res: http.ServerResponse, body: Record<string, un
       proxyRes.pipe(res)
     }
   )
-  proxyReq.setTimeout(300_000, () => proxyReq.destroy(new Error('Remote model timed out.')))
   proxyReq.on('error', () => {
     if (!res.headersSent) {
       json(res, 502, errBody('Remote model connection failed.', 'upstream_error'))
