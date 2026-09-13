@@ -27,7 +27,8 @@ export function buildSendHistory<T extends HistoryTurn>(
   convMsgs: readonly T[],
   regen: boolean,
   newUserText: string,
-  limit = 20
+  limit = 20,
+  contextWindowTokens?: number
 ): HistoryTurn[] {
   // Task guidance is shown in Chat for continuity, but the operator already
   // consumed it. Do not replay it as another user prompt to the resident LLM.
@@ -42,10 +43,16 @@ export function buildSendHistory<T extends HistoryTurn>(
     base = [...flat, { role: 'user', content: newUserText }]
   }
   if (base.length === 0) return []
-  if (limit <= 1) return base.slice(-1)
+  const estimatedTokens = Math.ceil(JSON.stringify(base).length / 4)
+  if (contextWindowTokens && estimatedTokens < contextWindowTokens * 0.8) return base
+  const effectiveLimit =
+    contextWindowTokens && estimatedTokens >= contextWindowTokens * 0.8 && base.length > 2
+      ? Math.min(limit, Math.max(2, Math.floor(base.length / 2)))
+      : limit
+  if (effectiveLimit <= 1) return base.slice(-1)
   // The active turn is never shortened. Prior turns share a fixed budget so a
   // few very large messages cannot exhaust the model context by themselves.
-  const recent = base.length <= limit ? base : base.slice(-(limit - 1))
+  const recent = base.length <= effectiveLimit ? base : base.slice(-(effectiveLimit - 1))
   const older = base.slice(0, base.length - recent.length)
   const excerptTurns = older.length
     ? [older[0]!, ...older.slice(-3).filter((turn) => turn !== older[0])]
