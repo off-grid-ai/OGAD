@@ -64,7 +64,15 @@ it('completes a skill in the draft and sends it from a populated chat', async ()
   expect(screen.getByText('Earlier answer')).toBeTruthy()
 })
 
-it('completes and opens an installed skill on the last line of a chat message', async () => {
+it.each([
+  [
+    'on a later line',
+    'Please improve this draft.\n/proo',
+    'Please improve this draft.\n/proofread ',
+    'Please improve this draft.'
+  ],
+  ['after text', 'hello /proo', 'hello /proofread ', 'hello']
+])('completes and opens an installed skill %s', async (_, draft, completed, prompt) => {
   const boundary = new ChatBoundary()
   Object.assign(boundary.api, {
     listSkills: async () => [{ name: 'proofread', description: 'Improve writing' }],
@@ -83,15 +91,15 @@ it('completes and opens an installed skill on the last line of a chat message', 
   renderChat({ conversationId: 'conversation-a' })
 
   const composer = await screen.findByPlaceholderText('Ask about “Project Alpha”…')
-  fireEvent.change(composer, { target: { value: 'Please improve this draft.\n/proo' } })
+  fireEvent.change(composer, { target: { value: draft } })
   expect(await screen.findByRole('button', { name: /proofread/i })).toBeTruthy()
   fireEvent.keyDown(composer, { key: 'Tab' })
-  expect((composer as HTMLTextAreaElement).value).toBe('Please improve this draft.\n/proofread ')
+  expect((composer as HTMLTextAreaElement).value).toBe(completed)
   await user.click(screen.getByRole('button', { name: 'Send' }))
 
   await waitFor(() => expect(boundary.calls).toHaveLength(1))
   expect(boundary.calls[0]!.query).toContain('Preserve the meaning.')
-  expect(boundary.calls[0]!.query).toContain('Please improve this draft.')
+  expect(boundary.calls[0]!.query).toContain(prompt)
   await act(async () => boundary.resolve(0, 'The draft is clearer.'))
   await user.click(await screen.findByRole('button', { name: 'Open /proofread skill' }))
   const panel = await screen.findByRole('dialog', { name: 'Skills' })

@@ -1237,13 +1237,16 @@ function makeCiteComponents(
 const SKILL_MENTION_LINK_PREFIX = '#offgrid-skill-'
 
 function renderUserSkillMention(content: string, installedSkillNames: readonly string[]): string {
-  return content.replace(/^\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/gim, (mention, name: string) => {
-    const isInstalled = installedSkillNames.some(
-      (installedName) => installedName.toLowerCase() === name.toLowerCase()
-    )
-    if (!isInstalled && !presetForSkillName(name)) return mention
-    return `[/${name}](${SKILL_MENTION_LINK_PREFIX}${encodeURIComponent(name)})`
-  })
+  return content.replace(
+    /(^|\s)\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/gi,
+    (mention, space: string, name: string) => {
+      const isInstalled = installedSkillNames.some(
+        (installedName) => installedName.toLowerCase() === name.toLowerCase()
+      )
+      if (!isInstalled && !presetForSkillName(name)) return mention
+      return `${space}[/${name}](${SKILL_MENTION_LINK_PREFIX}${encodeURIComponent(name)})`
+    }
+  )
 }
 
 function makeUserMessageComponents(navigation: ContextNavigation): Components {
@@ -3833,16 +3836,16 @@ export function MemoryChat({
     }
     if (isInput) setAttachments([])
 
-    // Skill invocation: "/skill-name [rest]" prepends that skill's instructions.
+    // An installed /skill-name anywhere in the prompt prepends that skill's instructions.
     if (isInput) {
-      const leadingSkill = /^\/([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(typed)
-      const trailingSkill = /^([\s\S]*\S)\n\/([A-Za-z0-9_-]+)\s*$/.exec(typed)
-      const skillName = leadingSkill?.[1] ?? trailingSkill?.[2]
+      const skillMention = /(^|\s)\/([A-Za-z0-9_-]+)(?=\s|$)/.exec(typed)
+      const skillName = skillMention?.[2]
       if (skillName && skills.some((s) => s.name.toLowerCase() === skillName.toLowerCase())) {
         try {
           const sk = await window.api.getSkill(skillName)
           if (sk) {
-            const rest = (leadingSkill?.[2] ?? trailingSkill?.[1] ?? '').trim()
+            const rest =
+              `${typed.slice(0, skillMention!.index)}${skillMention![1]}${typed.slice(skillMention!.index + skillMention![0].length)}`.trim()
             modelQuery =
               `${attBlock ? attBlock + '\n\n' : ''}# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim()
           }
