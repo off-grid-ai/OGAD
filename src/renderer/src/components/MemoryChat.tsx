@@ -139,6 +139,7 @@ import {
   Sparkle as Sparkles,
   FolderPlus,
   Wrench,
+  Waveform,
   Plug,
   SlidersHorizontal,
   Brain,
@@ -1259,9 +1260,7 @@ function MessageMarkdown({
  * What the generation cost, under the answer that cost it.
  *
  * Only the fields the run actually produced: a server that reports no token counts shows a time and
- * nothing else, because "0 tok/s" would be a lie. Rendered whenever the numbers exist rather than
- * behind a preference - unlike mobile, the desktop chat has no display-settings surface to hang a
- * toggle on, and inventing one for a single muted line is not worth the drift.
+ * nothing else, because "0 tok/s" would be a lie.
  */
 function GenerationMetricsRow({
   metrics
@@ -1283,15 +1282,21 @@ function GenerationMetricsRow({
         : null
   if (!parts.length && contextLabel === null) return null
   return (
-    <p
-      className="mt-2 font-mono text-[10px] tabular-nums text-neutral-500"
-      data-testid="generation-metrics"
-    >
-      {[
-        ...(contextLabel === null ? [] : [contextLabel]),
-        ...parts
-      ].join(' · ')}
-    </p>
+    <Collapsible className="mt-1 max-w-[85%] font-mono text-[10px] text-neutral-500">
+      <CollapsibleTrigger className="group flex items-center gap-1.5 text-left transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
+        <Waveform className="h-3 w-3" aria-hidden="true" />
+        <span>Generation details</span>
+        <CaretDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <p className="ml-1 mt-1 border-l border-neutral-800 pl-3 tabular-nums" data-testid="generation-metrics">
+          {[
+            ...(contextLabel === null ? [] : [contextLabel]),
+            ...parts
+          ].join(' · ')}
+        </p>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
