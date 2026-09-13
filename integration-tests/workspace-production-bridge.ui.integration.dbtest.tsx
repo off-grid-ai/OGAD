@@ -251,6 +251,39 @@ describe('production workspace bridge', () => {
     expect(screen.queryByText('Sorry, I could not generate a response right now.')).toBeNull()
   })
 
+  it('keeps a slow reply active past the former deadline until the user stops it', async () => {
+    fake.enqueue(
+      { content: '{"intent":"chat","urls":[]}' },
+      { content: 'This reply is still in progress.', hold: true }
+    )
+    const user = userEvent.setup()
+    renderChat()
+
+    const composer = await screen.findByPlaceholderText(/^ask /i)
+    await user.click(screen.getByRole('button', { name: 'New chat' }))
+    fireEvent.change(composer, { target: { value: 'Keep working until I stop you' } })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^send$/i }))
+      for (let i = 0; i < 30 && !screen.queryByText('This reply is still in progress.'); i++) {
+        await vi.advanceTimersByTimeAsync(10)
+        await new Promise<void>((resolve) => setImmediate(resolve))
+      }
+      expect(screen.getByText('This reply is still in progress.')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Stop generating' })).toBeTruthy()
+      await vi.advanceTimersByTimeAsync(300_001)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(screen.getByRole('button', { name: 'Stop generating' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Stop generating' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull()
+    })
+    expect(await inTranscript('This reply is still in progress.')).toBeTruthy()
+  })
+
   it('shows and saves a compaction notice when the chat reaches 80% of its context', async () => {
     const longAnswer = `Stored answer ${'A'.repeat(54_000)}`
     fake.enqueue(
