@@ -317,31 +317,16 @@ class SdServerService {
       if (!pollUrl) throw new Error('sd-server did not return a job to poll.')
       this.currentJobId = job.id ?? null
 
-      // Watchdog: abort if the job makes no progress for too long, so a hung
-      // server can't wedge generation forever (the poll loop would otherwise spin
-      // indefinitely). Reset the deadline whenever progress advances; a 1024²
-      // image can legitimately take minutes, so the window is generous.
-      const STALL_MS = 180_000
-      let lastAdvanceAt = Date.now()
-      let lastProgress = -1
       for (;;) {
         await new Promise((r) => setTimeout(r, 150))
         const res = await this.sdFetch(`${this.base()}${pollUrl}`)
         if (!res.ok) throw new Error(`job poll failed (HTTP ${res.status}).`)
         const status = await res.json()
         const outcome = parseJobResult(status)
-        if (typeof outcome.progress === 'number' && outcome.progress > lastProgress) {
-          lastProgress = outcome.progress
-          lastAdvanceAt = Date.now()
-        }
         if (onProgress && typeof outcome.progress === 'number') {
           onProgress({ step: Math.min(total, Math.round(outcome.progress * total)), total })
         }
-        if (!outcome.done) {
-          if (Date.now() - lastAdvanceAt > STALL_MS)
-            throw new Error('image generation stalled (no progress) — aborting.')
-          continue
-        }
+        if (!outcome.done) continue
         if (!outcome.ok) throw new Error(outcome.error ?? 'image generation failed.')
         const png = Buffer.from(outcome.pngBase64!, 'base64')
         // Prefer the server-reported seed (for a reproducible -1 request); fall
