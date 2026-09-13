@@ -1237,14 +1237,13 @@ function makeCiteComponents(
 const SKILL_MENTION_LINK_PREFIX = '#offgrid-skill-'
 
 function renderUserSkillMention(content: string, installedSkillNames: readonly string[]): string {
-  const match = /^\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/i.exec(content)
-  if (!match) return content
-  const name = match[1]!
-  const isInstalled = installedSkillNames.some(
-    (installedName) => installedName.toLowerCase() === name.toLowerCase()
-  )
-  if (!isInstalled && !presetForSkillName(name)) return content
-  return `[/${name}](${SKILL_MENTION_LINK_PREFIX}${encodeURIComponent(name)})${content.slice(match[0].length)}`
+  return content.replace(/^\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/gim, (mention, name: string) => {
+    const isInstalled = installedSkillNames.some(
+      (installedName) => installedName.toLowerCase() === name.toLowerCase()
+    )
+    if (!isInstalled && !presetForSkillName(name)) return mention
+    return `[/${name}](${SKILL_MENTION_LINK_PREFIX}${encodeURIComponent(name)})`
+  })
 }
 
 function makeUserMessageComponents(navigation: ContextNavigation): Components {
@@ -3836,12 +3835,14 @@ export function MemoryChat({
 
     // Skill invocation: "/skill-name [rest]" prepends that skill's instructions.
     if (isInput) {
-      const sm = /^\/([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(typed)
-      if (sm && skills.some((s) => s.name.toLowerCase() === sm[1]!.toLowerCase())) {
+      const leadingSkill = /^\/([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(typed)
+      const trailingSkill = /^([\s\S]*\S)\n\/([A-Za-z0-9_-]+)\s*$/.exec(typed)
+      const skillName = leadingSkill?.[1] ?? trailingSkill?.[2]
+      if (skillName && skills.some((s) => s.name.toLowerCase() === skillName.toLowerCase())) {
         try {
-          const sk = await window.api.getSkill(sm[1]!)
+          const sk = await window.api.getSkill(skillName)
           if (sk) {
-            const rest = sm[2]!.trim()
+            const rest = (leadingSkill?.[2] ?? trailingSkill?.[1] ?? '').trim()
             modelQuery =
               `${attBlock ? attBlock + '\n\n' : ''}# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim()
           }
