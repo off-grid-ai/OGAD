@@ -200,6 +200,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    await user.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
     expect(screen.queryByText('Failed route partial.')).toBeNull()
     expect(screen.queryByText('Failed route thought.')).toBeNull()
@@ -212,6 +213,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
     )
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    await user.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
     expect(screen.queryByText('Failed route partial.')).toBeNull()
   })
@@ -366,10 +368,10 @@ describe('<MemoryChat/> ordered tool turn', () => {
         content: 'The answer is ready.',
         context: {
           metrics: {
-            estimatedPromptTokens: 1024,
-            contextWindowTokens: 4096,
+            promptTokens: 2888,
+            contextWindowTokens: 12288,
             decodeTokensPerSecond: 42.5,
-            completionTokens: 128,
+            completionTokens: 567,
             totalSeconds: 3.4
           }
         }
@@ -384,8 +386,12 @@ describe('<MemoryChat/> ordered tool turn', () => {
     )
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    expect(screen.queryByTestId('generation-metrics')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Generation details' }))
     expect(
-      await screen.findByText(/Context: ~25% used · 42\.5 tok\/s · 128 tokens · 3\.4s total/)
+      await screen.findByText(
+        /Context: 24% used \(2888 prompt tokens \/ 12288 context\) · 42\.5 tok\/s · 567 output tokens · 3\.4s total/
+      )
     ).toBeTruthy()
   })
 

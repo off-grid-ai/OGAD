@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { mergeSyncedMessageContext, serializeSyncedMessageContext } from '@offgrid/sync'
 import { afterEach, expect, it } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
@@ -41,16 +42,20 @@ it('shows portable generation details from a synced reply after reload', async (
 
   const chat = renderChat({ conversationId: 'conversation-a' })
   expect(await screen.findByText('Answer from phone')).toBeTruthy()
+  expect(screen.queryByTestId('generation-metrics')).toBeNull()
+  await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
   let details = await screen.findByTestId('generation-metrics')
   expect(details.textContent).toContain('Context: ~25% used')
   expect(details.textContent).toContain('42.5 tok/s')
   expect(details.textContent).toContain('TTFT 0.37s')
-  expect(details.textContent).toContain('128 tokens')
+  expect(details.textContent).toContain('128 output tokens')
   expect(details.textContent).toContain('3.4s total')
   expect(await screen.findByRole('button', { name: 'Tools sent in request (1)' })).toBeTruthy()
 
   chat.unmount()
   renderChat({ conversationId: 'conversation-a' })
+  expect(screen.queryByTestId('generation-metrics')).toBeNull()
+  await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
   details = await screen.findByTestId('generation-metrics')
   expect(details.textContent).toContain('Context: ~25% used')
   expect(details.textContent).toContain('42.5 tok/s')

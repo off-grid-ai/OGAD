@@ -91,9 +91,7 @@ export function generationMetrics(input: {
     ...(positive(timings?.prompt_per_second) === undefined
       ? {}
       : { prefillTokensPerSecond: positive(timings?.prompt_per_second) }),
-    ...(positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n)
-      ? { promptTokens: positive(usage?.prompt_tokens) ?? positive(timings?.prompt_n) }
-      : {}),
+    ...(positive(usage?.prompt_tokens) ? { promptTokens: positive(usage?.prompt_tokens) } : {}),
     ...(completionTokens === undefined ? {} : { completionTokens })
   }
 }
@@ -111,7 +109,7 @@ export function formatGenerationMetrics(metrics: GenerationMetrics): string[] {
   if (metrics.timeToFirstTokenSeconds) {
     parts.push(`TTFT ${metrics.timeToFirstTokenSeconds.toFixed(2)}s`)
   }
-  if (metrics.completionTokens) parts.push(`${metrics.completionTokens} tokens`)
+  if (metrics.completionTokens) parts.push(`${metrics.completionTokens} output tokens`)
   if (metrics.totalSeconds) parts.push(`${metrics.totalSeconds.toFixed(1)}s total`)
   return parts
 }

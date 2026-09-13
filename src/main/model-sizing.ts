@@ -162,21 +162,11 @@ export interface LoadAttempt {
   reason: string
 }
 
-/** The ordered launch attempts for a model, so a load that OOMs degrades instead
- *  of failing (mobile's GPU → smaller-ctx → CPU ladder). Largest context on GPU
- *  first, then halve context down the ladder, then a final CPU-only pass at the
- *  2048 floor. The runtime only advances to the next attempt on an OUT-OF-MEMORY
- *  failure — a non-memory failure (bad arch, missing dylib) isn't retried. */
+/** Try GPU, then CPU at the selected context. Never reduce the selected value. */
 export function loadAttempts(requestedCtx: number, gpuLayers: number): LoadAttempt[] {
-  const out: LoadAttempt[] = contextLadder(requestedCtx).map((ctxSize, i) => ({
-    ctxSize,
-    gpuLayers,
-    reason: i === 0 ? 'requested' : `context ${ctxSize}`
-  }))
-  // Last resort: CPU-only at the floor. Skipped if GPU offload was already off
-  // (that attempt is already covered by the ctx=2048 rung above).
+  const out: LoadAttempt[] = [{ ctxSize: requestedCtx, gpuLayers, reason: 'requested' }]
   if (gpuLayers > 0) {
-    out.push({ ctxSize: 2048, gpuLayers: 0, reason: 'CPU-only, context 2048' })
+    out.push({ ctxSize: requestedCtx, gpuLayers: 0, reason: 'CPU-only' })
   }
   return out
 }

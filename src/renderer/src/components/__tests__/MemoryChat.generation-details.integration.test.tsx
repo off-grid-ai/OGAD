@@ -99,12 +99,14 @@ describe('<MemoryChat/> generation details', () => {
 
     await answerWith(boundary, 'conversation-on', user, MEASURED)
 
+    expect(screen.queryByTestId('generation-metrics')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Generation details' }))
     const row = await screen.findByTestId('generation-metrics')
     // The server's own rates, our measured TTFT, and the token count - the whole point of the row.
     expect(row.textContent).toContain('42.5 tok/s')
     expect(row.textContent).toContain('prefill 910 tok/s')
     expect(row.textContent).toContain('TTFT 0.37s')
-    expect(row.textContent).toContain('128 tokens')
+    expect(row.textContent).toContain('128 output tokens')
     const regenerate = screen.getByRole('button', { name: 'Regenerate' })
     expect(regenerate.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -124,6 +126,8 @@ describe('<MemoryChat/> generation details', () => {
     await user.click(await screen.findByRole('switch', { name: /generation details/i }))
 
     await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('showGenerationDetails', true))
+    expect(screen.queryByTestId('generation-metrics')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Generation details' }))
     const row = await screen.findByTestId('generation-metrics')
     expect(row.textContent).toContain('42.5 tok/s')
     expect(row.textContent).toContain('TTFT 0.37s')
