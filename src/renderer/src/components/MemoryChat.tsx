@@ -3912,10 +3912,13 @@ export function MemoryChat({
       // History is built from the TARGET conversation's own messages (never the
       // active tab's `messages`) — a drained-queue or background send is bound to
       // `convId`, so its history must come from that conversation (D8).
-      const contextWindowTokens = await window.api
-        .getLlmSettings()
-        .then((settings) => settings?.ctxSize)
-        .catch(() => undefined)
+      const contextWindowTokens =
+        typeof window.api.getLlmSettings === 'function'
+          ? await window.api
+              .getLlmSettings()
+              .then((settings) => settings?.ctxSize)
+              .catch(() => undefined)
+          : undefined
       const history = buildSendHistory(
         messagesByConv[convId] ?? EMPTY_MSGS,
         !!regen,
