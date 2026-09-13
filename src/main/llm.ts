@@ -92,6 +92,24 @@ export interface ChatStreamResult extends StreamResult {
   maxTokens: number
 }
 
+function withContextMetrics(
+  result: StreamResult,
+  messages: unknown[],
+  options: { contextWindowTokens?: number; tools?: unknown[] }
+): StreamResult {
+  const { contextWindowTokens, tools } = options
+  return {
+    ...result,
+    metrics: {
+      ...result.metrics,
+      ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {}),
+      ...(result.metrics?.promptTokens
+        ? {}
+        : { estimatedPromptTokens: Math.ceil(JSON.stringify({ messages, tools }).length / 4) })
+    }
+  }
+}
+
 export class LLMService {
   private readonly healthInvalidationListeners = new Set<() => void>()
   private server: ChildProcess | null = null
@@ -313,9 +331,10 @@ export class LLMService {
     }
   }
 
-  /** The EFFECTIVE (RAM-clamped) context window the server is actually running
-   *  with — the real ceiling for prompt + tools + answer. */
+  /** The selected app context cap. Local inference also needs the RAM clamp;
+   *  remote inference uses the configured cap without the local model's clamp. */
   effectiveContextSize(): number {
+    if (this.activeRemoteTextModel()) return this.ctxSize
     return this.safeCtxSize(this.ctxSize)
   }
 
@@ -1290,7 +1309,12 @@ export class LLMService {
         thinking: opts.thinking,
         signal: opts.signal
       })
-      return { ...result, maxTokens: resolvedMaxTokens }
+      return {
+        ...withContextMetrics(result, messages, {
+          contextWindowTokens: this.effectiveContextSize()
+        }),
+        maxTokens: resolvedMaxTokens
+      }
     }
     await this.beginGeneration()
     try {
@@ -1319,7 +1343,10 @@ export class LLMService {
         signal: opts.signal,
         timeoutMs
       })
-      return { ...result, maxTokens: resolvedMaxTokens }
+      return {
+        ...withContextMetrics(result, messages, { contextWindowTokens: this.effectiveContextSize() }),
+        maxTokens: resolvedMaxTokens
+      }
     } finally {
       this.finishGeneration()
     }
@@ -1348,7 +1375,7 @@ export class LLMService {
   ): Promise<StreamResult> {
     const remote = this.activeRemoteTextModel()
     if (remote) {
-      return this.completeRemote(remote, messages, onDelta, {
+      const result = await this.completeRemote(remote, messages, onDelta, {
         timeoutMs,
         maxTokens: opts.maxTokens,
         temperature: opts.temperature,
@@ -1358,6 +1385,10 @@ export class LLMService {
         responseFormat: opts.responseFormat,
         tools: opts.tools,
         toolChoice: opts.toolChoice
+      })
+      return withContextMetrics(result, messages, {
+        contextWindowTokens: this.effectiveContextSize(),
+        tools: opts.tools
       })
     }
     await this.beginGeneration()
@@ -1385,9 +1416,13 @@ export class LLMService {
 
       // Single SSE transport (llm/stream.ts) — same path as chatStream, but the
       // assembled tool calls are surfaced too (this powers the agentic loop).
-      return await streamCompletion(this.port, body, onDelta, {
+      const result = await streamCompletion(this.port, body, onDelta, {
         signal: opts.signal,
         timeoutMs
+      })
+      return withContextMetrics(result, messages, {
+        contextWindowTokens: this.effectiveContextSize(),
+        tools: opts.tools
       })
     } finally {
       this.finishGeneration()

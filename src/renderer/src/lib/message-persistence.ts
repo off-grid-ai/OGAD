@@ -98,7 +98,9 @@ export function readGenerationMetrics(ctx: unknown): GenerationMetrics | undefin
     'decodeTokensPerSecond',
     'prefillTokensPerSecond',
     'promptTokens',
-    'completionTokens'
+    'completionTokens',
+    'contextWindowTokens',
+    'estimatedPromptTokens'
   ] as const
   const metrics: Record<string, number> = {}
   for (const key of keys) {

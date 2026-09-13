@@ -37,6 +37,10 @@ export interface GenerationMetrics {
   prefillTokensPerSecond?: number
   promptTokens?: number
   completionTokens?: number
+  /** Context window used for this reply, captured before model selection can change. */
+  contextWindowTokens?: number
+  /** Prompt size estimate when the server does not report prompt tokens. */
+  estimatedPromptTokens?: number
 }
 
 function positive(value: number | undefined): number | undefined {
