@@ -112,26 +112,28 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     // mid-sentence at ~1024 tokens regardless of the setting/window. Now it inherits the setting.
     const svc = llm as unknown as { maxTokens: number }
     const prev = svc.maxTokens
-    svc.maxTokens = 5000 // a distinctive user cap
+    svc.maxTokens = 2000 // distinctive user cap that fits the smallest test context
     try {
       enqueueReactiveAfterEmptyPlan({ content: 'a long answer' })
       await toolChat('write a lot', [])
       const round1 = fake.requests[0] as { max_tokens?: number }
-      expect(round1.max_tokens).toBe(5000) // inherits the user's setting…
+      expect(round1.max_tokens).toBe(2000) // inherits the user's setting…
       expect(round1.max_tokens).not.toBe(1024) // …never the removed hardcap
     } finally {
       svc.maxTokens = prev
     }
   })
 
-  it('defaults the tool-loop answer to auto — max_tokens = -1 (until EOS / window fills)', async () => {
+  it('uses the remaining context window for an auto tool-loop answer', async () => {
     const svc = llm as unknown as { maxTokens: number }
     const prev = svc.maxTokens
     svc.maxTokens = 0 // MAX_TOKENS_AUTO
     try {
       enqueueReactiveAfterEmptyPlan({ content: 'ok' })
       await toolChat('hi', [])
-      expect((fake.requests[0] as { max_tokens?: number }).max_tokens).toBe(-1)
+      const maxTokens = (fake.requests[0] as { max_tokens?: number }).max_tokens
+      expect(maxTokens).toBeGreaterThan(1024)
+      expect(maxTokens).toBeLessThan(llm.effectiveContextSize())
     } finally {
       svc.maxTokens = prev
     }
