@@ -32,9 +32,43 @@ export function buildSendHistory<T extends HistoryTurn>(
 ): HistoryTurn[] {
   // Task guidance is shown in Chat for continuity, but the operator already
   // consumed it. Do not replay it as another user prompt to the resident LLM.
-  const flat = convMsgs
+  const lastCompaction = convMsgs.findLastIndex(
+    (message) => message.notice && message.content === '_Compacted_'
+  )
+  const beforeNotice = convMsgs
+    .slice(0, lastCompaction < 0 ? 0 : lastCompaction)
     .filter((message) => !message.context?.taskGuidance && !message.notice)
-    .map((m) => ({ role: m.role, content: m.content }))
+  // The notice is inserted after the user turn that triggered compaction.
+  // Keep that active turn intact for the next reply as well.
+  const retainedUserTurn = beforeNotice.at(-1)?.role === 'user' ? beforeNotice.at(-1) : undefined
+  const preCompactionTurns = retainedUserTurn ? beforeNotice.slice(0, -1) : beforeNotice
+  const preCompactionExcerpts = preCompactionTurns.length
+    ? [
+        preCompactionTurns[0]!,
+        ...preCompactionTurns.slice(-3).filter((turn) => turn !== preCompactionTurns[0])
+      ]
+    : []
+  const preCompactionLabels = preCompactionExcerpts.map(
+    (turn) => `${turn.role === 'assistant' ? 'Assistant' : 'User'}: ${turn.content.slice(0, 90)}`
+  )
+  const flat = [
+    ...(preCompactionLabels.length
+      ? [
+          {
+            role: 'user',
+            content:
+              `${EARLIER_CHAT_EXCERPTS_PREFIX} (${preCompactionTurns.length} turns; some details omitted): ${preCompactionLabels.join(' | ')}`.slice(
+                0,
+                400
+              )
+          }
+        ]
+      : []),
+    ...(retainedUserTurn ? [retainedUserTurn] : []),
+    ...convMsgs
+      .slice(lastCompaction + 1)
+      .filter((message) => !message.context?.taskGuidance && !message.notice)
+  ].map((m) => ({ role: m.role, content: m.content }))
   let base: HistoryTurn[]
   if (regen) {
     const lastUserIdx = flat.map((m) => m.role).lastIndexOf('user')

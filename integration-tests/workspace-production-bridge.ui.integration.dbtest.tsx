@@ -31,6 +31,7 @@ type IpcListener = (event: unknown, ...args: unknown[]) => void
 
 const PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-workspace-bridge-'))
 const previousUserData = process.env.OFFGRID_USER_DATA
+const previousDataDir = process.env.OFFGRID_DATA_DIR
 const bridge = vi.hoisted(() => ({
   handlers: new Map<string, IpcHandler>(),
   mainListeners: new Map<string, IpcHandler>(),
@@ -149,6 +150,7 @@ function renderChat(target?: { conversationId?: string; projectId?: string }): v
 
 beforeAll(async () => {
   process.env.OFFGRID_USER_DATA = PROFILE_DIR
+  process.env.OFFGRID_DATA_DIR = PROFILE_DIR
   fake = await startFakeLlamaServer()
   await bootProductionMain()
   await import('../src/preload/index')
@@ -182,6 +184,8 @@ afterAll(async () => {
   fs.rmSync(PROFILE_DIR, { recursive: true, force: true })
   if (previousUserData === undefined) delete process.env.OFFGRID_USER_DATA
   else process.env.OFFGRID_USER_DATA = previousUserData
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
 })
 
 /**
@@ -286,6 +290,61 @@ describe('production workspace bridge', () => {
     expect(getRagMessages(conversation!.id)).toEqual(
       expect.arrayContaining([expect.objectContaining({ content: '_Compacted_' })])
     )
+  })
+
+  it('uses the same chat Thinking control for remote provider requests', async () => {
+    const endpoint = `http://127.0.0.1:${fake.port}/v1`
+    await window.api.setLlmSettings({ reasoningBudget: 1024 })
+    try {
+      for (const provider of ['openrouter', 'ollama', 'lmstudio', 'ogad'] as const) {
+        fake.reset()
+        await window.api.setRemoteVisionServer({ provider, endpoint, model: 'integration-model' })
+        fake.enqueue(
+          { content: '{"intent":"chat","urls":[]}' },
+          { content: `${provider} answered with Thinking on.` },
+          { content: '{"intent":"chat","urls":[]}' },
+          { content: `${provider} answered with Thinking off.` }
+        )
+        const user = userEvent.setup()
+        renderChat()
+        const composer = await screen.findByPlaceholderText(/^ask /i)
+        await user.click(screen.getByRole('button', { name: 'New chat' }))
+        await user.click(screen.getByRole('button', { name: /^Thinking$/i }))
+        fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking on` } })
+        await user.click(screen.getByRole('button', { name: /^send$/i }))
+        expect(await inTranscript(`${provider} answered with Thinking on.`)).toBeTruthy()
+        const onRequest = fake.requests.at(-1)
+        if (provider === 'openrouter') {
+          expect(onRequest?.reasoning).toEqual({ max_tokens: 1024 })
+        } else if (provider === 'ollama') {
+          expect(onRequest?.reasoning_effort).toBe('low')
+        } else {
+          expect(onRequest?.chat_template_kwargs).toEqual({ enable_thinking: true })
+          if (provider === 'ogad') expect(onRequest?.reasoning_budget_tokens).toBe(1024)
+        }
+
+        await user.click(screen.getByRole('button', { name: /^Thinking$/i }))
+        fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking off` } })
+        await user.click(screen.getByRole('button', { name: /^send$/i }))
+        expect(await inTranscript(`${provider} answered with Thinking off.`)).toBeTruthy()
+        const offRequest = fake.requests.at(-1)
+        if (provider === 'openrouter') {
+          expect(offRequest?.reasoning).toEqual({ effort: 'none' })
+        } else if (provider === 'ollama') {
+          expect(offRequest?.reasoning_effort).toBe('none')
+        } else {
+          expect(offRequest?.chat_template_kwargs).toEqual({ enable_thinking: false })
+        }
+        cleanup()
+      }
+    } finally {
+      await window.api.setRemoteVisionServer({
+        provider: 'custom',
+        endpoint,
+        model: 'integration-model'
+      })
+      await window.api.setLlmSettings({ reasoningBudget: 0 })
+    }
   })
 
   it('renders projects, chats, messages, and artifacts after the real database reopens', async () => {

@@ -49,7 +49,6 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    await user.click(screen.getByRole('button', { name: /Work done/ }))
     expect(screen.getByText('No matching recorded meetings were found.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Searched meetings, complete' }))
     expect(screen.getAllByText('No matching recorded meetings were found.')).toHaveLength(2)
@@ -77,7 +76,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: /Working/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Web Use, running' })).toBeTruthy()
     expect(screen.getByText('Entering the destination airport')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Web Use, running' }))
     expect(requests.at(-1)).toEqual({
@@ -110,13 +109,9 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    const card = await screen.findByRole('button', { name: /Work done/ })
-    card.focus()
+    const row = await screen.findByRole('button', { name: 'Web Use, complete' })
+    row.focus()
     await user.keyboard('{Enter}')
-    expect(requests).toEqual([])
-
-    const row = screen.getByRole('button', { name: 'Web Use, complete' })
-    await user.click(row)
     expect(requests.at(-1)).toEqual({ taskId: 'web-keyboard', kind: 'web_use', detail: true })
 
     const toggle = screen.getByRole('button', { name: 'Close task details' })
@@ -184,9 +179,6 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: /Working/ }).textContent).toContain(
-      '2 steps · running'
-    )
     expect(screen.getAllByRole('listitem')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Searched the web, complete' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Web Use, running' })).toBeTruthy()
@@ -220,9 +212,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: /Working/ }).textContent).toContain(
-      '5 steps · running'
-    )
+    expect(screen.getAllByRole('listitem')).toHaveLength(5)
     expect(screen.getByText('Listed folder')).toBeTruthy()
     expect(screen.getByText('Read file')).toBeTruthy()
     expect(screen.getByText('Built slide plan')).toBeTruthy()
@@ -244,7 +234,6 @@ describe('<ChatToolRows/> work timeline', () => {
         ]}
       />
     )
-    await user.click(screen.getByRole('button', { name: /Work failed/ }))
     expect(screen.getByText('Web Use')).toBeTruthy()
     expect(screen.getByText('Searched messages')).toBeTruthy()
     expect(screen.queryByText(/web_use/)).toBeNull()
@@ -257,9 +246,8 @@ describe('<ChatToolRows/> work timeline', () => {
   it('names work that needs the user without calling it done', () => {
     render(<ChatToolRows tools={[{ name: 'action_approval', status: 'pending', result: '' }]} />)
 
-    const heading = screen.getByRole('button', { name: /Action needed/ })
-    expect(heading.textContent).toContain('1 step · needs attention')
-    expect(screen.queryByRole('button', { name: /Work done/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Requested approval, needs attention' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Requested approval, complete' })).toBeNull()
   })
 
   it('shows persisted redacted Computer Use evidence inside the assistant turn', async () => {
@@ -308,7 +296,6 @@ describe('<ChatToolRows/> work timeline', () => {
     )
 
     expect(taskReferenceFromResult('Done. Task reference: act_1.')).toBe('act_1')
-    await user.click(screen.getByRole('button', { name: /Work done/ }))
     await user.click(screen.getByRole('button', { name: 'Computer Use, complete' }))
     expect(await screen.findByText('Computer Use details')).toBeTruthy()
     expect(screen.queryByText(/Task reference/)).toBeNull()
@@ -360,8 +347,7 @@ describe('<ChatToolRows/> work timeline', () => {
       })
     })
 
-    expect(screen.getByRole('button', { name: /Work failed/ }).textContent).toContain('failed')
-    await userEvent.click(screen.getByRole('button', { name: /Work failed/ }))
+    expect(screen.getByRole('button', { name: 'Web Use, failed' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Web Use, failed' }))
     expect(screen.getAllByText('The traveler control could not be completed.')).toHaveLength(2)
     const retry = await screen.findByRole('button', { name: 'Retry' })
@@ -381,7 +367,7 @@ describe('<ChatToolRows/> work timeline', () => {
         updatedAt: 3
       })
     })
-    expect(screen.getByRole('button', { name: /Working/ }).textContent).toContain('running')
+    expect(screen.getByRole('button', { name: 'Web Use, running' })).toBeTruthy()
 
     act(() => {
       changed?.({
@@ -397,7 +383,7 @@ describe('<ChatToolRows/> work timeline', () => {
         updatedAt: 4
       })
     })
-    expect(screen.getByRole('button', { name: /Work done/ }).textContent).toContain('complete')
+    expect(screen.getByRole('button', { name: 'Web Use, complete' })).toBeTruthy()
   })
 
   it('shows the execution device when a synced task cannot retry here', async () => {
@@ -436,7 +422,6 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
-    await userEvent.click(await screen.findByRole('button', { name: /Work failed/ }))
     await userEvent.click(screen.getByRole('button', { name: 'Computer Use, failed' }))
     const retry = await screen.findByRole('button', { name: 'Retry on Studio Mac' })
     expect((retry as HTMLButtonElement).disabled).toBe(true)

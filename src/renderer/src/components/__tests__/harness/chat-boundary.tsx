@@ -245,6 +245,7 @@ export class ChatBoundary {
     prepareTtsVoice: vi.fn(async () => ({ ready: true })),
     onTtsVoiceProgress: vi.fn(() => () => {}),
     getSettings: vi.fn(async () => ({})),
+    getLlmSettings: vi.fn(async () => ({})),
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),
     styleThumbs: vi.fn(async () => ({})),
