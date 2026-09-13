@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
-import { buildSendHistory, EARLIER_CHAT_EXCERPTS_PREFIX } from '@renderer/lib/chat-history'
+import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
 import { parseSqliteUtc, shiftLocalDay, startOfLocalDay, timeAgo } from '@renderer/lib/time'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
@@ -880,7 +880,10 @@ function WebTaskStepFeed(): React.JSX.Element | null {
   )
 }
 
-function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element {
+function MessageThinkingHeader({
+  message,
+  timeline = false
+}: Readonly<{ message: ChatMessage; timeline?: boolean }>): React.JSX.Element {
   if (message.role !== 'assistant') return <></>
   if (message.streaming) {
     const activity = activityLabel(message.activity)
@@ -889,7 +892,11 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
       <div className="mb-1.5 flex flex-col gap-1.5">
         {showLiveActivity ? <LoadingDots /> : null}
         {message.reasoningRequested || message.reasoning?.trim() ? (
-          <ChatThinkingBlock content={message.reasoning ?? ''} live />
+          <ChatThinkingBlock
+            content={message.reasoning ?? ''}
+            live
+            className={timeline ? 'max-w-full' : undefined}
+          />
         ) : null}
         {showLiveActivity && activity ? (
           <span className="text-[11px] text-neutral-500">{activity}</span>
@@ -900,13 +907,12 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
   }
   const reasoning = message.reasoning?.trim()
   if (!reasoning && !message.reasoningRequested) return <></>
-  const readableContent =
-    reasoning || 'This model did not return readable thinking details for this turn.'
+  const readableContent = reasoning || THINKING_UNAVAILABLE_TEXT
   const supporting = isSupportingMessage(message)
   return (
     <div
       className={
-        supporting
+        supporting && !timeline
           ? // The same box a tool row uses. This pill sits BETWEEN tool rows in a tool-calling turn,
             // and at px-3.5/py-2.5 it was visibly fatter than the rows either side of it, so a
             // sequence of reasoning and calls read as two competing shapes rather than one list.
@@ -917,11 +923,15 @@ function MessageThinkingHeader({ message }: Readonly<{ message: ChatMessage }>):
     >
       <ChatThinkingBlock
         content={readableContent}
-        label={reasoning ? message.reasoningLabel : 'Thinking unavailable'}
+        label={reasoning ? (message.reasoningLabel ?? (timeline ? 'Thinking' : undefined)) : 'Thinking unavailable'}
+        className={timeline ? 'max-w-full' : undefined}
       />
     </div>
   )
 }
+
+const THINKING_UNAVAILABLE_TEXT =
+  'This model did not return readable thinking details for this turn.'
 
 function IncomingFileRows({
   files
@@ -1192,16 +1202,17 @@ function GenerationMetricsRow({
 }: Readonly<{ metrics?: GenerationMetrics }>): React.JSX.Element | null {
   const parts = metrics ? formatGenerationMetrics(metrics) : []
   const contextWindowTokens = metrics?.contextWindowTokens
-  const promptTokens = metrics?.promptTokens ?? metrics?.estimatedPromptTokens
+  const promptTokens = metrics?.estimatedPromptTokens ?? metrics?.promptTokens
+  const estimated = metrics?.estimatedPromptTokens !== undefined
   const contextPercent =
     promptTokens && contextWindowTokens && contextWindowTokens > 0
       ? Math.round((promptTokens / contextWindowTokens) * 100)
       : null
   const contextLabel =
     contextPercent !== null
-      ? `Context: ${metrics?.promptTokens ? '' : '~'}${contextPercent}% used`
+      ? `Context: ${estimated ? '~' : ''}${contextPercent}% used`
       : promptTokens
-        ? `Context: ${metrics?.promptTokens ? '' : '~'}${promptTokens} tokens used (limit unknown)`
+        ? `Context: ${estimated ? '~' : ''}${promptTokens} tokens used (limit unknown)`
         : null
   if (!parts.length && contextLabel === null) return null
   return (
@@ -2067,11 +2078,17 @@ function StandardMessageRow({
   const copied = state.copiedKey === message.id
   const speechState = speechControlState(message.id, state.speakingId, state.speakLoadingId)
   const speechError = state.speakError?.id === message.id ? state.speakError.message : undefined
+  const toolTimeline =
+    message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
+  const thinking =
+    toolTimeline && (message.streaming || message.reasoning?.trim() || message.reasoningRequested)
+      ? <MessageThinkingHeader message={message} timeline />
+      : undefined
   return (
     <div className={standardMessageRowClass(message)} data-testid={`chat-message-${message.id}`}>
-      <MessageThinkingHeader message={message} />
+      {toolTimeline ? null : <MessageThinkingHeader message={message} />}
+      <ChatToolRows tools={message.toolCalls} thinking={thinking} liveTask={liveTask} />
       <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
-      <ChatToolRows tools={message.toolCalls} liveTask={liveTask} />
       {message.role === 'user' ? (
         message.context?.taskGuidance ? (
           <div className="mt-1.5 flex items-center gap-3">
@@ -3862,12 +3879,14 @@ export function MemoryChat({
         20,
         contextWindowTokens
       )
-      if (
-        history[0]?.content.startsWith(EARLIER_CHAT_EXCERPTS_PREFIX) &&
-        !(messagesByConv[convId] ?? EMPTY_MSGS).some(
-          (message) => message.notice && noticeText(message.content) === 'Compacted'
-        )
-      ) {
+      const fullHistory = buildSendHistory(
+        messagesByConv[convId] ?? EMPTY_MSGS,
+        !!regen,
+        trimmed,
+        20,
+        Number.MAX_SAFE_INTEGER
+      )
+      if (!agenticActive && JSON.stringify(history) !== JSON.stringify(fullHistory)) {
         try {
           const stored = await window.api.addRagMessage(convId, 'assistant', '_Compacted_', {
             notice: true
@@ -3879,6 +3898,10 @@ export function MemoryChat({
         } catch (error) {
           console.warn('Could not save the compaction notice', error)
         }
+      }
+      const conversationContextMetrics: GenerationMetrics = {
+        estimatedPromptTokens: Math.ceil(JSON.stringify(history).length / 4),
+        ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {})
       }
 
       // Agentic tools path (opt-in, non-project). The model calls built-in tools,
@@ -3901,7 +3924,7 @@ export function MemoryChat({
             streaming: true
           }
         ])
-        const tr = await window.api.toolChat(modelQuery, history, {
+        const tr = await window.api.toolChat(modelQuery, fullHistory.slice(0, -1), {
           connectors: connectorsOn,
           conversationId: convId,
           // Memory scope drives which memory tools the model gets: a project offers its
@@ -4113,6 +4136,7 @@ export function MemoryChat({
         thinkingEnabled,
         imagePaths
       )
+      const ragMetrics: GenerationMetrics = { ...result.metrics, ...conversationContextMetrics }
       const resultContext = result.context as RagContext | undefined
 
       // Stopped mid-stream — one owner decides what survives (finalizeStoppedTurn).
@@ -4201,7 +4225,7 @@ export function MemoryChat({
                   // On the LIVE message too, not only in the persisted context: the numbers are
                   // about the turn that just finished, so waiting for a reload to show them defeats
                   // the point.
-                  metrics: result.metrics,
+                  metrics: ragMetrics,
                   streaming: false,
                   variants: allVariants,
                   variantIndex: allVariants ? allVariants.length - 1 : undefined
@@ -4233,7 +4257,7 @@ export function MemoryChat({
             buildAssistantContext(resultContext, {
               reasoning: ragReasoning,
               cutoff: result.cutoff,
-              metrics: result.metrics
+              metrics: ragMetrics
             })
           )
           setConvMessages(convId, (previous) =>
@@ -4669,6 +4693,37 @@ export function MemoryChat({
       if (data.type === 'done') {
         streamConvRef.current.delete(data.streamId)
         markGenerating(cid, false)
+        return
+      }
+      if (
+        data.type === 'step' &&
+        data.step &&
+        typeof data.step === 'object' &&
+        'kind' in data.step &&
+        data.step.kind === 'compacted'
+      ) {
+        const noticeId = crypto.randomUUID()
+        const notice: ChatMessage = {
+          id: noticeId,
+          role: 'assistant',
+          content: '_Compacted_',
+          notice: true
+        }
+        setConvMessages(cid, (previous) => {
+          const streamIndex = previous.findIndex((message) => message.id === data.streamId)
+          if (streamIndex < 0) return [...previous, notice]
+          return [...previous.slice(0, streamIndex), notice, ...previous.slice(streamIndex)]
+        })
+        void window.api
+          .addRagMessage(cid, 'assistant', '_Compacted_', { notice: true })
+          .then((stored) =>
+            setConvMessages(cid, (previous) =>
+              previous.map((message) =>
+                message.id === noticeId ? { ...message, id: stored.uuid } : message
+              )
+            )
+          )
+          .catch((error) => console.warn('Could not save the compaction notice', error))
         return
       }
       // Mirror reasoning into a ref as it streams, so persistence can read it
