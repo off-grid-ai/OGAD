@@ -105,6 +105,8 @@ describe('<MemoryChat/> generation details', () => {
     expect(row.textContent).toContain('prefill 910 tok/s')
     expect(row.textContent).toContain('TTFT 0.37s')
     expect(row.textContent).toContain('128 tokens')
+    const regenerate = screen.getByRole('button', { name: 'Regenerate' })
+    expect(regenerate.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('shows details on the existing answer as soon as the open Settings panel enables them', async () => {

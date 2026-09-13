@@ -2057,9 +2057,6 @@ function MessageBubble({
         <MessageMarkdown message={message} navigation={navigation} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
-      {state.showGenerationDetails ? (
-        <GenerationMetricsRow metrics={message.metrics} />
-      ) : null}
       <ImageMemoryRetryAction
         message={message}
         loading={state.loading}
@@ -2129,6 +2126,9 @@ function StandardMessageRow({
           onSpeak={() => actions.speak(message.id, message.content)}
         />
       )}
+      {state.showGenerationDetails ? (
+        <GenerationMetricsRow metrics={message.metrics} />
+      ) : null}
       {message.role === 'assistant' ? (
         <ContextDisclosure context={message.context} navigation={navigation} />
       ) : null}
