@@ -144,6 +144,42 @@ describe('<App/> desktop navigation integration', () => {
     expect(screen.getByText('Configure it for me')).toBeTruthy()
   })
 
+  it('returns to a usable Chat after moving through Projects and Settings', async () => {
+    const user = userEvent.setup()
+    installAppBoundary({
+      getActiveRagStreams: async () => [],
+      imageGenJobStatus: async () => ({
+        id: null,
+        phase: 'idle',
+        conversationId: null,
+        projectId: null,
+        stage: null,
+        enhancedPrompt: '',
+        progress: null,
+        outputPath: null,
+        error: null,
+        startedAt: null,
+        finishedAt: null
+      })
+    })
+    render(
+      <TooltipProvider>
+        <App />
+      </TooltipProvider>
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Projects' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Chat' }))
+    expect(await screen.findByPlaceholderText('Ask anything…')).toBeTruthy()
+
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    await user.click(within(navigation).getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
+
+    await user.click(within(navigation).getByRole('button', { name: 'Chat' }))
+    expect(await screen.findByPlaceholderText('Ask anything…')).toBeTruthy()
+  })
+
   it('uses lifecycle updates and only checks idle chat health once per visible minute', async () => {
     vi.useFakeTimers()
     let publishHealth: ((health: { status: string }) => void) | undefined
