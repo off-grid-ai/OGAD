@@ -200,6 +200,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    await user.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
     expect(screen.queryByText('Failed route partial.')).toBeNull()
     expect(screen.queryByText('Failed route thought.')).toBeNull()
@@ -212,6 +213,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
     )
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    await user.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
     expect(screen.queryByText('Failed route partial.')).toBeNull()
   })
@@ -384,6 +386,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
     )
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(
       await screen.findByText(/Context: ~25% used · 42\.5 tok\/s · 128 tokens · 3\.4s total/)
     ).toBeTruthy()

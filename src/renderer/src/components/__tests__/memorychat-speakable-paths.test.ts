@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
@@ -38,7 +38,11 @@ describe('<MemoryChat/> speakable message integration', () => {
     expect(await screen.findByText('Release ready.')).toBeTruthy()
     expect(screen.queryByText(/\*\*|private-source|secret\.invalid/)).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: 'Speak' }))
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
     expect(boundary.api.speak).toHaveBeenCalledWith('Release ready.')
   })
