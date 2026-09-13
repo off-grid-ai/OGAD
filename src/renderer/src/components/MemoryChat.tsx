@@ -871,7 +871,11 @@ function VoiceMessageRow({
           autoPlay={autoPlay}
           showTranscriptInitially={showTranscriptInitially}
           defaultSpeed={playbackSpeed}
-          synthesize={(text) => window.api.speak(text)}
+          readVoice={async () => {
+            const settings = await window.api.getSettings()
+            return typeof settings.ttsVoice === 'string' ? settings.ttsVoice : undefined
+          }}
+          synthesize={(text, voice) => window.api.speak(text, voice)}
           onPlaybackStateChange={reportPlayback}
           copied={copied}
           onCopy={(text) => onCopy(text, message.id)}

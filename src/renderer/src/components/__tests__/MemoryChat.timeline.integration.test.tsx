@@ -19,7 +19,7 @@ function chatBoundary(
   voiceMode = false,
   showGenerationDetails = false
 ): {
-  status: () => { streamId: string; messages: string[] }
+  status: () => { streamId: string; messages: string[]; voice: string; syntheses: string[] }
   emit: (event: Omit<Event, 'streamId'>) => void
   finish: () => void
 } {
@@ -63,6 +63,8 @@ function chatBoundary(
   let onStream: ((event: Event) => void) | undefined
   let finishTurn: ((result: unknown) => void) | undefined
   let nextId = 2
+  let voice = 'af_heart'
+  const syntheses: string[] = []
   const api = {
     isPro: false,
     imageGenStatus: async () => ({ available: false, models: [], active: '' }),
@@ -100,15 +102,29 @@ function chatBoundary(
     getSettings: async () => ({
       composerToolsOn: true,
       composerVoiceMode: voiceMode,
-      showGenerationDetails
+      showGenerationDetails,
+      ttsVoice: voice
     }),
+    saveSetting: async (key: string, value: unknown) => {
+      if (key === 'ttsVoice' && typeof value === 'string') voice = value
+    },
+    ttsVoices: async () => [
+      { id: 'af_heart', label: 'Heart', language: 'en-US' },
+      { id: 'am_michael', label: 'Michael', language: 'en-US' }
+    ],
+    onTtsVoiceProgress: () => () => {},
+    prepareTtsVoice: async () => ({ ready: true }),
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     listTools: async () => [],
     mcpList: async () => [],
     listProjects: async () => [],
     listSkills: async () => [],
     styleThumbs: async () => ({}),
-    speak: async () => ({ dataUrl: '' }),
+    speak: async (_text: string, requestedVoice?: string) => {
+      const selectedVoice = requestedVoice ?? voice
+      syntheses.push(selectedVoice)
+      return { dataUrl: `data:audio/wav;base64,${btoa(selectedVoice)}` }
+    },
     tasks: { list: async () => [], onChanged: () => () => {} },
     toolChat: async (_query: string, _history: unknown[], options: { streamId: string }) => {
       streamId = options.streamId
@@ -122,7 +138,12 @@ function chatBoundary(
   }
   ;(window as unknown as { api: unknown }).api = api
   return {
-    status: () => ({ streamId, messages: messages.map((message) => message.content) }),
+    status: () => ({
+      streamId,
+      messages: messages.map((message) => message.content),
+      voice,
+      syntheses
+    }),
     emit: (event) => onStream?.({ ...event, streamId }),
     finish: () =>
       finishTurn?.({
@@ -321,6 +342,76 @@ describe('<MemoryChat/> ordered tool turn', () => {
     expect(
       await screen.findByText(/Context: ~25% used · 42\.5 tok\/s · 128 tokens · 3\.4s total/)
     ).toBeTruthy()
+  })
+
+  it('plays an existing voice reply with the newly selected voice, then caches that voice', async () => {
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+    const boundary = chatBoundary({ content: 'The answer is ready.', context: {} }, true)
+    const playedSources: string[] = []
+    const originalAudio = globalThis.Audio
+    class PlaybackDevice {
+      paused = true
+      currentTime = 0
+      duration = 3
+      playbackRate = 1
+      onended: (() => void) | null = null
+
+      constructor(public src: string) {}
+
+      async play(): Promise<void> {
+        playedSources.push(this.src)
+        this.paused = false
+      }
+
+      pause(): void {
+        this.paused = true
+      }
+    }
+    globalThis.Audio = PlaybackDevice as unknown as typeof Audio
+
+    try {
+      const user = userEvent.setup()
+      render(
+        <TooltipProvider>
+          <MemoryChat openTarget={{ conversationId: 'timeline-chat' }} />
+        </TooltipProvider>
+      )
+      await screen.findByText('The answer is ready.')
+      const replyPlayback = screen.getAllByTitle('Play').at(-1)!
+      await user.click(replyPlayback)
+      await waitFor(() =>
+        expect(playedSources).toEqual([`data:audio/wav;base64,${btoa('af_heart')}`])
+      )
+      await user.click(replyPlayback) // pause
+      await user.click(replyPlayback) // resume the same sound
+      expect(boundary.status().syntheses).toEqual(['af_heart'])
+      await user.click(replyPlayback) // pause before changing voice
+
+      await user.click(screen.getByTitle('Settings'))
+      await user.click(screen.getByRole('button', { name: 'voice' }))
+      const voiceSelect = await screen.findByRole('button', { name: 'Voice selection' })
+      await waitFor(() => expect((voiceSelect as HTMLButtonElement).disabled).toBe(false))
+      voiceSelect.focus()
+      await user.keyboard('{Enter}')
+      expect(voiceSelect.getAttribute('aria-expanded')).toBe('true')
+      expect(screen.queryAllByRole('menuitemradio').map((item) => item.textContent)).toEqual([
+        'Heart',
+        'Michael'
+      ])
+      await user.click(await screen.findByRole('menuitemradio', { name: 'Michael' }))
+      await waitFor(() => expect(boundary.status().voice).toBe('am_michael'))
+      await user.click(screen.getByRole('button', { name: 'Close' }))
+      await user.click(replyPlayback)
+      await waitFor(() =>
+        expect(playedSources.at(-1)).toBe(`data:audio/wav;base64,${btoa('am_michael')}`)
+      )
+      expect(boundary.status().syntheses).toEqual(['af_heart', 'am_michael'])
+      await user.click(replyPlayback) // pause
+      await user.click(replyPlayback) // reuse the new sound
+      expect(boundary.status().syntheses).toEqual(['af_heart', 'am_michael'])
+    } finally {
+      globalThis.Audio = originalAudio
+    }
   })
 
   it('keeps a failed memory search readable when a later search found sources', async () => {
