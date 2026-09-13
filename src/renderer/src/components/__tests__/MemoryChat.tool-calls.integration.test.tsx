@@ -161,6 +161,50 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     expect(await screen.findByText(LONG_RESULT)).toBeTruthy()
   })
 
+  it('shows a synced thought and tool sequence as one timeline before its answer', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-b'] = [
+      { id: 1, role: 'user', content: 'Find the answer.' },
+      { id: 2, role: 'assistant', content: '', context: { reasoning: 'First thought.' } },
+      {
+        id: 3,
+        role: 'tool',
+        content: 'First search result.',
+        context: { tool: { name: 'web_search', durationMs: 945 } }
+      },
+      { id: 4, role: 'assistant', content: '', context: { reasoning: 'Second thought.' } },
+      {
+        id: 5,
+        role: 'tool',
+        content: 'Second search result.',
+        context: { tool: { name: 'web_search', durationMs: 800 } }
+      },
+      {
+        id: 6,
+        role: 'assistant',
+        content: 'The answer is ready.',
+        context: { reasoning: 'Final thought.' }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-b' })
+
+    const answer = await screen.findByText('The answer is ready.')
+    const timeline = screen.getByRole('list', { name: 'Thinking and tool calls' })
+    expect(timeline.children).toHaveLength(5)
+    expect(screen.getAllByText('Thought process')).toHaveLength(3)
+    expect(screen.getAllByRole('button', { name: 'Searched the web, complete' })).toHaveLength(2)
+    expect(timeline.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+
+    await userEvent.click(screen.getAllByRole('button', { name: 'Searched the web, complete' })[0]!)
+    expect(await screen.findByText('First search result.')).toBeTruthy()
+
+    cleanup()
+    renderChat({ conversationId: 'conversation-b' })
+    expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'Thinking and tool calls' }).children).toHaveLength(5)
+  })
+
   it('explains a persisted proposal run as one ordered customer timeline', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-b'] = [

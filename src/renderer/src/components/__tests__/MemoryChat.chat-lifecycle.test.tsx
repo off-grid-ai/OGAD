@@ -8,7 +8,7 @@
 // boundary stands in for them. No Off Grid AI component, hook, store, or orchestration code
 // is mocked.
 
-import { act, cleanup, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
@@ -22,6 +22,14 @@ import {
   send,
   type ThinkSplitterFactory
 } from './harness/chat-boundary'
+
+function openActionsFor(text: string): void {
+  const row = screen.getByText(text).closest('[data-testid^="chat-message-"]') as HTMLElement
+  fireEvent.pointerDown(within(row).getByRole('button', { name: 'Message actions' }), {
+    button: 0,
+    ctrlKey: false
+  })
+}
 
 describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => {
   beforeEach(() => {
@@ -95,7 +103,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(await screen.findByText('Task guidance')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Resend' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Copy' })).toBeTruthy()
+    openActionsFor('Use a one-way flight')
+    expect(screen.getByRole('menuitem', { name: 'Copy' })).toBeTruthy()
   })
 
   it('shows a live Web Use as one clickable sibling tool row in its originating Chat', async () => {
@@ -202,7 +211,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await send('Compare the two release plans', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
     expect(boundary.calls[0]!.thinking).toBe(true)
-    expect(screen.getByRole('button', { name: 'Thinking…' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Thinking…' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Message actions' })).toHaveLength(1)
 
     boundary.emitReasoning(0, 'First compare risk, then reversibility.')
     boundary.emit(0, 'Choose plan B because it is reversible.')
@@ -267,7 +277,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     const disclosure = await screen.findByRole('button', { name: /enhanced prompt/i })
     const answer = screen.getByText('Generated image for: a lighthouse in a winter storm')
-    const speak = screen.getByRole('button', { name: 'Speak' })
+    openActionsFor('Generated image for: a lighthouse in a winter storm')
+    const speak = screen.getByRole('menuitem', { name: 'Speak' })
     expect(screen.getByTestId('supporting-context-bubble')).toBeTruthy()
     expect(screen.getByTestId('chat-message-1').className).toContain('mb-2')
     expect(screen.getByTestId('chat-message-2').className).toContain('mb-5')
@@ -275,8 +286,30 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       0
     )
     expect(answer.compareDocumentPosition(speak) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-    expect(screen.getAllByTitle('Copy')).toHaveLength(1)
-    expect(screen.getAllByTitle('Regenerate')).toHaveLength(1)
+    expect(screen.getAllByRole('menuitem', { name: 'Copy' })).toHaveLength(1)
+    expect(screen.getAllByRole('menuitem', { name: 'Regenerate' })).toHaveLength(1)
+  })
+
+  it('keeps the message footer off an intermediate tool thought', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 20, role: 'user', content: 'Find the source' },
+      {
+        id: 21,
+        role: 'assistant',
+        content: '',
+        context: { reasoning: 'Searching first.', toolCalls: [{ name: 'web_search', result: 'Found it.', status: 'completed' }] }
+      },
+      { id: 22, role: 'assistant', content: 'Here is the source.' }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    expect(await screen.findByText('Here is the source.')).toBeTruthy()
+    const thought = screen.getByTestId('chat-message-21')
+    expect(within(thought).queryByRole('button', { name: 'Message actions' })).toBeNull()
+    expect(thought.textContent).not.toMatch(/\d{1,2}:\d{2}\s*[AP]M/)
+    expect(within(screen.getByTestId('chat-message-22')).getByRole('button', { name: 'Message actions' })).toBeTruthy()
   })
 
   it('strips inline think markers from a plain reply through the real stream parser (#37)', async () => {
@@ -346,18 +379,23 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const user = userEvent.setup()
     const view = renderChat({ conversationId: 'conversation-b' })
 
-    await user.click(await screen.findByRole('button', { name: 'Speak' }))
+    await screen.findByText('Conversation B baseline')
+    openActionsFor('Conversation B baseline')
+    await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
-    await user.click(screen.getByRole('button', { name: /Generating/ }))
+    openActionsFor('Conversation B baseline')
+    await user.click(screen.getByRole('menuitem', { name: /Generating/ }))
     boundary.speechTurns[0]!.reject(new Error('canceled synthesis settled late'))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Speak' })).toBeTruthy())
+    openActionsFor('Conversation B baseline')
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Speak' })).toBeTruthy())
     expect(audios).toHaveLength(0)
     expect(screen.queryByRole('alert')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: 'Speak' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(2))
     boundary.speechTurns[1]!.resolve({ dataUrl: 'data:audio/wav;base64,UklGRg==' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy())
+    openActionsFor('Conversation B baseline')
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Stop' })).toBeTruthy())
     expect(audios).toHaveLength(1)
     expect(audios[0]!.play).toHaveBeenCalledOnce()
 
@@ -371,14 +409,17 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
-    await user.click(await screen.findByRole('button', { name: 'Speak' }))
+    await screen.findByText('Conversation B baseline')
+    openActionsFor('Conversation B baseline')
+    await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
     boundary.speechTurns[0]!.reject(new Error('native worker unavailable'))
 
     expect((await screen.findByRole('alert')).textContent).toMatch(
       /speech could not be generated.*text-to-speech is installed in settings/i
     )
-    expect(screen.getByRole('button', { name: 'Speak' })).toBeTruthy()
+    openActionsFor('Conversation B baseline')
+    expect(screen.getByRole('menuitem', { name: 'Speak' })).toBeTruthy()
   })
 
   it('sends markdown with a reference definition to speech without crashing', async () => {
@@ -389,7 +430,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
-    await user.click(await screen.findByRole('button', { name: 'Speak' }))
+    await screen.findByText('Read this answer.')
+    openActionsFor('Read this answer.')
+    await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
 
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
     expect(boundary.api.speak).toHaveBeenCalledWith('Read this answer.')
@@ -702,7 +745,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
-    await user.click(await screen.findByRole('button', { name: /^regenerate$/i }))
+    await screen.findByText('Original explanation')
+    openActionsFor('Original explanation')
+    await user.click(screen.getByRole('menuitem', { name: /^regenerate$/i }))
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
     expect(boundary.calls[0]).toMatchObject({
@@ -741,22 +786,20 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await send('Add the missing release detail', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
-    const inFlightResends = await screen.findAllByRole('button', { name: 'Resend' })
-    expect(inFlightResends.every((button) => button.hasAttribute('disabled'))).toBe(true)
-    await user.click(inFlightResends.at(-1)!)
+    openActionsFor('Add the missing release detail')
+    const inFlightResend = screen.getByRole('menuitem', { name: 'Resend' })
+    expect(inFlightResend.hasAttribute('data-disabled')).toBe(true)
+    await user.click(inFlightResend)
+    await user.keyboard('{Escape}')
     expect(boundary.calls).toHaveLength(1)
     expect(screen.getAllByText('Add the missing release detail')).toHaveLength(1)
 
     boundary.resolve(0, 'The release detail is ready.')
     expect(await screen.findByText('The release detail is ready.')).toBeTruthy()
-    await waitFor(() =>
-      expect(
-        screen
-          .getAllByRole('button', { name: 'Resend' })
-          .every((button) => !button.hasAttribute('disabled'))
-      ).toBe(true)
-    )
-    await user.click(screen.getAllByRole('button', { name: 'Resend' }).at(-1)!)
+    openActionsFor('Add the missing release detail')
+    const resend = screen.getByRole('menuitem', { name: 'Resend' })
+    expect(resend.hasAttribute('data-disabled')).toBe(false)
+    await user.click(resend)
     await waitFor(() => expect(boundary.calls).toHaveLength(2))
 
     expect(boundary.calls[1]).toMatchObject({
@@ -789,7 +832,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
-    await user.click(await screen.findByRole('button', { name: 'Resend' }))
+    await screen.findByText('Find the lowest flight price')
+    openActionsFor('Find the lowest flight price')
+    await user.click(screen.getByRole('menuitem', { name: 'Resend' }))
     await waitFor(() =>
       expect(boundary.stopComputerTask).toHaveBeenCalledWith('stop', 'web-live-1')
     )
@@ -798,7 +843,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       boundary.api.ragChat.mock.invocationCallOrder[0]!
     )
 
-    await user.click(screen.getByTitle('Edit this message'))
+    openActionsFor('Find the lowest flight price')
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }))
     await waitFor(() => expect(boundary.stopComputerTask).toHaveBeenCalledTimes(2))
   })
 
@@ -814,14 +860,15 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     renderChat({ conversationId: 'conversation-a' })
 
     await user.click(await screen.findByRole('button', { name: 'Thinking' }))
-    await user.click(screen.getByTitle('Edit this message'))
+    openActionsFor('Find flights to Pune')
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }))
     const editor = screen.getByDisplayValue('Find flights to Pune')
     await user.clear(editor)
     await user.type(editor, 'Find one-way flights to Pune')
     await user.click(screen.getByRole('button', { name: 'Save & submit' }))
 
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
-    expect(screen.getByRole('button', { name: 'Thinking…' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Thinking…' })).toBeNull()
 
     act(() => boundary.emitReasoning(0, 'Checking the edited route and date.'))
     expect(await screen.findByText('Checking the edited route and date.')).toBeTruthy()

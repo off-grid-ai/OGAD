@@ -10,7 +10,9 @@ type Event = {
   streamId: string
   type: 'reasoning' | 'content' | 'step' | 'tool_result'
   text?: string
-  step?: { kind: 'running_tool'; name: string } | { kind: 'model_changed'; failed: string; next: string }
+  step?:
+    | { kind: 'running_tool'; name: string }
+    | { kind: 'model_changed'; failed: string; next: string }
   call?: { name: string; result: string; status: 'completed' }
 }
 
@@ -191,15 +193,22 @@ describe('<MemoryChat/> ordered tool turn', () => {
     await act(async () => {
       boundary.emit({ type: 'content', text: 'Failed route partial.' })
       boundary.emit({ type: 'reasoning', text: 'Failed route thought.' })
-      boundary.emit({ type: 'step', step: {
-        kind: 'model_changed', failed: 'First model', next: 'Backup model'
-      } })
+      boundary.emit({
+        type: 'step',
+        step: {
+          kind: 'model_changed',
+          failed: 'First model',
+          next: 'Backup model'
+        }
+      })
       boundary.emit({ type: 'content', text: 'The answer is ready.' })
       boundary.finish('Backup model')
     })
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
-    expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    expect(
+      screen.getByText('Model changed: First model could not answer. Backup model is answering.')
+    ).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
     expect(screen.queryByText('Failed route partial.')).toBeNull()
@@ -212,7 +221,9 @@ describe('<MemoryChat/> ordered tool turn', () => {
       </TooltipProvider>
     )
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
-    expect(screen.getByText('Model changed: First model could not answer. Backup model is answering.')).toBeTruthy()
+    expect(
+      screen.getByText('Model changed: First model could not answer. Backup model is answering.')
+    ).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(screen.getByText(/Model: Backup model/)).toBeTruthy()
     expect(screen.queryByText('Failed route partial.')).toBeNull()
@@ -387,7 +398,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.queryByTestId('generation-metrics')).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Generation details' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(
       await screen.findByText(
         /Context: 24% used \(2888 prompt tokens \/ 12288 context\) · 42\.5 tok\/s · 567 output tokens · 3\.4s total/

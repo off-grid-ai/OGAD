@@ -9,6 +9,7 @@ import { ChatBoundary, installBoundary, renderChat } from './harness/chat-bounda
 afterEach(cleanup)
 
 it('shows portable generation details from a synced reply after reload', async () => {
+  const user = userEvent.setup()
   const context = mergeSyncedMessageContext(
     null,
     serializeSyncedMessageContext({
@@ -43,7 +44,7 @@ it('shows portable generation details from a synced reply after reload', async (
   const chat = renderChat({ conversationId: 'conversation-a' })
   expect(await screen.findByText('Answer from phone')).toBeTruthy()
   expect(screen.queryByTestId('generation-metrics')).toBeNull()
-  await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
+  await user.click(await screen.findByRole('button', { name: 'Generation details' }))
   let details = await screen.findByTestId('generation-metrics')
   expect(details.textContent).toContain('Context: ~25% used')
   expect(details.textContent).toContain('42.5 tok/s')
@@ -55,7 +56,7 @@ it('shows portable generation details from a synced reply after reload', async (
   chat.unmount()
   renderChat({ conversationId: 'conversation-a' })
   expect(screen.queryByTestId('generation-metrics')).toBeNull()
-  await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
+  await user.click(await screen.findByRole('button', { name: 'Generation details' }))
   details = await screen.findByTestId('generation-metrics')
   expect(details.textContent).toContain('Context: ~25% used')
   expect(details.textContent).toContain('42.5 tok/s')

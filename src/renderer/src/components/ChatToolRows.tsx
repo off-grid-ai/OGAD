@@ -350,7 +350,15 @@ export function ChatToolRows({
                 }}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-xs text-neutral-300">{stepLabel}</span>
+                  <span className="flex items-center gap-2 text-xs text-neutral-300">
+                    <span>{stepLabel}</span>
+                    {hasDisclosure ? (
+                      <CaretDown
+                        className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </span>
                   {!showMemorySources ? (
                     <span className="mt-0.5 block text-[10px] leading-relaxed text-neutral-500 group-data-[state=open]:hidden">
                       {shortResult(tool, stepStatus, rowSummary)}
@@ -361,12 +369,6 @@ export function ChatToolRows({
                   {durationMs !== undefined ? `${Math.round(durationMs)} ms · ` : ''}
                   {stepStatus}
                 </span>
-                {hasDisclosure ? (
-                  <CaretDown
-                    className="mt-0.5 h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
-                    aria-hidden="true"
-                  />
-                ) : null}
               </CollapsibleTrigger>
               {hasDisclosure ? (
                 <CollapsibleContent

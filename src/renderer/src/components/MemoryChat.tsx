@@ -139,16 +139,17 @@ import {
   Sparkle as Sparkles,
   FolderPlus,
   Wrench,
-  Waveform,
   Plug,
   SlidersHorizontal,
   Brain,
   Cpu,
+  Pulse,
   Prohibit,
   Check,
   X,
   FolderOpen,
   CaretDown,
+  DotsThree,
   Lightning,
   WarningCircle
 } from '@phosphor-icons/react'
@@ -205,6 +206,7 @@ type ChatMessage = {
   id: string
   role: SyncedMessageRole
   content: string
+  createdAt?: number
   context?: RagContext
   image?: string
   imagePath?: string
@@ -541,6 +543,7 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     id: turn.id,
     role: turn.role,
     content: projectedTurnContent(turn),
+    createdAt: turn.createdAt,
     context,
     reasoning: turn.reasoning ?? readReasoning(context),
     timeline: readAssistantTimeline(context),
@@ -562,9 +565,10 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
 function mapRagMessage(message: RawRagMessage): ChatMessage[] {
   const context = parseRagContext(message.context)
   const provenance = readRagProvenance(message)
-  if (context?.notice && (
-    noticeText(message.content) === 'Compacted' || message.content.startsWith('Model changed: ')
-  )) {
+  if (
+    context?.notice &&
+    (noticeText(message.content) === 'Compacted' || message.content.startsWith('Model changed: '))
+  ) {
     const id = String(message.uuid ?? message.id ?? '')
     return id ? [{ id, role: 'assistant', content: message.content, notice: true }] : []
   }
@@ -593,7 +597,58 @@ function mapRagMessage(message: RawRagMessage): ChatMessage[] {
 }
 
 function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
-  return raw.flatMap<ChatMessage>(mapRagMessage)
+  const messages = raw.flatMap<ChatMessage>(mapRagMessage)
+  const displayed: ChatMessage[] = []
+  let pending: ChatMessage[] = []
+  for (const message of messages) {
+    const intermediateThought =
+      message.role === 'assistant' &&
+      !message.content.trim() &&
+      Boolean(message.reasoning?.trim()) &&
+      !message.timeline?.length &&
+      !message.toolCalls?.length
+    if (intermediateThought || message.role === 'tool') {
+      pending.push(message)
+      continue
+    }
+    if (
+      message.role === 'assistant' &&
+      message.content.trim() &&
+      !message.timeline?.length &&
+      !message.toolCalls?.length &&
+      pending.some((entry) => entry.role === 'tool')
+    ) {
+      const tools: ProjectedSyncedTool[] = []
+      const timeline: AssistantTimelineEntry[] = []
+      for (const entry of pending) {
+        if (entry.role === 'assistant' && entry.reasoning?.trim()) {
+          timeline.push({ kind: 'thinking', text: entry.reasoning })
+        } else if (entry.role === 'tool') {
+          timeline.push({ kind: 'tool', toolIndex: tools.length })
+          tools.push({
+            name: entry.toolName || 'Tool result',
+            result: entry.content,
+            status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
+            ...(entry.generationTimeMs === undefined ? {} : { durationMs: entry.generationTimeMs })
+          })
+        }
+      }
+      if (message.reasoning?.trim()) {
+        timeline.push({ kind: 'thinking', text: message.reasoning })
+      }
+      displayed.push({
+        ...message,
+        toolCalls: tools.length ? tools : undefined,
+        timeline
+      })
+      pending = []
+      continue
+    }
+    displayed.push(...pending, message)
+    pending = []
+  }
+  displayed.push(...pending)
+  return displayed
 }
 
 /** Durable reloads replace durable rows but cannot erase a main-owned active stream. */
@@ -705,7 +760,7 @@ function standardMessageBubbleClass(message: ChatMessage, editing: boolean): str
   const width =
     editing || message.image || message.attachments?.length
       ? IMAGE_MESSAGE_COLUMN_WIDTH
-      : 'max-w-[85%]'
+      : 'max-w-full'
   const color = message.context?.taskGuidance
     ? 'border border-green-500/50 bg-green-500/5 text-foreground'
     : message.role === 'user'
@@ -738,9 +793,7 @@ function NoticeMessageRow({ message }: Readonly<{ message: ChatMessage }>): Reac
   }
   return (
     <div className="mb-4 flex justify-center">
-      <span className="px-3 text-center text-[11px] leading-relaxed text-neutral-500">
-        {text}
-      </span>
+      <span className="px-3 text-center text-[11px] leading-relaxed text-neutral-500">{text}</span>
     </div>
   )
 }
@@ -814,9 +867,9 @@ function VoiceMessageRow({
   const thinking =
     toolTimeline &&
     !message.timeline?.some((entry) => entry.kind === 'thinking') &&
-    (message.streaming || message.reasoning?.trim() || message.reasoningRequested)
-      ? <MessageThinkingHeader message={message} timeline />
-      : undefined
+    (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
+      <MessageThinkingHeader message={message} timeline />
+    ) : undefined
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
@@ -958,7 +1011,7 @@ function MessageThinkingHeader({
     return (
       <div className="mb-1.5 flex flex-col gap-1.5">
         {showLiveActivity ? <LoadingDots /> : null}
-        {message.reasoningRequested || message.reasoning?.trim() ? (
+        {message.reasoning?.trim() ? (
           <ChatThinkingBlock
             content={message.reasoning ?? ''}
             live
@@ -1284,16 +1337,19 @@ function GenerationMetricsRow({
   return (
     <Collapsible className="mt-1 max-w-[85%] font-mono text-[10px] text-neutral-500">
       <CollapsibleTrigger className="group flex items-center gap-1.5 text-left transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
-        <Waveform className="h-3 w-3" aria-hidden="true" />
+        <Pulse className="h-3 w-3" aria-hidden="true" />
         <span>Generation details</span>
-        <CaretDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+        <CaretDown
+          className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
+          aria-hidden="true"
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p className="ml-1 mt-1 border-l border-neutral-800 pl-3 tabular-nums" data-testid="generation-metrics">
-          {[
-            ...(contextLabel === null ? [] : [contextLabel]),
-            ...parts
-          ].join(' · ')}
+        <p
+          className="ml-1 mt-1 border-l border-neutral-800 pl-3 tabular-nums"
+          data-testid="generation-metrics"
+        >
+          {[...(contextLabel === null ? [] : [contextLabel]), ...parts].join(' · ')}
         </p>
       </CollapsibleContent>
     </Collapsible>
@@ -1309,11 +1365,16 @@ function ToolsSentDisclosure({
       <CollapsibleTrigger className="group flex items-center gap-1.5 text-left transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
         <Wrench className="h-3 w-3" aria-hidden="true" />
         <span>Tools sent in request ({names.length})</span>
-        <CaretDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+        <CaretDown
+          className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
+          aria-hidden="true"
+        />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <ul className="ml-1 mt-1 max-h-56 space-y-0.5 overflow-y-auto border-l border-neutral-800 pl-3">
-          {names.map((name, index) => <li key={`${name}:${index}`}>{name}</li>)}
+          {names.map((name, index) => (
+            <li key={`${name}:${index}`}>{name}</li>
+          ))}
         </ul>
       </CollapsibleContent>
     </Collapsible>
@@ -1451,9 +1512,8 @@ function CopyAction({
 }: Readonly<{ copied: boolean; onCopy: () => void }>): React.JSX.Element {
   const color = copied ? 'text-green-500' : 'text-neutral-600 hover:text-green-500'
   return (
-    <button
-      type="button"
-      onClick={onCopy}
+    <DropdownMenuItem
+      onSelect={onCopy}
       className={`flex items-center gap-1 text-[11px] transition-colors ${color}`}
       title="Copy"
     >
@@ -1470,7 +1530,7 @@ function CopyAction({
         </svg>
       )}
       {copied ? 'Copied' : 'Copy'}
-    </button>
+    </DropdownMenuItem>
   )
 }
 
@@ -1486,10 +1546,9 @@ function RegenerateAction({
   onRegenerate: () => void
 }>): React.JSX.Element {
   return (
-    <button
-      type="button"
+    <DropdownMenuItem
       disabled={disabled}
-      onClick={onRegenerate}
+      onSelect={onRegenerate}
       className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors enabled:hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
       title={title}
     >
@@ -1502,7 +1561,7 @@ function RegenerateAction({
         />
       </svg>
       {label}
-    </button>
+    </DropdownMenuItem>
   )
 }
 
@@ -1520,7 +1579,7 @@ function UserMessageActions({
   onRegenerate: () => void
 }>): React.JSX.Element {
   return (
-    <div className="mt-1.5 flex items-center gap-3">
+    <MessageActionsMenu>
       <CopyAction copied={copied} onCopy={onCopy} />
       <RegenerateAction
         label="Resend"
@@ -1532,9 +1591,8 @@ function UserMessageActions({
         disabled={regenerationDisabled}
         onRegenerate={onRegenerate}
       />
-      <button
-        type="button"
-        onClick={onEdit}
+      <DropdownMenuItem
+        onSelect={onEdit}
         className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
         title="Edit this message"
       >
@@ -1547,8 +1605,27 @@ function UserMessageActions({
           />
         </svg>
         Edit
-      </button>
-    </div>
+      </DropdownMenuItem>
+    </MessageActionsMenu>
+  )
+}
+
+function MessageActionsMenu({
+  children
+}: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Message actions"
+          className="rounded-sm px-1 text-neutral-500 transition-colors hover:text-neutral-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500"
+        >
+          <DotsThree className="h-5 w-5" weight="bold" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">{children}</DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -1618,15 +1695,14 @@ function SpeechAction({
   }
   const color = state === 'idle' ? 'text-neutral-600 hover:text-green-500' : 'text-green-500'
   return (
-    <button
-      type="button"
-      onClick={onSpeak}
+    <DropdownMenuItem
+      onSelect={onSpeak}
       className={`flex items-center gap-1 text-[11px] transition-colors ${color}`}
       title={label}
     >
       {icon}
       {label}
-    </button>
+    </DropdownMenuItem>
   )
 }
 
@@ -1691,36 +1767,47 @@ function AssistantMessageActions({
 }>): React.JSX.Element | null {
   if (message.image || isSupportingMessage(message)) return null
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-      {speechEnabled ? <SpeechAction state={speechState} onSpeak={onSpeak} /> : null}
-      <CopyAction copied={copied} onCopy={onCopy} />
-      {!message.context?.executionApproval ? (
-        <RegenerateAction label="Regenerate" title="Regenerate" onRegenerate={onRegenerate} />
-      ) : null}
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <MessageActionsMenu>
+        {speechEnabled ? <SpeechAction state={speechState} onSpeak={onSpeak} /> : null}
+        <CopyAction copied={copied} onCopy={onCopy} />
+        {!message.context?.executionApproval ? (
+          <RegenerateAction label="Regenerate" title="Regenerate" onRegenerate={onRegenerate} />
+        ) : null}
+        {artifact ? (
+          <DropdownMenuItem onSelect={() => onOpenArtifact(artifact)}>Open canvas</DropdownMenuItem>
+        ) : null}
+      </MessageActionsMenu>
       <VariantNavigation message={message} onSelect={onSelectVariant} />
-      {artifact ? (
-        <button
-          type="button"
-          onClick={() => onOpenArtifact(artifact)}
-          className="flex items-center gap-1 text-[11px] text-green-500 transition-colors hover:text-emerald-500"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 17V7h10v10M9 17H5a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v2"
-            />
-          </svg>
-          Open canvas
-        </button>
-      ) : null}
       {speechError ? (
         <p role="alert" className="basis-full text-[11px] leading-4 text-red-400">
           {speechError}
         </p>
       ) : null}
     </div>
+  )
+}
+
+function MessageTime({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element | null {
+  if (message.createdAt === undefined) return null
+  const time = new Date(message.createdAt).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+  const ms = message.generationTimeMs
+  const duration =
+    ms === undefined
+      ? null
+      : ms < 1000
+        ? `${ms}ms`
+        : ms < 60000
+          ? `${(ms / 1000).toFixed(1)}s`
+          : `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
+  return (
+    <span className="font-mono text-[11px] tabular-nums text-neutral-500">
+      {time}
+      {duration ? <span className="ml-2 text-green-500">{duration}</span> : null}
+    </span>
   )
 }
 
@@ -1743,13 +1830,13 @@ function hasInlineMemorySources(
 ): message is ChatMessage & { context: RagContext & { unified: UnifiedContextItem[] } } {
   return Boolean(
     message.role === 'assistant' &&
-      message.context?.unified?.length &&
-      message.toolCalls?.some(
-        (tool) =>
-          tool.name === 'search_memory' &&
-          tool.status !== 'failed' &&
-          !/^\s*(error|failed)\s*:/i.test(tool.result)
-      )
+    message.context?.unified?.length &&
+    message.toolCalls?.some(
+      (tool) =>
+        tool.name === 'search_memory' &&
+        tool.status !== 'failed' &&
+        !/^\s*(error|failed)\s*:/i.test(tool.result)
+    )
   )
 }
 
@@ -2187,9 +2274,9 @@ function StandardMessageRow({
   const thinking =
     toolTimeline &&
     !message.timeline?.some((entry) => entry.kind === 'thinking') &&
-    (message.streaming || message.reasoning?.trim() || message.reasoningRequested)
-      ? <MessageThinkingHeader message={message} timeline />
-      : undefined
+    (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
+      <MessageThinkingHeader message={message} timeline />
+    ) : undefined
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
@@ -2207,42 +2294,53 @@ function StandardMessageRow({
         memorySources={memorySources}
         liveTask={liveTask}
       />
-      <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
-      {message.role === 'user' ? (
-        message.context?.taskGuidance ? (
-          <div className="mt-1.5 flex items-center gap-3">
-            <CopyAction copied={copied} onCopy={() => actions.copy(message.content, message.id)} />
+      <div
+        className={`flex w-fit flex-col items-end ${message.image || message.attachments?.length || state.editingId === message.id ? 'max-w-2xl' : 'max-w-[85%]'}`}
+      >
+        <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
+        {message.role === 'user' ||
+        (!message.streaming && (message.content.trim() || message.image)) ? (
+          <div className="mt-1.5 flex items-center justify-end gap-2 pr-1">
+            <MessageTime message={message} />
+            {message.role === 'user' ? (
+              message.context?.taskGuidance ? (
+                <MessageActionsMenu>
+                  <CopyAction
+                    copied={copied}
+                    onCopy={() => actions.copy(message.content, message.id)}
+                  />
+                </MessageActionsMenu>
+              ) : (
+                <UserMessageActions
+                  copied={copied}
+                  regenerationDisabled={state.regenerationDisabled}
+                  onCopy={() => actions.copy(message.content, message.id)}
+                  onEdit={() => actions.startEdit(message)}
+                  onRegenerate={() => actions.regenerate(message.id)}
+                />
+              )
+            ) : (
+              <AssistantMessageActions
+                message={message}
+                artifact={artifact}
+                copied={copied}
+                speechState={speechState}
+                speechError={speechError}
+                speechEnabled={state.ttsEnabled}
+                onCopy={() => actions.copy(message.content, message.id)}
+                onOpenArtifact={actions.openArtifact}
+                onRegenerate={() => actions.regenerate(message.id)}
+                onSelectVariant={(direction) => actions.selectVariant(message.id, direction)}
+                onSpeak={() => actions.speak(message.id, message.content)}
+              />
+            )}
           </div>
-        ) : (
-          <UserMessageActions
-            copied={copied}
-            regenerationDisabled={state.regenerationDisabled}
-            onCopy={() => actions.copy(message.content, message.id)}
-            onEdit={() => actions.startEdit(message)}
-            onRegenerate={() => actions.regenerate(message.id)}
-          />
-        )
-      ) : (
-        <AssistantMessageActions
-          message={message}
-          artifact={artifact}
-          copied={copied}
-          speechState={speechState}
-          speechError={speechError}
-          speechEnabled={state.ttsEnabled}
-          onCopy={() => actions.copy(message.content, message.id)}
-          onOpenArtifact={actions.openArtifact}
-          onRegenerate={() => actions.regenerate(message.id)}
-          onSelectVariant={(direction) => actions.selectVariant(message.id, direction)}
-          onSpeak={() => actions.speak(message.id, message.content)}
-        />
-      )}
+        ) : null}
+      </div>
       {message.role === 'assistant' && !message.streaming ? (
         <ToolsSentDisclosure names={message.toolsOffered} />
       ) : null}
-      {state.showGenerationDetails ? (
-        <GenerationMetricsRow metrics={message.metrics} />
-      ) : null}
+      {state.showGenerationDetails ? <GenerationMetricsRow metrics={message.metrics} /> : null}
       {message.role === 'assistant' ? (
         <ContextDisclosure
           context={memorySources ? { ...message.context, unified: [] } : message.context}
@@ -4832,13 +4930,20 @@ export function MemoryChat({
         return
       }
       if (
-        data.type === 'step' && data.step && typeof data.step === 'object' &&
-        'kind' in data.step && data.step.kind === 'model_changed'
+        data.type === 'step' &&
+        data.step &&
+        typeof data.step === 'object' &&
+        'kind' in data.step &&
+        data.step.kind === 'model_changed'
       ) {
-        const failed = 'failed' in data.step && typeof data.step.failed === 'string'
-          ? data.step.failed : 'The selected model'
-        const next = 'next' in data.step && typeof data.step.next === 'string'
-          ? data.step.next : 'another model'
+        const failed =
+          'failed' in data.step && typeof data.step.failed === 'string'
+            ? data.step.failed
+            : 'The selected model'
+        const next =
+          'next' in data.step && typeof data.step.next === 'string'
+            ? data.step.next
+            : 'another model'
         const content = `Model changed: ${failed} could not answer. ${next} is answering.`
         const noticeId = crypto.randomUUID()
         reasoningByStream.current[data.streamId] = ''
@@ -4848,13 +4953,29 @@ export function MemoryChat({
           const streamIndex = previous.findIndex((message) => message.id === data.streamId)
           const notice: ChatMessage = { id: noticeId, role: 'assistant', content, notice: true }
           if (streamIndex < 0) return [...previous, notice]
-          const clean = { ...previous[streamIndex]!, content: '', reasoning: '', timeline: [], toolCalls: [] }
-          return [...previous.slice(0, streamIndex), notice, clean, ...previous.slice(streamIndex + 1)]
+          const clean = {
+            ...previous[streamIndex]!,
+            content: '',
+            reasoning: '',
+            timeline: [],
+            toolCalls: []
+          }
+          return [
+            ...previous.slice(0, streamIndex),
+            notice,
+            clean,
+            ...previous.slice(streamIndex + 1)
+          ]
         })
-        void window.api.addRagMessage(cid, 'assistant', content, { notice: true })
-          .then((stored) => setConvMessages(cid, (previous) => previous.map((message) =>
-            message.id === noticeId ? { ...message, id: stored.uuid } : message
-          )))
+        void window.api
+          .addRagMessage(cid, 'assistant', content, { notice: true })
+          .then((stored) =>
+            setConvMessages(cid, (previous) =>
+              previous.map((message) =>
+                message.id === noticeId ? { ...message, id: stored.uuid } : message
+              )
+            )
+          )
           .catch((error) => console.warn('Could not save the model-change notice', error))
         return
       }

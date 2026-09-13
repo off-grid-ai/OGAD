@@ -6,7 +6,7 @@
 // Only the preload boundary is faked. Nothing here asserts on internal state - the questions are
 // "did the switch persist" and "can the user see the numbers", which is what the feature IS.
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
@@ -72,6 +72,28 @@ describe('<MemoryChat/> generation details', () => {
     vi.unstubAllGlobals()
   })
 
+  it('shows a saved reply time and opens its actions from the three-dot menu', async () => {
+    const { boundary } = boundaryWithSettings({})
+    const user = userEvent.setup()
+    boundary.messages['conversation-a'] = [
+      { id: 21, role: 'assistant', content: 'the answer', created_at: '2026-01-01 09:41:00' }
+    ]
+    renderChat({ conversationId: 'conversation-a' })
+
+    const reply = (await screen.findByText('the answer')).closest(
+      '[data-testid^="chat-message-"]'
+    ) as HTMLElement
+    const actions = within(reply).getByRole('button', { name: 'Message actions' })
+    expect(within(reply).queryByRole('menuitem', { name: 'Copy' })).toBeNull()
+    expect(within(reply).getByText(/\d{1,2}:\d{2}\s*[AP]M/)).toBeTruthy()
+
+    fireEvent.pointerDown(actions, { button: 0, ctrlKey: false })
+    expect(await screen.findByRole('menuitem', { name: 'Copy' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Regenerate' })).toBeTruthy()
+    await user.click(screen.getByRole('menuitem', { name: 'Copy' }))
+    expect(screen.queryByRole('menuitem', { name: 'Regenerate' })).toBeNull()
+  })
+
   it('hides the numbers until the preference is on, even when the run reported them', async () => {
     const { boundary } = boundaryWithSettings({})
     const user = userEvent.setup()
@@ -99,16 +121,23 @@ describe('<MemoryChat/> generation details', () => {
 
     await answerWith(boundary, 'conversation-on', user, MEASURED)
 
+    const details = await screen.findByRole('button', { name: 'Generation details' })
     expect(screen.queryByTestId('generation-metrics')).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Generation details' }))
+    await user.click(details)
     const row = await screen.findByTestId('generation-metrics')
     // The server's own rates, our measured TTFT, and the token count - the whole point of the row.
     expect(row.textContent).toContain('42.5 tok/s')
     expect(row.textContent).toContain('prefill 910 tok/s')
     expect(row.textContent).toContain('TTFT 0.37s')
     expect(row.textContent).toContain('128 output tokens')
-    const regenerate = screen.getByRole('button', { name: 'Regenerate' })
-    expect(regenerate.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const reply = screen
+      .getByText('the answer')
+      .closest('[data-testid^="chat-message-"]') as HTMLElement
+    fireEvent.pointerDown(within(reply).getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    expect(screen.getByRole('menuitem', { name: 'Regenerate' })).toBeTruthy()
   })
 
   it('shows details on the existing answer as soon as the open Settings panel enables them', async () => {
@@ -126,8 +155,9 @@ describe('<MemoryChat/> generation details', () => {
     await user.click(await screen.findByRole('switch', { name: /generation details/i }))
 
     await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('showGenerationDetails', true))
+    const details = await screen.findByRole('button', { name: 'Generation details' })
     expect(screen.queryByTestId('generation-metrics')).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Generation details' }))
+    await user.click(details)
     const row = await screen.findByTestId('generation-metrics')
     expect(row.textContent).toContain('42.5 tok/s')
     expect(row.textContent).toContain('TTFT 0.37s')
