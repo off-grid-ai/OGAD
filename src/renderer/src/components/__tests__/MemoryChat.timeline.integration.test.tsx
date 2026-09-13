@@ -16,7 +16,8 @@ type Event = {
 
 function chatBoundary(
   savedReply?: { content: string; context: unknown },
-  voiceMode = false
+  voiceMode = false,
+  showGenerationDetails = false
 ): {
   status: () => { streamId: string; messages: string[] }
   emit: (event: Omit<Event, 'streamId'>) => void
@@ -96,7 +97,11 @@ function chatBoundary(
       conversation.message_count = messages.length
       return { id, uuid }
     },
-    getSettings: async () => ({ composerToolsOn: true, composerVoiceMode: voiceMode }),
+    getSettings: async () => ({
+      composerToolsOn: true,
+      composerVoiceMode: voiceMode,
+      showGenerationDetails
+    }),
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     listTools: async () => [],
     mcpList: async () => [],
@@ -287,6 +292,36 @@ describe('<MemoryChat/> ordered tool turn', () => {
       expect(screen.queryByRole('button', { name: 'Searched your memory — 1 results' })).toBeNull()
     }
   )
+
+  it('shows saved generation details below a voice reply when enabled', async () => {
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+    chatBoundary(
+      {
+        content: 'The answer is ready.',
+        context: {
+          metrics: {
+            estimatedPromptTokens: 1024,
+            contextWindowTokens: 4096,
+            decodeTokensPerSecond: 42.5,
+            completionTokens: 128,
+            totalSeconds: 3.4
+          }
+        }
+      },
+      true,
+      true
+    )
+    render(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'timeline-chat' }} />
+      </TooltipProvider>
+    )
+
+    expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    expect(
+      await screen.findByText(/Context: ~25% used · 42\.5 tok\/s · 128 tokens · 3\.4s total/)
+    ).toBeTruthy()
+  })
 
   it('keeps a failed memory search readable when a later search found sources', async () => {
     ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}

@@ -781,6 +781,7 @@ function VoiceMessageRow({
   autoPlay,
   copied,
   showTranscriptInitially,
+  showGenerationDetails,
   playbackSpeed,
   onPlaybackStateChange,
   onCopy,
@@ -793,6 +794,7 @@ function VoiceMessageRow({
   autoPlay: boolean
   copied: boolean
   showTranscriptInitially: boolean
+  showGenerationDetails: boolean
   playbackSpeed: number
   onPlaybackStateChange: (messageId: string, active: boolean) => void
   onCopy: (text: string, key?: string) => void
@@ -883,6 +885,9 @@ function VoiceMessageRow({
       {body}
       {message.role === 'assistant' && !message.streaming ? (
         <ToolsSentDisclosure names={message.toolsOffered} />
+      ) : null}
+      {message.role === 'assistant' && showGenerationDetails ? (
+        <GenerationMetricsRow metrics={message.metrics} />
       ) : null}
     </div>
   )
@@ -2337,6 +2342,7 @@ function MessageRow({
         autoPlay={state.autoPlayId === message.id}
         copied={state.copiedKey === message.id}
         showTranscriptInitially={state.latestVoiceAssistantId === message.id}
+        showGenerationDetails={state.showGenerationDetails}
         playbackSpeed={state.ttsSpeed}
         onPlaybackStateChange={actions.voicePlaybackChange}
         onCopy={actions.copy}
