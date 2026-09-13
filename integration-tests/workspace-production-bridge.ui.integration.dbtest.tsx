@@ -31,6 +31,7 @@ type IpcListener = (event: unknown, ...args: unknown[]) => void
 
 const PROFILE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-workspace-bridge-'))
 const previousUserData = process.env.OFFGRID_USER_DATA
+const previousDataDir = process.env.OFFGRID_DATA_DIR
 const bridge = vi.hoisted(() => ({
   handlers: new Map<string, IpcHandler>(),
   mainListeners: new Map<string, IpcHandler>(),
@@ -149,6 +150,7 @@ function renderChat(target?: { conversationId?: string; projectId?: string }): v
 
 beforeAll(async () => {
   process.env.OFFGRID_USER_DATA = PROFILE_DIR
+  process.env.OFFGRID_DATA_DIR = PROFILE_DIR
   fake = await startFakeLlamaServer()
   await bootProductionMain()
   await import('../src/preload/index')
@@ -182,6 +184,8 @@ afterAll(async () => {
   fs.rmSync(PROFILE_DIR, { recursive: true, force: true })
   if (previousUserData === undefined) delete process.env.OFFGRID_USER_DATA
   else process.env.OFFGRID_USER_DATA = previousUserData
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
 })
 
 /**
