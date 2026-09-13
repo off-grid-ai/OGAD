@@ -4,6 +4,7 @@
 // without mounting the chat.
 
 import { completeChatStreamTool, startChatStreamTool, type ChatStreamTool } from '@offgrid/sync'
+import type { AssistantTimelineEntry } from './message-persistence'
 
 export interface StreamEvent {
   type: 'content' | 'reasoning' | 'step' | 'tool_result' | 'done'
@@ -20,7 +21,32 @@ export interface StreamedMessage {
     result: string
     status?: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   }[]
+  timeline?: AssistantTimelineEntry[]
   activity?: unknown
+}
+
+/** Preserve stream order across separate model rounds without storing every token as an entry. */
+export function appendTimelineEvent(
+  previous: readonly AssistantTimelineEntry[] | undefined,
+  event: StreamEvent
+): AssistantTimelineEntry[] | undefined {
+  if (event.type === 'reasoning' && event.text) {
+    const entries = [...(previous ?? [])]
+    const last = entries.at(-1)
+    if (last?.kind === 'thinking')
+      entries[entries.length - 1] = { ...last, text: last.text + event.text }
+    else entries.push({ kind: 'thinking', text: event.text })
+    return entries
+  }
+  if (event.type === 'step' && runningToolName(event.step)) {
+    const entries = [...(previous ?? [])]
+    entries.push({
+      kind: 'tool',
+      toolIndex: entries.filter((entry) => entry.kind === 'tool').length
+    })
+    return entries
+  }
+  return previous ? [...previous] : undefined
 }
 
 /** A completed tool result can arrive before the chat model writes its final
@@ -40,7 +66,11 @@ export function applyStreamEvent<T extends StreamedMessage>(m: T, e: StreamEvent
     return { ...m, content: (m.content || '') + (e.text || ''), activity: undefined }
   }
   if (e.type === 'reasoning') {
-    return { ...m, reasoning: (m.reasoning || '') + (e.text || '') }
+    return {
+      ...m,
+      reasoning: (m.reasoning || '') + (e.text || ''),
+      timeline: appendTimelineEvent(m.timeline, e)
+    }
   }
   if (e.type === 'tool_result' && e.call) {
     return {
@@ -62,6 +92,7 @@ export function applyStreamEvent<T extends StreamedMessage>(m: T, e: StreamEvent
   return {
     ...m,
     activity: e.step,
+    timeline: appendTimelineEvent(m.timeline, e),
     ...(toolName
       ? {
           toolCalls: fromPortableTools(startChatStreamTool(toPortableTools(m.toolCalls), toolName))
