@@ -18,6 +18,8 @@ export interface RemoteVisionSavedServer {
   hasApiKey: boolean
   /** The user has confirmed that this remote server can receive screen images. */
   screenFramesAllowed: boolean
+  /** User-configured context window for this selected remote model. */
+  contextWindowTokens?: number
 }
 
 export interface RemoteVisionModelReference {
@@ -93,6 +95,7 @@ export interface RemoteVisionServerUpdate {
   apiKey?: string
   clearApiKey?: boolean
   screenFramesAllowed?: boolean
+  contextWindowTokens?: number
 }
 
 export interface RemoteVisionConnectionResult {

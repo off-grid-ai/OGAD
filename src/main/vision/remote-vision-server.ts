@@ -24,6 +24,7 @@ interface StoredRemoteVisionServer {
   endpoint: string
   model: string
   screenFramesAllowed: boolean
+  contextWindowTokens?: number
 }
 
 interface StoredRemoteVisionConfig {
@@ -71,7 +72,10 @@ function normalizeServer(
     provider: value.provider,
     endpoint: remoteVisionApiBase(remoteVisionEndpoint(value.provider, value.endpoint)),
     model: value.model.trim(),
-    screenFramesAllowed: value.screenFramesAllowed === true
+    screenFramesAllowed: value.screenFramesAllowed === true,
+    ...(Number.isSafeInteger(value.contextWindowTokens) && (value.contextWindowTokens ?? 0) > 0
+      ? { contextWindowTokens: value.contextWindowTokens }
+      : {})
   }
 }
 
@@ -198,7 +202,10 @@ export function setRemoteVisionServerSettings(
     provider: update.provider,
     endpoint,
     model,
-    screenFramesAllowed: update.screenFramesAllowed === true
+    screenFramesAllowed: update.screenFramesAllowed === true,
+    ...(Number.isSafeInteger(update.contextWindowTokens) && (update.contextWindowTokens ?? 0) > 0
+      ? { contextWindowTokens: update.contextWindowTokens }
+      : {})
   }
   const servers = stored.servers.some((server) => server.id === id)
     ? stored.servers.map((server) => (server.id === id ? next : server))

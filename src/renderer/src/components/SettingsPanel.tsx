@@ -386,7 +386,7 @@ export function SettingsPanel({
               label="Generation details"
               controlId="generation-details-toggle"
               value={showGenerationDetails ? 'Shown' : 'Hidden'}
-              hint="Print the speed, token count, and time to first token under each answer."
+              hint="Show context use, speed, token count, and time under each answer."
             >
               <button
                 id="generation-details-toggle"

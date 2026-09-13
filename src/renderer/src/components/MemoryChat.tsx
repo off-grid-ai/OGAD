@@ -1191,13 +1191,24 @@ function GenerationMetricsRow({
   metrics
 }: Readonly<{ metrics?: GenerationMetrics }>): React.JSX.Element | null {
   const parts = metrics ? formatGenerationMetrics(metrics) : []
-  if (!parts.length) return null
+  const contextWindowTokens = metrics?.contextWindowTokens
+  const promptTokens = metrics?.promptTokens ?? metrics?.estimatedPromptTokens
+  const contextPercent =
+    promptTokens && contextWindowTokens && contextWindowTokens > 0
+      ? Math.round((promptTokens / contextWindowTokens) * 100)
+      : null
+  if (!parts.length && contextPercent === null) return null
   return (
     <p
       className="mt-2 font-mono text-[10px] tabular-nums text-neutral-500"
       data-testid="generation-metrics"
     >
-      {parts.join(' · ')}
+      {[
+        ...(contextPercent === null
+          ? []
+          : [`Context: ${metrics?.promptTokens ? '' : '~'}${contextPercent}% used`]),
+        ...parts
+      ].join(' · ')}
     </p>
   )
 }
@@ -2020,7 +2031,9 @@ function MessageBubble({
         <MessageMarkdown message={message} navigation={navigation} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
-      {state.showGenerationDetails ? <GenerationMetricsRow metrics={message.metrics} /> : null}
+      {state.showGenerationDetails ? (
+        <GenerationMetricsRow metrics={message.metrics} />
+      ) : null}
       <ImageMemoryRetryAction
         message={message}
         loading={state.loading}
@@ -3927,11 +3940,22 @@ export function MemoryChat({
         setConvMessages(convId, (prev) =>
           prev.map((m) =>
             m.id === toolStreamId
-              ? { ...m, content: answer, context, toolCalls, activity: undefined, streaming: false }
+              ? {
+                  ...m,
+                  content: answer,
+                  context,
+                  toolCalls,
+                  metrics: tr?.metrics,
+                  activity: undefined,
+                  streaming: false
+                }
               : m
           )
         )
-        const toolCtxWithReasoning = buildAssistantContext(toolCtx, { reasoning: toolReasoning })
+        const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
+          reasoning: toolReasoning,
+          metrics: tr?.metrics
+        })
         // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results

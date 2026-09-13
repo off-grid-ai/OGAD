@@ -7,6 +7,7 @@
 // search + MCP connectors plug in here later.
 
 import { llm } from './llm'
+import type { GenerationMetrics } from '../shared/generation-metrics'
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
 import { stripChatControlTokens } from '@offgrid/sync'
 import { isMemoryToolAllowed } from './tools/memory-scope'
@@ -692,10 +693,12 @@ export async function toolChat(
     answer: string
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
+    metrics?: GenerationMetrics
   }): {
     answer: string
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
+    metrics?: GenerationMetrics
     imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
     imageRequest?: { prompt: string }
   } => {
@@ -720,7 +723,7 @@ export async function toolChat(
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
     // are accumulated and returned. A tool-calling round streams thinking (and no content);
     // the final round streams the answer. tool temperature stays 0.3 (was the blocking path).
-    const { content, toolCalls: calls } = await llm.streamChat(messages, onDelta, {
+    const { content, toolCalls: calls, metrics } = await llm.streamChat(messages, onDelta, {
       tools,
       toolChoice: 'auto',
       temperature: 0.3,
@@ -736,7 +739,7 @@ export async function toolChat(
     // them — a cancelled turn fires no side effects (e.g. an MCP send/create).
     // Return what we have; the renderer treats the turn as cancelled.
     if (opts.signal?.aborted)
-      return resultWithImages({ answer: content.trim(), toolCalls, unified })
+      return resultWithImages({ answer: content.trim(), toolCalls, unified, metrics })
 
     // Native tool_calls are preferred; but small on-device models (the gemma-4 we
     // ship) often emit a call as TEXT instead of on the tool_calls channel. When
@@ -811,14 +814,14 @@ export async function toolChat(
         messages.push({ role: 'tool', tool_call_id: c.id, content: res.text })
         if (res.authoritative) {
           onDelta(res.text, 'content')
-          return resultWithImages({ answer: res.text, toolCalls, unified })
+          return resultWithImages({ answer: res.text, toolCalls, unified, metrics })
         }
       }
       round += 1
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: answerFrom(content), toolCalls, unified })
+    return resultWithImages({ answer: answerFrom(content), toolCalls, unified, metrics })
   }
   // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
   // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
@@ -840,7 +843,8 @@ export async function toolChat(
   return resultWithImages({
     answer: answerFrom(final.content) || 'Stopped after too many tool steps.',
     toolCalls,
-    unified
+    unified,
+    metrics: final.metrics
   })
 }
 

@@ -26,6 +26,7 @@ interface ServerForm {
   model: string
   hasApiKey: boolean
   screenFramesAllowed: boolean
+  contextWindowTokens: string
 }
 
 const EMPTY_FORM: ServerForm = {
@@ -34,7 +35,8 @@ const EMPTY_FORM: ServerForm = {
   endpoint: '',
   model: '',
   hasApiKey: false,
-  screenFramesAllowed: false
+  screenFramesAllowed: false,
+  contextWindowTokens: ''
 }
 
 interface RemoteModelOption {
@@ -49,7 +51,8 @@ function formFromServer(server: RemoteVisionSavedServer): ServerForm {
     endpoint: server.endpoint,
     model: server.model,
     hasApiKey: server.hasApiKey,
-    screenFramesAllowed: server.screenFramesAllowed
+    screenFramesAllowed: server.screenFramesAllowed,
+    contextWindowTokens: server.contextWindowTokens ? String(server.contextWindowTokens) : ''
   }
 }
 
@@ -154,7 +157,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       serverId: form.id ?? undefined,
       name: form.name,
       ...(apiKey ? { apiKey } : {}),
-      screenFramesAllowed: form.screenFramesAllowed
+      screenFramesAllowed: form.screenFramesAllowed,
+      ...(form.contextWindowTokens ? { contextWindowTokens: Number(form.contextWindowTokens) } : {})
     }
   }
 
@@ -228,6 +232,14 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
     }
     if (remoteEnabled && !form.model) {
       setStatus('Test the connection and select a model first.')
+      return
+    }
+    if (
+      form.contextWindowTokens &&
+      (!Number.isSafeInteger(Number(form.contextWindowTokens)) ||
+        Number(form.contextWindowTokens) < 1024)
+    ) {
+      setStatus('Enter a context window of at least 1024 tokens.')
       return
     }
     setBusy(true)
@@ -390,6 +402,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     ...current,
                     endpoint: event.target.value,
                     model: '',
+                    contextWindowTokens: '',
                     screenFramesAllowed: false
                   }))
                   setModels([])
@@ -469,7 +482,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     onFocus={() => setShowModels(true)}
                     onChange={(event) => {
                       setModelQuery(event.target.value)
-                      setForm((current) => ({ ...current, model: '' }))
+                      setForm((current) => ({ ...current, model: '', contextWindowTokens: '' }))
                       setShowModels(true)
                     }}
                     placeholder="Search models"
@@ -484,7 +497,12 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                             key={model.id}
                             type="button"
                             onClick={() => {
-                              setForm((current) => ({ ...current, model: model.id }))
+                              setForm((current) => ({
+                                ...current,
+                                model: model.id,
+                                contextWindowTokens:
+                                  current.model === model.id ? current.contextWindowTokens : ''
+                              }))
                               setModelQuery(model.name)
                               setShowModels(false)
                               setStatus('Not saved.')
@@ -509,6 +527,25 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 </div>
               </Row>
             ) : null}
+            <Row
+              label="Context window"
+              controlId="remote-context-window"
+              hint="Tokens for this remote model. Leave empty if unknown."
+            >
+              <input
+                id="remote-context-window"
+                type="number"
+                min={1024}
+                step={1024}
+                value={form.contextWindowTokens}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, contextWindowTokens: event.target.value }))
+                  setStatus('Not saved.')
+                }}
+                placeholder="e.g., 131072"
+                className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
+              />
+            </Row>
           </>
         ) : null}
       </div>
