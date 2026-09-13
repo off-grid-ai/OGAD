@@ -1298,7 +1298,9 @@ export function addRagMessage(
 export function truncateRagMessages(conversationId: string, keepCount: number): number {
   const db = getDB()
   const rows = db
-    .prepare(`SELECT id, uuid FROM rag_messages WHERE conversation_id = ? ORDER BY id ASC`)
+    .prepare(
+      `SELECT id, uuid FROM rag_messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC`
+    )
     .all(conversationId) as Array<{ id: number; uuid: string }>
   const toDelete = rows.slice(Math.max(0, keepCount))
   if (!toDelete.length) return 0
@@ -1325,7 +1327,7 @@ export function getRagMessages(conversationId: string): RagMessage[] {
                origin_device_id, origin_device_name, created_at
         FROM rag_messages
         WHERE conversation_id = ?
-        ORDER BY created_at ASC
+        ORDER BY created_at ASC, id ASC
     `
     )
     .all(conversationId) as RagMessage[]
