@@ -1259,10 +1259,10 @@ function AppContent() {
                 {viewMode === 'chats' && selectedSessionId ? (
                   <motion.div
                     key={`chat-detail-${selectedSessionId}`}
-                    initial={{ opacity: 0, filter: 'blur(10px)' }}
-                    animate={{ opacity: 1, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, filter: 'blur(5px)' }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.12, ease: [0.25, 0.46, 0.45, 0.94] }}
                     className="h-full"
                   >
                     <ChatDetail
@@ -1285,10 +1285,10 @@ function AppContent() {
                 ) : (
                   <motion.div
                     key={viewMode}
-                    initial={{ opacity: 0, filter: 'blur(10px)' }}
-                    animate={{ opacity: 1, filter: 'blur(0px)' }}
-                    exit={{ opacity: 0, filter: 'blur(5px)' }}
-                    transition={{ duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.12, ease: [0.25, 0.46, 0.45, 0.94] }}
                     className="p-6 h-full overflow-y-auto"
                   >
                     {viewMode === 'explore' ? (

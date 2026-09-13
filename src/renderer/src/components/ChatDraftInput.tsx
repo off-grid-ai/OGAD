@@ -35,8 +35,9 @@ function useDraft(store: ChatDraftStore): string {
 }
 
 function matchingSkills(value: string, skills: readonly SkillOption[]): readonly SkillOption[] {
-  if (!value.startsWith('/') || /\s/.test(value)) return []
-  const query = value.slice(1).toLowerCase()
+  const match = /(?:^|\s)\/([a-z0-9_-]*)$/i.exec(value)
+  if (!match) return []
+  const query = match[1]!.toLowerCase()
   return skills.filter((skill) => skill.name.toLowerCase().includes(query))
 }
 
@@ -61,13 +62,13 @@ export const ChatDraftInput = forwardRef<ChatDraftInputHandle, ChatDraftInputPro
     }, [value])
 
     const completeSkill = (skill: SkillOption): void => {
-      store.set(`/${skill.name} `)
+      store.set(`${value.slice(0, value.lastIndexOf('/'))}/${skill.name} `)
       textareaRef.current?.focus()
     }
 
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
       if (matches.length > 0) {
-        const query = value.slice(1).toLowerCase()
+        const query = value.slice(value.lastIndexOf('/') + 1).toLowerCase()
         const exact = skills.some((skill) => skill.name.toLowerCase() === query)
         if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && !exact)) {
           event.preventDefault()

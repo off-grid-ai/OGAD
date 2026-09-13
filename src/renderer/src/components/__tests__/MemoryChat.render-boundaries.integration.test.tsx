@@ -64,6 +64,48 @@ it('completes a skill in the draft and sends it from a populated chat', async ()
   expect(screen.getByText('Earlier answer')).toBeTruthy()
 })
 
+it.each([
+  [
+    'on a later line',
+    'Please improve this draft.\n/proo',
+    'Please improve this draft.\n/proofread ',
+    'Please improve this draft.'
+  ],
+  ['after text', 'hello /proo', 'hello /proofread ', 'hello']
+])('completes and opens an installed skill %s', async (_, draft, completed, prompt) => {
+  const boundary = new ChatBoundary()
+  Object.assign(boundary.api, {
+    listSkills: async () => [{ name: 'proofread', description: 'Improve writing' }],
+    getSkill: async (name: string) =>
+      name === 'proofread'
+        ? {
+            name,
+            description: 'Improve writing',
+            instructions: 'Preserve the meaning.',
+            trigger: null
+          }
+        : null
+  })
+  installBoundary(boundary)
+  const user = userEvent.setup()
+  renderChat({ conversationId: 'conversation-a' })
+
+  const composer = await screen.findByPlaceholderText('Ask about “Project Alpha”…')
+  fireEvent.change(composer, { target: { value: draft } })
+  expect(await screen.findByRole('button', { name: /proofread/i })).toBeTruthy()
+  fireEvent.keyDown(composer, { key: 'Tab' })
+  expect((composer as HTMLTextAreaElement).value).toBe(completed)
+  await user.click(screen.getByRole('button', { name: 'Send' }))
+
+  await waitFor(() => expect(boundary.calls).toHaveLength(1))
+  expect(boundary.calls[0]!.query).toContain('Preserve the meaning.')
+  expect(boundary.calls[0]!.query).toContain(prompt)
+  await act(async () => boundary.resolve(0, 'The draft is clearer.'))
+  await user.click(await screen.findByRole('button', { name: 'Open /proofread skill' }))
+  const panel = await screen.findByRole('dialog', { name: 'Skills' })
+  expect(within(panel).getByDisplayValue('proofread')).toBeTruthy()
+})
+
 it('creates a project from the composer and sends into it', async () => {
   const boundary = new ChatBoundary()
   Object.assign(boundary.api, {
@@ -90,4 +132,24 @@ it('creates a project from the composer and sends into it', async () => {
   expect(boundary.calls[0]!.projectId).toBe('project-new')
   await act(async () => boundary.resolve(0, 'The Desktop chat changed.'))
   expect(await screen.findByText('The Desktop chat changed.')).toBeTruthy()
+})
+
+it('switches between saved chats and shows a peer update to an inactive chat', async () => {
+  const boundary = new ChatBoundary()
+  await boundary.addRagMessage('conversation-a', 'assistant', 'Answer in the first chat')
+  installBoundary(boundary)
+  const user = userEvent.setup()
+  renderChat({ conversationId: 'conversation-a' })
+
+  expect(await screen.findByText('Answer in the first chat')).toBeTruthy()
+  await user.click(await screen.findByText('Conversation B'))
+  expect(await screen.findByText('Conversation B baseline')).toBeTruthy()
+  await user.click(screen.getByRole('button', { name: 'Conversation A' }))
+  expect(await screen.findByText('Answer in the first chat')).toBeTruthy()
+
+  await boundary.addRagMessage('conversation-b', 'assistant', 'A peer added this answer')
+  await act(async () => boundary.emitConversationChanged('conversation-b'))
+  await user.click(screen.getByRole('button', { name: 'Conversation B' }))
+  expect(await screen.findByText('A peer added this answer')).toBeTruthy()
+  expect(screen.queryByText('Answer in the first chat')).toBeNull()
 })

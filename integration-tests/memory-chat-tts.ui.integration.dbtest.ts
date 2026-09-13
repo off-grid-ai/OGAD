@@ -298,10 +298,19 @@ describe('assistant reply speech integration (#105)', () => {
     await waitFor(() => expect(inTranscript('Conversation B baseline')).toBeTruthy(), {
       timeout: 10_000
     })
-    await user.click(await screen.findByRole('button', { name: 'Speak' }))
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    await user.click(await screen.findByRole('menuitem', { name: 'Speak' }))
     // This crosses a real child-process boundary. Shared Linux runners can take
     // more than 10 seconds to schedule the native speech worker under DB-suite load.
-    expect(await screen.findByRole('button', { name: 'Stop' }, { timeout: 30_000 })).toBeTruthy()
+    await waitFor(() => expect(audios).toHaveLength(1), { timeout: 30_000 })
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    expect(await screen.findByRole('menuitem', { name: 'Stop' }, { timeout: 30_000 })).toBeTruthy()
 
     expect(audios).toHaveLength(1)
     expect(audios[0]!.play).toHaveBeenCalledOnce()
@@ -322,13 +331,21 @@ describe('assistant reply speech integration (#105)', () => {
     await waitFor(() => expect(inTranscript('Conversation B baseline')).toBeTruthy(), {
       timeout: 10_000
     })
-    await user.click(await screen.findByRole('button', { name: 'Speak' }))
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    await user.click(await screen.findByRole('menuitem', { name: 'Speak' }))
 
     expect((await screen.findByRole('alert')).textContent).toMatch(
       /speech could not be generated.*text-to-speech is installed in settings/i
     )
     expect(audios).toHaveLength(0)
-    expect(screen.getByRole('button', { name: 'Speak' })).toBeTruthy()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    expect(await screen.findByRole('menuitem', { name: 'Speak' })).toBeTruthy()
   }, 15_000)
 
   it('records, transcribes, chats, speaks, stops, recovers, and reopens one voice turn', async () => {

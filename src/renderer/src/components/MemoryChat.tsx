@@ -1237,14 +1237,16 @@ function makeCiteComponents(
 const SKILL_MENTION_LINK_PREFIX = '#offgrid-skill-'
 
 function renderUserSkillMention(content: string, installedSkillNames: readonly string[]): string {
-  const match = /^\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/i.exec(content)
-  if (!match) return content
-  const name = match[1]!
-  const isInstalled = installedSkillNames.some(
-    (installedName) => installedName.toLowerCase() === name.toLowerCase()
+  return content.replace(
+    /(^|\s)\/([a-z0-9][a-z0-9_-]*)(?=\s|$)/gi,
+    (mention, space: string, name: string) => {
+      const isInstalled = installedSkillNames.some(
+        (installedName) => installedName.toLowerCase() === name.toLowerCase()
+      )
+      if (!isInstalled && !presetForSkillName(name)) return mention
+      return `${space}[/${name}](${SKILL_MENTION_LINK_PREFIX}${encodeURIComponent(name)})`
+    }
   )
-  if (!isInstalled && !presetForSkillName(name)) return content
-  return `[/${name}](${SKILL_MENTION_LINK_PREFIX}${encodeURIComponent(name)})${content.slice(match[0].length)}`
 }
 
 function makeUserMessageComponents(navigation: ContextNavigation): Components {
@@ -3558,6 +3560,9 @@ export function MemoryChat({
       if (convId === activeConversationId) return
       setActiveConversationId(convId)
       setActiveProjectId(conversations.find((c) => c.id === convId)?.project_id ?? null)
+      // Open tabs already own their rendered messages. A fresh read here rebuilt the
+      // whole transcript and rendered it a second time on every idle tab switch.
+      if (messagesByConv[convId]) return
       try {
         const nextMessages = await loadLatestConversationMessages(convId)
         if (!nextMessages) return
@@ -3567,10 +3572,9 @@ export function MemoryChat({
         )
       } catch (e) {
         console.error('Failed to load messages:', e)
-        setMessagesByConv((prev) => (prev[convId] ? prev : { ...prev, [convId]: [] }))
       }
     },
-    [activeConversationId, conversations, loadLatestConversationMessages]
+    [activeConversationId, conversations, loadLatestConversationMessages, messagesByConv]
   )
 
   // Close a chat tab; fall back to another open tab (or a fresh chat) if it was active.
@@ -3602,12 +3606,18 @@ export function MemoryChat({
     const off = window.api.onRagConversationsChanged?.(({ conversationId }) => {
       void (async () => {
         try {
-          if (
-            conversationId &&
-            conversationId === activeConversationId &&
-            !generatingRef.current.has(conversationId)
-          ) {
-            await refreshConversationMessages(conversationId)
+          if (conversationId && !generatingRef.current.has(conversationId)) {
+            if (conversationId === activeConversationId) {
+              await refreshConversationMessages(conversationId)
+            } else {
+              // The next visit must load a peer's new messages, not the old tab cache.
+              setMessagesByConv((prev) => {
+                if (!prev[conversationId]) return prev
+                const next = { ...prev }
+                delete next[conversationId]
+                return next
+              })
+            }
           }
           scheduleConversationListRefresh()
         } catch (error) {
@@ -3834,14 +3844,16 @@ export function MemoryChat({
     }
     if (isInput) setAttachments([])
 
-    // Skill invocation: "/skill-name [rest]" prepends that skill's instructions.
+    // An installed /skill-name anywhere in the prompt prepends that skill's instructions.
     if (isInput) {
-      const sm = /^\/([A-Za-z0-9_-]+)\s*([\s\S]*)$/.exec(typed)
-      if (sm && skills.some((s) => s.name.toLowerCase() === sm[1]!.toLowerCase())) {
+      const skillMention = /(^|\s)\/([A-Za-z0-9_-]+)(?=\s|$)/.exec(typed)
+      const skillName = skillMention?.[2]
+      if (skillName && skills.some((s) => s.name.toLowerCase() === skillName.toLowerCase())) {
         try {
-          const sk = await window.api.getSkill(sm[1]!)
+          const sk = await window.api.getSkill(skillName)
           if (sk) {
-            const rest = sm[2]!.trim()
+            const rest =
+              `${typed.slice(0, skillMention!.index)}${skillMention![1]}${typed.slice(skillMention!.index + skillMention![0].length)}`.trim()
             modelQuery =
               `${attBlock ? attBlock + '\n\n' : ''}# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim()
           }
