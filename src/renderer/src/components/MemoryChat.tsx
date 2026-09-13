@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
-import { buildSendHistory } from '@renderer/lib/chat-history'
+import { buildSendHistory, EARLIER_CHAT_EXCERPTS_PREFIX } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
 import { parseSqliteUtc, shiftLocalDay, startOfLocalDay, timeAgo } from '@renderer/lib/time'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
@@ -152,6 +152,7 @@ type RagEntity = { id: number; name?: string }
 type RagEntityFact = { fact?: string } | string
 
 type RagContext = {
+  notice?: boolean
   masterMemory?: string | null
   memories?: RagMemory[]
   messages?: unknown[]
@@ -549,6 +550,10 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
 function mapRagMessage(message: RawRagMessage): ChatMessage[] {
   const context = parseRagContext(message.context)
   const provenance = readRagProvenance(message)
+  if (context?.notice && noticeText(message.content) === 'Compacted') {
+    const id = String(message.uuid ?? message.id ?? '')
+    return id ? [{ id, role: 'assistant', content: message.content, notice: true }] : []
+  }
   // Shared excludes this temporary row from the portable answer projection. Desktop still needs
   // the local row until the same UUID becomes the durable Enhanced prompt disclosure.
   const promptEnhancement = promptEnhancementMessage(message, provenance)
@@ -707,10 +712,20 @@ function contextResultCount(context: RagContext): number {
 }
 
 function NoticeMessageRow({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element {
+  const text = noticeText(message.content)
+  if (text === 'Compacted') {
+    return (
+      <div className="mb-2 flex items-start" aria-live="polite">
+        <span className="rounded-sm border border-neutral-800 px-2.5 py-2 text-[11px] text-neutral-500">
+          {text}
+        </span>
+      </div>
+    )
+  }
   return (
     <div className="mb-4 flex justify-center">
       <span className="px-3 text-center text-[11px] leading-relaxed text-neutral-500">
-        {noticeText(message.content)}
+        {text}
       </span>
     </div>
   )
@@ -3819,7 +3834,31 @@ export function MemoryChat({
       // History is built from the TARGET conversation's own messages (never the
       // active tab's `messages`) — a drained-queue or background send is bound to
       // `convId`, so its history must come from that conversation (D8).
-      const history = buildSendHistory(messagesByConv[convId] ?? EMPTY_MSGS, !!regen, trimmed)
+      const historyLimit = (messagesByConv[convId]?.length ?? 0) >= 20 ? 8 : 20
+      const history = buildSendHistory(
+        messagesByConv[convId] ?? EMPTY_MSGS,
+        !!regen,
+        trimmed,
+        historyLimit
+      )
+      if (
+        history[0]?.content.startsWith(EARLIER_CHAT_EXCERPTS_PREFIX) &&
+        !(messagesByConv[convId] ?? EMPTY_MSGS).some(
+          (message) => message.notice && noticeText(message.content) === 'Compacted'
+        )
+      ) {
+        try {
+          const stored = await window.api.addRagMessage(convId, 'assistant', '_Compacted_', {
+            notice: true
+          })
+          setConvMessages(convId, (previous) => [
+            ...previous,
+            { id: stored.uuid, role: 'assistant', content: '_Compacted_', notice: true }
+          ])
+        } catch (error) {
+          console.warn('Could not save the compaction notice', error)
+        }
+      }
 
       // Agentic tools path (opt-in, non-project). The model calls built-in tools,
       // plus (when Connectors is on) MCP connector tools. STREAMS like the RAG path:

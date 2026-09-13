@@ -13,9 +13,12 @@ export interface HistoryTurn {
   role: string
   content: string
   context?: { taskGuidance?: unknown } | null
+  notice?: boolean
 }
 
-/** Build the last `limit` turns of history for a send.
+export const EARLIER_CHAT_EXCERPTS_PREFIX = 'Earlier chat excerpts'
+
+/** Build bounded history for a send.
  *  - regen: the latest user turn is already in the thread → keep up to and
  *    including it (drop anything after).
  *  - normal send: append the new user turn.
@@ -29,7 +32,7 @@ export function buildSendHistory<T extends HistoryTurn>(
   // Task guidance is shown in Chat for continuity, but the operator already
   // consumed it. Do not replay it as another user prompt to the resident LLM.
   const flat = convMsgs
-    .filter((message) => !message.context?.taskGuidance)
+    .filter((message) => !message.context?.taskGuidance && !message.notice)
     .map((m) => ({ role: m.role, content: m.content }))
   let base: HistoryTurn[]
   if (regen) {
@@ -38,5 +41,38 @@ export function buildSendHistory<T extends HistoryTurn>(
   } else {
     base = [...flat, { role: 'user', content: newUserText }]
   }
-  return base.slice(-limit)
+  if (base.length === 0) return []
+  if (limit <= 1) return base.slice(-1)
+  // The active turn is never shortened. Prior turns share a fixed budget so a
+  // few very large messages cannot exhaust the model context by themselves.
+  const recent = base.length <= limit ? base : base.slice(-(limit - 1))
+  const older = base.slice(0, base.length - recent.length)
+  const excerptTurns = older.length
+    ? [older[0]!, ...older.slice(-3).filter((turn) => turn !== older[0])]
+    : []
+  const excerpts = excerptTurns.map(
+    (turn) => `${turn.role === 'assistant' ? 'Assistant' : 'User'}: ${turn.content.slice(0, 90)}`
+  )
+  const prior: HistoryTurn[] = [
+    ...(older.length
+      ? [
+          {
+            role: 'user',
+            content: `${EARLIER_CHAT_EXCERPTS_PREFIX} (${older.length} turns; some details omitted): ${excerpts.join(' | ')}`
+          }
+        ]
+      : []),
+    ...recent.slice(0, -1)
+  ]
+  const charsPerTurn = Math.max(1, Math.floor(3000 / Math.max(1, prior.length)))
+  return [
+    ...prior.map((turn) => ({
+      ...turn,
+      content:
+        turn.content.length > charsPerTurn
+          ? `${turn.content.slice(0, charsPerTurn - 1)}…`
+          : turn.content
+    })),
+    recent[recent.length - 1]!
+  ]
 }
