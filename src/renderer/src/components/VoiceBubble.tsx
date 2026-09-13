@@ -94,7 +94,9 @@ interface VoiceBubbleProps {
   /** Assistant reply still generating — shows pulsing dots, no playback. */
   isLoading?: boolean
   /** Synthesize text → playable dataUrl on-device (assistant replies). */
-  synthesize: (text: string) => Promise<{ dataUrl: string }>
+  synthesize: (text: string, voice?: string) => Promise<{ dataUrl: string }>
+  /** Read the selected voice before playing a synthesized reply. */
+  readVoice?: () => Promise<string | undefined>
   /** Play once automatically when ready (a just-finished assistant reply). */
   autoPlay?: boolean
   /** The latest assistant voice reply opens its transcript without another click. */
@@ -117,6 +119,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   isUser = false,
   isLoading = false,
   synthesize,
+  readVoice,
   autoPlay = false,
   showTranscriptInitially = false,
   defaultSpeed = 1,
@@ -126,7 +129,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   onRetry
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const srcRef = useRef<string | null>(null) // cached synthesized dataUrl
+  const srcRef = useRef<{ dataUrl: string; voice?: string } | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'playing' | 'paused'>('idle')
   const [currentTime, setCurrentTime] = useState(0)
   const [loadedDuration, setLoadedDuration] = useState(0)
@@ -222,21 +225,27 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
       setStatus('paused')
       return
     }
-    if (status === 'paused' && audio) {
-      claimVoicePlayback(messageId)
-      await audio.play()
-      setStatus('playing')
-      return
-    }
-    // idle → resolve a source (cached synth / recording), then play.
     setPlaybackError(null)
     setStatus('loading')
     try {
-      let src = audioUrl || srcRef.current
+      const voice = audioUrl ? undefined : await readVoice?.().catch(() => undefined)
+      if (status === 'paused' && audio && (audioUrl || srcRef.current?.voice === voice)) {
+        claimVoicePlayback(messageId)
+        await audio.play()
+        setStatus('playing')
+        return
+      }
+      // A changed voice must not resume or reuse the previous synthesized clip.
+      audio?.pause()
+      audioRef.current = null
+      setCurrentTime(0)
+      setLoadedDuration(0)
+      const cached = srcRef.current
+      let src = audioUrl || (cached && cached.voice === voice ? cached.dataUrl : null)
       if (!src) {
-        const { dataUrl } = await synthesize(transcript)
+        const { dataUrl } = await synthesize(transcript, voice)
         if (!dataUrl) throw new Error('no audio')
-        srcRef.current = dataUrl
+        srcRef.current = { dataUrl, voice }
         src = dataUrl
       }
       const audioEl = new Audio(src)
@@ -254,7 +263,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
           : 'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
       )
     }
-  }, [status, audioUrl, transcript, synthesize, wire, messageId])
+  }, [status, audioUrl, readVoice, transcript, synthesize, wire, messageId])
 
   const cycleSpeed = useCallback(() => {
     setSpeed((prev) => {

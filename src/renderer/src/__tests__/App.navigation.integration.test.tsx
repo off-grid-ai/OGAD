@@ -550,8 +550,8 @@ describe('<App/> desktop navigation integration', () => {
       expect(window.location.pathname).toBe(startPath)
 
       for (const [label, path] of routeEntries) {
-        await screen.findAllByRole('button', { name: new RegExp(`^${label}`) }, { timeout: 10_000 })
-        await user.click(routedTabButton(label))
+        const tab = await waitFor(() => routedTabButton(label), { timeout: 10_000 })
+        await user.click(tab)
         await waitFor(() => expect(window.location.pathname).toBe(path))
         await waitFor(() =>
           expect(routedTabButton(label).getAttribute('aria-current')).toBe('page')

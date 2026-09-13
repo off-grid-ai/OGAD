@@ -81,6 +81,7 @@ function startRemoteServer(): Promise<http.Server> {
               {
                 id: 'openai/gpt-5.6',
                 name: 'GPT-5.6',
+                reasoning: { mandatory: false },
                 supported_parameters: ['tools', 'temperature', 'top_p']
               },
               {
