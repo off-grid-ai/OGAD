@@ -48,6 +48,45 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     clearRegisteredSlots()
   })
 
+  it('shows synced and local turns in the order returned by chat storage', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      {
+        id: 'phone-question',
+        role: 'user',
+        content: 'Phone question',
+        created_at: '2026-09-13T15:19:00.000Z'
+      },
+      {
+        id: 'phone-reply',
+        role: 'assistant',
+        content: 'Hi',
+        created_at: '2026-09-13T15:19:01.000Z'
+      },
+      {
+        id: 'mac-question',
+        role: 'user',
+        content: 'Mac question',
+        created_at: '2026-09-13 15:20:00'
+      },
+      { id: 'mac-reply', role: 'assistant', content: 'Ready', created_at: '2026-09-13 15:20:01' }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const labels = ['Phone question', 'Hi', 'Mac question', 'Ready']
+    await screen.findByText('Ready')
+    const rows = labels.map((label) =>
+      screen.getByText(label).closest('[data-testid^="chat-message-"]')
+    )
+    expect(rows.every(Boolean)).toBe(true)
+    for (let index = 1; index < rows.length; index++) {
+      expect(rows[index - 1]!.compareDocumentPosition(rows[index]!)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    }
+  })
+
   it('opens a task follow-up as a confirmed draft in its owning conversation', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
