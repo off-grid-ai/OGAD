@@ -26,7 +26,6 @@ interface ServerForm {
   model: string
   hasApiKey: boolean
   screenFramesAllowed: boolean
-  contextWindowTokens: string
 }
 
 const EMPTY_FORM: ServerForm = {
@@ -35,8 +34,7 @@ const EMPTY_FORM: ServerForm = {
   endpoint: '',
   model: '',
   hasApiKey: false,
-  screenFramesAllowed: false,
-  contextWindowTokens: ''
+  screenFramesAllowed: false
 }
 
 interface RemoteModelOption {
@@ -51,8 +49,7 @@ function formFromServer(server: RemoteVisionSavedServer): ServerForm {
     endpoint: server.endpoint,
     model: server.model,
     hasApiKey: server.hasApiKey,
-    screenFramesAllowed: server.screenFramesAllowed,
-    contextWindowTokens: server.contextWindowTokens ? String(server.contextWindowTokens) : ''
+    screenFramesAllowed: server.screenFramesAllowed
   }
 }
 
@@ -157,8 +154,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       serverId: form.id ?? undefined,
       name: form.name,
       ...(apiKey ? { apiKey } : {}),
-      screenFramesAllowed: form.screenFramesAllowed,
-      ...(form.contextWindowTokens ? { contextWindowTokens: Number(form.contextWindowTokens) } : {})
+      screenFramesAllowed: form.screenFramesAllowed
     }
   }
 
@@ -394,7 +390,6 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     ...current,
                     endpoint: event.target.value,
                     model: '',
-                    contextWindowTokens: '',
                     screenFramesAllowed: false
                   }))
                   setModels([])
@@ -474,7 +469,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     onFocus={() => setShowModels(true)}
                     onChange={(event) => {
                       setModelQuery(event.target.value)
-                      setForm((current) => ({ ...current, model: '', contextWindowTokens: '' }))
+                      setForm((current) => ({ ...current, model: '' }))
                       setShowModels(true)
                     }}
                     placeholder="Search models"
@@ -489,12 +484,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                             key={model.id}
                             type="button"
                             onClick={() => {
-                              setForm((current) => ({
-                                ...current,
-                                model: model.id,
-                                contextWindowTokens:
-                                  current.model === model.id ? current.contextWindowTokens : ''
-                              }))
+                              setForm((current) => ({ ...current, model: model.id }))
                               setModelQuery(model.name)
                               setShowModels(false)
                               setStatus('Not saved.')

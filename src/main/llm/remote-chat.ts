@@ -13,7 +13,6 @@ export interface RemoteTextModelConnection {
   endpoint: string
   model: string
   apiKey: string
-  contextWindowTokens?: number
 }
 
 export interface RemoteChatRequest {
