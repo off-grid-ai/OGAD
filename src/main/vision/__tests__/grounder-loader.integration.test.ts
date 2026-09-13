@@ -157,11 +157,7 @@ describe('Computer Use specialist lifecycle', () => {
     })
 
     expect(h.activeModelId()).toBe(CHAT_MODEL)
-    expect(h.events).toEqual([
-      `load:${SPECIALIST}`,
-      'run',
-      `restore-local:${CHAT_MODEL}`
-    ])
+    expect(h.events).toEqual([`load:${SPECIALIST}`, 'run', `restore-local:${CHAT_MODEL}`])
   })
 
   it('suspends remote priority even when the selected specialist is already resident', async () => {

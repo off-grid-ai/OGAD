@@ -96,13 +96,17 @@ describe('parseTtsProgressLine — worker download progress', () => {
 
 describe('parseRuntimeVoiceCatalog — runtime language source', () => {
   it('keeps valid runtime metadata and drops malformed entries', () => {
-    expect(parseRuntimeVoiceCatalog(JSON.stringify([
+    expect(
+      parseRuntimeVoiceCatalog(
+        JSON.stringify([
+          { id: 'af_heart', label: 'Heart', language: 'en-US' },
+          { id: 'jf_tebukuro', label: 'Tebukuro', language: 'ja' },
+          { label: 'Missing id', language: 'en-US' }
+        ])
+      )
+    ).toEqual([
       { id: 'af_heart', label: 'Heart', language: 'en-US' },
-      { id: 'jf_tebukuro', label: 'Tebukuro', language: 'ja' },
-      { label: 'Missing id', language: 'en-US' },
-    ]))).toEqual([
-      { id: 'af_heart', label: 'Heart', language: 'en-US' },
-      { id: 'jf_tebukuro', label: 'Tebukuro', language: 'ja' },
+      { id: 'jf_tebukuro', label: 'Tebukuro', language: 'ja' }
     ])
   })
 

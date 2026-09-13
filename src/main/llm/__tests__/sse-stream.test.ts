@@ -35,9 +35,7 @@ describe('parseSseLine', () => {
     )
 
     expect(frame).not.toBeNull()
-    expect(displayableReasoningDelta(frame!.delta)).toBe(
-      'Checking the route. Compared prices.'
-    )
+    expect(displayableReasoningDelta(frame!.delta)).toBe('Checking the route. Compared prices.')
   })
 
   it('handles an untrimmed line with leading/trailing whitespace (trims internally)', () => {

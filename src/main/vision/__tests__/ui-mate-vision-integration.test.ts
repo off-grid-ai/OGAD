@@ -64,10 +64,7 @@ describe('specialist vision protocols', () => {
       coordinateFrame: { encoded: bounds, source: bounds },
       history: [
         {
-          response: uiMate(
-            'left_click',
-            '<parameter=coordinate>[500, 250]</parameter>'
-          ),
+          response: uiMate('left_click', '<parameter=coordinate>[500, 250]</parameter>'),
           actionText: 'Click the old control.',
           screenshotDataUrl: 'data:image/png;base64,stale'
         }

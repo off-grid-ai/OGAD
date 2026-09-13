@@ -14,11 +14,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import {
-  addEntityFact,
-  getDB,
-  upsertEntitySession
-} from '../database'
+import { addEntityFact, getDB, upsertEntitySession } from '../database'
 import {
   deleteEntityById,
   registerEntityDomain,

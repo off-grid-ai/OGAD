@@ -8,8 +8,12 @@ const src = readFileSync(join(__dirname, '..', 'tts.ts'), 'utf8')
 
 describe('tts.ts ExecuTorch runtime contract', () => {
   it('resolves the packaged native helper before the sibling development checkout', () => {
-    expect(src).toMatch(/resourceDirs\(\)\.map\(\(root\) => path\.join\(root, 'bin', 'executorch-speech'\)\)/)
-    expect(src).toContain("path.resolve(process.cwd(), '../executorch-speech/native/bin/executorch-speech')")
+    expect(src).toMatch(
+      /resourceDirs\(\)\.map\(\(root\) => path\.join\(root, 'bin', 'executorch-speech'\)\)/
+    )
+    expect(src).toContain(
+      "path.resolve(process.cwd(), '../executorch-speech/native/bin/executorch-speech')"
+    )
   })
 
   it('keeps voice downloads in the app model cache', () => {

@@ -222,7 +222,12 @@ describe('taking a backup out of the database, and putting one back', () => {
 
     it('parses a message context back into an object, and drops one that is not JSON', async () => {
       insertConversation('c1', null)
-      insertMessage('c1', 'assistant', 'with context', JSON.stringify({ unified: [], image: 'a.png' }))
+      insertMessage(
+        'c1',
+        'assistant',
+        'with context',
+        JSON.stringify({ unified: [], image: 'a.png' })
+      )
       insertMessage('c1', 'assistant', 'corrupt context', '{ truncated')
       insertMessage('c1', 'assistant', 'no context', null)
 
@@ -358,9 +363,7 @@ describe('taking a backup out of the database, and putting one back', () => {
         name: 'Restored Project'
       })
       expect(db.prepare('SELECT content FROM rag_chunks').all()).toEqual([{ content: 'the text' }])
-      expect(
-        db.prepare('SELECT role, content FROM rag_messages ORDER BY id').all()
-      ).toEqual([
+      expect(db.prepare('SELECT role, content FROM rag_messages ORDER BY id').all()).toEqual([
         { role: 'user', content: 'hello' },
         { role: 'assistant', content: 'hi' }
       ])
@@ -411,7 +414,11 @@ describe('taking a backup out of the database, and putting one back', () => {
               updatedAt: '2026-01-02T09:00:00.000Z',
               messages: [
                 { role: 'user', content: 'first question', createdAt: '2026-01-01T09:00:00.000Z' },
-                { role: 'assistant', content: 'the missing answer', createdAt: '2026-01-01T09:01:00.000Z' }
+                {
+                  role: 'assistant',
+                  content: 'the missing answer',
+                  createdAt: '2026-01-01T09:01:00.000Z'
+                }
               ]
             }
           ]
@@ -420,7 +427,9 @@ describe('taking a backup out of the database, and putting one back', () => {
 
       const contents = (
         db
-          .prepare('SELECT content FROM rag_messages WHERE conversation_id = ? ORDER BY created_at ASC')
+          .prepare(
+            'SELECT content FROM rag_messages WHERE conversation_id = ? ORDER BY created_at ASC'
+          )
           .all('c1') as Array<{ content: string }>
       ).map(({ content }) => content)
 
@@ -521,16 +530,20 @@ describe('taking a backup out of the database, and putting one back', () => {
       const summary = await port.apply(
         bundle({
           projects: [],
-          conversations: [{ ...bundle().conversations[0]!, projectId: 'a-project-not-in-this-backup' }]
+          conversations: [
+            { ...bundle().conversations[0]!, projectId: 'a-project-not-in-this-backup' }
+          ]
         })
       )
 
       // The messages are the irreplaceable part. Filing the chat under a project that is not there would
       // hide it; discarding it would lose it. It comes back unfiled.
       expect(summary.conversationsAdded).toBe(1)
-      expect(db.prepare('SELECT project_id FROM rag_conversations WHERE id = ?').get('c1')).toEqual({
-        project_id: null
-      })
+      expect(db.prepare('SELECT project_id FROM rag_conversations WHERE id = ?').get('c1')).toEqual(
+        {
+          project_id: null
+        }
+      )
     })
 
     it('stores a message context as JSON, and nothing when there is none', async () => {

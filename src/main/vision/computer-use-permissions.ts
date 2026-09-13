@@ -5,9 +5,7 @@ export interface ComputerUsePermissionState {
 }
 
 /** Pure permission decision used before Computer Use loads a model or captures a frame. */
-export function computerUsePermissionBlock(
-  state: ComputerUsePermissionState
-): string | null {
+export function computerUsePermissionBlock(state: ComputerUsePermissionState): string | null {
   if (state.platform !== 'darwin') return null
   const missing = [
     state.screenRecordingGranted ? null : 'Screen Recording',

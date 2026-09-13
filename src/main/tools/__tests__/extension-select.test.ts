@@ -17,7 +17,7 @@ const ext = (id: string, category?: 'tool' | 'connector'): ToolExtension => ({
 })
 
 describe('selectToolExtensions', () => {
-  it('the assistant\'s own tools ride every agentic turn', () => {
+  it("the assistant's own tools ride every agentic turn", () => {
     const picked = selectToolExtensions([ext('native', 'tool'), ext('mcp', 'connector')], {
       connectors: false
     })

@@ -68,7 +68,10 @@ const helperCalls = (): Array<{ command: string; args: Record<string, unknown> }
 }
 
 test.beforeEach(async () => {
-  test.skip(targetIsPackaged(), 'dev-target journey: the packaged app resolves its helper from Resources')
+  test.skip(
+    targetIsPackaged(),
+    'dev-target journey: the packaged app resolves its helper from Resources'
+  )
   profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-app250-'))
   helperLog = path.join(profileDir, 'helper-log.jsonl')
   stageWorld()

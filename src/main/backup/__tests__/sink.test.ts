@@ -201,7 +201,10 @@ describe('delivering and collecting a backup file', () => {
     })
 
     it('takes only the first file when a picker offers several', async () => {
-      electron.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/a.zip', '/b.zip'] })
+      electron.showOpenDialog.mockResolvedValue({
+        canceled: false,
+        filePaths: ['/a.zip', '/b.zip']
+      })
 
       // One backup is restored at a time; importing two at once has no defined meaning.
       await expect((await sink()).pickFile()).resolves.toBe('/a.zip')

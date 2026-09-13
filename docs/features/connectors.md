@@ -44,6 +44,7 @@ between this device and Google.
 
    This is the callback shown in the Off Grid AI setup panel. The release source is
    `src/shared/mcp-oauth-callback.ts`. Do not select another port or change the path.
+
 8. Create the client. Copy its Client ID and Client secret. The Project ID is optional.
 
 ### Save and connect

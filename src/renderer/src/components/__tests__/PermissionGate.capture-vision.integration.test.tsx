@@ -15,11 +15,13 @@ let visionStatus: Record<string, { supportsVision: boolean; projectorInstalled: 
 let downloadModel: ReturnType<typeof vi.fn>
 let captureStatus: { running: boolean; paused: boolean; visionReady: boolean }
 let proListeners: Map<string, () => void>
-let modelProgress: ((progress: {
-  modelId: string
-  percent?: number
-  status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
-}) => void) | null
+let modelProgress:
+  | ((progress: {
+      modelId: string
+      percent?: number
+      status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+    }) => void)
+  | null
 
 beforeEach(() => {
   visionStatus = {}
@@ -144,25 +146,31 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
 
     modelProgress?.({ modelId: MODEL_ID, percent: 42, status: 'downloading' })
     expect(
-      (await screen.findByRole('button', { name: 'Downloading 42%' }) as HTMLButtonElement).disabled
+      ((await screen.findByRole('button', { name: 'Downloading 42%' })) as HTMLButtonElement)
+        .disabled
     ).toBe(true)
 
     modelProgress?.({ modelId: MODEL_ID, status: 'failed' })
     expect(
-      (await screen.findByRole('button', {
-        name: 'Download vision support'
-      }) as HTMLButtonElement).disabled
+      (
+        (await screen.findByRole('button', {
+          name: 'Download vision support'
+        })) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
 
     modelProgress?.({ modelId: MODEL_ID, percent: 65, status: 'downloading' })
     expect(
-      (await screen.findByRole('button', { name: 'Downloading 65%' }) as HTMLButtonElement).disabled
+      ((await screen.findByRole('button', { name: 'Downloading 65%' })) as HTMLButtonElement)
+        .disabled
     ).toBe(true)
     modelProgress?.({ modelId: MODEL_ID, status: 'cancelled' })
     expect(
-      (await screen.findByRole('button', {
-        name: 'Download vision support'
-      }) as HTMLButtonElement).disabled
+      (
+        (await screen.findByRole('button', {
+          name: 'Download vision support'
+        })) as HTMLButtonElement
+      ).disabled
     ).toBe(false)
   })
 

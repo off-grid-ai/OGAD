@@ -85,7 +85,9 @@ test('opens filling the screen, not in a small window', async () => {
 
 test('shows onboarding on a fresh install', async () => {
   await expect(page.getByText(/Off Grid AI/i).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })
+  ).toBeVisible()
 })
 
 test('onboarding surfaces the Pro capability grid', async () => {

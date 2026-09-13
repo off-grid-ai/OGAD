@@ -28,9 +28,7 @@ describe('capturePathFromUrl', () => {
     expect(capturePathFromUrl('ogcapture:///Users/user/Off%20Grid%20AI/a%20b.png')).toBe(
       '/Users/user/Off Grid AI/a b.png'
     )
-    expect(capturePathFromUrl('ogcapture://C%3A/Users/oga/a%20b.png')).toBe(
-      'C:/Users/oga/a b.png'
-    )
+    expect(capturePathFromUrl('ogcapture://C%3A/Users/oga/a%20b.png')).toBe('C:/Users/oga/a b.png')
   })
 
   it('treats a longer authority as path, since this scheme has no host', () => {

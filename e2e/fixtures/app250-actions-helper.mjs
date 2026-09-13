@@ -28,7 +28,10 @@ if (cmd.command === 'reminders.create') {
   reply({ ok: true, result: { id: `e2e-${Date.now()}` } })
 }
 if (cmd.command === 'reminders.list') {
-  const lines = logFile && fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean) : []
+  const lines =
+    logFile && fs.existsSync(logFile)
+      ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean)
+      : []
   const reminders = lines
     .map((line) => JSON.parse(line))
     .filter((entry) => entry.command === 'reminders.create')

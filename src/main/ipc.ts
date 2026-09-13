@@ -142,7 +142,10 @@ async function runChatWithFallback<T>(
     ...(selectedRemote
       ? remote.servers
           .filter((server) => server.id !== selectedRemote.id)
-          .map((server) => ({ id: remoteVisionModelId(server.id, server.model), name: server.model }))
+          .map((server) => ({
+            id: remoteVisionModelId(server.id, server.model),
+            name: server.model
+          }))
       : []),
     ...installed
       .filter((id) => !parseRemoteVisionModelId(id) && (selectedRemote || id !== selectedLocal))
@@ -210,25 +213,30 @@ async function streamAnswer(
     // cancel path aborts via the controller registered above.
     return await modalityQueue.run(CHAT_JOB, async () => {
       const { result, modelName } = await runChatWithFallback(
-        () => llm.chatStream(
-          prompt,
-          images,
-          (text, kind) => {
-            noteChatStreamDelta(streamId, text, kind)
-            try {
-              sender.send('rag:stream', { streamId, type: kind, text })
-            } catch {
-              /* window gone */
-            }
-          },
-          { thinking, signal: controller.signal }
-        ),
+        () =>
+          llm.chatStream(
+            prompt,
+            images,
+            (text, kind) => {
+              noteChatStreamDelta(streamId, text, kind)
+              try {
+                sender.send('rag:stream', { streamId, type: kind, text })
+              } catch {
+                /* window gone */
+              }
+            },
+            { thinking, signal: controller.signal }
+          ),
         {
           signal: controller.signal,
           onModelChanged: (failed, next) => {
             resetChatStreamPartial(streamId)
             try {
-              sender.send('rag:stream', { streamId, type: 'step', step: { kind: 'model_changed', failed, next } })
+              sender.send('rag:stream', {
+                streamId,
+                type: 'step',
+                step: { kind: 'model_changed', failed, next }
+              })
             } catch {
               /* window gone */
             }
@@ -1984,59 +1992,67 @@ export function setupIPC() {
       let toolStarted = false
       try {
         const { result, modelName } = await modalityQueue.run(CHAT_JOB, () =>
-          runChatWithFallback(() => toolChat(query, history || [], {
-            ...opts,
-            thinking: opts.thinking,
-            signal: controller.signal,
-            onDelta: (text, kind) => {
-              noteChatStreamDelta(streamId, text, kind)
-              try {
-                sender.send('rag:stream', { streamId, type: kind, text })
-              } catch {
-                /* window gone */
-              }
-            },
-            onStep: (call) => {
-              toolStarted = true
-              noteChatStreamToolStarted(streamId, call.name)
-              try {
-                sender.send('rag:stream', {
-                  streamId,
-                  type: 'step',
-                  step: { kind: 'running_tool', name: call.name }
-                })
-              } catch {
-                /* window gone */
-              }
-            },
-            onActivity: (activity) => {
-              try {
-                sender.send('rag:stream', { streamId, type: 'step', step: activity })
-              } catch {
-                /* window gone */
-              }
-            },
-            onToolResult: (call) => {
-              toolStarted = true
-              noteChatStreamToolCompleted(streamId, call.name, call.result, call.status)
-              try {
-                sender.send('rag:stream', { streamId, type: 'tool_result', call })
-              } catch {
-                /* window gone */
+          runChatWithFallback(
+            () =>
+              toolChat(query, history || [], {
+                ...opts,
+                thinking: opts.thinking,
+                signal: controller.signal,
+                onDelta: (text, kind) => {
+                  noteChatStreamDelta(streamId, text, kind)
+                  try {
+                    sender.send('rag:stream', { streamId, type: kind, text })
+                  } catch {
+                    /* window gone */
+                  }
+                },
+                onStep: (call) => {
+                  toolStarted = true
+                  noteChatStreamToolStarted(streamId, call.name)
+                  try {
+                    sender.send('rag:stream', {
+                      streamId,
+                      type: 'step',
+                      step: { kind: 'running_tool', name: call.name }
+                    })
+                  } catch {
+                    /* window gone */
+                  }
+                },
+                onActivity: (activity) => {
+                  try {
+                    sender.send('rag:stream', { streamId, type: 'step', step: activity })
+                  } catch {
+                    /* window gone */
+                  }
+                },
+                onToolResult: (call) => {
+                  toolStarted = true
+                  noteChatStreamToolCompleted(streamId, call.name, call.result, call.status)
+                  try {
+                    sender.send('rag:stream', { streamId, type: 'tool_result', call })
+                  } catch {
+                    /* window gone */
+                  }
+                }
+              }),
+            {
+              signal: controller.signal,
+              canRetry: () => !toolStarted,
+              onModelChanged: (failed, next) => {
+                resetChatStreamPartial(streamId)
+                try {
+                  sender.send('rag:stream', {
+                    streamId,
+                    type: 'step',
+                    step: { kind: 'model_changed', failed, next }
+                  })
+                } catch {
+                  /* window gone */
+                }
               }
             }
-          }), {
-            signal: controller.signal,
-            canRetry: () => !toolStarted,
-            onModelChanged: (failed, next) => {
-              resetChatStreamPartial(streamId)
-              try {
-                sender.send('rag:stream', { streamId, type: 'step', step: { kind: 'model_changed', failed, next } })
-              } catch {
-                /* window gone */
-              }
-            }
-          })
+          )
         )
         if (result.imageRequests.length > 0) {
           continuesAsImage = continueChatStreamWithImage(streamId)

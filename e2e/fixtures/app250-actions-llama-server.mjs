@@ -46,7 +46,8 @@ const server = http.createServer((request, response) => {
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive'
     })
-    const isAgenticFirstTurn = body.includes('reminders_create') && !body.includes('Created the reminder.')
+    const isAgenticFirstTurn =
+      body.includes('reminders_create') && !body.includes('Created the reminder.')
     const text = isAgenticFirstTurn ? TOOL_CALL : CONFIRMATION
     for (const piece of text.match(/.{1,24}/gs) ?? []) {
       response.write(delta(piece))

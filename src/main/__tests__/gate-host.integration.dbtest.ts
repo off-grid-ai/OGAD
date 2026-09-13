@@ -56,9 +56,7 @@ function makeWorld() {
   const device = {
     async execute(action: ActionRecord) {
       executed.push({ ...action.args })
-      db.prepare(`INSERT INTO test_computer_uses (title) VALUES (?)`).run(
-        String(action.args.title)
-      )
+      db.prepare(`INSERT INTO test_computer_uses (title) VALUES (?)`).run(String(action.args.title))
       return { ok: true }
     }
   }

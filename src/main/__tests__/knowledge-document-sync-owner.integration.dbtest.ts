@@ -115,9 +115,7 @@ describe('desktop knowledge-document sync owner', () => {
     })
     expect(short.chunkCount).toBe(1)
     expect(
-      db
-        .prepare('SELECT content, position FROM rag_chunks WHERE doc_id = ?')
-        .all(short.docId)
+      db.prepare('SELECT content, position FROM rag_chunks WHERE doc_id = ?').all(short.docId)
     ).toEqual([{ content: 'op', position: 0 }])
     expect(await service.searchProject(PROJECT_ID, 'op')).toEqual(
       expect.objectContaining({

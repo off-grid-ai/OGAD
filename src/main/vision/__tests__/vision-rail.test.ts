@@ -50,11 +50,7 @@ describe('makeVisionRailExecutor', () => {
   it('falls back to the action intent when no explicit goal is given', async () => {
     const host: VisionRailHost = { runTask: vi.fn(async () => run()) }
     await makeVisionRailExecutor(host)(action({}))
-    expect(host.runTask).toHaveBeenCalledWith(
-      'share the deck over WhatsApp',
-      'act_vis',
-      'act_vis'
-    )
+    expect(host.runTask).toHaveBeenCalledWith('share the deck over WhatsApp', 'act_vis', 'act_vis')
   })
 
   it('keeps the originating Chat as the task journey', async () => {

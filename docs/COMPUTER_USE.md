@@ -64,16 +64,16 @@ panel layout remain device-local where hardware or screen geometry makes a share
 
 ### Vision-first pipeline status - August 26, 2026
 
-| Requirement | Code and wiring | Verification state |
-| --- | --- | --- |
-| Fixed Web Use evidence | Web Use captures only the page viewport from its main-owned `WebContentsView`. App chrome, Chat, and task controls are not in the model image. | Focused capture tests pass. Current real Electron proof is open in CU-004. |
-| One model decision | UI-Mate, UI-TARS, and general vision models use one strict direction, milestone, and zero-or-one-action response for each screenshot. The request includes the current Task brief, accepted guidance, milestone, verified actions, recent events, older facts, coordinate bounds, and the screenshot. | Adapter and graph tests pass. Remote paths still have a thinking and privacy gap in CU-015. |
-| Response validation | The model boundary rejects missing or extra fields, invalid enum values, malformed JSON, a mismatched verdict, and more than one action. The request has one attempt. | Focused adapter tests pass. |
-| Model authority | After a valid model decision approves an action, Web Use does not use DOM text, element counts, labels, or UI phrases to reject it. The browser boundary checks only document freshness, screenshot pixels, coordinate structure, safety policy, and execution results. | A canvas-only page regression proves the approved visual click executes without DOM target resolution. |
-| Coordinates and action | Web Use maps inference pixels to the current page viewport by proportion, executes the one approved action through CDP, then returns to a fresh capture. | Mapping, resize, browser-driver, and graph tests pass. |
-| Milestones | The Web Use graph advances only on the model's validated `milestone_complete` signal and advances one milestone once. | Focused graph tests pass. Desktop Computer Use still has a separate loop owner; see CU-013. |
-| Evidence and model identity | Live details show the run-bound model name, current phase, milestone, operation, final decision, visible evidence, updates, screenshots, mapped actions, and errors. The model identity is stored with the task, so a later global model change cannot relabel it. | Focused main and renderer tests pass. Live visual proof is open in CU-004. |
-| Stop and immersive start | Stop in Chat reaches the task owner before Chat cancellation. The first running local Web Use attempt opens its details and closes the left navigation and Chat workspace once. | Focused lifecycle and App navigation tests pass. Live visual proof is open in CU-004. |
+| Requirement                 | Code and wiring                                                                                                                                                                                                                                                                                       | Verification state                                                                                     |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Fixed Web Use evidence      | Web Use captures only the page viewport from its main-owned `WebContentsView`. App chrome, Chat, and task controls are not in the model image.                                                                                                                                                        | Focused capture tests pass. Current real Electron proof is open in CU-004.                             |
+| One model decision          | UI-Mate, UI-TARS, and general vision models use one strict direction, milestone, and zero-or-one-action response for each screenshot. The request includes the current Task brief, accepted guidance, milestone, verified actions, recent events, older facts, coordinate bounds, and the screenshot. | Adapter and graph tests pass. Remote paths still have a thinking and privacy gap in CU-015.            |
+| Response validation         | The model boundary rejects missing or extra fields, invalid enum values, malformed JSON, a mismatched verdict, and more than one action. The request has one attempt.                                                                                                                                 | Focused adapter tests pass.                                                                            |
+| Model authority             | After a valid model decision approves an action, Web Use does not use DOM text, element counts, labels, or UI phrases to reject it. The browser boundary checks only document freshness, screenshot pixels, coordinate structure, safety policy, and execution results.                               | A canvas-only page regression proves the approved visual click executes without DOM target resolution. |
+| Coordinates and action      | Web Use maps inference pixels to the current page viewport by proportion, executes the one approved action through CDP, then returns to a fresh capture.                                                                                                                                              | Mapping, resize, browser-driver, and graph tests pass.                                                 |
+| Milestones                  | The Web Use graph advances only on the model's validated `milestone_complete` signal and advances one milestone once.                                                                                                                                                                                 | Focused graph tests pass. Desktop Computer Use still has a separate loop owner; see CU-013.            |
+| Evidence and model identity | Live details show the run-bound model name, current phase, milestone, operation, final decision, visible evidence, updates, screenshots, mapped actions, and errors. The model identity is stored with the task, so a later global model change cannot relabel it.                                    | Focused main and renderer tests pass. Live visual proof is open in CU-004.                             |
+| Stop and immersive start    | Stop in Chat reaches the task owner before Chat cancellation. The first running local Web Use attempt opens its details and closes the left navigation and Chat workspace once.                                                                                                                       | Focused lifecycle and App navigation tests pass. Live visual proof is open in CU-004.                  |
 
 The August 26 pipeline sweep passed 15 files and 200 tests, and its node typecheck passed. The later
 CU-014 gate passes four files and 58 tests. Its changed browser files have zero scoped lint errors.
@@ -111,14 +111,14 @@ Every task the assistant acts on comes from one of two generators. Both emit the
 
 The same flow, done again. Two authoring paths, one artifact (a routine = a trigger + an ordered, AX-anchored action trace):
 
-- **Auto-detected** - mined from the Replay observation log: "every weekday ~9am you open Mail then Slack and scan unread." Low fidelity (we know the sequence, not every exact target), so it is used to *propose*, then confirmed by a recording.
+- **Auto-detected** - mined from the Replay observation log: "every weekday ~9am you open Mail then Slack and scan unread." Low fidelity (we know the sequence, not every exact target), so it is used to _propose_, then confirmed by a recording.
 - **Demonstrated** - you hit record and do it once. High fidelity: the exact trace, directly replayable. See 5.
 
-Detection *proposes*; demonstration *records the reliable version*. "I noticed you do this every morning - show me once so I can do it exactly." They are one loop, not two features.
+Detection _proposes_; demonstration _records the reliable version_. "I noticed you do this every morning - show me once so I can do it exactly." They are one loop, not two features.
 
 ### 2.2 Reasoned proactivity - situation
 
-No repetition at all. Given your situation, something *should* have happened and has not. The flight case:
+No repetition at all. Given your situation, something _should_ have happened and has not. The flight case:
 
 1. **Detect the commitment/event** - "flight tonight" from a conversation Replay captured, or a confirmation email.
 2. **Know what it implies** - world knowledge the LLM already has: a flight means check-in, a boarding pass, a gate. Nobody programs "a flight entails check-in."
@@ -126,9 +126,9 @@ No repetition at all. Given your situation, something *should* have happened and
 4. **Surface the gap** - "You fly tonight and haven't checked in. Want me to?"
 5. **Act, then gate** - check in or open the check-in page; anything with identity or payment confirms first.
 
-Steps 1-4 - the *smart* part - are pure memory + LLM + read-only connectors. No vision, no risky automation. That is the most magical and the most reliable part; it lands early - R2 in the build plan, right after the chat action tool is released (R1). See `COMPUTER_USE_PLAN.md` for the order.
+Steps 1-4 - the _smart_ part - are pure memory + LLM + read-only connectors. No vision, no risky automation. That is the most magical and the most reliable part; it lands early - R2 in the build plan, right after the chat action tool is released (R1). See `COMPUTER_USE_PLAN.md` for the order.
 
-**The routine engine gives reliable *doing*; the reasoning engine gives an assistant that *notices*.** Same spine underneath.
+**The routine engine gives reliable _doing_; the reasoning engine gives an assistant that _notices_.** Same spine underneath.
 
 ## 3. One gated spine
 
@@ -148,20 +148,20 @@ flowchart TD
 ```
 
 - **Resolve** - the slots ("the presentation", "the person I promised") are filled from memory at run time, each with a confidence. This is the "which presentation" intelligence (see 6).
-- **Gate** - the approval card shows the *resolved* values: "Send `Q3-strategy.pptx` to Ali Chherawalla." One glance confirms the AI inferred correctly *and* that the action is safe. The gate is where inference and safety are confirmed together - it is the guard against a confident-but-wrong resolution, and the same mechanism handles "is it right" and "is it allowed."
+- **Gate** - the approval card shows the _resolved_ values: "Send `Q3-strategy.pptx` to Ali Chherawalla." One glance confirms the AI inferred correctly _and_ that the action is safe. The gate is where inference and safety are confirmed together - it is the guard against a confident-but-wrong resolution, and the same mechanism handles "is it right" and "is it allowed."
 - **Trust graduation** - suggest -> approve-each-run -> auto-run trusted routines. Irreversible steps (send, pay, delete, account-create) gate by default even inside a trusted routine.
 
 ## 4. The rail hierarchy - cheapest reliable first
 
 The router picks the cheapest rail that will reliably do the step. Vision is the last resort, not the engine.
 
-| Rail | What it is | Reliability | Status |
-| --- | --- | --- | --- |
-| 0. Perception | Replay OCR + the accessibility tree - structured "sight", no ML grounding model | n/a | capture ships; AX reader exists |
-| 1. Semantic | deep links / URL schemes, AppleScript / Apple Events, EventKit, Shortcuts, MCP connectors | ~100%, deterministic | **built** (calendar, reminders, contacts, messages, mail, open_url) |
-| 2. Agent browser | embedded browser pane driven in-process, for novel web tasks (check-in, ordering) | good; no OS permissions | built; live device proof remains open |
-| 3. AX-tree GUI | structured native control (AXPress / set-value) + replay of a demonstrated trace | good on well-behaved apps | supervised task rail built; recorder remains open |
-| 4. Vision grounding | a downloadable model mapping pixels -> coordinates | the frontier ceiling (~35-45% novel, local) | UI-TARS and UI-Mate adapters built; live device proof remains open |
+| Rail                | What it is                                                                                | Reliability                                 | Status                                                              |
+| ------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------- |
+| 0. Perception       | Replay OCR + the accessibility tree - structured "sight", no ML grounding model           | n/a                                         | capture ships; AX reader exists                                     |
+| 1. Semantic         | deep links / URL schemes, AppleScript / Apple Events, EventKit, Shortcuts, MCP connectors | ~100%, deterministic                        | **built** (calendar, reminders, contacts, messages, mail, open_url) |
+| 2. Agent browser    | embedded browser pane driven in-process, for novel web tasks (check-in, ordering)         | good; no OS permissions                     | built; live device proof remains open                               |
+| 3. AX-tree GUI      | structured native control (AXPress / set-value) + replay of a demonstrated trace          | good on well-behaved apps                   | supervised task rail built; recorder remains open                   |
+| 4. Vision grounding | a downloadable model mapping pixels -> coordinates                                        | the frontier ceiling (~35-45% novel, local) | UI-TARS and UI-Mate adapters built; live device proof remains open  |
 
 **Three different things get called "seeing", and only rail 4 is the heavy one:** Replay OCR (rail 0, ships) powers detection and context; the AX tree (rail 0/3, exists) powers precise recording and reliable replay with no ML model; the grounding vision model (rail 4) only earns its place when the AX tree is dead (WhatsApp-class apps) or a recorded step drifted. So the assistant can do a great deal - and ship real value - before rail 4 exists.
 
@@ -176,23 +176,23 @@ The rule is always: does the service expose a clean surface (deep link / API / c
 
 ## 5. The demonstration recorder
 
-Record-by-showing turns "novel GUI automation is ~40% reliable" into "replay a known trace", because replaying a *known* path is a far easier task than figuring out a UI from scratch.
+Record-by-showing turns "novel GUI automation is ~40% reliable" into "replay a known trace", because replaying a _known_ path is a far easier task than figuring out a UI from scratch.
 
 - **Capture the action trace, not raw input** - for each meaningful step: the app, the AX element (fallback coordinate), the action (click/type/scroll/navigate), any typed text. The AX context is what turns a raw click into "clicked Send in Slack" and what makes replay survive window moves and resizes.
-- **Primitives we already have** - the CGEvent tap (we ship the *listening* half in dictation-hotkey), the AX reader, and Replay frames for context and step verification. The recorder is Replay-with-intent plus AX-tagging, a new mode, not a new system.
+- **Primitives we already have** - the CGEvent tap (we ship the _listening_ half in dictation-hotkey), the AX reader, and Replay frames for context and step verification. The recorder is Replay-with-intent plus AX-tagging, a new mode, not a new system.
 - **Review + edit** - after recording we show the steps in plain language ("Open Slack", "Click Send", "Type: ..."); you delete, reorder, or **mark a step as a variable slot** (see 6).
 - **Store** - as a skill with a trigger (manual / schedule / event), reusing the existing skills format.
 - **Never record secrets** - secure-input detection (`IsSecureEventInputEnabled()`) hard-skips keystrokes into password fields. Recording credentials would be a serious mistake.
 
 On replay, deterministic trace execution runs through the rails; the LLM/vision comes in only as **recovery** when a step's AX target is gone or a verification fails. Deterministic automation with model fallback is strictly more reliable than model-drives-everything.
 
-## 6. Memory-grounded resolution (the recording gives the *how*, memory gives the *what*)
+## 6. Memory-grounded resolution (the recording gives the _how_, memory gives the _what_)
 
 A demonstrated trace stores the reliable UI path but leaves the content open. The slots - "the presentation I mentioned", "the person I promised" - resolve at run time by RAG over the memory spine: Replay observations + recent conversation + entity graph + files you touched, scoped by temporal and entity proximity, returning a value **plus a confidence**.
 
 - A generic assistant cannot do "send the deck I promised" - it has no record of your day. OGAD can, because it has both halves (the memory and the action).
 - **Confidence drives the gate**: high + non-sensitive -> preview-and-go; sensitive -> gate with the resolved preview; ambiguous ("which of three decks?") -> disambiguate or show the top candidate for one-tap confirm.
-- **Honest edges**: recency window needs temporal decay (grab *this* deck, not last month's); resolution quality rises and falls with what Replay captured (a healthy incentive to invest in memory); the dangerous case is confident-and-wrong, which the preview-at-gate catches for sensitive actions and a higher confidence bar catches for auto-run.
+- **Honest edges**: recency window needs temporal decay (grab _this_ deck, not last month's); resolution quality rises and falls with what Replay captured (a healthy incentive to invest in memory); the dangerous case is confident-and-wrong, which the preview-at-gate catches for sensitive actions and a higher confidence bar catches for auto-run.
 
 **Slot resolution (data, from memory) is a different intelligence from UI-drift recovery (elements, from AX + vision).** Keep them separate: one finds content, one finds buttons.
 
@@ -220,18 +220,18 @@ On top of the existing foundation. **The build order and schedule live in `COMPU
 
 This is the curated shortlist. The deep, component-by-component port map for the whole system (durable queue, brain, memory, routines, rails, models) with a port-vs-bespoke verdict per component lives in `PORTING_MAP.md`.
 
-| Source | License | What we take |
-| --- | --- | --- |
-| `@ui-tars/sdk` + the UI-TARS desktop app | Apache-2.0 | Operator seam + action parser; the ScreenMarker overlay trio (animated border, content-protected control widget, pre-action markers); desktopCapturer scaling; the macOS permission gate |
-| nanobrowser | Apache-2.0 | TypeScript DOM-to-indexed-elements serialization for the agent browser |
-| `@computer-use/nut-js` (or the community fork) | Apache-2.0 | input synthesis on the native rail |
-| macos-automator-mcp | MIT | wrapped AppleScript/JXA intents plus its recipe knowledge base |
-| bytebot (archived) | Apache-2.0 | takeover-as-recorded-actions (the human demonstration lands in the same action log) and the needs_help state - directly relevant to the recorder |
-| Peekaboo (OpenClaw org) | MIT | reference for the AX-tree + vision hybrid on the native rail |
-| OpenAdapt (MLDSAI) | MIT | the recorder / routines rail (R3): record once -> deterministic, self-healing local replay; each step carries a template crop, an OCR label, geometry, a structural locator, and postconditions (our per-step verify), and the model touches the script only to repair on drift. Port the trace format + self-heal rather than build one. |
-| FlaUI / pywinauto | MIT / BSD-3 | the Windows UI Automation act-primitives reference for the accessibility rail (R3 Windows fast-follow) - UIA2/UIA3 element find + invoke / set-value, the analogue of the macOS AX act-primitives |
-| Agent-S2 (Simular) | Apache-2.0 | open computer-use agent loop + router structure as a reference for the brain |
-| OpenClaw | AGPL (patterns only) | the proactive cron/skills pattern and the killer briefing workflow; equally its incident record as the avoid-list (exposed gateways, sandbox-off, weak auth, unvetted skills) - we ship none of those surfaces |
+| Source                                         | License              | What we take                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@ui-tars/sdk` + the UI-TARS desktop app       | Apache-2.0           | Operator seam + action parser; the ScreenMarker overlay trio (animated border, content-protected control widget, pre-action markers); desktopCapturer scaling; the macOS permission gate                                                                                                                                                  |
+| nanobrowser                                    | Apache-2.0           | TypeScript DOM-to-indexed-elements serialization for the agent browser                                                                                                                                                                                                                                                                    |
+| `@computer-use/nut-js` (or the community fork) | Apache-2.0           | input synthesis on the native rail                                                                                                                                                                                                                                                                                                        |
+| macos-automator-mcp                            | MIT                  | wrapped AppleScript/JXA intents plus its recipe knowledge base                                                                                                                                                                                                                                                                            |
+| bytebot (archived)                             | Apache-2.0           | takeover-as-recorded-actions (the human demonstration lands in the same action log) and the needs_help state - directly relevant to the recorder                                                                                                                                                                                          |
+| Peekaboo (OpenClaw org)                        | MIT                  | reference for the AX-tree + vision hybrid on the native rail                                                                                                                                                                                                                                                                              |
+| OpenAdapt (MLDSAI)                             | MIT                  | the recorder / routines rail (R3): record once -> deterministic, self-healing local replay; each step carries a template crop, an OCR label, geometry, a structural locator, and postconditions (our per-step verify), and the model touches the script only to repair on drift. Port the trace format + self-heal rather than build one. |
+| FlaUI / pywinauto                              | MIT / BSD-3          | the Windows UI Automation act-primitives reference for the accessibility rail (R3 Windows fast-follow) - UIA2/UIA3 element find + invoke / set-value, the analogue of the macOS AX act-primitives                                                                                                                                         |
+| Agent-S2 (Simular)                             | Apache-2.0           | open computer-use agent loop + router structure as a reference for the brain                                                                                                                                                                                                                                                              |
+| OpenClaw                                       | AGPL (patterns only) | the proactive cron/skills pattern and the killer briefing workflow; equally its incident record as the avoid-list (exposed gateways, sandbox-off, weak auth, unvetted skills) - we ship none of those surfaces                                                                                                                            |
 
 Everything adopted as code is Apache-2.0, MIT, or BSD - clean for the AGPL core + proprietary pro split (verify each license at the point of adoption; minitap/mobile-use asks for attribution).
 
@@ -239,14 +239,14 @@ Everything adopted as code is Apache-2.0, MIT, or BSD - clean for the AGPL core 
 
 Mobile is a `DeviceController` adapter on the same engine (Section 6 and `ASSISTANT_ARCHITECTURE.md`), not a rewrite - and the actuation layer already exists to port rather than build:
 
-| Source | License | What we take |
-| --- | --- | --- |
-| Mobilerun (droidrun) | MIT | the mobile actuation rail for Android + iOS: inspect UI state, screenshot, tap / swipe / type, model-agnostic and local-model-capable (Ollama / OpenAI-compatible). The mobile `DeviceController` wraps this instead of writing driver glue. |
-| minitap/mobile-use | Apache-2.0 (credit Minitap) | the mobile agent loop reference (first to 100% on AndroidWorld), a LangGraph multi-agent over low-level control |
-| AppAgent / AppAgent-v2 (Tencent) | MIT | learn-by-demonstration + tagged-element perception (numeric tags over the Android view hierarchy) - mobile routines by showing |
-| Mobile-Agent-v3 / GUI-Owl (X-PLUG) | MIT | full mobile agent reference + GUI-Owl as the shared grounding model (desktop + mobile trained) |
-| Appium + appium-webdriveragent (iOS) + UiAutomator2 (Android) | Apache-2.0 | the low-level device drivers under the mobile rail (iOS via WebDriverAgent / XCTest, Android via UiAutomator2) |
-| Maestro (mobile.dev) | Apache-2.0 | the YAML flow format as inspiration for the mobile routine trace |
+| Source                                                        | License                     | What we take                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mobilerun (droidrun)                                          | MIT                         | the mobile actuation rail for Android + iOS: inspect UI state, screenshot, tap / swipe / type, model-agnostic and local-model-capable (Ollama / OpenAI-compatible). The mobile `DeviceController` wraps this instead of writing driver glue. |
+| minitap/mobile-use                                            | Apache-2.0 (credit Minitap) | the mobile agent loop reference (first to 100% on AndroidWorld), a LangGraph multi-agent over low-level control                                                                                                                              |
+| AppAgent / AppAgent-v2 (Tencent)                              | MIT                         | learn-by-demonstration + tagged-element perception (numeric tags over the Android view hierarchy) - mobile routines by showing                                                                                                               |
+| Mobile-Agent-v3 / GUI-Owl (X-PLUG)                            | MIT                         | full mobile agent reference + GUI-Owl as the shared grounding model (desktop + mobile trained)                                                                                                                                               |
+| Appium + appium-webdriveragent (iOS) + UiAutomator2 (Android) | Apache-2.0                  | the low-level device drivers under the mobile rail (iOS via WebDriverAgent / XCTest, Android via UiAutomator2)                                                                                                                               |
+| Maestro (mobile.dev)                                          | Apache-2.0                  | the YAML flow format as inspiration for the mobile routine trace                                                                                                                                                                             |
 
 iOS stays intents-only for driving other apps (App Intents / Shortcuts) - Apple forbids reading or driving other apps, so the mobile GUI / vision rails are Android-first, exactly as the plan states.
 

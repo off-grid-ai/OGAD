@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  psQuote,
-  UIA_APPS_SCRIPT,
-  uiaActivateScript,
-  uiaElementsScript
-} from '../ax-uia-script'
+import { psQuote, UIA_APPS_SCRIPT, uiaActivateScript, uiaElementsScript } from '../ax-uia-script'
 
 describe('psQuote', () => {
   it('wraps in single quotes and doubles embedded quotes (PowerShell injection boundary)', () => {

@@ -5,11 +5,7 @@ import path from 'path'
 import * as fs from 'fs'
 import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
-import {
-  loadAttempts,
-  type KvCacheType,
-  type PerformanceMode
-} from './model-sizing'
+import { loadAttempts, type KvCacheType, type PerformanceMode } from './model-sizing'
 import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from './llm/gen-params'
 import { classifyLlamaError, modelPortConflictReason } from './llama-error'
 import type { ManagedRuntime } from './runtime-manager'
@@ -1272,7 +1268,9 @@ export class LLMService {
         timeoutMs
       })
       return {
-        ...withContextMetrics(result, messages, { contextWindowTokens: this.effectiveContextSize() }),
+        ...withContextMetrics(result, messages, {
+          contextWindowTokens: this.effectiveContextSize()
+        }),
         maxTokens: resolvedMaxTokens
       }
     } finally {

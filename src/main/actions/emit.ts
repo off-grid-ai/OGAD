@@ -19,7 +19,12 @@
  *
  * Pure module: no Electron, the asker is injected.
  */
-import { parseActionProposal, RISK_CLASSES, type ActionProposal, type ActionType } from '@offgrid/use'
+import {
+  parseActionProposal,
+  RISK_CLASSES,
+  type ActionProposal,
+  type ActionType
+} from '@offgrid/use'
 
 /**
  * The wire schema for llama-server's response_format. `type` is constrained
@@ -102,9 +107,7 @@ export function extractCandidates(raw: string): string[] {
   return [...new Set(candidates)].filter((c) => c.length > 0)
 }
 
-export type EmissionResult =
-  | { ok: true; proposal: ActionProposal }
-  | { ok: false; error: string }
+export type EmissionResult = { ok: true; proposal: ActionProposal } | { ok: false; error: string }
 
 /** Parse one raw emission through the repair ladder. Fail closed. */
 export function parseEmission(raw: string): EmissionResult {

@@ -397,9 +397,7 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
   // Terminal artifact: a newly created renderer, backed by the re-opened SQLite
   // database in a new Electron main process, paints the exact completed text turn.
   // The transcript copy again (see above): the rail's preview is the earlier match.
-  await expect(
-    page.getByText('Here is your weekly summary.', { exact: true }).last()
-  ).toBeVisible()
+  await expect(page.getByText('Here is your weekly summary.', { exact: true }).last()).toBeVisible()
   await expect(
     page
       .locator('p')

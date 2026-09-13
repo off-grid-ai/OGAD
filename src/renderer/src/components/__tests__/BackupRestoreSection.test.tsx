@@ -59,7 +59,10 @@ describe('the backup section in Settings', () => {
 
   it('says where the backup was saved, so the user can go and find it', async () => {
     const user = userEvent.setup()
-    api.exportBackup.mockResolvedValue({ canceled: false, path: '/Users/someone/Desktop/backup.zip' })
+    api.exportBackup.mockResolvedValue({
+      canceled: false,
+      path: '/Users/someone/Desktop/backup.zip'
+    })
     render(<BackupRestoreSection />)
 
     await user.click(screen.getByRole('button', { name: /Create backup/ }))
@@ -117,7 +120,10 @@ describe('the backup section in Settings', () => {
 
     pending.resolve({ canceled: true })
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Create backup/ })).toHaveProperty('disabled', false)
+      expect(screen.getByRole('button', { name: /Create backup/ })).toHaveProperty(
+        'disabled',
+        false
+      )
     )
   })
 
@@ -215,7 +221,10 @@ describe('the backup section in Settings', () => {
     // The finally clause earns its keep here: a failed export that left the buttons disabled would need an
     // app restart to retry.
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Create backup/ })).toHaveProperty('disabled', false)
+      expect(screen.getByRole('button', { name: /Create backup/ })).toHaveProperty(
+        'disabled',
+        false
+      )
     )
   })
 

@@ -699,7 +699,6 @@ export function upsertEntitySession(entityId: number, sessionId: string): void {
   stmt.run(entityId, sessionId)
 }
 
-
 export interface EntityRecord {
   id: number
   name: string
@@ -728,7 +727,6 @@ export interface EntityDetailsRecord {
   entity: (EntityRecord & Record<string, unknown>) | undefined
   facts: EntityFactRecord[]
 }
-
 
 export function getEntities(appName?: string): EntityListRecord[] {
   const db = getDB()
@@ -795,7 +793,6 @@ export function getEntitiesForSession(sessionId: string): SessionEntityRecord[] 
     `)
   return stmt.all(sessionId) as SessionEntityRecord[]
 }
-
 
 // === DELETE FUNCTIONS ===
 

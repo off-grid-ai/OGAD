@@ -15,7 +15,13 @@ const HEALTH: SystemHealthContract = {
   ramGb: 16,
   activeModel: 'gemma-4-E2B',
   components: [
-    { id: 'chat', label: 'Chat model (llama-server)', status: 'ready', port: 8439, canRestart: true }
+    {
+      id: 'chat',
+      label: 'Chat model (llama-server)',
+      status: 'ready',
+      port: 8439,
+      canRestart: true
+    }
   ]
 }
 

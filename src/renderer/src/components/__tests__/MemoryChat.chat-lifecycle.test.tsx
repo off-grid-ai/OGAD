@@ -298,7 +298,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
         id: 21,
         role: 'assistant',
         content: '',
-        context: { reasoning: 'Searching first.', toolCalls: [{ name: 'web_search', result: 'Found it.', status: 'completed' }] }
+        context: {
+          reasoning: 'Searching first.',
+          toolCalls: [{ name: 'web_search', result: 'Found it.', status: 'completed' }]
+        }
       },
       { id: 22, role: 'assistant', content: 'Here is the source.' }
     ]
@@ -309,7 +312,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const thought = screen.getByTestId('chat-message-21')
     expect(within(thought).queryByRole('button', { name: 'Message actions' })).toBeNull()
     expect(thought.textContent).not.toMatch(/\d{1,2}:\d{2}\s*[AP]M/)
-    expect(within(screen.getByTestId('chat-message-22')).getByRole('button', { name: 'Message actions' })).toBeTruthy()
+    expect(
+      within(screen.getByTestId('chat-message-22')).getByRole('button', { name: 'Message actions' })
+    ).toBeTruthy()
   })
 
   it('strips inline think markers from a plain reply through the real stream parser (#37)', async () => {

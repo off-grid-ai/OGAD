@@ -224,7 +224,10 @@ export function makeWindowsSemanticRailExecutor(deps: WindowsRailDeps) {
         }
       }
       if (action.type !== 'calendar' && action.type !== 'reminder' && action.type !== 'email') {
-        return { ok: false, detail: `the Windows semantic rail has no mapping for '${action.type}'` }
+        return {
+          ok: false,
+          detail: `the Windows semantic rail has no mapping for '${action.type}'`
+        }
       }
 
       const local = await deps.runPs(buildOutlookScript(action.type, action.args))

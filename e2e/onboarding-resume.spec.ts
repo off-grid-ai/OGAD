@@ -126,7 +126,9 @@ test('relaunch resumes onboarding progress and one interrupted transfer (#12)', 
   await launchApp()
 
   await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Continue|Start using Off Grid AI/i })).toHaveCount(
+    0
+  )
 
   const downloads = await page.evaluate(async () => window.api.listDownloads())
   expect(downloads).toEqual([
