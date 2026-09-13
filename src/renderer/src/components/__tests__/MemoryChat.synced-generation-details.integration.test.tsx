@@ -1,27 +1,25 @@
 // @vitest-environment jsdom
 
 import { cleanup, screen } from '@testing-library/react'
-import { mergeSyncedMessageContext } from '@offgrid/sync'
+import { mergeSyncedMessageContext, serializeSyncedMessageContext } from '@offgrid/sync'
 import { afterEach, expect, it } from 'vitest'
-import { serializeMessageContext } from '../../../../../../mobile/src/services/sync/messageContext'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
 
 afterEach(cleanup)
 
-it('shows generation details from a Mobile reply after sync and reload', async () => {
+it('shows portable generation details from a synced reply after reload', async () => {
   const context = mergeSyncedMessageContext(
     null,
-    serializeMessageContext({
-      role: 'assistant',
-      generationTimeMs: 3400,
-      generationMeta: {
-        contextPromptTokens: 1024,
+    serializeSyncedMessageContext({
+      durationMs: 3400,
+      toolsOffered: ['web_use'],
+      metrics: {
+        estimatedPromptTokens: 1024,
         contextWindowTokens: 4096,
-        contextEstimate: true,
         decodeTokensPerSecond: 42.5,
-        timeToFirstToken: 0.37,
-        tokenCount: 128,
-        routedToolNames: ['web_use']
+        timeToFirstTokenSeconds: 0.37,
+        completionTokens: 128,
+        totalSeconds: 3.4
       }
     })
   )
