@@ -203,6 +203,8 @@ type ChatMessage = {
   imagePath?: string
   imageMetadata?: ImageGenerationMetadata
   toolCalls?: ProjectedSyncedTool[]
+  /** Tool schemas sent to the model for this reply, including tools it did not call. */
+  toolsOffered?: string[]
   toolName?: string
   toolCallId?: string
   turnStatus?: SyncedTurnStatus
@@ -535,6 +537,7 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     reasoning: turn.reasoning ?? readReasoning(context),
     cutoff: readResponseCutoff(context),
     metrics: readGenerationMetrics(context),
+    toolsOffered: turn.toolsOffered,
     ...projectedTurnTools(turn),
     turnStatus: turn.status,
     notice: turn.notice,
@@ -841,7 +844,14 @@ function VoiceMessageRow({
       </>
     )
   }
-  return <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>{body}</div>
+  return (
+    <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>
+      {body}
+      {message.role === 'assistant' && !message.streaming ? (
+        <ToolsSentDisclosure names={message.toolsOffered} />
+      ) : null}
+    </div>
+  )
 }
 
 // Live web-task step narration, surfaced in the streaming turn (not below the browser).
@@ -1236,6 +1246,26 @@ function GenerationMetricsRow({
         ...parts
       ].join(' · ')}
     </p>
+  )
+}
+
+function ToolsSentDisclosure({
+  names
+}: Readonly<{ names?: readonly string[] }>): React.JSX.Element | null {
+  if (!names?.length) return null
+  return (
+    <Collapsible className="mt-1 max-w-[85%] text-[10px] text-neutral-500">
+      <CollapsibleTrigger className="group flex items-center gap-1.5 text-left transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
+        <Wrench className="h-3 w-3" aria-hidden="true" />
+        <span>Tools sent in request ({names.length})</span>
+        <CaretDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ul className="ml-1 mt-1 max-h-56 space-y-0.5 overflow-y-auto border-l border-neutral-800 pl-3">
+          {names.map((name, index) => <li key={`${name}:${index}`}>{name}</li>)}
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -2057,9 +2087,6 @@ function MessageBubble({
         <MessageMarkdown message={message} navigation={navigation} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
-      {state.showGenerationDetails ? (
-        <GenerationMetricsRow metrics={message.metrics} />
-      ) : null}
       <ImageMemoryRetryAction
         message={message}
         loading={state.loading}
@@ -2129,6 +2156,12 @@ function StandardMessageRow({
           onSpeak={() => actions.speak(message.id, message.content)}
         />
       )}
+      {message.role === 'assistant' && !message.streaming ? (
+        <ToolsSentDisclosure names={message.toolsOffered} />
+      ) : null}
+      {state.showGenerationDetails ? (
+        <GenerationMetricsRow metrics={message.metrics} />
+      ) : null}
       {message.role === 'assistant' ? (
         <ContextDisclosure context={message.context} navigation={navigation} />
       ) : null}
@@ -3879,10 +3912,13 @@ export function MemoryChat({
       // History is built from the TARGET conversation's own messages (never the
       // active tab's `messages`) — a drained-queue or background send is bound to
       // `convId`, so its history must come from that conversation (D8).
-      const contextWindowTokens = await window.api
-        .getLlmSettings()
-        .then((settings) => settings?.ctxSize)
-        .catch(() => undefined)
+      const contextWindowTokens =
+        typeof window.api.getLlmSettings === 'function'
+          ? await window.api
+              .getLlmSettings()
+              .then((settings) => settings?.ctxSize)
+              .catch(() => undefined)
+          : undefined
       const history = buildSendHistory(
         messagesByConv[convId] ?? EMPTY_MSGS,
         !!regen,
@@ -3952,8 +3988,8 @@ export function MemoryChat({
         const context = tr?.unified?.length ? { unified: tr.unified } : undefined
         // Persist the citation sources + tool calls so they survive a reload.
         const toolCtx =
-          tr?.unified?.length || toolCalls.length
-            ? { unified: tr?.unified ?? [], toolCalls }
+          tr?.unified?.length || toolCalls.length || tr?.toolsOffered?.length
+            ? { unified: tr?.unified ?? [], toolCalls, toolsOffered: tr?.toolsOffered }
             : undefined
         if (cancelledRef.current.has(convId)) {
           // The tool calls made before the stop are kept, exactly as a completed tool turn keeps
@@ -3962,7 +3998,8 @@ export function MemoryChat({
             answer: tr?.answer,
             context,
             persistContext: toolCtx,
-            toolCalls
+            toolCalls,
+            toolsOffered: tr?.toolsOffered
           })
           return
         }
@@ -3982,6 +4019,7 @@ export function MemoryChat({
                   content: answer,
                   context,
                   toolCalls,
+                  toolsOffered: tr?.toolsOffered,
                   metrics: tr?.metrics,
                   activity: undefined,
                   streaming: false
@@ -4393,6 +4431,7 @@ export function MemoryChat({
         persistContext?: Record<string, unknown>
         cutoff?: ResponseCutoffContract
         toolCalls?: ChatMessage['toolCalls']
+        toolsOffered?: ChatMessage['toolsOffered']
       }
     ): Promise<void> => {
       const reasoning = reasoningByStream.current[streamId]?.trim() || undefined
@@ -4416,6 +4455,7 @@ export function MemoryChat({
                 context: settled?.context ?? m.context,
                 cutoff: settled?.cutoff ?? m.cutoff,
                 toolCalls: settled?.toolCalls ?? m.toolCalls,
+                toolsOffered: settled?.toolsOffered ?? m.toolsOffered,
                 activity: undefined,
                 streaming: false
               }

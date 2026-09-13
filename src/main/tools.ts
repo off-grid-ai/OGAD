@@ -542,6 +542,7 @@ export async function toolChat(
   imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string }
+  toolsOffered?: string[]
 }> {
   if (opts.conversationId) {
     const decision = await callHookAsync<{ answer: string } | null>(
@@ -714,6 +715,7 @@ export async function toolChat(
   // updates this estimate if safety fitting changes those schemas. Later tool
   // results are transient; they must not make the displayed meter fall.
   let retainedPromptTokens = Math.ceil(toolPromptChars(messages, tools) / 4)
+  const offeredTools = new Set<string>()
   const toolCalls: ToolCall[] = []
   const successfulToolResults: string[] = []
   const unified: UnifiedSource[] = []
@@ -734,6 +736,7 @@ export async function toolChat(
     metrics?: GenerationMetrics
     imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
     imageRequest?: { prompt: string }
+    toolsOffered?: string[]
   } => {
     const finalImageRequest = imageRequests.at(-1)
     return {
@@ -744,6 +747,7 @@ export async function toolChat(
         estimatedPromptTokens: retainedPromptTokens
       },
       imageRequests,
+      ...(offeredTools.size ? { toolsOffered: [...offeredTools] } : {}),
       ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
     }
   }
@@ -782,6 +786,10 @@ export async function toolChat(
         : remainingOutputTokens
     if (tools.length && !roundTools.length) {
       console.warn('[tools] no tool schemas fit beside the retained conversation')
+    }
+    for (const tool of roundTools) {
+      const name = (tool as { function?: { name?: unknown } }).function?.name
+      if (typeof name === 'string' && name) offeredTools.add(name)
     }
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
     // are accumulated and returned. A tool-calling round streams thinking (and no content);

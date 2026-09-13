@@ -1151,6 +1151,7 @@ export class LLMService {
           timeoutMs,
           maxTokens,
           temperature: opts.temperature,
+          thinking: opts.disableThinking ? false : undefined,
           signal: opts.signal,
           responseFormat: opts.responseFormat
         })
@@ -1188,7 +1189,7 @@ export class LLMService {
           maxTokens,
           temperature: opts.temperature,
           topP: opts.topP,
-          thinking: opts.enableThinking === true && opts.disableThinking !== true,
+          thinking: opts.disableThinking ? false : opts.enableThinking,
           signal: opts.signal,
           responseFormat: opts.responseFormat
         })

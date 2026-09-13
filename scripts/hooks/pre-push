@@ -50,6 +50,9 @@ echo "[pre-push] typecheck"
 npm run --silent typecheck
 
 echo "[pre-push] tests related to pushed files"
+OFFGRID_HOOK_DATA_DIR=$(mktemp -d)
+trap 'rm -rf -- "$OFFGRID_HOOK_DATA_DIR"' EXIT
+export OFFGRID_DATA_DIR="$OFFGRID_HOOK_DATA_DIR"
 printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
   xargs -0 npx vitest related --run --project product-integration --passWithNoTests --bail=1
 

@@ -105,7 +105,32 @@ export async function startFakeLlamaServer(): Promise<FakeLlamaServer> {
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && (req.url === '/health' || req.url === '/v1/models')) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify(req.url === '/health' ? { status: 'ok' } : { data: [{ id: 'fake' }] }))
+      res.end(
+        JSON.stringify(
+          req.url === '/health'
+            ? { status: 'ok' }
+            : {
+                data: [
+                  { id: 'fake' },
+                  {
+                    id: 'integration-model',
+                    reasoning: { mandatory: false },
+                    supported_parameters: ['tools']
+                  }
+                ]
+              }
+        )
+      )
+      return
+    }
+    if (req.method === 'GET' && req.url === '/props') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ chat_template: '{% if enable_thinking %}<think>{% endif %}' }))
+      return
+    }
+    if (req.method === 'POST' && req.url === '/api/show') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ capabilities: ['thinking'] }))
       return
     }
     if (req.method === 'POST' && req.url === '/v1/chat/completions') {
