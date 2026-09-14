@@ -317,10 +317,10 @@ export function SettingsPanel({
         {(
           [
             'model',
-            'remote',
             'image',
             'voice',
             'transcription',
+            'remote',
             ...(TaskSettings ? (['tasks'] as const) : []),
             'tools',
             'connectors'
