@@ -122,6 +122,7 @@ interface ApiRequest {
   updated_at: number
   result?: unknown
   error?: { message: string; type: string }
+  progress?: { step: number; total: number }
 }
 
 const requests = new Map<string, ApiRequest>()
@@ -191,6 +192,7 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   }
   if (r.status === 'completed') body.result = r.result
   if (r.status === 'failed') body.error = r.error
+  if (r.progress) body.progress = r.progress
   json(res, 200, body)
 }
 
@@ -865,7 +867,8 @@ async function handleSpeech(
 async function executeImage(
   params: ImageGenParams,
   responseFormat: string,
-  cleanup?: () => void
+  cleanup?: () => void,
+  onProgress?: (progress: { step: number; total: number }) => void
 ): Promise<unknown> {
   try {
     const status = imageGenStatus()
@@ -876,7 +879,11 @@ async function executeImage(
       err.status = 501
       throw err
     }
-    const out = await generateImage(params)
+    const out = await generateImage(params, (update) => {
+      if (update.stage === 'generating' && update.progress) {
+        onProgress?.({ step: update.progress.step, total: update.progress.total })
+      }
+    })
     const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
     const datum =
       responseFormat === 'url'
@@ -934,7 +941,13 @@ async function handleImageGeneration(
     'image',
     '/v1/images/generations',
     isAsync(req, payload),
-    () => executeImage(params, fmt),
+    () => executeImage(params, fmt, undefined, (progress) => {
+      const request = requests.get(rid)
+      if (request) {
+        request.progress = progress
+        request.updated_at = Date.now()
+      }
+    }),
     (r) => jsonWithId(res, rid, r)
   )
 }
