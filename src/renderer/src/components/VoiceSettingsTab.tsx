@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  KOKORO_VOICE_CATALOG,
   SILENCE_AFTER_SPEECH_CHOICES_MS,
   SPEAKER_DRAIN_CHOICES_MS,
   VOICE_DELAY_LABELS,
@@ -76,6 +77,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const [voice, setVoice] = useState('af_heart')
   const [language, setLanguage] = useState('en-US')
   const [assetsState, setAssetsState] = useState<AssetsState>('loading')
+  const [voiceLoadError, setVoiceLoadError] = useState(
+    'Could not load voices. Check your connection and retry.'
+  )
   const [progress, setProgress] = useState<VoiceAssetProgress>({ percentage: 0 })
   const [testState, setTestState] = useState<TestState>('idle')
   const [settingsLoaded, setSettingsLoaded] = useState(false)
@@ -85,6 +89,8 @@ export function VoiceSettingsTab(): React.JSX.Element {
 
   const loadVoices = useCallback((): void => {
     setAssetsState('loading')
+    setVoices([])
+    setVoiceLoadError('Could not load voices. Check your connection and retry.')
     setProgress({ percentage: 0 })
     const modelApi = window.api as Partial<Pick<typeof window.api, 'getActiveModalities'>>
     void Promise.resolve(modelApi.getActiveModalities?.())
@@ -94,6 +100,14 @@ export function VoiceSettingsTab(): React.JSX.Element {
         return window.api.ttsVoices().then((runtimeVoices) => ({ remote, runtimeVoices }))
       })
       .then(({ remote, runtimeVoices }) => {
+        if (
+          remote &&
+          runtimeVoices.length &&
+          runtimeVoices.every(({ id }) => KOKORO_VOICE_CATALOG.some((local) => local.id === id))
+        ) {
+          setVoiceLoadError('The desktop speech service is out of date. Restart the app and retry.')
+          throw new Error('Remote model returned local speakers')
+        }
         if (!runtimeVoices.length && !remote) throw new Error('No voices available')
         setVoices(runtimeVoices)
         if (remote) setAssetsState('ready')
@@ -347,7 +361,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
           role="alert"
           className="mb-4 flex items-center justify-between gap-3 text-xs text-red-400"
         >
-          <span>Could not load voices. Check your connection and retry.</span>
+          <span>{voiceLoadError}</span>
           <button
             type="button"
             onClick={loadVoices}
