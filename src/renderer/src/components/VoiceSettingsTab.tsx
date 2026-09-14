@@ -161,13 +161,14 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }, [remoteVoice, settingsLoaded, voice, voices])
 
   useEffect(() => {
-    if (!settingsLoaded || assetsState !== 'ready' || !voices.length || voices.some(({ id }) => id === voice)) return
+    if (!settingsLoaded || !voices.length || voices.some(({ id }) => id === voice)) return
+    if (assetsState !== 'ready' && (remoteVoice || assetsState !== 'loading')) return
     const fallback = firstRuntimeVoiceForLanguage(voices, language) ?? voices[0]
     if (!fallback) return
     setVoice(fallback.id)
     setLanguage(runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
     void Promise.resolve(window.api.saveSetting('ttsVoice', fallback.id)).catch(() => {})
-  }, [assetsState, language, settingsLoaded, voice, voices])
+  }, [assetsState, language, remoteVoice, settingsLoaded, voice, voices])
 
   useEffect(() => {
     const updatePreferences = (event: Event): void => {
