@@ -61,6 +61,7 @@ import {
 import {
   activateRemoteVisionModel,
   activateRemoteVisionMediaModel,
+  deactivateRemoteVisionMediaModel,
   deactivateRemoteVisionModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
@@ -887,6 +888,7 @@ export async function setActiveModalChoice(
       }
     }
     setModal(modal, stored)
+    if (modal === 'image') deactivateRemoteVisionMediaModel('image')
     if (modal === 'speech') setRemoteVoiceSelected(false)
     return { success: true }
   }

@@ -218,6 +218,20 @@ export function activateRemoteVisionMediaModel(
   return true
 }
 
+export function deactivateRemoteVisionMediaModel(modality: Exclude<RemoteVisionModality, 'text'>): void {
+  const stored = readStored()
+  const server = stored.servers.find((candidate) => candidate.id === stored.activeServerId)
+  if (!server?.mediaModels?.[modality]) return
+  const mediaModels = { ...server.mediaModels }
+  delete mediaModels[modality]
+  writeStored({
+    ...stored,
+    servers: stored.servers.map((candidate) =>
+      candidate.id === server.id ? { ...candidate, mediaModels } : candidate
+    )
+  })
+}
+
 export function setRemoteVisionServerSettings(
   update: RemoteVisionServerUpdate
 ): RemoteVisionServerSettings {
