@@ -306,8 +306,10 @@ export async function testRemoteVisionServer(
         : kind === 'speech' ? 'voice'
         : kind === 'chat' || kind === 'vision' || kind === 'text' ? 'text'
         : outputs.includes('image') ? 'image'
-        : inputs.includes('audio') && outputs.includes('text') ? 'transcription'
-        : outputs.includes('audio') ? 'voice'
+        : outputs.includes('transcription') ? 'transcription'
+        : outputs.includes('speech') ? 'voice'
+        : update.provider !== 'openrouter' && inputs.includes('audio') && outputs.includes('text') ? 'transcription'
+        : update.provider !== 'openrouter' && outputs.includes('audio') ? 'voice'
         : 'text'
       return [{ id, name: typeof entry.name === 'string' ? entry.name : id, kind: modality }]
     })
