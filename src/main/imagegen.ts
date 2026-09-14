@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import { randomUUID } from 'node:crypto'
 import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
@@ -551,7 +552,7 @@ export async function generateImage(
       const extension = result.mime === 'image/jpeg' ? 'jpg' : result.mime === 'image/webp' ? 'webp' : 'png'
       const directory = path.join(dataDir(), 'generated-images')
       await fs.promises.mkdir(directory, { recursive: true })
-      const outputPath = path.join(directory, `remote-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`)
+      const outputPath = path.join(directory, `remote-${Date.now()}-${randomUUID()}.${extension}`)
       await fs.promises.writeFile(outputPath, result.bytes)
       return {
         dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}`,
