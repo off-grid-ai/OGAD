@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import { CaretDown } from '@phosphor-icons/react'
 import {
   DropdownMenu,
@@ -19,6 +20,7 @@ export function SettingsSelect<T extends string>({
   value,
   options,
   placeholder,
+  searchable = false,
   disabled = false,
   onValueChange
 }: {
@@ -27,13 +29,22 @@ export function SettingsSelect<T extends string>({
   value: T
   options: readonly SettingsSelectOption<T>[]
   placeholder?: string
+  searchable?: boolean
   disabled?: boolean
   onValueChange: (value: T) => void
 }): React.JSX.Element {
   const selected = options.find((option) => option.value === value)
+  const [query, setQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+  const visibleOptions = searchable
+    ? options.filter((option) => `${option.label} ${option.value}`.toLowerCase().includes(query.trim().toLowerCase()))
+    : options
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => {
+      if (open && searchable) requestAnimationFrame(() => searchRef.current?.focus())
+      if (!open) setQuery('')
+    }}>
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           id={id}
@@ -52,11 +63,30 @@ export function SettingsSelect<T extends string>({
         onEscapeKeyDown={(event) => event.stopPropagation()}
         className="max-h-64 w-(--radix-dropdown-menu-trigger-width) min-w-56 border-neutral-800 bg-neutral-950 text-neutral-200 shadow-none"
       >
+        {searchable && (
+          <input
+            ref={searchRef}
+            type="search"
+            aria-label={`Search ${label.toLowerCase()}`}
+            placeholder="Search models"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                searchRef.current?.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemradio"]:not([data-disabled])')?.focus()
+              } else if (event.key !== 'Escape') {
+                event.stopPropagation()
+              }
+            }}
+            className="mb-1 w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none focus-visible:border-green-500"
+          />
+        )}
         <DropdownMenuRadioGroup
           value={value}
           onValueChange={(nextValue) => onValueChange(nextValue as T)}
         >
-          {options.map((option) => (
+          {visibleOptions.map((option) => (
             <DropdownMenuRadioItem
               key={option.value}
               value={option.value}
@@ -67,6 +97,7 @@ export function SettingsSelect<T extends string>({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        {visibleOptions.length === 0 && <p className="px-2 py-1.5 text-xs text-neutral-500">No matching models.</p>}
       </DropdownMenuContent>
     </DropdownMenu>
   )

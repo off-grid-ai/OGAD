@@ -6,6 +6,7 @@ import {
   type ImageParamStore
 } from '@renderer/lib/image-params'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
+import { parseRemoteVisionModelId } from '../../../shared/remote-vision-server'
 import { SettingsSelect } from './SettingsSelect'
 
 type ImageSettings = {
@@ -15,10 +16,13 @@ type ImageSettings = {
   enhanceImagePrompts?: boolean
 }
 
-const modelLabel = (model: string): string => model.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')
+const modelLabel = (model: string): string =>
+  (parseRemoteVisionModelId(model)?.modelId ?? model)
+    .replace(/\.gguf$/i, '')
+    .replace(/-Q\d.*$/i, '')
 
 export function ImageSettingsTab(): React.JSX.Element {
-  const [models, setModels] = useState<string[]>([])
+  const [models, setModels] = useState<{ value: string; label: string }[]>([])
   const [model, setModel] = useState('')
   const [params, setParams] = useState<ImageParamStore>({})
   const [seed, setSeed] = useState('')
@@ -37,12 +41,21 @@ export function ImageSettingsTab(): React.JSX.Element {
   )
 
   useEffect(() => {
-    void Promise.all([window.api.imageGenStatus(), window.api.getSettings()])
-      .then(([status, settings]) => {
-        const available = status?.models ?? []
+    void Promise.all([
+      window.api.imageGenStatus(),
+      window.api.getSettings(),
+      window.api.getModelCatalog().catch(() => ({ models: [] }))
+    ])
+      .then(([status, settings, catalog]) => {
+        const available: string[] = status?.models ?? []
         const active = status?.active ?? available[0] ?? ''
         const saved = settings as ImageSettings
-        setModels(available)
+        const names = new Map(
+          (catalog.models as { id: string; name?: string }[]).map((entry) => [entry.id, entry.name])
+        )
+        setModels(
+          available.map((item) => ({ value: item, label: names.get(item) || modelLabel(item) }))
+        )
         setModel(active)
         setParams(saved.imageParams ?? {})
         setSeed(saved.imgSeed ?? '')
@@ -101,7 +114,7 @@ export function ImageSettingsTab(): React.JSX.Element {
           label="Active image model"
           value={model}
           onValueChange={chooseModel}
-          options={models.map((item) => ({ value: item, label: modelLabel(item) }))}
+          options={models}
         />
       </div>
 

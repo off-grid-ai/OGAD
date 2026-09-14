@@ -1,9 +1,54 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { kokoroVoiceLanguage, type RuntimeSpeechVoice } from '@offgrid/speech'
 import { IMAGE_MEMORY_GUARD_ERROR_CODE, imageMemoryGuardErrorMessage } from '../shared/image-generation-contract'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 
 type RemoteServer = NonNullable<ReturnType<typeof getActiveRemoteVisionServerForModality>>
+
+let cachedRemoteVoices:
+  | { key: string; expiresAt: number; voices: RuntimeSpeechVoice[] }
+  | undefined
+
+export async function listRemoteVoices(server: RemoteServer): Promise<RuntimeSpeechVoice[]> {
+  const key = `${server.id}:${server.endpoint}:${server.selectedModel}`
+  if (cachedRemoteVoices?.key === key && cachedRemoteVoices.expiresAt > Date.now()) {
+    return cachedRemoteVoices.voices
+  }
+  const response = await checked(
+    await fetch(`${server.endpoint}/models?output_modalities=speech`, {
+      headers: headers(server)
+    })
+  )
+  const catalog = (await response.json()) as {
+    data?: Array<{ id?: string; supported_voices?: string[] }>
+  }
+  const model = catalog.data?.find((item) => item.id === server.selectedModel)
+  const voices = (model?.supported_voices ?? [])
+    .filter((id): id is string => typeof id === 'string' && !!id)
+    .map((id) => {
+      const language = server.selectedModel === 'hexgrad/kokoro-82m'
+        ? kokoroVoiceLanguage(id)?.code
+        : server.selectedModel.startsWith('deepgram/')
+          ? id.match(/-([a-z]{2})$/i)?.[1]?.toLowerCase()
+          : server.selectedModel.startsWith('microsoft/mai-voice-2')
+            ? id.match(/^([a-z]{2}-[A-Z]{2})-/)?.[1]
+            : server.selectedModel.startsWith('mistralai/voxtral-mini-tts')
+              ? id.match(/^([a-z]{2})_/i)?.[1]?.toLowerCase().replace(/^gb$/, 'en-GB')
+              : undefined
+      return {
+        id,
+        label: id
+          .replace(/^flux-/, '')
+          .replace(/-en$/, '')
+          .replace(/[-_]/g, ' ')
+          .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+        ...(language ? { language } : {})
+      }
+    })
+  cachedRemoteVoices = { key, voices, expiresAt: Date.now() + 5 * 60_000 }
+  return voices
+}
 
 function headers(server: RemoteServer, contentType?: string): Record<string, string> {
   return {
@@ -87,7 +132,12 @@ export async function synthesizeRemoteVoice(server: RemoteServer, text: string, 
   const response = await checked(await fetch(`${server.endpoint}/audio/speech`, {
     method: 'POST',
     headers: headers(server, 'application/json'),
-    body: JSON.stringify({ model: server.selectedModel, input: text, voice: voice || 'alloy' })
+    body: JSON.stringify({
+      model: server.selectedModel,
+      input: text,
+      ...(voice ? { voice } : {}),
+      ...(server.provider === 'openrouter' ? { response_format: 'mp3' } : {})
+    })
   }))
   const mime = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg'
   return { dataUrl: `data:${mime};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}` }
@@ -111,6 +161,6 @@ export async function transcribeRemoteAudio(
     signal
   }))
   const result = await response.json() as { text?: string; language?: string }
-  if (typeof result.text !== 'string') throw new Error('The remote server returned no transcript.')
-  return { text: result.text, language: result.language }
+  if (typeof result.text !== 'string' || !result.text.trim()) throw new Error('The remote server returned no transcript.')
+  return { text: result.text.trim(), language: result.language }
 }

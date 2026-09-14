@@ -122,6 +122,7 @@ interface ApiRequest {
   updated_at: number
   result?: unknown
   error?: { message: string; type: string }
+  progress?: { step: number; total: number }
 }
 
 const requests = new Map<string, ApiRequest>()
@@ -191,6 +192,7 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   }
   if (r.status === 'completed') body.result = r.result
   if (r.status === 'failed') body.error = r.error
+  if (r.progress) body.progress = r.progress
   json(res, 200, body)
 }
 
@@ -643,7 +645,10 @@ function fetchUpstreamModels(): Promise<Record<string, unknown>> {
   })
 }
 
-async function handleModelsList(res: http.ServerResponse): Promise<void> {
+async function handleModelsList(
+  res: http.ServerResponse,
+  outputModalities?: string
+): Promise<void> {
   const now = Math.floor(Date.now() / 1000)
   const upstream = await fetchUpstreamModels()
   const upData = Array.isArray(upstream.data) ? (upstream.data as Record<string, unknown>[]) : []
@@ -707,7 +712,16 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   const speechId = remoteVoice
     ? remoteVisionModelId(remoteVoice.id, remoteVoice.selectedModel)
     : getActiveModal('speech') || (voices.length ? 'kokoro' : null)
-  const speech = speechId ? [tag(speechId, 'speech', remoteVoice ? { remote: true } : { voices })] : []
+  const speech = speechId
+    ? [
+        tag(speechId, 'speech', {
+          voices,
+          supported_voices: voices,
+          architecture: { input_modalities: ['text'], output_modalities: ['speech'] },
+          ...(remoteVoice ? { remote: true } : {})
+        })
+      ]
+    : []
 
   // Active transcription (STT) model (chosen pick, else the resolved whisper model).
   const remoteStt = getActiveRemoteVisionServerForModality('transcription')
@@ -718,10 +732,23 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   const transcription = sttId ? [tag(sttId, 'transcription')] : []
 
   const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription]
+  const requested = outputModalities
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const visible = requested?.length && !requested.includes('all')
+    ? data.filter((entry) =>
+        requested.includes(
+          entry.kind === 'speech' || entry.kind === 'image'
+            ? entry.kind
+            : 'text'
+        )
+      )
+    : data
   // Mirror into the ollama-style `models` array some clients read, so both shapes
   // stay in sync.
-  const models = ollamaMirror(data)
-  json(res, 200, { object: 'list', data, models })
+  const models = ollamaMirror(visible)
+  json(res, 200, { object: 'list', data: visible, models })
 }
 
 // ─── Speech-to-text (whisper) ────────────────────────────────────────────────
@@ -840,7 +867,8 @@ async function handleSpeech(
 async function executeImage(
   params: ImageGenParams,
   responseFormat: string,
-  cleanup?: () => void
+  cleanup?: () => void,
+  onProgress?: (progress: { step: number; total: number }) => void
 ): Promise<unknown> {
   try {
     const status = imageGenStatus()
@@ -851,7 +879,11 @@ async function executeImage(
       err.status = 501
       throw err
     }
-    const out = await generateImage(params)
+    const out = await generateImage(params, (update) => {
+      if (update.stage === 'generating' && update.progress) {
+        onProgress?.({ step: update.progress.step, total: update.progress.total })
+      }
+    })
     const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
     const datum =
       responseFormat === 'url'
@@ -909,7 +941,13 @@ async function handleImageGeneration(
     'image',
     '/v1/images/generations',
     isAsync(req, payload),
-    () => executeImage(params, fmt),
+    () => executeImage(params, fmt, undefined, (progress) => {
+      const request = requests.get(rid)
+      if (request) {
+        request.progress = progress
+        request.updated_at = Date.now()
+      }
+    }),
     (r) => jsonWithId(res, rid, r)
   )
 }
@@ -1339,7 +1377,11 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
     // which llama-server can't fetch itself, then forward (response still streams).
     if (url === '/v1/chat/completions' && method === 'POST') return void handleChat(req, res, rid)
     // Full local model surface across all modalities (not just the LLM).
-    if (url === '/v1/models' && method === 'GET') return void handleModelsList(res)
+    if (url === '/v1/models' && method === 'GET')
+      return void handleModelsList(
+        res,
+        new URLSearchParams(req.url?.split('?')[1]).get('output_modalities') ?? undefined
+      )
 
     // Everything else (completions/embeddings) -> llama-server.
     proxyToLlama(req, res)

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RemoteVisionSettingsTab } from '../RemoteVisionSettingsTab'
 
@@ -55,17 +56,21 @@ describe('<RemoteVisionSettingsTab/>', () => {
     fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'https://openrouter.ai/api/v1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
     await screen.findByText('Connected in 12 ms. 3 models found.')
-    fireEvent.change(screen.getByLabelText('Image'), { target: { value: 'image-maker' } })
-    fireEvent.change(screen.getByLabelText('Transcription'), { target: { value: 'listener' } })
-    fireEvent.change(screen.getByLabelText('Voice'), { target: { value: 'speaker' } })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'image model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Image Maker' }))
+    await user.click(screen.getByRole('button', { name: 'transcription model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Listener' }))
+    await user.click(screen.getByRole('button', { name: 'voice model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Speaker' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await screen.findByText('Server saved and active.')
     cleanup()
     render(<RemoteVisionSettingsTab />)
     await screen.findByDisplayValue('Media provider')
-    expect((screen.getByLabelText('Image') as HTMLSelectElement).value).toBe('image-maker')
-    expect((screen.getByLabelText('Transcription') as HTMLSelectElement).value).toBe('listener')
-    expect((screen.getByLabelText('Voice') as HTMLSelectElement).value).toBe('speaker')
+    expect(screen.getByRole('button', { name: 'image model' }).textContent).toContain('Image Maker')
+    expect(screen.getByRole('button', { name: 'transcription model' }).textContent).toContain('Listener')
+    expect(screen.getByRole('button', { name: 'voice model' }).textContent).toContain('Speaker')
 
     fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))

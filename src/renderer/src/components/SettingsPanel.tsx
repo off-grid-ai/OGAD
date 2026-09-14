@@ -112,7 +112,7 @@ type Connector = {
 }
 
 type TranscriptionInfo = {
-  engine: 'whisper' | 'parakeet' | 'whisper-resident'
+  engine: 'whisper' | 'parakeet' | 'whisper-resident' | 'remote'
   modelId: string | null
   label: string
   language: string
@@ -317,10 +317,10 @@ export function SettingsPanel({
         {(
           [
             'model',
-            'remote',
             'image',
             'voice',
             'transcription',
+            'remote',
             ...(TaskSettings ? (['tasks'] as const) : []),
             'tools',
             'connectors'

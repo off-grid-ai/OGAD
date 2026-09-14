@@ -111,6 +111,29 @@ describe('<ModelPicker/> dismissal', () => {
     expect(await screen.findByText('Remote')).toBeTruthy()
   })
 
+  it('shows the selected remote voice model and activates it through the shared model seam', async () => {
+    const voiceId = 'remote-vision:home:google%2Flyria-3-pro-preview'
+    const activateModel = vi.fn().mockResolvedValue({ success: true })
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getModelCatalog: vi.fn().mockResolvedValue({
+        models: [{ id: voiceId, name: 'Google: Lyria 3 Pro Preview', kind: 'speech', files: [], remoteServerId: 'home' }]
+      }),
+      getInstalledModels: vi.fn().mockResolvedValue([voiceId]),
+      getActiveModel: vi.fn().mockResolvedValue(null),
+      getActiveModalities: vi.fn().mockResolvedValue({ speech: voiceId }),
+      getActiveModelIds: vi.fn().mockResolvedValue([voiceId]),
+      getComputerUseActiveModels: vi.fn().mockResolvedValue(null),
+      activateModel
+    }
+
+    render(<ModelPicker onClose={vi.fn()} />)
+    const voice = (await screen.findByText('Google: Lyria 3 Pro Preview')).closest('button')
+    expect(voice?.querySelector('svg')).toBeTruthy()
+    expect(voice?.textContent).toContain('Remote')
+    fireEvent.click(voice as HTMLButtonElement)
+    await waitFor(() => expect(activateModel).toHaveBeenCalledWith(voiceId))
+  })
+
   it('closes on Escape', () => {
     const onClose = renderPicker()
     fireEvent.keyDown(window, { key: 'Escape' })

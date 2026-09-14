@@ -604,8 +604,9 @@ describe('<App/> desktop navigation integration', () => {
 
       mounted.unmount()
       render(<App />)
-      await screen.findAllByRole('button', { name: new RegExp(`^${previousTab}`) })
-      expect(routedTabButton(previousTab).getAttribute('aria-current')).toBe('page')
+      await waitFor(() =>
+        expect(routedTabButton(previousTab).getAttribute('aria-current')).toBe('page')
+      )
       expect(window.location.pathname).toBe(previousPath)
     }
   )

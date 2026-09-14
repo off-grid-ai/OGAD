@@ -74,6 +74,35 @@ afterEach(() => {
 })
 
 describe('<SettingsPanel/> speech languages', () => {
+  it('shows the remote voice source without offering local speakers', async () => {
+    const boundary = (window as unknown as { api: Record<string, unknown> }).api
+    boundary.getActiveModalities = vi.fn().mockResolvedValue({
+      speech: 'remote-vision:home:google%2Flyria-3-pro-preview'
+    })
+    boundary.ttsVoices = vi.fn().mockResolvedValue([])
+
+    render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
+
+    expect(await screen.findByText('Speaker choices are not available for this remote model.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Voice selection' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Language selection' })).toBeNull()
+    expect(screen.queryByText('Sarah')).toBeNull()
+  })
+
+  it('names the selected remote transcription model in Settings', async () => {
+    getTranscriptionInfo.mockResolvedValue({
+      engine: 'remote', modelId: 'remote-vision:home:google%2Fgemini-3.7-flash',
+      label: 'Remote · google/gemini-3.7-flash', language: 'auto',
+      languages: [{ code: 'auto', label: 'Auto-detect' }],
+      options: [{ id: 'remote-vision:home:google%2Fgemini-3.7-flash', name: 'Google: Gemini 3.7 Flash', active: true }]
+    })
+
+    render(<SettingsPanel onClose={vi.fn()} initialTab="transcription" />)
+
+    expect(await screen.findByText('Remote · google/gemini-3.7-flash')).toBeTruthy()
+    expect(screen.queryByText(/Whisper · Whisper Base/)).toBeNull()
+  })
+
   it('ignores a malformed saved voice instead of showing an object as a voice name', async () => {
     const boundary = (window as unknown as { api: Record<string, unknown> }).api
     boundary.getSettings = vi.fn().mockResolvedValue({ ttsVoice: { id: 'af_heart' } })

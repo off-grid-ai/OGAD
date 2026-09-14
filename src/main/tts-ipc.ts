@@ -33,6 +33,9 @@ export function setupTtsIpc(): void {
       return await listVoiceCatalog()
     } catch (error) {
       console.error('[tts] voices failed', error)
+      const { getActiveRemoteVisionServerForModality } =
+        await import('./vision/remote-vision-server')
+      if (getActiveRemoteVisionServerForModality('voice')?.provider === 'openrouter') throw error
       return []
     }
   })
@@ -45,8 +48,10 @@ export function setupTtsIpc(): void {
 
   ipcMain.handle('tts:speak', async (event, text: string, voice?: string) => {
     const { synthesize } = await import('./tts')
+    const { getActiveRemoteVisionServerForModality } = await import('./vision/remote-vision-server')
+    const remote = getActiveRemoteVisionServerForModality('voice')
     let chosenVoice = voice
-    if (!chosenVoice) {
+    if (!chosenVoice && !remote) {
       try {
         chosenVoice = getSetting<string>('ttsVoice', '') || undefined
       } catch {
