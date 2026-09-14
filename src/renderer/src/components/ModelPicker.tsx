@@ -32,7 +32,7 @@ const MODALITIES: {
 }[] = [
   { label: 'Text & Vision', kinds: ['text', 'vision'], mode: 'text' },
   { label: 'Image', kinds: ['image'], mode: 'image' },
-  { label: 'Voice', kinds: ['voice'], mode: 'speech' },
+  { label: 'Voice', kinds: ['voice', 'speech'], mode: 'speech' },
   { label: 'Transcription', kinds: ['transcription'], mode: 'transcription' }
 ]
 type PickerMode = (typeof MODALITIES)[number]['mode']
@@ -119,8 +119,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         }
       } else {
         const fname = primaryFile(m)
-        await api().setActiveModalModel?.(mode, fname)
-        setActive((a) => ({ ...a, [mode]: fname }))
+        if (m.remoteServerId) {
+          const result = await api().activateModel?.(m.id)
+          if (result?.success !== false) await load()
+        } else {
+          await api().setActiveModalModel?.(mode, fname)
+          setActive((a) => ({ ...a, [mode]: fname }))
+        }
       }
     } finally {
       setBusy(null)
