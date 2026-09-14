@@ -61,7 +61,7 @@ describe('ephemeral cache cleanup', () => {
       path.join(modelsDir, 'downloads.json'),
       JSON.stringify([{ modelId: model.id, status: 'failed' }])
     )
-    const partial = path.join(modelsDir, `${model.files[0].name}.part`)
+    const partial = path.join(modelsDir, `${model.files[0]!.name}.part`)
     const installed = path.join(modelsDir, 'installed.gguf')
     fs.mkdirSync(path.dirname(partial), { recursive: true })
     fs.writeFileSync(partial, Buffer.alloc(1_024))
