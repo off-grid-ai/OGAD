@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { mergeSyncedMessageContext, serializeSyncedMessageContext } from '@offgrid/sync'
 import { afterEach, expect, it } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
@@ -44,10 +45,14 @@ it('shows portable reply timing and offered tools after reload', async () => {
   expect(screen.queryByTestId('generation-metrics')).toBeNull()
   expect(await screen.findByText('3.4s')).toBeTruthy()
   expect(await screen.findByRole('button', { name: 'Tools sent in request (1)' })).toBeTruthy()
+  await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
+  expect((await screen.findByTestId('generation-metrics')).textContent).toContain('42.5 tok/s')
 
   chat.unmount()
   renderChat({ conversationId: 'conversation-a' })
   expect(screen.queryByTestId('generation-metrics')).toBeNull()
   expect(await screen.findByText('3.4s')).toBeTruthy()
   expect(await screen.findByRole('button', { name: 'Tools sent in request (1)' })).toBeTruthy()
+  await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
+  expect((await screen.findByTestId('generation-metrics')).textContent).toContain('42.5 tok/s')
 })
