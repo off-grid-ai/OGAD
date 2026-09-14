@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import React from 'react'
 import { createServer, type Server } from 'node:http'
+import net, { type AddressInfo } from 'node:net'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 
@@ -29,12 +30,14 @@ import {
   testRemoteVisionServer
 } from '../src/main/vision/remote-vision-server'
 import { generateImage } from '../src/main/imagegen'
+import { getGatewayPort, startModelServer, stopModelServer } from '../src/main/model-server'
 import { RemoteVisionSettingsTab } from '../src/renderer/src/components/RemoteVisionSettingsTab'
 
 let provider: Server | undefined
 
 afterEach(async () => {
   cleanup()
+  stopModelServer()
   if (provider) await new Promise<void>((resolve) => provider!.close(() => resolve()))
   provider = undefined
 })
@@ -93,11 +96,28 @@ describe('remote media choices in Desktop Settings', () => {
     expect(fs.readFileSync(image.path)).toEqual(generated)
     expect(image.model).toContain('picture')
 
+    const probe = net.createServer()
+    await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve))
+    const gatewayPort = (probe.address() as AddressInfo).port
+    await new Promise<void>((resolve) => probe.close(() => resolve()))
+    await startModelServer(gatewayPort)
+    const activeModels = await (await fetch(`http://127.0.0.1:${getGatewayPort()}/v1/models`)).json() as {
+      data: Array<{ id: string; kind: string; remote?: boolean }>
+    }
+    expect(activeModels.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'speech', remote: true, id: expect.stringContaining('speaker') }),
+      expect.objectContaining({ kind: 'transcription', id: expect.stringContaining('listener') })
+    ]))
+
     fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await screen.findByText('Local model is active.')
     expect(getActiveRemoteVisionServerForModality('image')).toBeNull()
     expect(getRemoteVisionServerSettings().servers).toHaveLength(1)
+    const localModels = await (await fetch(`http://127.0.0.1:${getGatewayPort()}/v1/models`)).json() as {
+      data: Array<{ id: string }>
+    }
+    expect(localModels.data.some((model) => model.id.includes('speaker') || model.id.includes('listener'))).toBe(false)
 
     fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
