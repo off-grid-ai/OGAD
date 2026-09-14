@@ -13,6 +13,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { getActiveModal } from './active-models'
+import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
+import { synthesizeRemoteVoice } from './remote-media-runtime'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
 import type { ManagedRuntime } from './runtime-manager'
@@ -95,6 +97,8 @@ export async function synthesize(
   voice?: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<{ dataUrl: string }> {
+  const remote = getActiveRemoteVisionServerForModality('voice')
+  if (remote) return synthesizeRemoteVoice(remote, text, voice)
   const selected = getActiveModal('speech')
   const requestedVoice = chooseVoice(voice, selected) || DEFAULT_VOICE
   // Older releases persisted Kokoro voices that the ExecuTorch catalogue does not contain.
