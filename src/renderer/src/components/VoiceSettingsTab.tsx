@@ -74,6 +74,7 @@ function PreferenceButtons<T extends string | number>({
 export function VoiceSettingsTab(): React.JSX.Element {
   const [voices, setVoices] = useState<RuntimeSpeechVoice[]>([])
   const [remoteVoice, setRemoteVoice] = useState(false)
+  const [miniMaxSpeech28, setMiniMaxSpeech28] = useState(false)
   const [voice, setVoice] = useState('af_heart')
   const [language, setLanguage] = useState('en-US')
   const [assetsState, setAssetsState] = useState<AssetsState>('loading')
@@ -97,6 +98,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
       .then((active) => {
         const remote = active?.speech?.startsWith('remote-vision:') ?? false
         setRemoteVoice(remote)
+        setMiniMaxSpeech28(
+          remote && /:minimax%2fspeech-2\.8-(?:hd|turbo)$/i.test(active?.speech ?? '')
+        )
         return window.api.ttsVoices().then((runtimeVoices) => ({ remote, runtimeVoices }))
       })
       .then(({ remote, runtimeVoices }) => {
@@ -346,6 +350,16 @@ export function VoiceSettingsTab(): React.JSX.Element {
           }))}
         />
       </SettingsRow>}
+
+      {miniMaxSpeech28 && !showLanguage && (
+        <SettingsRow
+          label="Language"
+          value="Automatic"
+          hint="MiniMax can speak 40 languages. It uses the language of the reply text; OpenRouter lists English-named speakers for this model."
+        >
+          {null}
+        </SettingsRow>
+      )}
 
       {assetsState === 'loading' || assetsState === 'checking' ? (
         <div

@@ -79,6 +79,7 @@ describe('<SettingsPanel/> speech languages', () => {
     boundary.getActiveModalities = vi.fn().mockResolvedValue({
       speech: 'remote-vision:home:google%2Flyria-3-pro-preview'
     })
+    boundary.ttsVoices = vi.fn().mockResolvedValue([])
 
     render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
 

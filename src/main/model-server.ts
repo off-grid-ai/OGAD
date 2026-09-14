@@ -643,7 +643,10 @@ function fetchUpstreamModels(): Promise<Record<string, unknown>> {
   })
 }
 
-async function handleModelsList(res: http.ServerResponse): Promise<void> {
+async function handleModelsList(
+  res: http.ServerResponse,
+  outputModalities?: string
+): Promise<void> {
   const now = Math.floor(Date.now() / 1000)
   const upstream = await fetchUpstreamModels()
   const upData = Array.isArray(upstream.data) ? (upstream.data as Record<string, unknown>[]) : []
@@ -707,7 +710,16 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   const speechId = remoteVoice
     ? remoteVisionModelId(remoteVoice.id, remoteVoice.selectedModel)
     : getActiveModal('speech') || (voices.length ? 'kokoro' : null)
-  const speech = speechId ? [tag(speechId, 'speech', remoteVoice ? { remote: true } : { voices })] : []
+  const speech = speechId
+    ? [
+        tag(speechId, 'speech', {
+          voices,
+          supported_voices: voices,
+          architecture: { input_modalities: ['text'], output_modalities: ['speech'] },
+          ...(remoteVoice ? { remote: true } : {})
+        })
+      ]
+    : []
 
   // Active transcription (STT) model (chosen pick, else the resolved whisper model).
   const remoteStt = getActiveRemoteVisionServerForModality('transcription')
@@ -718,10 +730,23 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   const transcription = sttId ? [tag(sttId, 'transcription')] : []
 
   const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription]
+  const requested = outputModalities
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const visible = requested?.length && !requested.includes('all')
+    ? data.filter((entry) =>
+        requested.includes(
+          entry.kind === 'speech' || entry.kind === 'image'
+            ? entry.kind
+            : 'text'
+        )
+      )
+    : data
   // Mirror into the ollama-style `models` array some clients read, so both shapes
   // stay in sync.
-  const models = ollamaMirror(data)
-  json(res, 200, { object: 'list', data, models })
+  const models = ollamaMirror(visible)
+  json(res, 200, { object: 'list', data: visible, models })
 }
 
 // ─── Speech-to-text (whisper) ────────────────────────────────────────────────
@@ -1339,7 +1364,11 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
     // which llama-server can't fetch itself, then forward (response still streams).
     if (url === '/v1/chat/completions' && method === 'POST') return void handleChat(req, res, rid)
     // Full local model surface across all modalities (not just the LLM).
-    if (url === '/v1/models' && method === 'GET') return void handleModelsList(res)
+    if (url === '/v1/models' && method === 'GET')
+      return void handleModelsList(
+        res,
+        new URLSearchParams(req.url?.split('?')[1]).get('output_modalities') ?? undefined
+      )
 
     // Everything else (completions/embeddings) -> llama-server.
     proxyToLlama(req, res)
