@@ -205,6 +205,40 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     expect(screen.getByRole('list', { name: 'Thinking and tool calls' }).children).toHaveLength(5)
   })
 
+  it('keeps one timeline while a saved tool turn is still waiting for its answer', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-b'] = [
+      { id: 1, role: 'user', content: 'Find the answer.' },
+      { id: 2, role: 'assistant', content: '', context: { reasoning: 'First thought.' } },
+      {
+        id: 3,
+        role: 'tool',
+        content: 'First search result.',
+        context: { tool: { name: 'web_search', durationMs: 945 } }
+      },
+      { id: 4, role: 'assistant', content: '', context: { reasoning: 'Second thought.' } },
+      {
+        id: 5,
+        role: 'tool',
+        content: 'Second search result.',
+        context: { tool: { name: 'read_url', durationMs: 800 } }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-b' })
+
+    const timeline = await screen.findByRole('list', { name: 'Thinking and tool calls' })
+    expect(timeline.children).toHaveLength(4)
+    expect(screen.getAllByText('Thought process')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Searched the web, complete' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Read web page, complete' })).toBeTruthy()
+    expect(screen.queryByTestId('chat-tool-timeline-3')).toBeNull()
+
+    cleanup()
+    renderChat({ conversationId: 'conversation-b' })
+    expect((await screen.findByRole('list', { name: 'Thinking and tool calls' })).children).toHaveLength(4)
+  })
+
   it('explains a persisted proposal run as one ordered customer timeline', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-b'] = [

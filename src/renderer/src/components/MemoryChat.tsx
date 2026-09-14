@@ -650,7 +650,33 @@ function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
     displayed.push(...pending, message)
     pending = []
   }
-  displayed.push(...pending)
+  if (pending.some((entry) => entry.role === 'assistant') && pending.some((entry) => entry.role === 'tool')) {
+    const tools: ProjectedSyncedTool[] = []
+    const timeline: AssistantTimelineEntry[] = []
+    for (const entry of pending) {
+      if (entry.role === 'assistant' && entry.reasoning?.trim()) {
+        timeline.push({ kind: 'thinking', text: entry.reasoning })
+      } else if (entry.role === 'tool') {
+        timeline.push({ kind: 'tool', toolIndex: tools.length })
+        tools.push({
+          name: entry.toolName || 'Tool result',
+          result: entry.content,
+          status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
+          ...(entry.generationTimeMs === undefined ? {} : { durationMs: entry.generationTimeMs })
+        })
+      }
+    }
+    displayed.push({
+      ...pending[0]!,
+      role: 'assistant',
+      content: '',
+      reasoning: undefined,
+      toolCalls: tools,
+      timeline
+    })
+  } else {
+    displayed.push(...pending)
+  }
   return displayed
 }
 
