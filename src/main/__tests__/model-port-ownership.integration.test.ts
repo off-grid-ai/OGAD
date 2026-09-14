@@ -132,7 +132,7 @@ function listenerPids(): number[] {
         LLAMA_SERVER_PORT
       ).map(Number)
     }
-    return execSync(`"${sysTool('lsof')}" -ti tcp:${String(LLAMA_SERVER_PORT)}`, {
+    return execSync(`"${sysTool('lsof')}" -tiTCP:${String(LLAMA_SERVER_PORT)} -sTCP:LISTEN`, {
       encoding: 'utf-8'
     })
       .trim()
