@@ -161,6 +161,6 @@ export async function transcribeRemoteAudio(
     signal
   }))
   const result = await response.json() as { text?: string; language?: string }
-  if (typeof result.text !== 'string') throw new Error('The remote server returned no transcript.')
-  return { text: result.text, language: result.language }
+  if (typeof result.text !== 'string' || !result.text.trim()) throw new Error('The remote server returned no transcript.')
+  return { text: result.text.trim(), language: result.language }
 }

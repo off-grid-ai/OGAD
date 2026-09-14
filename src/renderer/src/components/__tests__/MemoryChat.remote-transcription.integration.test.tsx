@@ -54,6 +54,7 @@ afterEach(() => {
 describe('<MemoryChat/> with a remote transcription provider', () => {
   it('puts the provider transcript into the message composer', async () => {
     let receivedFile: { model: FormDataEntryValue | null; name: string; size: number } | null = null
+    let transcript = 'Plan the next meeting'
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-transcription-ui-'))
     try {
       const server: Parameters<typeof transcribeRemoteAudio>[0] = {
@@ -71,7 +72,7 @@ describe('<MemoryChat/> with a remote transcription provider', () => {
         return {
           ok: true,
           status: 200,
-          json: async () => ({ text: 'Plan the next meeting', language: 'en' })
+          json: async () => ({ text: transcript, language: 'en' })
         } as Response
       }
       Object.defineProperty(navigator, 'mediaDevices', {
@@ -105,6 +106,12 @@ describe('<MemoryChat/> with a remote transcription provider', () => {
         expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe('Plan the next meeting')
       )
       expect(receivedFile).toEqual({ model: 'listener', name: 'voice.webm', size: 12 })
+
+      transcript = '   '
+      await user.click(await screen.findByRole('button', { name: 'Record voice' }))
+      await user.click(await screen.findByRole('button', { name: 'Stop recording' }))
+      expect((await screen.findByRole('alert')).textContent).toContain('Transcription failed')
+      expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe('Plan the next meeting')
     } finally {
       fs.rmSync(temporary, { recursive: true, force: true })
     }
