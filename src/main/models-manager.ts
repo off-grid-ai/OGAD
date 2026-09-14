@@ -1371,14 +1371,11 @@ export async function clearDownload(
     for (const f of entry?.files ?? []) {
       const part = path.join(dir, `${f.name}.part`)
       try {
-        freedBytes += fs.statSync(part).size
-      } catch {
-        /* none */
-      }
-      try {
+        const bytes = fs.statSync(part).size
         fs.rmSync(part, { force: true })
+        freedBytes += bytes
       } catch {
-        /* ignore */
+        /* no partial file or removal failed */
       }
     }
   } catch {

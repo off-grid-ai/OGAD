@@ -1,7 +1,7 @@
-// Cache cleanup is intentionally restricted to Chromium's explicitly classified
-// cache data. It never receives userData paths, so chats, projects, models, vault,
-// settings, and entitlement files are unreachable by construction.
+// Temporary Storage clears disposable Chromium data and incomplete model transfers.
+// Durable chats, projects, installed models, settings, and Pro data stay untouched.
 import { session } from 'electron'
+import { clearInactiveDownloads } from './models-manager'
 import type { CacheCleanupResultContract } from '../shared/ipc-contracts'
 
 async function measuredCacheSize(): Promise<number | null> {
@@ -19,8 +19,12 @@ export async function clearEphemeralCache(): Promise<CacheCleanupResultContract>
   // localStorage, IndexedDB, downloads, and every app-owned filesystem store.
   await session.defaultSession.clearData({ dataTypes: ['cache'] })
   const after = await measuredCacheSize()
+  const downloads = await clearInactiveDownloads()
+  if (!downloads.success) throw new Error('Incomplete model downloads could not be cleared')
+  const cacheBytes = before == null || after == null ? null : Math.max(0, before - after)
   return {
     success: true,
-    freedBytes: before == null || after == null ? null : Math.max(0, before - after)
+    freedBytes:
+      cacheBytes == null ? downloads.freedBytes || null : cacheBytes + downloads.freedBytes
   }
 }
