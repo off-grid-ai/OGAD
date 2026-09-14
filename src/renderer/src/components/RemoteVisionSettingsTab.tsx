@@ -11,6 +11,7 @@ import {
 } from '../../../shared/remote-vision-server'
 import { providerNeedsScreenDisclosure } from '../../../shared/remote-screen-privacy'
 import { SettingsRow as Row } from './SettingsRow'
+import { SettingsSelect } from './SettingsSelect'
 
 const EMPTY_SETTINGS: RemoteVisionServerSettings = {
   provider: 'local',
@@ -527,21 +528,20 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
               </Row>
             {(['image', 'transcription', 'voice'] as const).map((kind) => (
               <Row key={kind} label={kind === 'image' ? 'Image' : kind === 'voice' ? 'Voice' : 'Transcription'} controlId={`remote-server-${kind}-model`}>
-                <select
+                <SettingsSelect
                   id={`remote-server-${kind}-model`}
+                  label={`${kind} model`}
                   value={form.mediaModels[kind] ?? ''}
-                  onChange={(event) => {
-                    const value = event.target.value
+                  searchable
+                  options={[
+                    { value: '', label: `No ${kind} model` },
+                    ...models.filter((model) => model.kind === kind).map((model) => ({ value: model.id, label: model.name }))
+                  ]}
+                  onValueChange={(value) => {
                     setForm((current) => ({ ...current, mediaModels: { ...current.mediaModels, [kind]: value || undefined } }))
                     setStatus('Not saved.')
                   }}
-                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 focus-visible:border-green-500"
-                >
-                  <option value="">No {kind} model</option>
-                  {models.filter((model) => model.kind === kind).map((model) => (
-                    <option key={model.id} value={model.id}>{model.name}</option>
-                  ))}
-                </select>
+                />
               </Row>
             ))}
           </>
