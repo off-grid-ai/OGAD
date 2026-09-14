@@ -2,6 +2,7 @@
 
 import { createServer, type Server } from 'node:http'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { testRemoteVisionServer } from '../../../../main/vision/remote-vision-server'
 import { RemoteVisionSettingsTab } from '../RemoteVisionSettingsTab'
@@ -57,12 +58,18 @@ describe('remote model discovery from Settings', () => {
     })
 
     expect(await screen.findByText(/7 models found/)).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'picture' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'inferred-picture' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'listener' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'inferred-listener' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'speaker' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'inferred-speaker' })).toBeTruthy()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'image model' }))
+    expect(screen.getByRole('menuitemradio', { name: 'picture' })).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: 'inferred-picture' })).toBeTruthy()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: 'transcription model' }))
+    expect(screen.getByRole('menuitemradio', { name: 'listener' })).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: 'inferred-listener' })).toBeTruthy()
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: 'voice model' }))
+    expect(screen.getByRole('menuitemradio', { name: 'speaker' })).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: 'inferred-speaker' })).toBeTruthy()
   })
 
   it('shows a reachable server’s rejection reason', async () => {
