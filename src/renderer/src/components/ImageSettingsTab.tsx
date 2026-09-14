@@ -47,7 +47,7 @@ export function ImageSettingsTab(): React.JSX.Element {
       window.api.getModelCatalog().catch(() => ({ models: [] }))
     ])
       .then(([status, settings, catalog]) => {
-        const available = status?.models ?? []
+        const available: string[] = status?.models ?? []
         const active = status?.active ?? available[0] ?? ''
         const saved = settings as ImageSettings
         const names = new Map(

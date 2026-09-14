@@ -107,7 +107,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
         if (
           remote &&
           runtimeVoices.length &&
-          runtimeVoices.every(({ id }) => KOKORO_VOICE_CATALOG.some((local) => local.id === id))
+          runtimeVoices.every(({ id }: RuntimeSpeechVoice) =>
+            KOKORO_VOICE_CATALOG.some((local) => local.id === id)
+          )
         ) {
           setVoiceLoadError('The desktop speech service is out of date. Restart the app and retry.')
           throw new Error('Remote model returned local speakers')
