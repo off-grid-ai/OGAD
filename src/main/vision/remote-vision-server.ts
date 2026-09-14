@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { remoteVoiceSelected, setRemoteVoiceSelected } from '../active-models'
 import { modelsDir } from '../runtime-env'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
 import {
@@ -177,6 +178,7 @@ export function getActiveRemoteVisionServer():
 export function getActiveRemoteVisionServerForModality(
   modality: RemoteVisionModality
 ): (StoredRemoteVisionServer & { apiKey: string; selectedModel: string }) | null {
+  if (modality === 'voice' && !remoteVoiceSelected()) return null
   const stored = readStored()
   const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false)
   const selectedModel = active?.mediaModels?.[modality]
@@ -212,6 +214,7 @@ export function activateRemoteVisionMediaModel(
   )
   if (!server) return false
   writeStored({ ...stored, activeServerId: serverId })
+  if (modality === 'voice') setRemoteVoiceSelected(true)
   return true
 }
 
@@ -252,6 +255,7 @@ export function setRemoteVisionServerSettings(
   if (update.clearApiKey) deleteSecret(secretKey(id))
   else if (update.apiKey?.trim()) setSecret(secretKey(id), update.apiKey.trim())
   writeStored({ version: CONFIG_VERSION, activeServerId: id, servers })
+  if (mediaModels.voice) setRemoteVoiceSelected(true)
   return getRemoteVisionServerSettings()
 }
 

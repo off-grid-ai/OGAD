@@ -24,11 +24,11 @@ export class ActiveModalityStore {
     }
   }
 
-  get(kind: Modality): string | null {
+  get(kind: Modality | 'remote_voice'): string | null {
     return this.readAll()[kind] ?? null
   }
 
-  set(kind: Modality, id: string | null): void {
+  set(kind: Modality | 'remote_voice', id: string | null): void {
     const cur = this.readAll()
     cur[kind] = id
     try {
@@ -75,4 +75,13 @@ export function setActiveModal(
 
 export function getAllActiveModals(): Record<Modality, string | null> {
   return activeModalStore.all()
+}
+
+/** An unset value keeps the remote choice active for profiles saved before this setting existed. */
+export function remoteVoiceSelected(): boolean {
+  return activeModalStore.get('remote_voice') !== 'false'
+}
+
+export function setRemoteVoiceSelected(selected: boolean): void {
+  activeModalStore.set('remote_voice', selected ? 'true' : 'false')
 }

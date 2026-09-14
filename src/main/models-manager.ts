@@ -14,7 +14,13 @@ import {
   modelDownloadQueue,
   shutdownModelDownloads
 } from './models/download-queue'
-import { getAllActiveModals, setActiveModal as setModal, type Modality } from './active-models'
+import {
+  getAllActiveModals,
+  remoteVoiceSelected,
+  setActiveModal as setModal,
+  setRemoteVoiceSelected,
+  type Modality
+} from './active-models'
 import {
   recordDownloaded,
   removeDownloaded,
@@ -881,6 +887,7 @@ export async function setActiveModalChoice(
       }
     }
     setModal(modal, stored)
+    if (modal === 'speech') setRemoteVoiceSelected(false)
     return { success: true }
   }
   return { success: false, error: 'use setActiveModel for the chat LLM (text/vision)' }
@@ -897,7 +904,7 @@ export function getActiveModalities(): { text: string | null } & Record<Modality
     text: remoteId('text') ?? getActiveModel(),
     ...getAllActiveModals(),
     image: remoteId('image') ?? getAllActiveModals().image,
-    speech: remoteId('voice') ?? getAllActiveModals().speech,
+    speech: (remoteVoiceSelected() ? remoteId('voice') : null) ?? getAllActiveModals().speech,
     transcription: remoteId('transcription') ?? getAllActiveModals().transcription
   }
 }
