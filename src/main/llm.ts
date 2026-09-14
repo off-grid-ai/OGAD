@@ -354,14 +354,17 @@ export class LLMService {
    *  `userExplicit` pin-set (which fields the user set granularly), so a plain restart
    *  restores the pins and a mode preset can't reclobber an explicit KV/ctx choice. */
   private persist(): void {
+    fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
+    const temporaryFile = `${this.settingsFile}.tmp-${process.pid}`
     try {
-      fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
       fs.writeFileSync(
-        this.settingsFile,
+        temporaryFile,
         JSON.stringify({ ...this.getSettings(), userExplicit: [...this.userExplicit] })
       )
-    } catch {
-      /* ignore */
+      fs.renameSync(temporaryFile, this.settingsFile)
+    } catch (error) {
+      try { fs.rmSync(temporaryFile, { force: true }) } catch { /* keep the original error */ }
+      throw error
     }
   }
 
@@ -382,7 +385,9 @@ export class LLMService {
   /** Update inference settings; respawns the server if any launch-time arg changed
    *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
   async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
-    const before = options.emitSync === false ? undefined : this.getSettings()
+    const priorSettings = this.getSettings()
+    const priorExplicit = new Set(this.userExplicit)
+    const before = options.emitSync === false ? undefined : priorSettings
     // Granular launch-time fields the user sets in THIS patch become pinned: a mode
     // preset (now or on a future restart / mode re-pick) must NOT clobber them. Pin
     // BEFORE applying the preset so an explicit q8_0 in the same patch survives.
@@ -443,7 +448,29 @@ export class LLMService {
     if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
-    this.persist()
+    try {
+      this.persist()
+    } catch (error) {
+      this.performanceMode = priorSettings.performanceMode ?? this.performanceMode
+      this.temperature = priorSettings.temperature ?? this.temperature
+      this.ctxSize = priorSettings.ctxSize ?? this.ctxSize
+      this.topP = priorSettings.topP ?? this.topP
+      this.topK = priorSettings.topK ?? this.topK
+      this.minP = priorSettings.minP ?? this.minP
+      this.repeatPenalty = priorSettings.repeatPenalty ?? this.repeatPenalty
+      this.maxTokens = priorSettings.maxTokens ?? this.maxTokens
+      this.maxToolCalls = priorSettings.maxToolCalls ?? this.maxToolCalls
+      this.reasoningBudget = priorSettings.reasoningBudget ?? this.reasoningBudget
+      this.systemPrompt = priorSettings.systemPrompt ?? this.systemPrompt
+      this.kvCacheType = priorSettings.kvCacheType ?? this.kvCacheType
+      this.flashAttn = priorSettings.flashAttn ?? this.flashAttn
+      this.gpuLayers = priorSettings.gpuLayers ?? this.gpuLayers
+      this.threads = priorSettings.threads ?? this.threads
+      this.batchSize = priorSettings.batchSize ?? this.batchSize
+      this.userExplicit.clear()
+      priorExplicit.forEach(field => this.userExplicit.add(field))
+      throw error
+    }
     if (before) {
       emitChangedLlmSettings(
         before as Record<string, unknown>,

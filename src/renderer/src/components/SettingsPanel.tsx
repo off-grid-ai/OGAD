@@ -331,7 +331,7 @@ export function SettingsPanel({
             onClick={() => setTab(t)}
             className={`shrink-0 rounded-md px-3 py-1 text-xs capitalize transition-colors ${tab === t ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
           >
-            {t}
+            {t === 'model' ? 'Text' : t}
           </button>
         ))}
       </div>

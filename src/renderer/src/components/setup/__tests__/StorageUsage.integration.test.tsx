@@ -151,22 +151,22 @@ describe('rendered storage usage', () => {
     expect(api.cancelModelDownload).toHaveBeenCalledWith('model-queued-2')
   })
 
-  it('clears only temporary cache and explains which durable stores remain (#134)', async () => {
+  it('clears temporary storage and explains which durable stores remain (#134)', async () => {
     const user = userEvent.setup()
     render(<StoragePanel />)
 
-    expect(await screen.findByText('Temporary app cache')).toBeTruthy()
+    expect(await screen.findByText('Temporary Storage')).toBeTruthy()
     expect(
       screen.getByText(
-        'Safe to clear. Chats, projects, models, vault, settings, and Pro access stay.'
+        'Clears app cache and incomplete model downloads. Installed models and your data stay.'
       )
     ).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: 'Clear cache' }))
+    await user.click(screen.getByRole('button', { name: 'Clear storage' }))
 
     expect(api.clearAppCache).toHaveBeenCalledTimes(1)
     expect((await screen.findByRole('status')).textContent).toBe(
-      'Temporary cache cleared. 3 MB reclaimed. Your data and models were kept.'
+      'Temporary storage cleared. 3 MB reclaimed. Your data and models were kept.'
     )
   })
 
@@ -175,10 +175,10 @@ describe('rendered storage usage', () => {
     const user = userEvent.setup()
     render(<StoragePanel />)
 
-    await user.click(await screen.findByRole('button', { name: 'Clear cache' }))
+    await user.click(await screen.findByRole('button', { name: 'Clear storage' }))
 
     expect((await screen.findByRole('status')).textContent).toBe(
-      'Cache could not be cleared. Your data and models were not changed.'
+      'Temporary storage could not be fully cleared. Installed models were kept.'
     )
   })
 
@@ -187,10 +187,10 @@ describe('rendered storage usage', () => {
     const user = userEvent.setup()
     render(<StoragePanel />)
 
-    await user.click(await screen.findByRole('button', { name: 'Clear cache' }))
+    await user.click(await screen.findByRole('button', { name: 'Clear storage' }))
 
     expect((await screen.findByRole('status')).textContent).toBe(
-      'Temporary cache cleared. Your data and models were kept.'
+      'Temporary storage cleared. Your data and models were kept.'
     )
   })
 })

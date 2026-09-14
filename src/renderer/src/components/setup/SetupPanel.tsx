@@ -89,6 +89,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [mode, setMode] = useState<Mode>('balanced')
+  const [savingMode, setSavingMode] = useState(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const firedConfigured = useRef(false)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
@@ -136,12 +137,18 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
     return () => off?.()
   }, [api, onConfigured])
 
-  const pickMode = (m: Mode): void => {
-    setMode(m)
-    api
-      .setLlmSettings({ performanceMode: m })
-      .catch((error: unknown) => reportSetupFailure('resource-mode persistence', error))
-    loadPlan(m).catch((error: unknown) => reportSetupFailure('resource-plan loading', error))
+  const pickMode = async (m: Mode): Promise<void> => {
+    if (savingMode || m === mode) return
+    setSavingMode(true)
+    try {
+      await api.setLlmSettings({ performanceMode: m })
+      setMode(m)
+      await loadPlan(m)
+    } catch (error) {
+      reportSetupFailure('resource-mode persistence', error)
+    } finally {
+      setSavingMode(false)
+    }
   }
 
   const configure = async (): Promise<void> => {
@@ -230,7 +237,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
             {MODES.map((m) => (
               <button
                 key={m.id}
-                onClick={() => pickMode(m.id)}
+                onClick={() => { void pickMode(m.id) }}
+                disabled={savingMode}
                 aria-pressed={mode === m.id}
                 className={cn(
                   'flex-1 px-2 py-1.5 text-xs transition-colors',

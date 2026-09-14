@@ -52,6 +52,7 @@ export function HealthPanel(): React.ReactElement {
   const [restarting, setRestarting] = useState<string | null>(null)
   const [freeing, setFreeing] = useState(false)
   const [freeMsg, setFreeMsg] = useState<string | null>(null)
+  const [restartError, setRestartError] = useState<string | null>(null)
   const activeRefresh = useRef<Promise<void> | null>(null)
 
   const refresh = useCallback((): Promise<void> => {
@@ -86,9 +87,13 @@ export function HealthPanel(): React.ReactElement {
 
   const restart = async (id: string): Promise<void> => {
     setRestarting(id)
+    setRestartError(null)
     try {
-      await api.restartComponent(id)
+      const result = await api.restartComponent(id)
+      if (!result.success) setRestartError(result.error || 'Could not restart the component.')
       await refresh()
+    } catch (error) {
+      setRestartError(error instanceof Error ? error.message : 'Could not restart the component.')
     } finally {
       setRestarting(null)
     }
@@ -176,6 +181,12 @@ export function HealthPanel(): React.ReactElement {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {restartError && (
+        <div role="alert" className="border-t border-neutral-800/60 px-4 py-2 text-[10px] text-neutral-300">
+          {restartError}
         </div>
       )}
 

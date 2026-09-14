@@ -75,11 +75,14 @@ export default defineConfig({
         // / driver / loop / guard / parser all have their own suites). This
         // suite only LOADS them through use-runtime's import graph and never
         // exercises them, so with all:false they land here at ~0% and the
-        // merge - which sums denominators per report - drags the branch/
-        // function ratio for code another report already covers well. One
-        // report owns each file: the unit report owns these.
+        // merge can drag the branch/function ratio for code another report
+        // already covers well. The remote server store is an exception: its
+        // discovery and SQLite settings journeys need both reports.
         'src/main/browser/**',
-        'src/main/vision/**',
+        // The rendered Settings journey uses the real remote-server store and SQLite.
+        // Other vision rails stay owned by the default suite.
+        'src/main/vision/!(remote-vision-server).ts',
+        'src/main/vision/model-adapters/**',
         // Renderer surface (.ts + .tsx) is rendered-behaviour owned by the e2e tour +
         // targeted render tests, never by this Node SQLite journey. V8 reports transitive
         // imports even when they do not match `include`, so exclude the whole renderer +

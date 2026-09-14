@@ -17,6 +17,8 @@ import { modelsByKind } from '@offgrid/models'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import type { ManagedRuntime } from '../runtime-manager'
 import { getSetting } from '../database'
+import { getActiveRemoteVisionServerForModality } from '../vision/remote-vision-server'
+import { transcribeRemoteAudio } from '../remote-media-runtime'
 // The pure engine classifiers live in a LEAF module (classify.ts) so the CLIs can import
 // them without forming a load-time cycle back through select (which reads the CLI
 // singletons at module scope). Re-exported here so existing importers/tests keep working.
@@ -123,6 +125,18 @@ export type TranscriptionSettingReader = (key: string, fallback: string) => stri
 export function getActiveTranscription(
   readSetting: TranscriptionSettingReader = getSetting
 ): TranscriptionService {
+  const remote = getActiveRemoteVisionServerForModality('transcription')
+  if (remote) {
+    return {
+      isAvailable: () => true,
+      transcribe: (input, options) => transcribeRemoteAudio(
+        remote,
+        input.path,
+        options?.language ?? readSetting('sttLanguage', 'auto'),
+        options?.signal
+      )
+    }
+  }
   const active = getActiveModal('transcription')
   const engine = engineForActiveModel(active, modelsByKind('transcription'))
   const language = resolveConfiguredTranscriptionLanguage(

@@ -9,12 +9,23 @@ export const REMOTE_VISION_PROVIDERS = [
 
 export type RemoteVisionProvider = (typeof REMOTE_VISION_PROVIDERS)[number]
 
+export type RemoteVisionModality = 'text' | 'image' | 'transcription' | 'voice'
+export type RemoteVisionSelections = Partial<Record<RemoteVisionModality, string>>
+export interface RemoteVisionCatalogModel {
+  id: string
+  name: string
+  kind: RemoteVisionModality
+}
+
 export interface RemoteVisionSavedServer {
   id: string
   name: string
   provider: Exclude<RemoteVisionProvider, 'local'>
   endpoint: string
   model: string
+  enabled?: boolean
+  mediaModels?: RemoteVisionSelections
+  modelCatalog?: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   /** The user has confirmed that this remote server can receive screen images. */
   screenFramesAllowed: boolean
@@ -28,7 +39,7 @@ export interface RemoteVisionModelReference {
 export interface RemoteVisionInventoryModel {
   id: string
   name: string
-  kind: 'vision'
+  kind: 'vision' | 'image' | 'transcription' | 'speech'
   org: string
   description: string
   files: []
@@ -62,23 +73,33 @@ export function parseRemoteVisionModelId(value: string): RemoteVisionModelRefere
 export function remoteVisionInventoryModels(
   servers: RemoteVisionSavedServer[]
 ): RemoteVisionInventoryModel[] {
-  return servers.map((server) => ({
-    id: remoteVisionModelId(server.id, server.model),
-    name: server.model,
-    kind: 'vision',
-    org: server.name,
-    description: `Runs through ${server.name}.`,
-    files: [],
-    tags: ['Remote'],
-    remoteServerId: server.id,
-    remoteModelId: server.model
-  }))
+  return servers.flatMap((server) => {
+    if (server.enabled === false) return []
+    const selections: RemoteVisionSelections = server.mediaModels ?? { text: server.model }
+    return (['text', 'image', 'transcription', 'voice'] as const).flatMap((modality) => {
+      const modelId = selections[modality]
+      if (!modelId) return []
+      return [{
+        id: remoteVisionModelId(server.id, modelId),
+        name: server.modelCatalog?.find((model) => model.id === modelId && model.kind === modality)?.name ?? modelId,
+        kind: modality === 'text' ? 'vision' as const : modality === 'voice' ? 'speech' as const : modality,
+        org: server.name,
+        description: `Runs through ${server.name}.`,
+        files: [] as [],
+        tags: ['Remote'] as ['Remote'],
+        remoteServerId: server.id,
+        remoteModelId: modelId
+      }]
+    })
+  })
 }
 
 export interface RemoteVisionServerSettings {
   provider: RemoteVisionProvider
   endpoint: string
   model: string
+  mediaModels?: RemoteVisionSelections
+  modelCatalog?: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   activeServerId: string | null
   servers: RemoteVisionSavedServer[]
@@ -88,6 +109,8 @@ export interface RemoteVisionServerUpdate {
   provider: RemoteVisionProvider
   endpoint: string
   model: string
+  mediaModels?: RemoteVisionSelections
+  modelCatalog?: RemoteVisionCatalogModel[]
   serverId?: string
   name?: string
   apiKey?: string
@@ -99,7 +122,7 @@ export interface RemoteVisionConnectionResult {
   ok: boolean
   latencyMs: number
   error?: string
-  models?: Array<{ id: string; name: string }>
+  models?: RemoteVisionCatalogModel[]
 }
 
 export const REMOTE_VISION_DEFAULTS: Record<

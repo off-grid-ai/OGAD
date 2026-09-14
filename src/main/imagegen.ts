@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import { randomUUID } from 'node:crypto'
 import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
@@ -29,6 +30,9 @@ import {
   MFLUX_MODELS
 } from './mflux'
 import { getActiveModal } from './active-models'
+import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
+import { generateRemoteImage } from './remote-media-runtime'
+import { remoteVisionModelId } from '../shared/remote-vision-server'
 import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
@@ -127,7 +131,7 @@ export function listGeneratedImages(scope?: GeneratedImageScope): {
   try {
     let all = fs
       .readdirSync(dir)
-      .filter((f) => /\.png$/i.test(f) && !f.startsWith('preview-'))
+      .filter((f) => /\.(?:png|jpe?g|webp)$/i.test(f) && !f.startsWith('preview-'))
       .flatMap((f) => {
         const ownedImage = resolveExistingOwnedEntry(dir, f)
         if (!ownedImage) return []
@@ -160,7 +164,7 @@ export function deleteGeneratedImage(p: string): boolean {
   try {
     const dir = path.join(dataDir(), 'generated-images')
     const ownedImage = resolveExistingOwnedPath(dir, p)
-    if (!ownedImage || !/\.png$/i.test(ownedImage)) return false
+    if (!ownedImage || !/\.(?:png|jpe?g|webp)$/i.test(ownedImage)) return false
     fs.unlinkSync(ownedImage)
     fs.rmSync(generatedImageSidecarPath(ownedImage), { force: true })
     return true
@@ -334,6 +338,8 @@ function ggufIsFullCheckpoint(p: string): boolean {
 /** The image model an incoming request would actually load (active pick, else the
  *  resolver's default), as a bare filename — or null if none installed. */
 export function activeImageModel(): string | null {
+  const remote = getActiveRemoteVisionServerForModality('image')
+  if (remote) return remoteVisionModelId(remote.id, remote.selectedModel)
   const m = resolveModel()
   return m ? path.basename(m) : null
 }
@@ -376,6 +382,11 @@ export function imageGenStatus(): {
   active: string | null
   reason?: string
 } {
+  const remote = getActiveRemoteVisionServerForModality('image')
+  if (remote) {
+    const id = remoteVisionModelId(remote.id, remote.selectedModel)
+    return { available: true, models: [id], active: id }
+  }
   const models = listImageModels()
   // The model an incoming request would actually load (the user's active pick,
   // else the resolver default) — so the composer can default its picker to it and
@@ -422,7 +433,7 @@ export interface GeneratedImageScope {
 export function saveGeneratedImageScope(imagePath: string, facts: GeneratedImageSidecar): void {
   const dir = path.join(dataDir(), 'generated-images')
   const ownedImage = resolveExistingOwnedPath(dir, imagePath)
-  if (!ownedImage || !/\.png$/i.test(ownedImage)) {
+  if (!ownedImage || !/\.(?:png|jpe?g|webp)$/i.test(ownedImage)) {
     throw new Error('Generated image is outside the app image library.')
   }
 
@@ -475,7 +486,7 @@ export function preserveGeneratedImageSource(syncId: string, sourcePath: string)
 export async function exportGeneratedImage(imagePath: string, destination: string): Promise<void> {
   const dir = path.join(dataDir(), 'generated-images')
   const ownedImage = resolveExistingOwnedPath(dir, imagePath)
-  if (!ownedImage || !/\.png$/i.test(ownedImage)) {
+  if (!ownedImage || !/\.(?:png|jpe?g|webp)$/i.test(ownedImage)) {
     throw new Error('Generated image is outside the app image library.')
   }
 
@@ -492,10 +503,15 @@ export async function exportGeneratedImage(imagePath: string, destination: strin
 }
 
 let currentChild: ChildProcess | null = null
+let remoteAbort: AbortController | null = null
 const generationLifecycle = new ImageGenerationLifecycle()
 
 /** Kill an in-progress generation. Returns true if one was running. */
 export function cancelImageGen(): boolean {
+  if (remoteAbort) {
+    remoteAbort.abort()
+    return true
+  }
   cancelMflux() // no-op if mflux isn't the active runtime
   void sdServer.cancelCurrent() // cancels the in-flight job on the resident server (no-op if idle)
   if (!generationLifecycle.cancel()) return false
@@ -524,6 +540,31 @@ export async function generateImage(
   // image job below evicts the LLM, so the text pass must precede it. Gated by a
   // setting; failure/timeout silently keeps the original prompt.
   const enhanced = await maybeEnhancePrompt(params.prompt, onUpdate)
+  const remote = getActiveRemoteVisionServerForModality('image')
+  const remoteId = remote ? remoteVisionModelId(remote.id, remote.selectedModel) : null
+  if (remote && (!params.model || params.model === remote.selectedModel || params.model === remoteId)) {
+    if (remoteAbort) throw new Error('An image is already generating — please wait for it to finish.')
+    const controller = new AbortController()
+    remoteAbort = controller
+    onUpdate?.({ stage: 'preparing', enhancedPrompt: enhanced })
+    try {
+      const result = await generateRemoteImage(remote, enhanced, params.width, params.height, params.allowUnsafeMemoryOverride === true, controller.signal)
+      const extension = result.mime === 'image/jpeg' ? 'jpg' : result.mime === 'image/webp' ? 'webp' : 'png'
+      const directory = path.join(dataDir(), 'generated-images')
+      await fs.promises.mkdir(directory, { recursive: true })
+      const outputPath = path.join(directory, `remote-${Date.now()}-${randomUUID()}.${extension}`)
+      await fs.promises.writeFile(outputPath, result.bytes)
+      return {
+        dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}`,
+        path: outputPath,
+        seed: params.seed ?? -1,
+        model: remoteId!,
+        prompt: enhanced
+      }
+    } finally {
+      remoteAbort = null
+    }
+  }
   const selectedModel = params.model ?? activeImageModel()
   const modelParameters = selectedModel
     ? resolveImageParameters(
