@@ -30,6 +30,40 @@ afterEach(() => {
 })
 
 describe('<VoiceBubble/> with a remote voice provider', () => {
+  it('lets the provider choose its voice when no remote speaker is selected', async () => {
+    let requestBody: Record<string, unknown> | null = null
+    const provider = createServer(async (request, response) => {
+      const chunks: Buffer[] = []
+      for await (const chunk of request) chunks.push(Buffer.from(chunk))
+      requestBody = JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>
+      response.writeHead(200, { 'Content-Type': 'audio/mpeg' })
+      response.end(Buffer.from('synthetic speech bytes'))
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = provider.address()
+      if (!address || typeof address === 'string') throw new Error('Test provider has no port')
+      const server: Parameters<typeof synthesizeRemoteVoice>[0] = {
+        id: 'voice-server', name: 'Voice provider', provider: 'custom',
+        endpoint: `http://127.0.0.1:${address.port}/v1`, model: '', enabled: true,
+        mediaModels: { voice: 'voice-maker' }, modelCatalog: [],
+        screenFramesAllowed: false, apiKey: '', selectedModel: 'voice-maker'
+      }
+      globalThis.Audio = AudioOutput as unknown as typeof Audio
+      render(<VoiceBubble
+        messageId="reply"
+        transcript="Hello from the model"
+        readVoice={async () => undefined}
+        synthesize={(text, voice) => synthesizeRemoteVoice(server, text, voice)}
+      />)
+      await userEvent.setup().click(screen.getByTitle('Play'))
+      await waitFor(() => expect(screen.getByTitle('Pause')).toBeTruthy())
+      expect(requestBody).toEqual({ model: 'voice-maker', input: 'Hello from the model' })
+    } finally {
+      await new Promise<void>((resolve) => provider.close(() => resolve()))
+    }
+  })
+
   it('plays speech returned by the selected provider voice', async () => {
     let spokenText = ''
     const provider = createServer(async (request, response) => {

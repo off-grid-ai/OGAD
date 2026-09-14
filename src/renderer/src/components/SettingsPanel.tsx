@@ -112,7 +112,7 @@ type Connector = {
 }
 
 type TranscriptionInfo = {
-  engine: 'whisper' | 'parakeet' | 'whisper-resident'
+  engine: 'whisper' | 'parakeet' | 'whisper-resident' | 'remote'
   modelId: string | null
   label: string
   language: string

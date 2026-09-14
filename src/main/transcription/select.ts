@@ -18,6 +18,7 @@ import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import type { ManagedRuntime } from '../runtime-manager'
 import { getSetting } from '../database'
 import { getActiveRemoteVisionServerForModality } from '../vision/remote-vision-server'
+import { remoteVisionModelId } from '../../shared/remote-vision-server'
 import { transcribeRemoteAudio } from '../remote-media-runtime'
 // The pure engine classifiers live in a LEAF module (classify.ts) so the CLIs can import
 // them without forming a load-time cycle back through select (which reads the CLI
@@ -179,7 +180,7 @@ export function transcriptionActiveInfo(
   options: ReturnType<typeof transcriptionModelOptions>
 } {
   const activeEntry = installed.find((entry) => transcriptionEntryMatches(entry, info.modelId))
-  const languages = transcriptionLanguages(info.engine, activeEntry?.familyId ?? info.modelId)
+  const languages = transcriptionLanguages(info.engine === 'remote' ? 'whisper' : info.engine, activeEntry?.familyId ?? info.modelId)
   return {
     ...info,
     language: resolveConfiguredTranscriptionLanguage(configuredLanguage, languages),
@@ -197,7 +198,7 @@ export function effectiveEngine(engine: TranscriptionEngine): TranscriptionEngin
 
 export interface ActiveTranscriptionInfo {
   /** The engine that actually runs (after the whisper fallback). */
-  engine: TranscriptionEngine
+  engine: TranscriptionEngine | 'remote'
   /** The active transcription model id/filename, or null when none is explicitly selected. */
   modelId: string | null
   /** Human-readable provenance, e.g. "Whisper · Whisper Medium". */
@@ -229,6 +230,12 @@ export function transcriptionProvenance(
 /** Live provenance: the engine that would actually run for the active model, plus a display
  *  label. Read from the same active-model source of truth the transcription path uses. */
 export function getActiveTranscriptionInfo(): ActiveTranscriptionInfo {
+  const remote = getActiveRemoteVisionServerForModality('transcription')
+  if (remote) return {
+    engine: 'remote',
+    modelId: remoteVisionModelId(remote.id, remote.selectedModel),
+    label: `Remote · ${remote.selectedModel}`
+  }
   const active = getActiveModal('transcription')
   const entries = modelsByKind('transcription')
   const engine = effectiveEngine(engineForActiveModel(active, entries))

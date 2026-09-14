@@ -45,8 +45,10 @@ export function setupTtsIpc(): void {
 
   ipcMain.handle('tts:speak', async (event, text: string, voice?: string) => {
     const { synthesize } = await import('./tts')
-    let chosenVoice = voice
-    if (!chosenVoice) {
+    const { getActiveRemoteVisionServerForModality } = await import('./vision/remote-vision-server')
+    const remote = getActiveRemoteVisionServerForModality('voice')
+    let chosenVoice = remote ? undefined : voice
+    if (!chosenVoice && !remote) {
       try {
         chosenVoice = getSetting<string>('ttsVoice', '') || undefined
       } catch {

@@ -87,7 +87,7 @@ export async function synthesizeRemoteVoice(server: RemoteServer, text: string, 
   const response = await checked(await fetch(`${server.endpoint}/audio/speech`, {
     method: 'POST',
     headers: headers(server, 'application/json'),
-    body: JSON.stringify({ model: server.selectedModel, input: text, voice: voice || 'alloy' })
+    body: JSON.stringify({ model: server.selectedModel, input: text, ...(voice ? { voice } : {}) })
   }))
   const mime = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg'
   return { dataUrl: `data:${mime};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}` }

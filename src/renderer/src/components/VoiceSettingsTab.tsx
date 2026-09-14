@@ -72,6 +72,7 @@ function PreferenceButtons<T extends string | number>({
 
 export function VoiceSettingsTab(): React.JSX.Element {
   const [voices, setVoices] = useState<RuntimeSpeechVoice[]>([])
+  const [remoteVoice, setRemoteVoice] = useState(false)
   const [voice, setVoice] = useState('af_heart')
   const [language, setLanguage] = useState('en-US')
   const [assetsState, setAssetsState] = useState<AssetsState>('loading')
@@ -85,9 +86,20 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const loadVoices = useCallback((): void => {
     setAssetsState('loading')
     setProgress({ percentage: 0 })
-    void window.api
-      .ttsVoices()
-      .then((runtimeVoices: RuntimeSpeechVoice[]) => {
+    const modelApi = window.api as Partial<Pick<typeof window.api, 'getActiveModalities'>>
+    void Promise.resolve(modelApi.getActiveModalities?.())
+      .then((active) => {
+        if (active?.speech?.startsWith('remote-vision:')) {
+          setRemoteVoice(true)
+          setVoices([])
+          setAssetsState('ready')
+          return null
+        }
+        setRemoteVoice(false)
+        return window.api.ttsVoices()
+      })
+      .then((runtimeVoices: RuntimeSpeechVoice[] | null) => {
+        if (runtimeVoices === null) return
         if (!runtimeVoices.length) throw new Error('No voices available')
         setVoices(runtimeVoices)
       })
@@ -122,7 +134,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }, [loadVoices])
 
   useEffect(() => {
-    if (!settingsLoaded || !voices.some(({ id }) => id === voice)) return
+    if (remoteVoice || !settingsLoaded || !voices.some(({ id }) => id === voice)) return
     requestedVoiceRef.current = voice
     setAssetsState('checking')
     setProgress({ percentage: 0 })
@@ -137,7 +149,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
       .catch(() => {
         if (requestedVoiceRef.current === voice) setAssetsState('error')
       })
-  }, [settingsLoaded, voice, voices])
+  }, [remoteVoice, settingsLoaded, voice, voices])
 
   useEffect(() => {
     if (assetsState !== 'ready' || !voices.length || voices.some(({ id }) => id === voice)) return
@@ -200,7 +212,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const testVoice = async (): Promise<void> => {
     setTestState('generating')
     try {
-      const result = await window.api.speak('This is the Off Grid AI voice.', voice)
+      const result = await window.api.speak('This is the Off Grid AI voice.', remoteVoice ? undefined : voice)
       if (!result?.dataUrl) throw new Error('No audio returned')
       const audio = new Audio(result.dataUrl)
       testAudioRef.current = audio
@@ -292,7 +304,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
         </SettingsRow>
       ) : null}
 
-      <SettingsRow
+      {!remoteVoice && <SettingsRow
         label="Language"
         controlId="tts-language"
         hint="Choose the language for spoken replies. Audio files download once on first use."
@@ -308,7 +320,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
             label: item.label
           }))}
         />
-      </SettingsRow>
+      </SettingsRow>}
 
       {assetsState === 'loading' || assetsState === 'checking' ? (
         <div
@@ -349,13 +361,17 @@ export function VoiceSettingsTab(): React.JSX.Element {
             Retry
           </button>
         </div>
+      ) : remoteVoice ? (
+        <p role="status" className="mb-4 text-xs text-neutral-500">
+          Speaker choices are not available for this remote model.
+        </p>
       ) : (
         <p role="status" className="mb-4 text-xs text-neutral-500">
           {runtimeVoiceLanguage({ id: voice })?.label ?? language} voice ready.
         </p>
       )}
 
-      <SettingsRow
+      {!remoteVoice && <SettingsRow
         label="Voice"
         controlId="tts-voice"
         hint="Voices available for the selected language."
@@ -371,7 +387,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
             label: label ?? kokoroVoiceLabel(id)
           }))}
         />
-      </SettingsRow>
+      </SettingsRow>}
 
       <SettingsRow
         label="Playback speed"

@@ -677,7 +677,7 @@ const offGridApi = {
   // Provenance + picker options: which STT engine + model would run right now, and the installed
   // transcription models a picker can switch to (switch via setActiveModalModel('transcription')).
   getTranscriptionInfo: (): Promise<{
-    engine: 'whisper' | 'parakeet' | 'whisper-resident'
+    engine: 'whisper' | 'parakeet' | 'whisper-resident' | 'remote'
     modelId: string | null
     label: string
     language: string
