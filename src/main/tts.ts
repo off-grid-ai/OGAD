@@ -14,7 +14,7 @@ import os from 'os'
 import path from 'path'
 import { getActiveModal } from './active-models'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
-import { synthesizeRemoteVoice } from './remote-media-runtime'
+import { listRemoteVoices, synthesizeRemoteVoice } from './remote-media-runtime'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
 import type { ManagedRuntime } from './runtime-manager'
@@ -69,6 +69,8 @@ export const ttsRuntime: ManagedRuntime = {
 export async function listVoiceCatalog(
   onProgress?: (progress: number) => void
 ): Promise<RuntimeSpeechVoice[]> {
+  const remote = getActiveRemoteVisionServerForModality('voice')
+  if (remote) return remote.provider === 'openrouter' ? listRemoteVoices(remote) : []
   const voices = speechCapabilities.voices.map(({ id, language }) => ({
     id,
     label: kokoroVoiceLabel(id),
@@ -98,7 +100,13 @@ export async function synthesize(
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<{ dataUrl: string }> {
   const remote = getActiveRemoteVisionServerForModality('voice')
-  if (remote) return synthesizeRemoteVoice(remote, text, voice)
+  if (remote) {
+    if (remote.provider !== 'openrouter') return synthesizeRemoteVoice(remote, text, voice)
+    const voices = await listRemoteVoices(remote)
+    const chosenVoice = voices.find((candidate) => candidate.id === voice)?.id ?? voices[0]?.id
+    if (!chosenVoice) throw new Error('This remote model has no available speakers.')
+    return synthesizeRemoteVoice(remote, text, chosenVoice)
+  }
   const selected = getActiveModal('speech')
   const requestedVoice = chooseVoice(voice, selected) || DEFAULT_VOICE
   // Older releases persisted Kokoro voices that the ExecuTorch catalogue does not contain.

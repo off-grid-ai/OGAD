@@ -89,19 +89,14 @@ export function VoiceSettingsTab(): React.JSX.Element {
     const modelApi = window.api as Partial<Pick<typeof window.api, 'getActiveModalities'>>
     void Promise.resolve(modelApi.getActiveModalities?.())
       .then((active) => {
-        if (active?.speech?.startsWith('remote-vision:')) {
-          setRemoteVoice(true)
-          setVoices([])
-          setAssetsState('ready')
-          return null
-        }
-        setRemoteVoice(false)
-        return window.api.ttsVoices()
+        const remote = active?.speech?.startsWith('remote-vision:') ?? false
+        setRemoteVoice(remote)
+        return window.api.ttsVoices().then((runtimeVoices) => ({ remote, runtimeVoices }))
       })
-      .then((runtimeVoices: RuntimeSpeechVoice[] | null) => {
-        if (runtimeVoices === null) return
-        if (!runtimeVoices.length) throw new Error('No voices available')
+      .then(({ remote, runtimeVoices }) => {
+        if (!runtimeVoices.length && !remote) throw new Error('No voices available')
         setVoices(runtimeVoices)
+        if (remote) setAssetsState('ready')
       })
       .catch(() => setAssetsState('error'))
   }, [])
@@ -152,13 +147,13 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }, [remoteVoice, settingsLoaded, voice, voices])
 
   useEffect(() => {
-    if (assetsState !== 'ready' || !voices.length || voices.some(({ id }) => id === voice)) return
+    if (!settingsLoaded || assetsState !== 'ready' || !voices.length || voices.some(({ id }) => id === voice)) return
     const fallback = firstRuntimeVoiceForLanguage(voices, language) ?? voices[0]
     if (!fallback) return
     setVoice(fallback.id)
     setLanguage(runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
     void Promise.resolve(window.api.saveSetting('ttsVoice', fallback.id)).catch(() => {})
-  }, [assetsState, language, voice, voices])
+  }, [assetsState, language, settingsLoaded, voice, voices])
 
   useEffect(() => {
     const updatePreferences = (event: Event): void => {
@@ -212,7 +207,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const testVoice = async (): Promise<void> => {
     setTestState('generating')
     try {
-      const result = await window.api.speak('This is the Off Grid AI voice.', remoteVoice ? undefined : voice)
+      const result = await window.api.speak('This is the Off Grid AI voice.', voices.length ? voice : undefined)
       if (!result?.dataUrl) throw new Error('No audio returned')
       const audio = new Audio(result.dataUrl)
       testAudioRef.current = audio
@@ -361,7 +356,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
             Retry
           </button>
         </div>
-      ) : remoteVoice ? (
+      ) : remoteVoice && !voices.length ? (
         <p role="status" className="mb-4 text-xs text-neutral-500">
           Speaker choices are not available for this remote model.
         </p>
@@ -371,7 +366,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
         </p>
       )}
 
-      {!remoteVoice && <SettingsRow
+      {(!remoteVoice || voices.length > 0) && <SettingsRow
         label="Voice"
         controlId="tts-voice"
         hint="Voices available for the selected language."
@@ -382,7 +377,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
           value={voice}
           onValueChange={pickVoice}
           disabled={assetsState !== 'ready'}
-          options={filteredVoices.map(({ id, label }) => ({
+          options={(remoteVoice ? voices : filteredVoices).map(({ id, label }) => ({
             value: id,
             label: label ?? kokoroVoiceLabel(id)
           }))}
