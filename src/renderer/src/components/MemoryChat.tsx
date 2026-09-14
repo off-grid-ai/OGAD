@@ -1058,6 +1058,13 @@ function MessageThinkingHeader({
   if (!reasoning && !message.reasoningRequested) return <></>
   const readableContent = reasoning || THINKING_UNAVAILABLE_TEXT
   const supporting = isSupportingMessage(message)
+  if (supporting && !timeline && isPromptEnhancementReasoningLabel(message.reasoningLabel)) {
+    return (
+      <ChatToolRows
+        thinking={<ChatThinkingBlock content={readableContent} label={message.reasoningLabel} />}
+      />
+    )
+  }
   return (
     <div
       className={
