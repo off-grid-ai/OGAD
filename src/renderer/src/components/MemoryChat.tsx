@@ -4319,7 +4319,18 @@ export function MemoryChat({
                 // One failed image does not erase or block another completed tool request. Stop is
                 // the exception: it cancels the active runtime and ends the remaining local work.
                 if (cancelledRef.current.has(convId)) break
-                console.error('Deferred tool image generation failed', error)
+                const memoryGuard = parseImageMemoryGuardError(error)
+                const message = memoryGuard?.message || (error instanceof Error ? error.message : 'Image generation failed.')
+                if (!/cancel/i.test(message)) {
+                  setConvMessages(convId, (previous) => [...previous, {
+                    id: crypto.randomUUID(),
+                    role: 'assistant',
+                    content: message,
+                    imageMemoryRetry: memoryGuard
+                      ? { request: { prompt: imageRequest.prompt }, prompt: imageRequest.prompt, conversationId: convId, projectId }
+                      : undefined
+                  }])
+                }
               }
             }
           } finally {
@@ -4439,10 +4450,18 @@ export function MemoryChat({
             /* ignore */
           }
         } catch (err) {
-          const msg = (err as Error).message || 'Image generation failed.'
+          const memoryGuard = parseImageMemoryGuardError(err)
+          const msg = memoryGuard?.message || (err instanceof Error ? err.message : 'Image generation failed.')
           if (!/cancel/i.test(msg))
             setConvMessages(convId, (prev) =>
-              prev.map((m) => (m.id === streamId ? { ...m, content: msg, streaming: false } : m))
+              prev.map((m) => (m.id === streamId ? {
+                ...m,
+                content: msg,
+                streaming: false,
+                imageMemoryRetry: memoryGuard
+                  ? { request: { prompt: imgPrompt }, prompt: imgPrompt, conversationId: convId, projectId }
+                  : undefined
+              } : m))
             )
         }
       } else {
