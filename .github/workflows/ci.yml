@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # The authoritative coverage gate compares the checked-out change with
-          # origin/main. A depth-1 checkout has no merge base to measure.
+          # this PR's base branch. A depth-1 checkout has no merge base to measure.
           fetch-depth: 0
       # Check out pro on the branch that MATCHES this PR/push (so a coordinated
       # core+pro change is tested together). If pro has no such branch (most PRs),
