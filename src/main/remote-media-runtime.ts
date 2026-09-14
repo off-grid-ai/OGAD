@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { RuntimeSpeechVoice } from '@offgrid/speech'
+import { kokoroVoiceLanguage, type RuntimeSpeechVoice } from '@offgrid/speech'
 import { IMAGE_MEMORY_GUARD_ERROR_CODE, imageMemoryGuardErrorMessage } from '../shared/image-generation-contract'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 
@@ -26,15 +26,26 @@ export async function listRemoteVoices(server: RemoteServer): Promise<RuntimeSpe
   const model = catalog.data?.find((item) => item.id === server.selectedModel)
   const voices = (model?.supported_voices ?? [])
     .filter((id): id is string => typeof id === 'string' && !!id)
-    .map((id) => ({
-      id,
-      label: id
-        .replace(/^flux-/, '')
-        .replace(/-en$/, '')
-        .replace(/[-_]/g, ' ')
-        .replace(/\b\w/g, (letter) => letter.toUpperCase()),
-      language: 'en-US'
-    }))
+    .map((id) => {
+      const language = server.selectedModel === 'hexgrad/kokoro-82m'
+        ? kokoroVoiceLanguage(id)?.code
+        : server.selectedModel.startsWith('deepgram/')
+          ? id.match(/-([a-z]{2})$/i)?.[1]?.toLowerCase()
+          : server.selectedModel.startsWith('microsoft/mai-voice-2')
+            ? id.match(/^([a-z]{2}-[A-Z]{2})-/)?.[1]
+            : server.selectedModel.startsWith('mistralai/voxtral-mini-tts')
+              ? id.match(/^([a-z]{2})_/i)?.[1]?.toLowerCase().replace(/^gb$/, 'en-GB')
+              : undefined
+      return {
+        id,
+        label: id
+          .replace(/^flux-/, '')
+          .replace(/-en$/, '')
+          .replace(/[-_]/g, ' ')
+          .replace(/\b\w/g, (letter) => letter.toUpperCase()),
+        ...(language ? { language } : {})
+      }
+    })
   cachedRemoteVoices = { key, voices, expiresAt: Date.now() + 5 * 60_000 }
   return voices
 }

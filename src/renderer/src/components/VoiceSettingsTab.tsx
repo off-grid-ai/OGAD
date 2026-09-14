@@ -130,7 +130,6 @@ export function VoiceSettingsTab(): React.JSX.Element {
         const savedVoice = typeof settings.ttsVoice === 'string' ? settings.ttsVoice : null
         if (savedVoice) {
           setVoice(savedVoice)
-          setLanguage(runtimeVoiceLanguage({ id: savedVoice })?.code ?? 'en-US')
         }
         setPreferences(readVoicePreferences(settings))
       })
@@ -163,10 +162,12 @@ export function VoiceSettingsTab(): React.JSX.Element {
   useEffect(() => {
     if (!settingsLoaded || !voices.length || voices.some(({ id }) => id === voice)) return
     if (assetsState !== 'ready' && (remoteVoice || assetsState !== 'loading')) return
-    const fallback = firstRuntimeVoiceForLanguage(voices, language) ?? voices[0]
+    const fallback = (remoteVoice
+      ? voices.find((candidate) => candidate.language === language)
+      : firstRuntimeVoiceForLanguage(voices, language)) ?? voices[0]
     if (!fallback) return
     setVoice(fallback.id)
-    setLanguage(runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
+    setLanguage(remoteVoice && !fallback.language ? 'en-US' : runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
     void Promise.resolve(window.api.saveSetting('ttsVoice', fallback.id)).catch(() => {})
   }, [assetsState, language, remoteVoice, settingsLoaded, voice, voices])
 
@@ -190,22 +191,32 @@ export function VoiceSettingsTab(): React.JSX.Element {
     [preferences]
   )
 
+  const availableLanguages = useMemo(
+    () => runtimeSpeechLanguages(remoteVoice
+      ? voices.filter((candidate) => candidate.language)
+      : voices.length ? voices : [{ id: voice }]),
+    [remoteVoice, voice, voices]
+  )
+  const showLanguage = !remoteVoice || availableLanguages.length > 1
   const filteredVoices = useMemo(
-    () => runtimeVoicesForLanguage(voices.length ? voices : [{ id: voice }], language),
-    [language, voice, voices]
+    () => remoteVoice
+      ? showLanguage ? voices.filter((candidate) => !candidate.language || candidate.language === language) : voices
+      : runtimeVoicesForLanguage(voices.length ? voices : [{ id: voice }], language),
+    [language, remoteVoice, showLanguage, voice, voices]
   )
 
   useEffect(() => {
     const selected = voices.find(({ id }) => id === voice)
-    const selectedLanguage = selected ? runtimeVoiceLanguage(selected)?.code : undefined
+    const selectedLanguage = selected && (!remoteVoice || selected.language)
+      ? runtimeVoiceLanguage(selected)?.code : undefined
     if (selectedLanguage && selectedLanguage !== language) setLanguage(selectedLanguage)
-  }, [language, voice, voices])
+  }, [language, remoteVoice, voice, voices])
 
   const pickVoice = (nextVoice: string): void => {
     const previous = { voice, language }
     const runtimeVoice = voices.find(({ id }) => id === nextVoice) ?? { id: nextVoice }
     setVoice(nextVoice)
-    setLanguage(runtimeVoiceLanguage(runtimeVoice)?.code ?? language)
+    setLanguage(remoteVoice && !runtimeVoice.language ? language : runtimeVoiceLanguage(runtimeVoice)?.code ?? language)
     void Promise.resolve(window.api.saveSetting('ttsVoice', nextVoice)).catch(() => {
       setVoice(previous.voice)
       setLanguage(previous.language)
@@ -213,7 +224,9 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }
 
   const pickLanguage = (nextLanguage: string): void => {
-    const matching = firstRuntimeVoiceForLanguage(voices, nextLanguage)?.id
+    const matching = (remoteVoice
+      ? voices.find((candidate) => candidate.language === nextLanguage)
+      : firstRuntimeVoiceForLanguage(voices, nextLanguage))?.id
     if (!matching) return
     setLanguage(nextLanguage)
     pickVoice(matching)
@@ -314,10 +327,12 @@ export function VoiceSettingsTab(): React.JSX.Element {
         </SettingsRow>
       ) : null}
 
-      {!remoteVoice && <SettingsRow
+      {showLanguage && <SettingsRow
         label="Language"
         controlId="tts-language"
-        hint="Choose the language for spoken replies. Audio files download once on first use."
+        hint={remoteVoice
+          ? 'Choose the language for spoken replies.'
+          : 'Choose the language for spoken replies. Audio files download once on first use.'}
       >
         <SettingsSelect
           id="tts-language"
@@ -325,7 +340,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
           value={language}
           onValueChange={pickLanguage}
           disabled={assetsState === 'loading' || assetsState === 'downloading'}
-          options={runtimeSpeechLanguages(voices.length ? voices : [{ id: voice }]).map((item) => ({
+          options={availableLanguages.map((item) => ({
             value: item.code,
             label: item.label
           }))}
@@ -377,14 +392,14 @@ export function VoiceSettingsTab(): React.JSX.Element {
         </p>
       ) : (
         <p role="status" className="mb-4 text-xs text-neutral-500">
-          {runtimeVoiceLanguage({ id: voice })?.label ?? language} voice ready.
+          {remoteVoice ? 'Speaker selected.' : `${runtimeVoiceLanguage({ id: voice })?.label ?? language} voice ready.`}
         </p>
       )}
 
       {(!remoteVoice || voices.length > 0) && <SettingsRow
         label="Voice"
         controlId="tts-voice"
-        hint="Voices available for the selected language."
+        hint={showLanguage ? 'Voices available for the selected language.' : 'Speakers for the selected model.'}
       >
         <SettingsSelect
           id="tts-voice"
@@ -392,7 +407,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
           value={voice}
           onValueChange={pickVoice}
           disabled={assetsState !== 'ready'}
-          options={(remoteVoice ? voices : filteredVoices).map(({ id, label }) => ({
+          options={filteredVoices.map(({ id, label }) => ({
             value: id,
             label: label ?? kokoroVoiceLabel(id)
           }))}
