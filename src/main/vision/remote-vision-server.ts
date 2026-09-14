@@ -8,6 +8,9 @@ import {
   remoteVisionApiBase,
   remoteVisionEndpoint,
   type RemoteVisionConnectionResult,
+  type RemoteVisionCatalogModel,
+  type RemoteVisionModality,
+  type RemoteVisionSelections,
   type RemoteVisionProvider,
   type RemoteVisionSavedServer,
   type RemoteVisionServerSettings,
@@ -23,6 +26,9 @@ interface StoredRemoteVisionServer {
   provider: Exclude<RemoteVisionProvider, 'local'>
   endpoint: string
   model: string
+  enabled?: boolean
+  mediaModels?: RemoteVisionSelections
+  modelCatalog?: RemoteVisionCatalogModel[]
   screenFramesAllowed: boolean
 }
 
@@ -64,13 +70,18 @@ function validProvider(provider: unknown): provider is RemoteVisionProvider {
 function normalizeServer(
   value: Partial<StoredRemoteVisionServer>
 ): StoredRemoteVisionServer | null {
-  if (!value.id || !value.endpoint || !value.model || !validProvider(value.provider)) return null
+  if (!value.id || !value.endpoint || !validProvider(value.provider)) return null
+  const selections = value.mediaModels ?? (value.model ? { text: value.model } : {})
+  if (!Object.values(selections).some((model) => typeof model === 'string' && model.trim())) return null
   return {
     id: value.id,
     name: value.name?.trim() || defaultServerName(value.endpoint),
     provider: value.provider,
     endpoint: remoteVisionApiBase(remoteVisionEndpoint(value.provider, value.endpoint)),
-    model: value.model.trim(),
+    model: (selections.text ?? value.model ?? '').trim(),
+    enabled: value.enabled !== false,
+    mediaModels: selections,
+    modelCatalog: Array.isArray(value.modelCatalog) ? value.modelCatalog : [],
     screenFramesAllowed: value.screenFramesAllowed === true
   }
 }
@@ -144,7 +155,7 @@ function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer
 
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId)
+  const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false)
   return {
     provider: active?.provider ?? 'local',
     endpoint: active?.endpoint ?? '',
@@ -159,14 +170,25 @@ export function getActiveRemoteVisionServer():
   | (StoredRemoteVisionServer & { apiKey: string })
   | null {
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId)
+  const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false && !!server.model)
   return active ? { ...active, apiKey: serverApiKey(active.id) } : null
+}
+
+export function getActiveRemoteVisionServerForModality(
+  modality: RemoteVisionModality
+): (StoredRemoteVisionServer & { apiKey: string; selectedModel: string }) | null {
+  const stored = readStored()
+  const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false)
+  const selectedModel = active?.mediaModels?.[modality]
+  return active && selectedModel
+    ? { ...active, apiKey: serverApiKey(active.id), selectedModel }
+    : null
 }
 
 export function activateRemoteVisionModel(serverId: string, modelId: string): boolean {
   const stored = readStored()
   const server = stored.servers.find(
-    (candidate) => candidate.id === serverId && candidate.model === modelId
+    (candidate) => candidate.id === serverId && candidate.enabled !== false && candidate.model === modelId
   )
   if (!server) return false
   writeStored({ ...stored, activeServerId: server.id })
@@ -179,25 +201,49 @@ export function deactivateRemoteVisionModel(): void {
   writeStored({ ...stored, activeServerId: null })
 }
 
+export function activateRemoteVisionMediaModel(
+  serverId: string,
+  modality: Exclude<RemoteVisionModality, 'text'>,
+  modelId: string
+): boolean {
+  const stored = readStored()
+  const server = stored.servers.find((candidate) =>
+    candidate.id === serverId && candidate.enabled !== false && candidate.mediaModels?.[modality] === modelId
+  )
+  if (!server) return false
+  writeStored({ ...stored, activeServerId: serverId })
+  return true
+}
+
 export function setRemoteVisionServerSettings(
   update: RemoteVisionServerUpdate
 ): RemoteVisionServerSettings {
   const stored = readStored()
   if (update.provider === 'local') {
-    writeStored({ ...stored, activeServerId: null })
+    writeStored({
+      ...stored,
+      activeServerId: null,
+      servers: stored.servers.map((server) => ({ ...server, enabled: false }))
+    })
     return getRemoteVisionServerSettings()
   }
   if (!validProvider(update.provider)) throw new Error('Unknown model server.')
   const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
   const model = update.model.trim()
-  if (!endpoint || !model) throw new Error('Remote model server and model are required.')
+  const mediaModels = update.mediaModels ?? (model ? { text: model } : {})
+  if (!endpoint || !Object.values(mediaModels).some((selected) => !!selected.trim())) {
+    throw new Error('Remote model server and at least one model are required.')
+  }
   const id = update.serverId || randomUUID()
   const next: StoredRemoteVisionServer = {
     id,
     name: update.name?.trim() || defaultServerName(endpoint),
     provider: update.provider,
     endpoint,
-    model,
+    model: mediaModels.text?.trim() ?? '',
+    enabled: true,
+    mediaModels,
+    modelCatalog: update.modelCatalog ?? stored.servers.find((server) => server.id === id)?.modelCatalog ?? [],
     screenFramesAllowed: update.screenFramesAllowed === true
   }
   const servers = stored.servers.some((server) => server.id === id)
@@ -229,21 +275,41 @@ export async function testRemoteVisionServer(
     if (update.provider === 'local') return { ok: true, latencyMs: 0 }
     if (!endpoint) throw new Error('Remote model server is required.')
     const key = update.apiKey?.trim() || (update.serverId ? serverApiKey(update.serverId) : '')
-    const response = await fetch(`${endpoint}/models`, {
+    const response = await fetch(`${endpoint}/models${update.provider === 'openrouter' ? '?output_modalities=text,image,transcription,speech' : ''}`, {
       headers: key ? { Authorization: `Bearer ${key}` } : undefined,
       signal: AbortSignal.timeout(10_000)
     })
-    if (!response.ok) throw new Error(`Server returned HTTP ${response.status}.`)
-    const body = (await response.json()) as {
-      data?: Array<{ id?: unknown; name?: unknown }>
-      models?: Array<{ id?: unknown; name?: unknown; model?: unknown }>
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      let message = body.trim()
+      try {
+        const parsed = JSON.parse(body) as { error?: { message?: string } | string; message?: string }
+        message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message ?? ''
+      } catch { /* plain text is already useful */ }
+      throw new Error((message || `Server returned HTTP ${response.status}.`).slice(0, 500))
     }
-    const entries: Array<{ id?: unknown; name?: unknown; model?: unknown }> =
+    const body = (await response.json()) as {
+      data?: Array<{ id?: unknown; name?: unknown; kind?: unknown; architecture?: { input_modalities?: unknown; output_modalities?: unknown } }>
+      models?: Array<{ id?: unknown; name?: unknown; model?: unknown; kind?: unknown; architecture?: { input_modalities?: unknown; output_modalities?: unknown } }>
+    }
+    const entries: Array<{ id?: unknown; name?: unknown; model?: unknown; kind?: unknown; architecture?: { input_modalities?: unknown; output_modalities?: unknown } }> =
       body.data ?? body.models ?? []
     const models = entries.flatMap((entry) => {
       const id =
         typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
-      return id ? [{ id, name: typeof entry.name === 'string' ? entry.name : id }] : []
+      if (!id) return []
+      const kind = entry.kind
+      const outputs = Array.isArray(entry.architecture?.output_modalities) ? entry.architecture.output_modalities : []
+      const inputs = Array.isArray(entry.architecture?.input_modalities) ? entry.architecture.input_modalities : []
+      const modality: RemoteVisionModality = kind === 'image' ? 'image'
+        : kind === 'transcription' ? 'transcription'
+        : kind === 'speech' ? 'voice'
+        : kind === 'chat' || kind === 'vision' || kind === 'text' ? 'text'
+        : outputs.includes('image') ? 'image'
+        : inputs.includes('audio') && outputs.includes('text') ? 'transcription'
+        : outputs.includes('audio') ? 'voice'
+        : 'text'
+      return [{ id, name: typeof entry.name === 'string' ? entry.name : id, kind: modality }]
     })
     return { ok: true, latencyMs: Date.now() - startedAt, models }
   } catch (error) {

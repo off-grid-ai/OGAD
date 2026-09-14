@@ -54,6 +54,7 @@ import {
 } from '../shared/remote-vision-server'
 import {
   activateRemoteVisionModel,
+  activateRemoteVisionMediaModel,
   deactivateRemoteVisionModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
@@ -191,9 +192,7 @@ export async function listInstalled(): Promise<string[]> {
     present: (name) => fileSizeOf(dir, name) > 0,
     mfluxCached: (id) => isMfluxModelCached(id)
   })
-  const remoteInstalled = getRemoteVisionServerSettings().servers.map((server) =>
-    remoteVisionModelId(server.id, server.model)
-  )
+  const remoteInstalled = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers).map((model) => model.id)
   return [...localInstalled, ...remoteInstalled]
 }
 
@@ -806,7 +805,9 @@ export async function getActiveModelIds(): Promise<string[]> {
   const localIds = info.models
     .filter((model) => model.active && (!remote || model.id !== activeChatId))
     .map((model) => model.id)
-  return remote ? [...localIds, remoteVisionModelId(remote.id, remote.model)] : localIds
+  return remote && remote.enabled !== false
+    ? [...localIds, ...remoteVisionInventoryModels([remote]).map((model) => model.id)]
+    : localIds
 }
 
 /**
@@ -821,7 +822,13 @@ export async function activateModel(
 ): Promise<{ success: boolean; error?: string }> {
   const remote = parseRemoteVisionModelId(modelId)
   if (remote) {
-    return activateRemoteVisionModel(remote.serverId, remote.modelId)
+    const server = getRemoteVisionServerSettings().servers.find((candidate) => candidate.id === remote.serverId)
+    const selected = server?.mediaModels ?? (server?.model ? { text: server.model } : {})
+    const modality = (['text', 'image', 'transcription', 'voice'] as const).find((kind) => selected[kind] === remote.modelId)
+    const activated = modality === 'text'
+      ? activateRemoteVisionModel(remote.serverId, remote.modelId)
+      : modality ? activateRemoteVisionMediaModel(remote.serverId, modality, remote.modelId) : false
+    return activated
       ? { success: true }
       : { success: false, error: 'Remote model is no longer available.' }
   }
@@ -881,10 +888,17 @@ export async function setActiveModalChoice(
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
   const settings = getRemoteVisionServerSettings()
-  const remote = settings.servers.find((server) => server.id === settings.activeServerId)
+  const remote = settings.servers.find((server) => server.id === settings.activeServerId && server.enabled !== false)
+  const remoteId = (modality: 'text' | 'image' | 'transcription' | 'voice'): string | null => {
+    const model = remote?.mediaModels?.[modality] ?? (modality === 'text' ? remote?.model : undefined)
+    return remote && model ? remoteVisionModelId(remote.id, model) : null
+  }
   return {
-    text: remote ? remoteVisionModelId(remote.id, remote.model) : getActiveModel(),
-    ...getAllActiveModals()
+    text: remoteId('text') ?? getActiveModel(),
+    ...getAllActiveModals(),
+    image: remoteId('image') ?? getAllActiveModals().image,
+    speech: remoteId('voice') ?? getAllActiveModals().speech,
+    transcription: remoteId('transcription') ?? getAllActiveModals().transcription
   }
 }
 

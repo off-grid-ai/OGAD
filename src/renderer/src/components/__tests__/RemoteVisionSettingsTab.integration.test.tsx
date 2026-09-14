@@ -10,13 +10,76 @@ afterEach(() => {
 })
 
 describe('<RemoteVisionSettingsTab/>', () => {
+  it('saves a media-only server and turns every remote modality off', async () => {
+    let saved = {
+      provider: 'local' as 'local' | 'openrouter',
+      endpoint: '',
+      model: '',
+      hasApiKey: false,
+      activeServerId: null as string | null,
+      servers: [] as Array<Record<string, unknown>>
+    }
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getRemoteVisionServer: async () => saved,
+      testRemoteVisionServer: async () => ({
+        ok: true,
+        latencyMs: 12,
+        models: [
+          { id: 'image-maker', name: 'Image Maker', kind: 'image' },
+          { id: 'listener', name: 'Listener', kind: 'transcription' },
+          { id: 'speaker', name: 'Speaker', kind: 'voice' }
+        ]
+      }),
+      setRemoteVisionServer: async (update: {
+        provider: 'local' | 'openrouter'; endpoint: string; model: string;
+        name?: string; mediaModels?: Record<string, string>; modelCatalog?: unknown[]
+      }) => {
+        saved = update.provider === 'local'
+          ? { ...saved, provider: 'local', activeServerId: null,
+              servers: saved.servers.map(server => ({ ...server, enabled: false })) }
+          : { provider: 'openrouter', endpoint: update.endpoint, model: update.model,
+              hasApiKey: false, activeServerId: 'media-server',
+              servers: [{ id: 'media-server', name: update.name, provider: update.provider,
+                endpoint: update.endpoint, model: update.model, mediaModels: update.mediaModels,
+                modelCatalog: update.modelCatalog, enabled: true, hasApiKey: false,
+                screenFramesAllowed: false }] }
+        return saved
+      },
+      removeRemoteVisionServer: async () => saved
+    }
+
+    render(<RemoteVisionSettingsTab />)
+    await screen.findByText('Local model is active.')
+    fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
+    fireEvent.change(screen.getByLabelText('Server name'), { target: { value: 'Media provider' } })
+    fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'https://openrouter.ai/api/v1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
+    await screen.findByText('Connected in 12 ms. 3 models found.')
+    fireEvent.change(screen.getByLabelText('Image'), { target: { value: 'image-maker' } })
+    fireEvent.change(screen.getByLabelText('Transcription'), { target: { value: 'listener' } })
+    fireEvent.change(screen.getByLabelText('Voice'), { target: { value: 'speaker' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText('Server saved and active.')
+    cleanup()
+    render(<RemoteVisionSettingsTab />)
+    await screen.findByDisplayValue('Media provider')
+    expect((screen.getByLabelText('Image') as HTMLSelectElement).value).toBe('image-maker')
+    expect((screen.getByLabelText('Transcription') as HTMLSelectElement).value).toBe('listener')
+    expect((screen.getByLabelText('Voice') as HTMLSelectElement).value).toBe('speaker')
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText('Local model is active.')
+    expect(screen.getByRole('switch', { name: 'Use remote server' }).getAttribute('aria-checked')).toBe('false')
+  })
+
   it('tests and saves one remote vision configuration without exposing a stored key', async () => {
     const testRemoteVisionServer = vi.fn(async () => ({
       ok: true,
       latencyMs: 42,
       models: [
-        { id: 'vision-model', name: 'Vision model' },
-        { id: 'new-vision-model', name: 'New vision model' }
+        { id: 'vision-model', name: 'Vision model', kind: 'text' },
+        { id: 'new-vision-model', name: 'New vision model', kind: 'text' }
       ]
     }))
     const setRemoteVisionServer = vi.fn(async (update) => ({
@@ -95,6 +158,11 @@ describe('<RemoteVisionSettingsTab/>', () => {
         provider: 'custom',
         endpoint: 'https://models.example/v1',
         model: 'new-vision-model',
+        mediaModels: { text: 'new-vision-model' },
+        modelCatalog: [
+          { id: 'vision-model', name: 'Vision model', kind: 'text' },
+          { id: 'new-vision-model', name: 'New vision model', kind: 'text' }
+        ],
         name: 'Models example',
         serverId: 'server-1',
         apiKey: 'private-key',

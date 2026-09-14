@@ -3,6 +3,8 @@ import {
   remoteVisionApiBase,
   remoteVisionProviderForEndpoint,
   type RemoteVisionConnectionResult,
+  type RemoteVisionCatalogModel,
+  type RemoteVisionSelections,
   type RemoteVisionSavedServer,
   type RemoteVisionServerSettings,
   type RemoteVisionServerUpdate
@@ -24,6 +26,8 @@ interface ServerForm {
   name: string
   endpoint: string
   model: string
+  mediaModels: RemoteVisionSelections
+  modelCatalog: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   screenFramesAllowed: boolean
 }
@@ -33,13 +37,10 @@ const EMPTY_FORM: ServerForm = {
   name: '',
   endpoint: '',
   model: '',
+  mediaModels: {},
+  modelCatalog: [],
   hasApiKey: false,
   screenFramesAllowed: false
-}
-
-interface RemoteModelOption {
-  id: string
-  name: string
 }
 
 function formFromServer(server: RemoteVisionSavedServer): ServerForm {
@@ -48,6 +49,8 @@ function formFromServer(server: RemoteVisionSavedServer): ServerForm {
     name: server.name,
     endpoint: server.endpoint,
     model: server.model,
+    mediaModels: server.mediaModels ?? { text: server.model },
+    modelCatalog: server.modelCatalog ?? [],
     hasApiKey: server.hasApiKey,
     screenFramesAllowed: server.screenFramesAllowed
   }
@@ -87,7 +90,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const [form, setForm] = useState<ServerForm>(EMPTY_FORM)
   const [remoteEnabled, setRemoteEnabled] = useState(false)
   const [apiKey, setApiKey] = useState('')
-  const [models, setModels] = useState<RemoteModelOption[]>([])
+  const [models, setModels] = useState<RemoteVisionCatalogModel[]>([])
   const [modelQuery, setModelQuery] = useState('')
   const [showModels, setShowModels] = useState(false)
   const [status, setStatus] = useState('Checking saved settings')
@@ -96,7 +99,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const selectServer = (server: RemoteVisionSavedServer): void => {
     setForm(formFromServer(server))
     setApiKey('')
-    setModels(server.model ? [{ id: server.model, name: server.model }] : [])
+    setModels(server.modelCatalog ?? (server.model ? [{ id: server.model, name: server.model, kind: 'text' }] : []))
     setModelQuery(server.model)
     setShowModels(false)
     setStatus(server.id === settings.activeServerId ? 'This server is active.' : 'Ready to edit.')
@@ -129,7 +132,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
           normalized.servers[0]
         if (selected) {
           setForm(formFromServer(selected))
-          setModels(selected.model ? [{ id: selected.model, name: selected.model }] : [])
+          setModels(selected.modelCatalog ?? (selected.model ? [{ id: selected.model, name: selected.model, kind: 'text' }] : []))
           setModelQuery(selected.model)
         }
         setStatus(normalized.activeServerId ? 'Remote server is active.' : 'Local model is active.')
@@ -140,7 +143,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const filteredModels = useMemo(() => {
     const query = modelQuery.trim().toLowerCase()
     return models
-      .filter((model) => !query || `${model.name} ${model.id}`.toLowerCase().includes(query))
+      .filter((model) => model.kind === 'text' && (!query || `${model.name} ${model.id}`.toLowerCase().includes(query)))
       .slice(0, 75)
   }, [modelQuery, models])
 
@@ -151,6 +154,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       provider: remoteVisionProviderForEndpoint(endpoint),
       endpoint,
       model: form.model,
+      mediaModels: form.mediaModels,
+      modelCatalog: form.modelCatalog,
       serverId: form.id ?? undefined,
       name: form.name,
       ...(apiKey ? { apiKey } : {}),
@@ -173,9 +178,20 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
         return
       }
       const discovered = result.models ?? []
-      const nextModel = discovered.some((model) => model.id === selectedModel) ? selectedModel : ''
+      const nextModel = discovered.some((model) => model.id === selectedModel && model.kind === 'text') ? selectedModel : ''
       setModels(discovered)
-      setForm((current) => ({ ...current, model: nextModel }))
+      setForm((current) => ({
+        ...current,
+        model: nextModel,
+        modelCatalog: discovered,
+        mediaModels: Object.fromEntries(
+          (['text', 'image', 'transcription', 'voice'] as const).flatMap((kind) => {
+            const id = kind === 'text' ? nextModel : current.mediaModels[kind]
+            return id && discovered.some((model) => model.id === id && model.kind === kind)
+              ? [[kind, id]] : []
+          })
+        ) as RemoteVisionSelections
+      }))
       setModelQuery(nextModel)
       setShowModels(true)
       setStatus(
@@ -226,8 +242,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       setStatus('Enter a server name first.')
       return
     }
-    if (remoteEnabled && !form.model) {
-      setStatus('Test the connection and select a model first.')
+    if (remoteEnabled && !Object.values(form.mediaModels).some(Boolean)) {
+      setStatus('Test the connection and select at least one model first.')
       return
     }
     setBusy(true)
@@ -390,6 +406,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     ...current,
                     endpoint: event.target.value,
                     model: '',
+                    mediaModels: {},
+                    modelCatalog: [],
                     screenFramesAllowed: false
                   }))
                   setModels([])
@@ -405,7 +423,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
               controlId="remote-server-api-key"
               hint={
                 form.hasApiKey
-                  ? 'A key is stored in the system credential store.'
+                  ? 'A key is stored in the system credential store (••••••••).'
                   : 'Optional for servers that do not require a key.'
               }
             >
@@ -456,9 +474,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 </Row>
               </div>
             ) : null}
-            {models.length > 0 ? (
               <Row
-                label="Model"
+                label="Text + Vision"
                 controlId="remote-server-model-search"
                 hint={form.model ? `Selected: ${form.model}` : 'Search and select one model.'}
               >
@@ -469,7 +486,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     onFocus={() => setShowModels(true)}
                     onChange={(event) => {
                       setModelQuery(event.target.value)
-                      setForm((current) => ({ ...current, model: '' }))
+                      setForm((current) => ({ ...current, model: '', mediaModels: { ...current.mediaModels, text: undefined } }))
                       setShowModels(true)
                     }}
                     placeholder="Search models"
@@ -484,7 +501,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                             key={model.id}
                             type="button"
                             onClick={() => {
-                              setForm((current) => ({ ...current, model: model.id }))
+                              setForm((current) => ({ ...current, model: model.id, mediaModels: { ...current.mediaModels, text: model.id } }))
                               setModelQuery(model.name)
                               setShowModels(false)
                               setStatus('Not saved.')
@@ -508,7 +525,25 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                   ) : null}
                 </div>
               </Row>
-            ) : null}
+            {(['image', 'transcription', 'voice'] as const).map((kind) => (
+              <Row key={kind} label={kind === 'image' ? 'Image' : kind === 'voice' ? 'Voice' : 'Transcription'} controlId={`remote-server-${kind}-model`}>
+                <select
+                  id={`remote-server-${kind}-model`}
+                  value={form.mediaModels[kind] ?? ''}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setForm((current) => ({ ...current, mediaModels: { ...current.mediaModels, [kind]: value || undefined } }))
+                    setStatus('Not saved.')
+                  }}
+                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 focus-visible:border-green-500"
+                >
+                  <option value="">No {kind} model</option>
+                  {models.filter((model) => model.kind === kind).map((model) => (
+                    <option key={model.id} value={model.id}>{model.name}</option>
+                  ))}
+                </select>
+              </Row>
+            ))}
           </>
         ) : null}
       </div>
