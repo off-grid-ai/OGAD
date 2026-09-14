@@ -40,7 +40,7 @@ import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
-import { pickFreePort } from './free-port'
+import { isPortFree, pickFreePort } from './free-port'
 import { retryWithDeadline } from './lib/retry'
 import { resolveDims } from './model-server/dimensions'
 import { guardProxyStreams } from './stream-guards'
@@ -62,7 +62,7 @@ import { buildGatewayModalities, type GatewayModalities } from './model-server/h
 import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
-import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
+import { getActiveRemoteVisionServer, getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
 
 const UPSTREAM_HOST = '127.0.0.1'
@@ -703,13 +703,18 @@ async function handleModelsList(res: http.ServerResponse): Promise<void> {
   } catch {
     /* TTS may be unavailable */
   }
-  const speechId = getActiveModal('speech') || (voices.length ? 'kokoro' : null)
-  const speech = speechId ? [tag(speechId, 'speech', { voices })] : []
+  const remoteVoice = getActiveRemoteVisionServerForModality('voice')
+  const speechId = remoteVoice
+    ? remoteVisionModelId(remoteVoice.id, remoteVoice.selectedModel)
+    : getActiveModal('speech') || (voices.length ? 'kokoro' : null)
+  const speech = speechId ? [tag(speechId, 'speech', remoteVoice ? { remote: true } : { voices })] : []
 
   // Active transcription (STT) model (chosen pick, else the resolved whisper model).
-  const sttId =
-    getActiveModal('transcription') ||
-    (whisperModel() ? path.basename(whisperModel() as string) : null)
+  const remoteStt = getActiveRemoteVisionServerForModality('transcription')
+  const sttId = remoteStt
+    ? remoteVisionModelId(remoteStt.id, remoteStt.selectedModel)
+    : getActiveModal('transcription') ||
+      (whisperModel() ? path.basename(whisperModel() as string) : null)
   const transcription = sttId ? [tag(sttId, 'transcription')] : []
 
   const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription]
@@ -894,7 +899,8 @@ async function handleImageGeneration(
     steps: typeof payload.steps === 'number' ? payload.steps : undefined,
     seed: typeof payload.seed === 'number' ? payload.seed : undefined,
     cfgScale: typeof payload.cfg_scale === 'number' ? payload.cfg_scale : undefined,
-    model: typeof payload.model === 'string' ? payload.model : undefined
+    model: typeof payload.model === 'string' ? payload.model : undefined,
+    allowUnsafeMemoryOverride: payload.allow_unsafe_memory_override === true
   }
   const fmt = String(payload.response_format ?? 'b64_json')
   await serve(
@@ -939,7 +945,8 @@ async function handleImagesUnified(
     seed: typeof payload.seed === 'number' ? payload.seed : undefined,
     cfgScale: typeof payload.cfg_scale === 'number' ? payload.cfg_scale : undefined,
     model: typeof payload.model === 'string' ? payload.model : undefined,
-    strength: typeof payload.strength === 'number' ? payload.strength : undefined
+    strength: typeof payload.strength === 'number' ? payload.strength : undefined,
+    allowUnsafeMemoryOverride: payload.allow_unsafe_memory_override === true
   }
 
   // image-to-image: first input_reference becomes the init image.
@@ -1029,7 +1036,8 @@ async function handleImageEdit(
     steps: fields.steps ? parseInt(fields.steps, 10) : undefined,
     seed: fields.seed ? parseInt(fields.seed, 10) : undefined,
     cfgScale: fields.cfg_scale ? parseFloat(fields.cfg_scale) : undefined,
-    model: fields.model || undefined
+    model: fields.model || undefined,
+    allowUnsafeMemoryOverride: fields.allow_unsafe_memory_override === 'true'
   }
   const cleanup = (): void => {
     fs.promises.unlink(tmp).catch(() => {})
@@ -1060,7 +1068,14 @@ let startingGateway = false
 export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
   if (server || startingGateway) return
   startingGateway = true
-  boundGatewayPort = (await pickFreePort(port)) ?? port
+  try {
+    const availablePort = await pickFreePort(port, (candidate) => isPortFree(candidate, GATEWAY_BIND_HOST))
+    if (availablePort === null) throw new Error(`No free gateway port on ${GATEWAY_BIND_HOST}.`)
+    boundGatewayPort = availablePort
+  } catch (error) {
+    startingGateway = false
+    throw error
+  }
 
   server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*')

@@ -429,6 +429,7 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     cfg_scale: { type: 'number' },
                     negative_prompt: { type: 'string' },
                     model: { type: 'string', ...imgEnum },
+                    allow_unsafe_memory_override: { type: 'boolean', description: 'Run a remote image request after confirming its memory-limit warning.' },
                     response_format: {
                       type: 'string',
                       enum: ['b64_json', 'url'],

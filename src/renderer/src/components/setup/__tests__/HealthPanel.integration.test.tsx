@@ -256,4 +256,22 @@ describe('<HealthPanel/> production status integration', () => {
     expect(await screen.findByText(/port freed/i)).toBeTruthy()
     expect(llm.isReady()).toBe(false)
   })
+
+  it('shows a gateway bind failure after Restart instead of claiming success', async () => {
+    cleanup()
+    const api = (globalThis as unknown as { window: { api: {
+      restartComponent: (id: string) => Promise<{ success: boolean; error?: string }>
+    } } }).window.api
+    const previousRestart = api.restartComponent
+    api.restartComponent = async () => ({ success: false, error: 'No free gateway port on 0.0.0.0.' })
+    try {
+      const user = userEvent.setup()
+      render(<HealthPanel />)
+      const gateway = await screen.findByRole('status', { name: 'Local gateway' })
+      await user.click(within(gateway).getByRole('button', { name: 'Restart' }))
+      expect((await screen.findByRole('alert')).textContent).toContain('No free gateway port on 0.0.0.0.')
+    } finally {
+      api.restartComponent = previousRestart
+    }
+  })
 })

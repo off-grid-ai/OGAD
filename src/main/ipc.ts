@@ -1775,10 +1775,13 @@ export function setupIPC() {
       } catch {
         /* not running */
       }
-      // re-listens; falls back to a free port if the preferred one is held. Async, so catch a
-      // rejection on the promise rather than leaving it unhandled.
-      startModelServer().catch((e) => console.error('[model-server] restart failed', e))
-      return { success: true }
+      try {
+        await startModelServer()
+        return { success: true }
+      } catch (error) {
+        console.error('[model-server] restart failed', error)
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
     }
     return { success: false, error: `cannot restart "${id}"` }
   })
