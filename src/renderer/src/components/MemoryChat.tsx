@@ -4401,26 +4401,29 @@ export function MemoryChat({
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
         delete timelineByStream.current[toolStreamId]
         delete answerByStream.current[toolStreamId]
-        // A generated image owns the completed tool turn, so it does not leave a separate
-        // assistant bubble behind. Non-image tool turns still finalize their placeholder.
+        const pendingToolCalls = toolCalls.map((toolCall) =>
+          imageRequests.length > 0 && toolCall.name === 'generate_image'
+            ? { ...toolCall, status: 'running' as const }
+            : toolCall
+        )
+        // Keep the tool timeline in place while its deferred image job runs. The completed image
+        // replaces this row, so the timeline does not disappear and then return in a new position.
         setConvMessages(convId, (prev) =>
-          imageRequests.length > 0
-            ? prev.filter((message) => message.id !== toolStreamId)
-            : prev.map((message) =>
-                message.id === toolStreamId
-                  ? {
-                      ...message,
-                      content: answer,
-                      context,
-                      toolCalls,
-                      timeline: toolTimeline,
-                      toolsOffered: tr?.toolsOffered,
-                      metrics: tr?.metrics,
-                      activity: undefined,
-                      streaming: false
-                    }
-                  : message
-              )
+          prev.map((message) =>
+            message.id === toolStreamId
+              ? {
+                  ...message,
+                  content: imageRequests.length > 0 ? '' : answer,
+                  context,
+                  toolCalls: pendingToolCalls,
+                  timeline: toolTimeline,
+                  toolsOffered: tr?.toolsOffered,
+                  metrics: tr?.metrics,
+                  activity: undefined,
+                  streaming: false
+                }
+              : message
+          )
         )
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
@@ -4510,7 +4513,7 @@ export function MemoryChat({
                   /* Keep the generated file visible even if this database write fails. */
                 }
                 setConvMessages(convId, (prev) => [
-                  ...prev,
+                  ...prev.filter((message) => !ownsToolTurn || message.id !== toolStreamId),
                   {
                     id: imageMessageId,
                     role: 'assistant',
@@ -4568,7 +4571,7 @@ export function MemoryChat({
               /* The completed text answer remains visible if persistence fails. */
             }
             setConvMessages(convId, (previous) => [
-              ...previous,
+              ...previous.filter((message) => message.id !== toolStreamId),
               {
                 id: restoredMessageId,
                 role: 'assistant',
