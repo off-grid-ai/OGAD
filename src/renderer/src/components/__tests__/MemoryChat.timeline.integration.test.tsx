@@ -19,7 +19,12 @@ type Event = {
 function chatBoundary(
   savedReply?: { content: string; context: unknown },
   voiceMode = false,
-  showGenerationDetails = false
+  showGenerationDetails = false,
+  options?: {
+    userContext?: unknown
+    imageJob?: unknown
+    activeStreams?: unknown[]
+  }
 ): {
   status: () => { streamId: string; messages: string[]; voice: string; syntheses: string[] }
   emit: (event: Omit<Event, 'streamId'>) => void
@@ -46,6 +51,7 @@ function chatBoundary(
       uuid: 'earlier-message',
       role: 'user',
       content: 'Earlier question',
+      context: options?.userContext,
       created_at: '2026-09-13 09:00:00'
     },
     ...(savedReply
@@ -74,7 +80,9 @@ function chatBoundary(
     getRagConversations: async () => [conversation],
     getRagConversation: async () => conversation,
     getRagMessages: async () => messages.map((message) => ({ ...message })),
-    getActiveRagStreams: async () => [],
+    getActiveRagStreams: async () => options?.activeStreams ?? [],
+    ...(options?.imageJob ? { imageGenJobStatus: async () => options.imageJob } : {}),
+    onImageGenJobState: () => () => {},
     onRagStream: (callback: (event: Event) => void) => {
       onStream = callback
       return () => {
@@ -174,6 +182,145 @@ function timelineLabels(): string[] {
 afterEach(cleanup)
 
 describe('<MemoryChat/> ordered tool turn', () => {
+  it('keeps synced input and generated images visible when the user switches to voice mode', async () => {
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+    chatBoundary(
+      {
+        content:
+          '<think>__LABEL:Enhanced prompt__\nA majestic horse at sunset.</think>\n\nGenerated for: a horse',
+        context: {
+          reasoning: 'A majestic horse at sunset.',
+          reasoningLabel: 'Enhanced prompt',
+          timeline: [
+            { kind: 'thinking', text: 'Plan the image request.' },
+            { kind: 'tool', toolIndex: 0 },
+            { kind: 'thinking', text: 'Confirm the image request.' }
+          ],
+          toolCalls: [
+            {
+              name: 'generate_image',
+              result: 'Created the requested image.',
+              status: 'completed'
+            }
+          ],
+          imageRef: { id: 'horse-image', path: '/received/horse.png' }
+        }
+      },
+      false,
+      false,
+      {
+        userContext: {
+          attachments: [
+            {
+              id: 'input-image',
+              name: 'synced-input.jpg',
+              kind: 'image',
+              path: '/received/synced-input.jpg'
+            },
+            {
+              id: 'input-audio',
+              name: 'synced-input.wav',
+              kind: 'audio',
+              path: '/received/synced-input.wav'
+            }
+          ]
+        }
+      }
+    )
+    const user = userEvent.setup()
+    render(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'timeline-chat' }} />
+      </TooltipProvider>
+    )
+
+    expect(await screen.findByAltText('synced-input.jpg')).toBeTruthy()
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual([
+      'Thought process',
+      'Generated image',
+      'Thought process',
+      'Enhanced prompt'
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'Voice' }))
+
+    expect(await screen.findByRole('group', { name: 'Voice mode' })).toBeTruthy()
+    expect(screen.getByAltText('synced-input.jpg')).toBeTruthy()
+    expect(screen.getByAltText('Generated')).toBeTruthy()
+    expect(screen.getByText('Generated for: a horse')).toBeTruthy()
+    expect(screen.getAllByTitle('Play')).toHaveLength(2)
+    expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual([
+      'Thought process',
+      'Generated image',
+      'Thought process',
+      'Enhanced prompt'
+    ])
+  })
+
+  it('keeps enhanced prompt and active image progress in the timeline before its footer', async () => {
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+    chatBoundary(
+      {
+        content: '',
+        context: {
+          reasoning: 'Prepare the image request.',
+          timeline: [
+            { kind: 'thinking', text: 'Prepare the image request.' },
+            { kind: 'tool', toolIndex: 0 }
+          ],
+          toolCalls: [
+            {
+              name: 'generate_image',
+              result: 'Image generation started.',
+              status: 'completed'
+            }
+          ],
+          toolsOffered: ['generate_image'],
+          metrics: { totalSeconds: 2.4 }
+        }
+      },
+      false,
+      true,
+      {
+        imageJob: {
+          id: 'image-job',
+          phase: 'running',
+          conversationId: 'timeline-chat',
+          projectId: null,
+          stage: 'sampling',
+          enhancedPrompt: 'A detailed image prompt.',
+          progress: { step: 4, total: 17, secPerStep: 1 },
+          outputPath: null,
+          error: null,
+          startedAt: 1,
+          finishedAt: null
+        }
+      }
+    )
+    render(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'timeline-chat' }} />
+      </TooltipProvider>
+    )
+
+    const progress = await screen.findByText('Generating image · Step 4 of 17')
+    expect(timelineLabels()).toEqual([
+      'Thought process',
+      expect.stringContaining('Generated image'),
+      'Enhanced prompt'
+    ])
+    const toolsFooter = screen.getByRole('button', { name: 'Tools sent in request (1)' })
+    const generationFooter = screen.getByRole('button', { name: 'Generation details' })
+    expect(progress.compareDocumentPosition(toolsFooter) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(
+      toolsFooter.compareDocumentPosition(generationFooter) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.getAllByText('Off Grid AI')).toHaveLength(1)
+  })
+
   it('replaces failed model text with the new answer and keeps the model-change row after reload', async () => {
     ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     const boundary = chatBoundary(undefined, false, true)

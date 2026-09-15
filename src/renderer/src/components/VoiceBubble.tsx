@@ -103,6 +103,8 @@ interface VoiceBubbleProps {
   showTranscriptInitially?: boolean
   /** Persisted playback speed from Voice settings. */
   defaultSpeed?: number
+  /** Use the parent message bubble for width, color, border, and padding. */
+  embedded?: boolean
   /** Reports audio preparation and playback so hands-free input cannot record the reply. */
   onPlaybackStateChange?: (active: boolean) => void
   /** The chat's existing copy-feedback state for this message. */
@@ -123,6 +125,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   autoPlay = false,
   showTranscriptInitially = false,
   defaultSpeed = 1,
+  embedded = false,
   onPlaybackStateChange,
   copied = false,
   onCopy,
@@ -292,7 +295,11 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
 
   return (
     <div
-      className={`flex w-[88%] max-w-[34rem] flex-col gap-2 rounded-xl border p-3 ${isUser ? 'self-end border-green-500/40 bg-green-500/10' : 'self-start border-neutral-800 bg-neutral-900/50'}`}
+      className={
+        embedded
+          ? 'flex w-full flex-col gap-2'
+          : `flex w-[88%] max-w-[34rem] flex-col gap-2 rounded-xl border p-3 ${isUser ? 'self-end border-green-500/40 bg-green-500/10' : 'self-start border-neutral-800 bg-neutral-900/50'}`
+      }
     >
       <div className="flex items-center gap-2.5">
         {/* Play / pause / loading */}
