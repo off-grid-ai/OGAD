@@ -48,13 +48,11 @@ export function makeVisionRailExecutor(
   return async (action, checkpoint, continuation) => {
     const args = action.args as Record<string, unknown>
     const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
-    const result = await host.runTask(
-      goal,
-      action.id,
-      action.sourceRef ?? action.id,
-      checkpoint,
-      continuation
-    )
+    const journeyId = action.sourceRef ?? action.id
+    const result =
+      checkpoint || continuation
+        ? await host.runTask(goal, action.id, journeyId, checkpoint, continuation)
+        : await host.runTask(goal, action.id, journeyId)
     if (!result.ok) {
       return { ok: false, detail: result.summary }
     }
