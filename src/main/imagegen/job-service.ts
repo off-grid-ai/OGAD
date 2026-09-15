@@ -166,14 +166,16 @@ export class ImageGenerationJobService {
           ...(request.messageId ? { messageId: request.messageId } : {}),
           projectId: request.projectId ?? null,
           createdAt: new Date(this.snapshot.startedAt ?? Date.now()).toISOString(),
-          ...(request.width ? { width: request.width } : {}),
-          ...(request.height ? { height: request.height } : {}),
+          ...((result.width ?? request.width) ? { width: result.width ?? request.width } : {}),
+          ...((result.height ?? request.height) ? { height: result.height ?? request.height } : {}),
           metadataJson: generatedImageMetadataJson({
             prompt: result.prompt,
             ...(request.negativePrompt === undefined
               ? {}
               : { negativePrompt: request.negativePrompt }),
-            ...(request.steps === undefined ? {} : { steps: request.steps }),
+            ...((result.steps ?? request.steps) === undefined
+              ? {}
+              : { steps: result.steps ?? request.steps }),
             seed: result.seed,
             modelId: result.model
           })
@@ -187,17 +189,19 @@ export class ImageGenerationJobService {
           cause: new Error('The committed generated image could not be described for sharing.')
         })
       }
+      const finishedAt = Date.now()
+      const durationMs = Math.max(0, finishedAt - (this.snapshot.startedAt ?? finishedAt))
       this.snapshot = {
         ...this.snapshot,
         phase: 'succeeded',
         stage: null,
         outputPath: result.path,
         progress: null,
-        finishedAt: Date.now()
+        finishedAt
       }
       this.publish()
       console.log(`[image-job] ${JSON.stringify({ event: 'succeeded', id, path: result.path })}`)
-      return { ...result, syncId: id }
+      return { ...result, syncId: id, durationMs }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const cancelled = this.snapshot.id === id && this.snapshot.phase === 'cancelled'

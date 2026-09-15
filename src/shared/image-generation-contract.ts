@@ -25,11 +25,18 @@ export interface ImageGenerationOutputContract {
   model: string
   /** The exact prompt sent to the image runtime. */
   prompt: string
+  /** The effective settings used by the runtime after per-model overrides. */
+  width?: number
+  height?: number
+  steps?: number
+  cfgScale?: number
 }
 
 /** IPC adds the stable mesh identity owned by the main-process job service. */
 export interface ImageGenerationResultContract extends ImageGenerationOutputContract {
   syncId: string
+  /** Total image pipeline time, including prompt enhancement and model startup. */
+  durationMs?: number
 }
 
 export interface ImageGenerationProgressContract {

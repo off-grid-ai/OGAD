@@ -4179,16 +4179,20 @@ export function MemoryChat({
           projectId: projectId
         })
         const imageMetadata: ImageGenerationMetadata = {
-          width: imageRequest.width ?? imgSize,
-          height: imageRequest.height ?? imgSize,
-          steps: imageRequest.steps ?? imgSteps,
-          cfgScale: imageRequest.cfgScale ?? imgCfgScale,
+          width: img.width ?? imageRequest.width ?? imgSize,
+          height: img.height ?? imageRequest.height ?? imgSize,
+          steps: img.steps ?? imageRequest.steps ?? imgSteps,
+          cfgScale: img.cfgScale ?? imageRequest.cfgScale ?? imgCfgScale,
           seed:
             typeof img.seed === 'number'
               ? img.seed
               : (imageRequest.seed ?? (Number.isNaN(seedNum) ? -1 : seedNum)),
           model: typeof img.model === 'string' ? img.model : imageRequest.model
         }
+        const imageMetrics: GenerationMetrics | undefined =
+          typeof img.durationMs === 'number'
+            ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+            : undefined
         const completedImage = completedImageMessage(
           `Generated for: ${trimmed}`,
           imageRequest.prompt,
@@ -4200,7 +4204,9 @@ export function MemoryChat({
           ...completedImage,
           image: img.dataUrl,
           imagePath: img.path,
-          imageMetadata
+          imageMetadata,
+          ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
+          ...(imageMetrics ? { metrics: imageMetrics } : {})
         }
         setConvMessages(convId, (prev) => [...prev, assistantMessage])
         try {
@@ -4208,7 +4214,14 @@ export function MemoryChat({
             convId,
             'assistant',
             completedImage.storedContent,
-            withGeneratedImageReference({ imageMetadata }, { id: img.syncId, path: img.path })
+            withGeneratedImageReference(
+              {
+                imageMetadata,
+                ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
+                ...(imageMetrics ? { metrics: imageMetrics } : {})
+              },
+              { id: img.syncId, path: img.path }
+            )
           )
           await announceImageMessagePersisted(convId, stored.uuid)
         } catch {
@@ -4423,6 +4436,24 @@ export function MemoryChat({
                   conversationId: convId,
                   projectId: projectId
                 })
+                const imageMetadata: ImageGenerationMetadata | undefined =
+                  typeof img.width === 'number' &&
+                  typeof img.height === 'number' &&
+                  typeof img.steps === 'number' &&
+                  typeof img.cfgScale === 'number'
+                    ? {
+                        width: img.width,
+                        height: img.height,
+                        steps: img.steps,
+                        cfgScale: img.cfgScale,
+                        seed: img.seed,
+                        model: img.model
+                      }
+                    : undefined
+                const imageMetrics: GenerationMetrics | undefined =
+                  typeof img.durationMs === 'number'
+                    ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+                    : undefined
                 if (imageRequest.proposal) {
                   await window.api.storeProposalIllustration(
                     imageRequest.proposal.conversationId,
@@ -4442,10 +4473,14 @@ export function MemoryChat({
                     convId,
                     'assistant',
                     completedImage.storedContent,
-                    withGeneratedImageReference(undefined, {
-                      id: img.syncId,
-                      path: img.path
-                    })
+                    withGeneratedImageReference(
+                      {
+                        ...(imageMetadata ? { imageMetadata } : {}),
+                        ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
+                        ...(imageMetrics ? { metrics: imageMetrics } : {})
+                      },
+                      { id: img.syncId, path: img.path }
+                    )
                   )
                   imageMessageId = stored.uuid
                   await announceImageMessagePersisted(convId, stored.uuid)
@@ -4459,7 +4494,10 @@ export function MemoryChat({
                     role: 'assistant',
                     ...completedImage,
                     image: img.dataUrl,
-                    imagePath: img.path
+                    imagePath: img.path,
+                    imageMetadata,
+                    ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
+                    ...(imageMetrics ? { metrics: imageMetrics } : {})
                   }
                 ])
               } catch (error) {
@@ -4568,6 +4606,24 @@ export function MemoryChat({
             conversationId: convId,
             projectId: projectId
           })
+          const imageMetadata: ImageGenerationMetadata | undefined =
+            typeof img.width === 'number' &&
+            typeof img.height === 'number' &&
+            typeof img.steps === 'number' &&
+            typeof img.cfgScale === 'number'
+              ? {
+                  width: img.width,
+                  height: img.height,
+                  steps: img.steps,
+                  cfgScale: img.cfgScale,
+                  seed: img.seed,
+                  model: img.model
+                }
+              : undefined
+          const imageMetrics: GenerationMetrics | undefined =
+            typeof img.durationMs === 'number'
+              ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+              : undefined
           const completedImage = completedImageMessage(
             `Generated: ${imgPrompt.slice(0, 80)}`,
             imgPrompt,
@@ -4580,7 +4636,10 @@ export function MemoryChat({
                     ...m,
                     ...completedImage,
                     image: img.dataUrl,
-                    imagePath: img.path
+                    imagePath: img.path,
+                    imageMetadata,
+                    ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
+                    ...(imageMetrics ? { metrics: imageMetrics } : {})
                   }
                 : m
             )
@@ -4590,7 +4649,14 @@ export function MemoryChat({
               convId,
               'assistant',
               completedImage.storedContent,
-              withGeneratedImageReference(undefined, { id: img.syncId, path: img.path })
+              withGeneratedImageReference(
+                {
+                  ...(imageMetadata ? { imageMetadata } : {}),
+                  ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
+                  ...(imageMetrics ? { metrics: imageMetrics } : {})
+                },
+                { id: img.syncId, path: img.path }
+              )
             )
             await announceImageMessagePersisted(convId, stored.uuid)
           } catch {
