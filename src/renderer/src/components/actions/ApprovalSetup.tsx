@@ -77,7 +77,7 @@ export function ApprovalSetup({
   return (
     <form
       onSubmit={submit}
-      className="w-full max-w-4xl rounded-md border border-border bg-card p-4 text-left text-card-foreground"
+      className="w-full rounded-md border border-border bg-card p-4 text-left text-card-foreground"
       aria-labelledby={`approval-setup-${record.id}`}
       data-testid={`approval-intake-${record.id}`}
     >

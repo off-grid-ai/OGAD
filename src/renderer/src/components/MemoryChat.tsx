@@ -2897,6 +2897,8 @@ function StylePresetPicker({
 
 const NEW_CHAT = '__new__' // bucket key for a fresh, not-yet-saved conversation
 const EMPTY_MSGS: ChatMessage[] = []
+const OPEN_CHAT_TABS_KEY = 'offgrid:chat:open-tabs'
+const ACTIVE_CHAT_TAB_KEY = 'offgrid:chat:active-tab'
 
 function nextVoicePlaybackOwner(
   current: string | null,
@@ -3105,7 +3107,13 @@ export function MemoryChat({
       clearTimeout(t)
     }
   }, [convSearch])
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
+    try {
+      return window.localStorage.getItem(ACTIVE_CHAT_TAB_KEY)
+    } catch {
+      return null
+    }
+  })
   useEffect(() => {
     onActiveConversationChange?.(activeConversationId)
   }, [activeConversationId, onActiveConversationChange])
@@ -3132,7 +3140,32 @@ export function MemoryChat({
     stopAllVoicePlayback()
     return () => stopAllVoicePlayback()
   }, [activeConversationId])
-  const [openTabs, setOpenTabs] = useState<string[]>([]) // conversation ids open as tabs
+  const [openTabs, setOpenTabs] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(OPEN_CHAT_TABS_KEY) ?? '[]') as unknown
+      return Array.isArray(saved)
+        ? saved.filter((value): value is string => typeof value === 'string')
+        : []
+    } catch {
+      return []
+    }
+  }) // conversation ids open as tabs
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(OPEN_CHAT_TABS_KEY, JSON.stringify(openTabs))
+    } catch {
+      // Chat still works when renderer storage is unavailable.
+    }
+  }, [openTabs])
+  useEffect(() => {
+    try {
+      if (activeConversationId)
+        window.localStorage.setItem(ACTIVE_CHAT_TAB_KEY, activeConversationId)
+      else window.localStorage.removeItem(ACTIVE_CHAT_TAB_KEY)
+    } catch {
+      // Chat still works when renderer storage is unavailable.
+    }
+  }, [activeConversationId])
   const TaskWorkspace = isPro ? getSlot(SLOTS.taskWorkspace) : undefined
   const taskWorkspaceVisible = useTaskWorkspaceOpen() && Boolean(TaskWorkspace)
   const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
@@ -3449,11 +3482,19 @@ export function MemoryChat({
   const pendingVariantsRef = useRef<string[] | null>(null) // prior answers to keep when regenerating
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
   // Whether streamed output should keep scrolling to the bottom. Set from the container's onScroll
   // so it tracks the USER'S intent: pinned-to-bottom = follow; scrolled up = leave them be.
   const followBottomRef = useRef(true)
   const onScrollFollow = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    followBottomRef.current = shouldFollowBottom(e.currentTarget)
+    const followsBottom = shouldFollowBottom(e.currentTarget)
+    followBottomRef.current = followsBottom
+    setShowScrollToBottom(!followsBottom)
+  }, [])
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto'): void => {
+    followBottomRef.current = true
+    setShowScrollToBottom(false)
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior })
   }, [])
   // Per-conversation generation lock + queue: a send belongs to its OWN conversation,
   // never the active tab. generatingRef is the synchronous source of truth for the
@@ -3569,13 +3610,24 @@ export function MemoryChat({
     void (async () => {
       const convos = await window.api.getRagConversations().catch(() => [])
       setConversations(convos)
-      // Open the latest conversation by default (most recent first), unless the shell
-      // asked to open a specific chat/project — then its own effect handles it.
+      // Restore every saved tab. Remove tabs for conversations that no longer exist.
       if (!openTarget && convos.length > 0) {
-        const first = convos[0]! // convos.length > 0
+        const conversationIds = new Set(convos.map((conversation) => conversation.id))
+        const restoredTabs = openTabs.filter((id) => conversationIds.has(id))
+        if (
+          activeConversationId &&
+          conversationIds.has(activeConversationId) &&
+          !restoredTabs.includes(activeConversationId)
+        ) {
+          restoredTabs.push(activeConversationId)
+        }
+        const first =
+          convos.find((conversation) => conversation.id === activeConversationId) ??
+          convos.find((conversation) => conversation.id === restoredTabs[0]) ??
+          convos[0]!
         setActiveConversationId(first.id)
         setActiveProjectId((first as { project_id?: string | null }).project_id ?? null)
-        setOpenTabs([first.id])
+        setOpenTabs(restoredTabs.length > 0 ? restoredTabs : [first.id])
         try {
           const nextMessages = await loadLatestConversationMessages(first.id)
           if (nextMessages) replaceDurableMessages(first.id, nextMessages)
@@ -3709,9 +3761,9 @@ export function MemoryChat({
     // bottom between tokens, so the next token re-measured as "near bottom" and re-scrolled — a
     // feedback loop that made it impossible to scroll up during generation.
     if (followBottomRef.current) {
-      bottomRef.current?.scrollIntoView({ block: 'end' })
+      scrollToBottom()
     }
-  }, [messages, loading])
+  }, [messages, loading, scrollToBottom])
 
   // Opening / switching a chat lands you at the latest message (after it loads).
   const justSwitched = useRef(false)
@@ -3720,12 +3772,13 @@ export function MemoryChat({
     // A fresh conversation opens pinned to the bottom: reset the follow flag so a scroll-up in the
     // PREVIOUS chat doesn't leave the new one refusing to auto-scroll its stream.
     followBottomRef.current = true
+    setShowScrollToBottom(false)
   }, [activeConversationId])
   useEffect(() => {
     if (!justSwitched.current || !messages.length) return
     justSwitched.current = false
-    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ block: 'end' }))
-  }, [messages, activeConversationId])
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
+  }, [messages, activeConversationId, scrollToBottom])
 
   // Image jobs survive this component. Subscribe before reading the snapshot so a
   // navigation/remount cannot miss the transition between status and observation.
@@ -6230,7 +6283,8 @@ export function MemoryChat({
                   </div>
                 )}
                 {/* Messages */}
-                <div ref={scrollRef} onScroll={onScrollFollow} className="flex-1 overflow-y-auto">
+                <div className="relative min-h-0 flex-1">
+                  <div ref={scrollRef} onScroll={onScrollFollow} className="h-full overflow-y-auto">
                   {approvalSetup ? (
                     <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
                       <ApprovalSetup
@@ -6395,6 +6449,10 @@ export function MemoryChat({
                           conversationId={activeConversationId}
                           promptEnhancementActive={promptEnhancementActive}
                           promptEnhancementComplete={promptEnhancementComplete}
+                          chatBusy={loading || generatingConvs.has(activeConversationId)}
+                          executionRunning={messages.some(
+                            (message) => message.context?.executionApproval?.status === 'running'
+                          )}
                         />
                       ) : null}
                       {showGenerationProgress && !activeImageTimelineMessageId ? (
@@ -6419,6 +6477,20 @@ export function MemoryChat({
                       <div ref={bottomRef} className="h-2" />
                     </div>
                   )}
+                  </div>
+                  {showScrollToBottom ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="secondary"
+                      className="absolute bottom-3 left-1/2 z-10 h-7 w-7 -translate-x-1/2 rounded-full border border-border shadow-sm transition-all duration-150 active:scale-95"
+                      aria-label="Scroll to latest message"
+                      title="Scroll to latest message"
+                      onClick={() => scrollToBottom(reduceWorkspaceMotion ? 'auto' : 'smooth')}
+                    >
+                      <CaretDown className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                  ) : null}
                 </div>
 
                 {/* Composer */}

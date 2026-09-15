@@ -1042,9 +1042,21 @@ export function disposeBrowserHost(): void {
 /** Wire the renderer's pane-region reports to the live view so it docks to the
  *  watched pane and hides when there is none. Fire-and-forget (ipcMain.on). */
 export function registerBrowserViewIpc(): void {
-  ipcMain.on('browser:set-region', (_e, owner: unknown, raw: unknown) => {
+  ipcMain.on('browser:set-region', (event, owner: unknown, raw: unknown) => {
     if (!isBrowserRegionOwner(owner)) return
-    browserHost().setRegion(owner, parseRect(raw))
+    const rect = parseRect(raw)
+    const zoomFactor = event.sender.getZoomFactor()
+    browserHost().setRegion(
+      owner,
+      rect
+        ? {
+            x: rect.x * zoomFactor,
+            y: rect.y * zoomFactor,
+            width: rect.width * zoomFactor,
+            height: rect.height * zoomFactor
+          }
+        : null
+    )
   })
   ipcMain.handle('browser:new-tab', (_event, journeyId: unknown) =>
     browserHost().newTab(typeof journeyId === 'string' ? journeyId : undefined)
