@@ -179,6 +179,11 @@ function timelineLabels(): string[] {
   )
 }
 
+async function openCompletedWork(): Promise<void> {
+  const toggle = (await screen.findAllByRole('button', { name: 'Work done' })).at(-1)
+  if (toggle?.getAttribute('data-state') === 'closed') await userEvent.click(toggle)
+}
+
 afterEach(cleanup)
 
 describe('<MemoryChat/> ordered tool turn', () => {
@@ -236,6 +241,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
     expect(await screen.findByAltText('synced-input.jpg')).toBeTruthy()
     expect(await screen.findByAltText('Generated')).toBeTruthy()
+    await openCompletedWork()
     expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual([
       'Thought process',
       'Generated image',
@@ -250,6 +256,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
     expect(screen.getByAltText('Generated')).toBeTruthy()
     expect(screen.getByText('Generated for: a horse')).toBeTruthy()
     expect(screen.getAllByTitle('Play')).toHaveLength(2)
+    await openCompletedWork()
     expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual([
       'Thought process',
       'Generated image',
@@ -310,14 +317,10 @@ describe('<MemoryChat/> ordered tool turn', () => {
       expect.stringContaining('Generated image'),
       'Enhanced prompt'
     ])
-    const toolsFooter = screen.getByRole('button', { name: 'Tools sent in request (1)' })
-    const generationFooter = screen.getByRole('button', { name: 'Generation details' })
-    expect(progress.compareDocumentPosition(toolsFooter) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING
-    )
-    expect(
-      toolsFooter.compareDocumentPosition(generationFooter) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.queryByRole('button', { name: 'Tools sent in request (1)' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Generation details' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Working' }).getAttribute('data-state')).toBe('open')
+    expect(progress).toBeTruthy()
     expect(screen.getAllByText('Off Grid AI')).toHaveLength(1)
   })
 
@@ -425,6 +428,9 @@ describe('<MemoryChat/> ordered tool turn', () => {
     await act(async () => boundary.finish())
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.queryByText('Thinking…')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Work done' }).getAttribute('data-state')).toBe(
+      'closed'
+    )
 
     chat.unmount()
     render(
@@ -433,6 +439,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
       </TooltipProvider>
     )
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    await openCompletedWork()
     expect(timelineLabels()).toEqual([
       'Thought process',
       expect.stringContaining('Searched the web'),
@@ -461,6 +468,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
     )
 
     expect(await screen.findByText('An older answer.')).toBeTruthy()
+    await openCompletedWork()
     expect(timelineLabels()).toEqual([
       'Thought process',
       expect.stringContaining('Searched the web'),
@@ -508,6 +516,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
         </TooltipProvider>
       )
 
+      await openCompletedWork()
       const search = await screen.findByRole('button', {
         name: 'Searched your memory — 1 result, complete'
       })
@@ -525,6 +534,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
       {
         content: 'The answer is ready.',
         context: {
+          toolsOffered: ['web_search', 'read_url'],
           metrics: {
             promptTokens: 2888,
             contextWindowTokens: 12288,
@@ -545,7 +555,12 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.queryByTestId('generation-metrics')).toBeNull()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Tools sent in request (2)' })
+    )
+    expect(screen.getByText('web_search')).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
+    expect(screen.queryByText('web_search')).toBeNull()
     expect(
       await screen.findByText(
         /Context: 24% used \(2888 prompt tokens \/ 12288 context\) · 42\.5 tok\/s · 567 output tokens · 3\.4s total/
@@ -661,6 +676,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
       </TooltipProvider>
     )
 
+    await openCompletedWork()
     const failed = await screen.findByRole('button', { name: 'Searched memory, failed' })
     await userEvent.click(failed)
     expect(await screen.findByText('Error: memory index unavailable')).toBeTruthy()
