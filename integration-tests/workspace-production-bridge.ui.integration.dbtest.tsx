@@ -281,6 +281,7 @@ describe('production workspace bridge', () => {
       expect(
         await inTranscript('The supported pages were read and the unsupported URL was rejected.')
       ).toBeTruthy()
+      await user.click(await screen.findByRole('button', { name: 'Work done' }))
 
       const toolResults = await waitFor(() => {
         const results = screen.getAllByRole('button', {
@@ -502,6 +503,7 @@ describe('production workspace bridge', () => {
       await user.click(screen.getByRole('button', { name: /^send$/i }))
 
       expect(await inTranscript('Gemini used the calculator and returned 42.')).toBeTruthy()
+      await user.click(await screen.findByRole('button', { name: 'Work done' }))
       await user.click(await screen.findByRole('button', { name: 'Thought process' }))
       expect(await screen.findByText('I will calculate this value.')).toBeTruthy()
       expect(await screen.findByRole('button', { name: 'Calculator, complete' })).toBeTruthy()

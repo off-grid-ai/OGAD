@@ -2574,13 +2574,14 @@ function StandardMessageRow({
   const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const speechState = speechControlState(message.id, state.speakingId, state.speakLoadingId)
   const speechError = state.speakError?.id === message.id ? state.speakError.message : undefined
+  const hasTimelineThinking = message.timeline?.some((entry) => entry.kind === 'thinking') ?? false
+  const shouldShowThinking =
+    message.role === 'assistant' &&
+    (!hasTimelineThinking || Boolean(message.reasoningLabel)) &&
+    Boolean(message.streaming || message.reasoning?.trim() || message.reasoningRequested)
   const thinking =
     timelineThinking ??
-    (message.role === 'assistant' &&
-    (!message.timeline?.some((entry) => entry.kind === 'thinking') || message.reasoningLabel) &&
-      (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
-      <MessageThinkingHeader message={message} timeline />
-    ) : undefined)
+    (shouldShowThinking ? <MessageThinkingHeader message={message} timeline /> : undefined)
   const isFinalAssistantResponse =
     message.role === 'assistant' &&
     !message.streaming &&
