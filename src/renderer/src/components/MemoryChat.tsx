@@ -864,6 +864,8 @@ function ToolMessageTimelineRow({
 function VoiceMessageRow({
   message,
   liveTask,
+  timelineThinking,
+  continuation,
   navigation,
   autoPlay,
   copied,
@@ -884,6 +886,8 @@ function VoiceMessageRow({
 }: Readonly<{
   message: ChatMessage
   liveTask?: TaskSession
+  timelineThinking?: React.JSX.Element
+  continuation?: React.JSX.Element
   navigation: ContextNavigation
   autoPlay: boolean
   copied: boolean
@@ -913,13 +917,14 @@ function VoiceMessageRow({
   const toolTimeline =
     message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
   const thinking =
-    toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
+    timelineThinking ??
+    (toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
       <MessageThinkingHeader message={message} timeline />
     ) : toolTimeline &&
       !message.timeline?.some((entry) => entry.kind === 'thinking') &&
       (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
       <MessageThinkingHeader message={message} timeline />
-    ) : undefined
+    ) : undefined)
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
@@ -1080,6 +1085,7 @@ function VoiceMessageRow({
   return (
     <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>
       {body}
+      {continuation}
       {message.createdAt !== undefined || (message.role === 'user' && !editing) ? (
         <div className="flex items-center gap-2 pr-1">
           <MessageTime message={message} />
@@ -2413,6 +2419,8 @@ type MessageRowProps = Readonly<{
   message: ChatMessage
   nextMessageRole?: SyncedMessageRole
   liveTask?: TaskSession
+  timelineThinking?: React.JSX.Element
+  continuation?: React.JSX.Element
   voiceMode: boolean
   state: MessageRowState
   actions: MessageRowActions
@@ -2495,6 +2503,8 @@ function MessageBubble({
 function StandardMessageRow({
   message,
   liveTask,
+  timelineThinking,
+  continuation,
   state,
   actions,
   navigation
@@ -2506,13 +2516,14 @@ function StandardMessageRow({
   const toolTimeline =
     message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
   const thinking =
-    toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
+    timelineThinking ??
+    (toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
       <MessageThinkingHeader message={message} timeline />
     ) : toolTimeline &&
       !message.timeline?.some((entry) => entry.kind === 'thinking') &&
       (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
       <MessageThinkingHeader message={message} timeline />
-    ) : undefined
+    ) : undefined)
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
@@ -2573,6 +2584,7 @@ function StandardMessageRow({
           </div>
         ) : null}
       </div>
+      {continuation}
       {message.role === 'assistant' && !message.streaming ? (
         <ToolsSentDisclosure names={message.toolsOffered} />
       ) : null}
@@ -2667,6 +2679,8 @@ function AudioPane({ path, title }: { path: string; title: string }): React.JSX.
 function MessageRow({
   message,
   liveTask,
+  timelineThinking,
+  continuation,
   voiceMode,
   state,
   actions,
@@ -2684,6 +2698,8 @@ function MessageRow({
       <VoiceMessageRow
         message={message}
         liveTask={liveTask}
+        timelineThinking={timelineThinking}
+        continuation={continuation}
         navigation={navigation}
         autoPlay={state.autoPlayId === message.id}
         copied={state.copiedKey === message.id}
@@ -2708,6 +2724,8 @@ function MessageRow({
       <StandardMessageRow
         message={message}
         liveTask={liveTask}
+        timelineThinking={timelineThinking}
+        continuation={continuation}
         state={state}
         actions={actions}
         navigation={navigation}
@@ -5764,6 +5782,67 @@ export function MemoryChat({
   const latestVoiceAssistantId = voiceMode
     ? ([...messages].reverse().find((message) => message.role === 'assistant')?.id ?? null)
     : null
+  const showGenerationProgress = Boolean(
+    activeConversationId &&
+    !liveJourneyTask &&
+    generatingConvs.has(activeConversationId) &&
+    (generatingImage || !messages.some((message) => message.streaming))
+  )
+  const activeImageTimelineMessageId =
+    showGenerationProgress && generatingImage
+      ? [...messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === 'assistant' &&
+              !message.image &&
+              message.toolCalls?.some((tool) => tool.name === 'generate_image')
+          )?.id
+      : undefined
+  const activeEnhancedPrompt =
+    imageJobStage === 'enhancing' || streamingEnhancedPrompt ? (
+      <ChatThinkingBlock
+        content={streamingEnhancedPrompt || 'Starting…'}
+        live={imageJobStage === 'enhancing'}
+        label={imageJobStage === 'enhancing' ? 'Enhancing prompt…' : 'Enhanced prompt'}
+      />
+    ) : undefined
+  const activeImageProgress = showGenerationProgress ? (
+    <div className="w-full rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
+      {imgProgress?.preview ? (
+        <img
+          src={imgProgress.preview}
+          alt="forming"
+          className="mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover"
+        />
+      ) : (
+        <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">
+          Preparing image…
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
+        <span>{imageProgressLabel(imageJobStage, imgProgress)}</span>
+        {imgProgress ? (
+          <span className="text-neutral-600">
+            · ~
+            {Math.max(
+              0,
+              Math.round((imgProgress.total - imgProgress.step) * imgProgress.secPerStep)
+            )}
+            s left
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
+        <div
+          className="h-full bg-green-500 transition-all duration-300"
+          style={{
+            width: imgProgress ? `${(imgProgress.step / imgProgress.total) * 100}%` : '5%'
+          }}
+        />
+      </div>
+    </div>
+  ) : undefined
 
   return (
     <ActiveConversationProvider conversationId={activeConversationId}>
@@ -6264,6 +6343,20 @@ export function MemoryChat({
                             key={message.id}
                             message={message}
                             nextMessageRole={messages[messageIndex + 1]?.role}
+                            timelineThinking={
+                              message.id === activeImageTimelineMessageId
+                                ? activeEnhancedPrompt
+                                : undefined
+                            }
+                            continuation={
+                              message.id === activeImageTimelineMessageId ? (
+                                <div
+                                  className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start gap-2`}
+                                >
+                                  {activeImageProgress}
+                                </div>
+                              ) : undefined
+                            }
                             liveTask={
                               message.streaming ? (liveJourneyTask ?? undefined) : undefined
                             }
@@ -6299,10 +6392,7 @@ export function MemoryChat({
                           promptEnhancementComplete={promptEnhancementComplete}
                         />
                       ) : null}
-                      {!!activeConversationId &&
-                      !liveJourneyTask &&
-                      generatingConvs.has(activeConversationId) &&
-                      (generatingImage || !messages.some((m) => m.streaming)) ? (
+                      {showGenerationProgress && !activeImageTimelineMessageId ? (
                         <div className="mb-5 flex flex-col items-start">
                           <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
                             Off Grid AI
@@ -6311,56 +6401,8 @@ export function MemoryChat({
                             <div
                               className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start gap-2`}
                             >
-                              {imageJobStage === 'enhancing' || streamingEnhancedPrompt ? (
-                                <ChatThinkingBlock
-                                  content={streamingEnhancedPrompt || 'Starting…'}
-                                  live={imageJobStage === 'enhancing'}
-                                  label={
-                                    imageJobStage === 'enhancing'
-                                      ? 'Enhancing prompt…'
-                                      : 'Enhanced prompt'
-                                  }
-                                />
-                              ) : null}
-                              <div className="w-full rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
-                                {imgProgress?.preview ? (
-                                  <img
-                                    src={imgProgress.preview}
-                                    alt="forming"
-                                    className="mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover"
-                                  />
-                                ) : (
-                                  <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">
-                                    Preparing image…
-                                  </div>
-                                )}
-                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
-                                  <span>{imageProgressLabel(imageJobStage, imgProgress)}</span>
-                                  {imgProgress ? (
-                                    <span className="text-neutral-600">
-                                      · ~
-                                      {Math.max(
-                                        0,
-                                        Math.round(
-                                          (imgProgress.total - imgProgress.step) *
-                                            imgProgress.secPerStep
-                                        )
-                                      )}
-                                      s left
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
-                                  <div
-                                    className="h-full bg-green-500 transition-all duration-300"
-                                    style={{
-                                      width: imgProgress
-                                        ? `${(imgProgress.step / imgProgress.total) * 100}%`
-                                        : '5%'
-                                    }}
-                                  />
-                                </div>
-                              </div>
+                              {activeEnhancedPrompt}
+                              {activeImageProgress}
                             </div>
                           ) : (
                             <ChatLoadingCard

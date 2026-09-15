@@ -258,47 +258,67 @@ describe('<MemoryChat/> ordered tool turn', () => {
     ])
   })
 
-  it('shows image progress while the tool reply is still present', async () => {
+  it('keeps enhanced prompt and active image progress in the timeline before its footer', async () => {
     ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
-    chatBoundary(undefined, false, false, {
-      imageJob: {
-        id: 'image-job',
-        phase: 'running',
-        conversationId: 'timeline-chat',
-        projectId: null,
-        stage: 'sampling',
-        enhancedPrompt: '',
-        progress: { step: 4, total: 17, secPerStep: 1 },
-        outputPath: null,
-        error: null,
-        startedAt: 1,
-        finishedAt: null
-      },
-      activeStreams: [
-        {
-          streamId: 'active-image-tool-turn',
-          conversationId: 'timeline-chat',
-          content: 'The image will appear in the chat shortly.',
+    chatBoundary(
+      {
+        content: '',
+        context: {
           reasoning: 'Prepare the image request.',
-          reasoningRequested: true,
-          tools: [
+          timeline: [
+            { kind: 'thinking', text: 'Prepare the image request.' },
+            { kind: 'tool', toolIndex: 0 }
+          ],
+          toolCalls: [
             {
               name: 'generate_image',
               result: 'Image generation started.',
               status: 'completed'
             }
-          ]
+          ],
+          toolsOffered: ['generate_image'],
+          metrics: { totalSeconds: 2.4 }
         }
-      ]
-    })
+      },
+      false,
+      true,
+      {
+        imageJob: {
+          id: 'image-job',
+          phase: 'running',
+          conversationId: 'timeline-chat',
+          projectId: null,
+          stage: 'sampling',
+          enhancedPrompt: 'A detailed image prompt.',
+          progress: { step: 4, total: 17, secPerStep: 1 },
+          outputPath: null,
+          error: null,
+          startedAt: 1,
+          finishedAt: null
+        }
+      }
+    )
     render(
       <TooltipProvider>
         <MemoryChat openTarget={{ conversationId: 'timeline-chat' }} />
       </TooltipProvider>
     )
 
-    expect(await screen.findByText('The image will appear in the chat shortly.')).toBeTruthy()
-    expect(await screen.findByText('Generating image · Step 4 of 17')).toBeTruthy()
+    const progress = await screen.findByText('Generating image · Step 4 of 17')
+    expect(timelineLabels()).toEqual([
+      'Thought process',
+      expect.stringContaining('Generated image'),
+      'Enhanced prompt'
+    ])
+    const toolsFooter = screen.getByRole('button', { name: 'Tools sent in request (1)' })
+    const generationFooter = screen.getByRole('button', { name: 'Generation details' })
+    expect(progress.compareDocumentPosition(toolsFooter) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    expect(
+      toolsFooter.compareDocumentPosition(generationFooter) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.getAllByText('Off Grid AI')).toHaveLength(1)
   })
 
   it('replaces failed model text with the new answer and keeps the model-change row after reload', async () => {
