@@ -5,6 +5,8 @@
  * IPC handlers, React surfaces, repositories, SQLite, and artifact store stay real.
  */
 import fs from 'node:fs'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 // The DB Vitest config uses the classic JSX transform, which reads this binding at runtime.
@@ -234,6 +236,84 @@ describe('production workspace bridge', () => {
     })
     expect(fake.requests).toHaveLength(2)
   })
+
+  it('reads model-written web URLs with wrappers and rejects an unsupported scheme', async () => {
+    const requestedPaths: string[] = []
+    const pageServer = http.createServer((request, response) => {
+      const requestPath = request.url ?? ''
+      requestedPaths.push(requestPath)
+      response.writeHead(200, { 'Content-Type': 'text/html' })
+      response.end(
+        requestPath === '/quoted'
+          ? '<main>Quoted wrapper content</main>'
+          : '<main>Angle wrapper content</main>'
+      )
+    })
+    await new Promise<void>((resolve) => pageServer.listen(0, '127.0.0.1', resolve))
+    const pageOrigin = `http://127.0.0.1:${(pageServer.address() as AddressInfo).port}`
+    const user = userEvent.setup()
+
+    try {
+      fake.enqueue(
+        {
+          toolCalls: [
+            { name: 'read_url', args: { url: `"${pageOrigin}/quoted"` } },
+            { name: 'read_url', args: { url: `<${pageOrigin}/angled>` } },
+            { name: 'read_url', args: { url: 'ftp://example.com' } }
+          ]
+        },
+        { content: 'The supported pages were read and the unsupported URL was rejected.' }
+      )
+      renderChat()
+
+      const composer = await screen.findByPlaceholderText(/^ask /i)
+      await user.click(screen.getByRole('button', { name: 'New chat' }))
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Composer options' }), {
+        button: 0,
+        ctrlKey: false
+      })
+      await user.click(await screen.findByRole('menuitem', { name: /Tools/ }))
+      await user.keyboard('{Escape}')
+      fireEvent.change(composer, {
+        target: { value: 'Read the supplied web addresses and reject unsupported URL schemes' }
+      })
+      await user.click(screen.getByRole('button', { name: /^send$/i }))
+      expect(
+        await inTranscript('The supported pages were read and the unsupported URL was rejected.')
+      ).toBeTruthy()
+
+      const toolResults = await waitFor(() => {
+        const results = screen.getAllByRole('button', {
+          name: /^Read web page, (complete|failed)$/
+        })
+        expect(screen.getAllByRole('button', { name: 'Read web page, complete' })).toHaveLength(2)
+        expect(screen.getAllByRole('button', { name: 'Read web page, failed' })).toHaveLength(1)
+        return results
+      })
+      await user.click(toolResults[0]!)
+      expect(await screen.findByText('Quoted wrapper content')).toBeTruthy()
+      await user.click(toolResults[1]!)
+      expect(await screen.findByText('Angle wrapper content')).toBeTruthy()
+      await user.click(toolResults[2]!)
+      await waitFor(() =>
+        expect(toolResults[2]!.closest('li')?.textContent).toContain(
+          'Invalid URL: unsupported scheme ftp'
+        )
+      )
+      expect(requestedPaths).toEqual(['/quoted', '/angled'])
+    } finally {
+      const composerOptions = screen.queryByRole('button', { name: 'Composer options' })
+      if (composerOptions) {
+        fireEvent.pointerDown(composerOptions, { button: 0, ctrlKey: false })
+        const enabledTools = screen.queryByRole('menuitem', { name: 'ToolsOn' })
+        if (enabledTools) await user.click(enabledTools)
+        await user.keyboard('{Escape}')
+      }
+      await new Promise<void>((resolve, reject) =>
+        pageServer.close((error) => (error ? reject(error) : resolve()))
+      )
+    }
+  }, 15_000)
 
   it('shows the real memory-chat failure instead of a fabricated answer', async () => {
     fake.enqueue(
