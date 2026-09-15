@@ -218,19 +218,30 @@ export function getActionsRuntime(): ActionsRuntime {
   // The vision rail's live host (screen capture + actuation + grounding model),
   // created lazily on first computer_use.
   const visionExecute = makeVisionRailExecutor({
-    runTask: (goal, taskId, journeyId) => getVisionRailHost().runTask(goal, taskId, journeyId)
+    runTask: (goal, taskId, journeyId, checkpoint, continuation) =>
+      getVisionRailHost().runTask(goal, taskId, journeyId, checkpoint, continuation)
   })
   // VisionHost owns the selected model strategy for the whole task. This keeps
   // specialist-resident and per-step hybrid swaps behind the same session port.
-  const groundedVisionExecute = withRemoteScreenGate('computer_use', visionExecute)
+  const groundedVisionExecute: ComputerTaskTiers['visionExecute'] = (
+    action,
+    checkpoint,
+    continuation
+  ) =>
+    withRemoteScreenGate('computer_use', (approvedAction) =>
+      visionExecute(approvedAction, checkpoint, continuation)
+    )(action)
   // computer_use is TIERED: try the accessibility rail first (free, any chat
   // model, most native apps), and fall through to the grounder-vision rail only
   // when AX can't see the controls. OFFGRID_COMPUTER_RAIL=ax|vision forces one
   // rail for the A/B; unset = the real tiered behaviour.
   const computerTaskTiers: ComputerTaskTiers = {
     routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
-    runAx: (goal, taskId, journeyId, app, initial) =>
-      getAxRailHost().runTask(goal, taskId, app, initial, journeyId),
+    runAx: (goal, taskId, journeyId, app, request) =>
+      getAxRailHost().runTask(goal, taskId, app, request.initial, {
+        journeyId,
+        recoverWithVision: request.recoverWithVision
+      }),
     visionExecute: groundedVisionExecute
   }
   const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {

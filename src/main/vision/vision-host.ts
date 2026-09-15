@@ -215,7 +215,8 @@ class VisionHost {
     goal: string,
     taskId: string,
     journeyId = taskId,
-    checkpoint?: TaskRetryCheckpoint
+    checkpoint?: TaskRetryCheckpoint,
+    continuation?: VisionTaskContinuation
   ): Promise<VisionTaskResult> {
     const actuation = loadActuation()
     if (!actuation) {
@@ -230,8 +231,8 @@ class VisionHost {
     if (blocked) {
       return blocked
     }
-    const guard = new VisionGuard({ taskId, kind: 'computer_use' })
-    const request = new AbortController()
+    const guard = continuation?.guard ?? new VisionGuard({ taskId, kind: 'computer_use' })
+    const request = continuation?.request ?? new AbortController()
     const settings = getComputerUseSettings()
     try {
       return await withVisionTaskModelStrategy(
@@ -266,7 +267,8 @@ class VisionHost {
             modelIdentity,
             decide,
             contextTokens,
-            retrievedFacts
+            retrievedFacts,
+            continuation
           })
         }
       )
@@ -294,6 +296,7 @@ class VisionHost {
     decide: VisionTaskModelSession['decide']
     contextTokens: number
     retrievedFacts: string[]
+    continuation?: VisionTaskContinuation
   }): Promise<VisionTaskResult> {
     const {
       goal,
@@ -308,14 +311,20 @@ class VisionHost {
       modelIdentity,
       decide,
       contextTokens,
-      retrievedFacts
+      retrievedFacts,
+      continuation
     } = input
     // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
     // Stop routes to the SAME guard via the controller session.
-    const escapeRegistered = globalShortcut.register('Escape', () => {
-      stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
-    })
-    const releaseSession = registerVisionSession(taskId, guard, request)
+    const ownsControls = !continuation
+    const escapeRegistered = ownsControls
+      ? globalShortcut.register('Escape', () => {
+          stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
+        })
+      : true
+    const releaseSession = ownsControls
+      ? registerVisionSession(taskId, guard, request)
+      : () => undefined
     // The only run-level notice is an unavailable emergency shortcut. Model
     // selection guidance belongs in settings, not in a live task.
     const notice = [
@@ -334,11 +343,13 @@ class VisionHost {
       currentAction: 'Preparing local screen control',
       ...(notice ? { notice } : {})
     })
-    const queuedGuidance: string[] = [...(checkpoint?.guidance ?? [])]
-    const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
-      queuedGuidance.push(text)
-      return true
-    })
+    const queuedGuidance = continuation?.queuedGuidance ?? [...(checkpoint?.guidance ?? [])]
+    const releaseGuidance = ownsControls
+      ? registerTaskGuideHandler(taskId, (text) => {
+          queuedGuidance.push(text)
+          return true
+        })
+      : () => undefined
     try {
       const plan =
         checkpoint?.plan ??
@@ -477,11 +488,17 @@ class VisionHost {
       return { ok: false, summary, steps: [], handoffs: 0 }
     } finally {
       releaseGuidance()
-      if (escapeRegistered) globalShortcut.unregister('Escape')
+      if (ownsControls && escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
-      hideSupervisorWindow()
+      if (ownsControls) hideSupervisorWindow()
     }
   }
+}
+
+export interface VisionTaskContinuation {
+  guard: VisionGuard
+  request: AbortController
+  queuedGuidance: string[]
 }
 
 let host: VisionHost | null = null

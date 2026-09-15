@@ -4,11 +4,11 @@
  *
  *   accessibility (this rail, free, any chat model) -> vision (grounder, RAM).
  *
- * The decision is made ONCE, from the routing snapshot's richness (ax-router):
+ * The initial decision comes from the routing snapshot's richness (ax-router):
  * a control-rich AX window drives here; a dead-AX window (Catalyst, a game, a
- * canvas) falls through to the vision executor untouched. If AX is viable but
- * the model can't finish, that give_up is the honest answer - we do NOT then
- * re-run the whole task under vision (that would double-actuate the desktop).
+ * canvas) falls through to the vision executor untouched. An explicit give_up
+ * stays terminal. Only repeated invalid action replies continue under vision,
+ * with the same task and control owner so no GUI action is replayed.
  *
  * Pure and injected: the AX host (routing + run) and the vision executor are
  * passed in, so the tiering is unit-tested without a screen. The wiring in
@@ -18,6 +18,8 @@ import type { ActionRecord, ExecuteResult } from '@offgrid/use'
 import { axRailViable } from './ax-router'
 import type { AxRouting } from './ax-host'
 import type { ElementTaskResult } from './ax-agent'
+import type { TaskRetryCheckpoint } from '../tasks/task-retry'
+import type { VisionTaskContinuation } from '../vision/vision-host'
 
 export interface ComputerTaskTiers {
   /** Resolve + read the target app for routing, or null to fall to vision. */
@@ -28,10 +30,20 @@ export interface ComputerTaskTiers {
     taskId: string,
     journeyId: string,
     app: string,
-    initial: AxRouting['snapshot']
+    request: {
+      initial: AxRouting['snapshot']
+      recoverWithVision?: (
+        checkpoint: TaskRetryCheckpoint,
+        continuation: VisionTaskContinuation
+      ) => Promise<ExecuteResult>
+    }
   ): Promise<ElementTaskResult>
   /** The vision-rail executor, used when AX can't drive this surface. */
-  visionExecute(action: ActionRecord): Promise<ExecuteResult>
+  visionExecute(
+    action: ActionRecord,
+    checkpoint?: TaskRetryCheckpoint,
+    continuation?: VisionTaskContinuation
+  ): Promise<ExecuteResult>
 }
 
 /** Extract the task goal the same way the vision rail does. */
@@ -76,14 +88,22 @@ export function makeComputerTaskExecutor(
         routing ? `${routing.app}/${routing.snapshot.elements.length} elements` : 'none'
       } axViable=${viable} -> ${useAx ? 'AX' : 'grounder-vision'}`
     )
-    if (useAx && routing) {
+    if (useAx) {
       const t0 = now()
       const result = await tiers.runAx(
         goal,
         action.id,
         action.sourceRef ?? action.id,
         routing.app,
-        routing.snapshot
+        {
+          initial: routing.snapshot,
+          ...(forced === 'ax'
+            ? {}
+            : {
+                recoverWithVision: (checkpoint, continuation) =>
+                  tiers.visionExecute(action, checkpoint, continuation)
+              })
+        }
       )
       const ms = now() - t0
       const stepCount = result.steps.length

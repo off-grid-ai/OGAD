@@ -41,7 +41,7 @@ import { hideSupervisorWindow } from '../vision/supervisor-window'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { resolveComputerUseContextTokens } from '../../shared/computer-use-settings'
 import { recentVisualFacts } from '../vision/visual-context'
-import { recordTaskRun } from '../tasks/task-history'
+import { getTaskRun, recordTaskRun } from '../tasks/task-history'
 import { persistAxFrame, persistAxObservation, type AxObservationFrame } from './ax-observation'
 import { captureAxObservationFrame } from './ax-frame'
 import { accessibilityHelperPath } from './ax-helper'
@@ -53,6 +53,9 @@ import { NativeAppTargeter } from './native-app-target'
 import { createMacNativeAppPlatform } from './native-app-macos'
 import { windowsNativeAppPlatform } from './native-app-windows'
 import { automationTaskReadStatus } from '@offgrid/automation'
+import type { TaskRetryCheckpoint } from '../tasks/task-retry'
+import type { VisionTaskContinuation } from '../vision/vision-host'
+import type { ExecuteResult } from '@offgrid/use'
 
 const execFileAsync = promisify(execFile)
 
@@ -206,8 +209,16 @@ class AxRailHost {
     taskId: string,
     app: string,
     initial?: AxSnapshot,
-    journeyId = taskId
+    options: {
+      journeyId?: string
+      recoverWithVision?: (
+        checkpoint: TaskRetryCheckpoint,
+        continuation: VisionTaskContinuation
+      ) => Promise<ExecuteResult>
+    } = {}
   ): Promise<ElementTaskResult> {
+    const journeyId = options.journeyId ?? taskId
+    const { recoverWithVision } = options
     console.log(`[ax-rail] runTask app="${app}" goal="${goal}"`)
     const failBeforeStart = (summary: string): ElementTaskResult => {
       emitVisionState({
@@ -277,7 +288,7 @@ class AxRailHost {
         { goal, surface: 'computer', targetLabel: app, signal: request.signal },
         (marker) => emitVisionStep(taskId, marker)
       )
-      const result = await runElementTask(goal, {
+      let result = await runElementTask(goal, {
         read: async () => {
           emitVisionState({
             taskId,
@@ -374,6 +385,63 @@ class AxRailHost {
           persistAxObservation(taskId, goal, { ...observation, frame: observationFrame })
         }
       })
+      if (result.recovery === 'vision') {
+        emitVisionStep(taskId, 'Action replies stayed invalid. Switching to vision grounding.')
+        emitVisionState({
+          taskId,
+          journeyId,
+          goal,
+          status: 'running',
+          phase: 'observing',
+          currentStep: liveStep,
+          currentAction: 'Capturing the current screen for vision grounding'
+        })
+        if (result.guidance?.length) queuedGuidance.unshift(...result.guidance)
+        if (recoverWithVision) {
+          const task = getTaskRun(taskId)
+          try {
+            const outcome = await recoverWithVision(
+              {
+                taskId,
+                steps: task?.steps ?? result.steps,
+                ...(task?.stepDetails?.length ? { stepDetails: task.stepDetails } : {}),
+                plan,
+                ...(result.guidance?.length ? { guidance: result.guidance } : {}),
+                summary: result.summary,
+                currentStep: liveStep,
+                currentAction: result.summary
+              },
+              { guard, request, queuedGuidance }
+            )
+            const visionSummary = getTaskRun(taskId)?.summary
+            result = outcome.ok
+              ? {
+                  ok: true,
+                  summary: visionSummary || 'Vision grounding completed the task.',
+                  steps: result.steps
+                }
+              : {
+                  ok: false,
+                  summary: `Computer Use stopped after repeated invalid action replies. Vision recovery could not continue${outcome.detail ? `: ${outcome.detail}` : '.'}`,
+                  steps: result.steps
+                }
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : 'the vision model failed'
+            result = {
+              ok: false,
+              summary: `Computer Use stopped after repeated invalid action replies. Vision recovery could not continue: ${reason}`,
+              steps: result.steps
+            }
+          }
+        } else {
+          result = {
+            ok: false,
+            summary:
+              'Computer Use stopped after repeated invalid action replies. Vision recovery is unavailable. Check that a vision model is installed, then retry Computer Use.',
+            steps: result.steps
+          }
+        }
+      }
       if (!result.ok && !guard.isHalted) guard.fail(result.summary)
       const finalStatus = automationTaskReadStatus(guard.automationStatus)
       emitVisionState({
