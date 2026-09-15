@@ -1,5 +1,6 @@
 import React from 'react'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { isMac } from '@renderer/lib/device'
 
 // One reference catalog for every keyboard shortcut in the app. Each row notes where
 // the shortcut is actually registered — keep this in sync with that site. Pro rows
@@ -11,11 +12,18 @@ interface Shortcut {
   note?: string
 }
 
+const PRIMARY_MODIFIER_KEY = isMac() ? '⌘' : 'Ctrl'
+
 const SHORTCUTS: Shortcut[] = [
-  { keys: ['⌘', 'K'], action: 'Open command palette' }, // CommandPalette.tsx
-  { keys: ['⌘', '['], action: 'Back' }, // App.tsx
-  { keys: ['⌘', ']'], action: 'Forward' }, // App.tsx
-  { keys: ['⌘', '⇧', 'C'], action: 'Clipboard quick-paste popup', pro: true }, // pro/main/clipboard.ts
+  { keys: [PRIMARY_MODIFIER_KEY, 'K'], action: 'Open command palette' }, // CommandPalette.tsx
+  { keys: [PRIMARY_MODIFIER_KEY, '['], action: 'Back' }, // App.tsx
+  { keys: [PRIMARY_MODIFIER_KEY, ']'], action: 'Forward' }, // App.tsx
+  { keys: [PRIMARY_MODIFIER_KEY, '+ / - / 0'], action: 'Window zoom' }, // main/index.ts
+  {
+    keys: [PRIMARY_MODIFIER_KEY, '⇧', 'C'],
+    action: 'Clipboard quick-paste popup',
+    pro: true
+  }, // pro/main/clipboard.ts
   {
     keys: ['⌥', 'Space'],
     action: 'Dictation — hold or toggle',

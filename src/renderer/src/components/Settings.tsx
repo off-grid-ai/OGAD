@@ -252,7 +252,7 @@ export function Settings({
             {/* Keyboard shortcuts — one reference for every hotkey (core + pro rows). */}
             <SettingsCard
               title="Keyboard shortcuts"
-              summary="Every hotkey in one place — command palette, navigation, clipboard, dictation."
+              summary="Every hotkey in one place — command palette, navigation, window zoom, clipboard, dictation."
               delay={0.45}
             >
               <KeyboardShortcuts />
