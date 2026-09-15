@@ -888,9 +888,10 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const boundary = installApi({
       active: FULL,
       models: [FULL],
+      isPro: true,
       settings: { composerToolsOn: true, showGenerationDetails: true },
       toolResult: {
-        answer: 'I made both images.',
+        answer: 'Image generation started - it will appear in the chat.',
         toolCalls: [
           { name: 'generate_image', result: 'Image generation started' },
           { name: 'generate_image', result: 'Image generation started' }
@@ -922,15 +923,26 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       `768 × 768 · 17 steps · CFG 5.5 · seed 101 · ${FULL}`,
       `768 × 768 · 17 steps · CFG 5.5 · seed 202 · ${FULL}`
     ])
+    expect(
+      screen.queryByText('Image generation started - it will appear in the chat.')
+    ).toBeNull()
     const generationDetails = screen.getAllByRole('button', { name: 'Generation details' })
-    expect(generationDetails).toHaveLength(3)
+    expect(generationDetails).toHaveLength(2)
     await user.click(generationDetails[0]!)
-    expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain('42.5 tok/s')
-    expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain(
-      '64 output tokens'
-    )
-    await user.click(generationDetails[1]!)
-    expect(screen.getAllByTestId('generation-metrics')[1]!.textContent).toContain('117.6s total')
+    expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain('117.6s total')
+    act(() => {
+      boundary.emitIncomingFiles([
+        {
+          syncId: 'image-sync-first',
+          messageId: 'stored-message-2',
+          name: 'first.png',
+          fileSize: 10,
+          mimeType: 'image/png',
+          kind: 'generated-image'
+        }
+      ])
+    })
+    expect(screen.queryByTestId('incoming-shared-file')).toBeNull()
 
     const persistedImages = boundary.addRagMessage.mock.calls.filter(
       ([, role, , context]) =>
@@ -945,7 +957,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     ])
     expect(
       boundary.imageGenConversationPersisted.mock.calls.map(([, messageId]) => messageId)
-    ).toEqual(['stored-message-3', 'stored-message-4'])
+    ).toEqual(['stored-message-2', 'stored-message-3'])
 
     await user.click(screen.getByTitle('Generated images'))
     expect(await screen.findByRole('button', { name: /images \(2\)/i })).toBeTruthy()

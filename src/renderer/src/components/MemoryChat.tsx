@@ -2361,7 +2361,7 @@ function MessageBubble({
           <span>{message.context.taskGuidance.state}</span>
         </div>
       ) : null}
-      <IncomingFileRows files={state.incomingFiles} />
+      {message.image ? null : <IncomingFileRows files={state.incomingFiles} />}
       {message.attachments?.length ? (
         <MessageAttachments
           attachments={message.attachments}
@@ -4359,6 +4359,13 @@ export function MemoryChat({
           return
         }
         const answer = tr?.answer || 'No response returned.'
+        let imageRequests = tr?.imageRequests ?? []
+        if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
+          imageRequests = [tr.imageRequest]
+        }
+        const imageStatusOnly =
+          imageRequests.length > 0 &&
+          answer.startsWith('Image generation started - it will appear in the chat.')
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -4367,23 +4374,26 @@ export function MemoryChat({
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
         delete timelineByStream.current[toolStreamId]
         delete answerByStream.current[toolStreamId]
-        // Finalize the streamed placeholder in place (never append a second bubble).
+        // A generated image owns the completed tool turn, so it does not leave a separate
+        // assistant bubble behind. Non-image tool turns still finalize their placeholder.
         setConvMessages(convId, (prev) =>
-          prev.map((m) =>
-            m.id === toolStreamId
-              ? {
-                  ...m,
-                  content: answer,
-                  context,
-                  toolCalls,
-                  timeline: toolTimeline,
-                  toolsOffered: tr?.toolsOffered,
-                  metrics: tr?.metrics,
-                  activity: undefined,
-                  streaming: false
-                }
-              : m
-          )
+          imageStatusOnly
+            ? prev.filter((message) => message.id !== toolStreamId)
+            : prev.map((message) =>
+                message.id === toolStreamId
+                  ? {
+                      ...message,
+                      content: answer,
+                      context,
+                      toolCalls,
+                      timeline: toolTimeline,
+                      toolsOffered: tr?.toolsOffered,
+                      metrics: tr?.metrics,
+                      activity: undefined,
+                      streaming: false
+                    }
+                  : message
+              )
         )
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
@@ -4394,10 +4404,6 @@ export function MemoryChat({
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
         // on one row would make the last context write replace the first association.
-        let imageRequests = tr?.imageRequests ?? []
-        if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
-          imageRequests = [tr.imageRequest]
-        }
         if (
           imageRequests.length > 0 &&
           window.api.generateImage &&
@@ -4409,25 +4415,27 @@ export function MemoryChat({
           // RAG stream) and remains scoped to this conversation.
           setImgProgress(null)
           setImageGenConv(convId)
-          try {
-            const stored = await window.api.addRagMessage(
-              convId,
-              'assistant',
-              answer,
-              toolCtxWithReasoning
-            )
-            setConvMessages(convId, (previous) =>
-              previous.map((message) =>
-                message.id === toolStreamId ? { ...message, id: stored.uuid } : message
+          if (!imageStatusOnly) {
+            try {
+              const stored = await window.api.addRagMessage(
+                convId,
+                'assistant',
+                answer,
+                toolCtxWithReasoning
               )
-            )
-            if (voiceMode) setAutoPlayId(stored.uuid)
-          } catch {
-            /* The answer remains on screen; image rows can still be persisted independently. */
-            if (voiceMode) setAutoPlayId(toolStreamId)
+              setConvMessages(convId, (previous) =>
+                previous.map((message) =>
+                  message.id === toolStreamId ? { ...message, id: stored.uuid } : message
+                )
+              )
+              if (voiceMode) setAutoPlayId(stored.uuid)
+            } catch {
+              /* The answer remains on screen; image rows can still be persisted independently. */
+              if (voiceMode) setAutoPlayId(toolStreamId)
+            }
           }
           try {
-            for (const imageRequest of imageRequests) {
+            for (const [imageIndex, imageRequest] of imageRequests.entries()) {
               if (cancelledRef.current.has(convId)) break
               setImgProgress(null)
               try {
@@ -4475,6 +4483,7 @@ export function MemoryChat({
                     completedImage.storedContent,
                     withGeneratedImageReference(
                       {
+                        ...(imageIndex === 0 && imageStatusOnly ? toolCtxWithReasoning : {}),
                         ...(imageMetadata ? { imageMetadata } : {}),
                         ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
                         ...(imageMetrics ? { metrics: imageMetrics } : {})
@@ -4496,6 +4505,15 @@ export function MemoryChat({
                     image: img.dataUrl,
                     imagePath: img.path,
                     imageMetadata,
+                    ...(imageIndex === 0 && imageStatusOnly
+                      ? {
+                          context,
+                          reasoning: toolReasoning,
+                          timeline: toolTimeline,
+                          toolCalls,
+                          toolsOffered: tr?.toolsOffered
+                        }
+                      : {}),
                     ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
                     ...(imageMetrics ? { metrics: imageMetrics } : {})
                   }
