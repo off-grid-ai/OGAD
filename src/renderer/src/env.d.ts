@@ -318,6 +318,12 @@ interface RendererAPIOverrides {
     content: string,
     context?: unknown
   ) => Promise<{ id: number; uuid: string }>
+  updateRagMessage: (
+    conversationId: string,
+    messageId: string,
+    content: string,
+    context?: unknown
+  ) => Promise<boolean>
   truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
   updateRagConversationTitle: (id: string, title: string) => Promise<RagConversation>
   deleteRagConversation: (id: string) => Promise<void>

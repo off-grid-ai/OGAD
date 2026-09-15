@@ -153,6 +153,8 @@ import {
   FolderOpen,
   CaretDown,
   DotsThree,
+  PencilSimple,
+  Waveform,
   Lightning,
   WarningCircle
 } from '@phosphor-icons/react'
@@ -871,7 +873,12 @@ function VoiceMessageRow({
   onPlaybackStateChange,
   onCopy,
   onOpenImage,
-  onRegenerate
+  onRegenerate,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onUpdateTranscript
 }: Readonly<{
   message: ChatMessage
   liveTask?: TaskSession
@@ -885,8 +892,16 @@ function VoiceMessageRow({
   onCopy: (text: string, key?: string) => void
   onOpenImage: (image: OpenImage) => void
   onRegenerate: (messageId: string) => void
+  editing: boolean
+  onStartEdit: (message: ChatMessage) => void
+  onCancelEdit: () => void
+  onSaveEdit: (messageId: string, text: string) => void
+  onUpdateTranscript: (message: ChatMessage, text: string) => Promise<void>
 }>): React.JSX.Element {
+  const [transcribing, setTranscribing] = useState(false)
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
   const alignment = message.role === 'user' ? 'items-end' : 'items-start'
+  const audioUrl = recordedClipUrl(message)
   const reportPlayback = useCallback(
     (active: boolean) => onPlaybackStateChange(message.id, active),
     [message.id, onPlaybackStateChange]
@@ -905,8 +920,48 @@ function VoiceMessageRow({
         content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
       }
     : undefined
+  const transcribeAgain = useCallback(async (): Promise<void> => {
+    if (!audioUrl || transcribing) return
+    setTranscriptionError(null)
+    setTranscribing(true)
+    try {
+      const response = await fetch(audioUrl)
+      if (!response.ok) throw new Error('missing-audio')
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const source =
+        message.attachments?.find(
+          (attachment) => attachmentKindFor({ fileName: attachment.name }) === 'audio'
+        )?.path ?? audioUrl
+      const extension = source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] ?? 'webm'
+      const transcript = (
+        await window.api.transcribeAudio(bytes, extension, crypto.randomUUID())
+      ).trim()
+      if (!transcript) throw new Error('empty-transcript')
+      await onUpdateTranscript(message, transcript)
+    } catch (error) {
+      console.error('Saved voice transcription failed:', error)
+      setTranscriptionError(
+        error instanceof Error && error.message === 'missing-audio'
+          ? 'This voice note is not on this Mac.'
+          : 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
+      )
+    } finally {
+      setTranscribing(false)
+    }
+  }, [audioUrl, message, onUpdateTranscript, transcribing])
   let body: React.JSX.Element
-  if (message.role === 'user') {
+  if (message.role === 'user' && editing) {
+    body = (
+      <div className="w-full max-w-2xl">
+        <MessageEditor
+          messageId={message.id}
+          initialText={message.content}
+          onCancel={onCancelEdit}
+          onSave={onSaveEdit}
+        />
+      </div>
+    )
+  } else if (message.role === 'user') {
     body = (
       <VoiceBubble
         messageId={message.id}
@@ -972,6 +1027,24 @@ function VoiceMessageRow({
   return (
     <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>
       {body}
+      {message.role === 'user' && !editing ? (
+        <VoiceMessageActions
+          transcribing={transcribing}
+          canTranscribe={Boolean(audioUrl)}
+          onEdit={() => onStartEdit(message)}
+          onTranscribe={() => void transcribeAgain()}
+        />
+      ) : null}
+      {transcribing ? (
+        <div role="status" className="text-[11px] text-neutral-500">
+          Transcribing...
+        </div>
+      ) : null}
+      {transcriptionError ? (
+        <div role="alert" className="max-w-[34rem] text-[11px] text-red-300">
+          {transcriptionError}
+        </div>
+      ) : null}
       {message.role === 'assistant' && !message.streaming ? (
         <ToolsSentDisclosure names={message.toolsOffered} />
       ) : null}
@@ -1654,15 +1727,50 @@ function UserMessageActions({
   )
 }
 
+function VoiceMessageActions({
+  transcribing,
+  canTranscribe,
+  onEdit,
+  onTranscribe
+}: Readonly<{
+  transcribing: boolean
+  canTranscribe: boolean
+  onEdit: () => void
+  onTranscribe: () => void
+}>): React.JSX.Element {
+  return (
+    <MessageActionsMenu label="Voice message actions">
+      <DropdownMenuItem
+        onSelect={onEdit}
+        className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
+        title="Edit this message"
+      >
+        <PencilSimple className="h-3.5 w-3.5" aria-hidden="true" />
+        Edit
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={!canTranscribe || transcribing}
+        onSelect={onTranscribe}
+        className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors enabled:hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+        title={canTranscribe ? 'Transcribe this voice note again' : 'Voice note is not available'}
+      >
+        <Waveform className="h-3.5 w-3.5" aria-hidden="true" />
+        Transcribe again
+      </DropdownMenuItem>
+    </MessageActionsMenu>
+  )
+}
+
 function MessageActionsMenu({
-  children
-}: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
+  children,
+  label = 'Message actions'
+}: Readonly<{ children: React.ReactNode; label?: string }>): React.JSX.Element {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label="Message actions"
+          aria-label={label}
           className="rounded-sm px-1 text-neutral-500 transition-colors hover:text-neutral-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500"
         >
           <DotsThree className="h-5 w-5" weight="bold" aria-hidden="true" />
@@ -2210,6 +2318,7 @@ type MessageRowActions = Readonly<{
   startEdit: (message: ChatMessage) => void
   cancelEdit: () => void
   saveEdit: (messageId: string, text: string) => void
+  updateVoiceTranscript: (message: ChatMessage, text: string) => Promise<void>
   retryImageMemory: (retry: NonNullable<ChatMessage['imageMemoryRetry']>) => void
   openArtifact: (artifact: Artifact) => void
   selectAskOption: (selection: AskOptionSelection) => void
@@ -2499,6 +2608,11 @@ function MessageRow({
         onCopy={actions.copy}
         onOpenImage={actions.openImage}
         onRegenerate={actions.regenerate}
+        editing={state.editingId === message.id}
+        onStartEdit={actions.startEdit}
+        onCancelEdit={actions.cancelEdit}
+        onSaveEdit={actions.saveEdit}
+        onUpdateTranscript={actions.updateVoiceTranscript}
       />
     )
   } else {
@@ -5180,7 +5294,11 @@ export function MemoryChat({
     // record of it - so the chip vanished from the thread and every later regenerate lost it too.
     const cid = activeConversationId
     const edited = messages[idx]
-    const keptAtts = edited ? attachmentsOf(edited) : []
+    const keptAtts = edited
+      ? attachmentsOf(edited).map((attachment) =>
+          attachment.kind === 'audio' ? { ...attachment, text } : attachment
+        )
+      : []
     const persisted = keptAtts.length
       ? {
           attachments: keptAtts.map(
@@ -5218,6 +5336,39 @@ export function MemoryChat({
       }
     })()
   }
+
+  const updateVoiceTranscript = useCallback(
+    async (message: ChatMessage, text: string): Promise<void> => {
+      const cid = activeConversationId
+      if (!cid) throw new Error('No active conversation')
+      let updatedAudio = false
+      const nextAttachments = message.attachments?.map((attachment) => {
+        if (updatedAudio || attachmentKindFor({ fileName: attachment.name }) !== 'audio') {
+          return attachment
+        }
+        updatedAudio = true
+        return { ...attachment, text }
+      })
+      const nextContext = nextAttachments
+        ? { ...(message.context ?? {}), attachments: nextAttachments }
+        : undefined
+      const updated = await window.api.updateRagMessage(cid, message.id, text, nextContext)
+      if (!updated) throw new Error('Saved message was not found')
+      setConvMessages(cid, (previous) =>
+        previous.map((entry) =>
+          entry.id === message.id
+            ? {
+                ...entry,
+                content: text,
+                context: nextContext ?? entry.context,
+                attachments: nextAttachments
+              }
+            : entry
+        )
+      )
+    },
+    [activeConversationId, setConvMessages]
+  )
 
   // Process attached files into text (read/parse/caption/transcribe) on the main side.
   const addFiles = useCallback(
@@ -5381,6 +5532,7 @@ export function MemoryChat({
     },
     cancelEdit: () => setEditingId(null),
     saveEdit,
+    updateVoiceTranscript,
     retryImageMemory: (retry) => {
       void sendMessage(retry.prompt, {
         regen: true,

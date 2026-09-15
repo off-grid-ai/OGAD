@@ -1293,6 +1293,42 @@ export function addRagMessage(
   return { id: Number(info.lastInsertRowid), uuid }
 }
 
+/** Replace one saved message without removing the turns that follow it. */
+export function updateRagMessage(
+  conversationId: string,
+  messageId: string,
+  content: string,
+  context?: unknown
+): boolean {
+  const db = getDB()
+  const existing = db
+    .prepare(
+      `SELECT id, uuid, context FROM rag_messages
+       WHERE conversation_id = ? AND (uuid = ? OR CAST(id AS TEXT) = ?)`
+    )
+    .get(conversationId, messageId, messageId) as
+    | { id: number; uuid: string; context: string | null }
+    | undefined
+  if (!existing) return false
+
+  const contextJson = context === undefined ? existing.context : JSON.stringify(context)
+  db.prepare('UPDATE rag_messages SET content = ?, context = ? WHERE id = ?').run(
+    content,
+    contextJson,
+    existing.id
+  )
+  db.prepare('UPDATE rag_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+    conversationId
+  )
+  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.message, entityId: existing.uuid, kind: 'put' })
+  emitSyncMutation({
+    entity: CORE_SYNC_ENTITIES.conversation,
+    entityId: conversationId,
+    kind: 'put'
+  })
+  return true
+}
+
 // Keep the first `keepCount` messages of a conversation (chronological) and
 // delete the rest — used by regenerate/edit so old answers don't pile up.
 export function truncateRagMessages(conversationId: string, keepCount: number): number {
