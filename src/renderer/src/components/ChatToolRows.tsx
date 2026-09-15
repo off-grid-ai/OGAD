@@ -31,6 +31,12 @@ interface ChatToolRowsProps {
   memorySources?: { count: number; content: ReactNode }
   /** The task that belongs to this live Chat turn before its tool result contains a task id. */
   liveTask?: TaskSession
+  /** Open the timeline while this response is live, then close it when the response completes. */
+  live?: boolean
+  /** A final or stopped response closes work even if an earlier tool retained running state. */
+  settled?: boolean
+  /** The user stopped this turn before normal completion. */
+  stopped?: boolean
 }
 
 type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
@@ -232,7 +238,10 @@ export function ChatToolRows({
   timeline,
   thinkingLive = false,
   memorySources,
-  liveTask
+  liveTask,
+  live = false,
+  settled = false,
+  stopped = false
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
@@ -240,8 +249,12 @@ export function ChatToolRows({
   // pending row from the live task so the chat reports work at the time it happens.
   // Once the real tool call arrives, it replaces this transient projection.
   const visible: readonly DisplayTool[] =
-    tools?.length || !liveTask
-      ? (tools ?? [])
+    tools?.length
+      ? tools
+      : memorySources
+        ? [{ name: 'search_memory', result: '', status: 'completed' }]
+        : !liveTask
+          ? []
       : [
           {
             name: liveTask.kind === 'web_use' ? 'web_use' : 'computer_use',
@@ -277,7 +290,9 @@ export function ChatToolRows({
     0,
     ordered.filter((entry) => entry.kind === 'tool').length - projected.length
   )
-  return (
+  const workIsLive = live || (!stopped && !settled && projected.some(({ status }) => status === 'running'))
+  const workState = workIsLive ? 'live' : stopped ? 'stopped' : 'done'
+  const timelineRows = (
     <ol
       className="ml-1 mt-1 w-full max-w-[85%] border-l border-neutral-800 text-neutral-500"
       aria-label={thinking || hasOrderedThinking ? 'Thinking and tool calls' : 'Tool calls'}
@@ -419,5 +434,19 @@ export function ChatToolRows({
         </li>
       ) : null}
     </ol>
+  )
+  return (
+    <Collapsible key={workState} defaultOpen={workIsLive} className="w-full">
+      <CollapsibleTrigger className="group ml-1 flex items-center gap-1.5 py-1 text-xs text-neutral-500 transition-colors hover:text-neutral-300">
+        <span>{workIsLive ? 'Working' : stopped ? 'Work stopped' : 'Work done'}</span>
+        <CaretDown
+          className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
+          aria-hidden="true"
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="offgrid-smooth-collapsible overflow-hidden">
+        {timelineRows}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }

@@ -34,6 +34,10 @@ afterEach(() => {
   resetTaskSessionStoreForTests()
 })
 
+async function openCompletedWork(): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: 'Work done' }))
+}
+
 describe('<ChatToolRows/> work timeline', () => {
   it('uses the meeting search result for the collapsed summary', async () => {
     const user = userEvent.setup()
@@ -49,6 +53,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
+    await openCompletedWork()
     expect(screen.getByText('No matching recorded meetings were found.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Searched meetings, complete' }))
     expect(screen.getAllByText('No matching recorded meetings were found.')).toHaveLength(2)
@@ -109,6 +114,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
+    await openCompletedWork()
     const row = await screen.findByRole('button', { name: 'Web Use, complete' })
     row.focus()
     await user.keyboard('{Enter}')
@@ -234,6 +240,7 @@ describe('<ChatToolRows/> work timeline', () => {
         ]}
       />
     )
+    await openCompletedWork()
     expect(screen.getByText('Web Use')).toBeTruthy()
     expect(screen.getByText('Searched messages')).toBeTruthy()
     expect(screen.queryByText(/web_use/)).toBeNull()
@@ -243,9 +250,10 @@ describe('<ChatToolRows/> work timeline', () => {
     expect(await screen.findByText('Error: browser timed out')).toBeTruthy()
   })
 
-  it('names work that needs the user without calling it done', () => {
+  it('names work that needs the user without calling it done', async () => {
     render(<ChatToolRows tools={[{ name: 'action_approval', status: 'pending', result: '' }]} />)
 
+    await openCompletedWork()
     expect(screen.getByRole('button', { name: 'Requested approval, needs attention' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Requested approval, complete' })).toBeNull()
   })
@@ -295,6 +303,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
+    await openCompletedWork()
     expect(taskReferenceFromResult('Done. Task reference: act_1.')).toBe('act_1')
     await user.click(screen.getByRole('button', { name: 'Computer Use, complete' }))
     expect(await screen.findByText('Computer Use details')).toBeTruthy()
@@ -331,6 +340,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
+    await openCompletedWork()
     await waitFor(() => expect(changed).toBeTypeOf('function'))
     act(() => {
       changed?.({
@@ -383,6 +393,7 @@ describe('<ChatToolRows/> work timeline', () => {
         updatedAt: 4
       })
     })
+    await openCompletedWork()
     expect(screen.getByRole('button', { name: 'Web Use, complete' })).toBeTruthy()
   })
 
@@ -422,6 +433,7 @@ describe('<ChatToolRows/> work timeline', () => {
       />
     )
 
+    await openCompletedWork()
     await userEvent.click(screen.getByRole('button', { name: 'Computer Use, failed' }))
     const retry = await screen.findByRole('button', { name: 'Retry on Studio Mac' })
     expect((retry as HTMLButtonElement).disabled).toBe(true)

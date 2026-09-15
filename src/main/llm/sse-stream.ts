@@ -27,16 +27,14 @@ export interface SseToolCallDelta {
 }
 
 /** Shape of a single streamed delta from the OpenAI-style chat-completions SSE. */
+export type SseReasoningDetail = Record<string, unknown>
+
 interface SseDelta {
   reasoning_content?: string
   /** OpenRouter can stream plain reasoning under this OpenAI-compatible alias. */
   reasoning?: string
   /** Structured reasoning used by Gemini and other remote providers. */
-  reasoning_details?: Array<{
-    type?: string
-    text?: string
-    summary?: string
-  }>
+  reasoning_details?: SseReasoningDetail[]
   content?: string
   tool_calls?: SseToolCallDelta[]
 }
@@ -46,7 +44,13 @@ export function displayableReasoningDelta(delta: SseDelta): string {
   if (delta.reasoning_content) return delta.reasoning_content
   if (delta.reasoning) return delta.reasoning
   return (delta.reasoning_details ?? [])
-    .map((detail) => detail.text ?? detail.summary ?? '')
+    .map((detail) =>
+      typeof detail.text === 'string'
+        ? detail.text
+        : typeof detail.summary === 'string'
+          ? detail.summary
+          : ''
+    )
     .filter(Boolean)
     .join('')
 }

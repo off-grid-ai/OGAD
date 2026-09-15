@@ -63,6 +63,9 @@ function topKSimilar(query, candidates, k) {
 }
 
 // src/retrieval.ts
+function neutralizePromptTags(text) {
+  return text.replaceAll(/[<>]/g, "");
+}
 function rankBySimilarity(queryVec, candidates, topK = 5) {
   return candidates.map((c) => ({
     docId: c.docId,
@@ -87,8 +90,10 @@ function selectWithinBudget(chunks, charBudget) {
 }
 function formatForPrompt(result) {
   if (!result.chunks.length) return "";
-  const body = result.chunks.map((c) => `[Source: ${c.name} (part ${c.position + 1})]
-${c.content}`).join("\n---\n");
+  const body = result.chunks.map(
+    (c) => `[Source: ${neutralizePromptTags(c.name)} (part ${c.position + 1})]
+${neutralizePromptTags(c.content)}`
+  ).join("\n---\n");
   return `<knowledge_base>
 The following excerpts are from the user's project knowledge base. Use them to answer and cite the source filename when you do.
 ${body}

@@ -13,6 +13,7 @@ import {
   createToolCallAccumulator,
   createToolMarkupFilter,
   type AssembledToolCall,
+  type SseReasoningDetail,
   type SseTimings,
   type SseUsage
 } from './sse-stream'
@@ -25,6 +26,9 @@ const now = (): number => Date.now()
 export interface StreamResult {
   content: string
   toolCalls: AssembledToolCall[]
+  /** Provider reasoning blocks must be replayed unchanged with assistant tool calls.
+   * Gemini uses their signed form to validate the next tool round. */
+  reasoningDetails?: SseReasoningDetail[]
   /** Raw OpenAI-compatible stop reason. Product layers normalize this value. */
   finishReason: string | null
   /**
@@ -66,6 +70,7 @@ export function createCompletionStreamAccumulator(
     else reasoningMarkup.push(event.text)
   })
   const tools = createToolCallAccumulator()
+  const reasoningDetails: SseReasoningDetail[] = []
 
   const push = (chunk: string): void => {
     buffer += chunk
@@ -78,6 +83,9 @@ export function createCompletionStreamAccumulator(
       if (frame.finishReason) finishReason = frame.finishReason
       if (frame.usage) usage = frame.usage
       if (frame.timings) timings = frame.timings
+      if (frame.delta.reasoning_details?.length) {
+        reasoningDetails.push(...frame.delta.reasoning_details)
+      }
       const reasoning = displayableReasoningDelta(frame.delta)
       // Reasoning counts: it is the first thing the model produces and the first thing the user
       // sees move, so a thinking model's TTFT would otherwise read as the whole thinking pass.
@@ -101,6 +109,7 @@ export function createCompletionStreamAccumulator(
       return {
         content: splitter.answer(),
         toolCalls: tools.list(),
+        ...(reasoningDetails.length ? { reasoningDetails } : {}),
         finishReason,
         metrics: generationMetrics({
           startedAtMs,

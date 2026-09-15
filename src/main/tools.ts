@@ -155,6 +155,12 @@ export async function searchMemoryToolResult(
 // deterministic "read this URL, then build" flow). Works for localhost too.
 export async function readUrlText(url: string): Promise<string> {
   let u = url.trim()
+  while (u.length > 0 && '"\'<> '.includes(u[u.length - 1]!)) u = u.slice(0, -1)
+  while (u.length > 0 && '"\'<> '.includes(u[0]!)) u = u.slice(1)
+  if (!u) throw new Error('Invalid URL: empty')
+  const scheme = u.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]
+  if (scheme && !/^https?$/i.test(scheme))
+    throw new Error(`Invalid URL: unsupported scheme ${scheme}`)
   if (!/^https?:\/\//i.test(u)) u = 'https://' + u
   const res = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -251,13 +257,10 @@ const TOOLS: ToolDef[] = [
       required: ['url']
     },
     run: async (a) => {
-      let url = String(a.url ?? '').trim()
+      const url = String(a.url ?? '').trim()
       if (!url) return 'Error: empty url.'
-      if (!/^https?:\/\//i.test(url)) url = 'https://' + url
       try {
-        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
-        if (!res.ok) return `Error: HTTP ${res.status}`
-        const text = htmlToText(await res.text())
+        const text = await readUrlText(url)
         return text ? text.slice(0, 6000) : 'No readable text on the page.'
       } catch (e) {
         return 'Error: could not fetch — ' + (e as Error).message
@@ -827,6 +830,7 @@ export async function toolChat(
     const {
       content,
       toolCalls: calls,
+      reasoningDetails,
       metrics
     } = await llm.streamChat(messages, onDelta, {
       tools: roundTools,
@@ -878,6 +882,7 @@ export async function toolChat(
       messages.push({
         role: 'assistant',
         content: content || null,
+        ...(reasoningDetails?.length ? { reasoning_details: reasoningDetails } : {}),
         tool_calls: callsToRun.map((c) => ({
           id: c.id,
           type: 'function',

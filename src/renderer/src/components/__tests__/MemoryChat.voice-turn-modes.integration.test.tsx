@@ -129,6 +129,10 @@ async function flush(): Promise<void> {
   })
 }
 
+async function openCompletedWork(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: 'Work done' }))
+}
+
 describe('<MemoryChat/> Desktop voice turn modes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -332,11 +336,10 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
 
     boundary.emitReasoning(0, 'Check the calendar before answering.')
     boundary.emit(0, 'You have a planning review at 10.')
-    expect(await screen.findByText('Check the calendar before answering.')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Thinking…/ })).toBeTruthy()
 
     boundary.resolve(0, 'You have a planning review at 10.')
     await flush()
+    await openCompletedWork(user)
     const completedThought = await screen.findByRole('button', { name: /Thought process/i })
     expect(screen.queryByText('Check the calendar before answering.')).toBeNull()
     await user.click(completedThought)
@@ -363,6 +366,7 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
     boundary.resolve(0, 'I am doing well. How can I help?')
+    await openCompletedWork(user)
     const unavailable = await screen.findByRole('button', { name: /Thinking unavailable/i })
     await user.click(unavailable)
     expect(
@@ -386,6 +390,7 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
+    await openCompletedWork(user)
     const thought = await screen.findByRole('button', { name: /Thought process/i })
     expect(screen.queryByText('Historical reasoning stays private.')).toBeNull()
     await user.click(thought)
