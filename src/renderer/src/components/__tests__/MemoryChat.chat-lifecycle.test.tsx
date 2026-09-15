@@ -447,7 +447,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     fireEvent.click(stopped)
     const thoughts = screen.getAllByRole('button', { name: 'Thought process' })
     expect(thoughts).toHaveLength(2)
-    fireEvent.click(thoughts[1])
+    fireEvent.click(thoughts[1]!)
     expect(await screen.findByText('I should explain the partial result.')).toBeTruthy()
     expect(await screen.findByText('Search failed.')).toBeTruthy()
   })
