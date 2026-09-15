@@ -62,8 +62,12 @@ import { buildGatewayModalities, type GatewayModalities } from './model-server/h
 import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
-import { getActiveRemoteVisionServer, getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
+import {
+  getActiveRemoteVisionServer,
+  getActiveRemoteVisionServerForModality
+} from './vision/remote-vision-server'
 import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
+import { remoteTextModelProviderError } from './llm/remote-chat'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -306,13 +310,49 @@ function proxyToSelectedRemote(res: http.ServerResponse, body: Record<string, un
       }
     },
     (proxyRes) => {
+      const status = proxyRes.statusCode ?? 502
+      let providerErrorBody = ''
+      if (status >= 400) {
+        proxyRes.on('data', (chunk: Buffer | string) => {
+          if (providerErrorBody.length >= 4_096) return
+          providerErrorBody += chunk.toString().slice(0, 4_096 - providerErrorBody.length)
+        })
+        proxyRes.on('end', () => {
+          const error = remoteTextModelProviderError(status, providerErrorBody)
+          writeDiagnosticLog(
+            'gateway',
+            'remote_chat.provider_failed',
+            {
+              requestId: String(res.getHeader('X-Request-Id') ?? ''),
+              provider: remote.provider,
+              model: remote.model,
+              status,
+              error: error.message
+            },
+            status >= 500 ? 'error' : 'warn'
+          )
+        })
+      }
       const safeResponse = safeProxyResponse(proxyRes.statusCode, proxyRes.headers)
       res.writeHead(safeResponse.statusCode, safeResponse.headers)
       guardProxyStreams(proxyRes, res)
       proxyRes.pipe(res)
     }
   )
-  proxyReq.on('error', () => {
+  proxyReq.on('error', (error) => {
+    const errorCode = (error as NodeJS.ErrnoException).code
+    writeDiagnosticLog(
+      'gateway',
+      'remote_chat.connection_failed',
+      {
+        requestId: String(res.getHeader('X-Request-Id') ?? ''),
+        provider: remote.provider,
+        model: remote.model,
+        error: error.message,
+        errorCode: typeof errorCode === 'string' ? errorCode : undefined
+      },
+      'error'
+    )
     if (!res.headersSent) {
       json(res, 502, errBody('Remote model connection failed.', 'upstream_error'))
     } else {
@@ -1349,10 +1389,21 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
           if (url === '/v1/models/activate' && method === 'POST') {
             const { id, kind } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
-            const r = await mm.activateModel(
-              String(id),
-              typeof kind === 'string' ? kind : undefined
-            )
+            const modelId = String(id)
+            const r = await mm.activateModel(modelId, typeof kind === 'string' ? kind : undefined)
+            if (r.success && !parseRemoteVisionModelId(modelId)) {
+              void llm.init().catch((error) => {
+                writeDiagnosticLog(
+                  'gateway',
+                  'model_activation.start_failed',
+                  {
+                    model: modelId,
+                    error: error instanceof Error ? error.message : String(error)
+                  },
+                  'error'
+                )
+              })
+            }
             return json(res, r.success ? 200 : 400, r)
           }
           // DELETE /v1/models/{id}  (or POST /v1/models/delete {id})

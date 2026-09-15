@@ -6,6 +6,7 @@ import {
   type CompletionStreamAccumulator,
   type StreamResult
 } from './stream'
+import { writeDiagnosticLog } from '../diagnostics-log'
 
 export interface RemoteTextModelConnection {
   id: string
@@ -383,10 +384,21 @@ export async function streamRemoteChatCompletion(input: {
   } catch (error) {
     // A cancelled request keeps whatever streamed — the caller asked to stop, not to discard.
     if (options.signal?.aborted) return accumulator.finish()
-    throw classifyStreamFailure(error, {
+    const classified = classifyStreamFailure(error, {
       cancelled: false,
       timedOut: watchdog.firedRef.current
     })
+    writeDiagnosticLog(
+      'remote_chat',
+      'request.failed',
+      {
+        provider: remote.provider,
+        model: remote.model,
+        error: classified.message
+      },
+      'error'
+    )
+    throw classified
   } finally {
     watchdog.dispose()
   }
