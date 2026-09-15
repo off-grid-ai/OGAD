@@ -1285,7 +1285,7 @@ function MessageEditor({
           }
           if (event.key === 'Escape') onCancel()
         }}
-        rows={Math.min(10, text.split('\n').length + 1)}
+        rows={Math.min(10, Math.max(5, text.split('\n').length + 1))}
         className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-green-500"
       />
       <div className="flex gap-2">
@@ -2472,7 +2472,7 @@ function StandardMessageRow({
         liveTask={liveTask}
       />
       <div
-        className={`flex w-fit flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'max-w-2xl' : 'max-w-[85%]'}`}
+        className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${state.editingId === message.id ? 'w-full max-w-2xl' : `w-fit ${message.image || message.attachments?.length ? 'max-w-2xl' : 'max-w-[85%]'}`}`}
       >
         <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
         {message.role === 'user' ||
