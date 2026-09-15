@@ -1272,6 +1272,14 @@ export function setupIPC() {
     return getRagMessages(conversationId)
   })
 
+  ipcMain.handle(
+    'rag:update-message',
+    async (_e, conversationId: string, messageId: string, content: string, context?: unknown) => {
+      const { updateRagMessage } = await import('./database')
+      return updateRagMessage(conversationId, messageId, content, context)
+    }
+  )
+
   ipcMain.handle('rag:truncate-messages', async (_e, conversationId: string, keepCount: number) => {
     const { truncateRagMessages } = await import('./database')
     return truncateRagMessages(conversationId, keepCount)

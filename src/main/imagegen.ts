@@ -592,7 +592,14 @@ export async function generateImage(
   // The queue evicts 'llm' before this runs AND re-warms it (mode-aware) when the
   // job finishes — so the image path no longer touches llm.pause/resume itself.
   const output = await modalityQueue.run(IMAGE_JOB, () => runImageGen(effective, progressObserver))
-  return { ...output, prompt: effective.prompt }
+  return {
+    ...output,
+    prompt: effective.prompt,
+    width: effective.width,
+    height: effective.height,
+    steps: effective.steps,
+    cfgScale: effective.cfgScale
+  }
 }
 
 /** Expand the user's prompt into a richer generation prompt via the local text

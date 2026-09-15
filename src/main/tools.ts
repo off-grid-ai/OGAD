@@ -726,6 +726,7 @@ export async function toolChat(
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
   const imageRequests: (ProposalDeferredImageRequest | { prompt: string })[] = []
+  let finishAfterDeferredImages = false
   const resultWithImages = (result: {
     answer: string
     toolCalls: ToolCall[]
@@ -756,6 +757,30 @@ export async function toolChat(
 
   const settings = llm.getSettings()
   const maxToolCalls = normalizeMaxToolCalls(settings.maxToolCalls)
+  const requestedImageCountMatch = query.match(
+    /\b(\d+|two|three|four|five|six|seven|eight|nine|ten)\s+(?:distinct\s+|different\s+|separate\s+|unique\s+)?(?:images|pictures|photos|illustrations|variations)\b/i
+  )
+  const requestedImageCountWords: Record<string, number> = {
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10
+  }
+  const requestedImageCount = Math.min(
+    maxToolCalls,
+    Math.max(
+      1,
+      requestedImageCountMatch
+        ? (requestedImageCountWords[requestedImageCountMatch[1]!.toLowerCase()] ??
+            Number(requestedImageCountMatch[1]))
+        : 1
+    )
+  )
   // Tool chat compacts at 80% above. Fit schemas around the retained turns and
   // reserve space for the reply; never discard another turn without a notice.
   const replyReserve = Math.min(1024, Math.max(256, Math.floor(ctx * 0.1)))
@@ -776,7 +801,10 @@ export async function toolChat(
       Math.floor((maxPromptChars - toolPromptChars(messages)) / 4)
     )
     const fittedTools = budgetTools(tools, availableToolTokens, builtins.length)
-    const roundTools = fittedTools.estTokens <= availableToolTokens ? fittedTools.tools : []
+    const roundTools =
+      !finishAfterDeferredImages && fittedTools.estTokens <= availableToolTokens
+        ? fittedTools.tools
+        : []
     retainedPromptTokens = Math.ceil(toolPromptChars(messages, roundTools) / 4)
     const remainingOutputTokens = Math.max(
       1,
@@ -842,7 +870,10 @@ export async function toolChat(
     if (effective.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
-      const callsToRun = callsWithinToolBudget(effective, toolCalls.length, maxToolCalls)
+      let remainingImageRequests = requestedImageCount - imageRequests.length
+      const callsToRun = callsWithinToolBudget(effective, toolCalls.length, maxToolCalls).filter(
+        (call) => call.name !== 'generate_image' || remainingImageRequests-- > 0
+      )
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
       messages.push({
         role: 'assistant',
@@ -897,8 +928,13 @@ export async function toolChat(
           unifiedKeys.add(s.key)
           unified.push(s)
         }
-        if (res.imageRequests?.length) imageRequests.push(...res.imageRequests)
-        else if (res.imageRequest) imageRequests.push(res.imageRequest)
+        if (res.imageRequests?.length) {
+          imageRequests.push(...res.imageRequests)
+          finishAfterDeferredImages = true
+        } else if (res.imageRequest) {
+          imageRequests.push(res.imageRequest)
+          finishAfterDeferredImages = imageRequests.length >= requestedImageCount
+        }
         const status = res.status ?? 'completed'
         if (status === 'completed' && res.text.trim()) successfulToolResults.push(res.text)
         toolCalls.push({ name: c.name, args: c.args, result: res.text, status })

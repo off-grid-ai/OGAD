@@ -167,7 +167,11 @@ describe('main-owned image generation job journeys', () => {
       prompt: 'A detailed emerald cabin beneath a star-filled sky'
     }
     boundary.generation().succeed(output)
-    await expect(generation).resolves.toEqual({ ...output, syncId: jobs.status().id })
+    await expect(generation).resolves.toEqual({
+      ...output,
+      syncId: jobs.status().id,
+      durationMs: expect.any(Number)
+    })
 
     expect(firstScreen).not.toContain('succeeded')
     expect(returnedScreen).toContain('succeeded')

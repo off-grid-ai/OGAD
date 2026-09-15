@@ -153,6 +153,8 @@ import {
   FolderOpen,
   CaretDown,
   DotsThree,
+  PencilSimple,
+  Waveform,
   Lightning,
   WarningCircle
 } from '@phosphor-icons/react'
@@ -867,11 +869,17 @@ function VoiceMessageRow({
   copied,
   showTranscriptInitially,
   showGenerationDetails,
+  regenerationDisabled,
   playbackSpeed,
   onPlaybackStateChange,
   onCopy,
   onOpenImage,
-  onRegenerate
+  onRegenerate,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onUpdateTranscript
 }: Readonly<{
   message: ChatMessage
   liveTask?: TaskSession
@@ -880,13 +888,22 @@ function VoiceMessageRow({
   copied: boolean
   showTranscriptInitially: boolean
   showGenerationDetails: boolean
+  regenerationDisabled: boolean
   playbackSpeed: number
   onPlaybackStateChange: (messageId: string, active: boolean) => void
   onCopy: (text: string, key?: string) => void
   onOpenImage: (image: OpenImage) => void
   onRegenerate: (messageId: string) => void
+  editing: boolean
+  onStartEdit: (message: ChatMessage) => void
+  onCancelEdit: () => void
+  onSaveEdit: (messageId: string, text: string) => void
+  onUpdateTranscript: (message: ChatMessage, text: string) => Promise<void>
 }>): React.JSX.Element {
+  const [transcribing, setTranscribing] = useState(false)
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
   const alignment = message.role === 'user' ? 'items-end' : 'items-start'
+  const audioUrl = recordedClipUrl(message)
   const reportPlayback = useCallback(
     (active: boolean) => onPlaybackStateChange(message.id, active),
     [message.id, onPlaybackStateChange]
@@ -905,8 +922,48 @@ function VoiceMessageRow({
         content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
       }
     : undefined
+  const transcribeAgain = useCallback(async (): Promise<void> => {
+    if (!audioUrl || transcribing) return
+    setTranscriptionError(null)
+    setTranscribing(true)
+    try {
+      const response = await fetch(audioUrl)
+      if (!response.ok) throw new Error('missing-audio')
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const source =
+        message.attachments?.find(
+          (attachment) => attachmentKindFor({ fileName: attachment.name }) === 'audio'
+        )?.path ?? audioUrl
+      const extension = source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] ?? 'webm'
+      const transcript = (
+        await window.api.transcribeAudio(bytes, extension, crypto.randomUUID())
+      ).trim()
+      if (!transcript) throw new Error('empty-transcript')
+      await onUpdateTranscript(message, transcript)
+    } catch (error) {
+      console.error('Saved voice transcription failed:', error)
+      setTranscriptionError(
+        error instanceof Error && error.message === 'missing-audio'
+          ? 'This voice note is not on this Mac.'
+          : 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
+      )
+    } finally {
+      setTranscribing(false)
+    }
+  }, [audioUrl, message, onUpdateTranscript, transcribing])
   let body: React.JSX.Element
-  if (message.role === 'user') {
+  if (message.role === 'user' && editing) {
+    body = (
+      <div className="w-full max-w-2xl">
+        <MessageEditor
+          messageId={message.id}
+          initialText={message.content}
+          onCancel={onCancelEdit}
+          onSave={onSaveEdit}
+        />
+      </div>
+    )
+  } else if (message.role === 'user') {
     body = (
       <VoiceBubble
         messageId={message.id}
@@ -916,9 +973,6 @@ function VoiceMessageRow({
         durationSeconds={message.audioDuration}
         synthesize={(text) => window.api.speak(text)}
         onPlaybackStateChange={reportPlayback}
-        copied={copied}
-        onCopy={(text) => onCopy(text, message.id)}
-        onRetry={() => onRegenerate(message.id)}
         defaultSpeed={playbackSpeed}
       />
     )
@@ -972,6 +1026,33 @@ function VoiceMessageRow({
   return (
     <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>
       {body}
+      {message.createdAt !== undefined || (message.role === 'user' && !editing) ? (
+        <div className="flex items-center gap-2 pr-1">
+          <MessageTime message={message} />
+          {message.role === 'user' && !editing ? (
+            <VoiceMessageActions
+              copied={copied}
+              regenerationDisabled={regenerationDisabled}
+              transcribing={transcribing}
+              canTranscribe={Boolean(audioUrl)}
+              onCopy={() => onCopy(message.content, message.id)}
+              onRegenerate={() => onRegenerate(message.id)}
+              onEdit={() => onStartEdit(message)}
+              onTranscribe={() => void transcribeAgain()}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {transcribing ? (
+        <div role="status" className="text-[11px] text-neutral-500">
+          Transcribing...
+        </div>
+      ) : null}
+      {transcriptionError ? (
+        <div role="alert" className="max-w-[34rem] text-[11px] text-red-300">
+          {transcriptionError}
+        </div>
+      ) : null}
       {message.role === 'assistant' && !message.streaming ? (
         <ToolsSentDisclosure names={message.toolsOffered} />
       ) : null}
@@ -1654,15 +1735,69 @@ function UserMessageActions({
   )
 }
 
+function VoiceMessageActions({
+  copied,
+  regenerationDisabled,
+  transcribing,
+  canTranscribe,
+  onCopy,
+  onRegenerate,
+  onEdit,
+  onTranscribe
+}: Readonly<{
+  copied: boolean
+  regenerationDisabled: boolean
+  transcribing: boolean
+  canTranscribe: boolean
+  onCopy: () => void
+  onRegenerate: () => void
+  onEdit: () => void
+  onTranscribe: () => void
+}>): React.JSX.Element {
+  return (
+    <MessageActionsMenu label="Voice message actions">
+      <CopyAction copied={copied} onCopy={onCopy} />
+      <RegenerateAction
+        label="Resend"
+        title={
+          regenerationDisabled
+            ? 'Wait for the current reply to finish'
+            : 'Regenerate the reply to this message'
+        }
+        disabled={regenerationDisabled}
+        onRegenerate={onRegenerate}
+      />
+      <DropdownMenuItem
+        onSelect={onEdit}
+        className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
+        title="Edit this message"
+      >
+        <PencilSimple className="h-3.5 w-3.5" aria-hidden="true" />
+        Edit
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={!canTranscribe || transcribing}
+        onSelect={onTranscribe}
+        className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors enabled:hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+        title={canTranscribe ? 'Transcribe this voice note again' : 'Voice note is not available'}
+      >
+        <Waveform className="h-3.5 w-3.5" aria-hidden="true" />
+        Transcribe again
+      </DropdownMenuItem>
+    </MessageActionsMenu>
+  )
+}
+
 function MessageActionsMenu({
-  children
-}: Readonly<{ children: React.ReactNode }>): React.JSX.Element {
+  children,
+  label = 'Message actions'
+}: Readonly<{ children: React.ReactNode; label?: string }>): React.JSX.Element {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label="Message actions"
+          aria-label={label}
           className="rounded-sm px-1 text-neutral-500 transition-colors hover:text-neutral-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500"
         >
           <DotsThree className="h-5 w-5" weight="bold" aria-hidden="true" />
@@ -2210,6 +2345,7 @@ type MessageRowActions = Readonly<{
   startEdit: (message: ChatMessage) => void
   cancelEdit: () => void
   saveEdit: (messageId: string, text: string) => void
+  updateVoiceTranscript: (message: ChatMessage, text: string) => Promise<void>
   retryImageMemory: (retry: NonNullable<ChatMessage['imageMemoryRetry']>) => void
   openArtifact: (artifact: Artifact) => void
   selectAskOption: (selection: AskOptionSelection) => void
@@ -2252,7 +2388,7 @@ function MessageBubble({
           <span>{message.context.taskGuidance.state}</span>
         </div>
       ) : null}
-      <IncomingFileRows files={state.incomingFiles} />
+      {message.image ? null : <IncomingFileRows files={state.incomingFiles} />}
       {message.attachments?.length ? (
         <MessageAttachments
           attachments={message.attachments}
@@ -2494,11 +2630,17 @@ function MessageRow({
         copied={state.copiedKey === message.id}
         showTranscriptInitially={state.latestVoiceAssistantId === message.id}
         showGenerationDetails={state.showGenerationDetails}
+        regenerationDisabled={state.regenerationDisabled}
         playbackSpeed={state.ttsSpeed}
         onPlaybackStateChange={actions.voicePlaybackChange}
         onCopy={actions.copy}
         onOpenImage={actions.openImage}
         onRegenerate={actions.regenerate}
+        editing={state.editingId === message.id}
+        onStartEdit={actions.startEdit}
+        onCancelEdit={actions.cancelEdit}
+        onSaveEdit={actions.saveEdit}
+        onUpdateTranscript={actions.updateVoiceTranscript}
       />
     )
   } else {
@@ -4065,16 +4207,20 @@ export function MemoryChat({
           projectId: projectId
         })
         const imageMetadata: ImageGenerationMetadata = {
-          width: imageRequest.width ?? imgSize,
-          height: imageRequest.height ?? imgSize,
-          steps: imageRequest.steps ?? imgSteps,
-          cfgScale: imageRequest.cfgScale ?? imgCfgScale,
+          width: img.width ?? imageRequest.width ?? imgSize,
+          height: img.height ?? imageRequest.height ?? imgSize,
+          steps: img.steps ?? imageRequest.steps ?? imgSteps,
+          cfgScale: img.cfgScale ?? imageRequest.cfgScale ?? imgCfgScale,
           seed:
             typeof img.seed === 'number'
               ? img.seed
               : (imageRequest.seed ?? (Number.isNaN(seedNum) ? -1 : seedNum)),
           model: typeof img.model === 'string' ? img.model : imageRequest.model
         }
+        const imageMetrics: GenerationMetrics | undefined =
+          typeof img.durationMs === 'number'
+            ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+            : undefined
         const completedImage = completedImageMessage(
           `Generated for: ${trimmed}`,
           imageRequest.prompt,
@@ -4086,7 +4232,9 @@ export function MemoryChat({
           ...completedImage,
           image: img.dataUrl,
           imagePath: img.path,
-          imageMetadata
+          imageMetadata,
+          ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
+          ...(imageMetrics ? { metrics: imageMetrics } : {})
         }
         setConvMessages(convId, (prev) => [...prev, assistantMessage])
         try {
@@ -4094,7 +4242,14 @@ export function MemoryChat({
             convId,
             'assistant',
             completedImage.storedContent,
-            withGeneratedImageReference({ imageMetadata }, { id: img.syncId, path: img.path })
+            withGeneratedImageReference(
+              {
+                imageMetadata,
+                ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
+                ...(imageMetrics ? { metrics: imageMetrics } : {})
+              },
+              { id: img.syncId, path: img.path }
+            )
           )
           await announceImageMessagePersisted(convId, stored.uuid)
         } catch {
@@ -4232,6 +4387,12 @@ export function MemoryChat({
           return
         }
         const answer = tr?.answer || 'No response returned.'
+        let imageRequests = tr?.imageRequests ?? []
+        if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
+          imageRequests = [tr.imageRequest]
+        }
+        const pureImageToolTurn =
+          toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.name === 'generate_image')
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -4240,23 +4401,26 @@ export function MemoryChat({
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
         delete timelineByStream.current[toolStreamId]
         delete answerByStream.current[toolStreamId]
-        // Finalize the streamed placeholder in place (never append a second bubble).
+        // A generated image owns the completed tool turn, so it does not leave a separate
+        // assistant bubble behind. Non-image tool turns still finalize their placeholder.
         setConvMessages(convId, (prev) =>
-          prev.map((m) =>
-            m.id === toolStreamId
-              ? {
-                  ...m,
-                  content: answer,
-                  context,
-                  toolCalls,
-                  timeline: toolTimeline,
-                  toolsOffered: tr?.toolsOffered,
-                  metrics: tr?.metrics,
-                  activity: undefined,
-                  streaming: false
-                }
-              : m
-          )
+          imageRequests.length > 0
+            ? prev.filter((message) => message.id !== toolStreamId)
+            : prev.map((message) =>
+                message.id === toolStreamId
+                  ? {
+                      ...message,
+                      content: answer,
+                      context,
+                      toolCalls,
+                      timeline: toolTimeline,
+                      toolsOffered: tr?.toolsOffered,
+                      metrics: tr?.metrics,
+                      activity: undefined,
+                      streaming: false
+                    }
+                  : message
+              )
         )
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
@@ -4267,10 +4431,6 @@ export function MemoryChat({
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
         // on one row would make the last context write replace the first association.
-        let imageRequests = tr?.imageRequests ?? []
-        if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
-          imageRequests = [tr.imageRequest]
-        }
         if (
           imageRequests.length > 0 &&
           window.api.generateImage &&
@@ -4282,23 +4442,7 @@ export function MemoryChat({
           // RAG stream) and remains scoped to this conversation.
           setImgProgress(null)
           setImageGenConv(convId)
-          try {
-            const stored = await window.api.addRagMessage(
-              convId,
-              'assistant',
-              answer,
-              toolCtxWithReasoning
-            )
-            setConvMessages(convId, (previous) =>
-              previous.map((message) =>
-                message.id === toolStreamId ? { ...message, id: stored.uuid } : message
-              )
-            )
-            if (voiceMode) setAutoPlayId(stored.uuid)
-          } catch {
-            /* The answer remains on screen; image rows can still be persisted independently. */
-            if (voiceMode) setAutoPlayId(toolStreamId)
-          }
+          let generatedImageCount = 0
           try {
             for (const imageRequest of imageRequests) {
               if (cancelledRef.current.has(convId)) break
@@ -4309,6 +4453,24 @@ export function MemoryChat({
                   conversationId: convId,
                   projectId: projectId
                 })
+                const imageMetadata: ImageGenerationMetadata | undefined =
+                  typeof img.width === 'number' &&
+                  typeof img.height === 'number' &&
+                  typeof img.steps === 'number' &&
+                  typeof img.cfgScale === 'number'
+                    ? {
+                        width: img.width,
+                        height: img.height,
+                        steps: img.steps,
+                        cfgScale: img.cfgScale,
+                        seed: img.seed,
+                        model: img.model
+                      }
+                    : undefined
+                const imageMetrics: GenerationMetrics | undefined =
+                  typeof img.durationMs === 'number'
+                    ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+                    : undefined
                 if (imageRequest.proposal) {
                   await window.api.storeProposalIllustration(
                     imageRequest.proposal.conversationId,
@@ -4316,7 +4478,11 @@ export function MemoryChat({
                     img.path
                   )
                 }
-                const imageContent = `Generated for: ${imageRequest.prompt}`
+                const ownsToolTurn = generatedImageCount === 0
+                const imageContent =
+                  ownsToolTurn && !pureImageToolTurn
+                    ? answer
+                    : `Generated for: ${imageRequest.prompt}`
                 const completedImage = completedImageMessage(
                   imageContent,
                   imageRequest.prompt,
@@ -4328,10 +4494,15 @@ export function MemoryChat({
                     convId,
                     'assistant',
                     completedImage.storedContent,
-                    withGeneratedImageReference(undefined, {
-                      id: img.syncId,
-                      path: img.path
-                    })
+                    withGeneratedImageReference(
+                      {
+                        ...(ownsToolTurn ? toolCtxWithReasoning : {}),
+                        ...(imageMetadata ? { imageMetadata } : {}),
+                        ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
+                        ...(imageMetrics ? { metrics: imageMetrics } : {})
+                      },
+                      { id: img.syncId, path: img.path }
+                    )
                   )
                   imageMessageId = stored.uuid
                   await announceImageMessagePersisted(convId, stored.uuid)
@@ -4345,9 +4516,22 @@ export function MemoryChat({
                     role: 'assistant',
                     ...completedImage,
                     image: img.dataUrl,
-                    imagePath: img.path
+                    imagePath: img.path,
+                    imageMetadata,
+                    ...(ownsToolTurn
+                      ? {
+                          context,
+                          reasoning: toolReasoning,
+                          timeline: toolTimeline,
+                          toolCalls,
+                          toolsOffered: tr?.toolsOffered
+                        }
+                      : {}),
+                    ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
+                    ...(imageMetrics ? { metrics: imageMetrics } : {})
                   }
                 ])
+                generatedImageCount += 1
               } catch (error) {
                 // One failed image does not erase or block another completed tool request. Stop is
                 // the exception: it cancels the active runtime and ends the remaining local work.
@@ -4369,6 +4553,36 @@ export function MemoryChat({
           } finally {
             setImgProgress(null)
             setImageGenConv((owner) => (owner === convId ? null : owner))
+          }
+          if (generatedImageCount === 0) {
+            let restoredMessageId = toolStreamId
+            try {
+              const stored = await window.api.addRagMessage(
+                convId,
+                'assistant',
+                answer,
+                toolCtxWithReasoning
+              )
+              restoredMessageId = stored.uuid
+            } catch {
+              /* The completed text answer remains visible if persistence fails. */
+            }
+            setConvMessages(convId, (previous) => [
+              ...previous,
+              {
+                id: restoredMessageId,
+                role: 'assistant',
+                content: answer,
+                context,
+                reasoning: toolReasoning,
+                timeline: toolTimeline,
+                toolCalls,
+                toolsOffered: tr?.toolsOffered,
+                metrics: tr?.metrics,
+                streaming: false
+              }
+            ])
+            if (voiceMode) setAutoPlayId(restoredMessageId)
           }
           return
         }
@@ -4454,6 +4668,24 @@ export function MemoryChat({
             conversationId: convId,
             projectId: projectId
           })
+          const imageMetadata: ImageGenerationMetadata | undefined =
+            typeof img.width === 'number' &&
+            typeof img.height === 'number' &&
+            typeof img.steps === 'number' &&
+            typeof img.cfgScale === 'number'
+              ? {
+                  width: img.width,
+                  height: img.height,
+                  steps: img.steps,
+                  cfgScale: img.cfgScale,
+                  seed: img.seed,
+                  model: img.model
+                }
+              : undefined
+          const imageMetrics: GenerationMetrics | undefined =
+            typeof img.durationMs === 'number'
+              ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+              : undefined
           const completedImage = completedImageMessage(
             `Generated: ${imgPrompt.slice(0, 80)}`,
             imgPrompt,
@@ -4466,7 +4698,10 @@ export function MemoryChat({
                     ...m,
                     ...completedImage,
                     image: img.dataUrl,
-                    imagePath: img.path
+                    imagePath: img.path,
+                    imageMetadata,
+                    ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
+                    ...(imageMetrics ? { metrics: imageMetrics } : {})
                   }
                 : m
             )
@@ -4476,7 +4711,14 @@ export function MemoryChat({
               convId,
               'assistant',
               completedImage.storedContent,
-              withGeneratedImageReference(undefined, { id: img.syncId, path: img.path })
+              withGeneratedImageReference(
+                {
+                  ...(imageMetadata ? { imageMetadata } : {}),
+                  ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
+                  ...(imageMetrics ? { metrics: imageMetrics } : {})
+                },
+                { id: img.syncId, path: img.path }
+              )
             )
             await announceImageMessagePersisted(convId, stored.uuid)
           } catch {
@@ -5180,7 +5422,11 @@ export function MemoryChat({
     // record of it - so the chip vanished from the thread and every later regenerate lost it too.
     const cid = activeConversationId
     const edited = messages[idx]
-    const keptAtts = edited ? attachmentsOf(edited) : []
+    const keptAtts = edited
+      ? attachmentsOf(edited).map((attachment) =>
+          attachment.kind === 'audio' ? { ...attachment, text } : attachment
+        )
+      : []
     const persisted = keptAtts.length
       ? {
           attachments: keptAtts.map(
@@ -5218,6 +5464,39 @@ export function MemoryChat({
       }
     })()
   }
+
+  const updateVoiceTranscript = useCallback(
+    async (message: ChatMessage, text: string): Promise<void> => {
+      const cid = activeConversationId
+      if (!cid) throw new Error('No active conversation')
+      let updatedAudio = false
+      const nextAttachments = message.attachments?.map((attachment) => {
+        if (updatedAudio || attachmentKindFor({ fileName: attachment.name }) !== 'audio') {
+          return attachment
+        }
+        updatedAudio = true
+        return { ...attachment, text }
+      })
+      const nextContext = nextAttachments
+        ? { ...(message.context ?? {}), attachments: nextAttachments }
+        : undefined
+      const updated = await window.api.updateRagMessage(cid, message.id, text, nextContext)
+      if (!updated) throw new Error('Saved message was not found')
+      setConvMessages(cid, (previous) =>
+        previous.map((entry) =>
+          entry.id === message.id
+            ? {
+                ...entry,
+                content: text,
+                context: nextContext ?? entry.context,
+                attachments: nextAttachments
+              }
+            : entry
+        )
+      )
+    },
+    [activeConversationId, setConvMessages]
+  )
 
   // Process attached files into text (read/parse/caption/transcribe) on the main side.
   const addFiles = useCallback(
@@ -5381,6 +5660,7 @@ export function MemoryChat({
     },
     cancelEdit: () => setEditingId(null),
     saveEdit,
+    updateVoiceTranscript,
     retryImageMemory: (retry) => {
       void sendMessage(retry.prompt, {
         regen: true,

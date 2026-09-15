@@ -72,6 +72,11 @@ type ImageResult = {
   seed?: number
   model?: string
   prompt?: string
+  width?: number
+  height?: number
+  steps?: number
+  cfgScale?: number
+  durationMs?: number
 }
 type ImageProgress = {
   phase: 'sampling' | 'decoding'
@@ -123,6 +128,7 @@ type InstallApiOptions = {
     toolCalls: { name: string; result: string }[]
     unified: never[]
     imageRequests?: { prompt: string }[]
+    metrics?: { decodeTokensPerSecond?: number; completionTokens?: number }
   }
 }
 
@@ -137,6 +143,7 @@ type InstalledApi = {
       toolCalls: { name: string; result: string }[]
       unified: never[]
       imageRequests?: { prompt: string }[]
+      metrics?: { decodeTokensPerSecond?: number; completionTokens?: number }
     }>
   >
   exportGeneratedImage: Mock<(...args: unknown[]) => Promise<void>>
@@ -854,26 +861,44 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       {
         dataUrl: 'data:image/png;base64,FIRST',
         path: '/generated/first.png',
-        syncId: 'image-sync-first'
+        syncId: 'image-sync-first',
+        seed: 101,
+        model: FULL,
+        prompt: 'first scene',
+        width: 768,
+        height: 768,
+        steps: 17,
+        cfgScale: 5.5,
+        durationMs: 117_600
       },
       {
         dataUrl: 'data:image/png;base64,SECOND',
         path: '/generated/second.png',
-        syncId: 'image-sync-second'
+        syncId: 'image-sync-second',
+        seed: 202,
+        model: FULL,
+        prompt: 'second scene',
+        width: 768,
+        height: 768,
+        steps: 17,
+        cfgScale: 5.5,
+        durationMs: 90_000
       }
     ]
     const boundary = installApi({
       active: FULL,
       models: [FULL],
-      settings: { composerToolsOn: true },
+      isPro: true,
+      settings: { composerToolsOn: true, showGenerationDetails: true },
       toolResult: {
-        answer: 'I made both images.',
+        answer: 'चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।',
         toolCalls: [
           { name: 'generate_image', result: 'Image generation started' },
           { name: 'generate_image', result: 'Image generation started' }
         ],
         unified: [],
-        imageRequests: [{ prompt: 'first scene' }, { prompt: 'second scene' }]
+        imageRequests: [{ prompt: 'first scene' }, { prompt: 'second scene' }],
+        metrics: { decodeTokensPerSecond: 42.5, completionTokens: 64 }
       },
       generate: async () => outputs.shift()!
     })
@@ -892,6 +917,30 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       'data:image/png;base64,FIRST',
       'data:image/png;base64,SECOND'
     ])
+    expect(
+      screen.getAllByLabelText('Image generation metadata').map((metadata) => metadata.textContent)
+    ).toEqual([
+      `768 × 768 · 17 steps · CFG 5.5 · seed 101 · ${FULL}`,
+      `768 × 768 · 17 steps · CFG 5.5 · seed 202 · ${FULL}`
+    ])
+    expect(screen.queryByText('चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।')).toBeNull()
+    const generationDetails = screen.getAllByRole('button', { name: 'Generation details' })
+    expect(generationDetails).toHaveLength(2)
+    await user.click(generationDetails[0]!)
+    expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain('117.6s total')
+    act(() => {
+      boundary.emitIncomingFiles([
+        {
+          syncId: 'image-sync-first',
+          messageId: 'stored-message-2',
+          name: 'first.png',
+          fileSize: 10,
+          mimeType: 'image/png',
+          kind: 'generated-image'
+        }
+      ])
+    })
+    expect(screen.queryByTestId('incoming-shared-file')).toBeNull()
 
     const persistedImages = boundary.addRagMessage.mock.calls.filter(
       ([, role, , context]) =>
@@ -906,7 +955,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     ])
     expect(
       boundary.imageGenConversationPersisted.mock.calls.map(([, messageId]) => messageId)
-    ).toEqual(['stored-message-3', 'stored-message-4'])
+    ).toEqual(['stored-message-2', 'stored-message-3'])
 
     await user.click(screen.getByTitle('Generated images'))
     expect(await screen.findByRole('button', { name: /images \(2\)/i })).toBeTruthy()
