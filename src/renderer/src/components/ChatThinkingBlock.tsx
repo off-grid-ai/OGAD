@@ -7,6 +7,7 @@ import {
 } from '@renderer/components/ui/collapsible'
 import { cn } from '@renderer/lib/utils'
 import { ChatMarkdown } from './ChatMarkdown'
+import { LoadingDots } from './ui/loading-dots'
 
 interface ChatThinkingBlockProps {
   content: string
@@ -29,6 +30,7 @@ export function ChatThinkingBlock({
         <span className="whitespace-nowrap">
           {label ?? (live ? 'Thinking…' : 'Thought process')}
         </span>
+        {live ? <LoadingDots size="small" className="pl-0" /> : null}
         <CaretDown
           className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180"
           aria-hidden="true"
