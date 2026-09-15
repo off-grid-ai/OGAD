@@ -410,17 +410,21 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-a' })
 
-    await user.click(await screen.findByRole('button', { name: 'Resend' }))
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Voice message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+    await user.click(await screen.findByRole('menuitem', { name: 'Resend' }))
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
 
     expect(boundary.calls[0]?.query).toBe('Schedule the planning review')
     expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 1)
-    expect(screen.getAllByRole('button', { name: 'Resend' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Voice message actions' })).toHaveLength(1)
 
     boundary.resolve(0, 'The review is scheduled again.')
     expect(await screen.findByText('The review is scheduled again.')).toBeTruthy()
     expect(screen.queryByText('The review is scheduled.')).toBeNull()
-    expect(screen.getAllByRole('button', { name: 'Resend' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Voice message actions' })).toHaveLength(1)
     await waitFor(() =>
       expect(
         boundary.messages['conversation-a']!.map(({ role, content }) => [role, content])

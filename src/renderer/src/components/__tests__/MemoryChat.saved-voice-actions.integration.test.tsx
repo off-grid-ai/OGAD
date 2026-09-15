@@ -144,6 +144,31 @@ afterEach(() => {
 })
 
 describe('<MemoryChat/> saved voice actions', () => {
+  it('keeps copy and resend in the voice menu and shows the saved message time', async () => {
+    ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}
+    installSavedVoiceBoundary()
+
+    renderSavedVoiceChat()
+
+    const savedMessageTime = new Date('2026-09-14T10:00:00Z').toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit'
+    })
+    expect(await screen.findAllByText(savedMessageTime)).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Copy transcript' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Resend' })).toBeNull()
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Voice message actions' }), {
+      button: 0,
+      ctrlKey: false
+    })
+
+    expect(await screen.findByRole('menuitem', { name: 'Copy' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Resend' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Transcribe again' })).toBeTruthy()
+  })
+
   it('transcribes the saved file again, persists it in place, and keeps later messages', async () => {
     ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}
     globalThis.fetch = async () =>
