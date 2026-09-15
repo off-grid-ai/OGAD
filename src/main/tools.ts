@@ -827,6 +827,7 @@ export async function toolChat(
     const {
       content,
       toolCalls: calls,
+      reasoningDetails,
       metrics
     } = await llm.streamChat(messages, onDelta, {
       tools: roundTools,
@@ -878,6 +879,7 @@ export async function toolChat(
       messages.push({
         role: 'assistant',
         content: content || null,
+        ...(reasoningDetails?.length ? { reasoning_details: reasoningDetails } : {}),
         tool_calls: callsToRun.map((c) => ({
           id: c.id,
           type: 'function',

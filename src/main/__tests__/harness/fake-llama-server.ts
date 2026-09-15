@@ -30,6 +30,10 @@ interface FakeTurn {
   finishReason?: string
   /** Reasoning streamed on the reasoning_content channel before the answer. */
   reasoning?: string
+  /** OpenRouter-compatible structured reasoning, including Gemini signatures. */
+  reasoningDetails?: Array<Record<string, unknown>>
+  /** Reject this turn unless the prior assistant tool-call message kept those details. */
+  requirePriorReasoningDetails?: boolean
   /** Tool calls emitted on this turn (the agentic loop then runs them and calls back). */
   toolCalls?: FakeToolCall[]
   /** Force a non-200 to exercise the error path (body is surfaced by describeServerError). */
@@ -62,6 +66,9 @@ function sseFramesFor(turn: FakeTurn): string[] {
     `data: ${JSON.stringify({ choices: [{ delta: d }] })}\n\n`
   if (turn.reasoning) {
     frames.push(delta({ reasoning_content: turn.reasoning }))
+  }
+  if (turn.reasoningDetails?.length) {
+    frames.push(delta({ reasoning_details: turn.reasoningDetails }))
   }
   turn.toolCalls?.forEach((tc, i) => {
     const args = tc.argsRaw ?? JSON.stringify(tc.args ?? {})
@@ -147,6 +154,20 @@ export async function startFakeLlamaServer(): Promise<FakeLlamaServer> {
         }
         requests.push(parsed)
         const turn = queue.shift() ?? { content: '' }
+        if (turn.requirePriorReasoningDetails) {
+          const messages = Array.isArray(parsed.messages) ? parsed.messages : []
+          const keptReasoning = messages.some(
+            (message) =>
+              typeof message === 'object' &&
+              message !== null &&
+              Array.isArray((message as { reasoning_details?: unknown }).reasoning_details)
+          )
+          if (!keptReasoning) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: { message: 'Missing Gemini reasoning details.' } }))
+            return
+          }
+        }
         if (turn.errorStatus) {
           res.writeHead(turn.errorStatus, { 'Content-Type': 'application/json' })
           res.end(turn.errorBody ?? JSON.stringify({ error: { message: 'fake error' } }))

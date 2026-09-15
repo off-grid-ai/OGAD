@@ -380,6 +380,67 @@ describe('production workspace bridge', () => {
     }
   })
 
+  it('shows Gemini thinking and completes a signed reasoning tool round', async () => {
+    const endpoint = `http://127.0.0.1:${fake.port}/v1`
+    await window.api.setRemoteVisionServer({
+      provider: 'openrouter',
+      endpoint,
+      model: 'integration-model'
+    })
+    const user = userEvent.setup()
+    try {
+      fake.enqueue(
+        {
+          reasoningDetails: [
+            {
+              type: 'reasoning.text',
+              text: 'I will calculate this value.',
+              signature: 'signed-gemini-reasoning',
+              format: 'google-gemini-v1',
+              index: 0
+            }
+          ],
+          toolCalls: [{ name: 'calculator', args: { expression: '6*7' } }]
+        },
+        {
+          requirePriorReasoningDetails: true,
+          content: 'Gemini used the calculator and returned 42.'
+        }
+      )
+      renderChat()
+
+      const composer = await screen.findByPlaceholderText(/^ask /i)
+      await user.click(screen.getByRole('button', { name: 'New chat' }))
+      await user.click(screen.getByRole('button', { name: /^Thinking$/i }))
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Composer options' }), {
+        button: 0,
+        ctrlKey: false
+      })
+      await user.click(await screen.findByRole('menuitem', { name: /Tools/ }))
+      await user.keyboard('{Escape}')
+      fireEvent.change(composer, { target: { value: 'Calculate six times seven' } })
+      await user.click(screen.getByRole('button', { name: /^send$/i }))
+
+      expect(await inTranscript('Gemini used the calculator and returned 42.')).toBeTruthy()
+      await user.click(await screen.findByRole('button', { name: 'Thought process' }))
+      expect(await screen.findByText('I will calculate this value.')).toBeTruthy()
+      expect(await screen.findByRole('button', { name: 'Calculator, complete' })).toBeTruthy()
+    } finally {
+      await window.api.setRemoteVisionServer({
+        provider: 'custom',
+        endpoint,
+        model: 'integration-model'
+      })
+      const composerOptions = screen.queryByRole('button', { name: 'Composer options' })
+      if (composerOptions) {
+        fireEvent.pointerDown(composerOptions, { button: 0, ctrlKey: false })
+        const enabledTools = screen.queryByRole('menuitem', { name: 'ToolsOn' })
+        if (enabledTools) await user.click(enabledTools)
+        await user.keyboard('{Escape}')
+      }
+    }
+  })
+
   it('renders projects, chats, messages, and artifacts after the real database reopens', async () => {
     const api = window.api
     const projectId = await api.createProject!({ name: 'Reopened Workspace' })
