@@ -4440,7 +4440,7 @@ export function MemoryChat({
           streamId: toolStreamId,
           thinking: thinkingEnabled
         })
-        const toolCalls = (tr?.toolCalls || []).map(
+        const toolCalls: ProjectedSyncedTool[] = (tr?.toolCalls || []).map(
           (c: { name: string; result: string; status?: 'completed' | 'failed' | 'pending' }) => ({
             name: c.name,
             result: c.result,
