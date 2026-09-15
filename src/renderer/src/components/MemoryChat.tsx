@@ -873,6 +873,7 @@ function VoiceMessageRow({
   playbackSpeed,
   onPlaybackStateChange,
   onCopy,
+  onOpenAttachment,
   onOpenImage,
   onRegenerate,
   editing,
@@ -892,6 +893,7 @@ function VoiceMessageRow({
   playbackSpeed: number
   onPlaybackStateChange: (messageId: string, active: boolean) => void
   onCopy: (text: string, key?: string) => void
+  onOpenAttachment: (attachment: StoredMessageAttachment) => void
   onOpenImage: (image: OpenImage) => void
   onRegenerate: (messageId: string) => void
   editing: boolean
@@ -911,9 +913,11 @@ function VoiceMessageRow({
   const toolTimeline =
     message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
   const thinking =
-    toolTimeline &&
-    !message.timeline?.some((entry) => entry.kind === 'thinking') &&
-    (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
+    toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
+      <MessageThinkingHeader message={message} timeline />
+    ) : toolTimeline &&
+      !message.timeline?.some((entry) => entry.kind === 'thinking') &&
+      (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
       <MessageThinkingHeader message={message} timeline />
     ) : undefined
   const memorySources = hasInlineMemorySources(message)
@@ -964,7 +968,10 @@ function VoiceMessageRow({
       </div>
     )
   } else if (message.role === 'user') {
-    body = (
+    const imageAttachments = message.attachments?.filter(
+      (attachment) => attachment.kind === 'image' && attachment.path
+    )
+    const voiceBubble = (
       <VoiceBubble
         messageId={message.id}
         isUser
@@ -974,21 +981,68 @@ function VoiceMessageRow({
         synthesize={(text) => window.api.speak(text)}
         onPlaybackStateChange={reportPlayback}
         defaultSpeed={playbackSpeed}
+        embedded={Boolean(imageAttachments?.length)}
       />
+    )
+    body = (
+      imageAttachments?.length ? (
+        <div className={standardMessageBubbleClass(message, false)}>
+          <div className="flex w-full flex-col gap-2">
+            <MessageAttachments
+              attachments={imageAttachments}
+              onOpenAttachment={onOpenAttachment}
+              onOpenImage={onOpenImage}
+            />
+            {voiceBubble}
+          </div>
+        </div>
+      ) : (
+        voiceBubble
+      )
     )
   } else if (isSupportingMessage(message)) {
     body = <ChatThinkingBlock content={message.reasoning ?? ''} label={message.reasoningLabel} />
   } else if (message.image) {
     body = (
       <>
-        <MessageThinkingHeader message={message} />
-        <ChatImagePreview
-          src={message.image}
-          path={message.imagePath}
-          metadata={message.imageMetadata}
-          className="max-w-[20rem] cursor-zoom-in rounded-md border border-neutral-800 transition-opacity hover:opacity-90"
-          onOpen={onOpenImage}
+        {toolTimeline ? null : <MessageThinkingHeader message={message} />}
+        <ChatToolRows
+          tools={message.toolCalls}
+          thinking={thinking}
+          timeline={toolTimeline ? message.timeline : undefined}
+          thinkingLive={Boolean(message.streaming && !message.content)}
+          memorySources={memorySources}
+          liveTask={liveTask}
         />
+        <div className={standardMessageBubbleClass(message, false)}>
+          <div className="flex w-full flex-col gap-2">
+            <ChatImagePreview
+              src={message.image}
+              path={message.imagePath}
+              metadata={message.imageMetadata}
+              className="w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"
+              fill
+              onOpen={onOpenImage}
+            />
+            <VoiceBubble
+              messageId={message.id}
+              transcript={messageToSpeakable(selectedMessageContent(message))}
+              autoPlay={autoPlay}
+              showTranscriptInitially={showTranscriptInitially}
+              defaultSpeed={playbackSpeed}
+              readVoice={async () => {
+                const settings = await window.api.getSettings()
+                return typeof settings.ttsVoice === 'string' ? settings.ttsVoice : undefined
+              }}
+              synthesize={(text, voice) => window.api.speak(text, voice)}
+              onPlaybackStateChange={reportPlayback}
+              copied={copied}
+              onCopy={(text) => onCopy(text, message.id)}
+              onRetry={() => onRegenerate(message.id)}
+              embedded
+            />
+          </div>
+        </div>
       </>
     )
   } else {
@@ -2380,6 +2434,9 @@ function MessageBubble({
   const artifact = message.role === 'assistant' ? parseArtifact(message.content) : null
   const ask = message.role === 'assistant' ? parseAsk(message.content) : null
   const selected = state.askSelections[message.id] ?? []
+  const visibleAttachments = message.attachments?.filter(
+    (attachment) => attachmentKindFor({ fileName: attachment.name }) !== 'audio'
+  )
   return (
     <div className={standardMessageBubbleClass(message, editing)}>
       {message.context?.taskGuidance ? (
@@ -2389,9 +2446,9 @@ function MessageBubble({
         </div>
       ) : null}
       {message.image ? null : <IncomingFileRows files={state.incomingFiles} />}
-      {message.attachments?.length ? (
+      {visibleAttachments?.length ? (
         <MessageAttachments
-          attachments={message.attachments}
+          attachments={visibleAttachments}
           onOpenAttachment={actions.openAttachment}
           onOpenImage={actions.openImage}
         />
@@ -2449,9 +2506,11 @@ function StandardMessageRow({
   const toolTimeline =
     message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
   const thinking =
-    toolTimeline &&
-    !message.timeline?.some((entry) => entry.kind === 'thinking') &&
-    (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
+    toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
+      <MessageThinkingHeader message={message} timeline />
+    ) : toolTimeline &&
+      !message.timeline?.some((entry) => entry.kind === 'thinking') &&
+      (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
       <MessageThinkingHeader message={message} timeline />
     ) : undefined
   const memorySources = hasInlineMemorySources(message)
@@ -2472,7 +2531,7 @@ function StandardMessageRow({
         liveTask={liveTask}
       />
       <div
-        className={`flex w-fit flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'max-w-2xl' : 'max-w-[85%]'}`}
+        className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'w-full max-w-2xl' : 'w-fit max-w-[85%]'}`}
       >
         <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
         {message.role === 'user' ||
@@ -2634,6 +2693,7 @@ function MessageRow({
         playbackSpeed={state.ttsSpeed}
         onPlaybackStateChange={actions.voicePlaybackChange}
         onCopy={actions.copy}
+        onOpenAttachment={actions.openAttachment}
         onOpenImage={actions.openImage}
         onRegenerate={actions.regenerate}
         editing={state.editingId === message.id}
@@ -4237,6 +4297,7 @@ export function MemoryChat({
           ...(imageMetrics ? { metrics: imageMetrics } : {})
         }
         setConvMessages(convId, (prev) => [...prev, assistantMessage])
+        if (voiceMode) setAutoPlayId(assistantMessage.id)
         try {
           const stored = await window.api.addRagMessage(
             convId,
@@ -4401,26 +4462,25 @@ export function MemoryChat({
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
         delete timelineByStream.current[toolStreamId]
         delete answerByStream.current[toolStreamId]
-        // A generated image owns the completed tool turn, so it does not leave a separate
-        // assistant bubble behind. Non-image tool turns still finalize their placeholder.
+        // Keep the completed tool timeline visible while the deferred image job runs. The final
+        // image takes ownership of it below, so this temporary row never survives completion.
         setConvMessages(convId, (prev) =>
-          imageRequests.length > 0
-            ? prev.filter((message) => message.id !== toolStreamId)
-            : prev.map((message) =>
-                message.id === toolStreamId
-                  ? {
-                      ...message,
-                      content: answer,
-                      context,
-                      toolCalls,
-                      timeline: toolTimeline,
-                      toolsOffered: tr?.toolsOffered,
-                      metrics: tr?.metrics,
-                      activity: undefined,
-                      streaming: false
-                    }
-                  : message
-              )
+          prev.map((message) =>
+            message.id === toolStreamId
+              ? {
+                  ...message,
+                  content: imageRequests.length > 0 ? '' : answer,
+                  context,
+                  reasoning: toolReasoning,
+                  toolCalls,
+                  timeline: toolTimeline,
+                  toolsOffered: tr?.toolsOffered,
+                  metrics: tr?.metrics,
+                  activity: undefined,
+                  streaming: false
+                }
+              : message
+          )
         )
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
@@ -4510,7 +4570,9 @@ export function MemoryChat({
                   /* Keep the generated file visible even if this database write fails. */
                 }
                 setConvMessages(convId, (prev) => [
-                  ...prev,
+                  ...prev.filter(
+                    (message) => !ownsToolTurn || message.id !== toolStreamId
+                  ),
                   {
                     id: imageMessageId,
                     role: 'assistant',
@@ -4531,6 +4593,7 @@ export function MemoryChat({
                     ...(imageMetrics ? { metrics: imageMetrics } : {})
                   }
                 ])
+                if (voiceMode) setAutoPlayId(imageMessageId)
                 generatedImageCount += 1
               } catch (error) {
                 // One failed image does not erase or block another completed tool request. Stop is
@@ -4568,7 +4631,7 @@ export function MemoryChat({
               /* The completed text answer remains visible if persistence fails. */
             }
             setConvMessages(convId, (previous) => [
-              ...previous,
+              ...previous.filter((message) => message.id !== toolStreamId),
               {
                 id: restoredMessageId,
                 role: 'assistant',
@@ -4706,6 +4769,7 @@ export function MemoryChat({
                 : m
             )
           )
+          if (voiceMode) setAutoPlayId(streamId)
           try {
             const stored = await window.api.addRagMessage(
               convId,
@@ -6238,7 +6302,7 @@ export function MemoryChat({
                       {!!activeConversationId &&
                       !liveJourneyTask &&
                       generatingConvs.has(activeConversationId) &&
-                      !messages.some((m) => m.streaming) ? (
+                      (generatingImage || !messages.some((m) => m.streaming)) ? (
                         <div className="mb-5 flex flex-col items-start">
                           <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
                             Off Grid AI

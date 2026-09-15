@@ -410,6 +410,14 @@ export function ChatToolRows({
           </li>
         )
       })}
+      {thinking && hasOrderedThinking ? (
+        <li className="relative pb-2 pl-4 last:pb-0">
+          <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
+            <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
+          </span>
+          {thinking}
+        </li>
+      ) : null}
     </ol>
   )
 }
