@@ -209,19 +209,29 @@ class AxRailHost {
     journeyId = taskId
   ): Promise<ElementTaskResult> {
     console.log(`[ax-rail] runTask app="${app}" goal="${goal}"`)
+    const failBeforeStart = (summary: string): ElementTaskResult => {
+      emitVisionState({
+        taskId,
+        journeyId,
+        goal,
+        status: 'failed',
+        phase: 'failed',
+        currentStep: 0,
+        currentAction: summary,
+        summary
+      })
+      return { ok: false, summary, steps: [] }
+    }
     const actuation = loadActuation()
     if (!actuation) {
       console.log('[ax-rail] BLOCKED: nut.js actuation not available in this build')
-      return { ok: false, summary: 'input actuation is not available in this build', steps: [] }
+      return failBeforeStart('input actuation is not available in this build')
     }
     if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(true)) {
       console.log('[ax-rail] BLOCKED: Accessibility grant missing for Off Grid AI')
-      return {
-        ok: false,
-        summary:
-          'Off Grid AI needs Accessibility access to control the screen. Grant it in System Settings > Privacy & Security > Accessibility, then run this again.',
-        steps: []
-      }
+      return failBeforeStart(
+        'Off Grid AI needs Accessibility access to control the screen. Grant it in System Settings > Privacy & Security > Accessibility, then run this again.'
+      )
     }
     const guard = new VisionGuard({ taskId, kind: 'computer_use' })
     const request = new AbortController()

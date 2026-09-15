@@ -64,4 +64,5 @@ function run(script, cwd) {
 
 run(path.join(root, 'scripts', 'build-keychain-bootstrap.sh'), root)
 run(path.join(root, 'scripts', 'build-computer-use-capture.sh'), root)
+run(path.join(root, 'scripts', 'build-actions-helper.sh'), root)
 run(path.join(root, 'pro', 'scripts', 'build-proximity-helper.sh'), path.join(root, 'pro'))
