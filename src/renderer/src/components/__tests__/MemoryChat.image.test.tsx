@@ -856,6 +856,38 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(payload.prompt).toBe('a dog') // cleanImagePrompt stripped the verb
   })
 
+  it('keeps the image tool timeline visible while deferred generation is running', async () => {
+    const image = deferred<ImageResult>()
+    installApi({
+      active: FULL,
+      models: [FULL],
+      isPro: true,
+      settings: { composerToolsOn: true },
+      toolResult: {
+        answer: 'Image generation started.',
+        toolCalls: [{ name: 'generate_image', result: 'Image generation started' }],
+        unified: [],
+        imageRequests: [{ prompt: 'a red Ferrari in a studio' }]
+      },
+      generate: () => image.promise
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await sendChat(user, 'draw a Ferrari')
+
+    expect(await screen.findByRole('button', { name: 'Generated image, running' })).toBeTruthy()
+    expect(screen.getByText('Preparing image…')).toBeTruthy()
+
+    image.resolve({
+      dataUrl: 'data:image/png;base64,FERRARI',
+      path: '/generated/ferrari.png',
+      prompt: 'a red Ferrari in a studio'
+    })
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Generated image, complete' })).toBeTruthy()
+  })
+
   it('generates, associates, and renders one distinct image for every completed image tool call', async () => {
     const outputs = [
       {

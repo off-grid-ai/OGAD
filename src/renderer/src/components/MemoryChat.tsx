@@ -1345,7 +1345,7 @@ function MessageEditor({
           }
           if (event.key === 'Escape') onCancel()
         }}
-        rows={Math.min(10, text.split('\n').length + 1)}
+        rows={Math.min(10, Math.max(5, text.split('\n').length + 1))}
         className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-green-500"
       />
       <div className="flex gap-2">
@@ -4440,7 +4440,7 @@ export function MemoryChat({
           streamId: toolStreamId,
           thinking: thinkingEnabled
         })
-        const toolCalls = (tr?.toolCalls || []).map(
+        const toolCalls: ProjectedSyncedTool[] = (tr?.toolCalls || []).map(
           (c: { name: string; result: string; status?: 'completed' | 'failed' | 'pending' }) => ({
             name: c.name,
             result: c.result,
@@ -4480,8 +4480,13 @@ export function MemoryChat({
         delete reasoningByStream.current[toolStreamId] // done with this stream — free it
         delete timelineByStream.current[toolStreamId]
         delete answerByStream.current[toolStreamId]
-        // Keep the completed tool timeline visible while the deferred image job runs. The final
-        // image takes ownership of it below, so this temporary row never survives completion.
+        const pendingToolCalls = toolCalls.map((toolCall) =>
+          imageRequests.length > 0 && toolCall.name === 'generate_image'
+            ? { ...toolCall, status: 'running' as const }
+            : toolCall
+        )
+        // Keep the tool timeline in place while its deferred image job runs. The completed image
+        // replaces this row, so the timeline does not disappear and then return in a new position.
         setConvMessages(convId, (prev) =>
           prev.map((message) =>
             message.id === toolStreamId
@@ -4490,7 +4495,7 @@ export function MemoryChat({
                   content: imageRequests.length > 0 ? '' : answer,
                   context,
                   reasoning: toolReasoning,
-                  toolCalls,
+                  toolCalls: pendingToolCalls,
                   timeline: toolTimeline,
                   toolsOffered: tr?.toolsOffered,
                   metrics: tr?.metrics,

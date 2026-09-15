@@ -631,8 +631,10 @@ async function maybeEnhancePrompt(
               if (kind === 'content') onText(text)
             },
             { temperature: 0.7, thinking: false },
-            200,
-            15_000
+            // Leave enough room for a reasoning model to return the enhanced prompt, while
+            // keeping this background step bounded independently of the user's chat setting.
+            2_048,
+            60_000
           )
           .then((result) => result.content)
       )

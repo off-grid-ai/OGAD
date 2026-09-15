@@ -48,7 +48,7 @@ import {
 import { PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS } from '@offgrid/sync'
 import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
-import { purgeLegacyChatImports, getSetting } from './database'
+import { purgeLegacyChatImports, getSetting, saveSetting } from './database'
 import { modalityQueue } from './modality-queue/queue'
 import { applyQueueConfig, readQueueConfig } from './modality-queue/config'
 import { registerRuntime } from './runtime-manager'
@@ -147,11 +147,36 @@ function createWindow(): void {
     if (windowPresentation.showWindow) mainWindow.show()
   })
 
-  // Pin zoom to 100% (clear any persisted accidental Cmd+= zoom) and disable
-  // pinch-zoom so the UI always renders at the intended density.
+  // Restore the user's page zoom after each load and keep pinch zoom disabled.
   mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow.webContents.setZoomFactor(1)
+    const savedZoomLevel = getSetting('windowZoomLevel', 0)
+    mainWindow.webContents.setZoomLevel(
+      typeof savedZoomLevel === 'number' && Number.isFinite(savedZoomLevel) ? savedZoomLevel : 0
+    )
     mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
+  })
+
+  // Own the complete page-zoom shortcut set. Chromium handled Cmd+= here, but
+  // not its matching Cmd+-, and its zoom level was lost when the page reloaded.
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const commandModifier =
+      process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
+    if (input.type !== 'keyDown' || !commandModifier || input.alt) return
+
+    const currentZoomLevel = mainWindow.webContents.getZoomLevel()
+    const nextZoomLevel =
+      input.code === 'Equal'
+        ? currentZoomLevel + 0.5
+        : input.code === 'Minus'
+          ? currentZoomLevel - 0.5
+          : input.code === 'Digit0'
+            ? 0
+            : null
+    if (nextZoomLevel === null) return
+
+    event.preventDefault()
+    mainWindow.webContents.setZoomLevel(nextZoomLevel)
+    saveSetting('windowZoomLevel', nextZoomLevel)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
