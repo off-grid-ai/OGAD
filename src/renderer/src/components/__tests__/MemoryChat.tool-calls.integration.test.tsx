@@ -18,6 +18,10 @@ import {
 const LONG_RESULT =
   'GitHub — off-grid-ai/OGAD: Off Grid AI Desktop, a local-first on-device AI runtime.'
 
+async function openCompletedWork(): Promise<void> {
+  await userEvent.click(await screen.findByRole('button', { name: 'Work done' }))
+}
+
 describe('<MemoryChat/> tool calls — persistent + inline', () => {
   beforeEach(() => {
     resetTaskSessionStoreForTests()
@@ -77,6 +81,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     const offOpen = onOpenTaskSidePanel((request) => requests.push(request))
     renderChat({ conversationId: 'conversation-b' })
 
+    await openCompletedWork()
     await userEvent.click(await screen.findByRole('button', { name: 'Web Use, complete' }))
     expect(requests.at(-1)).toEqual({
       taskId: 'memory-web-task',
@@ -107,6 +112,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
+    await openCompletedWork()
     const tool = await screen.findByRole('button', { name: 'Searched the web, complete' })
     const answer = await screen.findByText('Here is what I found.')
     expect(tool.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
@@ -150,6 +156,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     const user = userEvent.setup()
     renderChat({ conversationId: 'conversation-b' })
 
+    await openCompletedWork()
     const tool = await screen.findByRole('button', { name: 'Searched the web, complete' })
     expect(screen.queryByText(LONG_RESULT)).toBeNull()
     // Adjacent persisted tool messages are one assistant-turn timeline.
@@ -189,6 +196,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-b' })
 
+    await openCompletedWork()
     const answer = await screen.findByText('The answer is ready.')
     const timeline = screen.getByRole('list', { name: 'Thinking and tool calls' })
     expect(timeline.children).toHaveLength(5)
@@ -202,6 +210,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     cleanup()
     renderChat({ conversationId: 'conversation-b' })
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
+    await openCompletedWork()
     expect(screen.getByRole('list', { name: 'Thinking and tool calls' }).children).toHaveLength(5)
   })
 
@@ -227,6 +236,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-b' })
 
+    await openCompletedWork()
     const timeline = await screen.findByRole('list', { name: 'Thinking and tool calls' })
     expect(timeline.children).toHaveLength(4)
     expect(screen.getAllByText('Thought process')).toHaveLength(2)
@@ -236,6 +246,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
 
     cleanup()
     renderChat({ conversationId: 'conversation-b' })
+    await openCompletedWork()
     expect((await screen.findByRole('list', { name: 'Thinking and tool calls' })).children).toHaveLength(4)
   })
 
@@ -269,6 +280,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-b' })
 
+    await openCompletedWork()
     expect(
       await screen.findByRole('button', { name: 'Requested approval, needs attention' })
     ).toBeTruthy()
@@ -339,6 +351,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
     renderChat({ conversationId: 'conversation-b' })
 
     await screen.findByText('Answer.')
+    await openCompletedWork()
     expect(screen.getByRole('button', { name: 'Searched memory, complete' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Searched activity, complete' })).toBeTruthy()
   })
@@ -386,6 +399,7 @@ describe('<MemoryChat/> tool calls — persistent + inline', () => {
       unified: []
     })
 
+    await openCompletedWork()
     expect(await screen.findByRole('button', { name: 'Web Use, needs attention' })).toBeTruthy()
     expect(await screen.findByText(result)).toBeTruthy()
   })
