@@ -157,11 +157,14 @@ export class VisionController {
     const command = parseVisionCommand(input)
     const taskId = typeof taskIdInput === 'string' ? taskIdInput : this.currentTaskId
     const session = taskId ? this.sessions.get(taskId) : undefined
-    if (!command || !taskId || !session) return false
-    const { guard } = session
+    if (!command || !taskId) return false
     if (command === 'stop') {
-      return this.stop(taskId, 'stopped from the supervisor', 'Stopped from the supervisor')
+      return session
+        ? this.stop(taskId, 'stopped from the supervisor', 'Stopped from the supervisor')
+        : true
     }
+    if (!session) return false
+    const { guard } = session
     if (command === 'pause' || command === 'takeover') {
       const accepted =
         command === 'takeover'
@@ -193,6 +196,7 @@ export class VisionController {
   stop(taskId: string, reason: string, currentAction: string): boolean {
     const session = this.sessions.get(taskId)
     if (!session) return false
+    if (session.guard.isHalted) return true
     if (!session.guard.halt(reason)) return false
     session.request.abort(reason)
     this.projectSession(taskId, currentAction)
