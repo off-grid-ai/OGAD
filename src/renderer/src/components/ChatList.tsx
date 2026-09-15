@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import { openChatLink } from '@renderer/lib/chat-link'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -33,7 +33,13 @@ interface ChatListItemProps {
   onDelete: (e: React.MouseEvent, sessionId: string) => void
 }
 
-function ChatListItem({ session, index, formattedTime, onSelect, onDelete }: ChatListItemProps) {
+function ChatListItem({
+  session,
+  index,
+  formattedTime,
+  onSelect,
+  onDelete
+}: ChatListItemProps): React.JSX.Element {
   const { readableTitle, llmLabel } = parseSessionId(session.session_id)
 
   // Glare effect state
@@ -41,7 +47,7 @@ function ChatListItem({ session, index, formattedTime, onSelect, onDelete }: Cha
   const isPointerInside = useRef(false)
   const [glareStyle, setGlareStyle] = useState({ x: 50, y: 50, opacity: 0, rotateX: 0, rotateY: 0 })
 
-  const handlePointerMove = (event: React.PointerEvent) => {
+  const handlePointerMove = (event: React.PointerEvent): void => {
     const rect = event.currentTarget.getBoundingClientRect()
     const x = ((event.clientX - rect.left) / rect.width) * 100
     const y = ((event.clientY - rect.top) / rect.height) * 100
@@ -51,17 +57,17 @@ function ChatListItem({ session, index, formattedTime, onSelect, onDelete }: Cha
     setGlareStyle({ x, y, opacity: 0.15, rotateX, rotateY })
   }
 
-  const handlePointerEnter = () => {
+  const handlePointerEnter = (): void => {
     isPointerInside.current = true
     setGlareStyle((prev) => ({ ...prev, opacity: 0.15 }))
   }
 
-  const handlePointerLeave = () => {
+  const handlePointerLeave = (): void => {
     isPointerInside.current = false
     setGlareStyle({ x: 50, y: 50, opacity: 0, rotateX: 0, rotateY: 0 })
   }
 
-  const markdownComponents: Record<string, React.ComponentType<any>> = {
+  const markdownComponents: Components = {
     p: ({ children }: { children?: React.ReactNode }) => (
       <p className="mb-3 last:mb-0 text-neutral-200">{children}</p>
     ),
@@ -281,44 +287,52 @@ function ChatListItem({ session, index, formattedTime, onSelect, onDelete }: Cha
   )
 }
 
-export function ChatList({ onSelectSession }: ChatListProps) {
+export function ChatList({ onSelectSession }: ChatListProps): React.JSX.Element {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [activeSource, setActiveSource] = useState<Source>('All')
+  const fetchRequestIdRef = useRef(0)
 
   const fetchSessions = useCallback(async () => {
+    fetchRequestIdRef.current += 1
+    const requestId = fetchRequestIdRef.current
     setLoading(true)
     try {
       const data = await window.api.getChatSessions(activeSource)
+      if (requestId !== fetchRequestIdRef.current) return
       setSessions(data)
     } catch (e) {
+      if (requestId !== fetchRequestIdRef.current) return
       console.error('Failed to fetch sessions', e)
     } finally {
-      setLoading(false)
+      if (requestId === fetchRequestIdRef.current) setLoading(false)
     }
   }, [activeSource])
 
-  const handleRefresh = async () => {
+  const handleRefresh = async (): Promise<void> => {
     setIsRefreshing(true)
     await fetchSessions()
     setIsRefreshing(false)
   }
 
   useEffect(() => {
-    fetchSessions()
+    void fetchSessions()
+    return () => {
+      fetchRequestIdRef.current += 1
+    }
   }, [fetchSessions])
 
-  const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
+  const handleDelete = async (e: React.MouseEvent, sessionId: string): Promise<void> => {
     e.stopPropagation()
     if (!confirm('Are you sure you want to delete this chat?')) return
 
     try {
       await window.api.deleteSession(sessionId)
       setSessions((prev) => prev.filter((s) => s.session_id !== sessionId))
-    } catch (e) {
-      console.error('Failed to delete', e)
+    } catch (error) {
+      console.error('Failed to delete', error)
     }
   }
 
