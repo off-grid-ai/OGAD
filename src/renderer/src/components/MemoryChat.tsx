@@ -1051,6 +1051,7 @@ function VoiceMessageRow({
           liveTask={liveTask}
           live={Boolean(message.streaming || continuation)}
           settled={assistantWorkIsSettled(message)}
+          stopped={message.turnStatus === 'cancelled'}
         />
         <div className={standardMessageBubbleClass(message, false)}>
           <div className="flex w-full flex-col gap-2">
@@ -1095,6 +1096,7 @@ function VoiceMessageRow({
           liveTask={liveTask}
           live={Boolean(message.streaming || continuation)}
           settled={assistantWorkIsSettled(message)}
+          stopped={message.turnStatus === 'cancelled'}
         />
         <VoiceBubble
           messageId={message.id}
@@ -2602,6 +2604,7 @@ function StandardMessageRow({
         liveTask={liveTask}
         live={Boolean(message.streaming || continuation)}
         settled={assistantWorkIsSettled(message)}
+        stopped={message.turnStatus === 'cancelled'}
       />
       <div
         className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'w-full max-w-2xl' : 'w-fit max-w-[85%]'}`}

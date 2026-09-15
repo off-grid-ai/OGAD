@@ -431,16 +431,25 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       {
         id: 43,
         role: 'assistant',
-        content: 'I stopped after the search failed.',
-        context: { reasoning: 'I should explain the partial result.' }
+        content: '',
+        context: {
+          reasoning: 'I should explain the partial result.',
+          status: 'cancelled'
+        }
       }
     ]
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-a' })
 
-    expect(await screen.findByText('I stopped after the search failed.')).toBeTruthy()
-    expect(screen.getAllByRole('button', { name: 'Work done' })).toHaveLength(1)
+    const stopped = await screen.findByRole('button', { name: 'Work stopped' })
+    expect(screen.getAllByRole('button', { name: 'Work stopped' })).toHaveLength(1)
     expect(screen.queryByRole('button', { name: 'Working' })).toBeNull()
+    fireEvent.click(stopped)
+    const thoughts = screen.getAllByRole('button', { name: 'Thought process' })
+    expect(thoughts).toHaveLength(2)
+    fireEvent.click(thoughts[1])
+    expect(await screen.findByText('I should explain the partial result.')).toBeTruthy()
+    expect(await screen.findByText('Search failed.')).toBeTruthy()
   })
 
   it('strips inline think markers from a plain reply through the real stream parser (#37)', async () => {

@@ -35,6 +35,8 @@ interface ChatToolRowsProps {
   live?: boolean
   /** A final or stopped response closes work even if an earlier tool retained running state. */
   settled?: boolean
+  /** The user stopped this turn before normal completion. */
+  stopped?: boolean
 }
 
 type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
@@ -238,7 +240,8 @@ export function ChatToolRows({
   memorySources,
   liveTask,
   live = false,
-  settled = false
+  settled = false,
+  stopped = false
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
@@ -287,7 +290,8 @@ export function ChatToolRows({
     0,
     ordered.filter((entry) => entry.kind === 'tool').length - projected.length
   )
-  const workIsLive = live || (!settled && projected.some(({ status }) => status === 'running'))
+  const workIsLive = live || (!stopped && !settled && projected.some(({ status }) => status === 'running'))
+  const workState = workIsLive ? 'live' : stopped ? 'stopped' : 'done'
   const timelineRows = (
     <ol
       className="ml-1 mt-1 w-full max-w-[85%] border-l border-neutral-800 text-neutral-500"
@@ -432,9 +436,9 @@ export function ChatToolRows({
     </ol>
   )
   return (
-    <Collapsible key={workIsLive ? 'live' : 'done'} defaultOpen={workIsLive} className="w-full">
+    <Collapsible key={workState} defaultOpen={workIsLive} className="w-full">
       <CollapsibleTrigger className="group ml-1 flex items-center gap-1.5 py-1 text-xs text-neutral-500 transition-colors hover:text-neutral-300">
-        <span>{workIsLive ? 'Working' : 'Work done'}</span>
+        <span>{workIsLive ? 'Working' : stopped ? 'Work stopped' : 'Work done'}</span>
         <CaretDown
           className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
           aria-hidden="true"
