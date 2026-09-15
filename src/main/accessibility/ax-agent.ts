@@ -81,6 +81,8 @@ export interface ElementTaskResult {
   ok: boolean
   summary: string
   steps: string[]
+  recovery?: 'vision'
+  guidance?: readonly string[]
 }
 
 export type ElementStep =
@@ -251,6 +253,7 @@ export function buildElementPrompt(input: {
 
 const DEFAULT_MAX_STEPS = DEFAULT_COMPUTER_USE_STEP_BUDGET
 const MAX_CONSECUTIVE_PARSE_FAILURES = 3
+export const AX_INVALID_REPLY_SUMMARY = `The action model returned an invalid reply ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row.`
 
 /** A stable signature of an actuating step, used to detect a runaway loop. Two
  *  consecutive identical signatures mean the model is repeating itself (it sent
@@ -396,9 +399,15 @@ export async function runElementTask(
         note('model reply did not parse; re-observing')
         checkpoint()
         if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
-          const summary = `The action model returned an invalid reply ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row.`
+          const summary = AX_INVALID_REPLY_SUMMARY
           note(summary)
-          return { ok: false, summary, steps }
+          return {
+            ok: false,
+            summary,
+            steps,
+            recovery: 'vision',
+            guidance: [...taskBrief.guidance]
+          }
         }
         continue
       }

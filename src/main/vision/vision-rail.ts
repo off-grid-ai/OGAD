@@ -12,9 +12,17 @@
  */
 import type { ActionRecord, ExecuteResult, HandlerRegistry } from '@offgrid/use'
 import type { VisionTaskResult } from './vision-agent'
+import type { TaskRetryCheckpoint } from '../tasks/task-retry'
+import type { VisionTaskContinuation } from './vision-host'
 
 export interface VisionRailHost {
-  runTask(goal: string, taskId: string, journeyId: string): Promise<VisionTaskResult>
+  runTask(
+    goal: string,
+    taskId: string,
+    journeyId: string,
+    checkpoint?: TaskRetryCheckpoint,
+    continuation?: VisionTaskContinuation
+  ): Promise<VisionTaskResult>
 }
 
 /** Registers the computer_use handler on the vision rail. */
@@ -32,11 +40,21 @@ export function registerVisionRail(registry: HandlerRegistry): void {
 /** The vision executor the DeviceController calls for the 'vision' rail. */
 export function makeVisionRailExecutor(
   host: VisionRailHost
-): (action: ActionRecord) => Promise<ExecuteResult> {
-  return async (action) => {
+): (
+  action: ActionRecord,
+  checkpoint?: TaskRetryCheckpoint,
+  continuation?: VisionTaskContinuation
+) => Promise<ExecuteResult> {
+  return async (action, checkpoint, continuation) => {
     const args = action.args as Record<string, unknown>
     const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
-    const result = await host.runTask(goal, action.id, action.sourceRef ?? action.id)
+    const result = await host.runTask(
+      goal,
+      action.id,
+      action.sourceRef ?? action.id,
+      checkpoint,
+      continuation
+    )
     if (!result.ok) {
       return { ok: false, detail: result.summary }
     }
