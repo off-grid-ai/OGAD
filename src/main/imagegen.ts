@@ -631,9 +631,9 @@ async function maybeEnhancePrompt(
               if (kind === 'content') onText(text)
             },
             { temperature: 0.7, thinking: false },
-            // A reasoning model can spend a small fixed output budget before it returns the
-            // enhanced prompt. Use the normal model limit; prompt cleanup bounds the result.
-            undefined,
+            // Leave enough room for a reasoning model to return the enhanced prompt, while
+            // keeping this background step bounded independently of the user's chat setting.
+            2_048,
             60_000
           )
           .then((result) => result.content)
