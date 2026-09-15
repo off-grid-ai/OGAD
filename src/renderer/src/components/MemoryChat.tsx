@@ -614,7 +614,8 @@ function groupChatTurnWork(messages: ChatMessage[]): ChatMessage[] {
         .reverse()
         .find(
           (entry) => entry.role === 'assistant' && Boolean(entry.content.trim() || entry.image)
-        )
+        ) ??
+      [...turn].reverse().find((entry) => entry.role === 'assistant')
     if (!response || !turn.some((entry) => entry.role === 'assistant')) {
       displayed.push(...turn)
       return

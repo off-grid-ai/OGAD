@@ -370,6 +370,50 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     ).toBeTruthy()
   })
 
+  it('keeps one open Work parent for a synced Mobile tool turn before its answer arrives', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 30, role: 'user', content: 'Research this on my phone' },
+      {
+        id: 31,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I will search the web first.',
+          toolCalls: [{ name: 'web_search', result: '', status: 'running' }]
+        }
+      },
+      {
+        id: 32,
+        role: 'tool',
+        content: 'First search result.',
+        context: { tool: { name: 'web_search', status: 'completed' } }
+      },
+      {
+        id: 33,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I will try another source.',
+          toolCalls: [{ name: 'search_knowledge_base', result: '', status: 'running' }]
+        }
+      },
+      {
+        id: 34,
+        role: 'tool',
+        content: 'No project context.',
+        context: { tool: { name: 'search_knowledge_base', status: 'completed' } }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const work = await screen.findByRole('button', { name: 'Working' })
+    expect(screen.getAllByRole('button', { name: 'Working' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Work done' })).toBeNull()
+    expect(work.getAttribute('data-state')).toBe('open')
+  })
+
   it('strips inline think markers from a plain reply through the real stream parser (#37)', async () => {
     const parserPath = ['../../../../main/llm', 'sse-stream'].join('/')
     const parser = await vi.importActual<{ createThinkSplitter: ThinkSplitterFactory }>(parserPath)
