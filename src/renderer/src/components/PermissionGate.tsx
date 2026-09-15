@@ -56,10 +56,11 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const checkCaptureVision = useCallback(async () => {
     if (!isPro || !window.api.proInvoke) return
     try {
-      const [activeId, statuses, capture] = await Promise.all([
+      const [activeId, statuses, capture, catalog] = await Promise.all([
         window.api.getActiveModel?.(),
         window.api.getModelVisionStatus?.(),
-        window.api.proInvoke('capture:status')
+        window.api.proInvoke('capture:status'),
+        window.api.getModelCatalog().catch(() => undefined)
       ])
       const status = capture as
         | { running?: boolean; paused?: boolean; visionReady?: boolean }
@@ -69,11 +70,19 @@ export function PermissionGate({ children }: PermissionGateProps) {
         return
       }
       const activeStatus = activeId ? statuses?.[activeId] : undefined
+      const catalogModels = (
+        catalog as { models?: Array<{ id: string; name?: string }> } | undefined
+      )?.models
+      const activeModelName = activeId
+        ? catalogModels?.find((model) => model.id === activeId)?.name?.trim() ||
+          activeId.split('/').pop() ||
+          activeId
+        : null
       if (activeId && activeStatus?.supportsVision && !activeStatus.projectorInstalled) {
         setVisionIssue({
           kind: 'missing-projector',
           modelId: activeId,
-          modelName: activeId.split('/').pop() ?? activeId
+          modelName: activeModelName ?? activeId
         })
         return
       }
@@ -84,7 +93,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
       setVisionIssue({
         kind: 'choose-vision-model',
         modelId: activeId ?? null,
-        modelName: activeId ? (activeId.split('/').pop() ?? activeId) : null
+        modelName: activeModelName
       })
     } catch (error) {
       console.error('Failed to check capture vision readiness:', error)

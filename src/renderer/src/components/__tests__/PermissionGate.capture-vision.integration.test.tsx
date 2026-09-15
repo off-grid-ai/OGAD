@@ -10,7 +10,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PermissionGate } from '../PermissionGate'
 
-const MODEL_ID = 'unsloth/gemma-4-E2B-it-GGUF'
+const MODEL_ID = `model-package-v1:${'a'.repeat(64)}`
+const MODEL_NAME = 'Gemma 4 E2B'
 let visionStatus: Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
 let downloadModel: ReturnType<typeof vi.fn>
 let captureStatus: { running: boolean; paused: boolean; visionReady: boolean }
@@ -41,6 +42,10 @@ beforeEach(() => {
       }),
       checkModelStatus: async () => ({ downloaded: true, modelsDir: '/tmp/models' }),
       getActiveModel: async () => MODEL_ID,
+      getModelCatalog: async () => ({
+        kinds: ['vision'],
+        models: [{ id: MODEL_ID, name: MODEL_NAME, kind: 'vision', files: [] }]
+      }),
       getModelVisionStatus: async () => visionStatus,
       proInvoke: async (channel: string) => {
         if (channel === 'capture:status') {
@@ -91,6 +96,12 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
     )
 
     expect(await screen.findByText('Capture needs a vision model')).toBeTruthy()
+    expect(
+      screen.getByText(
+        `${MODEL_NAME} cannot analyze Replay frames. Choose a vision-capable chat model.`
+      )
+    ).toBeTruthy()
+    expect(screen.queryByText(new RegExp(MODEL_ID))).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Choose model' }))
     await waitFor(() => expect(navigate).toHaveBeenCalledOnce())
     expect((navigate.mock.calls[0]?.[0] as CustomEvent).detail).toBe('models')
