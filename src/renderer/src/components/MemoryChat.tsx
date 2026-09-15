@@ -869,6 +869,7 @@ function VoiceMessageRow({
   copied,
   showTranscriptInitially,
   showGenerationDetails,
+  regenerationDisabled,
   playbackSpeed,
   onPlaybackStateChange,
   onCopy,
@@ -887,6 +888,7 @@ function VoiceMessageRow({
   copied: boolean
   showTranscriptInitially: boolean
   showGenerationDetails: boolean
+  regenerationDisabled: boolean
   playbackSpeed: number
   onPlaybackStateChange: (messageId: string, active: boolean) => void
   onCopy: (text: string, key?: string) => void
@@ -971,9 +973,6 @@ function VoiceMessageRow({
         durationSeconds={message.audioDuration}
         synthesize={(text) => window.api.speak(text)}
         onPlaybackStateChange={reportPlayback}
-        copied={copied}
-        onCopy={(text) => onCopy(text, message.id)}
-        onRetry={() => onRegenerate(message.id)}
         defaultSpeed={playbackSpeed}
       />
     )
@@ -1027,13 +1026,22 @@ function VoiceMessageRow({
   return (
     <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>
       {body}
-      {message.role === 'user' && !editing ? (
-        <VoiceMessageActions
-          transcribing={transcribing}
-          canTranscribe={Boolean(audioUrl)}
-          onEdit={() => onStartEdit(message)}
-          onTranscribe={() => void transcribeAgain()}
-        />
+      {message.createdAt !== undefined || (message.role === 'user' && !editing) ? (
+        <div className="flex items-center gap-2 pr-1">
+          <MessageTime message={message} />
+          {message.role === 'user' && !editing ? (
+            <VoiceMessageActions
+              copied={copied}
+              regenerationDisabled={regenerationDisabled}
+              transcribing={transcribing}
+              canTranscribe={Boolean(audioUrl)}
+              onCopy={() => onCopy(message.content, message.id)}
+              onRegenerate={() => onRegenerate(message.id)}
+              onEdit={() => onStartEdit(message)}
+              onTranscribe={() => void transcribeAgain()}
+            />
+          ) : null}
+        </div>
       ) : null}
       {transcribing ? (
         <div role="status" className="text-[11px] text-neutral-500">
@@ -1728,18 +1736,37 @@ function UserMessageActions({
 }
 
 function VoiceMessageActions({
+  copied,
+  regenerationDisabled,
   transcribing,
   canTranscribe,
+  onCopy,
+  onRegenerate,
   onEdit,
   onTranscribe
 }: Readonly<{
+  copied: boolean
+  regenerationDisabled: boolean
   transcribing: boolean
   canTranscribe: boolean
+  onCopy: () => void
+  onRegenerate: () => void
   onEdit: () => void
   onTranscribe: () => void
 }>): React.JSX.Element {
   return (
     <MessageActionsMenu label="Voice message actions">
+      <CopyAction copied={copied} onCopy={onCopy} />
+      <RegenerateAction
+        label="Resend"
+        title={
+          regenerationDisabled
+            ? 'Wait for the current reply to finish'
+            : 'Regenerate the reply to this message'
+        }
+        disabled={regenerationDisabled}
+        onRegenerate={onRegenerate}
+      />
       <DropdownMenuItem
         onSelect={onEdit}
         className="flex items-center gap-1 text-[11px] text-neutral-600 transition-colors hover:text-green-500"
@@ -2603,6 +2630,7 @@ function MessageRow({
         copied={state.copiedKey === message.id}
         showTranscriptInitially={state.latestVoiceAssistantId === message.id}
         showGenerationDetails={state.showGenerationDetails}
+        regenerationDisabled={state.regenerationDisabled}
         playbackSpeed={state.ttsSpeed}
         onPlaybackStateChange={actions.voicePlaybackChange}
         onCopy={actions.copy}
@@ -4363,9 +4391,8 @@ export function MemoryChat({
         if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
           imageRequests = [tr.imageRequest]
         }
-        const imageStatusOnly =
-          imageRequests.length > 0 &&
-          answer.startsWith('Image generation started - it will appear in the chat.')
+        const pureImageToolTurn =
+          toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.name === 'generate_image')
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -4377,7 +4404,7 @@ export function MemoryChat({
         // A generated image owns the completed tool turn, so it does not leave a separate
         // assistant bubble behind. Non-image tool turns still finalize their placeholder.
         setConvMessages(convId, (prev) =>
-          imageStatusOnly
+          imageRequests.length > 0
             ? prev.filter((message) => message.id !== toolStreamId)
             : prev.map((message) =>
                 message.id === toolStreamId
@@ -4415,27 +4442,9 @@ export function MemoryChat({
           // RAG stream) and remains scoped to this conversation.
           setImgProgress(null)
           setImageGenConv(convId)
-          if (!imageStatusOnly) {
-            try {
-              const stored = await window.api.addRagMessage(
-                convId,
-                'assistant',
-                answer,
-                toolCtxWithReasoning
-              )
-              setConvMessages(convId, (previous) =>
-                previous.map((message) =>
-                  message.id === toolStreamId ? { ...message, id: stored.uuid } : message
-                )
-              )
-              if (voiceMode) setAutoPlayId(stored.uuid)
-            } catch {
-              /* The answer remains on screen; image rows can still be persisted independently. */
-              if (voiceMode) setAutoPlayId(toolStreamId)
-            }
-          }
+          let generatedImageCount = 0
           try {
-            for (const [imageIndex, imageRequest] of imageRequests.entries()) {
+            for (const imageRequest of imageRequests) {
               if (cancelledRef.current.has(convId)) break
               setImgProgress(null)
               try {
@@ -4469,7 +4478,11 @@ export function MemoryChat({
                     img.path
                   )
                 }
-                const imageContent = `Generated for: ${imageRequest.prompt}`
+                const ownsToolTurn = generatedImageCount === 0
+                const imageContent =
+                  ownsToolTurn && !pureImageToolTurn
+                    ? answer
+                    : `Generated for: ${imageRequest.prompt}`
                 const completedImage = completedImageMessage(
                   imageContent,
                   imageRequest.prompt,
@@ -4483,7 +4496,7 @@ export function MemoryChat({
                     completedImage.storedContent,
                     withGeneratedImageReference(
                       {
-                        ...(imageIndex === 0 && imageStatusOnly ? toolCtxWithReasoning : {}),
+                        ...(ownsToolTurn ? toolCtxWithReasoning : {}),
                         ...(imageMetadata ? { imageMetadata } : {}),
                         ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
                         ...(imageMetrics ? { metrics: imageMetrics } : {})
@@ -4505,7 +4518,7 @@ export function MemoryChat({
                     image: img.dataUrl,
                     imagePath: img.path,
                     imageMetadata,
-                    ...(imageIndex === 0 && imageStatusOnly
+                    ...(ownsToolTurn
                       ? {
                           context,
                           reasoning: toolReasoning,
@@ -4518,6 +4531,7 @@ export function MemoryChat({
                     ...(imageMetrics ? { metrics: imageMetrics } : {})
                   }
                 ])
+                generatedImageCount += 1
               } catch (error) {
                 // One failed image does not erase or block another completed tool request. Stop is
                 // the exception: it cancels the active runtime and ends the remaining local work.
@@ -4539,6 +4553,36 @@ export function MemoryChat({
           } finally {
             setImgProgress(null)
             setImageGenConv((owner) => (owner === convId ? null : owner))
+          }
+          if (generatedImageCount === 0) {
+            let restoredMessageId = toolStreamId
+            try {
+              const stored = await window.api.addRagMessage(
+                convId,
+                'assistant',
+                answer,
+                toolCtxWithReasoning
+              )
+              restoredMessageId = stored.uuid
+            } catch {
+              /* The completed text answer remains visible if persistence fails. */
+            }
+            setConvMessages(convId, (previous) => [
+              ...previous,
+              {
+                id: restoredMessageId,
+                role: 'assistant',
+                content: answer,
+                context,
+                reasoning: toolReasoning,
+                timeline: toolTimeline,
+                toolCalls,
+                toolsOffered: tr?.toolsOffered,
+                metrics: tr?.metrics,
+                streaming: false
+              }
+            ])
+            if (voiceMode) setAutoPlayId(restoredMessageId)
           }
           return
         }

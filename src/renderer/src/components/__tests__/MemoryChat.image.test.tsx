@@ -891,7 +891,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       isPro: true,
       settings: { composerToolsOn: true, showGenerationDetails: true },
       toolResult: {
-        answer: 'Image generation started - it will appear in the chat.',
+        answer: 'चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।',
         toolCalls: [
           { name: 'generate_image', result: 'Image generation started' },
           { name: 'generate_image', result: 'Image generation started' }
@@ -923,9 +923,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       `768 × 768 · 17 steps · CFG 5.5 · seed 101 · ${FULL}`,
       `768 × 768 · 17 steps · CFG 5.5 · seed 202 · ${FULL}`
     ])
-    expect(
-      screen.queryByText('Image generation started - it will appear in the chat.')
-    ).toBeNull()
+    expect(screen.queryByText('चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।')).toBeNull()
     const generationDetails = screen.getAllByRole('button', { name: 'Generation details' })
     expect(generationDetails).toHaveLength(2)
     await user.click(generationDetails[0]!)
