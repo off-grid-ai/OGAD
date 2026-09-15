@@ -64,7 +64,10 @@ describe('makeComputerTaskExecutor', () => {
       'act-1',
       'act-1',
       'Slack',
-      routing.snapshot
+      expect.objectContaining({
+        initial: routing.snapshot,
+        recoverWithVision: expect.any(Function)
+      })
     )
     expect(tiers.visionExecute).not.toHaveBeenCalled()
     expect(result).toEqual({ ok: true, effectId: 'act-1' })
@@ -130,7 +133,10 @@ describe('makeComputerTaskExecutor', () => {
       'act-1',
       'chat-42',
       'Slack',
-      routing.snapshot
+      expect.objectContaining({
+        initial: routing.snapshot,
+        recoverWithVision: expect.any(Function)
+      })
     )
   })
 
