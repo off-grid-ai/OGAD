@@ -33,7 +33,7 @@ const SHORTCUTS: Shortcut[] = [
 
 export function KeyboardShortcuts(): React.ReactElement {
   const { isPro } = useRendererEntitlement()
-  const dictationShortcut = useDictationShortcut()
+  const dictationShortcut = useDictationShortcut(isPro)
   const rows = SHORTCUTS.filter((s) => !s.pro || isPro)
   return (
     <div className="flex flex-col gap-1.5">
@@ -45,11 +45,18 @@ export function KeyboardShortcuts(): React.ReactElement {
           <span className="text-xs text-neutral-300">
             {s.action}
             {s.note ? (
-              <span className="ml-2 text-[10px] text-neutral-600">
+              <span
+                role={s.configuredDictation ? 'status' : undefined}
+                className="ml-2 text-[10px] text-neutral-600"
+              >
                 ·{' '}
                 {s.configuredDictation && dictationShortcut.message
                   ? dictationShortcut.message
-                  : s.note}
+                  : s.configuredDictation
+                    ? dictationShortcut.registered
+                      ? 'Registered on this Mac'
+                      : 'Not registered on this Mac'
+                    : s.note}
               </span>
             ) : null}
           </span>

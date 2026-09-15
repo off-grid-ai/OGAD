@@ -7,6 +7,7 @@ type DictationState = 'idle' | 'recording' | 'transcribing'
 
 interface DictationSettings {
   accelerator: string
+  shortcutRegistered: boolean
   keyCode: number
   modifier: string
   mode: 'hold' | 'toggle' | 'both'
