@@ -318,7 +318,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const answer = screen.getByText('Generated image for: a lighthouse in a winter storm')
     openActionsFor('Generated image for: a lighthouse in a winter storm')
     const speak = screen.getByRole('menuitem', { name: 'Speak' })
-    expect(screen.getByTestId('supporting-context-bubble')).toBeTruthy()
+    expect(disclosure.closest('[data-testid="chat-message-1"]')).toBeTruthy()
     expect(screen.getByTestId('chat-message-1').className).toContain('mb-2')
     expect(screen.getByTestId('chat-message-2').className).toContain('mb-5')
     expect(disclosure.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
