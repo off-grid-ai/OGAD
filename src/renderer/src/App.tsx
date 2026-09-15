@@ -8,6 +8,7 @@ import { ExploreScreen } from './components/explore/ExploreScreen'
 import type { DemoPreset } from './components/explore/presetCatalog'
 import { Settings, SETTINGS_DESTINATIONS } from './components/Settings'
 import { SettingsPanel } from './components/SettingsPanel'
+import { ModelPicker } from './components/ModelPicker'
 import { ModelsScreen } from './components/ModelsScreen'
 import { ProjectsScreen } from './components/ProjectsScreen'
 import { ConnectorsScreen } from './components/ConnectorsScreen'
@@ -70,6 +71,7 @@ import { SidebarNavigationMenu } from './components/navigation/SidebarNavigation
 import { StartupNotice } from './components/StartupNotice'
 import { CHAT_VIEW, setCurrentView } from './lib/current-view'
 import {
+  OPEN_ACTIVE_MODELS_PANEL_EVENT,
   OPEN_MODEL_SETTINGS_PANEL_EVENT,
   type ModelSettingsPanelTab
 } from './lib/model-settings-panel'
@@ -328,6 +330,7 @@ function AppContent() {
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0)
   const [navigationSubroute, setNavigationSubroute] = useState<string | null>(null)
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false)
+  const [activeModelsOpen, setActiveModelsOpen] = useState(false)
   const [modelSettingsTab, setModelSettingsTab] = useState<ModelSettingsPanelTab>('model')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null)
@@ -418,6 +421,7 @@ function AppContent() {
     setCanGoForward(false)
     setSettingsSection(null)
     setNavigationSubroute(null)
+    setActiveModelsOpen(false)
     setModelSettingsOpen(false)
     setModelSettingsTab('model')
     setSelectedSessionId(null)
@@ -554,12 +558,23 @@ function AppContent() {
     const open = (event: Event): void => {
       const detail = (event as CustomEvent<{ tab?: ModelSettingsPanelTab } | undefined>).detail
       const requestedTab = detail ? detail.tab : undefined
+      setActiveModelsOpen(false)
       setModelSettingsTab(requestedTab ?? 'model')
       setModelSettingsOpen(true)
     }
     window.addEventListener(OPEN_MODEL_SETTINGS_PANEL_EVENT, open)
     return () => window.removeEventListener(OPEN_MODEL_SETTINGS_PANEL_EVENT, open)
   }, [])
+
+  useEffect(() => {
+    if (viewMode === 'memory-chat') return
+    const open = (): void => {
+      setModelSettingsOpen(false)
+      setActiveModelsOpen(true)
+    }
+    window.addEventListener(OPEN_ACTIVE_MODELS_PANEL_EVENT, open)
+    return () => window.removeEventListener(OPEN_ACTIVE_MODELS_PANEL_EVENT, open)
+  }, [viewMode])
 
   // Update browser URL when view mode changes
   useEffect(() => {
@@ -879,7 +894,8 @@ function AppContent() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === '[') {
         e.preventDefault()
-        if (modelSettingsOpen) setModelSettingsOpen(false)
+        if (activeModelsOpen) setActiveModelsOpen(false)
+        else if (modelSettingsOpen) setModelSettingsOpen(false)
         else navigateBack()
       } else if ((e.metaKey || e.ctrlKey) && e.key === ']') {
         e.preventDefault()
@@ -888,7 +904,7 @@ function AppContent() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [modelSettingsOpen, navigateBack, navigateForward])
+  }, [activeModelsOpen, modelSettingsOpen, navigateBack, navigateForward])
 
   // Original sidebar order preserved. Pro tabs pull their icon/label from the
   // static catalogue and are marked locked in the free build (open the
@@ -1388,6 +1404,7 @@ function AppContent() {
         </div>
       </div>
       <AnimatePresence>
+        {activeModelsOpen && <ModelPicker onClose={() => setActiveModelsOpen(false)} />}
         {modelSettingsOpen && (
           <SettingsPanel
             key={modelSettingsTab}

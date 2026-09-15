@@ -456,6 +456,31 @@ describe('<App/> desktop navigation integration', () => {
     expect(window.location.pathname).toBe('/models')
   })
 
+  it('switches from model settings to Active models over the Models screen', async () => {
+    window.history.replaceState(null, '', '/models')
+    const user = userEvent.setup()
+    installAppBoundary({
+      getLlmSettings: async () => ({
+        ctxSize: 65536,
+        effectiveCtxSize: 32768,
+        modelMaxCtx: 262144
+      })
+    })
+
+    render(<App />)
+    await waitFor(() => expect(window.location.pathname).toBe('/models'))
+    act(() => {
+      window.dispatchEvent(new CustomEvent('og:open-model-settings-panel'))
+    })
+    expect(await screen.findByRole('dialog', { name: 'Model settings' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Active models' }))
+
+    expect(await screen.findByRole('dialog', { name: 'Active models' })).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'Model settings' })).toBeNull()
+    expect(window.location.pathname).toBe('/models')
+  })
+
   it('keeps a Devices subroute only while Devices remains the active screen', async () => {
     const user = userEvent.setup()
     installAppBoundary({ universalSearch: async () => [] })
