@@ -544,6 +544,9 @@ async function handleTranscription(
   // trust boundary, so a paired phone offloading its recorder audio over the LAN is accepted the same
   // way as a chat request. Only settings mutations are peer-guarded.
   const ct = req.headers['content-type'] || ''
+  console.log(
+    `[stt-diag] remote=${req.socket.remoteAddress} ct="${ct}" len=${req.headers['content-length'] ?? '?'}`
+  )
   if (!ct.includes('multipart/form-data')) {
     json(res, 400, errBody('Send multipart/form-data with a "file" field.'))
     return
@@ -556,6 +559,9 @@ async function handleTranscription(
     return
   }
   const { files, fields } = parseMultipart(body, ct)
+  console.log(
+    `[stt-diag] bodyLen=${body.length} fileFields=${Object.keys(files).join(',')} textFields=${Object.keys(fields).join(',')}`
+  )
   const file = files.file || Object.values(files)[0]
   if (!file || !file.data.length) {
     json(res, 400, errBody('No audio file in "file" field.'))
