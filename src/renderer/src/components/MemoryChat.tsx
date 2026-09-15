@@ -814,6 +814,13 @@ function standardMessageBubbleClass(message: ChatMessage, editing: boolean): str
   return `py-1 text-sm leading-relaxed ${width} ${color}`
 }
 
+function assistantWorkIsSettled(message: ChatMessage): boolean {
+  return Boolean(
+    !message.streaming &&
+      (message.content.trim() || message.image || message.attachments?.length)
+  )
+}
+
 function contextResultCount(context: RagContext): number {
   return (
     (context.sources?.length ?? 0) +
@@ -1043,6 +1050,7 @@ function VoiceMessageRow({
           memorySources={memorySources}
           liveTask={liveTask}
           live={Boolean(message.streaming || continuation)}
+          settled={assistantWorkIsSettled(message)}
         />
         <div className={standardMessageBubbleClass(message, false)}>
           <div className="flex w-full flex-col gap-2">
@@ -1086,6 +1094,7 @@ function VoiceMessageRow({
           memorySources={memorySources}
           liveTask={liveTask}
           live={Boolean(message.streaming || continuation)}
+          settled={assistantWorkIsSettled(message)}
         />
         <VoiceBubble
           messageId={message.id}
@@ -2592,6 +2601,7 @@ function StandardMessageRow({
         memorySources={memorySources}
         liveTask={liveTask}
         live={Boolean(message.streaming || continuation)}
+        settled={assistantWorkIsSettled(message)}
       />
       <div
         className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'w-full max-w-2xl' : 'w-fit max-w-[85%]'}`}

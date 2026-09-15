@@ -414,6 +414,35 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(work.getAttribute('data-state')).toBe('open')
   })
 
+  it('closes synced Mobile work when Stop keeps a partial answer', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 40, role: 'user', content: 'Research this on my phone' },
+      {
+        id: 41,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I will search the web.',
+          toolCalls: [{ name: 'web_search', result: '', status: 'running' }]
+        }
+      },
+      { id: 42, role: 'tool', content: 'Search failed.' },
+      {
+        id: 43,
+        role: 'assistant',
+        content: 'I stopped after the search failed.',
+        context: { reasoning: 'I should explain the partial result.' }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    expect(await screen.findByText('I stopped after the search failed.')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: 'Work done' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Working' })).toBeNull()
+  })
+
   it('strips inline think markers from a plain reply through the real stream parser (#37)', async () => {
     const parserPath = ['../../../../main/llm', 'sse-stream'].join('/')
     const parser = await vi.importActual<{ createThinkSplitter: ThinkSplitterFactory }>(parserPath)

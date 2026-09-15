@@ -33,6 +33,8 @@ interface ChatToolRowsProps {
   liveTask?: TaskSession
   /** Open the timeline while this response is live, then close it when the response completes. */
   live?: boolean
+  /** A final or stopped response closes work even if an earlier tool retained running state. */
+  settled?: boolean
 }
 
 type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
@@ -235,7 +237,8 @@ export function ChatToolRows({
   thinkingLive = false,
   memorySources,
   liveTask,
-  live = false
+  live = false,
+  settled = false
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
@@ -284,7 +287,7 @@ export function ChatToolRows({
     0,
     ordered.filter((entry) => entry.kind === 'tool').length - projected.length
   )
-  const workIsLive = live || projected.some(({ status }) => status === 'running')
+  const workIsLive = live || (!settled && projected.some(({ status }) => status === 'running'))
   const timelineRows = (
     <ol
       className="ml-1 mt-1 w-full max-w-[85%] border-l border-neutral-800 text-neutral-500"
