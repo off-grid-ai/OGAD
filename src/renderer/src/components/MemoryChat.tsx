@@ -6418,7 +6418,16 @@ export function MemoryChat({
                             {g.items.map((conv) => (
                               <div
                                 key={conv.id}
+                                role="button"
+                                tabIndex={0}
                                 onClick={() => switchConversation(conv.id, true)}
+                                onKeyDown={(event) => {
+                                  if (event.target !== event.currentTarget) return
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault()
+                                    switchConversation(conv.id, true)
+                                  }
+                                }}
                                 className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
                                   activeConversationId === conv.id
                                     ? 'border-neutral-800 bg-neutral-900'

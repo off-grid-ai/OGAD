@@ -144,7 +144,11 @@ it('switches between saved chats and shows a peer update to an inactive chat', a
 
   expect(await screen.findByText('Answer in the first chat')).toBeTruthy()
   const conversationList = screen.getByRole('complementary')
-  await user.click(within(conversationList).getByText('Conversation B'))
+  const conversationBRow = within(conversationList)
+    .getByText('Conversation B')
+    .closest('[role="button"]') as HTMLElement
+  conversationBRow.focus()
+  await user.keyboard('{Enter}')
   expect(await screen.findByRole('status', { name: 'Loading conversation' })).toBeTruthy()
   boundary.releaseConversationRead('conversation-b')
   expect(await screen.findByText('Conversation B baseline')).toBeTruthy()
