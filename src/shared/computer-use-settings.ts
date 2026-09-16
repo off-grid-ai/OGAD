@@ -3,6 +3,7 @@ export type ComputerUseScreenshotSize = 'compact' | 'balanced' | 'large'
 export type ComputerUseScreenshotQuality = 'efficient' | 'balanced' | 'detailed'
 export type ComputerUseCheckpointInterval = 8 | 9 | 10
 export type ComputerUseVisualHistoryFrames = 0 | 1 | 2 | 5
+export type ComputerUseRail = 'ax' | 'vision'
 export type ComputerUseModelStrategy =
   | 'same_as_chat'
   | 'separate_specialist'
@@ -16,6 +17,7 @@ export interface ComputerUseSettings {
   checkpointInterval: ComputerUseCheckpointInterval
   visualHistoryFrames: ComputerUseVisualHistoryFrames
   retrieveOlderVisuals: boolean
+  enabledRails: ComputerUseRail[]
 }
 
 export interface ComputerUseActiveModel {
@@ -42,7 +44,8 @@ export const DEFAULT_COMPUTER_USE_SETTINGS: Readonly<ComputerUseSettings> = {
   screenshotQuality: 'balanced',
   checkpointInterval: 9,
   visualHistoryFrames: 2,
-  retrieveOlderVisuals: false
+  retrieveOlderVisuals: false,
+  enabledRails: ['vision']
 }
 
 const CONTEXT_TOKENS: Record<Exclude<ComputerUseContext, 'auto'>, number> = {
@@ -109,6 +112,9 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
     input.visualHistoryFrames === 5
       ? input.visualHistoryFrames
       : DEFAULT_COMPUTER_USE_SETTINGS.visualHistoryFrames
+  const enabledRails = (['ax', 'vision'] as const).filter(
+    (rail) => Array.isArray(input.enabledRails) && input.enabledRails.includes(rail)
+  )
 
   return {
     modelStrategy:
@@ -125,7 +131,9 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
     retrieveOlderVisuals:
       typeof input.retrieveOlderVisuals === 'boolean'
         ? input.retrieveOlderVisuals
-        : DEFAULT_COMPUTER_USE_SETTINGS.retrieveOlderVisuals
+        : DEFAULT_COMPUTER_USE_SETTINGS.retrieveOlderVisuals,
+    enabledRails:
+      enabledRails.length > 0 ? enabledRails : [...DEFAULT_COMPUTER_USE_SETTINGS.enabledRails]
   }
 }
 

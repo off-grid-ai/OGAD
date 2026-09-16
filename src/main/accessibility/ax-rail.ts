@@ -20,6 +20,7 @@ import type { AxRouting } from './ax-host'
 import type { ElementTaskResult } from './ax-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
 import type { VisionTaskContinuation } from '../vision/vision-host'
+import type { ComputerUseRail } from '../../shared/computer-use-settings'
 
 export interface ComputerTaskTiers {
   /** Resolve + read the target app for routing, or null to fall to vision. */
@@ -64,7 +65,12 @@ export function parseForcedRail(value: string | undefined): ForcedRail {
 export interface ComputerTaskOptions {
   /** Pin the rail (A/B). Default 'auto' = tiered. */
   forcedRail?: ForcedRail
+  enabledRails?: readonly ComputerUseRail[]
   now?: () => number
+}
+
+function isRailEnabled(enabledRails: readonly ComputerUseRail[], rail: ComputerUseRail): boolean {
+  return enabledRails.includes(rail)
 }
 
 /** Build the tiered computer_use executor for the DeviceController's 'vision'
@@ -74,15 +80,21 @@ export function makeComputerTaskExecutor(
   opts: ComputerTaskOptions = {}
 ): (action: ActionRecord) => Promise<ExecuteResult> {
   const forced = opts.forcedRail ?? 'auto'
+  const enabledRails = opts.enabledRails ?? ['vision']
   const now = opts.now ?? Date.now
   return async (action) => {
     const goal = goalOf(action)
-    // 'vision' forces the grounder rail: skip the AX read entirely.
-    const routing = forced === 'vision' ? null : await tiers.routingSnapshot(goal)
+    const forceAx = forced === 'ax'
+    const forceVision = forced === 'vision'
+    const axEnabled = forceAx || (forced === 'auto' && isRailEnabled(enabledRails, 'ax'))
+    const visionEnabled =
+      forceVision || (forced === 'auto' && isRailEnabled(enabledRails, 'vision'))
+    // Vision-only skips the AX read entirely.
+    const routing = axEnabled ? await tiers.routingSnapshot(goal) : null
     const viable = routing !== null && axRailViable(routing.snapshot)
-    // 'ax' drives via AX whenever a target app resolved (even below the
-    // richness threshold); 'auto' requires it viable.
-    const useAx = routing !== null && (forced === 'ax' || viable)
+    // AX-only drives whenever a target app resolved, even below the richness
+    // threshold. With both rails enabled, AX still requires a viable tree.
+    const useAx = routing !== null && (!visionEnabled || forceAx || viable)
     console.log(
       `[computer-task] rail=${forced} goal="${goal}" routing=${
         routing ? `${routing.app}/${routing.snapshot.elements.length} elements` : 'none'
@@ -97,7 +109,7 @@ export function makeComputerTaskExecutor(
         routing.app,
         {
           initial: routing.snapshot,
-          ...(forced === 'ax'
+          ...(!visionEnabled || forceAx
             ? {}
             : {
                 recoverWithVision: (checkpoint, continuation) =>
@@ -116,7 +128,10 @@ export function makeComputerTaskExecutor(
       // A GUI action has no generic undo; the action id is the effect handle.
       return { ok: true, effectId: action.id }
     }
-    // Dead-AX surface, no named app, or forced: the grounder-vision rail. The
+    if (!visionEnabled) {
+      return { ok: false, detail: 'The Accessibility rail could not find a target app.' }
+    }
+    // Dead-AX surface, no named app, or Vision-only: the grounder-vision rail. The
     // wiring wraps this with the on-demand grounder swap + its own timing.
     console.log('[computer-task] using the grounder-vision rail')
     return tiers.visionExecute(action)

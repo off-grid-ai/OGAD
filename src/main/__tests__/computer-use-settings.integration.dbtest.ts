@@ -36,7 +36,8 @@ describe('Computer Use settings persistence', () => {
       screenshotSize: 'large',
       screenshotQuality: 'detailed',
       checkpointInterval: 8,
-      retrieveOlderVisuals: true
+      retrieveOlderVisuals: true,
+      enabledRails: ['ax', 'vision']
     })
 
     expect(getComputerUseSettings()).toEqual({
@@ -46,7 +47,8 @@ describe('Computer Use settings persistence', () => {
       screenshotQuality: 'detailed',
       checkpointInterval: 8,
       retrieveOlderVisuals: true,
-      visualHistoryFrames: 2
+      visualHistoryFrames: 2,
+      enabledRails: ['ax', 'vision']
     })
   })
 

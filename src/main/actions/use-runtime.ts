@@ -48,6 +48,7 @@ import { withRemoteScreenGate } from './remote-screen-gate'
 import { getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
 import { taskLaunchFromActionArgs } from '../tasks/task-launch-identity'
 import { taskKindForActionType } from '../tools/nativeActionToolExtension-logic'
+import { getComputerUseSettings } from '../computer-use-settings'
 
 export interface ActionsRuntime {
   propose(
@@ -245,11 +246,13 @@ export function getActionsRuntime(): ActionsRuntime {
     visionExecute: groundedVisionExecute
   }
   const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {
+    const settings = getComputerUseSettings()
     return makeComputerTaskExecutor(computerTaskTiers, {
       // Model strategy selects which model handles a vision FALLBACK. It must
       // never bypass verified native application controls. The environment
       // override remains available only for explicit rail diagnostics.
-      forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL)
+      forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL),
+      enabledRails: settings.enabledRails
     })(action)
   }
   const engine = new UseEngine({
