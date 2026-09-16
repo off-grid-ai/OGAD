@@ -7,6 +7,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import React from 'react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
