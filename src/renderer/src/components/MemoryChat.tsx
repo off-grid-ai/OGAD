@@ -25,6 +25,7 @@ import {
   PROMPT_ENHANCEMENT_REASONING_LABEL,
   preprocessChatMarkdown,
   projectSyncedMessageTurn,
+  type ChatStreamPreviewRow,
   type ProjectedSyncedTool,
   type RecordProvenance,
   type SyncedMessageRole,
@@ -513,6 +514,9 @@ function shouldHideProjectedTurn(turn: ReturnType<typeof projectSyncedMessageTur
   return Boolean(
     turn &&
     turn.role === 'assistant' &&
+    turn.status !== 'failed' &&
+    turn.status !== 'cancelled' &&
+    turn.tools.length === 0 &&
     !(turn.answer ?? turn.content).trim() &&
     turn.reasoning === undefined
   )
@@ -629,6 +633,20 @@ function groupChatTurnWork(messages: ChatMessage[]): ChatMessage[] {
     for (const entry of turn) {
       entry.toolsOffered?.forEach((name) => toolsOffered.add(name))
       if (entry.role === 'tool') {
+        const existingToolIndex = entry.toolCallId
+          ? tools.findIndex((tool) => tool.id === entry.toolCallId)
+          : -1
+        if (existingToolIndex >= 0) {
+          tools[existingToolIndex] = {
+            ...tools[existingToolIndex]!,
+            result: entry.content,
+            status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
+            ...(entry.generationTimeMs === undefined
+              ? {}
+              : { durationMs: entry.generationTimeMs })
+          }
+          continue
+        }
         timeline.push({ kind: 'tool', toolIndex: tools.length })
         tools.push({
           name: entry.toolName || 'Tool result',
@@ -691,6 +709,29 @@ function groupChatTurnWork(messages: ChatMessage[]): ChatMessage[] {
   }
   flushPending()
   return displayed
+}
+
+function mergeRemotePreviewTools(
+  durable: readonly ProjectedSyncedTool[] | undefined,
+  preview: ChatStreamPreviewRow | null
+): ProjectedSyncedTool[] | undefined {
+  const saved = [...(durable ?? [])]
+  const live = (preview?.tools ?? []).map((tool) => ({
+    name: tool.name,
+    result: tool.result ?? '',
+    status: tool.status
+  }))
+  for (const savedTool of saved) {
+    const match = live.findIndex(
+      (tool) =>
+        tool.name === savedTool.name &&
+        tool.status !== 'running' &&
+        tool.result === savedTool.result
+    )
+    if (match >= 0) live.splice(match, 1)
+  }
+  const combined = [...saved, ...live]
+  return combined.length ? combined : undefined
 }
 
 function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
@@ -816,8 +857,7 @@ function standardMessageBubbleClass(message: ChatMessage, editing: boolean): str
 
 function assistantWorkIsSettled(message: ChatMessage): boolean {
   return Boolean(
-    !message.streaming &&
-      (message.content.trim() || message.image || message.attachments?.length)
+    !message.streaming && (message.content.trim() || message.image || message.attachments?.length)
   )
 }
 
@@ -887,6 +927,7 @@ function VoiceMessageRow({
   nextMessageRole,
   liveTask,
   timelineThinking,
+  workFooter,
   continuation,
   navigation,
   autoPlay,
@@ -910,6 +951,7 @@ function VoiceMessageRow({
   nextMessageRole?: SyncedMessageRole
   liveTask?: TaskSession
   timelineThinking?: React.JSX.Element
+  workFooter?: React.JSX.Element
   continuation?: React.JSX.Element
   navigation: ContextNavigation
   autoPlay: boolean
@@ -942,7 +984,8 @@ function VoiceMessageRow({
     timelineThinking ??
     (message.role === 'assistant' &&
     (!message.timeline?.some((entry) => entry.kind === 'thinking') || message.reasoningLabel) &&
-      (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
+    (message.turnStatus !== 'cancelled' || Boolean(message.reasoning?.trim())) &&
+    (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
       <MessageThinkingHeader message={message} timeline />
     ) : undefined)
   const isFinalAssistantResponse =
@@ -1015,21 +1058,19 @@ function VoiceMessageRow({
         embedded={Boolean(imageAttachments?.length)}
       />
     )
-    body = (
-      imageAttachments?.length ? (
-        <div className={standardMessageBubbleClass(message, false)}>
-          <div className="flex w-full flex-col gap-2">
-            <MessageAttachments
-              attachments={imageAttachments}
-              onOpenAttachment={onOpenAttachment}
-              onOpenImage={onOpenImage}
-            />
-            {voiceBubble}
-          </div>
+    body = imageAttachments?.length ? (
+      <div className={standardMessageBubbleClass(message, false)}>
+        <div className="flex w-full flex-col gap-2">
+          <MessageAttachments
+            attachments={imageAttachments}
+            onOpenAttachment={onOpenAttachment}
+            onOpenImage={onOpenImage}
+          />
+          {voiceBubble}
         </div>
-      ) : (
-        voiceBubble
-      )
+      </div>
+    ) : (
+      voiceBubble
     )
   } else if (isSupportingMessage(message)) {
     body = (
@@ -1045,6 +1086,10 @@ function VoiceMessageRow({
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
+          footer={
+            workFooter ??
+            (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+          }
           timeline={message.timeline}
           thinkingLive={Boolean(message.streaming && !message.content)}
           memorySources={memorySources}
@@ -1052,6 +1097,7 @@ function VoiceMessageRow({
           live={Boolean(message.streaming || continuation)}
           settled={assistantWorkIsSettled(message)}
           stopped={message.turnStatus === 'cancelled'}
+          failed={message.turnStatus === 'failed'}
         />
         <div className={standardMessageBubbleClass(message, false)}>
           <div className="flex w-full flex-col gap-2">
@@ -1090,6 +1136,10 @@ function VoiceMessageRow({
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
+          footer={
+            workFooter ??
+            (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+          }
           timeline={message.timeline}
           thinkingLive={Boolean(message.streaming && !message.content)}
           memorySources={memorySources}
@@ -1097,6 +1147,7 @@ function VoiceMessageRow({
           live={Boolean(message.streaming || continuation)}
           settled={assistantWorkIsSettled(message)}
           stopped={message.turnStatus === 'cancelled'}
+          failed={message.turnStatus === 'failed'}
         />
         <VoiceBubble
           messageId={message.id}
@@ -1227,7 +1278,7 @@ function MessageThinkingHeader({
     const showLiveActivity = hasLiveStreamActivity(message)
     return (
       <div className="mb-1.5 flex flex-col gap-1.5">
-        {showLiveActivity ? <LoadingDots /> : null}
+        {showLiveActivity && !timeline ? <LoadingDots /> : null}
         {message.reasoning?.trim() ? (
           <ChatThinkingBlock
             content={message.reasoning ?? ''}
@@ -1243,6 +1294,7 @@ function MessageThinkingHeader({
     )
   }
   const reasoning = message.reasoning?.trim()
+  if (!reasoning && message.turnStatus === 'cancelled') return <></>
   if (!reasoning && !message.reasoningRequested) return <></>
   const readableContent = reasoning || THINKING_UNAVAILABLE_TEXT
   const supporting = isSupportingMessage(message)
@@ -2479,6 +2531,7 @@ type MessageRowProps = Readonly<{
   nextMessageRole?: SyncedMessageRole
   liveTask?: TaskSession
   timelineThinking?: React.JSX.Element
+  workFooter?: React.JSX.Element
   continuation?: React.JSX.Element
   voiceMode: boolean
   state: MessageRowState
@@ -2564,6 +2617,7 @@ function StandardMessageRow({
   nextMessageRole,
   liveTask,
   timelineThinking,
+  workFooter,
   continuation,
   state,
   actions,
@@ -2578,6 +2632,7 @@ function StandardMessageRow({
   const shouldShowThinking =
     message.role === 'assistant' &&
     (!hasTimelineThinking || Boolean(message.reasoningLabel)) &&
+    (message.turnStatus !== 'cancelled' || Boolean(message.reasoning?.trim())) &&
     Boolean(message.streaming || message.reasoning?.trim() || message.reasoningRequested)
   const thinking =
     timelineThinking ??
@@ -2599,6 +2654,10 @@ function StandardMessageRow({
       <ChatToolRows
         tools={message.toolCalls}
         thinking={thinking}
+        footer={
+          workFooter ??
+          (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+        }
         timeline={message.timeline}
         thinkingLive={Boolean(message.streaming && !message.content)}
         memorySources={memorySources}
@@ -2606,6 +2665,7 @@ function StandardMessageRow({
         live={Boolean(message.streaming || continuation)}
         settled={assistantWorkIsSettled(message)}
         stopped={message.turnStatus === 'cancelled'}
+        failed={message.turnStatus === 'failed'}
       />
       <div
         className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'w-full max-w-2xl' : 'w-fit max-w-[85%]'}`}
@@ -2756,6 +2816,7 @@ function MessageRow({
   nextMessageRole,
   liveTask,
   timelineThinking,
+  workFooter,
   continuation,
   voiceMode,
   state,
@@ -2776,6 +2837,7 @@ function MessageRow({
         nextMessageRole={nextMessageRole}
         liveTask={liveTask}
         timelineThinking={timelineThinking}
+        workFooter={workFooter}
         continuation={continuation}
         navigation={navigation}
         autoPlay={state.autoPlayId === message.id}
@@ -2803,6 +2865,7 @@ function MessageRow({
         nextMessageRole={nextMessageRole}
         liveTask={liveTask}
         timelineThinking={timelineThinking}
+        workFooter={workFooter}
         continuation={continuation}
         state={state}
         actions={actions}
@@ -3199,6 +3262,31 @@ export function MemoryChat({
   // sites keep working. The send path targets its own conv via setConvMessages instead.
   const messages = messagesByConv[activeConversationId ?? NEW_CHAT] ?? EMPTY_MSGS
   const displayMessages = useMemo(() => groupChatTurnWork(messages), [messages])
+  const [remoteWorkPreview, setRemoteWorkPreview] = useState<ChatStreamPreviewRow | null>(null)
+  useEffect(() => setRemoteWorkPreview(null), [activeConversationId])
+  const durableWorkMessageId = useMemo(() => {
+    let currentTurnStart = 0
+    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
+      if (displayMessages[index]?.role === 'user') {
+        currentTurnStart = index + 1
+        break
+      }
+    }
+    return [...displayMessages.slice(currentTurnStart)]
+        .reverse()
+        .find(
+          (message) =>
+            message.role === 'assistant' &&
+            !isPromptEnhancementMessage(message) &&
+            !isPromptEnhancementReasoningLabel(message.reasoningLabel) &&
+            Boolean(
+              message.toolCalls?.length ||
+                message.timeline?.length ||
+                message.reasoning?.trim()
+            )
+        )?.id
+  }, [displayMessages])
+  const mergedRemoteWorkMessageId = remoteWorkPreview ? durableWorkMessageId : undefined
   const liveJourneyTask = guidanceTaskForJourney(taskSessions, activeConversationId)
   const promptEnhancementActive = messages.some(isPromptEnhancementMessage)
   const promptEnhancementComplete = messages.some(
@@ -3602,6 +3690,7 @@ export function MemoryChat({
   // reload (the exact T1f bug). A ref is written synchronously and read directly.
   const reasoningByStream = useRef<Record<string, string>>({})
   const timelineByStream = useRef<Record<string, AssistantTimelineEntry[]>>({})
+  const toolCallsByStream = useRef<Record<string, NonNullable<ChatMessage['toolCalls']>>>({})
   /** What the model has actually said so far, per stream — see the stream handler for why. */
   const answerByStream = useRef<Record<string, string>>({})
   // Conversations the user hit "stop" on. The in-flight send checks this at each of
@@ -4725,9 +4814,7 @@ export function MemoryChat({
                   /* Keep the generated file visible even if this database write fails. */
                 }
                 setConvMessages(convId, (prev) => [
-                  ...prev.filter(
-                    (message) => !ownsToolTurn || message.id !== toolStreamId
-                  ),
+                  ...prev.filter((message) => !ownsToolTurn || message.id !== toolStreamId),
                   {
                     id: imageMessageId,
                     role: 'assistant',
@@ -4755,16 +4842,26 @@ export function MemoryChat({
                 // the exception: it cancels the active runtime and ends the remaining local work.
                 if (cancelledRef.current.has(convId)) break
                 const memoryGuard = parseImageMemoryGuardError(error)
-                const message = memoryGuard?.message || (error instanceof Error ? error.message : 'Image generation failed.')
+                const message =
+                  memoryGuard?.message ||
+                  (error instanceof Error ? error.message : 'Image generation failed.')
                 if (!/cancel/i.test(message)) {
-                  setConvMessages(convId, (previous) => [...previous, {
-                    id: crypto.randomUUID(),
-                    role: 'assistant',
-                    content: message,
-                    imageMemoryRetry: memoryGuard
-                      ? { request: { prompt: imageRequest.prompt }, prompt: imageRequest.prompt, conversationId: convId, projectId }
-                      : undefined
-                  }])
+                  setConvMessages(convId, (previous) => [
+                    ...previous,
+                    {
+                      id: crypto.randomUUID(),
+                      role: 'assistant',
+                      content: message,
+                      imageMemoryRetry: memoryGuard
+                        ? {
+                            request: { prompt: imageRequest.prompt },
+                            prompt: imageRequest.prompt,
+                            conversationId: convId,
+                            projectId
+                          }
+                        : undefined
+                    }
+                  ])
                 }
               }
             }
@@ -4945,17 +5042,28 @@ export function MemoryChat({
           }
         } catch (err) {
           const memoryGuard = parseImageMemoryGuardError(err)
-          const msg = memoryGuard?.message || (err instanceof Error ? err.message : 'Image generation failed.')
+          const msg =
+            memoryGuard?.message ||
+            (err instanceof Error ? err.message : 'Image generation failed.')
           if (!/cancel/i.test(msg))
             setConvMessages(convId, (prev) =>
-              prev.map((m) => (m.id === streamId ? {
-                ...m,
-                content: msg,
-                streaming: false,
-                imageMemoryRetry: memoryGuard
-                  ? { request: { prompt: imgPrompt }, prompt: imgPrompt, conversationId: convId, projectId }
-                  : undefined
-              } : m))
+              prev.map((m) =>
+                m.id === streamId
+                  ? {
+                      ...m,
+                      content: msg,
+                      streaming: false,
+                      imageMemoryRetry: memoryGuard
+                        ? {
+                            request: { prompt: imgPrompt },
+                            prompt: imgPrompt,
+                            conversationId: convId,
+                            projectId
+                          }
+                        : undefined
+                    }
+                  : m
+              )
             )
         }
       } else {
@@ -5063,6 +5171,7 @@ export function MemoryChat({
       if (activeStreamId) {
         streamConvRef.current.delete(activeStreamId)
         delete timelineByStream.current[activeStreamId]
+        delete toolCallsByStream.current[activeStreamId]
       }
     }
   }
@@ -5149,18 +5258,21 @@ export function MemoryChat({
         toolsOffered?: ChatMessage['toolsOffered']
       }
     ): Promise<void> => {
+      if (!streamConvRef.current.has(streamId)) return
+      streamConvRef.current.delete(streamId)
+      const current = (messagesByConv[convId] ?? []).find((message) => message.id === streamId)
       const reasoning = reasoningByStream.current[streamId]?.trim() || undefined
-      const timeline = timelineByStream.current[streamId]
+      const timeline = timelineByStream.current[streamId] ?? current?.timeline
+      const toolCalls =
+        settled?.toolCalls ?? toolCallsByStream.current[streamId] ?? current?.toolCalls
+      const toolsOffered = settled?.toolsOffered ?? current?.toolsOffered
       const streamed = answerByStream.current[streamId] || ''
       delete reasoningByStream.current[streamId]
       delete timelineByStream.current[streamId]
+      delete toolCallsByStream.current[streamId]
       delete answerByStream.current[streamId]
 
       const answer = (settled?.answer ?? streamed).trim()
-      if (!answer && !reasoning) {
-        setConvMessages(convId, (prev) => prev.filter((m) => m.id !== streamId))
-        return
-      }
 
       setConvMessages(convId, (prev) =>
         prev.map((m) =>
@@ -5172,8 +5284,9 @@ export function MemoryChat({
                 timeline,
                 context: settled?.context ?? m.context,
                 cutoff: settled?.cutoff ?? m.cutoff,
-                toolCalls: settled?.toolCalls ?? m.toolCalls,
-                toolsOffered: settled?.toolsOffered ?? m.toolsOffered,
+                toolCalls,
+                toolsOffered,
+                turnStatus: 'cancelled',
                 activity: undefined,
                 streaming: false
               }
@@ -5185,17 +5298,25 @@ export function MemoryChat({
           convId,
           'assistant',
           answer,
-          buildAssistantContext(settled?.persistContext ?? settled?.context, {
-            reasoning,
-            timeline,
-            cutoff: settled?.cutoff
-          })
+          buildAssistantContext(
+            {
+              ...(settled?.persistContext ?? settled?.context),
+              ...(toolCalls?.length ? { toolCalls } : {}),
+              ...(toolsOffered?.length ? { toolsOffered } : {}),
+              status: 'cancelled'
+            },
+            {
+              reasoning,
+              timeline,
+              cutoff: settled?.cutoff
+            }
+          )
         )
       } catch (e) {
         console.error('Failed to persist stopped assistant message:', e)
       }
     },
-    [setConvMessages]
+    [messagesByConv, setConvMessages]
   )
 
   const stopGeneration = useCallback(
@@ -5221,7 +5342,10 @@ export function MemoryChat({
       setAttachWarn(null)
       cancelledRef.current.add(convId)
       const streamingId = (messagesByConv[convId] ?? []).find((m) => m.streaming)?.id
-      if (streamingId) window.api.cancelRag(streamingId)
+      if (streamingId) {
+        window.api.cancelRag(streamingId)
+        await finalizeStoppedTurn(convId, streamingId)
+      }
       if (queuedRef.current[convId]?.length) {
         queuedRef.current = clearQueue(queuedRef.current, convId)
         setQueuedByConv({ ...queuedRef.current })
@@ -5239,7 +5363,7 @@ export function MemoryChat({
       // on screen (the only conversation whose composer is visible).
       if (convId === activeConversationId) setLoading(false)
     },
-    [activeConversationId, messagesByConv, markGenerating, imageGenConv]
+    [activeConversationId, finalizeStoppedTurn, messagesByConv, markGenerating, imageGenConv]
   )
 
   // Voice output: synthesize a message on-device (Kokoro) and play it. Toggling
@@ -5441,6 +5565,7 @@ export function MemoryChat({
         reasoningByStream.current[data.streamId] = ''
         answerByStream.current[data.streamId] = ''
         timelineByStream.current[data.streamId] = []
+        toolCallsByStream.current[data.streamId] = []
         setConvMessages(cid, (previous) => {
           const streamIndex = previous.findIndex((message) => message.id === data.streamId)
           const notice: ChatMessage = { id: noticeId, role: 'assistant', content, notice: true }
@@ -5513,6 +5638,13 @@ export function MemoryChat({
         const timeline = appendTimelineEvent(timelineByStream.current[data.streamId], data)
         if (timeline) timelineByStream.current[data.streamId] = timeline
       }
+      if (data.type === 'step' || data.type === 'tool_result') {
+        const next = applyStreamEvent(
+          { toolCalls: toolCallsByStream.current[data.streamId] },
+          data
+        ).toolCalls
+        if (next) toolCallsByStream.current[data.streamId] = next
+      }
       // The answer is mirrored for the same reason: when the user stops, the call can REJECT
       // rather than return, and then there is no result to read the partial answer out of. This
       // ref is the one place that always has what arrived.
@@ -5538,6 +5670,11 @@ export function MemoryChat({
               : []),
             ...(stream.tools ?? []).map((_, toolIndex) => ({ kind: 'tool' as const, toolIndex }))
           ]
+          toolCallsByStream.current[stream.streamId] = (stream.tools ?? []).map((tool) => ({
+            name: tool.name,
+            result: tool.result ?? '',
+            status: tool.status
+          }))
           answerByStream.current[stream.streamId] = stream.content
           markGenerating(stream.conversationId, true)
           setConvMessages(stream.conversationId, (previous) => {
@@ -6476,15 +6613,41 @@ export function MemoryChat({
                           }
                           return <ToolMessageTimelineRow key={message.id} messages={run} />
                         }
+                        const displayedMessage =
+                          message.id === mergedRemoteWorkMessageId
+                            ? {
+                                ...message,
+                                streaming: true,
+                                toolCalls: mergeRemotePreviewTools(
+                                  message.toolCalls,
+                                  remoteWorkPreview
+                                )
+                              }
+                            : message
                         return (
                           <MessageRow
                             key={message.id}
-                            message={message}
+                            message={displayedMessage}
                             nextMessageRole={displayMessages[messageIndex + 1]?.role}
                             timelineThinking={
                               message.id === activeImageTimelineMessageId
                                 ? activeEnhancedPrompt
+                                : message.id === mergedRemoteWorkMessageId
+                                  ? remoteWorkPreview?.reasoning?.trim()
+                                    ? (
+                                        <ChatThinkingBlock
+                                          content={remoteWorkPreview.reasoning}
+                                          live
+                                          className="max-w-full"
+                                        />
+                                      )
+                                    : undefined
                                 : undefined
+                            }
+                            workFooter={
+                              message.id === mergedRemoteWorkMessageId ? (
+                                <LoadingDots size="small" className="px-0" />
+                              ) : undefined
                             }
                             continuation={
                               message.id === activeImageTimelineMessageId ? (
@@ -6532,6 +6695,8 @@ export function MemoryChat({
                           executionRunning={messages.some(
                             (message) => message.context?.executionApproval?.status === 'running'
                           )}
+                          durableWorkActive={Boolean(durableWorkMessageId)}
+                          onRemoteWorkPreviewChange={setRemoteWorkPreview}
                         />
                       ) : null}
                       {showGenerationProgress && !activeImageTimelineMessageId ? (
@@ -6547,8 +6712,14 @@ export function MemoryChat({
                               {activeImageProgress}
                             </div>
                           ) : (
-                            <ChatLoadingCard
-                              label={waitingLabel({ noMemory, hasProject: !!activeProjectId })}
+                            <ChatToolRows
+                              live
+                              thinking={
+                                <span className="text-[11px] text-neutral-500" role="status">
+                                  {waitingLabel({ noMemory, hasProject: !!activeProjectId })}
+                                </span>
+                              }
+                              footer={<LoadingDots />}
                             />
                           )}
                         </div>
