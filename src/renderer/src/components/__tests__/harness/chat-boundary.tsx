@@ -130,6 +130,7 @@ export class ChatBoundary {
     | ((change: { conversationId: string; projectId?: string | null }) => void)
     | null = null
   private readonly rawSplitters = new Map<number, ThinkSplitter>()
+  private readonly pendingConversationReads = new Map<string, ReturnType<typeof deferred<void>>>()
   private nextMessageId = 10
   private pendingUserWrite: ReturnType<typeof deferred<void>> | null = null
 
@@ -211,14 +212,17 @@ export class ChatBoundary {
       const found = this.conversations.find((item) => item.id === id)
       return found ? { ...found } : null
     }),
-    getRagMessages: vi.fn(async (id: string) =>
-      // created_at is filled in where a fixture omitted it, because the table it stands for always has
-      // one and the renderer discards any row that does not.
-      (this.messages[id] ?? []).map((item, index) => ({
-        ...item,
-        created_at: item.created_at ?? storedAt(index)
-      }))
-    ),
+    getRagMessages: vi.fn(async (id: string) => {
+      await this.pendingConversationReads.get(id)?.promise
+      return (
+        // created_at is filled in where a fixture omitted it, because the table it stands for always has
+        // one and the renderer discards any row that does not.
+        (this.messages[id] ?? []).map((item, index) => ({
+          ...item,
+          created_at: item.created_at ?? storedAt(index)
+        }))
+      )
+    }),
     createRagConversation: vi.fn(
       async (id: string, title = 'Untitled', projectId: string | null = null) => {
         this.conversations.unshift(this.conversation(id, title, projectId))
@@ -282,6 +286,15 @@ export class ChatBoundary {
 
   releaseUserWrite(): void {
     this.pendingUserWrite?.resolve()
+  }
+
+  blockConversationRead(conversationId: string): void {
+    this.pendingConversationReads.set(conversationId, deferred<void>())
+  }
+
+  releaseConversationRead(conversationId: string): void {
+    this.pendingConversationReads.get(conversationId)?.resolve()
+    this.pendingConversationReads.delete(conversationId)
   }
 
   emit(callIndex: number, text: string): void {
