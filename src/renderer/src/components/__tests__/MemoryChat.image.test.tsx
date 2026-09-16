@@ -807,6 +807,11 @@ async function sendChat(user: ReturnType<typeof userEvent.setup>, text: string):
   await user.click(screen.getByRole('button', { name: /^send$/i }))
 }
 
+async function openLatestCompletedWork(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const toggle = (await screen.findAllByRole('button', { name: 'Work done' })).at(-1)
+  if (toggle?.getAttribute('data-state') === 'closed') await user.click(toggle)
+}
+
 // Bug 4 (root of the image-gen-as-tool bug): the renderer's keyword auto-route and
 // the agent's tool decision both decided "is this an image request?" for the same
 // turn. With tools on, "draw ..." was hijacked by the renderer's direct generate,
@@ -885,6 +890,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       prompt: 'a red Ferrari in a studio'
     })
     expect(await screen.findByAltText('Generated')).toBeTruthy()
+    await openLatestCompletedWork(user)
     expect(screen.getByRole('button', { name: 'Generated image, complete' })).toBeTruthy()
   })
 
@@ -957,9 +963,9 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     ])
     expect(screen.queryByText('चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।')).toBeNull()
     const generationDetails = screen.getAllByRole('button', { name: 'Generation details' })
-    expect(generationDetails).toHaveLength(2)
+    expect(generationDetails).toHaveLength(1)
     await user.click(generationDetails[0]!)
-    expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain('117.6s total')
+    expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain('90.0s total')
     act(() => {
       boundary.emitIncomingFiles([
         {
@@ -1118,6 +1124,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     })
     const generated = await screen.findByAltText('Generated')
     const caption = await screen.findByText('Generated for: a lighthouse during a winter storm')
+    await openLatestCompletedWork(user)
     const disclosure = await screen.findByRole('button', { name: /enhanced prompt/i })
     expect(screen.getAllByAltText('Generated')).toHaveLength(1)
     expect(generated.className).toContain('w-full')

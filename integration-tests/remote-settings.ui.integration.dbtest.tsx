@@ -8,6 +8,7 @@ import { createServer, type Server } from 'node:http'
 import net, { type AddressInfo } from 'node:net'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-remote-settings-ui-'))
 const previousDataDir = process.env.OFFGRID_DATA_DIR
@@ -80,9 +81,13 @@ describe('remote media choices in Desktop Settings', () => {
     fireEvent.change(screen.getByLabelText('Address'), { target: { value: `http://127.0.0.1:${address.port}` } })
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
     await screen.findByText(/3 models found/)
-    fireEvent.change(screen.getByLabelText('Image'), { target: { value: 'picture' } })
-    fireEvent.change(screen.getByLabelText('Transcription'), { target: { value: 'listener' } })
-    fireEvent.change(screen.getByLabelText('Voice'), { target: { value: 'speaker' } })
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'image model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'picture' }))
+    await user.click(screen.getByRole('button', { name: 'transcription model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'listener' }))
+    await user.click(screen.getByRole('button', { name: 'voice model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'speaker' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await screen.findByText('Server saved and active.')
 

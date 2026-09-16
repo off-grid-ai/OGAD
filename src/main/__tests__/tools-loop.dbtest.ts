@@ -551,7 +551,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
-  it('shows successful tool output when the final model turn is empty', async () => {
+  it('does not save successful tool output as the answer when the final model turn is empty', async () => {
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
       { content: '' }
@@ -564,8 +564,8 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       }
     })
 
-    expect(result.answer).toBe('4')
-    expect(deltas.join('')).toBe('4')
+    expect(result.answer).toBe('')
+    expect(deltas.join('')).toBe('')
   })
 
   it('bounds each tool result to the room left in the active model window', async () => {
@@ -818,6 +818,35 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     expect(r.toolCalls[0]!.result).toContain('en.wikipedia.org/Achilles')
     expect(r.toolCalls[0]!.result).toContain('Achilles - Wikipedia')
     expect(r.toolCalls[0]!.result).toContain('Trojan War')
+  })
+
+  it('web_search falls back when DuckDuckGo returns an anti-bot page', async () => {
+    const fetchResponses = [
+      {
+        ok: true,
+        status: 202,
+        text: async () => '<html><div class="anomaly-modal__title">Unfortunately, bots.</div></html>'
+      },
+      {
+        ok: true,
+        status: 200,
+        text: async () => `<?xml version="1.0"?><rss><channel><item>
+          <title>Wednesday Solutions</title>
+          <link>https://www.wednesday.is/</link>
+          <description>Product engineering and design.</description>
+        </item></channel></rss>`
+      }
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => fetchResponses.shift()!))
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'web_search', args: { query: 'Wednesday Solutions' } }] },
+      { content: 'Here is what I found.' }
+    )
+
+    const r = await toolChat('search Wednesday Solutions', [])
+
+    expect(r.toolCalls[0]!.result).toContain('https://www.wednesday.is/')
+    expect(r.toolCalls[0]!.result).toContain('Product engineering and design.')
   })
 
   it('does not leak <tool_call> markup into the visible content stream (still runs the tool)', async () => {

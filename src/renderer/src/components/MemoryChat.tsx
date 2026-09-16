@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { shouldQueue, enqueue, dequeue, queuedCount, clearQueue } from '@renderer/lib/chat-queue'
 import { buildSendHistory } from '@renderer/lib/chat-history'
 import { waitingLabel } from '@renderer/lib/chat-labels'
@@ -25,6 +25,7 @@ import {
   PROMPT_ENHANCEMENT_REASONING_LABEL,
   preprocessChatMarkdown,
   projectSyncedMessageTurn,
+  type ChatStreamPreviewRow,
   type ProjectedSyncedTool,
   type RecordProvenance,
   type SyncedMessageRole,
@@ -513,6 +514,9 @@ function shouldHideProjectedTurn(turn: ReturnType<typeof projectSyncedMessageTur
   return Boolean(
     turn &&
     turn.role === 'assistant' &&
+    turn.status !== 'failed' &&
+    turn.status !== 'cancelled' &&
+    turn.tools.length === 0 &&
     !(turn.answer ?? turn.content).trim() &&
     turn.reasoning === undefined
   )
@@ -601,64 +605,48 @@ function mapRagMessage(message: RawRagMessage): ChatMessage[] {
   return [projectChatMessage(turn, context)]
 }
 
-function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
-  const messages = raw.flatMap<ChatMessage>(mapRagMessage)
+function groupChatTurnWork(messages: ChatMessage[]): ChatMessage[] {
   const displayed: ChatMessage[] = []
   let pending: ChatMessage[] = []
-  for (const message of messages) {
-    const intermediateThought =
-      message.role === 'assistant' &&
-      !message.content.trim() &&
-      Boolean(message.reasoning?.trim()) &&
-      !message.timeline?.length &&
-      !message.toolCalls?.length
-    if (intermediateThought || message.role === 'tool') {
-      pending.push(message)
-      continue
-    }
-    if (
-      message.role === 'assistant' &&
-      message.content.trim() &&
-      !message.timeline?.length &&
-      !message.toolCalls?.length &&
-      pending.some((entry) => entry.role === 'tool')
-    ) {
-      const tools: ProjectedSyncedTool[] = []
-      const timeline: AssistantTimelineEntry[] = []
-      for (const entry of pending) {
-        if (entry.role === 'assistant' && entry.reasoning?.trim()) {
-          timeline.push({ kind: 'thinking', text: entry.reasoning })
-        } else if (entry.role === 'tool') {
-          timeline.push({ kind: 'tool', toolIndex: tools.length })
-          tools.push({
-            name: entry.toolName || 'Tool result',
-            result: entry.content,
-            status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
-            ...(entry.generationTimeMs === undefined ? {} : { durationMs: entry.generationTimeMs })
-          })
-        }
-      }
-      if (message.reasoning?.trim()) {
-        timeline.push({ kind: 'thinking', text: message.reasoning })
-      }
-      displayed.push({
-        ...message,
-        toolCalls: tools.length ? tools : undefined,
-        timeline
-      })
-      pending = []
-      continue
-    }
-    displayed.push(...pending, message)
+  const flushPending = (final?: ChatMessage): void => {
+    const turn = final ? [...pending, final] : pending
     pending = []
-  }
-  if (pending.some((entry) => entry.role === 'assistant') && pending.some((entry) => entry.role === 'tool')) {
+    if (turn.length === 0) return
+    const response =
+      final ??
+      [...turn]
+        .reverse()
+        .find(
+          (entry) => entry.role === 'assistant' && Boolean(entry.content.trim() || entry.image)
+        ) ??
+      [...turn].reverse().find((entry) => entry.role === 'assistant')
+    if (!response || !turn.some((entry) => entry.role === 'assistant')) {
+      displayed.push(...turn)
+      return
+    }
     const tools: ProjectedSyncedTool[] = []
     const timeline: AssistantTimelineEntry[] = []
-    for (const entry of pending) {
-      if (entry.role === 'assistant' && entry.reasoning?.trim()) {
-        timeline.push({ kind: 'thinking', text: entry.reasoning })
-      } else if (entry.role === 'tool') {
+    const toolsOffered = new Set<string>()
+    const labeledReasoning = turn.find(
+      (entry) => entry.role === 'assistant' && entry.reasoningLabel && entry.reasoning?.trim()
+    )
+    for (const entry of turn) {
+      entry.toolsOffered?.forEach((name) => toolsOffered.add(name))
+      if (entry.role === 'tool') {
+        const existingToolIndex = entry.toolCallId
+          ? tools.findIndex((tool) => tool.id === entry.toolCallId)
+          : -1
+        if (existingToolIndex >= 0) {
+          tools[existingToolIndex] = {
+            ...tools[existingToolIndex]!,
+            result: entry.content,
+            status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
+            ...(entry.generationTimeMs === undefined
+              ? {}
+              : { durationMs: entry.generationTimeMs })
+          }
+          continue
+        }
         timeline.push({ kind: 'tool', toolIndex: tools.length })
         tools.push({
           name: entry.toolName || 'Tool result',
@@ -666,20 +654,88 @@ function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
           status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
           ...(entry.generationTimeMs === undefined ? {} : { durationMs: entry.generationTimeMs })
         })
+        continue
+      }
+      if (entry.role !== 'assistant') continue
+      const toolOffset = tools.length
+      tools.push(...(entry.toolCalls ?? []))
+      if (entry.timeline?.length) {
+        timeline.push(
+          ...entry.timeline.map((item) =>
+            item.kind === 'tool' ? { ...item, toolIndex: item.toolIndex + toolOffset } : item
+          )
+        )
+      } else {
+        if (entry.reasoning?.trim()) timeline.push({ kind: 'thinking', text: entry.reasoning })
+        entry.toolCalls?.forEach((_, index) =>
+          timeline.push({ kind: 'tool', toolIndex: toolOffset + index })
+        )
       }
     }
     displayed.push({
-      ...pending[0]!,
-      role: 'assistant',
-      content: '',
-      reasoning: undefined,
-      toolCalls: tools,
-      timeline
+      ...response,
+      toolCalls: tools.length ? tools : undefined,
+      timeline: timeline.length ? timeline : undefined,
+      toolsOffered: toolsOffered.size ? [...toolsOffered] : response.toolsOffered,
+      reasoning: response.reasoning ?? labeledReasoning?.reasoning,
+      reasoningLabel: response.reasoningLabel ?? labeledReasoning?.reasoningLabel
     })
-  } else {
-    displayed.push(...pending)
   }
+  for (const message of messages) {
+    if (message.role === 'user') {
+      flushPending()
+      displayed.push(message)
+      continue
+    }
+    if (pending.length && message.role === 'assistant') {
+      if (!pending.some((entry) => entry.role === 'assistant' && entry.image)) {
+        pending.push(message)
+        continue
+      }
+      flushPending()
+    }
+    const intermediateThought =
+      message.role === 'assistant' &&
+      !message.content.trim() &&
+      Boolean(message.reasoning?.trim()) &&
+      !message.timeline?.length &&
+      !message.toolCalls?.length
+    if (intermediateThought || message.role === 'tool' || message.toolCalls?.length) {
+      pending.push(message)
+      continue
+    }
+    flushPending()
+    displayed.push(message)
+  }
+  flushPending()
   return displayed
+}
+
+function mergeRemotePreviewTools(
+  durable: readonly ProjectedSyncedTool[] | undefined,
+  preview: ChatStreamPreviewRow | null
+): ProjectedSyncedTool[] | undefined {
+  const saved = [...(durable ?? [])]
+  const live = (preview?.tools ?? []).map((tool) => ({
+    name: tool.name,
+    result: tool.result ?? '',
+    status: tool.status
+  }))
+  for (const savedTool of saved) {
+    const match = live.findIndex(
+      (tool) =>
+        tool.name === savedTool.name &&
+        tool.status !== 'running' &&
+        tool.result === savedTool.result
+    )
+    if (match >= 0) live.splice(match, 1)
+  }
+  const combined = [...saved, ...live]
+  return combined.length ? combined : undefined
+}
+
+function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
+  return raw.flatMap<ChatMessage>(mapRagMessage)
 }
 
 /** Durable reloads replace durable rows but cannot erase a main-owned active stream. */
@@ -769,7 +825,7 @@ function renderedMessageContent(message: ChatMessage): string {
 }
 
 function standardMessageRowClass(message: ChatMessage): string {
-  const margin = isSupportingMessage(message) ? 'mb-2' : 'mb-5'
+  const margin = isSupportingMessage(message) ? 'my-1' : 'my-2.5'
   const alignment = message.role === 'user' ? 'items-end' : 'items-start'
   return `${margin} flex flex-col ${alignment}`
 }
@@ -792,12 +848,17 @@ function standardMessageBubbleClass(message: ChatMessage, editing: boolean): str
     editing || message.image || message.attachments?.length
       ? IMAGE_MESSAGE_COLUMN_WIDTH
       : 'max-w-full'
-  const color = message.context?.taskGuidance
-    ? 'border border-green-500/50 bg-green-500/5 text-foreground'
-    : message.role === 'user'
-      ? 'bg-neutral-800 text-neutral-100'
-      : 'border border-neutral-800 bg-neutral-900/40 text-neutral-200'
-  return `rounded-md px-3.5 py-2.5 text-sm leading-relaxed ${width} ${color}`
+  if (message.context?.taskGuidance) {
+    return `rounded-md border border-green-500/50 bg-green-500/5 px-3.5 py-2.5 text-sm leading-relaxed text-foreground ${width}`
+  }
+  const color = message.role === 'user' ? 'text-neutral-100' : 'text-neutral-200'
+  return `py-1 text-sm leading-relaxed ${width} ${color}`
+}
+
+function assistantWorkIsSettled(message: ChatMessage): boolean {
+  return Boolean(
+    !message.streaming && (message.content.trim() || message.image || message.attachments?.length)
+  )
 }
 
 function contextResultCount(context: RagContext): number {
@@ -863,8 +924,10 @@ function ToolMessageTimelineRow({
 
 function VoiceMessageRow({
   message,
+  nextMessageRole,
   liveTask,
   timelineThinking,
+  workFooter,
   continuation,
   navigation,
   autoPlay,
@@ -885,8 +948,10 @@ function VoiceMessageRow({
   onUpdateTranscript
 }: Readonly<{
   message: ChatMessage
+  nextMessageRole?: SyncedMessageRole
   liveTask?: TaskSession
   timelineThinking?: React.JSX.Element
+  workFooter?: React.JSX.Element
   continuation?: React.JSX.Element
   navigation: ContextNavigation
   autoPlay: boolean
@@ -908,23 +973,27 @@ function VoiceMessageRow({
 }>): React.JSX.Element {
   const [transcribing, setTranscribing] = useState(false)
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
+  const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const alignment = message.role === 'user' ? 'items-end' : 'items-start'
   const audioUrl = recordedClipUrl(message)
   const reportPlayback = useCallback(
     (active: boolean) => onPlaybackStateChange(message.id, active),
     [message.id, onPlaybackStateChange]
   )
-  const toolTimeline =
-    message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
   const thinking =
     timelineThinking ??
-    (toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
-      <MessageThinkingHeader message={message} timeline />
-    ) : toolTimeline &&
-      !message.timeline?.some((entry) => entry.kind === 'thinking') &&
-      (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
+    (message.role === 'assistant' &&
+    (!message.timeline?.some((entry) => entry.kind === 'thinking') || message.reasoningLabel) &&
+    (message.turnStatus !== 'cancelled' || Boolean(message.reasoning?.trim())) &&
+    (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
       <MessageThinkingHeader message={message} timeline />
     ) : undefined)
+  const isFinalAssistantResponse =
+    message.role === 'assistant' &&
+    !message.streaming &&
+    nextMessageRole !== 'assistant' &&
+    nextMessageRole !== 'tool' &&
+    !isSupportingMessage(message)
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
@@ -989,35 +1058,46 @@ function VoiceMessageRow({
         embedded={Boolean(imageAttachments?.length)}
       />
     )
-    body = (
-      imageAttachments?.length ? (
-        <div className={standardMessageBubbleClass(message, false)}>
-          <div className="flex w-full flex-col gap-2">
-            <MessageAttachments
-              attachments={imageAttachments}
-              onOpenAttachment={onOpenAttachment}
-              onOpenImage={onOpenImage}
-            />
-            {voiceBubble}
-          </div>
+    body = imageAttachments?.length ? (
+      <div className={standardMessageBubbleClass(message, false)}>
+        <div className="flex w-full flex-col gap-2">
+          <MessageAttachments
+            attachments={imageAttachments}
+            onOpenAttachment={onOpenAttachment}
+            onOpenImage={onOpenImage}
+          />
+          {voiceBubble}
         </div>
-      ) : (
-        voiceBubble
-      )
+      </div>
+    ) : (
+      voiceBubble
     )
   } else if (isSupportingMessage(message)) {
-    body = <ChatThinkingBlock content={message.reasoning ?? ''} label={message.reasoningLabel} />
+    body = (
+      <ChatToolRows
+        thinking={
+          <ChatThinkingBlock content={message.reasoning ?? ''} label={message.reasoningLabel} />
+        }
+      />
+    )
   } else if (message.image) {
     body = (
       <>
-        {toolTimeline ? null : <MessageThinkingHeader message={message} />}
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
-          timeline={toolTimeline ? message.timeline : undefined}
+          footer={
+            workFooter ??
+            (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+          }
+          timeline={message.timeline}
           thinkingLive={Boolean(message.streaming && !message.content)}
           memorySources={memorySources}
           liveTask={liveTask}
+          live={Boolean(message.streaming || continuation)}
+          settled={assistantWorkIsSettled(message)}
+          stopped={message.turnStatus === 'cancelled'}
+          failed={message.turnStatus === 'failed'}
         />
         <div className={standardMessageBubbleClass(message, false)}>
           <div className="flex w-full flex-col gap-2">
@@ -1053,14 +1133,21 @@ function VoiceMessageRow({
   } else {
     body = (
       <>
-        {toolTimeline ? null : <MessageThinkingHeader message={message} />}
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
-          timeline={toolTimeline ? message.timeline : undefined}
+          footer={
+            workFooter ??
+            (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+          }
+          timeline={message.timeline}
           thinkingLive={Boolean(message.streaming && !message.content)}
           memorySources={memorySources}
           liveTask={liveTask}
+          live={Boolean(message.streaming || continuation)}
+          settled={assistantWorkIsSettled(message)}
+          stopped={message.turnStatus === 'cancelled'}
+          failed={message.turnStatus === 'failed'}
         />
         <VoiceBubble
           messageId={message.id}
@@ -1083,13 +1170,13 @@ function VoiceMessageRow({
     )
   }
   return (
-    <div className={`mb-4 flex flex-col gap-1.5 ${alignment}`}>
+    <div className={`my-2 flex flex-col gap-1.5 ${alignment}`}>
       {body}
       {continuation}
-      {message.createdAt !== undefined || (message.role === 'user' && !editing) ? (
+      {message.role === 'user' ? (
         <div className="flex items-center gap-2 pr-1">
           <MessageTime message={message} />
-          {message.role === 'user' && !editing ? (
+          {!editing ? (
             <VoiceMessageActions
               copied={copied}
               regenerationDisabled={regenerationDisabled}
@@ -1113,11 +1200,22 @@ function VoiceMessageRow({
           {transcriptionError}
         </div>
       ) : null}
-      {message.role === 'assistant' && !message.streaming ? (
-        <ToolsSentDisclosure names={message.toolsOffered} />
-      ) : null}
-      {message.role === 'assistant' && showGenerationDetails ? (
-        <GenerationMetricsRow metrics={message.metrics} />
+      {isFinalAssistantResponse ? (
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pr-1">
+          <ToolsSentDisclosure
+            names={message.toolsOffered}
+            open={openFooterDetail === 'tools'}
+            onOpenChange={(open) => setOpenFooterDetail(open ? 'tools' : null)}
+          />
+          {showGenerationDetails ? (
+            <GenerationMetricsRow
+              metrics={message.metrics}
+              open={openFooterDetail === 'generation'}
+              onOpenChange={(open) => setOpenFooterDetail(open ? 'generation' : null)}
+            />
+          ) : null}
+          <MessageTime message={message} />
+        </div>
       ) : null}
     </div>
   )
@@ -1180,7 +1278,7 @@ function MessageThinkingHeader({
     const showLiveActivity = hasLiveStreamActivity(message)
     return (
       <div className="mb-1.5 flex flex-col gap-1.5">
-        {showLiveActivity ? <LoadingDots /> : null}
+        {showLiveActivity && !timeline ? <LoadingDots /> : null}
         {message.reasoning?.trim() ? (
           <ChatThinkingBlock
             content={message.reasoning ?? ''}
@@ -1196,6 +1294,7 @@ function MessageThinkingHeader({
     )
   }
   const reasoning = message.reasoning?.trim()
+  if (!reasoning && message.turnStatus === 'cancelled') return <></>
   if (!reasoning && !message.reasoningRequested) return <></>
   const readableContent = reasoning || THINKING_UNAVAILABLE_TEXT
   const supporting = isSupportingMessage(message)
@@ -1501,8 +1600,14 @@ function MessageMarkdown({
  * nothing else, because "0 tok/s" would be a lie.
  */
 function GenerationMetricsRow({
-  metrics
-}: Readonly<{ metrics?: GenerationMetrics }>): React.JSX.Element | null {
+  metrics,
+  open,
+  onOpenChange
+}: Readonly<{
+  metrics?: GenerationMetrics
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}>): React.JSX.Element | null {
   const parts = metrics ? formatGenerationMetrics(metrics) : []
   const contextWindowTokens = metrics?.contextWindowTokens
   const promptTokens = metrics?.promptTokens ?? metrics?.estimatedPromptTokens
@@ -1520,8 +1625,8 @@ function GenerationMetricsRow({
         : null
   if (!parts.length && contextLabel === null) return null
   return (
-    <Collapsible className="mt-1 max-w-[85%] font-mono text-[10px] text-neutral-500">
-      <CollapsibleTrigger className="group flex items-center gap-1.5 text-left transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
+    <Collapsible open={open} onOpenChange={onOpenChange} className="contents">
+      <CollapsibleTrigger className="group flex items-center gap-1.5 text-left font-mono text-[10px] text-neutral-500 transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
         <Pulse className="h-3 w-3" aria-hidden="true" />
         <span>Generation details</span>
         <CaretDown
@@ -1529,9 +1634,9 @@ function GenerationMetricsRow({
           aria-hidden="true"
         />
       </CollapsibleTrigger>
-      <CollapsibleContent>
+      <CollapsibleContent className="order-last min-w-0 max-w-full basis-full overflow-hidden font-mono text-[10px] text-neutral-500">
         <p
-          className="ml-1 mt-1 border-l border-neutral-800 pl-3 tabular-nums"
+          className="ml-1 mt-1 border-l border-neutral-800 pl-3 tabular-nums [overflow-wrap:anywhere]"
           data-testid="generation-metrics"
         >
           {[...(contextLabel === null ? [] : [contextLabel]), ...parts].join(' · ')}
@@ -1542,12 +1647,18 @@ function GenerationMetricsRow({
 }
 
 function ToolsSentDisclosure({
-  names
-}: Readonly<{ names?: readonly string[] }>): React.JSX.Element | null {
+  names,
+  open,
+  onOpenChange
+}: Readonly<{
+  names?: readonly string[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}>): React.JSX.Element | null {
   if (!names?.length) return null
   return (
-    <Collapsible className="mt-1 max-w-[85%] text-[10px] text-neutral-500">
-      <CollapsibleTrigger className="group flex items-center gap-1.5 text-left transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
+    <Collapsible open={open} onOpenChange={onOpenChange} className="contents">
+      <CollapsibleTrigger className="group flex items-center gap-1.5 text-left text-[10px] text-neutral-500 transition-colors hover:text-neutral-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-green-500">
         <Wrench className="h-3 w-3" aria-hidden="true" />
         <span>Tools sent in request ({names.length})</span>
         <CaretDown
@@ -1555,7 +1666,7 @@ function ToolsSentDisclosure({
           aria-hidden="true"
         />
       </CollapsibleTrigger>
-      <CollapsibleContent>
+      <CollapsibleContent className="order-last max-w-full basis-full text-[10px] text-neutral-500">
         <ul className="ml-1 mt-1 max-h-56 space-y-0.5 overflow-y-auto border-l border-neutral-800 pl-3">
           {names.map((name, index) => (
             <li key={`${name}:${index}`}>{name}</li>
@@ -2420,6 +2531,7 @@ type MessageRowProps = Readonly<{
   nextMessageRole?: SyncedMessageRole
   liveTask?: TaskSession
   timelineThinking?: React.JSX.Element
+  workFooter?: React.JSX.Element
   continuation?: React.JSX.Element
   voiceMode: boolean
   state: MessageRowState
@@ -2502,28 +2614,35 @@ function MessageBubble({
 
 function StandardMessageRow({
   message,
+  nextMessageRole,
   liveTask,
   timelineThinking,
+  workFooter,
   continuation,
   state,
   actions,
   navigation
-}: Omit<MessageRowProps, 'nextMessageRole' | 'voiceMode'>): React.JSX.Element {
+}: Omit<MessageRowProps, 'voiceMode'>): React.JSX.Element {
   const artifact = message.role === 'assistant' ? parseArtifact(message.content) : null
   const copied = state.copiedKey === message.id
+  const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const speechState = speechControlState(message.id, state.speakingId, state.speakLoadingId)
   const speechError = state.speakError?.id === message.id ? state.speakError.message : undefined
-  const toolTimeline =
-    message.role === 'assistant' && Boolean(message.toolCalls?.length || liveTask)
+  const hasTimelineThinking = message.timeline?.some((entry) => entry.kind === 'thinking') ?? false
+  const shouldShowThinking =
+    message.role === 'assistant' &&
+    (!hasTimelineThinking || Boolean(message.reasoningLabel)) &&
+    (message.turnStatus !== 'cancelled' || Boolean(message.reasoning?.trim())) &&
+    Boolean(message.streaming || message.reasoning?.trim() || message.reasoningRequested)
   const thinking =
     timelineThinking ??
-    (toolTimeline && isPromptEnhancementReasoningLabel(message.reasoningLabel) ? (
-      <MessageThinkingHeader message={message} timeline />
-    ) : toolTimeline &&
-      !message.timeline?.some((entry) => entry.kind === 'thinking') &&
-      (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
-      <MessageThinkingHeader message={message} timeline />
-    ) : undefined)
+    (shouldShowThinking ? <MessageThinkingHeader message={message} timeline /> : undefined)
+  const isFinalAssistantResponse =
+    message.role === 'assistant' &&
+    !message.streaming &&
+    nextMessageRole !== 'assistant' &&
+    nextMessageRole !== 'tool' &&
+    !isSupportingMessage(message)
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
@@ -2532,64 +2651,80 @@ function StandardMessageRow({
     : undefined
   return (
     <div className={standardMessageRowClass(message)} data-testid={`chat-message-${message.id}`}>
-      {toolTimeline ? null : <MessageThinkingHeader message={message} />}
       <ChatToolRows
         tools={message.toolCalls}
         thinking={thinking}
-        timeline={toolTimeline ? message.timeline : undefined}
+        footer={
+          workFooter ??
+          (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+        }
+        timeline={message.timeline}
         thinkingLive={Boolean(message.streaming && !message.content)}
         memorySources={memorySources}
         liveTask={liveTask}
+        live={Boolean(message.streaming || continuation)}
+        settled={assistantWorkIsSettled(message)}
+        stopped={message.turnStatus === 'cancelled'}
+        failed={message.turnStatus === 'failed'}
       />
       <div
         className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'} ${message.image || message.attachments?.length || state.editingId === message.id ? 'w-full max-w-2xl' : 'w-fit max-w-[85%]'}`}
       >
         <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
-        {message.role === 'user' ||
-        (!message.streaming && (message.content.trim() || message.image)) ? (
+        {message.role === 'user' ? (
           <div className="mt-1.5 flex items-center justify-end gap-2 pr-1">
             <MessageTime message={message} />
-            {message.role === 'user' ? (
-              message.context?.taskGuidance ? (
-                <MessageActionsMenu>
-                  <CopyAction
-                    copied={copied}
-                    onCopy={() => actions.copy(message.content, message.id)}
-                  />
-                </MessageActionsMenu>
-              ) : (
-                <UserMessageActions
+            {message.context?.taskGuidance ? (
+              <MessageActionsMenu>
+                <CopyAction
                   copied={copied}
-                  regenerationDisabled={state.regenerationDisabled}
                   onCopy={() => actions.copy(message.content, message.id)}
-                  onEdit={() => actions.startEdit(message)}
-                  onRegenerate={() => actions.regenerate(message.id)}
                 />
-              )
+              </MessageActionsMenu>
             ) : (
-              <AssistantMessageActions
-                message={message}
-                artifact={artifact}
+              <UserMessageActions
                 copied={copied}
-                speechState={speechState}
-                speechError={speechError}
-                speechEnabled={state.ttsEnabled}
+                regenerationDisabled={state.regenerationDisabled}
                 onCopy={() => actions.copy(message.content, message.id)}
-                onOpenArtifact={actions.openArtifact}
+                onEdit={() => actions.startEdit(message)}
                 onRegenerate={() => actions.regenerate(message.id)}
-                onSelectVariant={(direction) => actions.selectVariant(message.id, direction)}
-                onSpeak={() => actions.speak(message.id, message.content)}
               />
             )}
           </div>
         ) : null}
       </div>
       {continuation}
-      {message.role === 'assistant' && !message.streaming ? (
-        <ToolsSentDisclosure names={message.toolsOffered} />
+      {isFinalAssistantResponse ? (
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pr-1">
+          <ToolsSentDisclosure
+            names={message.toolsOffered}
+            open={openFooterDetail === 'tools'}
+            onOpenChange={(open) => setOpenFooterDetail(open ? 'tools' : null)}
+          />
+          {state.showGenerationDetails ? (
+            <GenerationMetricsRow
+              metrics={message.metrics}
+              open={openFooterDetail === 'generation'}
+              onOpenChange={(open) => setOpenFooterDetail(open ? 'generation' : null)}
+            />
+          ) : null}
+          <MessageTime message={message} />
+          <AssistantMessageActions
+            message={message}
+            artifact={artifact}
+            copied={copied}
+            speechState={speechState}
+            speechError={speechError}
+            speechEnabled={state.ttsEnabled}
+            onCopy={() => actions.copy(message.content, message.id)}
+            onOpenArtifact={actions.openArtifact}
+            onRegenerate={() => actions.regenerate(message.id)}
+            onSelectVariant={(direction) => actions.selectVariant(message.id, direction)}
+            onSpeak={() => actions.speak(message.id, message.content)}
+          />
+        </div>
       ) : null}
-      {state.showGenerationDetails ? <GenerationMetricsRow metrics={message.metrics} /> : null}
-      {message.role === 'assistant' ? (
+      {isFinalAssistantResponse ? (
         <ContextDisclosure
           context={memorySources ? { ...message.context, unified: [] } : message.context}
           navigation={navigation}
@@ -2678,8 +2813,10 @@ function AudioPane({ path, title }: { path: string; title: string }): React.JSX.
 
 function MessageRow({
   message,
+  nextMessageRole,
   liveTask,
   timelineThinking,
+  workFooter,
   continuation,
   voiceMode,
   state,
@@ -2697,8 +2834,10 @@ function MessageRow({
     body = (
       <VoiceMessageRow
         message={message}
+        nextMessageRole={nextMessageRole}
         liveTask={liveTask}
         timelineThinking={timelineThinking}
+        workFooter={workFooter}
         continuation={continuation}
         navigation={navigation}
         autoPlay={state.autoPlayId === message.id}
@@ -2723,8 +2862,10 @@ function MessageRow({
     body = (
       <StandardMessageRow
         message={message}
+        nextMessageRole={nextMessageRole}
         liveTask={liveTask}
         timelineThinking={timelineThinking}
+        workFooter={workFooter}
         continuation={continuation}
         state={state}
         actions={actions}
@@ -3120,6 +3261,32 @@ export function MemoryChat({
   // Active tab's messages (derived) + a shim so the existing active-conversation call
   // sites keep working. The send path targets its own conv via setConvMessages instead.
   const messages = messagesByConv[activeConversationId ?? NEW_CHAT] ?? EMPTY_MSGS
+  const displayMessages = useMemo(() => groupChatTurnWork(messages), [messages])
+  const [remoteWorkPreview, setRemoteWorkPreview] = useState<ChatStreamPreviewRow | null>(null)
+  useEffect(() => setRemoteWorkPreview(null), [activeConversationId])
+  const durableWorkMessageId = useMemo(() => {
+    let currentTurnStart = 0
+    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
+      if (displayMessages[index]?.role === 'user') {
+        currentTurnStart = index + 1
+        break
+      }
+    }
+    return [...displayMessages.slice(currentTurnStart)]
+        .reverse()
+        .find(
+          (message) =>
+            message.role === 'assistant' &&
+            !isPromptEnhancementMessage(message) &&
+            !isPromptEnhancementReasoningLabel(message.reasoningLabel) &&
+            Boolean(
+              message.toolCalls?.length ||
+                message.timeline?.length ||
+                message.reasoning?.trim()
+            )
+        )?.id
+  }, [displayMessages])
+  const mergedRemoteWorkMessageId = remoteWorkPreview ? durableWorkMessageId : undefined
   const liveJourneyTask = guidanceTaskForJourney(taskSessions, activeConversationId)
   const promptEnhancementActive = messages.some(isPromptEnhancementMessage)
   const promptEnhancementComplete = messages.some(
@@ -3523,6 +3690,7 @@ export function MemoryChat({
   // reload (the exact T1f bug). A ref is written synchronously and read directly.
   const reasoningByStream = useRef<Record<string, string>>({})
   const timelineByStream = useRef<Record<string, AssistantTimelineEntry[]>>({})
+  const toolCallsByStream = useRef<Record<string, NonNullable<ChatMessage['toolCalls']>>>({})
   /** What the model has actually said so far, per stream — see the stream handler for why. */
   const answerByStream = useRef<Record<string, string>>({})
   // Conversations the user hit "stop" on. The in-flight send checks this at each of
@@ -4646,9 +4814,7 @@ export function MemoryChat({
                   /* Keep the generated file visible even if this database write fails. */
                 }
                 setConvMessages(convId, (prev) => [
-                  ...prev.filter(
-                    (message) => !ownsToolTurn || message.id !== toolStreamId
-                  ),
+                  ...prev.filter((message) => !ownsToolTurn || message.id !== toolStreamId),
                   {
                     id: imageMessageId,
                     role: 'assistant',
@@ -4676,16 +4842,26 @@ export function MemoryChat({
                 // the exception: it cancels the active runtime and ends the remaining local work.
                 if (cancelledRef.current.has(convId)) break
                 const memoryGuard = parseImageMemoryGuardError(error)
-                const message = memoryGuard?.message || (error instanceof Error ? error.message : 'Image generation failed.')
+                const message =
+                  memoryGuard?.message ||
+                  (error instanceof Error ? error.message : 'Image generation failed.')
                 if (!/cancel/i.test(message)) {
-                  setConvMessages(convId, (previous) => [...previous, {
-                    id: crypto.randomUUID(),
-                    role: 'assistant',
-                    content: message,
-                    imageMemoryRetry: memoryGuard
-                      ? { request: { prompt: imageRequest.prompt }, prompt: imageRequest.prompt, conversationId: convId, projectId }
-                      : undefined
-                  }])
+                  setConvMessages(convId, (previous) => [
+                    ...previous,
+                    {
+                      id: crypto.randomUUID(),
+                      role: 'assistant',
+                      content: message,
+                      imageMemoryRetry: memoryGuard
+                        ? {
+                            request: { prompt: imageRequest.prompt },
+                            prompt: imageRequest.prompt,
+                            conversationId: convId,
+                            projectId
+                          }
+                        : undefined
+                    }
+                  ])
                 }
               }
             }
@@ -4866,17 +5042,28 @@ export function MemoryChat({
           }
         } catch (err) {
           const memoryGuard = parseImageMemoryGuardError(err)
-          const msg = memoryGuard?.message || (err instanceof Error ? err.message : 'Image generation failed.')
+          const msg =
+            memoryGuard?.message ||
+            (err instanceof Error ? err.message : 'Image generation failed.')
           if (!/cancel/i.test(msg))
             setConvMessages(convId, (prev) =>
-              prev.map((m) => (m.id === streamId ? {
-                ...m,
-                content: msg,
-                streaming: false,
-                imageMemoryRetry: memoryGuard
-                  ? { request: { prompt: imgPrompt }, prompt: imgPrompt, conversationId: convId, projectId }
-                  : undefined
-              } : m))
+              prev.map((m) =>
+                m.id === streamId
+                  ? {
+                      ...m,
+                      content: msg,
+                      streaming: false,
+                      imageMemoryRetry: memoryGuard
+                        ? {
+                            request: { prompt: imgPrompt },
+                            prompt: imgPrompt,
+                            conversationId: convId,
+                            projectId
+                          }
+                        : undefined
+                    }
+                  : m
+              )
             )
         }
       } else {
@@ -4984,6 +5171,7 @@ export function MemoryChat({
       if (activeStreamId) {
         streamConvRef.current.delete(activeStreamId)
         delete timelineByStream.current[activeStreamId]
+        delete toolCallsByStream.current[activeStreamId]
       }
     }
   }
@@ -5070,18 +5258,21 @@ export function MemoryChat({
         toolsOffered?: ChatMessage['toolsOffered']
       }
     ): Promise<void> => {
+      if (!streamConvRef.current.has(streamId)) return
+      streamConvRef.current.delete(streamId)
+      const current = (messagesByConv[convId] ?? []).find((message) => message.id === streamId)
       const reasoning = reasoningByStream.current[streamId]?.trim() || undefined
-      const timeline = timelineByStream.current[streamId]
+      const timeline = timelineByStream.current[streamId] ?? current?.timeline
+      const toolCalls =
+        settled?.toolCalls ?? toolCallsByStream.current[streamId] ?? current?.toolCalls
+      const toolsOffered = settled?.toolsOffered ?? current?.toolsOffered
       const streamed = answerByStream.current[streamId] || ''
       delete reasoningByStream.current[streamId]
       delete timelineByStream.current[streamId]
+      delete toolCallsByStream.current[streamId]
       delete answerByStream.current[streamId]
 
       const answer = (settled?.answer ?? streamed).trim()
-      if (!answer && !reasoning) {
-        setConvMessages(convId, (prev) => prev.filter((m) => m.id !== streamId))
-        return
-      }
 
       setConvMessages(convId, (prev) =>
         prev.map((m) =>
@@ -5093,8 +5284,9 @@ export function MemoryChat({
                 timeline,
                 context: settled?.context ?? m.context,
                 cutoff: settled?.cutoff ?? m.cutoff,
-                toolCalls: settled?.toolCalls ?? m.toolCalls,
-                toolsOffered: settled?.toolsOffered ?? m.toolsOffered,
+                toolCalls,
+                toolsOffered,
+                turnStatus: 'cancelled',
                 activity: undefined,
                 streaming: false
               }
@@ -5106,17 +5298,25 @@ export function MemoryChat({
           convId,
           'assistant',
           answer,
-          buildAssistantContext(settled?.persistContext ?? settled?.context, {
-            reasoning,
-            timeline,
-            cutoff: settled?.cutoff
-          })
+          buildAssistantContext(
+            {
+              ...(settled?.persistContext ?? settled?.context),
+              ...(toolCalls?.length ? { toolCalls } : {}),
+              ...(toolsOffered?.length ? { toolsOffered } : {}),
+              status: 'cancelled'
+            },
+            {
+              reasoning,
+              timeline,
+              cutoff: settled?.cutoff
+            }
+          )
         )
       } catch (e) {
         console.error('Failed to persist stopped assistant message:', e)
       }
     },
-    [setConvMessages]
+    [messagesByConv, setConvMessages]
   )
 
   const stopGeneration = useCallback(
@@ -5142,7 +5342,10 @@ export function MemoryChat({
       setAttachWarn(null)
       cancelledRef.current.add(convId)
       const streamingId = (messagesByConv[convId] ?? []).find((m) => m.streaming)?.id
-      if (streamingId) window.api.cancelRag(streamingId)
+      if (streamingId) {
+        window.api.cancelRag(streamingId)
+        await finalizeStoppedTurn(convId, streamingId)
+      }
       if (queuedRef.current[convId]?.length) {
         queuedRef.current = clearQueue(queuedRef.current, convId)
         setQueuedByConv({ ...queuedRef.current })
@@ -5160,7 +5363,7 @@ export function MemoryChat({
       // on screen (the only conversation whose composer is visible).
       if (convId === activeConversationId) setLoading(false)
     },
-    [activeConversationId, messagesByConv, markGenerating, imageGenConv]
+    [activeConversationId, finalizeStoppedTurn, messagesByConv, markGenerating, imageGenConv]
   )
 
   // Voice output: synthesize a message on-device (Kokoro) and play it. Toggling
@@ -5362,6 +5565,7 @@ export function MemoryChat({
         reasoningByStream.current[data.streamId] = ''
         answerByStream.current[data.streamId] = ''
         timelineByStream.current[data.streamId] = []
+        toolCallsByStream.current[data.streamId] = []
         setConvMessages(cid, (previous) => {
           const streamIndex = previous.findIndex((message) => message.id === data.streamId)
           const notice: ChatMessage = { id: noticeId, role: 'assistant', content, notice: true }
@@ -5434,6 +5638,13 @@ export function MemoryChat({
         const timeline = appendTimelineEvent(timelineByStream.current[data.streamId], data)
         if (timeline) timelineByStream.current[data.streamId] = timeline
       }
+      if (data.type === 'step' || data.type === 'tool_result') {
+        const next = applyStreamEvent(
+          { toolCalls: toolCallsByStream.current[data.streamId] },
+          data
+        ).toolCalls
+        if (next) toolCallsByStream.current[data.streamId] = next
+      }
       // The answer is mirrored for the same reason: when the user stops, the call can REJECT
       // rather than return, and then there is no result to read the partial answer out of. This
       // ref is the one place that always has what arrived.
@@ -5459,6 +5670,11 @@ export function MemoryChat({
               : []),
             ...(stream.tools ?? []).map((_, toolIndex) => ({ kind: 'tool' as const, toolIndex }))
           ]
+          toolCallsByStream.current[stream.streamId] = (stream.tools ?? []).map((tool) => ({
+            name: tool.name,
+            result: tool.result ?? '',
+            status: tool.status
+          }))
           answerByStream.current[stream.streamId] = stream.content
           markGenerating(stream.conversationId, true)
           setConvMessages(stream.conversationId, (previous) => {
@@ -6384,28 +6600,54 @@ export function MemoryChat({
                     </div>
                   ) : (
                     <div className="w-full px-6 py-5">
-                      {messages.map((message, messageIndex) => {
+                      {displayMessages.map((message, messageIndex) => {
                         if (message.role === 'tool') {
-                          if (messages[messageIndex - 1]?.role === 'tool') return null
+                          if (displayMessages[messageIndex - 1]?.role === 'tool') return null
                           const run: ChatMessage[] = []
                           for (
                             let index = messageIndex;
-                            messages[index]?.role === 'tool';
+                            displayMessages[index]?.role === 'tool';
                             index += 1
                           ) {
-                            run.push(messages[index]!)
+                            run.push(displayMessages[index]!)
                           }
                           return <ToolMessageTimelineRow key={message.id} messages={run} />
                         }
+                        const displayedMessage =
+                          message.id === mergedRemoteWorkMessageId
+                            ? {
+                                ...message,
+                                streaming: true,
+                                toolCalls: mergeRemotePreviewTools(
+                                  message.toolCalls,
+                                  remoteWorkPreview
+                                )
+                              }
+                            : message
                         return (
                           <MessageRow
                             key={message.id}
-                            message={message}
-                            nextMessageRole={messages[messageIndex + 1]?.role}
+                            message={displayedMessage}
+                            nextMessageRole={displayMessages[messageIndex + 1]?.role}
                             timelineThinking={
                               message.id === activeImageTimelineMessageId
                                 ? activeEnhancedPrompt
+                                : message.id === mergedRemoteWorkMessageId
+                                  ? remoteWorkPreview?.reasoning?.trim()
+                                    ? (
+                                        <ChatThinkingBlock
+                                          content={remoteWorkPreview.reasoning}
+                                          live
+                                          className="max-w-full"
+                                        />
+                                      )
+                                    : undefined
                                 : undefined
+                            }
+                            workFooter={
+                              message.id === mergedRemoteWorkMessageId ? (
+                                <LoadingDots size="small" className="px-0" />
+                              ) : undefined
                             }
                             continuation={
                               message.id === activeImageTimelineMessageId ? (
@@ -6453,6 +6695,8 @@ export function MemoryChat({
                           executionRunning={messages.some(
                             (message) => message.context?.executionApproval?.status === 'running'
                           )}
+                          durableWorkActive={Boolean(durableWorkMessageId)}
+                          onRemoteWorkPreviewChange={setRemoteWorkPreview}
                         />
                       ) : null}
                       {showGenerationProgress && !activeImageTimelineMessageId ? (
@@ -6468,8 +6712,14 @@ export function MemoryChat({
                               {activeImageProgress}
                             </div>
                           ) : (
-                            <ChatLoadingCard
-                              label={waitingLabel({ noMemory, hasProject: !!activeProjectId })}
+                            <ChatToolRows
+                              live
+                              thinking={
+                                <span className="text-[11px] text-neutral-500" role="status">
+                                  {waitingLabel({ noMemory, hasProject: !!activeProjectId })}
+                                </span>
+                              }
+                              footer={<LoadingDots />}
                             />
                           )}
                         </div>

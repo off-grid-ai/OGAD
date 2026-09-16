@@ -6,6 +6,7 @@ import {
   type CompletionStreamAccumulator,
   type StreamResult
 } from './stream'
+import { writeDiagnosticLog } from '../diagnostics-log'
 
 export interface RemoteTextModelConnection {
   id: string
@@ -48,7 +49,7 @@ interface OpenRouterModelMetadata {
 
 const nativeToolCapabilities = new Map<string, Promise<RemoteNativeToolCapability>>()
 type RemoteReasoningControl = ThinkingDialect | 'openrouter' | 'ollama'
-interface RemoteReasoningCapability {
+export interface RemoteReasoningCapability {
   control: RemoteReasoningControl
   mandatory?: boolean
   tokenBudget?: boolean
@@ -110,7 +111,7 @@ export function remoteNativeToolCapability(
 }
 
 /** Read the server's model/template facts, never its display name. Failed probes are retried. */
-async function remoteReasoningCapability(
+export async function remoteReasoningCapability(
   remote: RemoteTextModelConnection
 ): Promise<RemoteReasoningCapability> {
   const key = capabilityKey(remote)
@@ -383,10 +384,21 @@ export async function streamRemoteChatCompletion(input: {
   } catch (error) {
     // A cancelled request keeps whatever streamed — the caller asked to stop, not to discard.
     if (options.signal?.aborted) return accumulator.finish()
-    throw classifyStreamFailure(error, {
+    const classified = classifyStreamFailure(error, {
       cancelled: false,
       timedOut: watchdog.firedRef.current
     })
+    writeDiagnosticLog(
+      'remote_chat',
+      'request.failed',
+      {
+        provider: remote.provider,
+        model: remote.model,
+        error: classified.message
+      },
+      'error'
+    )
+    throw classified
   } finally {
     watchdog.dispose()
   }

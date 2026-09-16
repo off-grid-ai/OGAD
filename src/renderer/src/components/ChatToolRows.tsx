@@ -26,11 +26,21 @@ type DisplayTool =
 interface ChatToolRowsProps {
   tools?: readonly DisplayTool[]
   thinking?: ReactNode
+  /** Live status shown below, but outside, the ordered work timeline. */
+  footer?: ReactNode
   timeline?: readonly AssistantTimelineEntry[]
   thinkingLive?: boolean
   memorySources?: { count: number; content: ReactNode }
   /** The task that belongs to this live Chat turn before its tool result contains a task id. */
   liveTask?: TaskSession
+  /** Open the timeline while this response is live, then close it when the response completes. */
+  live?: boolean
+  /** A final or stopped response closes work even if an earlier tool retained running state. */
+  settled?: boolean
+  /** The user stopped this turn before normal completion. */
+  stopped?: boolean
+  /** The model failed after it had started this turn. */
+  failed?: boolean
 }
 
 type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
@@ -229,28 +239,36 @@ function liveTaskToolIndex(
 export function ChatToolRows({
   tools,
   thinking,
+  footer,
   timeline,
   thinkingLive = false,
   memorySources,
-  liveTask
+  liveTask,
+  live = false,
+  settled = false,
+  stopped = false,
+  failed = false
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
   const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
   // Web Use can start before toolChat returns its durable tool result. Project one
   // pending row from the live task so the chat reports work at the time it happens.
   // Once the real tool call arrives, it replaces this transient projection.
-  const visible: readonly DisplayTool[] =
-    tools?.length || !liveTask
-      ? (tools ?? [])
-      : [
-          {
-            name: liveTask.kind === 'web_use' ? 'web_use' : 'computer_use',
-            arguments: '{}',
-            result: '',
-            status: 'running'
-          }
-        ]
-  if (visible.length === 0 && !thinking && !timeline?.length) return null
+  const visible: readonly DisplayTool[] = tools?.length
+    ? tools
+    : memorySources
+      ? [{ name: 'search_memory', result: '', status: 'completed' }]
+      : !liveTask
+        ? []
+        : [
+            {
+              name: liveTask.kind === 'web_use' ? 'web_use' : 'computer_use',
+              arguments: '{}',
+              result: '',
+              status: 'running'
+            }
+          ]
+  if (visible.length === 0 && !thinking && !timeline?.length && !stopped && !failed) return null
   const liveToolIndex = liveTaskToolIndex(visible, liveTask)
   const firstMemoryToolIndex = visible.findIndex(
     (tool) => normalizedToolKey(tool.name) === 'search_memory' && workStatus(tool) === 'complete'
@@ -277,7 +295,11 @@ export function ChatToolRows({
     0,
     ordered.filter((entry) => entry.kind === 'tool').length - projected.length
   )
-  return (
+  const workIsLive =
+    live ||
+    (!stopped && !failed && !settled && projected.some(({ status }) => status === 'running'))
+  const workState = workIsLive ? 'live' : stopped ? 'stopped' : failed ? 'failed' : 'done'
+  const timelineRows = (
     <ol
       className="ml-1 mt-1 w-full max-w-[85%] border-l border-neutral-800 text-neutral-500"
       aria-label={thinking || hasOrderedThinking ? 'Thinking and tool calls' : 'Tool calls'}
@@ -419,5 +441,39 @@ export function ChatToolRows({
         </li>
       ) : null}
     </ol>
+  )
+  return (
+    <>
+      <Collapsible key={workState} defaultOpen={workIsLive} className="w-full">
+        <CollapsibleTrigger className="group ml-1 flex items-center gap-1.5 py-1 text-xs text-neutral-500 transition-colors hover:text-neutral-300">
+          <span>
+            {workIsLive
+              ? 'Working'
+              : stopped
+                ? 'Work stopped'
+                : failed
+                  ? 'Work failed'
+                  : 'Work done'}
+          </span>
+          <CaretDown
+            className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180"
+            aria-hidden="true"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="offgrid-smooth-collapsible overflow-hidden">
+          {timelineRows}
+        </CollapsibleContent>
+      </Collapsible>
+      {footer ? (
+        <div
+          className="ml-5 mt-2 inline-flex items-center text-neutral-500"
+          role="status"
+          aria-live="polite"
+          aria-label="Working"
+        >
+          {footer}
+        </div>
+      ) : null}
+    </>
   )
 }

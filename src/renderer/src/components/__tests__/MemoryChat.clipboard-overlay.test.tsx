@@ -12,7 +12,7 @@ const conversation = {
   project_id: null,
   created_at: '2026-07-17T00:00:00.000Z',
   updated_at: '2026-07-17T00:00:00.000Z',
-  message_count: 3
+  message_count: 4
 }
 
 function installApi(): {
@@ -47,10 +47,16 @@ function installApi(): {
       },
       {
         id: 3,
+        role: 'user',
+        content: 'make an image',
+        created_at: '2026-01-01 09:00:02'
+      },
+      {
+        id: 4,
         role: 'assistant',
         content: 'generated image',
         context: JSON.stringify({ image: '/tmp/generated.png' }),
-        created_at: '2026-01-01 09:00:02'
+        created_at: '2026-01-01 09:00:03'
       }
     ]),
     getSettings: vi.fn(async () => ({})),

@@ -166,6 +166,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     boundary.emitToolStep(0, 'web_use')
     expect(await screen.findByRole('button', { name: 'Searched the web, complete' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Web Use, running' })).toBeTruthy()
+    const timeline = screen.getByRole('list', { name: 'Thinking and tool calls' })
+    const working = screen.getByRole('status', { name: 'Working' })
+    expect(timeline.contains(working)).toBe(false)
+    expect(timeline.compareDocumentPosition(working) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
 
     act(() => {
       boundary.emitTask({
@@ -256,12 +260,17 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     boundary.emitReasoning(0, 'First compare risk, then reversibility.')
     boundary.emit(0, 'Choose plan B because it is reversible.')
 
-    expect(await screen.findByText('Thinking…')).toBeTruthy()
-    expect(screen.getByText('First compare risk, then reversibility.')).toBeTruthy()
+    expect(
+      (await screen.findByRole('button', { name: 'Working' })).getAttribute('data-state')
+    ).toBe('open')
+    const liveThinking = await screen.findByRole('button', { name: /thought process/i })
+    if (liveThinking.getAttribute('data-state') === 'closed') await user.click(liveThinking)
+    expect(await screen.findByText('First compare risk, then reversibility.')).toBeTruthy()
     expect(screen.getByText('Choose plan B because it is reversible.')).toBeTruthy()
 
     boundary.resolve(0, 'Choose plan B because it is reversible.')
 
+    await user.click(await screen.findByRole('button', { name: 'Work done' }))
     const thoughtProcess = await screen.findByRole('button', { name: /thought process/i })
     const thoughtProcessLabel = screen.getByText('Thought process')
     expect(thoughtProcessLabel.classList.contains('whitespace-nowrap')).toBe(true)
@@ -314,13 +323,13 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     renderChat({ conversationId: 'conversation-a' })
 
+    const work = await screen.findByRole('button', { name: 'Work done' })
+    await userEvent.click(work)
     const disclosure = await screen.findByRole('button', { name: /enhanced prompt/i })
     const answer = screen.getByText('Generated image for: a lighthouse in a winter storm')
+    expect(screen.getAllByRole('button', { name: 'Work done' })).toHaveLength(1)
     openActionsFor('Generated image for: a lighthouse in a winter storm')
     const speak = screen.getByRole('menuitem', { name: 'Speak' })
-    expect(disclosure.closest('[data-testid="chat-message-1"]')).toBeTruthy()
-    expect(screen.getByTestId('chat-message-1').className).toContain('mb-2')
-    expect(screen.getByTestId('chat-message-2').className).toContain('mb-5')
     expect(disclosure.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
       0
     )
@@ -336,24 +345,177 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       {
         id: 21,
         role: 'assistant',
-        content: '',
+        content: 'Verified the contact before sending.',
         context: {
-          reasoning: 'Searching first.',
-          toolCalls: [{ name: 'web_search', result: 'Found it.', status: 'completed' }]
+          toolCalls: [{ name: 'contacts_search', result: 'Found it.', status: 'completed' }]
         }
       },
-      { id: 22, role: 'assistant', content: 'Here is the source.' }
+      {
+        id: 22,
+        role: 'assistant',
+        content: 'The message was sent.',
+        context: {
+          toolCalls: [{ name: 'computer_use', result: 'Sent it.', status: 'completed' }]
+        }
+      }
     ]
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-a' })
 
-    expect(await screen.findByText('Here is the source.')).toBeTruthy()
-    const thought = screen.getByTestId('chat-message-21')
-    expect(within(thought).queryByRole('button', { name: 'Message actions' })).toBeNull()
-    expect(thought.textContent).not.toMatch(/\d{1,2}:\d{2}\s*[AP]M/)
+    expect(await screen.findByText('The message was sent.')).toBeTruthy()
+    expect(screen.queryByText('Verified the contact before sending.')).toBeNull()
+    expect(screen.queryByTestId('chat-message-21')).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Work done' })).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Work done' }))
+    expect(screen.getByRole('button', { name: 'Contacts search, complete' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Computer Use, complete' })).toBeTruthy()
     expect(
       within(screen.getByTestId('chat-message-22')).getByRole('button', { name: 'Message actions' })
     ).toBeTruthy()
+  })
+
+  it('keeps one open Work parent for a synced Mobile tool turn before its answer arrives', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 30, role: 'user', content: 'Research this on my phone' },
+      {
+        id: 31,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I will search the web first.',
+          toolCalls: [{ name: 'web_search', result: '', status: 'running' }]
+        }
+      },
+      {
+        id: 32,
+        role: 'tool',
+        content: 'First search result.',
+        context: { tool: { name: 'web_search', status: 'completed' } }
+      },
+      {
+        id: 33,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I will try another source.',
+          toolCalls: [{ name: 'search_knowledge_base', result: '', status: 'running' }]
+        }
+      },
+      {
+        id: 34,
+        role: 'tool',
+        content: 'No project context.',
+        context: { tool: { name: 'search_knowledge_base', status: 'completed' } }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const work = await screen.findByRole('button', { name: 'Working' })
+    expect(screen.getAllByRole('button', { name: 'Working' })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'Work done' })).toBeNull()
+    expect(work.getAttribute('data-state')).toBe('open')
+  })
+
+  it('closes synced Mobile work when Stop keeps a partial answer', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 40, role: 'user', content: 'Research this on my phone' },
+      {
+        id: 41,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I will search the web.',
+          toolCalls: [{ name: 'web_search', result: '', status: 'running' }]
+        }
+      },
+      { id: 42, role: 'tool', content: 'Search failed.' },
+      {
+        id: 43,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I should explain the partial result.',
+          status: 'cancelled'
+        }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const stopped = await screen.findByRole('button', { name: 'Work stopped' })
+    expect(screen.getAllByRole('button', { name: 'Work stopped' })).toHaveLength(1)
+    expect(screen.queryByText('Thinking unavailable')).toBeNull()
+    expect(
+      screen.queryByText('This model did not return readable thinking details for this turn.')
+    ).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Working' })).toBeNull()
+    fireEvent.click(stopped)
+    const thoughts = screen.getAllByRole('button', { name: 'Thought process' })
+    expect(thoughts).toHaveLength(2)
+    fireEvent.click(thoughts[1]!)
+    expect(await screen.findByText('I should explain the partial result.')).toBeTruthy()
+    expect(await screen.findByText('Search failed.')).toBeTruthy()
+  })
+
+  it('closes synced Mobile work when Stop occurs before the answer starts', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 44, role: 'user', content: 'Research this on my phone' },
+      {
+        id: 45,
+        role: 'assistant',
+        content: '',
+        context: {
+          toolCalls: [{ name: 'web_search', result: '', status: 'running' }]
+        }
+      },
+      { id: 46, role: 'tool', content: 'Search completed.' },
+      {
+        id: 47,
+        role: 'assistant',
+        content: '',
+        context: { status: 'cancelled' }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    expect(await screen.findByRole('button', { name: 'Work stopped' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Work done' })).toBeNull()
+  })
+
+  it('closes synced Mobile work when the model fails after tool calls', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 50, role: 'user', content: 'Research this on my phone' },
+      {
+        id: 51,
+        role: 'assistant',
+        content: '',
+        context: {
+          reasoning: 'I will search the web.',
+          toolCalls: [{ name: 'web_search', result: '', status: 'running' }]
+        }
+      },
+      { id: 52, role: 'tool', content: 'Search completed.' },
+      {
+        id: 53,
+        role: 'assistant',
+        content: '',
+        context: { status: 'failed' }
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const failed = await screen.findByRole('button', { name: 'Work failed' })
+    expect(screen.queryByRole('button', { name: 'Working' })).toBeNull()
+    expect(failed.getAttribute('data-state')).toBe('closed')
+    fireEvent.click(failed)
+    expect(await screen.findByText('Search completed.')).toBeTruthy()
   })
 
   it('strips inline think markers from a plain reply through the real stream parser (#37)', async () => {
@@ -538,6 +700,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
 
     await screen.findByPlaceholderText(/project alpha/i)
     await send('cancel before the model starts', user)
+    expect(await screen.findByRole('button', { name: 'Working' })).toBeTruthy()
+    expect(screen.getByText('Searching this project…')).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: /stop generating/i }))
     boundary.releaseUserWrite()
 
@@ -579,6 +743,43 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       ).toBe(true)
     })
     expect(screen.queryByText('No response returned.')).toBeNull()
+  })
+
+  it('keeps tool work in one Work stopped accordion when Stop lands before the answer', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('search and explain the result', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    act(() => {
+      boundary.emitToolStep(0, 'web_search')
+      boundary.emitToolResult(0, 'web_search', 'Search results are ready.')
+    })
+    expect(await screen.findByRole('button', { name: 'Searched the web, complete' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: /stop generating/i }))
+
+    const stopped = await screen.findByRole('button', { name: 'Work stopped' })
+    expect(screen.getAllByRole('button', { name: 'Work stopped' })).toHaveLength(1)
+    expect(screen.queryByText('Thinking unavailable')).toBeNull()
+    await user.click(stopped)
+    expect(screen.getByRole('list', { name: 'Tool calls' })).toBeTruthy()
+    expect(await screen.findByText('Search results are ready.')).toBeTruthy()
+    await waitFor(() =>
+      expect(boundary.messages['conversation-a']?.at(-1)?.context).toMatchObject({
+        status: 'cancelled',
+        toolCalls: [
+          {
+            name: 'web_search',
+            result: 'Search results are ready.',
+            status: 'completed'
+          }
+        ]
+      })
+    )
+    boundary.resolve(0, '')
   })
 
   it('stops the live Web Use task owned by the Chat when Stop is pressed', async () => {
