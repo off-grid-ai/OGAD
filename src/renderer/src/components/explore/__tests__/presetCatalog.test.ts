@@ -42,9 +42,7 @@ describe('the Explore preset catalog', () => {
 
   it('covers the five capabilities we mean to show off', () => {
     const capabilities = PRESET_SECTIONS.map((section) => section.capability)
-    expect(new Set(capabilities)).toEqual(
-      new Set(['browser', 'computer-use', 'creation', 'memory', 'phone'])
-    )
+    expect(new Set(capabilities)).toEqual(new Set(['browser', 'computer-use', 'memory', 'phone']))
   })
 
   it('every preset carries its own icon, defined once in the catalog', () => {
@@ -69,8 +67,7 @@ describe('the Explore preset catalog', () => {
     expect(flight?.prompt.trim().length).toBeGreaterThan(0)
   })
 
-  it('starts the proposal workflow through its installed skill', () => {
-    const proposal = ALL_PRESETS.find((preset) => preset.id === 'proposal-deck')
-    expect(proposal?.prompt).toMatch(/^\/proposal-deck\b/)
+  it('does not expose the removed proposal deck workflow', () => {
+    expect(ALL_PRESETS.some((preset) => preset.id === 'proposal-deck')).toBe(false)
   })
 })

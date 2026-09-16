@@ -14,7 +14,6 @@ import {
   type Skill,
   type SkillTrigger
 } from './skills-parse'
-import { BUNDLED_SKILLS } from './skills-builtin'
 
 // Re-export the pure types so existing importers of './skills' are unchanged.
 export type { Skill }
@@ -49,19 +48,19 @@ function ensureSkillsDir(): string {
       /* best effort */
     }
   }
-  const marker = path.join(dir, '.bundled-skills-v1')
-  if (!fs.existsSync(marker)) {
-    try {
-      for (const skill of BUNDLED_SKILLS) {
-        const folder = path.join(dir, skill.slug)
-        if (fs.existsSync(folder)) continue
-        fs.mkdirSync(folder, { recursive: true })
-        fs.writeFileSync(path.join(folder, 'SKILL.md'), skill.markdown)
-      }
-      fs.writeFileSync(marker, 'Installed bundled skills v1.\n')
-    } catch {
-      /* A read-only profile still keeps manually installed skills available. */
+  // Remove the retired bundled product without touching a user-created skill that happens to use
+  // the same folder name.
+  try {
+    const folder = path.join(dir, 'proposal-deck')
+    const markdown = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8')
+    if (
+      markdown.includes('name: proposal-deck') &&
+      markdown.includes('Create a client proposal through the proposal_deck tool.')
+    ) {
+      fs.rmSync(folder, { recursive: true, force: true })
     }
+  } catch {
+    /* The retired bundled skill is absent or the profile is read-only. */
   }
   return dir
 }

@@ -4796,13 +4796,6 @@ export function MemoryChat({
                   typeof img.durationMs === 'number'
                     ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
                     : undefined
-                if (imageRequest.proposal) {
-                  await window.api.storeProposalIllustration(
-                    imageRequest.proposal.conversationId,
-                    imageRequest.proposal.slide,
-                    img.path
-                  )
-                }
                 const ownsToolTurn = generatedImageCount === 0
                 const imageContent =
                   ownsToolTurn && !pureImageToolTurn

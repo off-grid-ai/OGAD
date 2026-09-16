@@ -2212,17 +2212,6 @@ export function setupIPC() {
     return skillsDir()
   })
   ipcMain.handle(
-    'proposal-deck:store-illustration',
-    async (_event, conversationId: string, slide: number, generatedImagePath: string) => {
-      const { proposalDeckService } = await import('./proposal-deck/service')
-      return proposalDeckService().saveIllustration(
-        conversationId,
-        Number(slide),
-        generatedImagePath
-      )
-    }
-  )
-  ipcMain.handle(
     'filesystem:pick-folder',
     async (_event, input?: { title?: string; defaultPath?: string }) => {
       const { dialog } = await import('electron')

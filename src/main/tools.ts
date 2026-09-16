@@ -19,13 +19,6 @@ import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
-import {
-  PROPOSAL_DECK_TOOL,
-  PROPOSAL_DECK_TOOL_NAME,
-  runProposalDeckTool,
-  type ProposalDeferredImageRequest
-} from './proposal-deck/tool'
-import { proposalDeckSystemHint, proposalDeckService } from './proposal-deck/service'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import {
   boundToolResult,
@@ -93,7 +86,7 @@ export interface ToolResult {
   authoritative?: boolean
   sources?: UnifiedSource[]
   imageRequest?: { prompt: string }
-  imageRequests?: ProposalDeferredImageRequest[]
+  imageRequests?: { prompt: string }[]
 }
 
 type ToolDef = {
@@ -416,16 +409,6 @@ const TOOLS: ToolDef[] = [
           }
         : { text: 'Error: no image prompt provided.' }
     }
-  },
-  {
-    name: PROPOSAL_DECK_TOOL.name,
-    description: PROPOSAL_DECK_TOOL.description,
-    parameters: PROPOSAL_DECK_TOOL.parameters,
-    run: (args, context) =>
-      runProposalDeckTool(args, {
-        conversationId: context.conversationId,
-        userMessage: context.userQuery
-      })
   }
 ]
 
@@ -433,13 +416,12 @@ const TOOLS: ToolDef[] = [
 // otherwise; every other built-in obeys only the disabled-set.
 function schemas(
   imageAvailable: boolean,
-  scope: { projectActive: boolean; allMemory: boolean; proposalDeck: boolean }
+  scope: { projectActive: boolean; allMemory: boolean }
 ): unknown[] {
   const off = disabledSet()
   return (
     TOOLS.filter((t) => !off.has(t.name))
       .filter((t) => t.name !== 'generate_image' || imageAvailable)
-      .filter((t) => t.name !== PROPOSAL_DECK_TOOL_NAME || scope.proposalDeck)
       // Memory tools (search_knowledge_base / search_memory) follow the chat's memory scope.
       .filter((t) => isMemoryToolAllowed(t.name, scope))
       .map((t) => ({
@@ -566,7 +548,7 @@ export async function toolChat(
   answer: string
   toolCalls: ToolCall[]
   unified: UnifiedSource[]
-  imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
+  imageRequests: { prompt: string }[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string }
   toolsOffered?: string[]
@@ -644,13 +626,9 @@ export async function toolChat(
       console.error('[tools] extension schemas', e.id, err)
     }
   }
-  const proposalDeckActive =
-    /# Skill:\s*proposal-deck\b|\/proposal-deck\b/i.test(query) ||
-    (!!opts.conversationId && !!proposalDeckService().get(opts.conversationId))
   const builtins = schemas(imageAvailable, {
     projectActive: !!opts.projectId,
-    allMemory: !!opts.allMemory,
-    proposalDeck: proposalDeckActive
+    allMemory: !!opts.allMemory
   })
   const rawTools = extSchemas.length ? [...builtins, ...extSchemas] : builtins
   // Keep the tool payload within the model's context. llama-server inlines every
@@ -699,8 +677,7 @@ export async function toolChat(
   const tools = budgeted.tools
   const sys =
     'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
-    (hints.length ? ' ' + hints.join(' ') : '') +
-    (proposalDeckActive ? ` ${proposalDeckSystemHint(opts.conversationId)}` : '')
+    (hints.length ? ' ' + hints.join(' ') : '')
 
   // Attached images ride on the current user turn so the vision model can read
   // them even in tools/connectors mode (otherwise they were silently dropped).
@@ -751,7 +728,7 @@ export async function toolChat(
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
-  const imageRequests: (ProposalDeferredImageRequest | { prompt: string })[] = []
+  const imageRequests: { prompt: string }[] = []
   let finishAfterDeferredImages = false
   const resultWithImages = (result: {
     answer: string
@@ -763,7 +740,7 @@ export async function toolChat(
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
     metrics?: GenerationMetrics
-    imageRequests: (ProposalDeferredImageRequest | { prompt: string })[]
+    imageRequests: { prompt: string }[]
     imageRequest?: { prompt: string }
     toolsOffered?: string[]
   } => {

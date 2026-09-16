@@ -9,13 +9,12 @@ import {
   MagnifyingGlass,
   MapPin,
   PaperPlaneTilt,
-  Presentation,
   SpotifyLogo,
   Tag,
   type Icon
 } from '@phosphor-icons/react'
 
-export type PresetCapability = 'browser' | 'computer-use' | 'creation' | 'memory' | 'phone'
+export type PresetCapability = 'browser' | 'computer-use' | 'memory' | 'phone'
 export type DemoReadiness = 'robust' | 'needs-setup' | 'needs-data'
 export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history'
 export type PresetFieldKind = 'text' | 'textarea' | 'select' | 'folder'
@@ -493,107 +492,6 @@ ${EXECUTION_RULES}`,
               label: 'Do not say',
               help: 'Optional wording or commitments to avoid.',
               kind: 'textarea'
-            }
-          ]
-        }
-      }
-    ]
-  },
-  {
-    id: 'creation',
-    capability: 'creation',
-    title: 'Build client-ready work',
-    teaches: 'Collect the complete brief first, then build through visible approval gates.',
-    presets: [
-      {
-        id: 'proposal-deck',
-        skillName: 'proposal-deck',
-        icon: Presentation,
-        title: 'Build a proposal deck',
-        prompt: `/proposal-deck
-
-Start a new client proposal with the complete approved brief below. Load and follow the installed proposal-deck skill in full. All required start inputs are present in the form. Do not ask for them again.
-
-Required method:
-1. Validate the approved source, output, and optional style-reference folders.
-2. If a public website is supplied, use Web Use to read only its current public pages and save factual website context before the Narrative Plan.
-3. Start the proposal session with the exact company, meeting context, sale mode, geography, folders, and website supplied below.
-4. Follow every proposal approval gate in order. Never infer approval or skip a gate.
-5. Use only confirmed source facts and metrics. Report a source gap instead of inventing proof.
-6. Create the final editable deck and PDF only after final approval, then confirm both output files exist.
-
-${EXECUTION_RULES}`,
-        blurb: 'Collects the full brief and approved folders before the proposal workflow starts.',
-        readiness: 'needs-setup',
-        intake: {
-          title: 'Set up the proposal',
-          description:
-            'Add the full client brief and approved local folders before the chat starts.',
-          fields: [
-            {
-              id: 'company',
-              label: 'Company',
-              help: 'Client or prospect name.',
-              kind: 'text',
-              required: true
-            },
-            {
-              id: 'meetingContext',
-              label: 'Meeting context',
-              help: 'What happened, what they need, and what decision is next.',
-              kind: 'textarea',
-              required: true
-            },
-            {
-              id: 'saleMode',
-              label: 'Sale mode',
-              help: 'Choose the proposal frame.',
-              kind: 'select',
-              required: true,
-              defaultValue: 'transformation',
-              options: [
-                { value: 'transformation', label: 'Transformation' },
-                { value: 'product-engineering', label: 'Product engineering' }
-              ]
-            },
-            {
-              id: 'geography',
-              label: 'Audience geography',
-              help: 'Controls regional language and proof.',
-              kind: 'select',
-              required: true,
-              defaultValue: 'international',
-              options: [
-                { value: 'india', label: 'India' },
-                { value: 'international', label: 'International' }
-              ]
-            },
-            {
-              id: 'website',
-              label: 'Public website (optional)',
-              help: 'Current public pages may be read with Web Use.',
-              kind: 'text',
-              placeholder: 'https://example.com'
-            },
-            {
-              id: 'sourceFolder',
-              label: 'Content folder',
-              help: 'Notes, proof, prior copy, and client material.',
-              kind: 'folder',
-              required: true
-            },
-            {
-              id: 'outputFolder',
-              label: 'Save under',
-              help: 'A new company folder is created here.',
-              kind: 'folder',
-              required: true
-            },
-            {
-              id: 'styleFolder',
-              label: 'Style example (optional)',
-              help: 'A prior proposal folder used only for method and visual direction.',
-              kind: 'folder'
             }
           ]
         }
