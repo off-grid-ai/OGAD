@@ -152,6 +152,8 @@ it('switches between saved chats and shows a peer update to an inactive chat', a
   expect(screen.getAllByTitle('Close tab')).toHaveLength(1)
   expect(screen.getByTitle('Close tab').parentElement?.textContent).toContain('Conversation B')
   await user.click(screen.getByTitle('New tab'))
+  expect(await screen.findByText('Start a conversation')).toBeTruthy()
+  expect(screen.queryByRole('status', { name: 'Loading conversation' })).toBeNull()
   await user.click(within(conversationList).getByText('Conversation A'))
   expect(await screen.findByRole('status', { name: 'Loading conversation' })).toBeTruthy()
   expect(await screen.findByText('Answer in the first chat')).toBeTruthy()

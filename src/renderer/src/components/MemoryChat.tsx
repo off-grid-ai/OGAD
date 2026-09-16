@@ -6518,7 +6518,8 @@ export function MemoryChat({
                 {/* Messages */}
                 <div className="relative min-h-0 flex-1">
                   <div ref={scrollRef} onScroll={onScrollFollow} className="h-full overflow-y-auto">
-                  {switchingConversationId === activeConversationId ? (
+                  {switchingConversationId !== null &&
+                  switchingConversationId === activeConversationId ? (
                     <div
                       className="flex min-h-full items-center justify-center"
                       role="status"
