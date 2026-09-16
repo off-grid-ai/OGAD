@@ -227,12 +227,9 @@ describe('model download release matrix', () => {
     seedInstalledCatalogModel(holoGrounder)
     expect(await manager.listInstalled()).toContain(holoGrounder.id)
 
-    expect(await manager.activateModel(holoGrounder.id)).toEqual({ success: true })
-    expect(manager.getActiveModalities().text).toBe(holoGrounder.id)
-
     expect(await manager.activateModel(holoGrounder.id, 'computer_use')).toEqual({ success: true })
     expect(manager.getActiveModalities().computer_use).toBe(holoGrounder.id)
-    expect(manager.getActiveModalities().text).toBe(holoGrounder.id)
+    expect(manager.getActiveModalities().text).toBeNull()
   })
 
   it('makes a complete Parakeet download selectable by the real dictation service (#19)', async () => {

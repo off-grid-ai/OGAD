@@ -79,7 +79,6 @@ test('every Explore card opens its intake form inside Chat before a run starts',
     'play-music',
     'crop-screenshot',
     'draft-reply',
-    'proposal-deck',
     'work-today',
     'that-article',
     'phone-summarize'
@@ -88,24 +87,6 @@ test('every Explore card opens its intake form inside Chat before a run starts',
     await page.getByTestId(`explore-preset-${presetId}`).click()
     await expect(page.getByTestId(`preset-intake-${presetId}`)).toBeVisible()
   }
-})
-
-test('proposal intake collects the complete brief before enabling chat', async () => {
-  await page.getByRole('button', { name: 'Explore', exact: true }).first().click()
-  await page.getByTestId('explore-preset-proposal-deck').click()
-  const setup = page.getByTestId('preset-intake-proposal-deck')
-  await expect(setup).toBeVisible()
-  await expect(setup.getByRole('textbox', { name: /Company/ })).toHaveValue('')
-  await expect(setup.getByRole('textbox', { name: /Meeting context/ })).toHaveValue('')
-  await expect(setup.getByRole('textbox', { name: /Content folder/ })).toHaveValue('')
-  await expect(setup.getByRole('textbox', { name: /Save under/ })).toHaveValue('')
-  await expect(setup.getByRole('button', { name: 'Start in chat' })).toBeDisabled()
-  await setup.getByRole('textbox', { name: /Company/ }).fill('Acme')
-  await setup.getByRole('textbox', { name: /Meeting context/ }).fill('Plan the product launch.')
-  await setup.getByRole('textbox', { name: /Content folder/ }).fill('/tmp/client-material')
-  await setup.getByRole('textbox', { name: /Save under/ }).fill('/tmp/client-output')
-  await expect(setup.getByRole('button', { name: 'Start in chat' })).toBeEnabled()
-  await page.screenshot({ path: 'e2e/screenshots/explore-proposal-setup.png' })
 })
 
 test('the chat empty state reuses the same catalog with its compact intro', async () => {

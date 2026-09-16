@@ -273,20 +273,20 @@ describe('<App/> desktop navigation integration', () => {
     const discover = screen.getByRole('button', { name: 'Discover' })
     await user.click(discover)
     expect(discover.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Search' })).toBeNull()
 
     await user.unhover(navigation)
     await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('false'))
     expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
       'false'
     )
-    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Search' })).toBeNull()
 
     await user.hover(navigation)
     expect(screen.getByRole('button', { name: 'Discover' }).getAttribute('aria-expanded')).toBe(
       'false'
     )
-    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Search' })).toBeNull()
   })
 
   it('keeps the notification badge and active route visible at both sidebar widths', async () => {

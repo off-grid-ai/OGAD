@@ -14,6 +14,11 @@ describe('<ExploreSection/>', () => {
     }
   })
 
+  it('does not show the removed proposal deck product', () => {
+    render(<ExploreSection onRun={() => {}} />)
+    expect(screen.queryByText(/proposal deck/i)).toBeNull()
+  })
+
   it('never renders the raw prompt on a card - the prompt stays behind the tap', () => {
     render(<ExploreSection onRun={() => {}} />)
     for (const preset of ALL_PRESETS) {

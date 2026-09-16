@@ -42,7 +42,6 @@ import { NavThemeToggle } from './components/ThemeToggle'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
-  IconCompass,
   IconSettings,
   IconDownload,
   IconFolders,
@@ -54,13 +53,13 @@ import {
   IconArrowRight,
   IconActivityHeartbeat,
   IconDeviceMobile,
-  IconListCheck,
   IconExternalLink,
   IconSparkles,
   IconBriefcase,
   IconShieldLock,
   IconTool
 } from '@tabler/icons-react'
+import { PushPin, PushPinSlash } from '@phosphor-icons/react'
 import { OFF_GRID_MOBILE_URL, openExternal } from './constants/links'
 import { cn } from './lib/utils'
 import { normalizeProNavigationIntent, type ProNavigationIntent } from './lib/pro-navigation'
@@ -286,23 +285,25 @@ function AppContent() {
   // Re-render once pro renderer features have activated (registers the view-router).
   const [proReady, setProReady] = useState(false)
   const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
+  const proActivationRevision = useRef(0)
+  const activateRendererFeatures = useCallback(async (): Promise<void> => {
+    const revision = ++proActivationRevision.current
+    const activation = await loadProFeaturesRenderer()
+    if (revision !== proActivationRevision.current) return
+    setProActivation(activation)
+    setProReady(true)
+  }, [])
   const TaskWorkspace = isPro && proReady ? getSlot(SLOTS.taskWorkspace) : undefined
   // Rendered at the app root, NOT inside the route switch: a running task follows the user across
   // navigation, so a route-scoped mount would unmount it exactly when it is wanted.
   const TaskFloatingView = isPro && proReady ? getSlot(SLOTS.taskFloatingView) : undefined
   const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
-    let mounted = true
-    void loadProFeaturesRenderer().then((activation) => {
-      if (mounted) {
-        setProActivation(activation)
-        setProReady(true)
-      }
-    })
+    void activateRendererFeatures()
     return () => {
-      mounted = false
+      proActivationRevision.current += 1
     }
-  }, [])
+  }, [activateRendererFeatures])
 
   useEffect(() => {
     if (!proReady || !isPro) {
@@ -375,11 +376,19 @@ function AppContent() {
     prepare?.()
     commitViewMode(destination)
   }, [])
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarHovered, setSidebarHovered] = useState(false)
+  const [sidebarPinned, setSidebarPinned] = useState(() => readSidebarPinned())
+  const sidebarOpen = sidebarPinned || sidebarHovered
+  const toggleSidebarPinned = (): void => {
+    setSidebarPinned((pinned) => {
+      writeSidebarPinned(!pinned)
+      return !pinned
+    })
+  }
   const rec = useMeetingRecorder()
 
   const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
-    if (detailOpen) setSidebarOpen(false)
+    if (detailOpen) setSidebarHovered(false)
   }, [])
 
   // The meeting recording lifecycle (detect → record → warn → stop → finalize) is
@@ -410,6 +419,7 @@ function AppContent() {
     // Remove capability seams before React changes the route. No paid view,
     // slot, settings section, hook, screen, or nav entry can run after this.
     clearProFeaturesRenderer()
+    proActivationRevision.current += 1
     setIsPro(false)
     setProActivation('none')
     setProReady(true)
@@ -447,7 +457,13 @@ function AppContent() {
     if (!license || typeof license.onChanged !== 'function') return
     let active = true
     const applyStatus = (info: ProLicenseInfo): void => {
-      if (!active || !shouldRemovePaidRendererAccess(info)) return
+      if (!active) return
+      if (info.isPro) {
+        setIsPro(true)
+        void activateRendererFeatures()
+        return
+      }
+      if (!shouldRemovePaidRendererAccess(info)) return
       removePaidRendererAccess()
     }
     const off = license.onChanged(applyStatus)
@@ -459,7 +475,7 @@ function AppContent() {
       active = false
       off()
     }
-  }, [removePaidRendererAccess])
+  }, [activateRendererFeatures, removePaidRendererAccess, setIsPro])
 
   // Handle browser URL changes
   useEffect(() => {
@@ -935,17 +951,7 @@ function AppContent() {
     {
       label: 'Discover',
       icon: <IconSparkles className="h-5 w-5 shrink-0" />,
-      items: navItems(
-        {
-          label: 'Explore',
-          icon: <IconCompass className="h-5 w-5 shrink-0" />,
-          view: 'explore' as ViewMode
-        },
-        proItem('search'),
-        proItem('day'),
-        proItem('replay'),
-        proItem('reflect')
-      )
+      items: navItems(proItem('search'), proItem('day'), proItem('replay'), proItem('reflect'))
     },
     {
       label: 'Work',
@@ -964,11 +970,8 @@ function AppContent() {
           icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
           view: 'memory-chat' as ViewMode
         },
-        {
-          label: 'Tasks',
-          icon: <IconListCheck className="h-5 w-5 shrink-0" />,
-          view: 'tasks' as ViewMode
-        },
+        proItem('explore'),
+        proItem('tasks'),
         proItem('voice')
       )
     },
@@ -1078,7 +1081,7 @@ function AppContent() {
         ]}
         onGoTo={(view, subroute) => {
           goToView(view as ViewMode, subroute)
-          setSidebarOpen(false)
+          setSidebarHovered(false)
         }}
       />
       {/* Recording indicator — auto-records detected meetings; always visible. */}
@@ -1159,17 +1162,17 @@ function AppContent() {
 
       <div className="flex h-full relative z-10">
         {/* Aceternity Sidebar */}
-        <Sidebar open={sidebarOpen} setOpen={setSidebarOpen}>
+        <Sidebar open={sidebarOpen} setOpen={setSidebarHovered}>
           <SidebarBody
             role="navigation"
             aria-label="Primary navigation"
             aria-expanded={sidebarOpen}
             className="justify-between gap-3 bg-neutral-900/80 backdrop-blur-xl border-r border-neutral-800"
-            onMouseEnter={() => setSidebarOpen(true)}
-            onMouseLeave={() => setSidebarOpen(false)}
-            onFocusCapture={() => setSidebarOpen(true)}
+            onMouseEnter={() => setSidebarHovered(true)}
+            onMouseLeave={() => setSidebarHovered(false)}
+            onFocusCapture={() => setSidebarHovered(true)}
             onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarOpen(false)
+              if (!event.currentTarget.contains(event.relatedTarget)) setSidebarHovered(false)
             }}
           >
             <div className="flex min-h-0 flex-1 flex-col">
@@ -1187,6 +1190,9 @@ function AppContent() {
 
               {/* Back / forward — a distinct control (filled), available everywhere (⌘[ / ⌘]) */}
               <div className={cn('mt-3 flex items-center gap-1', !sidebarOpen && 'justify-center')}>
+                {sidebarOpen && (
+                  <SidebarPinButton pinned={sidebarPinned} onToggle={toggleSidebarPinned} />
+                )}
                 <button
                   onClick={navigateBack}
                   disabled={!canGoBack}
@@ -1308,7 +1314,11 @@ function AppContent() {
                     className="p-6 h-full overflow-y-auto"
                   >
                     {viewMode === 'explore' ? (
-                      <ExploreScreen onRunPreset={handleRunPreset} />
+                      isPro ? (
+                        <ExploreScreen onRunPreset={handleRunPreset} />
+                      ) : (
+                        <UpgradeScreen feature={getProFeature(viewMode)} />
+                      )
                     ) : viewMode === 'memory-chat' ? (
                       <MemoryChat
                         onNavigateToMemory={handleSelectMemory}
@@ -1416,6 +1426,45 @@ function AppContent() {
       {TaskFloatingView ? <TaskFloatingView /> : null}
     </div>
   )
+}
+
+const SIDEBAR_PINNED_KEY = 'sidebar_pinned'
+
+function SidebarPinButton({
+  pinned,
+  onToggle
+}: Readonly<{ pinned: boolean; onToggle: () => void }>): React.JSX.Element {
+  const Icon = pinned ? PushPinSlash : PushPin
+  return (
+    <button
+      onClick={onToggle}
+      aria-label={pinned ? 'Unpin sidebar' : 'Pin sidebar'}
+      aria-pressed={pinned}
+      title={pinned ? 'Unpin: open on hover' : 'Pin: keep the sidebar open'}
+      className={cn(
+        'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white',
+        pinned ? 'text-green-500' : 'text-neutral-400'
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+    </button>
+  )
+}
+
+function readSidebarPinned(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_PINNED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeSidebarPinned(pinned: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_PINNED_KEY, pinned ? 'true' : 'false')
+  } catch {
+    // A private window forgets the choice; the sidebar remains usable.
+  }
 }
 
 function App() {

@@ -26,14 +26,14 @@ export function ExploreScreen({
     const body = flowRequest.trim()
     if (!body) return
     openExternal(
-      `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Explore flow request')}&body=${encodeURIComponent(`Here is the flow I would like to see in Off Grid AI:\n\n${body}`)}`
+      `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Assistant flow request')}&body=${encodeURIComponent(`Here is the flow I would like to see in Off Grid AI:\n\n${body}`)}`
     )
   }
   return (
     <div className="w-full font-mono">
       <div className="mb-5 flex items-end justify-between gap-4 border-b border-neutral-900 pb-4">
         <div>
-          <h1 className="text-lg tracking-tight text-white">Explore</h1>
+          <h1 className="text-lg tracking-tight text-white">Assistant</h1>
           <p className="mt-1 text-xs text-neutral-500">
             Pick a run - add the details once, then start it in chat. Everything happens on your
             Mac.
@@ -50,7 +50,7 @@ export function ExploreScreen({
             <ChatCircleDots className="h-5 w-5" />
           </span>
           <div>
-            <p className="text-[10px] uppercase tracking-wide text-primary">Shape Explore</p>
+            <p className="text-[10px] uppercase tracking-wide text-primary">Shape Assistant</p>
             <h2 className="mt-1 text-sm text-foreground">What should Off Grid AI do next?</h2>
             <p className="mt-1.5 max-w-md text-[11px] leading-5 text-muted-foreground">
               Tell us about a real workflow you want to run. Your requests decide which flows we

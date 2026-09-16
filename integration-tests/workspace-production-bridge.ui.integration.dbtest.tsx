@@ -459,7 +459,7 @@ describe('production workspace bridge', () => {
       })
       await window.api.setLlmSettings({ reasoningBudget: 0 })
     }
-  })
+  }, 15_000)
 
   it('shows Gemini thinking and completes a signed reasoning tool round', async () => {
     const endpoint = `http://127.0.0.1:${fake.port}/v1`

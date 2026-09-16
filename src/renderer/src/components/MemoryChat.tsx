@@ -3992,6 +3992,8 @@ export function MemoryChat({
 
   const conversationListRequestRef = useRef<Promise<void> | null>(null)
   const conversationListRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const staleConversationIdsRef = useRef(new Set<string>())
+  const [switchingConversationId, setSwitchingConversationId] = useState<string | null>(null)
 
   const loadConversations = useCallback(async (): Promise<void> => {
     if (conversationListRequestRef.current) return conversationListRequestRef.current
@@ -4029,14 +4031,30 @@ export function MemoryChat({
   )
 
   const switchConversation = useCallback(
-    async (convId: string) => {
-      setOpenTabs((t) => (t.includes(convId) ? t : [...t, convId]))
+    async (convId: string, replaceActiveTab = false) => {
       if (convId === activeConversationId) return
+      setOpenTabs((tabs) => {
+        if (!replaceActiveTab) return tabs.includes(convId) ? tabs : [...tabs, convId]
+        const next = tabs.filter((id) => id !== convId)
+        const activeIndex = activeConversationId ? next.indexOf(activeConversationId) : -1
+        if (activeIndex < 0) return [...next, convId]
+        next[activeIndex] = convId
+        return next
+      })
       setActiveConversationId(convId)
       setActiveProjectId(conversations.find((c) => c.id === convId)?.project_id ?? null)
+      setSwitchingConversationId(convId)
       // Open tabs already own their rendered messages. A fresh read here rebuilt the
       // whole transcript and rendered it a second time on every idle tab switch.
-      if (messagesByConv[convId]) return
+      const stale = staleConversationIdsRef.current.delete(convId)
+      if (messagesByConv[convId] && !stale) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setSwitchingConversationId((current) => (current === convId ? null : current))
+          })
+        })
+        return
+      }
       try {
         const nextMessages = await loadLatestConversationMessages(convId)
         if (!nextMessages) return
@@ -4046,6 +4064,8 @@ export function MemoryChat({
         )
       } catch (e) {
         console.error('Failed to load messages:', e)
+      } finally {
+        setSwitchingConversationId((current) => (current === convId ? null : current))
       }
     },
     [activeConversationId, conversations, loadLatestConversationMessages, messagesByConv]
@@ -4072,7 +4092,7 @@ export function MemoryChat({
   )
 
   // A conversation changed underneath us - most often a message synced from another device. Reload
-  // that thread when it is the one on screen, and refresh the list either way so ordering follows.
+  // the visible thread now. Defer hidden chat and sidebar work until the user opens that surface.
   //
   // Skipped while THIS device is generating in that conversation: the in-flight reply lives in local
   // state and re-reading the table mid-stream would drop it.
@@ -4085,23 +4105,24 @@ export function MemoryChat({
               await refreshConversationMessages(conversationId)
             } else {
               // The next visit must load a peer's new messages, not the old tab cache.
-              setMessagesByConv((prev) => {
-                if (!prev[conversationId]) return prev
-                const next = { ...prev }
-                delete next[conversationId]
-                return next
-              })
+              staleConversationIdsRef.current.add(conversationId)
             }
           }
-          scheduleConversationListRefresh()
+          if (conversationId === activeConversationId || !conversationsToggleWillShow) {
+            scheduleConversationListRefresh()
+          }
         } catch (error) {
           console.error('Failed to refresh a synced conversation:', error)
         }
       })()
     })
     return () => off?.()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, refreshConversationMessages, scheduleConversationListRefresh])
+  }, [
+    activeConversationId,
+    conversationsToggleWillShow,
+    refreshConversationMessages,
+    scheduleConversationListRefresh
+  ])
 
   // Task guidance is written to the originating conversation by the Tasks
   // workspace. Refresh that conversation immediately so its special guidance
@@ -4775,13 +4796,6 @@ export function MemoryChat({
                   typeof img.durationMs === 'number'
                     ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
                     : undefined
-                if (imageRequest.proposal) {
-                  await window.api.storeProposalIllustration(
-                    imageRequest.proposal.conversationId,
-                    imageRequest.proposal.slide,
-                    img.path
-                  )
-                }
                 const ownsToolTurn = generatedImageCount === 0
                 const imageContent =
                   ownsToolTurn && !pureImageToolTurn
@@ -6284,7 +6298,10 @@ export function MemoryChat({
               collapsible
               collapsedSize={0}
               onCollapse={() => setConversationsVisible(false)}
-              onExpand={() => setConversationsVisible(true)}
+              onExpand={() => {
+                setConversationsVisible(true)
+                void loadConversations()
+              }}
               className="min-w-0 overflow-hidden transition-[flex-grow] duration-200 ease-out motion-reduce:transition-none"
             >
               <aside className="h-full overflow-hidden border-r border-neutral-900">
@@ -6401,7 +6418,16 @@ export function MemoryChat({
                             {g.items.map((conv) => (
                               <div
                                 key={conv.id}
-                                onClick={() => switchConversation(conv.id)}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => switchConversation(conv.id, true)}
+                                onKeyDown={(event) => {
+                                  if (event.target !== event.currentTarget) return
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault()
+                                    switchConversation(conv.id, true)
+                                  }
+                                }}
                                 className={`group flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${
                                   activeConversationId === conv.id
                                     ? 'border-neutral-800 bg-neutral-900'
@@ -6501,7 +6527,17 @@ export function MemoryChat({
                 {/* Messages */}
                 <div className="relative min-h-0 flex-1">
                   <div ref={scrollRef} onScroll={onScrollFollow} className="h-full overflow-y-auto">
-                  {approvalSetup ? (
+                  {switchingConversationId !== null &&
+                  switchingConversationId === activeConversationId ? (
+                    <div
+                      className="flex min-h-full items-center justify-center"
+                      role="status"
+                      aria-label="Loading conversation"
+                    >
+                      <LoadingDots />
+                      <span className="sr-only">Loading conversation</span>
+                    </div>
+                  ) : approvalSetup ? (
                     <div className="flex min-h-full w-full flex-col items-center justify-center px-6 py-6 text-center">
                       <ApprovalSetup
                         key={approvalSetup.id}

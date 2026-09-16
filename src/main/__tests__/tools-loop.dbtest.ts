@@ -500,7 +500,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
-  it('never saves a second Gemma tool request as the final answer after the limit', async () => {
+  it('never saves a second Gemma tool request or raw tool output after the limit', async () => {
     await llm.setSettings({ maxToolCalls: 1 })
     try {
       enqueueReactiveAfterEmptyPlan(
@@ -518,9 +518,9 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       })
 
       expect(result.toolCalls).toHaveLength(1)
-      expect(result.answer).toBe('4')
+      expect(result.answer).toBe('Stopped after too many tool steps.')
       expect(result.answer).not.toMatch(/tool_call|web_use/i)
-      expect(deltas.join('')).toBe('4')
+      expect(deltas.join('')).toBe('')
     } finally {
       await llm.setSettings({ maxToolCalls: 25 })
     }

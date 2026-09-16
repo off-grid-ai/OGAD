@@ -11,6 +11,7 @@
 import { ipcMain, BrowserWindow, app, shell } from 'electron'
 import {
   deactivateProFeaturesMain,
+  loadProFeaturesMain,
   proEnabled,
   proEntitlementBootstrapEnabled
 } from './bootstrap/loadProFeaturesMain'
@@ -29,18 +30,30 @@ import {
 import { effectiveProLicenseInfo } from './licensing/effective-license'
 
 export function setupLicenseIpc(): void {
+  let licenseChangeRevision = 0
+  let licenseChangeTask: Promise<void> = Promise.resolve()
   // Push entitlement changes to every window and stop live paid services when
   // access closes.
   setLicenseChangeNotifier((info: ProLicenseInfo) => {
+    const revision = ++licenseChangeRevision
     const effectiveInfo = effectiveProLicenseInfo(info, proEnabled())
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('license:changed', effectiveInfo)
+    const publish = (): void => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('license:changed', effectiveInfo)
+      }
     }
-    if (!effectiveInfo.isPro) {
-      void deactivateProFeaturesMain().catch((error) => {
-        console.error('[pro] entitlement-loss shutdown failed', error)
-      })
+    if (effectiveInfo.isPro) {
+      licenseChangeTask = loadProFeaturesMain()
+        .then(() => {
+          if (revision === licenseChangeRevision) publish()
+        })
+        .catch(console.error.bind(console, '[pro] entitlement activation failed'))
+      return
     }
+    publish()
+    licenseChangeTask = deactivateProFeaturesMain().catch(
+      console.error.bind(console, '[pro] entitlement-loss shutdown failed')
+    )
   })
 
   // SYNC: preload reads this once to seed window.api.isPro. Must be registered
@@ -56,7 +69,11 @@ export function setupLicenseIpc(): void {
     const info = getProLicenseInfo()
     return effectiveProLicenseInfo(info, proEnabled())
   })
-  ipcMain.handle('license:activate', (_e, key: string) => activateProByKey(key))
+  ipcMain.handle('license:activate', async (_e, key: string) => {
+    const result = await activateProByKey(key)
+    await licenseChangeTask
+    return result
+  })
   ipcMain.handle('license:list-devices', () => listProDevices())
   ipcMain.handle('license:deactivate', (_e, machineId: string) => deactivateProDevice(machineId))
   ipcMain.handle('license:reset-current-device', () => resetProCurrentDevice())
@@ -65,8 +82,7 @@ export function setupLicenseIpc(): void {
   })
   ipcMain.handle('license:pay-url', () => PRO_PAY_PAGE_URL)
   ipcMain.handle('license:open-pay', () => shell.openExternal(PRO_PAY_PAGE_URL))
-  // Pro main-process features (tray, capture, CRM loops) only attach at boot, so
-  // a fresh activation needs a relaunch to fully light up.
+  // Kept for device-reset and update flows that still require a full process restart.
   ipcMain.handle('license:relaunch', () => {
     requestApplicationRelaunch(app)
   })

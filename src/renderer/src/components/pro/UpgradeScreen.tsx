@@ -16,8 +16,8 @@ import { projectPersonalMeshActivationFailure } from '@offgrid/sync'
 
 // License-key activation. Only meaningful in a pro-capable build (__OFFGRID_PRO__);
 // a core build has no pro code bundled, so entering a key would unlock nothing.
-// On success the cached entitlement flips, but main-process pro features (tray,
-// capture, CRM loops) only attach at boot — so we offer a relaunch.
+// Main and renderer lifecycle owners react to the saved entitlement, so activation
+// completes in this process without a restart.
 function LicenseActivation(): React.ReactElement {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
@@ -31,7 +31,7 @@ function LicenseActivation(): React.ReactElement {
     try {
       const r = await license.activate(key.trim())
       if (r.ok) {
-        setMsg({ kind: 'ok', text: 'Activated. Restart to finish unlocking Pro.' })
+        setMsg({ kind: 'ok', text: 'Activated. Pro is starting.' })
       } else {
         setMsg({
           kind: 'err',
@@ -77,19 +77,6 @@ function LicenseActivation(): React.ReactElement {
           }`}
         >
           <span>{msg.text}</span>
-          {msg.kind === 'ok' && (
-            // Solid emerald, white text - the same treatment every other primary action in the app
-            // uses. This was green-300 text on a transparent background behind a 40%-opacity border,
-            // which is the lightest green in the scale on no fill at all: barely legible in dark mode
-            // and worse in light. It is also the one action a person must find right after activating,
-            // so it should read as the primary button it is.
-            <button
-              onClick={() => window.api.license?.relaunch()}
-              className="shrink-0 rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white transition-colors duration-150 hover:bg-emerald-500 active:scale-95"
-            >
-              Restart now
-            </button>
-          )}
         </div>
       )}
     </div>

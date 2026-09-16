@@ -1,11 +1,4 @@
-import {
-  Globe,
-  Desktop,
-  Brain,
-  DeviceMobile,
-  ArrowRight,
-  Presentation
-} from '@phosphor-icons/react'
+import { Globe, Desktop, Brain, DeviceMobile, ArrowRight } from '@phosphor-icons/react'
 import {
   PRESET_SECTIONS,
   type DemoPreset,
@@ -27,7 +20,6 @@ import {
 const CAPABILITY_ICON: Record<PresetCapability, typeof Globe> = {
   browser: Globe,
   'computer-use': Desktop,
-  creation: Presentation,
   memory: Brain,
   phone: DeviceMobile
 }

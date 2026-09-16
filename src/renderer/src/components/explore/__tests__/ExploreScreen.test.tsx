@@ -17,7 +17,7 @@ describe('<ExploreScreen/>', () => {
 
   it('renders one page header with a catalog-computed count, not the section intro', () => {
     render(<ExploreScreen onRunPreset={() => {}} />)
-    expect(screen.getByRole('heading', { level: 1, name: 'Explore' })).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Assistant' })).toBeTruthy()
     // The meta count comes from the catalog, never a hardcoded number.
     expect(
       screen.getByText(`${ALL_PRESETS.length} runs / ${PRESET_SECTIONS.length} capabilities`)

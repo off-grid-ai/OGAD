@@ -55,7 +55,7 @@ describe('makeComputerTaskExecutor', () => {
   it('drives via accessibility when the AX tree is rich', async () => {
     const routing: AxRouting = { app: 'Slack', snapshot: richSnapshot() }
     const tiers = makeTiers({ routingSnapshot: vi.fn(async () => routing) })
-    const exec = makeComputerTaskExecutor(tiers)
+    const exec = makeComputerTaskExecutor(tiers, { enabledRails: ['ax', 'vision'] })
 
     const result = await exec(action())
 
@@ -79,7 +79,7 @@ describe('makeComputerTaskExecutor', () => {
       routingSnapshot: vi.fn(async () => routing),
       runAx: vi.fn(async () => ({ ok: false, summary: 'needs a sign-in', steps: [] }))
     })
-    const exec = makeComputerTaskExecutor(tiers)
+    const exec = makeComputerTaskExecutor(tiers, { enabledRails: ['ax', 'vision'] })
 
     const result = await exec(action())
 
@@ -90,7 +90,7 @@ describe('makeComputerTaskExecutor', () => {
   it('falls through to vision on a dead-AX window', async () => {
     const routing: AxRouting = { app: 'Game', snapshot: deadSnapshot() }
     const tiers = makeTiers({ routingSnapshot: vi.fn(async () => routing) })
-    const exec = makeComputerTaskExecutor(tiers)
+    const exec = makeComputerTaskExecutor(tiers, { enabledRails: ['ax', 'vision'] })
 
     const result = await exec(action({ intent: 'play the game' }))
 
@@ -101,7 +101,7 @@ describe('makeComputerTaskExecutor', () => {
 
   it('falls through to vision when the goal names no running app', async () => {
     const tiers = makeTiers({ routingSnapshot: vi.fn(async () => null) })
-    const exec = makeComputerTaskExecutor(tiers)
+    const exec = makeComputerTaskExecutor(tiers, { enabledRails: ['ax', 'vision'] })
 
     const result = await exec(action({ intent: 'do something vague' }))
 
@@ -114,7 +114,7 @@ describe('makeComputerTaskExecutor', () => {
     const routing: AxRouting = { app: 'Slack', snapshot: richSnapshot() }
     const routingSnapshot = vi.fn(async () => routing)
     const tiers = makeTiers({ routingSnapshot })
-    const exec = makeComputerTaskExecutor(tiers)
+    const exec = makeComputerTaskExecutor(tiers, { enabledRails: ['ax', 'vision'] })
 
     await exec(action({ args: { goal: 'open the DM with sidd' } }))
 
@@ -124,7 +124,7 @@ describe('makeComputerTaskExecutor', () => {
   it('keeps the originating Chat as the AX task journey', async () => {
     const routing: AxRouting = { app: 'Slack', snapshot: richSnapshot() }
     const tiers = makeTiers({ routingSnapshot: vi.fn(async () => routing) })
-    const exec = makeComputerTaskExecutor(tiers)
+    const exec = makeComputerTaskExecutor(tiers, { enabledRails: ['ax', 'vision'] })
 
     await exec(action({ sourceRef: 'chat-42' }))
 
@@ -166,14 +166,18 @@ describe('makeComputerTaskExecutor', () => {
       expect(result).toEqual({ ok: true, effectId: 'act-1' })
     })
 
-    it("forcedRail 'ax' still falls to vision when NO app resolves (nothing to drive)", async () => {
+    it("forcedRail 'ax' fails when no app resolves instead of using vision", async () => {
       const tiers = makeTiers({ routingSnapshot: vi.fn(async () => null) })
       const exec = makeComputerTaskExecutor(tiers, { forcedRail: 'ax' })
 
-      await exec(action())
+      const result = await exec(action())
 
       expect(tiers.runAx).not.toHaveBeenCalled()
-      expect(tiers.visionExecute).toHaveBeenCalledOnce()
+      expect(tiers.visionExecute).not.toHaveBeenCalled()
+      expect(result).toEqual({
+        ok: false,
+        detail: 'The Accessibility rail could not find a target app.'
+      })
     })
   })
 })
