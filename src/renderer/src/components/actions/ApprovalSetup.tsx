@@ -91,7 +91,7 @@ export function ApprovalSetup({
             Add the final details, then start it in Chat
           </h2>
           <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-            This uses the same task flow as Explore. You can edit everything before it starts.
+            This uses the same task flow as Assistant. You can edit everything before it starts.
           </p>
         </div>
       </div>

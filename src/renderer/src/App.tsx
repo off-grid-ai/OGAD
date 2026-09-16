@@ -42,7 +42,6 @@ import { NavThemeToggle } from './components/ThemeToggle'
 import { motion, AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
-  IconCompass,
   IconSettings,
   IconDownload,
   IconFolders,
@@ -54,7 +53,6 @@ import {
   IconArrowRight,
   IconActivityHeartbeat,
   IconDeviceMobile,
-  IconListCheck,
   IconExternalLink,
   IconSparkles,
   IconBriefcase,
@@ -287,23 +285,25 @@ function AppContent() {
   // Re-render once pro renderer features have activated (registers the view-router).
   const [proReady, setProReady] = useState(false)
   const [proActivation, setProActivation] = useState<ProRendererActivation>('none')
+  const proActivationRevision = useRef(0)
+  const activateRendererFeatures = useCallback(async (): Promise<void> => {
+    const revision = ++proActivationRevision.current
+    const activation = await loadProFeaturesRenderer()
+    if (revision !== proActivationRevision.current) return
+    setProActivation(activation)
+    setProReady(true)
+  }, [])
   const TaskWorkspace = isPro && proReady ? getSlot(SLOTS.taskWorkspace) : undefined
   // Rendered at the app root, NOT inside the route switch: a running task follows the user across
   // navigation, so a route-scoped mount would unmount it exactly when it is wanted.
   const TaskFloatingView = isPro && proReady ? getSlot(SLOTS.taskFloatingView) : undefined
   const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
-    let mounted = true
-    void loadProFeaturesRenderer().then((activation) => {
-      if (mounted) {
-        setProActivation(activation)
-        setProReady(true)
-      }
-    })
+    void activateRendererFeatures()
     return () => {
-      mounted = false
+      proActivationRevision.current += 1
     }
-  }, [])
+  }, [activateRendererFeatures])
 
   useEffect(() => {
     if (!proReady || !isPro) {
@@ -419,6 +419,7 @@ function AppContent() {
     // Remove capability seams before React changes the route. No paid view,
     // slot, settings section, hook, screen, or nav entry can run after this.
     clearProFeaturesRenderer()
+    proActivationRevision.current += 1
     setIsPro(false)
     setProActivation('none')
     setProReady(true)
@@ -456,7 +457,13 @@ function AppContent() {
     if (!license || typeof license.onChanged !== 'function') return
     let active = true
     const applyStatus = (info: ProLicenseInfo): void => {
-      if (!active || !shouldRemovePaidRendererAccess(info)) return
+      if (!active) return
+      if (info.isPro) {
+        setIsPro(true)
+        void activateRendererFeatures()
+        return
+      }
+      if (!shouldRemovePaidRendererAccess(info)) return
       removePaidRendererAccess()
     }
     const off = license.onChanged(applyStatus)
@@ -468,7 +475,7 @@ function AppContent() {
       active = false
       off()
     }
-  }, [removePaidRendererAccess])
+  }, [activateRendererFeatures, removePaidRendererAccess, setIsPro])
 
   // Handle browser URL changes
   useEffect(() => {
@@ -963,16 +970,8 @@ function AppContent() {
           icon: <IconMessageCircle className="h-5 w-5 shrink-0" />,
           view: 'memory-chat' as ViewMode
         },
-        {
-          label: 'Explore',
-          icon: <IconCompass className="h-5 w-5 shrink-0" />,
-          view: 'explore' as ViewMode
-        },
-        {
-          label: 'Tasks',
-          icon: <IconListCheck className="h-5 w-5 shrink-0" />,
-          view: 'tasks' as ViewMode
-        },
+        proItem('explore'),
+        proItem('tasks'),
         proItem('voice')
       )
     },
@@ -1315,7 +1314,11 @@ function AppContent() {
                     className="p-6 h-full overflow-y-auto"
                   >
                     {viewMode === 'explore' ? (
-                      <ExploreScreen onRunPreset={handleRunPreset} />
+                      isPro ? (
+                        <ExploreScreen onRunPreset={handleRunPreset} />
+                      ) : (
+                        <UpgradeScreen feature={getProFeature(viewMode)} />
+                      )
                     ) : viewMode === 'memory-chat' ? (
                       <MemoryChat
                         onNavigateToMemory={handleSelectMemory}

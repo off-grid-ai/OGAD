@@ -50,7 +50,7 @@ describe('<App/> shell navigation integration', () => {
     expect(localStorage.getItem('sidebar_pinned')).toBe('false')
   })
 
-  it('places Explore directly after Chat and opens it from Work', async () => {
+  it('places locked Assistant directly after Chat and opens its Pro journey from Work', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -59,14 +59,15 @@ describe('<App/> shell navigation integration', () => {
 
     const work = within(navigation).getByRole('group', { name: 'Work' })
     const chat = within(work).getByRole('button', { name: 'Chat' })
-    const explore = within(work).getByRole('button', { name: 'Explore' })
+    const assistant = within(work).getByRole('button', { name: 'Assistant' })
     const workButtons = within(work).getAllByRole('button')
 
-    expect(workButtons.indexOf(explore)).toBe(workButtons.indexOf(chat) + 1)
+    expect(workButtons.indexOf(assistant)).toBe(workButtons.indexOf(chat) + 1)
 
-    await user.click(explore)
+    await user.click(assistant)
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Explore' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Assistant' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
     expect(window.location.pathname).toBe('/explore')
   }, 30_000)
 })

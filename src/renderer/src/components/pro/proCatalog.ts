@@ -8,6 +8,8 @@ import {
   MagnifyingGlass,
   Broadcast,
   ClipboardText,
+  Compass,
+  ListChecks,
   Waveform,
   ShieldCheck,
   Devices as DevicesIcon
@@ -51,6 +53,26 @@ export interface ProFeature {
 }
 
 export const PRO_FEATURES: ProFeature[] = [
+  {
+    route: 'explore',
+    label: 'Assistant',
+    icon: Compass,
+    tagline: 'Start a prepared run.',
+    description:
+      'Choose a workflow, add its details, and start it in Chat. The work stays on this Mac.',
+    highlights: ['Prepared workflows', 'One intake before the run', 'Starts in your local Chat'],
+    platforms: ['darwin']
+  },
+  {
+    route: 'tasks',
+    label: 'Tasks',
+    icon: ListChecks,
+    tagline: 'See every active run in one place.',
+    description:
+      'Track running and completed work, open its live view, and respond when a task needs attention.',
+    highlights: ['Live task status', 'Saved task history', 'Attention requests in one place'],
+    platforms: ['darwin']
+  },
   {
     route: 'day',
     label: 'Day',
