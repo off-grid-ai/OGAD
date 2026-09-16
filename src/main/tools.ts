@@ -30,7 +30,6 @@ import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import {
   boundToolResult,
   callsWithinToolBudget,
-  finalResponseFromToolResults,
   normalizeMaxToolCalls,
   toolLimitFinalAnswerInstruction,
   toolPromptChars,
@@ -195,7 +194,32 @@ const TOOLS: ToolDef[] = [
         const sre = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g
         let s: RegExpExecArray | null
         while ((s = sre.exec(html)) && snippets.length < 6) snippets.push(stripTags(s[1]!))
-        if (!titles.length) return 'No results found.'
+        if (!titles.length) {
+          const fallback = await fetch(
+            'https://www.bing.com/search?format=rss&q=' + encodeURIComponent(q),
+            { headers: { 'User-Agent': 'Mozilla/5.0' } }
+          )
+          if (!fallback.ok) throw new Error(`search providers returned HTTP ${fallback.status}`)
+          const xml = await fallback.text()
+          const items: { title: string; url: string; snippet: string }[] = []
+          const ire = /<item>([\s\S]*?)<\/item>/gi
+          let item: RegExpExecArray | null
+          while ((item = ire.exec(xml)) && items.length < 6) {
+            const title = /<title>([\s\S]*?)<\/title>/i.exec(item[1]!)
+            const link = /<link>([\s\S]*?)<\/link>/i.exec(item[1]!)
+            const description = /<description>([\s\S]*?)<\/description>/i.exec(item[1]!)
+            if (!title || !link) continue
+            items.push({
+              title: stripTags(title[1]!),
+              url: stripTags(link[1]!),
+              snippet: description ? stripTags(description[1]!) : ''
+            })
+          }
+          if (!items.length) throw new Error('search providers returned no usable results')
+          return items
+            .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
+            .join('\n')
+        }
         return titles
           .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${snippets[i] || ''}`)
           .join('\n')
@@ -722,7 +746,6 @@ export async function toolChat(
   let retainedPromptTokens = Math.ceil(toolPromptChars(messages, tools) / 4)
   const offeredTools = new Set<string>()
   const toolCalls: ToolCall[] = []
-  const successfulToolResults: string[] = []
   const unified: UnifiedSource[] = []
   const unifiedKeys = new Set<string>()
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
@@ -789,10 +812,7 @@ export async function toolChat(
   const replyReserve = Math.min(1024, Math.max(256, Math.floor(ctx * 0.1)))
   const maxPromptChars = Math.max(0, ctx - replyReserve) * 4
   const answerFrom = (content: string): string => {
-    const visibleContent = stripChatControlTokens(content)
-    const answer = finalResponseFromToolResults(visibleContent, successfulToolResults)
-    if (!visibleContent && answer) onDelta(answer, 'content')
-    return answer
+    return stripChatControlTokens(content)
   }
   let round = 0
   while (toolCalls.length < maxToolCalls) {
@@ -941,7 +961,6 @@ export async function toolChat(
           finishAfterDeferredImages = imageRequests.length >= requestedImageCount
         }
         const status = res.status ?? 'completed'
-        if (status === 'completed' && res.text.trim()) successfulToolResults.push(res.text)
         toolCalls.push({ name: c.name, args: c.args, result: res.text, status })
         // Surface the COMPLETED call (with its result) live, so the UI can show each
         // tool call + result as it lands, not only in the final batch.

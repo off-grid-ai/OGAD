@@ -49,7 +49,7 @@ interface OpenRouterModelMetadata {
 
 const nativeToolCapabilities = new Map<string, Promise<RemoteNativeToolCapability>>()
 type RemoteReasoningControl = ThinkingDialect | 'openrouter' | 'ollama'
-interface RemoteReasoningCapability {
+export interface RemoteReasoningCapability {
   control: RemoteReasoningControl
   mandatory?: boolean
   tokenBudget?: boolean
@@ -111,7 +111,7 @@ export function remoteNativeToolCapability(
 }
 
 /** Read the server's model/template facts, never its display name. Failed probes are retried. */
-async function remoteReasoningCapability(
+export async function remoteReasoningCapability(
   remote: RemoteTextModelConnection
 ): Promise<RemoteReasoningCapability> {
   const key = capabilityKey(remote)

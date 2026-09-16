@@ -67,7 +67,10 @@ import {
   getActiveRemoteVisionServerForModality
 } from './vision/remote-vision-server'
 import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
-import { remoteTextModelProviderError } from './llm/remote-chat'
+import {
+  remoteReasoningCapability,
+  remoteTextModelProviderError
+} from './llm/remote-chat'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -696,6 +699,8 @@ async function handleModelsList(
   let text: Record<string, unknown>[] = tagLlmEntries(upData)
   const activeRemote = getActiveRemoteVisionServer()
   if (activeRemote) {
+    const reasoning = await remoteReasoningCapability(activeRemote)
+    const supportsReasoning = reasoning.control !== 'none'
     text = [
       {
         id: remoteVisionModelId(activeRemote.id, activeRemote.model),
@@ -708,7 +713,14 @@ async function handleModelsList(
         // The Desktop gateway has already validated this OpenAI-compatible route.
         // Mobile must not probe the local llama /props endpoint for capabilities of
         // this remote model, because that reports the wrong active model.
-        capabilities: ['vision', 'tools']
+        capabilities: [
+          'vision',
+          'tools',
+          ...(supportsReasoning ? ['reasoning'] : [])
+        ],
+        ...(supportsReasoning
+          ? { reasoning: { mandatory: reasoning.mandatory === true } }
+          : {})
       }
     ]
   }
