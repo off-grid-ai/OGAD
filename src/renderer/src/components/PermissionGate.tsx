@@ -32,6 +32,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
   const [setupDismissed, setSetupDismissed] = useState(false)
   const [visionIssue, setVisionIssue] = useState<VisionIssue | null>(null)
   const [visionDownloadProgress, setVisionDownloadProgress] = useState<ProgressLike | null>(null)
+  const [visionDownloadFailure, setVisionDownloadFailure] = useState<string | null>(null)
   const permissions = usePermissionController(isPro)
   const permissionStatus = permissions.status
   const isChecking = permissions.checking
@@ -118,8 +119,14 @@ export function PermissionGate({ children }: PermissionGateProps) {
     if (progress.modelId !== visionIssue?.modelId) return
     if (progress.status === 'completed') {
       setVisionDownloadProgress(null)
+      setVisionDownloadFailure(null)
       void checkCaptureVision()
-    } else if (progress.status === 'failed' || progress.status === 'cancelled') {
+    } else if (progress.status === 'failed') {
+      setVisionDownloadProgress(null)
+      setVisionDownloadFailure(
+        'Vision support download failed. Check your connection and try again.'
+      )
+    } else if (progress.status === 'cancelled') {
       setVisionDownloadProgress(null)
     } else {
       setVisionDownloadProgress(progress)
@@ -145,10 +152,16 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
   const handleVisionAction = (): void => {
     if (visionIssue?.kind === 'missing-projector') {
+      setVisionDownloadFailure(null)
       setVisionDownloadProgress({ percent: 0 })
       void window.api
         .downloadModel?.(visionIssue.modelId)
-        .catch((error) => console.error('Failed to download capture vision support:', error))
+        .catch((error) => {
+          console.error('Failed to download capture vision support:', error)
+          setVisionDownloadFailure(
+            'Vision support download failed. Check your connection and try again.'
+          )
+        })
         .finally(() => {
           setVisionDownloadProgress(null)
           void checkCaptureVision()
@@ -202,6 +215,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
             issue={visionIssue.kind}
             modelName={visionIssue.modelName}
             progress={visionDownloadProgress}
+            failure={visionDownloadFailure}
             onOpen={handleVisionAction}
             onDismiss={() => setSetupDismissed(true)}
           />
@@ -332,6 +346,7 @@ function SetupNudge({
   issue,
   modelName,
   progress,
+  failure,
   onOpen,
   onDismiss
 }: {
@@ -340,6 +355,7 @@ function SetupNudge({
   issue?: VisionIssue['kind']
   modelName?: string | null
   progress?: ProgressLike | null
+  failure?: string | null
   onOpen: () => void
   onDismiss: () => void
 }) {
@@ -417,6 +433,11 @@ function SetupNudge({
       <div className="text-xs leading-tight">
         <div className="font-medium text-foreground">{title}</div>
         <div className="text-muted-foreground">{detail}</div>
+        {failure ? (
+          <div role="status" className="mt-1 text-red-400">
+            {failure}
+          </div>
+        ) : null}
         {presentedProgress ? (
           <div className="mt-1 tabular-nums text-muted-foreground">
             {presentedProgress.totalBytes !== undefined

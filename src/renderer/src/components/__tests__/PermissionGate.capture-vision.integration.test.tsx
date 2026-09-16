@@ -162,6 +162,9 @@ describe('<PermissionGate/> Pro capture vision recovery', () => {
     ).toBe(true)
 
     modelProgress?.({ modelId: MODEL_ID, status: 'failed' })
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Vision support download failed. Check your connection and try again.'
+    )
     expect(
       (
         (await screen.findByRole('button', {
