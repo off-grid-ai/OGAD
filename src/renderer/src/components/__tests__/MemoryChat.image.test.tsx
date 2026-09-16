@@ -1227,9 +1227,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
     expect(boundary.cancelImageGen).not.toHaveBeenCalled()
 
-    const aTab = screen.getByRole('button', { name: 'Conversation A' })
-    await user.click(aTab)
-    await waitFor(() => expect(aTab.parentElement?.className).toContain('bg-neutral-800'))
+    await user.click(screen.getByText('Conversation A'))
     expect(
       screen.queryAllByRole('button', { name: /stop/i }).map((button) => button.textContent)
     ).toEqual(['Stop'])

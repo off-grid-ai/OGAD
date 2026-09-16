@@ -676,7 +676,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
       </TooltipProvider>
     )
 
-    await openCompletedWork()
+    await userEvent.click(await screen.findByRole('button', { name: 'Work failed' }))
     const failed = await screen.findByRole('button', { name: 'Searched memory, failed' })
     await userEvent.click(failed)
     expect(await screen.findByText('Error: memory index unavailable')).toBeTruthy()
