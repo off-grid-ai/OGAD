@@ -47,13 +47,13 @@ export function setupLicenseIpc(): void {
         .then(() => {
           if (revision === licenseChangeRevision) publish()
         })
-        .catch((error) => console.error('[pro] entitlement activation failed', error))
+        .catch(console.error.bind(console, '[pro] entitlement activation failed'))
       return
     }
     publish()
-    licenseChangeTask = deactivateProFeaturesMain().catch((error) => {
-      console.error('[pro] entitlement-loss shutdown failed', error)
-    })
+    licenseChangeTask = deactivateProFeaturesMain().catch(
+      console.error.bind(console, '[pro] entitlement-loss shutdown failed')
+    )
   })
 
   // SYNC: preload reads this once to seed window.api.isPro. Must be registered
