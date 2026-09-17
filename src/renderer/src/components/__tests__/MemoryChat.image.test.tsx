@@ -831,20 +831,23 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
 
   it('with tools ON, a "draw ..." turn goes to the agent (toolChat), NOT the renderer direct-generate', async () => {
     const user = userEvent.setup()
-    // composerToolsOn is persisted in settings and read into toolsOn on mount.
     const { generateImage, toolChat } = installApi({
       active: FULL,
       models: [FULL],
-      settings: { composerToolsOn: true }
+      isPro: true
     })
     renderChat()
 
+    const assistant = screen.getByRole('button', { name: 'Assistant' })
+    await user.click(assistant)
+    expect(assistant.getAttribute('aria-pressed')).toBe('true')
     await sendChat(user, 'draw a dog')
 
     // The turn crossed on the agentic path...
     await waitFor(() => expect(toolChat).toHaveBeenCalledTimes(1))
     // ...and the renderer did NOT pre-decide + fire a direct image generation.
     expect(generateImage).not.toHaveBeenCalled()
+    expect(assistant.getAttribute('aria-pressed')).toBe('false')
   })
 
   it('with tools OFF, the same "draw ..." turn auto-routes to direct image generation', async () => {
@@ -867,7 +870,6 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       active: FULL,
       models: [FULL],
       isPro: true,
-      settings: { composerToolsOn: true },
       toolResult: {
         answer: 'Image generation started.',
         toolCalls: [{ name: 'generate_image', result: 'Image generation started' }],
@@ -879,6 +881,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const user = userEvent.setup()
     renderChat()
 
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
     await sendChat(user, 'draw a Ferrari')
 
     expect(await screen.findByRole('button', { name: 'Generated image, running' })).toBeTruthy()
@@ -927,7 +930,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       active: FULL,
       models: [FULL],
       isPro: true,
-      settings: { composerToolsOn: true, showGenerationDetails: true },
+      settings: { showGenerationDetails: true },
       toolResult: {
         answer: 'चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।',
         toolCalls: [
@@ -943,6 +946,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const user = userEvent.setup()
     renderChat()
 
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
     await sendChat(user, 'make two different scenes')
 
     await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(2))
