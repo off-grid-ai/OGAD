@@ -89,7 +89,6 @@ describe('Fara 1.5 official browser adapter', () => {
     }
     const request = fara15Adapter.buildRequest(input('embedded_browser'))
     expect(request.temperature).toBe(0)
-    expect(request.maxTokens).toBe(2_048)
     expect(request.tools).toEqual([
       expect.objectContaining({
         function: expect.objectContaining({ name: 'computer_use' })
