@@ -58,13 +58,13 @@ export function ExploreSection({
         </div>
       ) : null}
 
-      <div className="columns-1 gap-3 @4xl:columns-2">
+      <div className="grid grid-cols-1 gap-3 @4xl:grid-cols-2">
         {PRESET_SECTIONS.map((section) => {
           const Icon = CAPABILITY_ICON[section.capability]
           return (
             <section
               key={section.id}
-              className="mb-3 break-inside-avoid rounded-md border border-border bg-card p-3 text-card-foreground"
+              className="break-inside-avoid rounded-md border border-border bg-card p-3 text-card-foreground @4xl:[&:only-child]:col-span-2"
             >
               <div className="mb-3 flex items-center gap-2.5">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-primary">
@@ -79,7 +79,7 @@ export function ExploreSection({
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 gap-2 @2xl:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-2">
                 {section.presets.map((preset) => (
                   <button
                     key={preset.id}
