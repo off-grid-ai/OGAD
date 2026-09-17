@@ -6,34 +6,18 @@ import { parseSqliteUtc, shiftLocalDay, startOfLocalDay } from '@renderer/lib/ti
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
-import { toSpeakableText } from '@renderer/lib/speakable'
 import { isAgenticTurn } from '@renderer/lib/agentic-active'
-import {
-  appendTimelineEvent,
-  applyStreamEvent,
-  hasLiveStreamActivity
-} from '@renderer/lib/stream-reducer'
+import { appendTimelineEvent, applyStreamEvent } from '@renderer/lib/stream-reducer'
 import { useActiveModelSummary } from '@renderer/hooks/useActiveModelSummary'
 import { shouldFollowBottom } from '@renderer/lib/scroll-follow'
 import {
   attachmentKindFor,
   describeAttachment,
   isPromptEnhancementReasoningLabel,
-  isPromptEnhancementStatus,
-  isSupportingChatContext,
-  PROMPT_ENHANCEMENT_REASONING_LABEL,
-  preprocessChatMarkdown,
-  projectSyncedMessageTurn,
   type ChatStreamPreviewRow,
-  type ProjectedSyncedTool,
-  type RecordProvenance,
-  type SyncedMessageRole,
-  type SyncedTurnStatus
+  type ProjectedSyncedTool
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
-import ReactMarkdown, { Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkBreaks from 'remark-breaks'
 import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { callHook } from '@/bootstrap/hookRegistry'
 import { useRendererEntitlement } from '@/bootstrap/useRendererEntitlement'
@@ -41,12 +25,9 @@ import {
   SYNC_SUBSCRIBE_INCOMING_FILES_HOOK,
   type IncomingSharedFile
 } from '@renderer/lib/sync-hooks'
-import { ChatLoadingCard } from '../ChatLoadingCard'
-import { chatMarkdownComponents } from '../chat-markdown-components'
 import { ChatThinkingBlock } from '../ChatThinkingBlock'
 import { ChatToolRows } from '../ChatToolRows'
 import { ArtifactCanvas, parseArtifact, type Artifact } from '../ArtifactCanvas'
-import { VoiceBubble } from '../VoiceBubble'
 import { stopAllVoicePlayback } from '@renderer/lib/voice-playback-bus'
 import { ChatVoiceComposer, VoiceModeControl } from '../ChatVoiceComposer'
 import { ChatDraftInput, ChatDraftSendButton, type ChatDraftInputHandle } from '../ChatDraftInput'
@@ -58,10 +39,9 @@ import { ApprovalSetup, type ApprovalSetupRecord } from '../actions/ApprovalSetu
 import {
   REQUEST_FORM_URL,
   presetById,
-  presetForSkillName,
   type DemoPreset
 } from '../explore/presetCatalog'
-import { useChatVoiceTurns, type ChatVoicePhase } from '../use-chat-voice-turns'
+import { useChatVoiceTurns } from '../use-chat-voice-turns'
 import { SkillsPanel } from '../SkillsPanel'
 import { ModelPicker } from '../ModelPicker'
 import { SettingsPanel } from '../SettingsPanel'
@@ -84,27 +64,14 @@ import {
 import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-intent'
 import {
   buildAssistantContext,
-  readAssistantTimeline,
-  readReasoning,
-  readResponseCutoff,
-  readGenerationMetrics,
   type AssistantTimelineEntry
 } from '../../lib/message-persistence'
-import {
-  formatGenerationMetrics,
-  type GenerationMetrics
-} from '../../../../shared/generation-metrics'
-import {
-  readGeneratedImageReference,
-  withGeneratedImageReference
-} from '../../../../shared/generated-image-reference'
+import type { GenerationMetrics } from '../../../../shared/generation-metrics'
+import { withGeneratedImageReference } from '../../../../shared/generated-image-reference'
 import type {
   RagConversationContract,
   ResponseCutoffContract
 } from '../../../../shared/ipc-contracts'
-import type { SearchHit } from '../../types'
-import { navigateSearchHit } from '@renderer/lib/search-navigation'
-import { runningToolLabel } from '@renderer/lib/tool-display'
 import {
   parseImageMemoryGuardError,
   type ImageGenerationJobContract,
@@ -142,11 +109,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent
 } from '@renderer/components/ui/dropdown-menu'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger
-} from '@renderer/components/ui/collapsible'
 import { captureUrlForPath } from '../../../../shared/ogcapture-url'
 import {
   Plus,
@@ -154,28 +116,22 @@ import {
   Image as ImageIcon,
   Sparkle as Sparkles,
   FolderPlus,
-  Wrench,
   Robot,
   Plug,
   SlidersHorizontal,
   Brain,
   Cpu,
-  Pulse,
   Prohibit,
   Check,
   X,
   FolderOpen,
   CaretDown,
-  DotsThree,
-  PencilSimple,
-  Waveform,
   Lightning,
   WarningCircle
 } from '@phosphor-icons/react'
 
 import type { MemoryChatProps } from './interfaces'
 import type {
-  AskBlock,
   Attachment,
   ChatMessage,
   ChatMode,
@@ -185,17 +141,9 @@ import type {
   ImageGenerationMetadata,
   ImageProgress,
   MessageRowActions,
-  MessageRowProps,
-  MessageRowState,
-  OpenImage,
   ProjectLite,
-  RagEntity,
-  RagEntityFact,
   RagContext,
-  RagMemory,
-  RagSummary,
-  StoredAttachment,
-  StoredMessageAttachment
+  StoredAttachment
 } from './types'
 import {
   announceImageMessagePersisted,
@@ -207,58 +155,17 @@ import {
   mergeRemotePreviewTools
 } from './helper'
 import {
-  activityLabel,
-  assistantWorkIsSettled,
-  contextResultCount,
   findDurableWorkMessageId,
   generationErrorContent,
   IMAGE_MESSAGE_COLUMN_WIDTH,
   imageProgressLabel,
   isPromptEnhancementMessage,
-  isSupportingMessage,
   messageToSpeakable,
-  noticeText,
-  parseAsk,
   preferredImageModel,
   readActiveConversationId,
-  readOpenChatTabs,
-  renderedMessageContent,
-  selectedMessageContent,
-  standardMessageBubbleClass,
-  standardMessageRowClass
+  readOpenChatTabs
 } from './utlis'
-import { ChatImagePreview } from './components/ChatImagePreview'
-import { NoticeMessageRow } from './components/NoticeMessageRow'
-import { PromptEnhancementMessageRow } from './components/PromptEnhancementMessageRow'
 import { ToolMessageTimelineRow } from './components/ToolMessageTimelineRow'
-import { MessageThinkingHeader } from './components/MessageThinkingHeader'
-import { IncomingFileRows, MessageAttachments, MessageEditor } from './components/MessageContent'
-import {
-  GenerationMetricsRow,
-  ResponseCutoffNotice,
-  ToolsSentDisclosure
-} from './components/MessageMetadata'
-import { ArtifactCard, AskCard, ImageMemoryRetryAction } from './components/MessageCards'
-import {
-  CopyAction,
-  MessageActionsMenu,
-  RegenerateAction,
-  UserMessageActions,
-  VoiceMessageActions
-} from './components/MessageActions'
-import { MessageMarkdown } from './components/MessageMarkdown'
-import {
-  AssistantMessageActions,
-  MessageTime,
-  speechControlState,
-  type SpeechControlState
-} from './components/AssistantMessageActions'
-import {
-  ContextDisclosure,
-  hasInlineMemorySources,
-  openUnifiedContext,
-  UnifiedContextSection
-} from './components/MessageContext'
 import { AudioPane, DocumentPane } from './components/AttachmentPanes'
 import {
   ASK_EXAMPLES,
@@ -303,7 +210,7 @@ export function MemoryChat({
   onTargetConsumed,
   onActiveConversationChange,
   onTaskDetailModeChange
-}: MemoryChatProps) {
+}: MemoryChatProps): React.JSX.Element {
   const { isPro } = useRendererEntitlement()
   // Messages are kept PER CONVERSATION so a background tab keeps its own thread and
   // an in-flight stream can't leak into whatever tab you switch to. `messages` (below,
@@ -446,7 +353,7 @@ export function MemoryChat({
     let live = true
     const t = setTimeout(async () => {
       try {
-        const ids = (await window.api.searchRagConversationIds?.(q)) as string[] | undefined
+        const ids = (await window.api.searchRagConversationIds(q)) as string[] | undefined
         if (live) setContentMatchIds(new Set(ids ?? []))
       } catch {
         /* keep title-only matches */
@@ -918,7 +825,7 @@ export function MemoryChat({
   // into the composer. Falls back to a sensible default only when nothing is active.
   const refreshImageModel = useCallback(async () => {
     try {
-      const s = await window.api.imageGenStatus?.()
+      const s = await window.api.imageGenStatus()
       if (!s) return
       setImageAvailable(!!s.available)
       const rawModels: unknown = s.models
@@ -1002,11 +909,11 @@ export function MemoryChat({
     })()
     void refreshImageModel()
     window.api
-      .listProjects?.()
+      .listProjects()
       .then((p: ProjectLite[]) => setProjects(p))
       .catch(() => { })
     window.api
-      .styleThumbs?.()
+      .styleThumbs()
       .then((t: Record<string, string>) => setStyleThumbs(t))
       .catch(() => { })
   }, [])
@@ -1037,7 +944,7 @@ export function MemoryChat({
     // silent reject would let the composer and Active-models panel diverge again
     // (the exact drift this binding prevents), with no signal.
     void window.api
-      .setActiveModalModel?.('image', value)
+      .setActiveModalModel('image', value)
       .catch((e) => console.error('[image] failed to persist active model', e))
   }, [])
   // Steps/size edits persist as a per-model override so they survive a remount and
@@ -1077,7 +984,7 @@ export function MemoryChat({
 
   const loadProjects = useCallback(async () => {
     try {
-      setProjects((await window.api.listProjects?.()) || [])
+      setProjects((await window.api.listProjects()) || [])
     } catch (e) {
       console.error(e)
     }
@@ -1110,7 +1017,7 @@ export function MemoryChat({
         return
       }
       try {
-        const id = await window.api.createProject?.({ name })
+        const id = await window.api.createProject({ name })
         await loadProjects()
         if (id) await assignProject(id)
       } catch (e) {
@@ -1179,20 +1086,20 @@ export function MemoryChat({
       setImgProgress(null)
       markGenerating(job.conversationId, false)
     }
-    const offJob = window.api.onImageGenJobState?.(observe)
-    const offConversation = window.api.onImageGenConversationUpdated?.((conversationId) => {
+    const offJob = window.api.onImageGenJobState(observe)
+    const offConversation = window.api.onImageGenConversationUpdated((conversationId) => {
       void refreshConversationMessages(conversationId).catch((error) =>
         console.error('Failed to refresh generated image message', error)
       )
     })
     void window.api
-      .imageGenJobStatus?.()
+      .imageGenJobStatus()
       .then(observe)
       .catch((error) => console.error('Failed to reattach image generation', error))
     return () => {
       live = false
-      offJob?.()
-      offConversation?.()
+      offJob()
+      offConversation()
     }
   }, [refreshConversationMessages, markGenerating])
 
@@ -1338,7 +1245,7 @@ export function MemoryChat({
     console.log('MemoryChat effect: task guidance subscription')
     const onTaskGuidanceMessage = (event: Event): void => {
       const conversationId = (event as CustomEvent<{ conversationId?: string }>).detail
-        ?.conversationId
+        .conversationId
       if (!conversationId) return
       void (async () => {
         if (conversationId === activeConversationId) {
@@ -1403,7 +1310,7 @@ export function MemoryChat({
   useEffect(() => {
     console.log('MemoryChat effect: approval intake subscription')
     const openApprovalIntake = (event: Event): void => {
-      const approvalId = (event as CustomEvent<{ approvalId?: number }>).detail?.approvalId
+      const approvalId = (event as CustomEvent<{ approvalId?: number }>).detail.approvalId
       if (!approvalId) return
       void window.api
         .proInvoke?.('approvals:list')
@@ -1470,7 +1377,7 @@ export function MemoryChat({
       /** Captured when a queued turn was submitted; Assistant never persists between turns. */
       assistantEnabled?: boolean
     }
-  ) => {
+  ): Promise<void> => {
     const isInput = override === undefined || opts?.asUserInput === true
     // Regenerate/Resend: the user turn already exists in the thread — re-run it
     // in place instead of echoing another user bubble.
@@ -1507,7 +1414,7 @@ export function MemoryChat({
     // A live operator task owns this journey until it finishes. New Chat input is
     // guidance for that task, not a second memory/model turn running beside it.
     if (!regen && targetConv && !opts?.imageRequest) {
-      const listedTasks = await window.api.tasks?.list?.(50)
+      const listedTasks = await window.api.tasks?.list(50)
       const liveTask = guidanceTaskForJourney(
         listedTasks ?? getTaskSessionState().tasks,
         targetConv
@@ -1977,7 +1884,6 @@ export function MemoryChat({
         // on one row would make the last context write replace the first association.
         if (
           imageRequests.length > 0 &&
-          window.api.generateImage &&
           !cancelledRef.current.has(convId)
         ) {
           // The tool loop has finished its text answer and handed ownership to the
@@ -2203,7 +2109,7 @@ export function MemoryChat({
       // The model decided this is an image request — replace the streamed turn
       // with on-device generation.
       const imgMatch = assistantContent.match(/```image\s*\n([\s\S]*?)```/i)
-      if (imgMatch && window.api.generateImage) {
+      if (imgMatch) {
         const imgPrompt = imgMatch[1]!.trim()
         setConvMessages(convId, (prev) =>
           prev.map((m) =>
@@ -2688,7 +2594,7 @@ export function MemoryChat({
           ? { projectId: activeProjectId }
           : undefined
     try {
-      setGallery((await window.api.listGeneratedImages?.(scope)) || [])
+      setGallery((await window.api.listGeneratedImages(scope)) || [])
     } catch (e) {
       console.error(e)
     }
@@ -2760,7 +2666,7 @@ export function MemoryChat({
   const downloadImage = useCallback(async (path?: string, name?: string) => {
     if (!path) return
     try {
-      await window.api.exportGeneratedImage?.(path, name || 'off-grid-image.png')
+      await window.api.exportGeneratedImage(path, name || 'off-grid-image.png')
     } catch (e) {
       console.error(e)
     }
@@ -2769,7 +2675,7 @@ export function MemoryChat({
   const deleteImage = useCallback(async (path?: string) => {
     if (!path) return
     try {
-      await window.api.deleteGeneratedImage?.(path)
+      await window.api.deleteGeneratedImage(path)
       setMessages((prev) =>
         prev.map((m) =>
           m.imagePath === path
@@ -4087,7 +3993,7 @@ export function MemoryChat({
                           ) : (
                             <button
                               onClick={async () => {
-                                const p = await window.api.pickImageForGen?.()
+                                const p = await window.api.pickImageForGen()
                                 if (p) setImgInit(p)
                               }}
                               className="rounded-md border border-neutral-800 px-2 py-1 text-neutral-400 transition-colors hover:border-green-500 hover:text-green-500"

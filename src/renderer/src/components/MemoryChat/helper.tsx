@@ -21,7 +21,7 @@ import type {
   RawRagMessage,
   StoredAttachment
 } from './types'
-import { isPromptEnhancementMessage, noticeText } from './utlis'
+import { noticeText } from './utlis'
 import type { TaskSession } from '@renderer/lib/task-session-store'
 
 export function completedImageMessage(
@@ -46,7 +46,7 @@ export async function announceImageMessagePersisted(
   messageId: string
 ): Promise<void> {
   try {
-    await window.api.imageGenConversationPersisted?.(conversationId, messageId)
+    await window.api.imageGenConversationPersisted(conversationId, messageId)
   } catch {
     /* The message is already durable; a later mount still loads it from SQLite. */
   }
