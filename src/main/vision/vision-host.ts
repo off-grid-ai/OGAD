@@ -37,7 +37,6 @@ import {
   waitForVisionUser
 } from './vision-controller'
 import { hideSupervisorWindow, showSupervisorWindow } from './supervisor-window'
-import { getMainWindow } from '../main-window'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
 import { checkAccessibilityPermission, checkScreenRecordingPermission } from '../permissions'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
@@ -375,10 +374,7 @@ class VisionHost {
     const releaseSession = ownsControls
       ? registerVisionSession(taskId, guard, request)
       : () => undefined
-    const mainWindow = ownsControls ? getMainWindow() : null
-    const restoreMainWindow = Boolean(mainWindow?.isVisible())
     if (ownsControls) showSupervisorWindow()
-    if (restoreMainWindow) mainWindow?.hide()
     // The only run-level notice is an unavailable emergency shortcut. Model
     // selection guidance belongs in settings, not in a live task.
     const notice = [
@@ -549,10 +545,6 @@ class VisionHost {
       releaseSession()
       if (ownsControls) {
         hideSupervisorWindow()
-        if (restoreMainWindow && mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show()
-          mainWindow.focus()
-        }
       }
     }
   }
