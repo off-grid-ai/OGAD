@@ -107,6 +107,14 @@ import {
   type ImageGenerationRequestContract
 } from '../../../shared/image-generation-contract'
 import { Button } from '@renderer/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@renderer/components/ui/dialog'
 import { ActionGateDock } from '@renderer/components/actions/ActionGateDock'
 import { TaskPanelTrigger } from '@renderer/components/tasks/TaskPanelTrigger'
 import { useTaskWorkspaceOpen } from '@renderer/lib/task-side-panel'
@@ -3413,6 +3421,7 @@ export function MemoryChat({
   const [, setProjectMenuOpen] = useState(false)
   const [projCreating, setProjCreating] = useState(false)
   const [toolsOn, setToolsOn] = useState(false)
+  const [assistantGateOpen, setAssistantGateOpen] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [voiceMode, setVoiceMode] = useState(DEFAULT_VOICE_PREFERENCES.voiceMode)
@@ -7988,6 +7997,26 @@ export function MemoryChat({
           </SidePanel>
         )}
       </AnimatePresence>
+      <Dialog open={assistantGateOpen} onOpenChange={setAssistantGateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assistant requires Pro</DialogTitle>
+            <DialogDescription>
+              Assistant uses Web Use and Computer Use on this Desktop.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setAssistantGateOpen(false)
+                onOpenAssistantUpgrade?.()
+              }}
+            >
+              View Pro
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
     </ActiveConversationProvider>
   )
