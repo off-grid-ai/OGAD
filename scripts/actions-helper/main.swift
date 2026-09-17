@@ -209,6 +209,7 @@ func searchContacts(_ args: [String: Any]) -> Never {
     if !access.granted { fail(access.error ?? "contacts access was not granted") }
 
     let keys: [CNKeyDescriptor] = [
+        CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
         CNContactGivenNameKey as CNKeyDescriptor,
         CNContactFamilyNameKey as CNKeyDescriptor,
         CNContactPhoneNumbersKey as CNKeyDescriptor,
