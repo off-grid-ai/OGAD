@@ -279,7 +279,30 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                     <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
                       {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
                     </span>
-                    <span className="block truncate text-neutral-200">{model.modelName}</span>
+                    {model.role === 'grounding_specialist' ? (
+                      <SettingsSelect<string>
+                        id="active-web-use-model"
+                        label="Active Web Use grounding model"
+                        value={model.modelId}
+                        disabled={busy !== null}
+                        onValueChange={(modelId) => void chooseComputerUse(modelId)}
+                        options={[
+                          ...models
+                            .filter(
+                              (candidate) =>
+                                installed.includes(candidate.id) &&
+                                candidate.availability !== 'coming_soon' &&
+                                (candidate.kind === 'computer_use' || candidate.grounder === true)
+                            )
+                            .map((candidate) => ({ value: candidate.id, label: candidate.name })),
+                          ...(models.some((candidate) => candidate.id === model.modelId)
+                            ? []
+                            : [{ value: model.modelId, label: model.modelName }])
+                        ]}
+                      />
+                    ) : (
+                      <span className="block truncate text-neutral-200">{model.modelName}</span>
+                    )}
                   </span>
                   {model.remote ? (
                     <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
