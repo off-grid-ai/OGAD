@@ -31,7 +31,6 @@ export type UIMateActionName = (typeof UI_MATE_ACTIONS)[number] | 'subtask_compl
 export type UIMateControl = 'WAIT' | 'USER' | 'DONE' | 'FAIL'
 
 export const UI_MATE_GENERATION_CONFIG = {
-  maxTokens: 2_048,
   temperature: 1,
   topP: 0.95
 } as const

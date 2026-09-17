@@ -64,8 +64,6 @@ export const uiTarsAdapter: VisionModelAdapter = {
           ]
         }
       ],
-      maxTokens: 200,
-      timeoutMs: 60_000,
       maxAttempts: 1,
       disableThinking: true
     }

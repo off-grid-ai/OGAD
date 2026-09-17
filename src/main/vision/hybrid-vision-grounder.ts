@@ -481,8 +481,6 @@ function reasonerRequest(
         ]
       }
     ],
-    maxTokens: 900,
-    timeoutMs: 90_000,
     maxAttempts: 2,
     tools: input.semanticElements?.length
       ? [ACCESSIBILITY_CLICK_TOOL, ...HYBRID_REASONER_TOOLS]

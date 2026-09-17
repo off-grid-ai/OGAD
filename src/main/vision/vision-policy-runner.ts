@@ -135,13 +135,11 @@ export async function runVisionPolicyRequest(
               responseFormat: request.responseFormat,
               tools: request.tools,
               toolChoice: request.toolChoice,
-              maxTokens: request.maxTokens,
               signal
-            },
-            request.timeoutMs
+            }
           )
         : {
-            content: await llm.chatMessages(messages, request.timeoutMs, request.maxTokens, {
+            content: await llm.chatMessages(messages, undefined, undefined, {
               temperature: request.temperature,
               topP: request.topP,
               responseFormat: request.responseFormat,

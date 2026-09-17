@@ -48,25 +48,21 @@ const PLAYWRIGHT_STEP_FORMAT = {
             'fallback'
           ]
         },
-        phase_id: { type: ['string', 'null'], maxLength: 80 },
-        element: { type: ['string', 'null'], maxLength: 160 },
-        ref: { type: ['string', 'null'], maxLength: 80 },
-        text: { type: ['string', 'null'], maxLength: 1_000 },
-        key: { type: ['string', 'null'], maxLength: 40 },
-        values: {
-          type: ['array', 'null'],
-          maxItems: 20,
-          items: { type: 'string', maxLength: 160 }
-        },
-        start_element: { type: ['string', 'null'], maxLength: 160 },
-        start_ref: { type: ['string', 'null'], maxLength: 80 },
-        end_element: { type: ['string', 'null'], maxLength: 160 },
-        end_ref: { type: ['string', 'null'], maxLength: 80 },
-        url: { type: ['string', 'null'], maxLength: 2_048 },
-        evidence_ref: { type: ['string', 'null'], maxLength: 80 },
-        evidence_text: { type: ['string', 'null'], maxLength: 500 },
-        reason: { type: 'string', maxLength: 160 },
-        summary: { type: 'string', maxLength: 240 }
+        phase_id: { type: ['string', 'null'] },
+        element: { type: ['string', 'null'] },
+        ref: { type: ['string', 'null'] },
+        text: { type: ['string', 'null'] },
+        key: { type: ['string', 'null'] },
+        values: { type: ['array', 'null'], items: { type: 'string' } },
+        start_element: { type: ['string', 'null'] },
+        start_ref: { type: ['string', 'null'] },
+        end_element: { type: ['string', 'null'] },
+        end_ref: { type: ['string', 'null'] },
+        url: { type: ['string', 'null'] },
+        evidence_ref: { type: ['string', 'null'] },
+        evidence_text: { type: ['string', 'null'] },
+        reason: { type: 'string' },
+        summary: { type: 'string' }
       }
     }
   }
@@ -142,7 +138,7 @@ Rules:
 <untrusted_page_snapshot>
 ${boundedSnapshot(request.snapshot)}
 </untrusted_page_snapshot>`
-  const raw = await llm.chat(prompt, [], 60_000, 420, {
+  const raw = await llm.chat(prompt, [], undefined, undefined, {
     disableThinking: true,
     temperature: 0.1,
     responseFormat: PLAYWRIGHT_STEP_FORMAT,

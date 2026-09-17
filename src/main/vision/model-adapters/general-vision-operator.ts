@@ -66,8 +66,6 @@ export function buildCanonicalVisionOperatorRequest(
         ]
       }
     ],
-    maxTokens: 1_200,
-    timeoutMs: 90_000,
     maxAttempts: 2,
     tools: [...GENERAL_VISION_TOOLS],
     toolChoice: 'required',

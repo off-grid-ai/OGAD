@@ -66,8 +66,6 @@ export interface VisionPolicyResponse {
 
 export interface VisionPolicyRequest {
   messages: VisionPolicyMessage[]
-  maxTokens: number
-  timeoutMs: number
   maxAttempts: number
   /** Optional structured-output grammar for specialist text protocols. */
   responseFormat?: unknown

@@ -219,8 +219,6 @@ export const uiMateAdapter: VisionModelAdapter = {
         currentScreenshotDataUrl: input.currentScreenshotDataUrl,
         history: input.history
       }),
-      maxTokens: UI_MATE_GENERATION_CONFIG.maxTokens,
-      timeoutMs: 130_000,
       maxAttempts: 2,
       temperature: UI_MATE_GENERATION_CONFIG.temperature,
       topP: UI_MATE_GENERATION_CONFIG.topP
