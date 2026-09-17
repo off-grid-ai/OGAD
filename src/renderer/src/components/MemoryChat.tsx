@@ -3098,6 +3098,7 @@ export function MemoryChat({
   onSeekReplay,
   onOpenSkillPreset,
   onOpenConnectors,
+  onOpenAssistantUpgrade,
   openTarget,
   onTargetConsumed,
   onActiveConversationChange,
@@ -7459,7 +7460,7 @@ export function MemoryChat({
                                 aria-pressed={toolsOn}
                                 onClick={() => {
                                   if (!isPro) {
-                                    setAssistantGateOpen(true)
+                                    onOpenAssistantUpgrade?.()
                                     return
                                   }
                                   setToolsOn((current) => !current)

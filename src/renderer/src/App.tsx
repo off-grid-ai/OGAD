@@ -1335,6 +1335,7 @@ function AppContent() {
                         }}
                         onOpenSkillPreset={handleOpenSkillPreset}
                         onOpenConnectors={() => navigateTo('connectors')}
+                        onOpenAssistantUpgrade={() => navigateTo('tasks')}
                         openTarget={chatTarget}
                         onTargetConsumed={() => setChatTarget(null)}
                         onTaskDetailModeChange={setTaskDetailSidebarMode}
