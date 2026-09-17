@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { desktopCapturer } from 'electron'
+import { BrowserWindow, desktopCapturer } from 'electron'
 import sharp from 'sharp'
 import { binRoots, exe } from '../runtime-env'
 import { existing } from '../transcription/bin-resolution'
@@ -30,12 +30,24 @@ function captureBinary(): string | null {
   return existing(binRoots().map((root) => path.join(root, exe('computer-use-capture'))))
 }
 
+function captureWindowId(sourceId: string): number | null {
+  const match = /^window:(\d+):/.exec(sourceId)
+  if (!match) return null
+  const value = Number(match[1])
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+
 async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDisplayCapture> {
   const binary = captureBinary()
   if (!binary) throw new Error('Computer Use screen-capture helper is not installed.')
-  const excludedWindowId = ensureSupervisorCaptureWindowId()
-  if (!excludedWindowId) {
+  const supervisorWindowId = ensureSupervisorCaptureWindowId()
+  if (!supervisorWindowId) {
     throw new Error('Computer Use cannot identify its supervisor window for safe screen capture.')
+  }
+  const excludedWindowIds = new Set<number>([supervisorWindowId])
+  for (const window of BrowserWindow.getAllWindows()) {
+    const windowId = captureWindowId(window.getMediaSourceId())
+    if (windowId) excludedWindowIds.add(windowId)
   }
   const output = path.join(
     os.tmpdir(),
@@ -47,7 +59,7 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
       [
         output,
         String(input.displayId),
-        String(excludedWindowId),
+        [...excludedWindowIds].join(','),
         String(input.width),
         String(input.height)
       ],
