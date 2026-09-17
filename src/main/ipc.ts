@@ -1798,9 +1798,9 @@ export function setupIPC() {
     import('./setup').then((m) => m.estimateModelFit(modelId))
   )
 
-  // Open an https link in the user's default browser (e.g. a model's HF page).
+  // Open a safe web link or email draft in the user's default app.
   ipcMain.handle('app:open-external', async (_e, url: string) => {
-    if (!/^https:\/\//.test(url)) return { success: false }
+    if (!/^(https:\/\/|mailto:)/i.test(url)) return { success: false }
     const { shell } = await import('electron')
     await shell.openExternal(url)
     return { success: true }
