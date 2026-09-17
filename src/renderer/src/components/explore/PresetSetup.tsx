@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ArrowLeft, CheckCircle, FolderOpen, PlugsConnected, Sparkle } from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
+import { LoadingDots } from '@/components/ui/loading-dots'
 import type { DemoPreset, PresetIntakeField } from './presetCatalog'
 import { buildPresetPrompt, hasRequiredPresetAnswers, initialPresetAnswers } from './presetPrompt'
 
@@ -72,7 +73,13 @@ function IntakeField({
               title="Enhance with local AI"
               className="absolute bottom-2 right-2 text-muted-foreground hover:text-primary disabled:cursor-wait"
             >
-              <Sparkle className={`h-3.5 w-3.5 ${enhancing ? 'animate-pulse text-primary' : ''}`} />
+              {enhancing ? (
+                <span role="status" aria-label="AI enhancement in progress">
+                  <LoadingDots size="small" className="px-0" />
+                </span>
+              ) : (
+                <Sparkle className="h-3.5 w-3.5" />
+              )}
             </Button>
           ) : null}
         </div>
@@ -182,7 +189,13 @@ function IntakeField({
             title="Enhance with local AI"
             className="absolute bottom-1.5 right-1.5 text-muted-foreground hover:text-primary disabled:cursor-wait"
           >
-            <Sparkle className={`h-3.5 w-3.5 ${enhancing ? 'animate-pulse text-primary' : ''}`} />
+            {enhancing ? (
+              <span role="status" aria-label="AI enhancement in progress">
+                <LoadingDots size="small" className="px-0" />
+              </span>
+            ) : (
+              <Sparkle className="h-3.5 w-3.5" />
+            )}
           </Button>
         </div>
       )
@@ -265,15 +278,15 @@ export function PresetSetup({
           : field.id === 'avoid'
             ? 'Write a concise comma-separated list of low-signal topics, formats, or source traits to exclude. Do not invent named creators.'
             : `Rewrite the value so it is clear, specific, concise, and suitable for "${field.label}". Follow this field guidance: ${field.help}`
-    const prompt = `Improve one field in an Assistant workflow.
+    const prompt = `Edit this short form answer for clarity.
 
-Field: ${field.label}
-Current value: ${currentValue || '(empty)'}
-Other approved settings:
+Form question: ${field.label}
+Answer to edit: ${currentValue || '(empty)'}
+Other form answers for context:
 ${context || '(none)'}
 
 ${format}
-Preserve the user's intent. Do not invent missing facts or add actions, permissions, platforms, creators, hashtags, or commentary. Keep the result under 240 characters. Return only the replacement field value.`
+Preserve the original meaning. Do not invent missing facts. Keep the result under 240 characters. Return only the edited answer.`
     try {
       const result = await window.api.ragChat(
         prompt,
@@ -292,7 +305,17 @@ Preserve the user's intent. Do not invent missing facts or add actions, permissi
         .replace(/^['"]|['"]$/g, '')
         .trim()
         .slice(0, 240)
-      if (enhanced) setAnswers((current) => ({ ...current, [field.id]: enhanced }))
+      const refused =
+        /^(?:i\s+(?:cannot|can't|won't)|unable to|sorry[,\s]|i'm sorry)/i.test(enhanced) ||
+        /(?:safety guidelines|system prompt|cannot comply)/i.test(enhanced)
+      if (refused) {
+        setEnhancementError({
+          fieldId: field.id,
+          message: 'AI enhancement did not return an edited value. Your original text is unchanged.'
+        })
+      } else if (enhanced) {
+        setAnswers((current) => ({ ...current, [field.id]: enhanced }))
+      }
     } catch {
       setEnhancementError({
         fieldId: field.id,
