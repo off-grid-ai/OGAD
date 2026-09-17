@@ -448,6 +448,8 @@ interface MemoryChatProps {
   readonly onOpenSkillPreset?: (preset: DemoPreset) => void
   /** Open connector settings from an Explore intake recommendation. */
   readonly onOpenConnectors?: () => void
+  /** Open the Pro journey when a free user selects Assistant. */
+  readonly onOpenAssistantUpgrade?: () => void
   /** Open a specific conversation, or start a new one scoped to a project. */
   readonly openTarget?: Readonly<{
     conversationId?: string
@@ -3432,13 +3434,12 @@ export function MemoryChat({
     }
   }, [voiceMode])
 
-  // Composer preferences persist across sessions (memory scope, thinking, tools,
-  // voice mode). Main owns the durable values. This snapshot distinguishes hydration
+  // Composer preferences persist across sessions (memory scope, thinking, connectors,
+  // voice mode). Assistant is deliberately per turn and is not in this snapshot. Main owns the durable values. This snapshot distinguishes hydration
   // and settings invalidations from a real UI edit, so opening Chat never writes the
   // values it just read back through IPC.
   const persistedPreferenceValues = useRef<Record<string, unknown>>({
     composerNoMemory: noMemory,
-    composerToolsOn: toolsOn,
     composerConnectorsOn: connectorsOn,
     composerThinking: thinkingEnabled,
     composerVoiceMode: voiceMode,
@@ -3464,8 +3465,6 @@ export function MemoryChat({
             typeof s.composerNoMemory === 'boolean'
               ? s.composerNoMemory
               : previous.composerNoMemory,
-          composerToolsOn:
-            typeof s.composerToolsOn === 'boolean' ? s.composerToolsOn : previous.composerToolsOn,
           composerConnectorsOn:
             typeof s.composerConnectorsOn === 'boolean'
               ? s.composerConnectorsOn
@@ -3489,7 +3488,6 @@ export function MemoryChat({
               : previous.imageParams
         })
         if (typeof s.composerNoMemory === 'boolean') setNoMemory(s.composerNoMemory)
-        if (typeof s.composerToolsOn === 'boolean') setToolsOn(s.composerToolsOn)
         if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
         if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
         setShowGenerationDetails(s.showGenerationDetails === true)
@@ -3520,9 +3518,6 @@ export function MemoryChat({
   useEffect(() => {
     persistChangedPreference('composerNoMemory', noMemory)
   }, [noMemory, persistChangedPreference])
-  useEffect(() => {
-    persistChangedPreference('composerToolsOn', toolsOn)
-  }, [persistChangedPreference, toolsOn])
   useEffect(() => {
     persistChangedPreference('composerConnectorsOn', connectorsOn)
   }, [connectorsOn, persistChangedPreference])
@@ -4257,12 +4252,16 @@ export function MemoryChat({
       projectIdOverride?: string | null
       /** A form submission is user input even though its text is supplied as an argument. */
       asUserInput?: boolean
+      /** Captured when a queued turn was submitted; Assistant never persists between turns. */
+      assistantEnabled?: boolean
     }
   ) => {
     const isInput = override === undefined || opts?.asUserInput === true
     // Regenerate/Resend: the user turn already exists in the thread — re-run it
     // in place instead of echoing another user bubble.
     const regen = opts?.regen ?? false
+    const assistantForTurn = opts?.assistantEnabled ?? toolsOn
+    if (!regen && opts?.assistantEnabled === undefined) setToolsOn(false)
     // Lock the project for THIS send at send-time, like convId — every attribution
     // below (RAG scope, saved artifacts, generated images) uses it. Reading the live
     // `activeProjectId` at each await instead let a mid-stream project switch land
@@ -4328,7 +4327,7 @@ export function MemoryChat({
       }
     }
     if (shouldQueue(targetConv, generatingRef.current)) {
-      const item = { text: typed, atts }
+      const item = { text: typed, atts, assistantEnabled: assistantForTurn }
       queuedRef.current = enqueue(queuedRef.current, targetConv as string, item)
       setQueuedByConv({ ...queuedRef.current })
       if (isInput) {
@@ -4496,7 +4495,7 @@ export function MemoryChat({
     // Agentic tools run everywhere the user turns them on — including project chats.
     // (Projects used to force the RAG-only path, which silently ignored Tools/Connectors
     // and left the model to hallucinate "searches" instead of calling web_search etc.)
-    const agenticActive = isAgenticTurn({ toolsOn, connectorsOn })
+    const agenticActive = isAgenticTurn({ toolsOn: assistantForTurn, connectorsOn })
     const autoImage = shouldAutoRouteImage({ mode, imageAvailable, agenticActive, text: trimmed })
     if (opts?.imageRequest || mode === 'image' || autoImage) {
       setImgProgress(null)
@@ -5198,7 +5197,11 @@ export function MemoryChat({
     setQueuedByConv({ ...next })
     if (item === undefined) return
     setTimeout(() => {
-      void sendMessage(item.text || ' ', { atts: item.atts, conversationId: convId })
+      void sendMessage(item.text || ' ', {
+        atts: item.atts,
+        conversationId: convId,
+        assistantEnabled: item.assistantEnabled
+      })
     }, 30)
   }
 
