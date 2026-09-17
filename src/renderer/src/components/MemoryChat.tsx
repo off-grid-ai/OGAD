@@ -3670,9 +3670,11 @@ export function MemoryChat({
   }, [])
   // Queued sends carry their attachments too, so a message waiting behind an in-flight
   // generation keeps its image/files when it finally runs — keyed per conversation.
-  const queuedRef = useRef<Record<string, { text: string; atts: Attachment[] }[]>>({})
+  const queuedRef = useRef<
+    Record<string, { text: string; atts: Attachment[]; assistantEnabled?: boolean }[]>
+  >({})
   const [queuedByConv, setQueuedByConv] = useState<
-    Record<string, { text: string; atts: Attachment[] }[]>
+    Record<string, { text: string; atts: Attachment[]; assistantEnabled?: boolean }[]>
   >({})
   // Map streamId → convId so the onRagStream handler can route tokens to the right
   // conversation regardless of which tab is active when the event fires.
@@ -7455,7 +7457,13 @@ export function MemoryChat({
                                 variant="outline"
                                 size="sm"
                                 aria-pressed={toolsOn}
-                                onClick={() => setToolsOn((current) => !current)}
+                                onClick={() => {
+                                  if (!isPro) {
+                                    setAssistantGateOpen(true)
+                                    return
+                                  }
+                                  setToolsOn((current) => !current)
+                                }}
                                 className={`h-8 gap-1.5 rounded-md ${toolsOn ? 'border-primary text-primary' : 'text-muted-foreground'}`}
                               >
                                 <Wrench className="h-3.5 w-3.5" /> Assistant
