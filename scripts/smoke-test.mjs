@@ -47,10 +47,15 @@ const smoke = {
   },
   async navigate(label, expectedContent) {
     try {
-      await win.getByRole('button', { name: label, exact: false }).first().click({ timeout: 5000 })
-      await smoke.wait(1400)
-      return expectedContent.test(await smoke.pageText())
-    } catch {
+      const navigation = win.getByRole('navigation', { name: 'Primary navigation' })
+      const destination = navigation.getByRole('button', { name: label, exact: true })
+      await destination.focus({ timeout: 5000 })
+      await destination.press('Enter')
+      await win.getByText(expectedContent).first().waitFor({ state: 'visible', timeout: 15000 })
+      return true
+    } catch (error) {
+      console.error(`  navigation to ${label} failed: ${error.message}`)
+      console.error((await smoke.pageText()).slice(0, 4000))
       return false
     }
   }
