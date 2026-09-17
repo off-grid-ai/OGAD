@@ -22,16 +22,22 @@ import sharp from 'sharp'
 import { globalShortcut, screen } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
-import { type VisionScreen, type VisionTaskResult } from './vision-agent'
+import {
+  type VisionScreen,
+  type VisionSemanticElement,
+  type VisionTaskResult
+} from './vision-agent'
 import { VisionGuard } from './vision-guard'
 import {
+  controlVisionTask,
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
   stopVisionTask,
   waitForVisionUser
 } from './vision-controller'
-import { hideSupervisorWindow } from './supervisor-window'
+import { hideSupervisorWindow, showSupervisorWindow } from './supervisor-window'
+import { getMainWindow } from '../main-window'
 import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
 import { checkAccessibilityPermission, checkScreenRecordingPermission } from '../permissions'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
@@ -65,6 +71,7 @@ import type { VisionTaskModelSession } from './vision-task-model-strategy'
 import { computerUsePermissionBlock } from './computer-use-permissions'
 import { runVisionTaskGraph } from './vision-task-graph'
 import { captureComputerUseDisplay } from './computer-use-display-capture'
+import { snapshotAccessibilityApp } from '../accessibility/ax-host'
 
 export type { ActuationPort }
 
@@ -81,8 +88,10 @@ function makeScreen(input: {
   goal: string
   settings: ComputerUseSettings
   screenshotResizeFactor?: number
+  targetLabel?: string
 }): VisionScreen {
-  const { actuation, taskId, journeyId, goal, settings, screenshotResizeFactor } = input
+  const { actuation, taskId, journeyId, goal, settings, screenshotResizeFactor, targetLabel } =
+    input
   // The display the last screenshot was taken from. Its scaleFactor + origin move
   // the grounder's DIP coordinates into the actuation space (physical px on
   // Windows). capture() always runs before actuate() in the vision loop.
@@ -94,6 +103,9 @@ function makeScreen(input: {
       const point = screen.getCursorScreenPoint()
       const display = screen.getDisplayNearestPoint(point)
       const { width, height } = display.size
+      const semanticSnapshot = targetLabel ? await snapshotAccessibilityApp(targetLabel) : null
+      const exposeSemanticElements =
+        settings.modelStrategy === 'text_plus_specialist' && settings.enabledRails.includes('ax')
       const captureSize = {
         width: Math.max(1, Math.round(width * display.scaleFactor)),
         height: Math.max(1, Math.round(height * display.scaleFactor))
@@ -131,7 +143,7 @@ function makeScreen(input: {
               : await sharp(captured.png)
                   .resize({
                     ...target,
-                    kernel: SCREENSHOT_RESIZE_KERNEL[settings.screenshotQuality]
+                    kernel: SCREENSHOT_RESIZE_KERNEL.efficient
                   })
                   .png()
                   .toBuffer()
@@ -156,6 +168,35 @@ function makeScreen(input: {
         encodedSize,
         scale: Math.min(encodedSize.width / width, encodedSize.height / height)
       }
+      const semanticElements: VisionSemanticElement[] = (semanticSnapshot?.elements ?? [])
+        .filter((element) => element.enabled && (element.name || element.value))
+        .flatMap((element) => {
+          const globalPoint =
+            process.platform === 'win32'
+              ? screen.screenToDipPoint({ x: element.cx, y: element.cy })
+              : { x: element.cx, y: element.cy }
+          const localX = globalPoint.x - display.bounds.x
+          const localY = globalPoint.y - display.bounds.y
+          if (localX < 0 || localY < 0 || localX >= width || localY >= height) return []
+          return [
+            {
+              index: element.index,
+              role: element.role,
+              name: element.name,
+              value: element.value,
+              point: {
+                x: Math.min(
+                  encodedSize.width - 1,
+                  Math.round((localX * encodedSize.width) / width)
+                ),
+                y: Math.min(
+                  encodedSize.height - 1,
+                  Math.round((localY * encodedSize.height) / height)
+                )
+              }
+            }
+          ]
+        })
       captureNumber += 1
       const savedScreenshot = taskScreenshotPath(taskId, captureNumber)
       fs.writeFileSync(savedScreenshot, png)
@@ -172,7 +213,12 @@ function makeScreen(input: {
       return {
         image: savedScreenshot,
         bounds: encodedSize as Bounds,
-        metadata: { path: savedScreenshot, geometry: capturedGeometry }
+        metadata: {
+          path: savedScreenshot,
+          geometry: capturedGeometry,
+          ...(semanticElements.length ? { verificationSemanticElements: semanticElements } : {}),
+          ...(exposeSemanticElements && semanticElements.length ? { semanticElements } : {})
+        }
       }
     },
     async actuate(action: VisionAction) {
@@ -216,7 +262,8 @@ class VisionHost {
     taskId: string,
     journeyId = taskId,
     checkpoint?: TaskRetryCheckpoint,
-    continuation?: VisionTaskContinuation
+    continuation?: VisionTaskContinuation,
+    targetLabel?: string
   ): Promise<VisionTaskResult> {
     const actuation = loadActuation()
     if (!actuation) {
@@ -268,7 +315,8 @@ class VisionHost {
             decide,
             contextTokens,
             retrievedFacts,
-            continuation
+            continuation,
+            targetLabel
           })
         }
       )
@@ -297,6 +345,7 @@ class VisionHost {
     contextTokens: number
     retrievedFacts: string[]
     continuation?: VisionTaskContinuation
+    targetLabel?: string
   }): Promise<VisionTaskResult> {
     const {
       goal,
@@ -312,7 +361,8 @@ class VisionHost {
       decide,
       contextTokens,
       retrievedFacts,
-      continuation
+      continuation,
+      targetLabel
     } = input
     // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
     // Stop routes to the SAME guard via the controller session.
@@ -325,6 +375,10 @@ class VisionHost {
     const releaseSession = ownsControls
       ? registerVisionSession(taskId, guard, request)
       : () => undefined
+    const mainWindow = ownsControls ? getMainWindow() : null
+    const restoreMainWindow = Boolean(mainWindow?.isVisible())
+    if (ownsControls) showSupervisorWindow()
+    if (restoreMainWindow) mainWindow?.hide()
     // The only run-level notice is an unavailable emergency shortcut. Model
     // selection guidance belongs in settings, not in a live task.
     const notice = [
@@ -347,6 +401,7 @@ class VisionHost {
     const releaseGuidance = ownsControls
       ? registerTaskGuideHandler(taskId, (text) => {
           queuedGuidance.push(text)
+          controlVisionTask('resume', taskId)
           return true
         })
       : () => undefined
@@ -357,6 +412,7 @@ class VisionHost {
           {
             goal: retryPlanningGoal(goal, checkpoint),
             surface: 'computer',
+            targetLabel,
             signal: request.signal
           },
           (marker) => emitVisionStep(taskId, marker)
@@ -368,7 +424,8 @@ class VisionHost {
           journeyId,
           goal,
           settings,
-          screenshotResizeFactor: modelAdapter.screenshotResizeFactor
+          screenshotResizeFactor: modelAdapter.screenshotResizeFactor,
+          targetLabel
         }),
         guard,
         decide,
@@ -490,7 +547,13 @@ class VisionHost {
       releaseGuidance()
       if (ownsControls && escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
-      if (ownsControls) hideSupervisorWindow()
+      if (ownsControls) {
+        hideSupervisorWindow()
+        if (restoreMainWindow && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show()
+          mainWindow.focus()
+        }
+      }
     }
   }
 }

@@ -21,7 +21,8 @@ export interface VisionRailHost {
     taskId: string,
     journeyId: string,
     checkpoint?: TaskRetryCheckpoint,
-    continuation?: VisionTaskContinuation
+    continuation?: VisionTaskContinuation,
+    targetLabel?: string
   ): Promise<VisionTaskResult>
 }
 
@@ -43,16 +44,21 @@ export function makeVisionRailExecutor(
 ): (
   action: ActionRecord,
   checkpoint?: TaskRetryCheckpoint,
-  continuation?: VisionTaskContinuation
+  continuation?: VisionTaskContinuation,
+  targetLabel?: string
 ) => Promise<ExecuteResult> {
-  return async (action, checkpoint, continuation) => {
+  return async (action, checkpoint, continuation, targetLabel) => {
     const args = action.args as Record<string, unknown>
     const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
     const journeyId = action.sourceRef ?? action.id
-    const result =
-      checkpoint || continuation
-        ? await host.runTask(goal, action.id, journeyId, checkpoint, continuation)
-        : await host.runTask(goal, action.id, journeyId)
+    const result = await host.runTask(
+      goal,
+      action.id,
+      journeyId,
+      checkpoint,
+      continuation,
+      targetLabel
+    )
     if (!result.ok) {
       return { ok: false, detail: result.summary }
     }

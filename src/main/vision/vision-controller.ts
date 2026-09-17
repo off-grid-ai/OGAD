@@ -198,8 +198,11 @@ export class VisionController {
     if (!session) return false
     if (session.guard.isHalted) return true
     if (!session.guard.halt(reason)) return false
-    session.request.abort(reason)
+    // Persist the terminal projection before abort listeners can release this
+    // session. Otherwise the final in-flight model callback can leave the
+    // durable task row at its earlier running/thinking state.
     this.projectSession(taskId, currentAction)
+    session.request.abort(reason)
     return true
   }
 

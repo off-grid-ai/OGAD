@@ -23,7 +23,11 @@ import {
   type CdpTransport
 } from './browser-driver'
 import { VisionGuard } from '../vision/vision-guard'
-import { registerVisionSession, waitForVisionUser } from '../vision/vision-controller'
+import {
+  controlVisionTask,
+  registerVisionSession,
+  waitForVisionUser
+} from '../vision/vision-controller'
 import { getMainWindow } from '../main-window'
 import type { BrowserRailHost, BrowserTaskRequest, WebTaskResult } from './browser-rail'
 import {
@@ -741,6 +745,7 @@ class BrowserHost implements BrowserRailHost {
       if (!ownsRun()) return false
       queuedGuidance.push(text)
       recordStep(TASK_GUIDANCE_TRACE)
+      controlVisionTask('resume', taskId)
       return true
     })
 

@@ -1,4 +1,6 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
+import fs from 'node:fs/promises'
+import sharp from 'sharp'
 import {
   computerUseHistoryTokenBudget,
   tailWithinTokenBudget
@@ -18,6 +20,7 @@ import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { VisionAction } from './vision-action'
 import {
   RecoverableVisionError,
+  type VisionActionEffect,
   type VisionGroundingInput,
   type VisionGroundingResult,
   type VisionScreen,
@@ -57,6 +60,57 @@ interface CapturedStep {
   history: string[]
   promptContext: string
   currentMilestone?: string
+  evidence: ScreenEvidence
+}
+
+const MAX_CONSECUTIVE_RETHINKS = 3
+const VISUAL_FINGERPRINT_SIZE = 48
+const VISUAL_NOOP_MEAN_DELTA = 0.002
+
+interface ScreenEvidence {
+  visual?: Buffer
+  semantic?: string
+}
+
+async function screenEvidence(
+  shot: Awaited<ReturnType<VisionScreen['capture']>>
+): Promise<ScreenEvidence> {
+  let visual: Buffer | undefined
+  try {
+    const source = shot.image.startsWith('data:')
+      ? Buffer.from(shot.image.slice(shot.image.indexOf(',') + 1), 'base64')
+      : await fs.readFile(shot.image)
+    visual = await sharp(source)
+      .resize(VISUAL_FINGERPRINT_SIZE, VISUAL_FINGERPRINT_SIZE, { fit: 'fill' })
+      .greyscale()
+      .raw()
+      .toBuffer()
+  } catch {
+    // A missing comparison signal must remain unverifiable, never successful.
+  }
+  const elements = shot.metadata?.verificationSemanticElements ?? shot.metadata?.semanticElements
+  const semantic = elements
+    ? JSON.stringify(
+        elements
+          .map((element) => [element.role, element.name, element.value])
+          .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+      )
+    : undefined
+  return { visual, semantic }
+}
+
+function actionEffect(before: ScreenEvidence, after: ScreenEvidence): VisionActionEffect {
+  const semanticComparable = before.semantic !== undefined && after.semantic !== undefined
+  if (semanticComparable && before.semantic !== after.semantic) return 'confirmed'
+  if (!before.visual || !after.visual || before.visual.length !== after.visual.length) {
+    return 'unverifiable'
+  }
+  let delta = 0
+  for (let index = 0; index < before.visual.length; index += 1) {
+    delta += Math.abs(before.visual[index]! - after.visual[index]!)
+  }
+  const visuallyUnchanged = delta / (before.visual.length * 255) <= VISUAL_NOOP_MEAN_DELTA
+  return visuallyUnchanged && semanticComparable ? 'suspected_noop' : 'unverifiable'
 }
 
 /**
@@ -167,6 +221,14 @@ class VisionTaskGraphRuntime {
     coordinateFrame: ReturnType<typeof coordinateFrame>
   }
   private equivalentClickRecoveries = 0
+  private duplicateTypeRecoveries = 0
+  private consecutiveRethinks = 0
+  private consecutiveSuspectedNoops = 0
+  private previousActionEffect?: VisionActionEffect
+  private previousExpectedEffect?: string
+  private pendingActionEvidence?: ScreenEvidence
+  private pendingExpectedEffect?: string
+  private mustRethink = false
   private handoffs = 0
   private modelStep = 0
   /**
@@ -292,6 +354,24 @@ class VisionTaskGraphRuntime {
       .join('\n\n')
     try {
       const shot = await this.deps.screen.capture()
+      const evidence = await screenEvidence(shot)
+      if (this.pendingActionEvidence) {
+        this.previousActionEffect = actionEffect(this.pendingActionEvidence, evidence)
+        this.previousExpectedEffect = this.pendingExpectedEffect
+        this.note(`action effect: ${this.previousActionEffect}`)
+        this.pendingActionEvidence = undefined
+        this.pendingExpectedEffect = undefined
+        if (this.previousActionEffect === 'suspected_noop') {
+          this.consecutiveSuspectedNoops += 1
+          if (this.consecutiveSuspectedNoops >= 2) {
+            this.mustRethink = true
+            this.consecutiveSuspectedNoops = 0
+            this.note('two consecutive actions had no observable effect; forcing a rethink')
+          }
+        } else {
+          this.consecutiveSuspectedNoops = 0
+        }
+      }
       this.captured = {
         shot,
         startedAt,
@@ -299,7 +379,8 @@ class VisionTaskGraphRuntime {
         guidance,
         history,
         promptContext,
-        currentMilestone: currentPhase?.title
+        currentMilestone: currentPhase?.title,
+        evidence
       }
       if (!this.deps.guard.markObservationReady()) return { route: 'gate' }
       this.decision = undefined
@@ -331,6 +412,17 @@ class VisionTaskGraphRuntime {
   async decide(): Promise<{ route: WorkflowRoute }> {
     const captured = this.requireCaptured()
     this.progress('thinking', 'Reviewing direction, milestone, and next action')
+    if (this.mustRethink) {
+      this.mustRethink = false
+      this.decision = {
+        kind: 'rethink',
+        actionText: 'Reassess the current screen',
+        summary: 'Two consecutive actions produced no observable screen or Accessibility change.',
+        direction: 'off_course',
+        decisionRationale: 'The action-effect check requires a different strategy.'
+      }
+      return { route: 'handle_decision' }
+    }
     this.beginReasoning()
     try {
       const decisionStartedAt = this.now()
@@ -421,6 +513,27 @@ class VisionTaskGraphRuntime {
       return { route: 'end' }
     }
     if (decision.kind === 'actions') {
+      this.consecutiveRethinks = 0
+      const repeatedType = decision.actions.find((action) =>
+        isRepeatedTypeAction(action, this.previousVerifiedAction)
+      )
+      if (repeatedType) {
+        this.duplicateTypeRecoveries += 1
+        const summary = 'Repeated text input blocked because the same text was already typed.'
+        this.discardPendingPolicyHistory()
+        this.observeDecision('blocked', summary)
+        this.note(summary)
+        this.checkpoint()
+        if (this.duplicateTypeRecoveries > 1) {
+          const failure = 'Computer use repeated the same text without making progress.'
+          this.progress('failed', failure)
+          this.note(failure)
+          this.finish(false, failure)
+          return { route: 'end' }
+        }
+        this.progress('checking', 'Taking a fresh observation and choosing a different action')
+        return { route: 'gate' }
+      }
       const repeatedClick = decision.actions.find((action) =>
         isEquivalentClickTarget(
           action,
@@ -432,7 +545,7 @@ class VisionTaskGraphRuntime {
         this.equivalentClickRecoveries += 1
         const summary = `Repeated click region blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where the earlier attempt landed.`
         const recovery =
-          'Do not guess another Dock or taskbar icon from its color or position. If the target application is not visibly identified, use the operating system application launcher or search.'
+          'Do not guess another control from its appearance or position. Use a visibly identified control, or use the operating system launcher or search when the target application is not visible.'
         this.discardPendingPolicyHistory()
         this.observeDecision('blocked', summary)
         this.note(summary)
@@ -455,15 +568,25 @@ class VisionTaskGraphRuntime {
       return { route: 'execute' }
     }
     if (decision.kind === 'phase_complete') {
+      this.consecutiveRethinks = 0
       this.discardPendingPolicyHistory()
       this.observeDecision('terminal')
       this.checkpoint()
       return { route: 'advance' }
     }
     if (decision.kind === 'rethink') {
+      this.consecutiveRethinks += 1
       this.discardPendingPolicyHistory()
       this.observeDecision('blocked', decision.summary)
       this.note(`${decision.direction}: ${decision.summary}`)
+      if (this.consecutiveRethinks >= MAX_CONSECUTIVE_RETHINKS) {
+        const failure = `Computer use could not make progress after ${MAX_CONSECUTIVE_RETHINKS} fresh observations: ${decision.summary}`
+        this.progress('failed', 'The visual strategy did not make progress')
+        this.note(failure)
+        this.checkpoint()
+        this.finish(false, failure)
+        return { route: 'end' }
+      }
       this.progress('checking', 'Taking a fresh observation after rethinking the action')
       this.checkpoint()
       return { route: 'gate' }
@@ -572,6 +695,7 @@ class VisionTaskGraphRuntime {
           coordinateFrame: coordinateFrame(captured.shot)
         }
         this.equivalentClickRecoveries = 0
+        this.duplicateTypeRecoveries = 0
         if (actuation?.mappedAction) mappedActions.push(actuation.mappedAction)
       }
     } catch (error) {
@@ -628,7 +752,11 @@ class VisionTaskGraphRuntime {
     }
     if (!blocked && !this.deps.guard.isVerifying) this.deps.guard.beginVerification()
     if (blocked) this.discardPendingPolicyHistory()
-    else this.commitPendingPolicyHistory()
+    else {
+      this.pendingActionEvidence = captured.evidence
+      this.pendingExpectedEffect = decision.expectedEffect
+      this.commitPendingPolicyHistory()
+    }
     const blockedPhase: ComputerUsePhase = this.deps.guard.isHalted ? 'stopped' : 'paused'
     this.observe({
       phase: blocked ? blockedPhase : 'checking',
@@ -667,6 +795,9 @@ class VisionTaskGraphRuntime {
       guidance: captured.guidance,
       currentMilestone: captured.currentMilestone,
       verifiedActions: [...this.verifiedActions],
+      previousActionEffect: this.previousActionEffect,
+      previousExpectedEffect: this.previousExpectedEffect,
+      semanticElements: captured.shot.metadata?.semanticElements,
       previousVerifiedAction: this.previousVerifiedAction,
       coordinateFrame: coordinateFrame(captured.shot),
       signal: this.deps.signal,
@@ -785,6 +916,19 @@ class VisionTaskGraphRuntime {
       handoffs: this.handoffs
     }
   }
+}
+
+function isRepeatedTypeAction(
+  action: VisionAction,
+  previous:
+    | { action: VisionAction; coordinateFrame: ReturnType<typeof coordinateFrame> }
+    | undefined
+): boolean {
+  return (
+    action.type === 'type' &&
+    previous?.action.type === 'type' &&
+    action.content === previous.action.content
+  )
 }
 
 function coordinateFrame(shot: Awaited<ReturnType<VisionScreen['capture']>>): {

@@ -1,5 +1,6 @@
 import type { ContentPart } from '../../llm/chat-payload'
 import type { Bounds, VisionAction } from '../vision-action'
+import type { VisionActionEffect, VisionSemanticElement } from '../vision-agent'
 
 export interface VisionModelArtifacts {
   id: string
@@ -27,6 +28,12 @@ export interface VisionPolicyInput {
   currentMilestone?: string
   /** Actions that crossed the execution boundary without an error. */
   verifiedActions?: readonly string[]
+  /** Observable effect of the last action. This does not imply milestone completion. */
+  previousActionEffect?: VisionActionEffect
+  /** Visible state the reasoner expected the previous action to produce. */
+  previousExpectedEffect?: string
+  /** OS accessibility controls aligned to the current screenshot. */
+  semanticElements?: readonly VisionSemanticElement[]
   /** Marker drawn into the current screenshot at the previous click position.
    * This lets the visual judge verify where the last action landed. */
   previousClickMarker?: { x: number; y: number }
@@ -83,7 +90,12 @@ export interface VisionPolicyRequest {
 }
 
 export type VisionPolicyDecision = (
-  | { kind: 'actions'; actionText: string; actions: readonly VisionAction[] }
+  | {
+      kind: 'actions'
+      actionText: string
+      actions: readonly VisionAction[]
+      expectedEffect?: string
+    }
   | { kind: 'phase_complete'; actionText: string; summary: string }
   | { kind: 'wait'; actionText: string; durationMs: number }
   | { kind: 'done'; actionText: string; summary: string }

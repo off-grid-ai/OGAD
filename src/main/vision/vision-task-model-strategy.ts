@@ -108,7 +108,7 @@ export async function getComputerUseActiveModelProjection(
     models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
   }
   models.push(await projectedModel('grounding_specialist', specialistModelId, false, dependencies))
-  return { strategy, strategyLabel: 'Text + Specialist', models }
+  return { strategy, strategyLabel: 'Reasoning + Specialist', models }
 }
 
 function activeChatSelection(

@@ -16,12 +16,7 @@
  * coverage; the A/B run exercises it.
  */
 import { llm } from '../llm'
-import {
-  getActiveModel,
-  listInstalled,
-  loadComputerUseModel,
-  setActiveModel
-} from '../models-manager'
+import { getActiveModel, listInstalled, loadComputerUseModel } from '../models-manager'
 import { getActiveModal } from '../active-models'
 import { isGrounderActive } from './vision-model-notice'
 import { resolveGrounderPlan } from './grounder-plan'
@@ -70,11 +65,8 @@ async function loadGrounder(id: string): Promise<void> {
   await llm.restart()
 }
 
-async function restoreChatModel(previousId: string): Promise<void> {
-  const restored = await setActiveModel(previousId)
-  if (!restored.success) {
-    throw new Error(restored.error ?? 'The chat model could not be restored.')
-  }
+async function restoreChatModel(_previousId: string): Promise<void> {
+  llm.restoreSelectedModel()
   await llm.restart()
 }
 
@@ -149,7 +141,9 @@ export function createGrounderRunner(
 
     const grounderId = dependencies.selectedModelId()
     const active = dependencies.activeModel()
-    const alreadyGrounder = active?.id === grounderId && dependencies.isGrounder(active)
+    // An exact match proves this is the selected Computer Use package. Downloaded package IDs are
+    // opaque, so the catalog-name heuristic cannot identify them as grounders after they load.
+    const alreadyGrounder = active?.id === grounderId && active.vision
     const plan = resolveGrounderPlan(alreadyGrounder, await dependencies.installed(grounderId))
     if (plan === 'missing-grounder') {
       throw new Error(
@@ -170,14 +164,11 @@ export function createGrounderRunner(
         if (loadSelected) await dependencies.load(grounderId)
       },
       run: task,
-      // With no prior resident model there is nothing to restore: the callback
-      // no-ops and the selected specialist stays resident after the run. A remote
-      // reasoner does not need the prior local chat model either. Keep the local
-      // specialist resident between grounded actions and restore only the remote
-      // transport; otherwise every task step pays two multi-GB model reloads.
       restore: async () => {
-        if (loadSelected && previousLocalId && !previousRemote) {
-          await dependencies.restoreLocal(previousLocalId)
+        // A remote reasoner does not need the resident local Chat model. Keep the lazily loaded
+        // specialist resident so later delegated actions do not pay another model reload.
+        if (loadSelected && !previousRemote) {
+          await dependencies.restoreLocal(previousLocalId ?? '')
         }
         if (previousRemote) dependencies.restoreRemote(previousRemote)
       },
@@ -199,11 +190,20 @@ export async function withGrounder<T>(
   now: () => number = Date.now
 ): Promise<{ result: T; timing: GrounderTiming }> {
   const screenTask = currentRemoteScreenTaskSession()
-  if (!screenTask) return runWithProductionGrounder(task, now)
+  const remoteReasoner = screenTask?.activeServer
+  if (!screenTask || !remoteReasoner) return runWithProductionGrounder(task, now)
   // A remote Chat reasoner remains bound to the outer task session. The grounding specialist is
   // local, so its nested request must not inherit that remote transport or rewrite the saved active
   // server while the task swaps the resident local model.
+  const runWithRemoteGrounder = createGrounderRunner({
+    ...productionGrounderDependencies,
+    activeRemote: () => remoteReasoner,
+    // The nested task session already forces the specialist request local. Keep the saved remote
+    // selection untouched while still telling the lifecycle not to restore the old local model.
+    suspendRemote: () => undefined,
+    restoreRemote: () => undefined
+  })
   return runWithRemoteScreenTaskSession({ ...screenTask, activeServer: null }, () =>
-    runWithProductionGrounder(task, now)
+    runWithRemoteGrounder(task, now)
   )
 }

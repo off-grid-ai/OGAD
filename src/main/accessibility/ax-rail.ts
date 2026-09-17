@@ -1,6 +1,6 @@
 /**
- * The computer_use tiering (R5 T1e): try the cheapest rail that can actually
- * see the controls, and only pay for vision when it can't. Order is
+ * The computer_use routing boundary (R5 T1e): direct modes try the cheapest
+ * rail that can see the controls, then use vision when it cannot. Order is
  *
  *   accessibility (this rail, free, any chat model) -> vision (grounder, RAM).
  *
@@ -9,6 +9,10 @@
  * canvas) falls through to the vision executor untouched. An explicit give_up
  * stays terminal. Only repeated invalid action replies continue under vision,
  * with the same task and control owner so no GUI action is replayed.
+ *
+ * Reasoning + Specialist uses the vision graph as the single task owner and
+ * supplies AX/UIA controls as aligned observations instead of starting this
+ * separate AX loop.
  *
  * Pure and injected: the AX host (routing + run) and the vision executor are
  * passed in, so the tiering is unit-tested without a screen. The wiring in
@@ -43,7 +47,8 @@ export interface ComputerTaskTiers {
   visionExecute(
     action: ActionRecord,
     checkpoint?: TaskRetryCheckpoint,
-    continuation?: VisionTaskContinuation
+    continuation?: VisionTaskContinuation,
+    targetLabel?: string
   ): Promise<ExecuteResult>
 }
 
@@ -66,6 +71,8 @@ export interface ComputerTaskOptions {
   /** Pin the rail (A/B). Default 'auto' = tiered. */
   forcedRail?: ForcedRail
   enabledRails?: readonly ComputerUseRail[]
+  /** Let the vision graph own the task while it consumes aligned AX/UIA controls. */
+  preferVisionGraph?: boolean
   now?: () => number
 }
 
@@ -89,12 +96,16 @@ export function makeComputerTaskExecutor(
     const axEnabled = forceAx || (forced === 'auto' && isRailEnabled(enabledRails, 'ax'))
     const visionEnabled =
       forceVision || (forced === 'auto' && isRailEnabled(enabledRails, 'vision'))
-    // Vision-only skips the AX read entirely.
-    const routing = axEnabled ? await tiers.routingSnapshot(goal) : null
+    const preferVisionGraph = opts.preferVisionGraph === true && visionEnabled && !forceAx
+    // Resolve and activate a named native app before either control rail runs.
+    // Vision-only does not use the AX tree, but it still needs the verified app
+    // identity so planning cannot guess a web version of an installed app.
+    const routing = await tiers.routingSnapshot(goal)
     const viable = routing !== null && axRailViable(routing.snapshot)
     // AX-only drives whenever a target app resolved, even below the richness
     // threshold. With both rails enabled, AX still requires a viable tree.
-    const useAx = routing !== null && (!visionEnabled || forceAx || viable)
+    const useAx =
+      routing !== null && axEnabled && !preferVisionGraph && (!visionEnabled || forceAx || viable)
     console.log(
       `[computer-task] rail=${forced} goal="${goal}" routing=${
         routing ? `${routing.app}/${routing.snapshot.elements.length} elements` : 'none'
@@ -113,7 +124,7 @@ export function makeComputerTaskExecutor(
             ? {}
             : {
                 recoverWithVision: (checkpoint, continuation) =>
-                  tiers.visionExecute(action, checkpoint, continuation)
+                  tiers.visionExecute(action, checkpoint, continuation, routing.app)
               })
         }
       )
@@ -134,6 +145,6 @@ export function makeComputerTaskExecutor(
     // Dead-AX surface, no named app, or Vision-only: the grounder-vision rail. The
     // wiring wraps this with the on-demand grounder swap + its own timing.
     console.log('[computer-task] using the grounder-vision rail')
-    return tiers.visionExecute(action)
+    return tiers.visionExecute(action, undefined, undefined, routing?.app)
   }
 }

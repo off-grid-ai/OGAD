@@ -3,13 +3,13 @@
  * element loop plugs into. It resolves the target app, reads that app's
  * interactive elements through the shipped Swift helper (`text-extractor
  * --elements <app>`), and drives it with synthetic input - one step at a time,
- * the model picking elements by LABEL, so a normal chat model runs it with NO
- * grounder loaded.
+ * the model picking elements by LABEL. A vision-capable chat model also gets
+ * the captured frame that matches the AX list.
  *
- * This is the cheapest tier: the app publishes controls over Accessibility, so
- * there is no vision-model or per-pixel grounding. A display frame is still
- * recorded for user supervision and evidence. The router (ax-router) decides
- * whether the tree is rich enough; when it is not, the caller falls through to vision.
+ * This is the cheapest tier: the app publishes controls over Accessibility. A
+ * display frame is recorded for supervision and is sent with the AX list when
+ * the active chat model supports images. The router (ax-router) decides whether
+ * the tree is rich enough; when it is not, the caller falls through to vision.
  *
  * Native/Electron glue over the tested spine (parser, router, loop, target
  * picker), so it is excluded from in-process coverage; it is exercised on a
@@ -31,6 +31,7 @@ import {
 } from './ax-agent'
 import { VisionGuard } from '../vision/vision-guard'
 import {
+  controlVisionTask,
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
@@ -56,6 +57,8 @@ import { automationTaskReadStatus } from '@offgrid/automation'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
 import type { VisionTaskContinuation } from '../vision/vision-host'
 import type { ExecuteResult } from '@offgrid/use'
+import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
+import { remoteVisionModelId } from '../../shared/remote-vision-server'
 
 const execFileAsync = promisify(execFile)
 
@@ -85,6 +88,12 @@ const macAxBackend: AxBackend = {
  *  stays off and the caller falls to vision. */
 function axBackend(): AxBackend {
   return process.platform === 'win32' ? windowsAxBackend : macAxBackend
+}
+
+/** Capture one app's current AX/UIA controls for the unified vision graph. */
+export async function snapshotAccessibilityApp(app: string): Promise<AxSnapshot | null> {
+  const backend = axBackend()
+  return backend.available() ? backend.snapshot(app) : null
 }
 
 function nativeAppTargeter(): NativeAppTargeter | null {
@@ -176,7 +185,8 @@ export interface AxRouting {
 
 class AxRailHost {
   /** Resolve or launch the target app and read its elements for the router.
-   * Null means no verified application target or no accessible live window. */
+   * Null means no verified application target. An empty tree still preserves
+   * the verified native target for visual control. */
   async routingSnapshot(goal: string): Promise<AxRouting | null> {
     const backend = axBackend()
     if (!backend.available()) {
@@ -195,10 +205,7 @@ class AxRailHost {
     const ready = await targeter!.ensureReady(target)
     if (!ready) return null
     const app = ready.runningName
-    const snapshot = await backend.snapshot(app)
-    if (!snapshot) {
-      return null
-    }
+    const snapshot = (await backend.snapshot(app)) ?? { windowTitle: app, elements: [] }
     return { app, snapshot }
   }
 
@@ -247,8 +254,12 @@ class AxRailHost {
     const guard = new VisionGuard({ taskId, kind: 'computer_use' })
     const request = new AbortController()
     const settings = getComputerUseSettings()
+    const remoteModel = currentRemoteScreenTaskSession()?.activeServer
     const activeModel = llm.activeModelInfo()
-    const modelIdentity = activeModel ? await resolveModelIdentity(activeModel.id) : undefined
+    const taskModelId = remoteModel
+      ? remoteVisionModelId(remoteModel.id, remoteModel.model)
+      : activeModel?.id
+    const modelIdentity = taskModelId ? await resolveModelIdentity(taskModelId) : undefined
     const contextTokens = resolveComputerUseContextTokens(
       settings.context,
       llm.effectiveContextSize()
@@ -281,6 +292,7 @@ class AxRailHost {
     const queuedGuidance: string[] = []
     const releaseGuidance = registerTaskGuideHandler(taskId, (text) => {
       queuedGuidance.push(text)
+      controlVisionTask('resume', taskId)
       return true
     })
     try {
@@ -335,8 +347,11 @@ class AxRailHost {
             currentAction: action
           })
         }),
-        decide: async (prompt) => {
+        screenshotPath: () =>
+          remoteModel || activeModel?.vision ? observationFrame?.capture.path : undefined,
+        decide: async (prompt, screenshotPath) => {
           liveStep += 1
+          console.log(`[ax-rail] decision input: image=${Boolean(screenshotPath)}`)
           emitVisionState({
             taskId,
             journeyId,
@@ -346,11 +361,19 @@ class AxRailHost {
             currentStep: liveStep,
             currentAction: 'Choosing the next action'
           })
-          const raw = await llm.chat(prompt, [], 60_000, 400, {
-            responseFormat: ELEMENT_STEP_FORMAT,
-            disableThinking: true,
-            signal: request.signal
-          })
+          const response = await llm.chat(
+            prompt,
+            screenshotPath ? [screenshotPath] : [],
+            60_000,
+            900,
+            {
+              responseFormat: ELEMENT_STEP_FORMAT,
+              enableThinking: true,
+              separateReasoning: true,
+              signal: request.signal
+            }
+          )
+          const raw = response.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim()
           console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)
           return raw
         },
@@ -386,7 +409,7 @@ class AxRailHost {
         }
       })
       if (result.recovery === 'vision') {
-        emitVisionStep(taskId, 'Action replies stayed invalid. Switching to vision grounding.')
+        emitVisionStep(taskId, 'Accessibility control stalled. Switching to vision grounding.')
         emitVisionState({
           taskId,
           journeyId,
@@ -422,14 +445,14 @@ class AxRailHost {
                 }
               : {
                   ok: false,
-                  summary: `Computer Use stopped after repeated invalid action replies. Vision recovery could not continue${outcome.detail ? `: ${outcome.detail}` : '.'}`,
+                  summary: `Computer Use could not make progress. Vision recovery could not continue${outcome.detail ? `: ${outcome.detail}` : '.'}`,
                   steps: result.steps
                 }
           } catch (error) {
             const reason = error instanceof Error ? error.message : 'the vision model failed'
             result = {
               ok: false,
-              summary: `Computer Use stopped after repeated invalid action replies. Vision recovery could not continue: ${reason}`,
+              summary: `Computer Use could not make progress. Vision recovery could not continue: ${reason}`,
               steps: result.steps
             }
           }
@@ -437,7 +460,7 @@ class AxRailHost {
           result = {
             ok: false,
             summary:
-              'Computer Use stopped after repeated invalid action replies. Vision recovery is unavailable. Check that a vision model is installed, then retry Computer Use.',
+              'Computer Use could not make progress. Vision recovery is unavailable. Check that a vision model is installed, then retry Computer Use.',
             steps: result.steps
           }
         }

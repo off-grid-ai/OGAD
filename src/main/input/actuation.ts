@@ -136,10 +136,12 @@ export function adaptNutActuation(nut: NutApi): ActuationPort {
       }
     },
     async scrollBy(axis, amount) {
-      // VisionAction scroll_by uses pixels on every surface. nut.js accepts
-      // wheel steps, so convert at this native boundary instead of allowing
-      // browser and desktop behavior to drift.
-      const magnitude = Math.ceil(Math.abs(amount) / WHEEL_STEP_PIXELS)
+      // VisionAction scroll_by uses pixels on every surface. libnut's macOS
+      // backend also uses pixels; its Windows/Linux backends use wheel steps.
+      const magnitude =
+        process.platform === 'darwin'
+          ? Math.ceil(Math.abs(amount))
+          : Math.ceil(Math.abs(amount) / WHEEL_STEP_PIXELS)
       if (magnitude === 0) return
       if (axis === 'horizontal') {
         await (amount > 0 ? mouse.scrollRight(magnitude) : mouse.scrollLeft(magnitude))
