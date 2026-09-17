@@ -50,6 +50,7 @@ import {
   type GenerationResult
 } from '@offgrid/models'
 import { getActiveTranscription } from './transcription/select'
+import { attachStreamingTranscription } from './transcription/streaming-transcription'
 import * as tts from './tts'
 import { generateImage, imageGenStatus, type ImageGenParams } from './imagegen'
 import { whisperModel } from './rag/extractors'
@@ -1152,6 +1153,8 @@ export async function startModelServer(
         listening.removeListener('error', onError)
         // Hand ongoing runtime errors to the logger now that startup succeeded.
         listening.on('error', (e) => console.error('[model-server]', e))
+        // Streaming transcription rides the same server + trust boundary as the batch STT route.
+        attachStreamingTranscription(listening)
         console.log(
           `[model-server] multimodal gateway at http://${GATEWAY_HOST}:${boundGatewayPort}/v1`
         )
