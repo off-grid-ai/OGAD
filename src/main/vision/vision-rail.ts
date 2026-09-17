@@ -30,6 +30,7 @@ export interface VisionRailHost {
 export function registerVisionRail(registry: HandlerRegistry): void {
   registry.register({
     type: 'computer_use',
+    attemptTimeoutMs: 2 * 60 * 60_000,
     rail: 'vision',
     // Gates for approval; the supervised overlay covers the run itself.
     defaultRisk: 'mutate',

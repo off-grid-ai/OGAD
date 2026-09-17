@@ -1,6 +1,6 @@
 import type { WebContentsView } from 'electron'
 import { llm } from '../llm'
-import { getComputerUseSettings } from '../computer-use-settings'
+import { getWebUseSettings } from '../web-use-settings'
 import { appendTaskStepDetail, getTaskExecutionDevice } from '../tasks/task-history'
 import type { ComputerUseStepDetail } from '../tasks/task-step-details'
 import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
@@ -59,7 +59,7 @@ export function resolveActiveBrowserVisionSelection(): BrowserVisionSelection {
     throw new Error('Web Use requires an active model with installed vision support.')
   }
   try {
-    const strategy = getComputerUseSettings().modelStrategy
+    const strategy = getWebUseSettings().modelStrategy
     return {
       // The user's strategy decides the adapter: "Same as Chat" means a general tool-calling VLM
       // is driving, whatever it is named.
@@ -125,7 +125,7 @@ interface BrowserVisualTaskInput {
 /** Runs the browser screenshot -> decision -> action -> verification loop.
  * Session ownership and task status remain in BrowserHost. */
 export function runBrowserVisualTask(input: BrowserVisualTaskInput): Promise<VisionTaskResult> {
-  const settings = getComputerUseSettings()
+  const settings = getWebUseSettings()
   const executionDevice = getTaskExecutionDevice()
   return runVisionTaskGraph(input.goal, {
     screen: createBrowserVisionScreen({

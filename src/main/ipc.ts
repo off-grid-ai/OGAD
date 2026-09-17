@@ -33,6 +33,8 @@ import {
 import { deleteEntityById, resolveEntityCandidate } from './entity-domain'
 import { setComputerUseSettings } from './computer-use-settings'
 import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
+import { setWebUseSettings } from './web-use-settings'
+import { WEB_USE_SETTINGS_KEY } from '../shared/web-use-settings'
 import { embeddings } from './embeddings'
 import {
   getResidency,
@@ -1319,6 +1321,7 @@ export function setupIPC() {
 
   ipcMain.handle('settings:save', (_, key: string, value: any) => {
     if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
+    else if (key === WEB_USE_SETTINGS_KEY) setWebUseSettings(value)
     else saveSetting(key, value)
     console.log(`[IPC] Setting saved: ${key} =`, value)
     return true

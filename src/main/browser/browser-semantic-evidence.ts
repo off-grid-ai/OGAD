@@ -1,5 +1,5 @@
 import type { WebContentsView } from 'electron'
-import { getComputerUseSettings } from '../computer-use-settings'
+import { getWebUseSettings } from '../web-use-settings'
 import { appendTaskStepDetail, getTaskExecutionDevice } from '../tasks/task-history'
 import type { ComputerUseStepDetail } from '../tasks/task-step-details'
 import type { BrowserDriver } from './browser-driver'
@@ -31,7 +31,7 @@ export function createBrowserSemanticEvidenceRecorder(
     taskId: input.taskId,
     journeyId: input.journeyId,
     goal: input.goal,
-    settings: getComputerUseSettings()
+    settings: getWebUseSettings()
   })
   const executionDevice = getTaskExecutionDevice()
   return async (observation) => {
