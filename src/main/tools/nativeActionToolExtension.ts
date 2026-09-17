@@ -77,6 +77,33 @@ export function inlineRunnerForPlatform(
 
 const inlineRun = inlineRunnerForPlatform(process.platform)
 
+function currentCoordinates(result: unknown): { latitude: number; longitude: number } | undefined {
+  if (!result || typeof result !== 'object') return undefined
+  const latitude = (result as Record<string, unknown>).latitude
+  const longitude = (result as Record<string, unknown>).longitude
+  return typeof latitude === 'number' &&
+    Number.isFinite(latitude) &&
+    typeof longitude === 'number' &&
+    Number.isFinite(longitude)
+    ? { latitude, longitude }
+    : undefined
+}
+
+function needsCurrentLocation(args: Record<string, unknown>, context?: ToolContext): boolean {
+  const text = [
+    typeof args.goal === 'string' ? args.goal : '',
+    context?.userQuery ?? ''
+  ].join('\n')
+  if (
+    /\blatitude\s*[:=]?\s*-?\d+(?:\.\d+)?[^\n]*\blongitude\s*[:=]?\s*-?\d+(?:\.\d+)?/i.test(
+      text
+    )
+  ) {
+    return false
+  }
+  return /\b(?:near me|my (?:current )?location|current location|device location)\b/i.test(text)
+}
+
 const productionBoundary: NativeActionToolBoundary = {
   run: inlineRun,
   isProEntitled,
@@ -140,6 +167,22 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!spec) {
       return `Error: unknown action ${name}`
     }
+    if (isTaskAction(name) && needsCurrentLocation(args, context)) {
+      const location = context?.currentLocation
+      if (!location) {
+        return {
+          text: context?.currentLocationFailed
+            ? 'I could not get your current location. Provide a starting address or neighborhood before I start this nearby task.'
+            : 'I need your current coordinates before I start this nearby task. I did not start Web Use.',
+          status: 'failed',
+          authoritative: true
+        }
+      }
+      args = {
+        ...args,
+        goal: `${typeof args.goal === 'string' ? args.goal : ''}\n\nStart from latitude ${location.latitude}, longitude ${location.longitude}.`
+      }
+    }
     if (shouldGate(spec.risk)) {
       const actionType = actionTypeForTool(name)
       const actions = this.boundary.actions
@@ -154,7 +197,13 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!spec.command) return `Error: ${name} has no inline command.`
     const res = await this.boundary.run({ command: spec.command, args: spec.buildArgs(args) })
     if (!res.ok) {
+      if (name === 'get_current_location' && context) context.currentLocationFailed = true
       return `Error: ${res.error}`
+    }
+    if (name === 'get_current_location' && context) {
+      const coordinates = currentCoordinates(res.result)
+      if (coordinates) context.currentLocation = coordinates
+      else context.currentLocationFailed = true
     }
     return spec.formatResult(res.result)
   }
@@ -199,9 +248,8 @@ export class NativeActionToolExtension implements ToolExtension {
     const taskReference = isTaskAction(actionType) ? `Task reference: ${proposed.id}. ` : ''
     if (proposed.deduped) {
       return reply(
-        'A matching task is already in flight. No duplicate was started.',
-        'completed',
-        false
+        `${taskReference}A matching task is already in flight. No duplicate was started.`,
+        'pending'
       )
     }
     actions.kick()
@@ -209,8 +257,7 @@ export class NativeActionToolExtension implements ToolExtension {
       const label = actionType === 'computer_use' ? 'Computer Use' : 'Web Use'
       return reply(
         `${taskReference}${label} started. Live progress and the final result will appear in this chat. Do not call ${actionType} again for this goal.`,
-        'completed',
-        false
+        'pending'
       )
     }
     const raced = await Promise.race([

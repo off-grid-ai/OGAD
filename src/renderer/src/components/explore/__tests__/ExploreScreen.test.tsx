@@ -39,4 +39,12 @@ describe('<ExploreScreen/>', () => {
       prompt: expect.stringContaining('Train the selected social feed')
     })
   })
+
+  it('tells the user that Train My Feed uses Computer Use', () => {
+    render(<ExploreScreen onRunPreset={() => {}} />)
+
+    expect(
+      screen.getByText('Uses Computer Use in your default browser and only the actions you approve.')
+    ).toBeTruthy()
+  })
 })

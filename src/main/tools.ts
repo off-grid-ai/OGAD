@@ -60,6 +60,10 @@ export interface ToolContext {
   /** The active project (if the chat is in one), so search_knowledge_base can query
    *  that project's uploaded docs + captured memory. */
   projectId?: string
+  /** Per-turn location result. Nearby task tools use this to fail closed when
+   *  the device location request did not return usable coordinates. */
+  currentLocation?: { latitude: number; longitude: number }
+  currentLocationFailed?: boolean
 }
 
 export interface ToolConversationTurn {

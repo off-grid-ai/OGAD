@@ -83,6 +83,9 @@ final class CurrentLocationDelegate: NSObject, CLLocationManagerDelegate {
 }
 
 func currentLocation(_ args: [String: Any]) -> Never {
+    guard CLLocationManager.locationServicesEnabled() else {
+        fail("Location Services are turned off in System Settings")
+    }
     let manager = CLLocationManager()
     manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
     let delegate = CurrentLocationDelegate(manager: manager)
@@ -96,7 +99,16 @@ func currentLocation(_ args: [String: Any]) -> Never {
 
     if let error = delegate.error { fail(error) }
     guard let location = delegate.location else {
-        fail("current location was not available within 15 seconds")
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            fail("macOS did not complete the location permission request. Open System Settings > Privacy & Security > Location Services and allow Off Grid AI Desktop.")
+        case .denied, .restricted:
+            fail("Location access is not allowed. Open System Settings > Privacy & Security > Location Services and allow Off Grid AI Desktop.")
+        case .authorizedAlways, .authorizedWhenInUse:
+            fail("macOS did not provide a location within 15 seconds. Check that Wi-Fi is on, then try again.")
+        @unknown default:
+            fail("macOS returned an unknown location authorization state")
+        }
     }
     ok([
         "latitude": location.coordinate.latitude,

@@ -306,11 +306,11 @@ ${EXECUTION_RULES}`,
         id: 'train-my-feed',
         icon: YoutubeLogo,
         title: 'Train My Feed',
-        prompt: `Train the selected social feed around the approved learning goal below. Use the user's default browser and Computer Use.
+        prompt: `Train the selected social feed around the approved learning goal below. Use the user's default browser and Computer Use. Never use Web Use or Off Grid AI's in-app browser for this run because the task depends on the user's existing browser login, cookies, history, cache, and recommendations.
 
 Required method:
 1. Read "Actions you allow" as a strict allowlist for this run. An unchecked action is forbidden. Include that allowlist, the session limit, and the follow limit in the Computer Use goal so the approval shows the complete boundary.
-2. Map the selected platform to its official home URL: X = https://x.com/home, LinkedIn = https://www.linkedin.com/feed/, Instagram = https://www.instagram.com/, TikTok = https://www.tiktok.com/, YouTube = https://www.youtube.com/. Call open_url with that URL. The operating system will open it in the user's default browser. Do not choose or install a different browser.
+2. Map the selected platform to its official home URL: X = https://x.com/home, LinkedIn = https://www.linkedin.com/feed/, Instagram = https://www.instagram.com/, TikTok = https://www.tiktok.com/, YouTube = https://www.youtube.com/. Call open_url with that URL. The operating system will open it in the user's default browser. Do not choose or install a different browser. Do not call web_use.
 3. Confirm the visible default browser, selected platform, and signed-in account. If sign-in, CAPTCHA, two-factor authentication, or account recovery is required, stop and ask the user to take over. Never request or handle a password or one-time code.
 4. Call computer_use once with the complete approved brief. Before changing the feed, record a short baseline of its visible topics, creators, and repeated recommendation patterns.
 5. Build a small topic map from the learning goal and related concepts. Search from broad concepts toward specific questions. When search is not allowed, work only from the visible feed and direct navigation already available on the platform.
@@ -322,7 +322,7 @@ Required method:
 11. Return a digest with: useful items and why they matter; credible creators and why they passed; searches run; account actions taken; irrelevant material dismissed; observable feed changes; weak sources rejected; and focused topics for the next bounded session. State clearly when the feed did not change enough to verify.
 
 ${EXECUTION_RULES}`,
-        blurb: 'Uses your default browser and only the feed actions you approve.',
+        blurb: 'Uses Computer Use in your default browser and only the actions you approve.',
         readiness: 'needs-setup',
         intake: {
           title: 'Set the learning goal',
