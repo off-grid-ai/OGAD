@@ -61,6 +61,7 @@ describe('the extension on win32', () => {
   it('schemas and canHandle follow the platform subset', () => {
     expect(extension.schemas()).toHaveLength(WINDOWS_TOOL_NAMES.size)
     expect(extension.canHandle('reminders_create')).toBe(true)
+    expect(extension.canHandle('get_current_location')).toBe(true)
     expect(extension.canHandle('messages_send')).toBe(false)
     expect(extension.canHandle('reminders_list')).toBe(false)
   })

@@ -23,6 +23,7 @@ const REQUIRED_USAGE_KEYS = [
   'NSCalendarsUsageDescription',
   'NSRemindersFullAccessUsageDescription',
   'NSContactsUsageDescription',
+  'NSLocationUsageDescription',
   'NSPhotoLibraryUsageDescription'
 ]
 

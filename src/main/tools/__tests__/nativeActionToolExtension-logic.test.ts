@@ -23,6 +23,7 @@ describe('native tool specs', () => {
 
   it('exposes calendar and reminder tools with matching helper commands', () => {
     expect(NATIVE_TOOL_SPECS.map((s) => s.name)).toEqual([
+      'get_current_location',
       'calendar_create_event',
       'calendar_list_events',
       'reminders_create',
@@ -34,6 +35,7 @@ describe('native tool specs', () => {
       'web_use',
       'computer_use'
     ])
+    expect(findNativeToolSpec('get_current_location')?.command).toBe('location.current')
     expect(findNativeToolSpec('calendar_create_event')?.command).toBe('calendar.createEvent')
     expect(findNativeToolSpec('calendar_list_events')?.command).toBe('calendar.listEvents')
     expect(findNativeToolSpec('reminders_create')?.command).toBe('reminders.create')
@@ -49,6 +51,7 @@ describe('native tool specs', () => {
       expect(shouldGate(findNativeToolSpec(name)!.risk)).toBe(true)
     }
     expect(shouldGate(findNativeToolSpec('contacts_search')!.risk)).toBe(false)
+    expect(shouldGate(findNativeToolSpec('get_current_location')!.risk)).toBe(false)
   })
 
   it('treats open_url as a navigate that runs without approval', () => {
@@ -102,7 +105,9 @@ describe('native tool specs', () => {
   it('builds OpenAI function schemas for every spec', () => {
     const schemas = buildNativeToolSchemas()
     expect(schemas).toHaveLength(NATIVE_TOOL_SPECS.length)
-    expect(schemas[0]).toMatchObject({
+    expect(
+      schemas.find((schema) => schema.function.name === 'calendar_create_event')
+    ).toMatchObject({
       type: 'function',
       function: { name: 'calendar_create_event', parameters: { required: ['title', 'start'] } }
     })

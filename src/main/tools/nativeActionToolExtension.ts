@@ -14,6 +14,7 @@ import { shouldGate } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
 import { isProEntitled } from '../licensing/license-service'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
+import { runPowerShell } from '../actions/win-powershell'
 import { runNativeAction } from '../actions/native-helper'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
 import {
@@ -66,7 +67,7 @@ export function inlineRunnerForPlatform(
   if (platform === 'win32') {
     return makeWinInlineRunner(async (url) => {
       await shell.openExternal(url)
-    })
+    }, runPowerShell)
   }
   return runNativeAction
 }
