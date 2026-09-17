@@ -7474,7 +7474,7 @@ export function MemoryChat({
                                   }
                                   setToolsOn((current) => !current)
                                 }}
-                                className={`h-8 gap-1.5 rounded-md ${toolsOn ? 'border-primary text-primary' : 'text-muted-foreground'}`}
+                                className={`h-8 gap-1.5 rounded-full ${toolsOn ? 'border-primary text-primary' : 'text-muted-foreground'}`}
                               >
                                 <Wrench className="h-3.5 w-3.5" /> Assistant
                               </Button>
