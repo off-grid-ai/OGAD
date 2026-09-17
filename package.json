@@ -1,7 +1,7 @@
 {
   "name": "off-grid-ai",
   "productName": "Off Grid AI Desktop",
-  "version": "0.0.43",
+  "version": "0.0.44",
   "offgrid": {
     "llamaRef": "b10369"
   },
