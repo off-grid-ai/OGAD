@@ -22,8 +22,6 @@ const WIN_HEIGHT = 680
 const MIN_WIN_WIDTH = 360
 const MIN_WIN_HEIGHT = 480
 const MARGIN = 24
-const COMPUTER_USE_PIP_ENABLED = false
-
 let supervisor: BrowserWindow | null = null
 let supervisorCaptureWindowId: number | null = null
 let closeTimer: NodeJS.Timeout | null = null
@@ -111,17 +109,7 @@ export function ensureSupervisorCaptureWindowId(): number | null {
 /** Show the supervisor window (creating it if needed) WITHOUT stealing focus
  *  from the app being driven. Idempotent. */
 export function showSupervisorWindow(): void {
-  if (!COMPUTER_USE_PIP_ENABLED) return
-  if (closeTimer) {
-    clearTimeout(closeTimer)
-    closeTimer = null
-  }
-  const win = supervisor && !supervisor.isDestroyed() ? supervisor : create()
-  if (!win.isVisible()) {
-    // showInactive: appear on top but do NOT activate, so the driven app keeps
-    // keyboard/mouse focus for actuation.
-    win.showInactive()
-  }
+  // The separate PiP is disabled. The main window remains visible during Computer Use.
 }
 
 /** Hide the PiP without changing the task. The task controller remains the only owner of
