@@ -9,7 +9,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from '@renderer/components/ui/collapsible'
-import { type TaskSession, useTaskSessions } from '@renderer/lib/task-session-store'
+import { type TaskSession, useTaskSessionsForReferences } from '@renderer/lib/task-session-store'
 import {
   closeTaskWorkspace,
   openTaskSidePanel,
@@ -249,7 +249,6 @@ export function ChatToolRows({
   stopped = false,
   failed = false
 }: Readonly<ChatToolRowsProps>): React.JSX.Element | null {
-  const { tasks } = useTaskSessions()
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
   // Web Use can start before toolChat returns its durable tool result. Project one
   // pending row from the live task so the chat reports work at the time it happens.
@@ -268,6 +267,11 @@ export function ChatToolRows({
               status: 'running'
             }
           ]
+  const taskReferences = visible.flatMap((tool) => {
+    const reference = taskReferenceFromResult(tool.result)
+    return reference ? [reference] : []
+  })
+  const tasks = useTaskSessionsForReferences(taskReferences)
   if (visible.length === 0 && !thinking && !timeline?.length && !stopped && !failed) return null
   const liveToolIndex = liveTaskToolIndex(visible, liveTask)
   const firstMemoryToolIndex = visible.findIndex(

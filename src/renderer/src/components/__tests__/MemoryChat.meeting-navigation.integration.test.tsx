@@ -13,7 +13,7 @@ import { ChatBoundary, installBoundary } from './harness/chat-boundary'
 describe('<MemoryChat/> meeting source navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
   })
 
   afterEach(() => {

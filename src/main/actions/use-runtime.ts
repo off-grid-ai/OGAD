@@ -18,7 +18,7 @@ import {
   type Rail,
   type TickOutcome,
   type ActionRecord,
-  type ExecuteResult
+  parseActionProposal
 } from '@offgrid/use'
 import { getDB } from '../database'
 import { hasHook, HOOKS } from '../bootstrap/hookRegistry'
@@ -45,7 +45,7 @@ import { isProEntitled } from '../licensing/license-service'
 import { callConnectorTool } from '../mcp'
 import { makeConnectorRailExecutor } from './connector-rail'
 import { withRemoteScreenGate } from './remote-screen-gate'
-import { getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
+import { getTaskExecutionDevice, getTaskRun, recordTaskRun } from '../tasks/task-history'
 import { taskLaunchFromActionArgs } from '../tasks/task-launch-identity'
 import { taskKindForActionType } from '../tools/nativeActionToolExtension-logic'
 import { getComputerUseSettings } from '../computer-use-settings'
@@ -158,9 +158,50 @@ function recordAuthenticatedTaskLaunch(
   })
 }
 
+/** Materialize an accepted long-running task before Chat reports that it started. */
+function recordAcceptedTaskLaunch(
+  input: unknown,
+  sourceRef: string | undefined,
+  outcome: ProposeOutcome
+): void {
+  if (!outcome.accepted || outcome.deduped) return
+  const parsed = parseActionProposal(input)
+  if (!parsed.ok) return
+  const kind = taskKindForActionType(parsed.value.type)
+  if (!kind) return
+  const args = parsed.value.args as Record<string, unknown>
+  const launch = taskLaunchFromActionArgs(args)
+  const executionDevice = getTaskExecutionDevice()
+  const goal = typeof args.goal === 'string' ? args.goal.trim() : ''
+  recordTaskRun({
+    taskId: outcome.id,
+    journeyId: sourceRef ?? outcome.id,
+    kind,
+    title: goal || parsed.value.intent,
+    status: 'running',
+    phase: 'preparing',
+    currentAction: 'Starting task',
+    executionDeviceId: executionDevice.id,
+    executionDeviceName: executionDevice.name,
+    ...(launch ? { launchId: launch.launchId, requestingDeviceId: launch.requestingDeviceId } : {})
+  })
+}
+
 /** Keep the durable task projection aligned with the action engine's terminal decision. */
 function recordTaskActionOutcome(outcome: TickOutcome): void {
-  if (outcome.outcome === 'poisoned') return
+  if (outcome.outcome === 'poisoned') {
+    const task = getTaskRun(outcome.id)
+    if (task) {
+      recordTaskRun({
+        taskId: task.taskId,
+        kind: task.kind,
+        title: task.title,
+        status: 'failed',
+        summary: outcome.error
+      })
+    }
+    return
+  }
   const kind = taskKindForActionType(outcome.record.type)
   if (!kind || outcome.outcome === 'done') return
   const detail = outcome.record.attemptLog.at(-1)?.detail?.trim()
@@ -219,23 +260,20 @@ export function getActionsRuntime(): ActionsRuntime {
   // The vision rail's live host (screen capture + actuation + grounding model),
   // created lazily on first computer_use.
   const visionExecute = makeVisionRailExecutor({
-    runTask: (goal, taskId, journeyId, checkpoint, continuation) =>
-      getVisionRailHost().runTask(goal, taskId, journeyId, checkpoint, continuation)
+    runTask: (goal, taskId, journeyId, checkpoint, continuation, targetLabel) =>
+      getVisionRailHost().runTask(goal, taskId, journeyId, checkpoint, continuation, targetLabel)
   })
-  // VisionHost owns the selected model strategy for the whole task. This keeps
-  // specialist-resident and per-step hybrid swaps behind the same session port.
+  // VisionHost owns the selected model strategy for the whole task. The outer
+  // Computer Use gate binds the selected local or remote model to every rail.
   const groundedVisionExecute: ComputerTaskTiers['visionExecute'] = (
     action,
     checkpoint,
-    continuation
-  ) =>
-    withRemoteScreenGate('computer_use', (approvedAction) =>
-      visionExecute(approvedAction, checkpoint, continuation)
-    )(action)
-  // computer_use is TIERED: try the accessibility rail first (free, any chat
-  // model, most native apps), and fall through to the grounder-vision rail only
-  // when AX can't see the controls. OFFGRID_COMPUTER_RAIL=ax|vision forces one
-  // rail for the A/B; unset = the real tiered behaviour.
+    continuation,
+    targetLabel
+  ) => visionExecute(action, checkpoint, continuation, targetLabel)
+  // Direct modes tier AX before vision. Reasoning + Specialist keeps one vision
+  // graph in charge and feeds it the aligned AX/UIA controls. The environment
+  // override still forces one rail for diagnostics.
   const computerTaskTiers: ComputerTaskTiers = {
     routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
     runAx: (goal, taskId, journeyId, app, request) =>
@@ -245,16 +283,17 @@ export function getActionsRuntime(): ActionsRuntime {
       }),
     visionExecute: groundedVisionExecute
   }
-  const computerTaskExecute = (action: ActionRecord): Promise<ExecuteResult> => {
+  const computerTaskExecute = withRemoteScreenGate('computer_use', (action) => {
     const settings = getComputerUseSettings()
     return makeComputerTaskExecutor(computerTaskTiers, {
       // Model strategy selects which model handles a vision FALLBACK. It must
       // never bypass verified native application controls. The environment
       // override remains available only for explicit rail diagnostics.
       forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL),
-      enabledRails: settings.enabledRails
+      enabledRails: settings.enabledRails,
+      preferVisionGraph: settings.modelStrategy === 'text_plus_specialist'
     })(action)
-  }
+  })
   const engine = new UseEngine({
     driver: makeUseDriver(getDB()),
     // Read-back verification reads the world back through the platform's own
@@ -293,6 +332,9 @@ export function getActionsRuntime(): ActionsRuntime {
   })
 
   const worker: ActionWorker = createActionWorker(engine, { onParked: onGateParked })
+  // Long-running task tools return after launch, so no Chat waiter remains to project a later
+  // terminal engine outcome. Keep the durable task row correct for every worker completion.
+  worker.onOutcome(recordTaskActionOutcome)
 
   const ready = (async () => {
     await engine.init()
@@ -309,14 +351,13 @@ export function getActionsRuntime(): ActionsRuntime {
     async propose(input, meta) {
       await ready
       const outcome = await engine.propose(input, meta)
+      recordAcceptedTaskLaunch(input, meta.sourceRef, outcome)
       worker.kick()
       return outcome
     },
     async waitForOutcome(actionId, timeoutMs) {
       await ready
-      const outcome = await worker.waitForOutcome(actionId, timeoutMs)
-      if (outcome) recordTaskActionOutcome(outcome)
-      return outcome
+      return worker.waitForOutcome(actionId, timeoutMs)
     },
     whenParked: whenActionParked,
     onParked: onActionParked,

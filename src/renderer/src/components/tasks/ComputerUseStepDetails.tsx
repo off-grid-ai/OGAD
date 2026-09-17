@@ -109,6 +109,9 @@ export function ComputerUseStepDetails({
                       src={captureUrlForPath(detail.screenshot.path)}
                       alt={`Computer Use step ${index + 1}`}
                       className="max-h-40 w-full object-contain"
+                      loading="lazy"
+                      decoding="async"
+                      fetchPriority="low"
                     />
                   </button>
                 ) : showScreenshots && detail.screenshot ? (

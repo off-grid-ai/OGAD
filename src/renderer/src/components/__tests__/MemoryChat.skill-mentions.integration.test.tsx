@@ -27,7 +27,7 @@ function SkillMentionJourney(): React.ReactElement {
 describe('<MemoryChat/> clickable skill mentions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
   })
 
   afterEach(() => {
@@ -69,11 +69,11 @@ describe('<MemoryChat/> clickable skill mentions', () => {
       getSkill: vi.fn(async (name: string) =>
         name === 'proofread'
           ? {
-              name: 'proofread',
-              description: 'Make writing clearer',
-              instructions: 'Preserve the meaning.',
-              trigger: null
-            }
+            name: 'proofread',
+            description: 'Make writing clearer',
+            instructions: 'Preserve the meaning.',
+            trigger: null
+          }
           : null
       )
     })

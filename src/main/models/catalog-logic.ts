@@ -59,6 +59,9 @@ export type FilePresent = (name: string) => boolean
 export const isProjectorFileName = (name: string): boolean =>
   /(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(name)
 
+export const isDflashFileName = (name: string): boolean =>
+  /(?:^|[-_.])d-?flash(?:[-_.]|$)/i.test(name)
+
 /** A catalog-shaped view of an imported local model whose primary file is present
  *  (size > 0). Tagged "Imported" and surfaced at the top of the catalog. */
 export function localsForCatalog(locals: LocalModelLike[], present: FilePresent): CatalogEntry[] {
@@ -129,14 +132,15 @@ export function mergeCatalog(opts: {
 }
 
 /** Whether a single catalog entry counts as installed. mflux entries defer to the
- *  runtime cache (`mfluxCached`); everything else needs every file present (size>0). */
+ *  runtime cache (`mfluxCached`); DFlash is an optional repairable companion. */
 export function catalogEntryInstalled(
   entry: CatalogEntry,
   present: FilePresent,
   mfluxCached: (id: string) => boolean
 ): boolean {
   if (entry.runtime === 'mflux') return mfluxCached(entry.id)
-  return entry.files.length > 0 && entry.files.every((f) => present(f.name))
+  const required = entry.files.filter((file) => !isDflashFileName(file.name))
+  return required.length > 0 && required.every((file) => present(file.name))
 }
 
 /** The installed-id list, in the exact live order: imported locals, installed HF
@@ -176,6 +180,11 @@ export function projectorFileName(entry: Pick<CatalogEntry, 'files'>): string | 
   return entry.files.find((f) => f.role === 'mmproj')?.name
 }
 
+/** The optional DFlash speculative-decoding companion for an entry, if declared. */
+export function dflashFileName(entry: Pick<CatalogEntry, 'files'>): string | undefined {
+  return entry.files.find((file) => isDflashFileName(file.name))?.name
+}
+
 export interface VisionStatus {
   /** The model ships a vision projector — it CAN read images (once the projector is
    *  present). Derived from files, never a hand-typed flag. */
@@ -183,6 +192,11 @@ export interface VisionStatus {
   /** The projector file is present on disk. A vision model with this false is the
    *  "installed but can't see yet — offer to download the projector" case. */
   projectorInstalled: boolean
+  /** Optional DFlash companion readiness. These fields exist only for models that
+   *  declare a DFlash GGUF, so existing vision-status consumers stay unchanged. */
+  supportsDflash?: boolean
+  dflashInstalled?: boolean
+  dflashFile?: string
 }
 
 /** Per-model vision capability + readiness, derived from files (does it ship a
@@ -193,7 +207,14 @@ export function visionStatus(
   present: FilePresent
 ): VisionStatus {
   const projector = projectorFileName(entry)
-  return { supportsVision: !!projector, projectorInstalled: !!projector && present(projector) }
+  const dflash = dflashFileName(entry)
+  return {
+    supportsVision: !!projector,
+    projectorInstalled: !!projector && present(projector),
+    ...(dflash
+      ? { supportsDflash: true, dflashInstalled: present(dflash), dflashFile: dflash }
+      : {})
+  }
 }
 
 /** The projector filename to heal a stale active-model config with, or undefined for

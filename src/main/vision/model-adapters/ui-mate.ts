@@ -1,7 +1,6 @@
 import { WHEEL_STEP_PIXELS, type VisionAction } from '../vision-action'
 import { visionKeysSupported } from '../vision-keys'
 import { WEB_USE_CONTROL_INSTRUCTIONS } from '../../../shared/web-use-control'
-import { NORMALIZED_COORDINATE_GRID_INSTRUCTION } from '../../../shared/vision-coordinate-grid'
 import { assertUIMateModelCapabilities, UI_MATE_GGUF_REPOSITORIES } from './ui-mate/capabilities'
 import {
   buildUIMateMessages,
@@ -96,7 +95,6 @@ function policyInstruction(input: Parameters<VisionModelAdapter['buildRequest']>
           'Coordinate frame:',
           '- The screenshot is the exact web page viewport. It does not include a browser address bar, tab strip, title bar, sidebar, or app chrome.',
           '- Return x and y from 0 to 999 over this exact screenshot: (0, 0) is its top-left pixel and (999, 999) is its bottom-right pixel.',
-          `- ${NORMALIZED_COORDINATE_GRID_INSTRUCTION}`,
           '- Do not add an offset for browser controls or screen padding.',
           ...WEB_USE_CONTROL_INSTRUCTIONS.map((instruction) => `- ${instruction}`)
         ].join('\n')
@@ -104,13 +102,14 @@ function policyInstruction(input: Parameters<VisionModelAdapter['buildRequest']>
           'Coordinate frame:',
           '- The screenshot is the exact current display frame.',
           '- Return x and y from 0 to 999 over this exact screenshot: (0, 0) is its top-left pixel and (999, 999) is its bottom-right pixel.',
-          `- ${NORMALIZED_COORDINATE_GRID_INSTRUCTION}`,
           '- Do not add an offset for window borders, screen padding, or controls outside the screenshot.'
         ].join('\n'),
     input.currentMilestone
       ? `Current execution plan and verified progress:\nCurrent milestone: ${input.currentMilestone}`
       : '',
-    input.recentSteps.length ? `Recent verified task events:\n${input.recentSteps.join('\n')}` : ''
+    input.recentSteps.length
+      ? `Recent verified task events:\n${input.recentSteps.slice(-4).join('\n')}`
+      : ''
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -168,8 +167,8 @@ function uiMateDecision(
       decisionRationale: rationale
     }
   }
-  const actions = parsed.actions.map(toVisionAction)
-  if (actions.some((action) => action === null)) {
+  const firstAction = parsed.actions[0] ? toVisionAction(parsed.actions[0]) : null
+  if (!firstAction) {
     return {
       kind: 'invalid',
       actionText: parsed.actionText,
@@ -177,10 +176,17 @@ function uiMateDecision(
       decisionRationale: rationale
     }
   }
+  const secondAction = parsed.actions[1] ? toVisionAction(parsed.actions[1]) : null
+  const actions =
+    parsed.actions.length === 2 &&
+    firstAction.type === 'mouse_move' &&
+    secondAction?.type === 'scroll_by'
+      ? [firstAction, secondAction]
+      : [firstAction]
   return {
     kind: 'actions',
     actionText: parsed.actionText,
-    actions: actions as VisionAction[],
+    actions,
     decisionRationale: rationale
   }
 }
@@ -213,8 +219,6 @@ export const uiMateAdapter: VisionModelAdapter = {
         currentScreenshotDataUrl: input.currentScreenshotDataUrl,
         history: input.history
       }),
-      maxTokens: UI_MATE_GENERATION_CONFIG.maxTokens,
-      timeoutMs: 130_000,
       maxAttempts: 2,
       temperature: UI_MATE_GENERATION_CONFIG.temperature,
       topP: UI_MATE_GENERATION_CONFIG.topP

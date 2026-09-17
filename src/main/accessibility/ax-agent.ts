@@ -44,8 +44,9 @@ export interface ElementActuator {
 export interface ElementTaskDeps {
   read(): Promise<AxSnapshot>
   actuator: ElementActuator
-  /** goal + the numbered elements + history in, one step decision out. */
-  decide: (prompt: string) => Promise<string>
+  /** Goal + numbered elements + the current frame in, one step decision out. */
+  decide: (prompt: string, screenshotPath?: string) => Promise<string>
+  screenshotPath?: () => string | undefined
   onStep?: (note: string) => void
   onObservation?: (observation: ElementStepObservation) => void
   onCheckpoint?: (step: number, steps: readonly string[]) => void
@@ -213,9 +214,9 @@ export function buildElementPrompt(input: {
   const boundedHistory = tailWithinTokenBudget(
     history,
     computerUseHistoryTokenBudget(contextTokens)
-  )
+  ).slice(-4)
   return [
-    'You are completing a task by operating an app one step at a time.',
+    'Operate the supplied app one step at a time.',
     `Task: ${goal}`,
     input.plan ? formatTaskExecutionPlanContext(input.plan) : '',
     input.guidance?.length
@@ -228,24 +229,16 @@ export function buildElementPrompt(input: {
       ? `Older task outcomes (text only; may be stale):\n${retrievedFacts.join('\n')}`
       : '',
     boundedHistory.length ? `Previous steps:\n${boundedHistory.join('\n')}` : '',
-    'Rules - one action per reply, using an element [number]:',
-    '- Click: {"action":"click","index":N} or {"action":"press","index":N}',
-    '- Type: {"action":"type","index":N,"text":"..."} - omit "index" to type into the field that is already focused; add "keys":"Enter" to send.',
-    '- Key: {"action":"key","keys":"Enter"} (or "cmd k").',
-    '- Sign-in, password, one-time code, or payment: {"action":"human_required","why":"..."}. The user completes the step, then you continue this same task from a fresh screen.',
-    '- Task complete: {"action":"done","summary":"..."}. Cannot be done: {"action":"give_up","why":"..."}.',
-    '- STOP as soon as the goal is achieved: the instant the target is open or PLAYING, the message is sent, or the file is attached, reply {"action":"done"}. Do NOT keep clicking once the visible end-state is reached - a video that is already playing is done, not a cue to click more.',
-    'Messaging a person in a chat app (Slack, etc.), in order:',
-    '  1) Open their conversation with the quick switcher: {"action":"key","keys":"cmd k"}, then type their name, then {"action":"key","keys":"Enter"}. (Typing in the left sidebar "Search"/"Channel or user name" box only FILTERS the list - Enter there does NOT open the chat; you would have to CLICK the matching result.)',
-    '  2) THEN type the message into the box labeled "Message to <name>" (or "Message #<channel>") by ITS [number], and add "keys":"Enter" to send. Do not assume the message box is focused.',
-    'If Previous steps says the text was typed but not submitted, NEVER type it again. Press Enter or click the visible Send control.',
-    'A Search / "Channel or user name" / "To" field is for navigation only - never put the message text there.',
-    'Attaching or uploading a file, AFTER an Attach/Upload opens the system file dialog (the dialog runs in its own window - drive it with keys, not the app search box):',
-    '  1) Open "Go to Folder": {"action":"key","keys":"cmd shift g"}.',
-    '  2) Type the FULL path and go: {"action":"type","text":"~/Documents/<file>","keys":"Enter"} - this navigates to the folder AND selects that exact file. Build the path from the task (the Documents folder is ~/Documents).',
-    '  3) Confirm: {"action":"key","keys":"Enter"} (or click "Open"). NEVER click "Open"/"search" before a file is selected - with nothing selected it does nothing and you will loop.',
-    'If a step changed nothing (the same field still holds your text), do something different - do not repeat it.',
-    'Reply with ONLY the JSON for your next action.'
+    'Return exactly one JSON action:',
+    '- Click or press an element: {"action":"click","index":N} or {"action":"press","index":N}.',
+    '- Enter text: {"action":"type","index":N,"text":"..."}. Omit index only when the correct field is already focused. Add "keys":"Enter" to submit.',
+    '- Send keys: {"action":"key","keys":"Enter"}.',
+    '- Use human_required for sign-in, passwords, one-time codes, or payment.',
+    '- Use done only when the goal is visibly complete. Use give_up only when it cannot be completed.',
+    '- For an edit, change, or replacement, verify that the original item changed. A new copy elsewhere is not completion.',
+    'Match the exact target and intended control. Navigation fields are not content fields.',
+    'If text is already entered, submit it without typing it again. If an action had no effect, choose a different action.',
+    'Reply with JSON only.'
   ]
     .filter(Boolean)
     .join('\n')
@@ -253,7 +246,9 @@ export function buildElementPrompt(input: {
 
 const DEFAULT_MAX_STEPS = DEFAULT_COMPUTER_USE_STEP_BUDGET
 const MAX_CONSECUTIVE_PARSE_FAILURES = 3
+const MAX_CONSECUTIVE_NO_PROGRESS = 3
 export const AX_INVALID_REPLY_SUMMARY = `The action model returned an invalid reply ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row.`
+export const AX_NO_PROGRESS_SUMMARY = `The action model made no progress ${MAX_CONSECUTIVE_NO_PROGRESS} times in a row.`
 
 /** A stable signature of an actuating step, used to detect a runaway loop. Two
  *  consecutive identical signatures mean the model is repeating itself (it sent
@@ -280,6 +275,10 @@ function isSubmitKey(keys: string): boolean {
 
 function isSubmitElement(element: AxElement): boolean {
   return /\b(send|submit|post)\b/i.test(`${element.name} ${element.role}`)
+}
+
+function isEditableElement(element: AxElement): boolean {
+  return /^(?:AXTextField|AXTextArea|Edit|Document|ComboBox)$/i.test(element.role)
 }
 
 /* eslint-disable complexity -- one state machine; per-action helpers would hide
@@ -312,6 +311,7 @@ export async function runElementTask(
   let draftAwaitingSubmit = false
   const taskBrief = new CurrentTaskBrief(goal)
   let consecutiveParseFailures = 0
+  let consecutiveNoProgress = 0
   const requireFreshVerification = (): void => {
     if (deps.control && !deps.control.isVerifying) deps.control.beginVerification()
   }
@@ -331,7 +331,6 @@ export async function runElementTask(
     const stoppedBeforeStep = await waitForControl()
     if (stoppedBeforeStep) return stoppedBeforeStep
     const planningStep = step + 1
-    reportPhase(step)
     const startedAt = now()
     let prompt = ''
     let modelPrompt = ''
@@ -376,7 +375,7 @@ export async function runElementTask(
         modelPrompt
       )
       const decisionLeaseEpoch = deps.control?.snapshot().inputLease.epoch
-      rawResponse = await decide(modelPrompt)
+      rawResponse = await decide(modelPrompt, deps.screenshotPath?.())
       const stoppedAfterDecision = await waitForControl()
       if (stoppedAfterDecision) return stoppedAfterDecision
       const controlAfterDecision = deps.control?.snapshot()
@@ -467,10 +466,22 @@ export async function runElementTask(
             : 'skipped a repeated action; choose a different action'
         )
         checkpoint()
+        consecutiveNoProgress += 1
+        if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
+          note(AX_NO_PROGRESS_SUMMARY)
+          return {
+            ok: false,
+            summary: AX_NO_PROGRESS_SUMMARY,
+            steps,
+            recovery: 'vision',
+            guidance: [...taskBrief.guidance]
+          }
+        }
         continue
       }
       lastActionSig = sig
       if (action.action === 'key') {
+        consecutiveNoProgress = 0
         await actuator.keys(action.keys)
         if (isSubmitKey(action.keys)) draftAwaitingSubmit = false
         requireFreshVerification()
@@ -490,8 +501,20 @@ export async function runElementTask(
           observe('skipped')
           note('already typed this text; not sending it again')
           checkpoint()
+          consecutiveNoProgress += 1
+          if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
+            note(AX_NO_PROGRESS_SUMMARY)
+            return {
+              ok: false,
+              summary: AX_NO_PROGRESS_SUMMARY,
+              steps,
+              recovery: 'vision',
+              guidance: [...taskBrief.guidance]
+            }
+          }
           continue
         }
+        consecutiveNoProgress = 0
         if (typed.length > 0) {
           typedTexts.add(typed)
         }
@@ -506,6 +529,19 @@ export async function runElementTask(
             note(`no element [${targetIndex}] on this screen`)
             checkpoint()
             continue
+          }
+          if (!isEditableElement(target)) {
+            const summary = `The action model tried to type into non-editable element [${targetIndex}].`
+            observe('invalid_target', summary)
+            note(summary)
+            checkpoint()
+            return {
+              ok: false,
+              summary,
+              steps,
+              recovery: 'vision',
+              guidance: [...taskBrief.guidance]
+            }
           }
         }
         await actuator.type(target, action.text)
@@ -537,9 +573,11 @@ export async function runElementTask(
       }
       // click or press: prefer AXPress when the element exposes it.
       if (action.action === 'press' || el.actionable) {
+        consecutiveNoProgress = 0
         await actuator.press(el)
         note(`pressed [${el.index}] ${el.name || el.role}`)
       } else {
+        consecutiveNoProgress = 0
         await actuator.click(el)
         note(`clicked [${el.index}] ${el.name || el.role}`)
       }

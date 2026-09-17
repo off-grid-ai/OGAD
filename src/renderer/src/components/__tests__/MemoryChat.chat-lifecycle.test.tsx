@@ -34,7 +34,7 @@ function openActionsFor(text: string): void {
 describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
     globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
       callback(0)
       return 1

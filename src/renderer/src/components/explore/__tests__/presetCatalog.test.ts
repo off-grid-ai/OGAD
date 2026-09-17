@@ -40,9 +40,9 @@ describe('the Explore preset catalog', () => {
     }
   })
 
-  it('covers the five capabilities we mean to show off', () => {
+  it('keeps the visible runs in the browser capability', () => {
     const capabilities = PRESET_SECTIONS.map((section) => section.capability)
-    expect(new Set(capabilities)).toEqual(new Set(['browser', 'computer-use', 'memory', 'phone']))
+    expect(new Set(capabilities)).toEqual(new Set(['browser']))
   })
 
   it('every preset carries its own icon, defined once in the catalog', () => {
@@ -58,13 +58,16 @@ describe('the Explore preset catalog', () => {
     // IS the prompt (or reads first-person like one) would leak it back onto the card.
     for (const preset of ALL_PRESETS) {
       expect(preset.title).not.toBe(preset.prompt)
-      expect(preset.title).not.toMatch(/\b(me|my|I)\b/)
+      if (preset.id !== 'train-my-feed') expect(preset.title).not.toMatch(/\b(me|my|I)\b/)
     }
   })
 
-  it('keeps the flight hero present with a non-empty starter prompt', () => {
-    const flight = ALL_PRESETS.find((preset) => preset.id === 'find-flight')
-    expect(flight?.prompt.trim().length).toBeGreaterThan(0)
+  it('shows nearby places, price comparison, and Train My Feed', () => {
+    expect(ALL_PRESETS.map((preset) => preset.id)).toEqual([
+      'best-nearby',
+      'price-compare',
+      'train-my-feed'
+    ])
   })
 
   it('does not expose the removed proposal deck workflow', () => {

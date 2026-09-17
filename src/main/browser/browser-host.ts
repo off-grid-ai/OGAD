@@ -23,7 +23,11 @@ import {
   type CdpTransport
 } from './browser-driver'
 import { VisionGuard } from '../vision/vision-guard'
-import { registerVisionSession, waitForVisionUser } from '../vision/vision-controller'
+import {
+  controlVisionTask,
+  registerVisionSession,
+  waitForVisionUser
+} from '../vision/vision-controller'
 import { getMainWindow } from '../main-window'
 import type { BrowserRailHost, BrowserTaskRequest, WebTaskResult } from './browser-rail'
 import {
@@ -59,7 +63,9 @@ import { BrowserJourneyRunOwners } from './browser-run-owners'
 import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
-import { automationTaskReadStatus } from '@offgrid/automation'
+import { automationTaskReadStatus, isAutomationTaskTerminal } from '@offgrid/automation'
+import { getWebUseSettings } from '../web-use-settings'
+import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -281,6 +287,31 @@ class BrowserHost implements BrowserRailHost {
     } catch {
       /* already destroyed */
     }
+  }
+
+  /** Keep the current result page available, but release completed Web Use
+   * renderers from older journeys before a new live preview starts. History can
+   * recreate those pages from its saved URL when the user opens them again. */
+  private releaseRetainedTaskViews(activeJourneyId: string): void {
+    let changed = false
+    for (const snapshot of this.sessions.snapshot().sessions) {
+      if (
+        snapshot.kind !== 'task' ||
+        snapshot.journeyId === activeJourneyId ||
+        snapshot.status === 'open' ||
+        !isAutomationTaskTerminal(snapshot.status)
+      ) {
+        continue
+      }
+      const closed = this.sessions.close(snapshot.sessionId)
+      if (!closed) continue
+      changed = true
+      this.taskPointers.delete(snapshot.sessionId)
+      this.destroyView(closed.resource)
+    }
+    if (!changed) return
+    this.syncViewVisibility()
+    this.broadcastSessions()
   }
 
   dispose(): void {
@@ -625,6 +656,7 @@ class BrowserHost implements BrowserRailHost {
 
   async runTask(request: BrowserTaskRequest): Promise<WebTaskResult> {
     const { goal, url, taskId, journeyId, checkpoint } = request
+    this.releaseRetainedTaskViews(journeyId)
     let record = this.sessions.findJourney(journeyId)
     const continuingJourney = Boolean(record)
     if (!record) {
@@ -741,6 +773,7 @@ class BrowserHost implements BrowserRailHost {
       if (!ownsRun()) return false
       queuedGuidance.push(text)
       recordStep(TASK_GUIDANCE_TRACE)
+      controlVisionTask('resume', taskId)
       return true
     })
 
@@ -846,115 +879,131 @@ class BrowserHost implements BrowserRailHost {
           .join('\n\n')
       }
 
-      const semantic = await (async () => {
-        try {
-          await playwright.connect()
-        } catch (error) {
-          if (owner.controller.signal.aborted) throw owner.controller.signal.reason ?? error
-          const detail = error instanceof Error ? error.message : String(error)
-          return {
-            ok: false,
-            fallback: true,
-            summary: `Playwright semantic control was unavailable: ${detail}`,
-            handoffs: 0
+      const runBrowserRails = async (): Promise<{
+        semantic: Awaited<ReturnType<typeof runBrowserPlaywrightTask>>
+        visual: Awaited<ReturnType<typeof runBrowserVisualTask>>
+      }> => {
+        const semantic = await (async () => {
+          try {
+            await playwright.connect()
+          } catch (error) {
+            if (owner.controller.signal.aborted) throw owner.controller.signal.reason ?? error
+            const detail = error instanceof Error ? error.message : String(error)
+            return {
+              ok: false,
+              fallback: true,
+              summary: `Playwright semantic control was unavailable: ${detail}`,
+              handoffs: 0
+            }
           }
-        }
-        return runBrowserPlaywrightTask({
-          goal,
-          plan,
-          session: playwright,
-          guard,
-          activeDriver: () => activePage().driver,
-          activeUrl: () => activePage().view.webContents.getURL(),
-          waitForUser: async (why, signal) => {
-            if (!ownsRun()) return
-            await waitForVisionUser(taskId, why, signal)
-          },
-          takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
-          onStep: recordStep,
-          onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
-          onProgress: (currentStep, phase, action) => {
-            if (!ownsRun()) return
-            reportTaskProgress({
-              taskId,
-              journeyId,
-              kind: 'web_use',
-              title: goal,
-              status: 'running',
-              phase,
-              currentStep,
-              currentAction: action
-            })
-          },
-          onObservation: recordSemanticEvidence,
-          signal: owner.controller.signal
-        })
-      })().finally(() => playwright.close())
-
-      // Vision remains a bounded fallback for canvas, maps, remote desktops,
-      // and pages that do not publish useful accessibility semantics.
-      const visual = semantic.fallback
-        ? await withActiveBrowserVision(async ({ selection, identity, decide }) => {
-            recordStep(`visual fallback: ${semantic.summary}`)
-            if (!ownsRun()) owner.controller.abort()
-            owner.controller.signal.throwIfAborted()
-            recordTaskRun({ taskId, journeyId, kind: 'web_use', title: goal, ...identity })
-            return runBrowserVisualTask({
-              goal,
-              taskId,
-              journeyId,
-              adapter: selection.adapter,
-              decide,
-              guard,
-              plan,
-              ...(checkpoint?.steps.length ? { resumedSteps: checkpoint.steps } : {}),
-              activePage,
-              waitForUser: async (why, signal) => {
-                if (!ownsRun()) return
-                await waitForVisionUser(taskId, why, signal)
-              },
-              onStep: recordStep,
-              onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
-              onProgress: (progress) => {
-                if (!ownsRun()) return
-                reportTaskProgress({
-                  taskId,
-                  journeyId,
-                  kind: 'web_use',
-                  title: goal,
-                  status:
-                    progress.phase === 'paused'
-                      ? 'paused'
-                      : progress.phase === 'stopped'
-                        ? 'stopped'
-                        : 'running',
-                  phase: progress.phase,
-                  currentStep: progress.step,
-                  currentAction: progress.action
-                })
-              },
-              onReasoning: (reasoning) => {
-                if (!ownsRun()) return
-                const transcript = reasoningTranscript(reasoning)
-                reportTaskProgress({
-                  taskId,
-                  journeyId,
-                  kind: 'web_use',
-                  title: goal,
-                  ...(transcript ? { currentReasoning: transcript } : {}),
-                  reasoningLive: reasoning.live
-                })
-              },
-              takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
-              signal: owner.controller.signal
-            })
+          return runBrowserPlaywrightTask({
+            goal,
+            plan,
+            session: playwright,
+            guard,
+            activeDriver: () => activePage().driver,
+            activeUrl: () => activePage().view.webContents.getURL(),
+            waitForUser: async (why, signal) => {
+              if (!ownsRun()) return
+              await waitForVisionUser(taskId, why, signal)
+            },
+            takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
+            onStep: recordStep,
+            onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
+            onProgress: (currentStep, phase, action) => {
+              if (!ownsRun()) return
+              reportTaskProgress({
+                taskId,
+                journeyId,
+                kind: 'web_use',
+                title: goal,
+                status: 'running',
+                phase,
+                currentStep,
+                currentAction: action
+              })
+            },
+            onObservation: recordSemanticEvidence,
+            signal: owner.controller.signal
           })
-        : {
-            ok: semantic.ok,
-            summary: semantic.summary,
-            steps,
-            handoffs: semantic.handoffs
-          }
+        })().finally(() => playwright.close())
+
+        // Vision remains a bounded fallback for canvas, maps, remote desktops,
+        // and pages that do not publish useful accessibility semantics.
+        const visual = semantic.fallback
+          ? await withActiveBrowserVision(async ({ selection, identity, decide }) => {
+              recordStep(`visual fallback: ${semantic.summary}`)
+              if (!ownsRun()) owner.controller.abort()
+              owner.controller.signal.throwIfAborted()
+              recordTaskRun({ taskId, journeyId, kind: 'web_use', title: goal, ...identity })
+              return runBrowserVisualTask({
+                goal,
+                taskId,
+                journeyId,
+                adapter: selection.adapter,
+                decide,
+                guard,
+                plan,
+                ...(checkpoint?.steps.length ? { resumedSteps: checkpoint.steps } : {}),
+                activePage,
+                waitForUser: async (why, signal) => {
+                  if (!ownsRun()) return
+                  await waitForVisionUser(taskId, why, signal)
+                },
+                onStep: recordStep,
+                onPhase: (phaseId) => recordStep(encodeTaskPhase(phaseId)),
+                onProgress: (progress) => {
+                  if (!ownsRun()) return
+                  reportTaskProgress({
+                    taskId,
+                    journeyId,
+                    kind: 'web_use',
+                    title: goal,
+                    status:
+                      progress.phase === 'paused'
+                        ? 'paused'
+                        : progress.phase === 'stopped'
+                          ? 'stopped'
+                          : 'running',
+                    phase: progress.phase,
+                    currentStep: progress.step,
+                    currentAction: progress.action
+                  })
+                },
+                onReasoning: (reasoning) => {
+                  if (!ownsRun()) return
+                  const transcript = reasoningTranscript(reasoning)
+                  reportTaskProgress({
+                    taskId,
+                    journeyId,
+                    kind: 'web_use',
+                    title: goal,
+                    ...(transcript ? { currentReasoning: transcript } : {}),
+                    reasoningLive: reasoning.live
+                  })
+                },
+                takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
+                signal: owner.controller.signal
+              })
+            })
+          : {
+              ok: semantic.ok,
+              summary: semantic.summary,
+              steps,
+              handoffs: semantic.handoffs
+            }
+        return { semantic, visual }
+      }
+
+      const strategy =
+        currentRemoteScreenTaskSession()?.modelStrategy ?? getWebUseSettings().modelStrategy
+      const { semantic, visual } =
+        strategy === 'separate_specialist'
+          ? await withActiveBrowserVision(async ({ identity }) => {
+              recordTaskRun({ taskId, journeyId, kind: 'web_use', title: goal, ...identity })
+              return runBrowserRails()
+            })
+          : await runBrowserRails()
       if (!ownsRun()) return replacedResult()
       const finalContents = activePage().view.webContents
       const finalUrl = finalContents.getURL()

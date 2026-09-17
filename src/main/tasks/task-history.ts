@@ -283,11 +283,15 @@ export function appendTaskStepDetail(
   detail: ComputerUseStepDetail
 ): TaskRunSnapshot {
   const previous = taskHistoryStore().get(taskId)
+  const sanitized = sanitizeComputerUseStepDetail(detail)
   return recordTaskRun({
     taskId,
     kind,
     title,
-    stepDetails: [...(previous?.stepDetails ?? []), sanitizeComputerUseStepDetail(detail)]
+    stepDetails: [
+      ...(previous?.stepDetails ?? []).filter((candidate) => candidate.stepId !== sanitized.stepId),
+      sanitized
+    ]
   })
 }
 

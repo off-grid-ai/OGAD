@@ -31,12 +31,20 @@ describe('<ExploreScreen/>', () => {
     const user = userEvent.setup()
     render(<ExploreScreen onRunPreset={onRunPreset} />)
 
-    await user.click(screen.getByTestId('explore-preset-find-flight'))
+    await user.click(screen.getByTestId('explore-preset-train-my-feed'))
 
     expect(onRunPreset).toHaveBeenCalledTimes(1)
     expect(onRunPreset.mock.calls[0]?.[0]).toMatchObject({
-      id: 'find-flight',
-      prompt: expect.stringContaining('flight')
+      id: 'train-my-feed',
+      prompt: expect.stringContaining('Train the selected social feed')
     })
+  })
+
+  it('tells the user that Train My Feed uses Computer Use', () => {
+    render(<ExploreScreen onRunPreset={() => {}} />)
+
+    expect(
+      screen.getByText('Uses Computer Use in your default browser and only the actions you approve.')
+    ).toBeTruthy()
   })
 })

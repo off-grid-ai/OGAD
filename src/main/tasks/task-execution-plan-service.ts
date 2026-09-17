@@ -26,7 +26,7 @@ export async function createTaskExecutionPlan(
   const generate =
     request.generate ??
     ((input: string, signal?: AbortSignal) =>
-      llm.chat(input, [], 45_000, 280, {
+      llm.chat(input, [], undefined, undefined, {
         disableThinking: true,
         responseFormat: TASK_PLAN_RESPONSE_FORMAT,
         signal

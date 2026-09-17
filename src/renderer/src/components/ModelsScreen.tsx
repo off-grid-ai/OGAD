@@ -129,6 +129,7 @@ interface ModelFile {
   name: string
   url: string
   sizeBytes?: number
+  role?: string
 }
 interface ModelEntry {
   id: string
@@ -305,11 +306,18 @@ export function ModelsScreen({
   const [kinds, setKinds] = useState<string[]>([])
   const [models, setModels] = useState<ModelEntry[]>([])
   const [installed, setInstalled] = useState<string[]>([])
-  // Per-model vision readiness from the backend (derived from files + disk): which
-  // vision-capable models have their projector downloaded. Drives the "add vision
-  // support" affordance for a model installed before it gained a projector.
+  // Per-model optional companion readiness from the backend (derived from files + disk).
+  // Drives repair actions for projectors and DFlash draft models.
   const [visionSt, setVisionSt] = useState<
-    Record<string, { supportsVision: boolean; projectorInstalled: boolean }>
+    Record<
+      string,
+      {
+        supportsVision: boolean
+        projectorInstalled: boolean
+        supportsDflash?: boolean
+        dflashInstalled?: boolean
+      }
+    >
   >({})
   const refreshVision = (): void => {
     void api.getModelVisionStatus?.().then((s) => setVisionSt(s ?? {}))
@@ -628,6 +636,7 @@ export function ModelsScreen({
     // files already present, so this pulls only the mmproj.
     const vs = visionSt[m.id]
     const projectorMissing = isInstalled && !!vs?.supportsVision && !vs.projectorInstalled
+    const dflashMissing = isInstalled && !!vs?.supportsDflash && !vs.dflashInstalled
     const bytes = totalBytes(m)
     const size = formatSize(bytes) || null
     const meta = [m.org, m.params ? `${m.params}B` : null, size, fmtReleaseDate(m.releaseDate)]
@@ -636,6 +645,7 @@ export function ModelsScreen({
     const tier: FitTier = isHf ? 'easy' : ramTier(m)
     const tags = (m.tags ?? []).filter((t) => !/tight|risky|fit/i.test(t))
     const comingSoon = m.availability === 'coming_soon'
+    const worksBest = /(?:^|[\s/_-])UI[\s_-]?Mate(?:[\s/_-]|$)/i.test(`${m.id} ${m.name}`)
     // The single image pick best-suited to THIS machine's RAM (Light on <=16GB,
     // full above) — a prominent filled-emerald badge, distinct from the outlined tags.
     const recommended = !isHf && !!recommendedImageId && m.id === recommendedImageId
@@ -656,6 +666,11 @@ export function ModelsScreen({
               >
                 {m.name}
               </button>
+              {worksBest && (
+                <span className="shrink-0 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
+                  Works best
+                </span>
+              )}
               {m.kind === 'vision' && (
                 <span className="flex shrink-0 items-center gap-0.5 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
                   <IconEye className="h-2 w-2" /> Vision
@@ -877,13 +892,22 @@ export function ModelsScreen({
 
         {/* Vision-capable but projector not downloaded — offer to add it. Hidden while a
             download is in flight (the progress UI covers that). */}
-        {!comingSoon && projectorMissing && !downloading && (
+        {!comingSoon && projectorMissing && !dflashMissing && !downloading && (
           <button
             onClick={() => download(m.id)}
             title="Download the vision projector so this model can read images"
             className="flex items-center gap-1 rounded border border-amber-400/50 px-2 py-1 text-[10px] text-amber-300 transition-all duration-150 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95"
           >
             <IconEye className="h-3 w-3" /> Add vision support
+          </button>
+        )}
+        {!comingSoon && dflashMissing && !downloading && (
+          <button
+            onClick={() => download(m.id)}
+            title="Download the missing DFlash model for speculative decoding"
+            className="flex items-center gap-1 rounded border border-amber-400/50 px-2 py-1 text-[10px] text-amber-300 transition-all duration-150 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95"
+          >
+            <IconDownload className="h-3 w-3" /> Repair
           </button>
         )}
 

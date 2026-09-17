@@ -108,9 +108,15 @@ export function buildOutlookScript(
  * pretends to be the Swift helper.
  */
 export function makeWinInlineRunner(
-  openExternal: (url: string) => Promise<void>
+  openExternal: (url: string) => Promise<void>,
+  runPs?: RunPowerShell
 ): (cmd: { command: string; args: Record<string, unknown> }) => Promise<NativeActionResponse> {
   return async (cmd) => {
+    if (cmd.command === 'location.current') {
+      return runPs
+        ? runPs(buildWindowsLocationScript())
+        : { ok: false, error: 'current location is not available on Windows' }
+    }
     if (cmd.command === 'system.openURL') {
       try {
         await openExternal(String(cmd.args.url ?? ''))
@@ -121,6 +127,27 @@ export function makeWinInlineRunner(
     }
     return { ok: false, error: `'${cmd.command}' is not available on Windows` }
   }
+}
+
+/** Read the current position through the Windows Runtime location service. The OS owns
+ * permission and location-provider policy; the script returns only the bounded fields
+ * exposed by the macOS helper. */
+export function buildWindowsLocationScript(): string {
+  return [
+    `try {`,
+    `Add-Type -AssemblyName System.Runtime.WindowsRuntime`,
+    `$geopositionType = [Windows.Devices.Geolocation.Geoposition, Windows.Devices.Geolocation, ContentType=WindowsRuntime]`,
+    `$null = [Windows.Devices.Geolocation.Geolocator, Windows.Devices.Geolocation, ContentType=WindowsRuntime]`,
+    `$locator = New-Object Windows.Devices.Geolocation.Geolocator`,
+    `$operation = $locator.GetGeopositionAsync()`,
+    `$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 } | Select-Object -First 1`,
+    `$task = $asTask.MakeGenericMethod($geopositionType).Invoke($null, @($operation))`,
+    `if (-not $task.Wait(15000)) { throw 'current location was not available within 15 seconds' }`,
+    `$coordinate = $task.Result.Coordinate`,
+    `$position = $coordinate.Point.Position`,
+    `@{ ok = $true; result = @{ latitude = $position.Latitude; longitude = $position.Longitude; accuracyMeters = $coordinate.Accuracy; timestamp = $coordinate.Timestamp.UtcDateTime.ToString('o') } } | ConvertTo-Json -Compress -Depth 5`,
+    CATCH
+  ].join('\n')
 }
 
 /** COM error shapes that mean "Outlook is not installed / not registered". */

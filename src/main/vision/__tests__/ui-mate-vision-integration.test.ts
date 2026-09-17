@@ -26,7 +26,6 @@ describe('specialist vision protocols', () => {
 
     expect(request.tools).toBeUndefined()
     expect(request.responseFormat).toBeUndefined()
-    expect(request.maxTokens).toBe(16_384)
     expect(serialized).toContain('<function=computer_use>')
     expect(serialized).toContain('Current milestone: Open the menu.')
     expect(serialized).toContain('Only active instruction: Open the menu.')

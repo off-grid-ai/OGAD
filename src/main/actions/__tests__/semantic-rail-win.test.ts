@@ -11,6 +11,7 @@ import {
   buildOutlookDeleteScript,
   buildOutlookListScript,
   buildOutlookScript,
+  buildWindowsLocationScript,
   isOutlookUnavailable,
   makeOutlookNativeReader,
   makeWindowsSemanticRailExecutor,
@@ -233,6 +234,20 @@ describe('the DeviceController swap (DSP)', () => {
 })
 
 describe('makeWinInlineRunner (R2-A2)', () => {
+  it('gets location through the injected Windows Runtime boundary', async () => {
+    const runPs = vi.fn(async () => ({
+      ok: true as const,
+      result: { latitude: 37.78, longitude: -122.4, accuracyMeters: 20 }
+    }))
+    const run = makeWinInlineRunner(async () => {}, runPs)
+
+    expect(await run({ command: 'location.current', args: {} })).toEqual({
+      ok: true,
+      result: { latitude: 37.78, longitude: -122.4, accuracyMeters: 20 }
+    })
+    expect(runPs).toHaveBeenCalledWith(buildWindowsLocationScript())
+  })
+
   it('opens links through the injected opener', async () => {
     const opened: string[] = []
     const run = makeWinInlineRunner(async (url) => {

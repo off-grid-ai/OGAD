@@ -14,6 +14,7 @@ import { shouldGate } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
 import { isProEntitled } from '../licensing/license-service'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
+import { runPowerShell } from '../actions/win-powershell'
 import { runNativeAction } from '../actions/native-helper'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
 import {
@@ -51,9 +52,12 @@ const OUTCOME_WAIT_MS = 30_000
 function engineResult(
   actionType: string,
   text: string,
-  status: ToolCallStatus = 'completed'
+  status: ToolCallStatus = 'completed',
+  authoritative = true
 ): string | ToolResult {
-  return isTaskAction(actionType) ? { text, status, authoritative: true } : text
+  return isTaskAction(actionType)
+    ? { text, status, ...(authoritative ? { authoritative: true } : {}) }
+    : text
 }
 
 // The inline (non-engine) runner, picked by platform in exactly one place:
@@ -66,12 +70,39 @@ export function inlineRunnerForPlatform(
   if (platform === 'win32') {
     return makeWinInlineRunner(async (url) => {
       await shell.openExternal(url)
-    })
+    }, runPowerShell)
   }
   return runNativeAction
 }
 
 const inlineRun = inlineRunnerForPlatform(process.platform)
+
+function currentCoordinates(result: unknown): { latitude: number; longitude: number } | undefined {
+  if (!result || typeof result !== 'object') return undefined
+  const latitude = (result as Record<string, unknown>).latitude
+  const longitude = (result as Record<string, unknown>).longitude
+  return typeof latitude === 'number' &&
+    Number.isFinite(latitude) &&
+    typeof longitude === 'number' &&
+    Number.isFinite(longitude)
+    ? { latitude, longitude }
+    : undefined
+}
+
+function needsCurrentLocation(args: Record<string, unknown>, context?: ToolContext): boolean {
+  const text = [
+    typeof args.goal === 'string' ? args.goal : '',
+    context?.userQuery ?? ''
+  ].join('\n')
+  if (
+    /\blatitude\s*[:=]?\s*-?\d+(?:\.\d+)?[^\n]*\blongitude\s*[:=]?\s*-?\d+(?:\.\d+)?/i.test(
+      text
+    )
+  ) {
+    return false
+  }
+  return /\b(?:near me|my (?:current )?location|current location|device location)\b/i.test(text)
+}
 
 const productionBoundary: NativeActionToolBoundary = {
   run: inlineRun,
@@ -136,6 +167,22 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!spec) {
       return `Error: unknown action ${name}`
     }
+    if (isTaskAction(name) && needsCurrentLocation(args, context)) {
+      const location = context?.currentLocation
+      if (!location) {
+        return {
+          text: context?.currentLocationFailed
+            ? 'I could not get your current location. Provide a starting address or neighborhood before I start this nearby task.'
+            : 'I need your current coordinates before I start this nearby task. I did not start Web Use.',
+          status: 'failed',
+          authoritative: true
+        }
+      }
+      args = {
+        ...args,
+        goal: `${typeof args.goal === 'string' ? args.goal : ''}\n\nStart from latitude ${location.latitude}, longitude ${location.longitude}.`
+      }
+    }
     if (shouldGate(spec.risk)) {
       const actionType = actionTypeForTool(name)
       const actions = this.boundary.actions
@@ -150,7 +197,13 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!spec.command) return `Error: ${name} has no inline command.`
     const res = await this.boundary.run({ command: spec.command, args: spec.buildArgs(args) })
     if (!res.ok) {
+      if (name === 'get_current_location' && context) context.currentLocationFailed = true
       return `Error: ${res.error}`
+    }
+    if (name === 'get_current_location' && context) {
+      const coordinates = currentCoordinates(res.result)
+      if (coordinates) context.currentLocation = coordinates
+      else context.currentLocationFailed = true
     }
     return spec.formatResult(res.result)
   }
@@ -164,8 +217,11 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
-    const reply = (text: string, status?: ToolCallStatus): string | ToolResult =>
-      engineResult(actionType, text, status)
+    const reply = (
+      text: string,
+      status?: ToolCallStatus,
+      authoritative = true
+    ): string | ToolResult => engineResult(actionType, text, status, authoritative)
     const cleanArgs = spec.buildArgs(args)
     const proposed = await actions.propose(
       {
@@ -189,17 +245,18 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!proposed.accepted) {
       return reply(`Error: the action was refused: ${proposed.reason}`, 'failed')
     }
-    const taskReference = isTaskAction(actionType) ? ` Task reference: ${proposed.id}.` : ''
+    const taskReference = isTaskAction(actionType) ? `Task reference: ${proposed.id}. ` : ''
     if (proposed.deduped) {
       return reply(
-        `That exact action is already in flight — not starting a duplicate.${taskReference}`,
+        `${taskReference}A matching task is already in flight. No duplicate was started.`,
         'pending'
       )
     }
     actions.kick()
     if (isTaskAction(actionType)) {
+      const label = actionType === 'computer_use' ? 'Computer Use' : 'Web Use'
       return reply(
-        `Started "${spec.title(args)}". Do not call ${actionType} again for this goal. Live progress and the final result will appear in this chat.${taskReference}`,
+        `${taskReference}${label} started. Live progress and the final result will appear in this chat. Do not call ${actionType} again for this goal.`,
         'pending'
       )
     }
@@ -211,7 +268,7 @@ export class NativeActionToolExtension implements ToolExtension {
     ])
     if (raced.kind === 'parked') {
       return reply(
-        `Error: the action engine held this Chat action instead of starting it. No approval was created.${taskReference}`,
+        `${taskReference}Error: the action engine held this Chat action instead of starting it. No approval was created.`,
         'failed'
       )
     }
@@ -219,34 +276,34 @@ export class NativeActionToolExtension implements ToolExtension {
       // Approved and still running past the wait window - NOT queued. Say so, or
       // the model wrongly tells the user to approve something already in flight.
       return reply(
-        `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.${taskReference}`,
+        `${taskReference}"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.`,
         'pending'
       )
     }
     const outcome = raced.outcome
     switch (outcome.outcome) {
       case 'done':
-        return reply(`${spec.formatResult(undefined)}${taskReference}`)
+        return reply(`${taskReference}${spec.formatResult(undefined)}`)
       case 'rejected':
         return reply(
-          `The user declined — ${spec.title(args)} was not run.${taskReference}`,
+          `${taskReference}The user declined — ${spec.title(args)} was not run.`,
           'failed'
         )
       case 'needs_help': {
         const lastAttempt = outcome.record.attemptLog.at(-1)
         const detail = lastAttempt?.detail ? ` (${lastAttempt.detail})` : ''
         return reply(
-          `It ran but could not be confirmed${detail}. Tell the user it needs their attention.${taskReference}`,
+          `${taskReference}It ran but could not be confirmed${detail}. Tell the user it needs their attention.`,
           'pending'
         )
       }
       case 'edited':
         return reply(
-          `The user is editing this action before approving it. Tell them it is pending.${taskReference}`,
+          `${taskReference}The user is editing this action before approving it. Tell them it is pending.`,
           'pending'
         )
       case 'poisoned':
-        return reply(`Error: ${outcome.error}${taskReference}`, 'failed')
+        return reply(`${taskReference}Error: ${outcome.error}`, 'failed')
     }
   }
 }

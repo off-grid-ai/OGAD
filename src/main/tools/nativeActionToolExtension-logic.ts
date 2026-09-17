@@ -50,6 +50,17 @@ function formatCreated(label: string): (result: unknown) => string {
 
 export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
+    name: 'get_current_location',
+    description:
+      "Get the user's current device location as latitude, longitude, accuracy, and timestamp. Read-only; use it before a nearby task when the user has not supplied another starting location. If it fails, do not start Web Use or Computer Use; ask for an address or neighborhood.",
+    parameters: { type: 'object', properties: {} },
+    command: 'location.current',
+    risk: 'read',
+    buildArgs: () => ({}),
+    title: () => 'Get the current location',
+    formatResult: (result) => JSON.stringify(result)
+  },
+  {
     name: 'calendar_create_event',
     description:
       "Create an event in the user's macOS Calendar. Times are ISO 8601 (e.g. 2026-08-13T15:00:00). A Chat request runs directly.",
@@ -177,7 +188,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'open_url',
     description:
-      "Open a URL or app scheme in the user's default browser or app (a web page, a mailto: draft, whatsapp://send). It ONLY opens - no searching, clicking, playing, logging in, or submitting. If the goal needs anything DONE on a website (play or watch a video, search and click a result, log in, place an order, fill a form), use web_use instead - it does the task inside Off Grid AI's own built-in browser.",
+      "Open a URL or app scheme in the user's default browser or app (a web page, a mailto: draft, whatsapp://send). It ONLY opens - no searching, clicking, playing, logging in, or submitting. If the goal needs anything DONE on a website, use web_use unless the user explicitly requires their existing default-browser session, cookies, history, cache, or signed-in account. For that case, open the page with open_url, then control the visible browser with computer_use.",
     parameters: {
       type: 'object',
       properties: {
@@ -194,7 +205,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: WEB_USE_TOOL_NAME,
     description:
-      "Do a task on a website in Off Grid AI's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it - 'play X on YouTube' or 'search Y and open the first result' is web_use, not open_url. It runs INSIDE Off Grid AI's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Use the full conversation. Ask the user before calling this tool only when a material fact is missing. Call it once for the complete goal. Do not call it again while that task runs. Live progress and the final result appear in the chat.",
+      "Do a task on a website in Off Grid AI's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it, unless the user explicitly requires their existing default-browser session, cookies, history, cache, or signed-in account. That case requires open_url followed by computer_use. For a task near the user's current location, call get_current_location first and start Web Use only when it returns coordinates. Web Use runs INSIDE Off Grid AI's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Use the full conversation. Ask the user before calling this tool only when a material fact is missing. Call it once for the complete goal. Do not call it again while that task runs. Live progress and the final result appear in the chat.",
     parameters: {
       type: 'object',
       properties: {
@@ -223,7 +234,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'computer_use',
     description:
-      'Complete a task by controlling a desktop APP directly - clicking, typing, and navigating its window - for things no other tool can do (a desktop app with no web version, sharing a file through an app UI). The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_use for anything on a website and the direct tools (calendar/reminders/mail) whenever they fit - use this only when the task genuinely needs GUI control of an installed app. Call it once for the complete goal. Do not call it again while that task runs. Live progress and the final result appear in the chat.',
+      "Complete a task by controlling a visible desktop app directly, including the user's default browser when the task explicitly depends on its existing login, cookies, history, cache, recommendations, or signed-in account. The user watches in a supervised overlay and can stop or take over at any time; sign-ins and payments are handed back to them. Prefer web_use for website tasks that do not need the user's existing browser state, and prefer direct tools when they fit. Call computer_use once for the complete goal. Do not call it again while that task runs. Live progress and the final result appear in the chat.",
     parameters: {
       type: 'object',
       properties: {
@@ -301,6 +312,7 @@ export function taskKindForActionType(actionType: string): 'web_use' | 'computer
  * this. An unlisted platform exposes nothing.
  */
 export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'get_current_location',
   'calendar_create_event',
   'reminders_create',
   'mail_send',
@@ -333,15 +345,15 @@ export function specsForPlatform(
 export function systemHintForPlatform(platform: NodeJS.Platform, includeProUse = true): string {
   if (platform === 'darwin') {
     if (!includeProUse) {
-      return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
+      return "You can act on the user's Mac: get their current location for nearby requests (get_current_location), manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
     }
-    return "You can act on the user's Mac: manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. To actually DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_use - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
+    return "You can act on the user's Mac: get their current location for nearby requests (get_current_location), manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. Use web_use for normal website tasks; it runs inside Off Grid AI's own built-in browser. When the user explicitly requires their existing default-browser login, cookies, history, cache, recommendations, or signed-in account, call open_url first and then use computer_use on the visible browser. The user watches Computer Use and can take over. Prefer direct tools when they fit. Use ISO 8601 for all times. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
   }
   if (platform === 'win32') {
     if (!includeProUse) {
-      return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
+      return "You can act on the user's PC: get their current location for nearby requests (get_current_location), and use Outlook to create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
     }
-    return "You can act on the user's PC through Outlook: create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. To DO something on a website - play or watch a video, search and click a result, check in, order, fill a form, log in - use web_use (NOT open_url); it runs the task inside Off Grid AI's own built-in browser without touching the user's cursor or their own browser, so they keep working, and hands back for any sign-in or payment. For a task that needs to control a desktop app with no web version, use computer_use - the user watches and can take over. Prefer the direct tools and web_use when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
+    return "You can act on the user's PC: get their current location for nearby requests (get_current_location), and use Outlook to create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. Use web_use for normal website tasks; it runs inside Off Grid AI's own built-in browser. When the user explicitly requires their existing default-browser login, cookies, history, cache, recommendations, or signed-in account, call open_url first and then use computer_use on the visible browser. The user watches Computer Use and can take over. Prefer direct tools when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
   }
   return ''
 }

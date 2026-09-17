@@ -92,7 +92,7 @@ function deferred<T>(): {
 }
 
 export class ChatBoundary {
-  constructor(private readonly createSplitter?: ThinkSplitterFactory) {}
+  constructor(private readonly createSplitter?: ThinkSplitterFactory) { }
 
   readonly projects = [
     { id: 'project-alpha', name: 'Project Alpha' },
@@ -120,6 +120,7 @@ export class ChatBoundary {
     thinking: boolean
     turn: ReturnType<typeof deferred<RagResult>>
   }[] = []
+  readonly toolQueries: { query: string; options: Record<string, unknown> }[] = []
 
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
   readonly activeRagStreams: ActiveChatStreamContract[] = []
@@ -189,7 +190,7 @@ export class ChatBoundary {
       })
     },
     vision: { control: this.stopComputerTask },
-    onImageGenProgress: vi.fn(() => () => {}),
+    onImageGenProgress: vi.fn(() => () => { }),
     onRagConversationsChanged: vi.fn(
       (callback: (change: { conversationId: string; projectId?: string | null }) => void) => {
         this.conversationChangedCallback = callback
@@ -247,10 +248,10 @@ export class ChatBoundary {
       { id: 'bf_emma', label: 'Emma', language: 'en-GB' }
     ]),
     prepareTtsVoice: vi.fn(async () => ({ ready: true })),
-    onTtsVoiceProgress: vi.fn(() => () => {}),
+    onTtsVoiceProgress: vi.fn(() => () => { }),
     getSettings: vi.fn(async () => ({})),
     getLlmSettings: vi.fn(async () => ({})),
-    saveSetting: vi.fn(async () => {}),
+    saveSetting: vi.fn(async () => { }),
     listProjects: vi.fn(async () => this.projects.map((item) => ({ ...item }))),
     styleThumbs: vi.fn(async () => ({})),
     listSkills: vi.fn(async (): Promise<{ name: string; description: string }[]> => []),
@@ -276,6 +277,12 @@ export class ChatBoundary {
           turn
         })
         return turn.promise
+      }
+    ),
+    toolChat: vi.fn(
+      async (_query: string, _history: unknown[], options: Record<string, unknown>) => {
+        this.toolQueries.push({ query: _query, options })
+        return { answer: 'Started the requested run.', unified: [], toolCalls: [] }
       }
     )
   }
@@ -381,13 +388,14 @@ export class ChatBoundary {
 }
 
 export function installBoundary(boundary: ChatBoundary): void {
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = boundary.api
+  ; (globalThis as unknown as { window: { api: unknown } }).window.api = boundary.api
 }
 
 export function renderChat(target: {
   conversationId?: string
   projectId?: string
   draftPrompt?: string
+  presetId?: string
 }): ReturnType<typeof render> {
   return render(
     <TooltipProvider>

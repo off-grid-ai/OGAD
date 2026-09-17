@@ -25,6 +25,7 @@ import {
   isStaleReference,
   observeWithCurrentLease,
   recoverCrashedTarget,
+  semanticSnapshotDiagnostics,
   stableActionKey
 } from './browser-playwright-task-support'
 
@@ -65,6 +66,10 @@ export async function runBrowserPlaywrightTask(
   } catch (error) {
     if (input.signal?.aborted) throw input.signal.reason ?? error
     const detail = error instanceof Error ? error.message : String(error)
+    console.warn('[web-use][semantic] loop failed', {
+      errorName: error instanceof Error ? error.name : typeof error,
+      error: compact(detail)
+    })
     return fallback(`Semantic control was unavailable: ${compact(detail)}`)
   }
 }
@@ -73,12 +78,26 @@ async function runSemanticLoop(
   input: BrowserPlaywrightTaskInput
 ): Promise<BrowserPlaywrightTaskResult> {
   let observation = await observeWithCurrentLease(input)
+  console.log('[web-use][semantic] initial snapshot', {
+    isError: observation.isError,
+    ...semanticSnapshotDiagnostics(observation.text)
+  })
   let crashRecoveries = 0
   if (observation.isError && isCrashedTarget(observation)) {
+    console.warn('[web-use][semantic] crashed target detected; recovering')
     observation = await recoverCrashedTarget(input)
     crashRecoveries += 1
+    console.log('[web-use][semantic] recovered snapshot', {
+      isError: observation.isError,
+      ...semanticSnapshotDiagnostics(observation.text)
+    })
   }
   if (observation.isError || !hasSemanticReferences(observation.text)) {
+    console.warn('[web-use][semantic] snapshot rejected', {
+      reason: observation.isError ? 'mcp-result-error' : 'no-semantic-references',
+      isError: observation.isError,
+      ...semanticSnapshotDiagnostics(observation.text)
+    })
     return fallback('The page did not expose usable semantic controls.')
   }
   await publishObservation(input, { step: 0, phase: 'observing', summary: 'Initial page' })

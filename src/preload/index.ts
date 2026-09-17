@@ -489,6 +489,7 @@ const offGridApi = {
     ipcRenderer.invoke('models:set-active-modal', kind, modelId),
   getActiveModalities: () => ipcRenderer.invoke('models:active-modalities'),
   getComputerUseActiveModels: () => ipcRenderer.invoke('models:computer-use-active'),
+  getWebUseActiveModels: () => ipcRenderer.invoke('models:web-use-active'),
   onModelProgress: (
     callback: (data: {
       modelId: string
@@ -609,6 +610,8 @@ const offGridApi = {
     gpuLayers?: number
     threads?: number
     batchSize?: number
+    speculativeDecoding?: 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
+    draftModel?: string
     performanceMode?: 'conservative' | 'balanced' | 'extreme'
   }) => ipcRenderer.invoke('llm:set-settings', s),
   getRemoteVisionServer: () => ipcRenderer.invoke('vision:remote-server:get'),

@@ -13,6 +13,7 @@ export interface LlamaFailure {
     | 'os_too_old'
     | 'out_of_memory'
     | 'gpu_unsupported'
+    | 'speculation_unsupported'
     | 'missing_library'
     | 'model_corrupt'
     | 'port_in_use'
@@ -107,6 +108,20 @@ export function classifyLlamaError(
       reason: ext
         ? `GPU acceleration is unavailable - this graphics driver does not support ${ext}. Chat is running on the CPU engine, which is slower.`
         : 'GPU acceleration is unavailable - this graphics driver is missing a feature the GPU engine needs. Chat is running on the CPU engine, which is slower.'
+    }
+  }
+
+  // Speculative decoding is optional. Some GGUFs do not contain MTP layers, and
+  // an unrelated draft model can have an incompatible vocabulary. Neither case
+  // means the selected target model is broken.
+  if (
+    /doesn'?t contain mtp layers|failed to create mtp context|target and draft vocabs are not compatible|draft model vocab type must match target model/.test(
+      s
+    )
+  ) {
+    return {
+      code: 'speculation_unsupported',
+      reason: 'This model does not support the selected speculative decoding mode.'
     }
   }
 

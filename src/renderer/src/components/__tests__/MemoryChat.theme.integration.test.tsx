@@ -28,7 +28,7 @@ describe('<MemoryChat/> theme surfaces', () => {
 
       const composer = await screen.findByTestId('chat-composer')
       const hero = screen.getByTestId('chat-empty-hero')
-      const preset = screen.getByTestId('explore-preset-find-flight')
+      const preset = screen.getByTestId('explore-preset-train-my-feed')
 
       expect(composer.className).toContain('bg-card')
       expect(composer.className).toContain('border-input')

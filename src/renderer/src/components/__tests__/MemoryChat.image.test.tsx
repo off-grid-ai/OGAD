@@ -209,7 +209,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     })
     return result
   })
-  const setActiveModalModel = vi.fn<(kind: string, model: string) => Promise<void>>(async () => {})
+  const setActiveModalModel = vi.fn<(kind: string, model: string) => Promise<void>>(async () => { })
   // The agentic path's single entry point. Returns a benign text answer with no
   // imageRequest, so if the turn reaches the agent no generateImage call follows —
   // making "generateImage was/ wasn't called" an unambiguous terminal artifact.
@@ -219,13 +219,13 @@ function installApi(opts: InstallApiOptions): InstalledApi {
       : { answer: 'done', toolCalls: [], unified: [] }
   )
   const cancelImageGen = vi.fn<() => void>()
-  const exportGeneratedImage = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {})
+  const exportGeneratedImage = vi.fn<(...args: unknown[]) => Promise<void>>(async () => { })
   let nextStoredMessageId = 1
   const addRagMessage = vi.fn(async () => {
     const id = nextStoredMessageId++
     return { id, uuid: `stored-message-${id}` }
   })
-  const imageGenConversationPersisted = vi.fn(async () => {})
+  const imageGenConversationPersisted = vi.fn(async () => { })
   // Timestamps are filled in where a seed omitted one. The renderer projects each row through
   // projectSyncedMessageTurn, which returns null for a message it cannot order, so an untimestamped
   // row is silently dropped and the conversation renders empty. The table this stands for always has
@@ -311,7 +311,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     }),
     addRagMessage,
     imageGenConversationPersisted,
-    saveArtifact: vi.fn(async () => {}),
+    saveArtifact: vi.fn(async () => { }),
     exportGeneratedImage,
     // --- settings round-trip (per-model override persistence) ---
     getSettings: vi.fn(async () => settings),
@@ -322,13 +322,13 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     listGeneratedImages,
     styleThumbs: vi.fn(async () => ({ ...(opts.styleThumbs ?? {}) })),
     listSkills: vi.fn(async () => []),
-    onRagStream: vi.fn(() => () => {}),
+    onRagStream: vi.fn(() => () => { }),
     chatVisionAvailable,
     processFile,
     ragChat,
     toolChat
   }
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
+    ; (globalThis as unknown as { window: { api: unknown } }).window.api = api
   return {
     generateImage,
     setActiveModalModel,
@@ -401,7 +401,7 @@ function typeSteps(value: number): void {
 
 async function sendPrompt(user: ReturnType<typeof userEvent.setup>, prompt: string): Promise<void> {
   const textarea = screen.getByPlaceholderText(/describe an image to generate/i)
-  ;(textarea as HTMLTextAreaElement).focus()
+    ; (textarea as HTMLTextAreaElement).focus()
   await user.type(textarea, prompt, { skipClick: true })
   await user.click(screen.getByRole('button', { name: /^send$/i }))
 }
@@ -410,14 +410,14 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-    // jsdom has no layout engine. Polyfill the layout APIs MemoryChat + Radix touch so
-    // an effect doesn't throw an async ResizeObserver/scroll error that taints the run.
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
-    ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    }
+      // jsdom has no layout engine. Polyfill the layout APIs MemoryChat + Radix touch so
+      // an effect doesn't throw an async ResizeObserver/scroll error that taints the run.
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+      ; (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+        observe(): void { }
+        unobserve(): void { }
+        disconnect(): void { }
+      }
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:attachment-preview')
@@ -802,7 +802,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 // Send a message in the DEFAULT chat composer (not image mode).
 async function sendChat(user: ReturnType<typeof userEvent.setup>, text: string): Promise<void> {
   const textarea = await screen.findByPlaceholderText(/ask anything/i, {}, { timeout: 3000 })
-  ;(textarea as HTMLTextAreaElement).focus()
+    ; (textarea as HTMLTextAreaElement).focus()
   await user.type(textarea, text, { skipClick: true })
   await user.click(screen.getByRole('button', { name: /^send$/i }))
 }
@@ -821,30 +821,33 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
-    ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
-      observe(): void {}
-      unobserve(): void {}
-      disconnect(): void {}
-    }
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+      ; (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+        observe(): void { }
+        unobserve(): void { }
+        disconnect(): void { }
+      }
   })
 
   it('with tools ON, a "draw ..." turn goes to the agent (toolChat), NOT the renderer direct-generate', async () => {
     const user = userEvent.setup()
-    // composerToolsOn is persisted in settings and read into toolsOn on mount.
     const { generateImage, toolChat } = installApi({
       active: FULL,
       models: [FULL],
-      settings: { composerToolsOn: true }
+      isPro: true
     })
     renderChat()
 
+    const assistant = screen.getByRole('button', { name: 'Assistant' })
+    await user.click(assistant)
+    expect(assistant.getAttribute('aria-pressed')).toBe('true')
     await sendChat(user, 'draw a dog')
 
     // The turn crossed on the agentic path...
     await waitFor(() => expect(toolChat).toHaveBeenCalledTimes(1))
     // ...and the renderer did NOT pre-decide + fire a direct image generation.
     expect(generateImage).not.toHaveBeenCalled()
+    expect(assistant.getAttribute('aria-pressed')).toBe('false')
   })
 
   it('with tools OFF, the same "draw ..." turn auto-routes to direct image generation', async () => {
@@ -867,7 +870,6 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       active: FULL,
       models: [FULL],
       isPro: true,
-      settings: { composerToolsOn: true },
       toolResult: {
         answer: 'Image generation started.',
         toolCalls: [{ name: 'generate_image', result: 'Image generation started' }],
@@ -879,6 +881,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const user = userEvent.setup()
     renderChat()
 
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
     await sendChat(user, 'draw a Ferrari')
 
     expect(await screen.findByRole('button', { name: 'Generated image, running' })).toBeTruthy()
@@ -927,7 +930,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       active: FULL,
       models: [FULL],
       isPro: true,
-      settings: { composerToolsOn: true, showGenerationDetails: true },
+      settings: { showGenerationDetails: true },
       toolResult: {
         answer: 'चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।',
         toolCalls: [
@@ -943,6 +946,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const user = userEvent.setup()
     renderChat()
 
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
     await sendChat(user, 'make two different scenes')
 
     await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(2))
@@ -1023,7 +1027,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:attachment-preview')

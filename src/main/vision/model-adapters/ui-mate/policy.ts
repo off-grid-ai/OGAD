@@ -31,12 +31,11 @@ export type UIMateActionName = (typeof UI_MATE_ACTIONS)[number] | 'subtask_compl
 export type UIMateControl = 'WAIT' | 'USER' | 'DONE' | 'FAIL'
 
 export const UI_MATE_GENERATION_CONFIG = {
-  maxTokens: 16_384,
   temperature: 1,
   topP: 0.95
 } as const
 
-export const UI_MATE_MAX_HISTORY_STEPS = 100
+export const UI_MATE_MAX_HISTORY_STEPS = 4
 
 export interface UIMateAction {
   action: UIMateActionName
@@ -83,13 +82,6 @@ export interface BuildUIMateMessagesInput {
 }
 
 const COLLAPSED_SCREENSHOT_TEXT = 'This screenshot has been collapsed.'
-
-export const UI_MATE_PROMPT_ADDITIONS = `<IMPORTANT_NOTES>
-* DO NOT use LibreOffice macros or GIMP Script-Fu to complete tasks. Always use the GUI interface directly with mouse and keyboard actions. Macros and scripting cause reliability issues and task failures.
-* For GIMP tasks, do NOT save or export files unless the instruction explicitly asks you to. Note that existing tasks that require file output will ask you to "export", not "save". Most GIMP tasks are evaluated automatically without requiring you to save.
-* Before starting a task, consider whether it is achievable with the designated application's native GUI features. If the app fundamentally lacks the requested capability, declare it infeasible (finish with status=failure) instead of using CLI tools, Python scripts, or other applications as workarounds.
-* After completing a task, verify the visible or functional result. If your actions had no real effect, reconsider whether the task is feasible.
-</IMPORTANT_NOTES>`
 
 const ACTION_DESCRIPTION = `* \`left_click\`: Click the left mouse button at the specified (x, y) coordinate.
 * \`right_click\`: Click the right mouse button at the specified (x, y) coordinate.
@@ -209,8 +201,6 @@ ${pythonJson(UI_MATE_TOOL_SCHEMA)}
 
 ${TOOL_FORMAT}
 
-${UI_MATE_PROMPT_ADDITIONS}
-
 # Response format
 
 Response format for every step:
@@ -250,11 +240,7 @@ function instructionText(
  * only refer to the current screenshot. The current frame already carries the
  * previous-click marker needed to judge the last action. */
 export function buildUIMateMessages(input: BuildUIMateMessagesInput): UIMateMessage[] {
-  const history = input.history ?? []
-  const totalSteps = history.length + 1
-  const startStep = Math.max(1, totalSteps - UI_MATE_MAX_HISTORY_STEPS)
-  const priorHistory = history.slice(0, startStep - 1)
-  const retainedHistory = history.slice(startStep - 1)
+  const retainedHistory = (input.history ?? []).slice(-UI_MATE_MAX_HISTORY_STEPS)
   const usesExecutionPlan =
     /(?:Execution plan|Current execution plan and verified progress):/i.test(input.instruction)
   const messages: UIMateMessage[] = [
@@ -283,7 +269,7 @@ export function buildUIMateMessages(input: BuildUIMateMessagesInput): UIMateMess
       index === 0
         ? [
             ...(image ? [image] : []),
-            { type: 'text', text: instructionText(input.instruction, priorHistory) }
+            { type: 'text', text: instructionText(input.instruction, []) }
           ]
         : image
           ? [
@@ -304,7 +290,7 @@ export function buildUIMateMessages(input: BuildUIMateMessagesInput): UIMateMess
         content: [
           {
             type: 'text',
-            text: compactUIMateResponse(turn.step.response, input.includeThinkingInHistory ?? true)
+            text: compactUIMateResponse(turn.step.response, input.includeThinkingInHistory ?? false)
           }
         ]
       })
@@ -404,6 +390,15 @@ function normalizedCoordinate(
   if (x < 0 || x > 999 || y < 0 || y > 999) return undefined
   if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) {
     return undefined
+  }
+  // Some compatible runtimes occasionally emit fractional 0..1 coordinates even though the
+  // native UI-Mate contract says 0..999. Treat fractional pairs as ratios instead of silently
+  // turning a valid target into the top-left pixel.
+  if (x <= 1 && y <= 1 && (!Number.isInteger(x) || !Number.isInteger(y))) {
+    return [
+      Math.min(width - 1, Math.trunc(x * width)),
+      Math.min(height - 1, Math.trunc(y * height))
+    ]
   }
   // UI-Mate is trained against a 1000 x 1000 action grid whose valid values
   // are 0..999. Keep that grid intact. Dividing by 999 shifts every non-zero

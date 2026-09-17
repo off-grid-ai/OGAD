@@ -33,6 +33,8 @@ import {
 import { deleteEntityById, resolveEntityCandidate } from './entity-domain'
 import { setComputerUseSettings } from './computer-use-settings'
 import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
+import { setWebUseSettings } from './web-use-settings'
+import { WEB_USE_SETTINGS_KEY } from '../shared/web-use-settings'
 import { embeddings } from './embeddings'
 import {
   getResidency,
@@ -1319,6 +1321,7 @@ export function setupIPC() {
 
   ipcMain.handle('settings:save', (_, key: string, value: any) => {
     if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
+    else if (key === WEB_USE_SETTINGS_KEY) setWebUseSettings(value)
     else saveSetting(key, value)
     console.log(`[IPC] Setting saved: ${key} =`, value)
     return true
@@ -1692,6 +1695,9 @@ export function setupIPC() {
       m.getComputerUseActiveModelProjection()
     )
   )
+  ipcMain.handle('models:web-use-active', () =>
+    import('./vision/vision-task-model-strategy').then((m) => m.getWebUseActiveModelProjection())
+  )
 
   // Storage + download manager
   ipcMain.handle('models:storage', () => import('./models-manager').then((m) => m.getStorageInfo()))
@@ -1798,9 +1804,9 @@ export function setupIPC() {
     import('./setup').then((m) => m.estimateModelFit(modelId))
   )
 
-  // Open an https link in the user's default browser (e.g. a model's HF page).
+  // Open a safe web link or email draft in the user's default app.
   ipcMain.handle('app:open-external', async (_e, url: string) => {
-    if (!/^https:\/\//.test(url)) return { success: false }
+    if (!/^(https:\/\/|mailto:)/i.test(url)) return { success: false }
     const { shell } = await import('electron')
     await shell.openExternal(url)
     return { success: true }

@@ -135,13 +135,11 @@ export async function runVisionPolicyRequest(
               responseFormat: request.responseFormat,
               tools: request.tools,
               toolChoice: request.toolChoice,
-              maxTokens: request.maxTokens,
               signal
-            },
-            request.timeoutMs
+            }
           )
         : {
-            content: await llm.chatMessages(messages, request.timeoutMs, request.maxTokens, {
+            content: await llm.chatMessages(messages, undefined, undefined, {
               temperature: request.temperature,
               topP: request.topP,
               responseFormat: request.responseFormat,
@@ -167,8 +165,13 @@ export async function runVisionPolicyRequest(
         // job rather than re-derive it from the screenshot with no memory of what it just decided.
         priorInvalidAnswer = reasoningText.trim() || undefined
         priorValidationError = reasoningText.trim()
-          ? 'you reasoned to a conclusion but called no tool, so the decision was lost. Restate that same conclusion as exactly one tool call. Every outcome has a tool: complete_milestone when the phase is done, perform_action to act, rethink when the plan is wrong, call_user when the page cannot satisfy the goal. Answering with nothing is never correct'
+          ? 'you reasoned to a conclusion but called no tool, so the decision was lost. Restate that same conclusion with exactly one of the provided tools. Answering with nothing is never correct'
           : 'the response was empty. Call exactly one tool'
+        // After the bounded same-frame retry, let the graph treat this as an
+        // invalid decision and capture a fresh screen instead of failing the task.
+        if (attempt === request.maxAttempts) {
+          return { content: '', toolCalls: [] }
+        }
         throw new Error(
           reasoningText.trim()
             ? 'Computer-use model reasoned but called no tool.'
@@ -222,6 +225,9 @@ interface PreviousClickMarker {
   y: number
 }
 
+function shouldDrawCoordinateGrid(): boolean {
+  return false
+}
 const COORDINATE_GRID_MAX = 1_000
 const COORDINATE_GRID_INTERVAL = 20
 
@@ -330,9 +336,9 @@ export async function modelScreenshot(input: VisionGroundingInput): Promise<{
     )
   }
   const marker = previousClickMarker(input)
-  const overlays: Array<{ input: Buffer; left: number; top: number }> = [
-    { input: await rasterizedCoordinateGrid(expected.width, expected.height), left: 0, top: 0 }
-  ]
+  const overlays: Array<{ input: Buffer; left: number; top: number }> = shouldDrawCoordinateGrid()
+    ? [{ input: await rasterizedCoordinateGrid(expected.width, expected.height), left: 0, top: 0 }]
+    : []
   if (marker) {
     const markerSize = Math.max(
       14,
@@ -367,6 +373,9 @@ function visionPolicyInput(
     olderVisualFacts: input.retrievedFacts,
     currentMilestone: input.currentMilestone,
     verifiedActions: input.verifiedActions,
+    previousActionEffect: input.previousActionEffect,
+    previousExpectedEffect: input.previousExpectedEffect,
+    semanticElements: input.semanticElements,
     previousClickMarker: marker,
     coordinateFrame: input.coordinateFrame
   }
@@ -384,9 +393,9 @@ export interface PreparedVisionGrounding {
   screenshotDataUrl: string
 }
 
-/** Annotate and persist the captured frame once. Multi-model strategies reuse
+/** Prepare and persist the captured frame once. Multi-model strategies reuse
  * these exact bytes, so the reasoner, specialist, task history, and replay do
- * not diverge or draw the coordinate grid twice. */
+ * not diverge. */
 export async function prepareVisionGrounding(
   input: VisionGroundingInput,
   operatorEnvironment: VisionPolicyInput['operatorEnvironment'] = 'desktop'

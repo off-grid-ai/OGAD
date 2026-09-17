@@ -2,6 +2,7 @@ import Foundation
 import EventKit
 import Contacts
 import AppKit
+import CoreLocation
 
 // Off Grid AI Desktop - native actions helper (macOS), the backend of the computer-use
 // semantic rail. One-shot CLI: reads a single JSON command argument, performs one
@@ -43,6 +44,78 @@ func parseDate(_ value: Any?) -> Date? {
         if let date = formatter.date(from: raw) { return date }
     }
     return nil
+}
+
+final class CurrentLocationDelegate: NSObject, CLLocationManagerDelegate {
+    let manager: CLLocationManager
+    var location: CLLocation?
+    var error: String?
+
+    init(manager: CLLocationManager) {
+        self.manager = manager
+        super.init()
+    }
+
+    func requestIfAuthorized() {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            error = "location access was not granted"
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        @unknown default:
+            error = "location authorization has an unknown state"
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        requestIfAuthorized()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        location = locations.last
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        self.error = error.localizedDescription
+    }
+}
+
+func currentLocation(_ args: [String: Any]) -> Never {
+    guard CLLocationManager.locationServicesEnabled() else {
+        fail("Location Services are turned off in System Settings")
+    }
+    let manager = CLLocationManager()
+    manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    let delegate = CurrentLocationDelegate(manager: manager)
+    manager.delegate = delegate
+    delegate.requestIfAuthorized()
+
+    let deadline = Date().addingTimeInterval(15)
+    while delegate.location == nil && delegate.error == nil && Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+    }
+
+    if let error = delegate.error { fail(error) }
+    guard let location = delegate.location else {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            fail("macOS did not complete the location permission request. Open System Settings > Privacy & Security > Location Services and allow Off Grid AI Desktop.")
+        case .denied, .restricted:
+            fail("Location access is not allowed. Open System Settings > Privacy & Security > Location Services and allow Off Grid AI Desktop.")
+        case .authorizedAlways, .authorizedWhenInUse:
+            fail("macOS did not provide a location within 15 seconds. Check that Wi-Fi is on, then try again.")
+        @unknown default:
+            fail("macOS returned an unknown location authorization state")
+        }
+    }
+    ok([
+        "latitude": location.coordinate.latitude,
+        "longitude": location.coordinate.longitude,
+        "accuracyMeters": location.horizontalAccuracy,
+        "timestamp": iso.string(from: location.timestamp)
+    ])
 }
 
 // Request EventKit access synchronously. The completion handler runs off the calling
@@ -209,6 +282,7 @@ func searchContacts(_ args: [String: Any]) -> Never {
     if !access.granted { fail(access.error ?? "contacts access was not granted") }
 
     let keys: [CNKeyDescriptor] = [
+        CNContactFormatter.descriptorForRequiredKeys(for: .fullName),
         CNContactGivenNameKey as CNKeyDescriptor,
         CNContactFamilyNameKey as CNKeyDescriptor,
         CNContactPhoneNumbersKey as CNKeyDescriptor,
@@ -336,6 +410,8 @@ guard let data = arguments[1].data(using: .utf8),
 let commandArgs = (payload["args"] as? [String: Any]) ?? [:]
 
 switch command {
+case "location.current":
+    currentLocation(commandArgs)
 case "calendar.createEvent":
     createEvent(commandArgs)
 case "calendar.deleteEvent":

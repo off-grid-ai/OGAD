@@ -66,10 +66,10 @@ export function resolveBrowserModelViewport(
 export async function normalizeBrowserModelFrame(
   sourcePng: Buffer,
   target: { width: number; height: number },
-  quality: ComputerUseSettings['screenshotQuality']
+  _quality: ComputerUseSettings['screenshotQuality']
 ): Promise<Buffer> {
   return sharp(sourcePng)
-    .resize({ ...target, fit: 'fill', kernel: SCREENSHOT_RESIZE_KERNEL[quality] })
+    .resize({ ...target, fit: 'fill', kernel: SCREENSHOT_RESIZE_KERNEL.efficient })
     .png()
     .toBuffer()
 }

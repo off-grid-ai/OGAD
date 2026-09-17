@@ -40,10 +40,10 @@ describe('<ExploreSection/>', () => {
     )
   })
 
-  it('annotates a gated preset so it never dead-ends silently', () => {
+  it('replaces music playback with Train My Feed', () => {
     render(<ExploreSection onRun={() => {}} />)
-    const gated = screen.getByTestId('explore-preset-phone-summarize')
-    expect(gated.textContent).toMatch(/paired phone/i)
+    expect(screen.getByTestId('explore-preset-train-my-feed')).toBeTruthy()
+    expect(screen.queryByTestId('explore-preset-play-music')).toBeNull()
   })
 
   it('renders each card with its own icon plus the run arrow', () => {
@@ -64,10 +64,8 @@ describe('<ExploreSection/>', () => {
     render(<ExploreSection onRun={() => {}} />)
     // Robust + ungated -> the ready marker.
     expect(screen.getByTestId('explore-preset-best-nearby').textContent).toMatch(/ready to run/i)
-    // Gated -> the requirement, never a ready claim.
-    expect(screen.getByTestId('explore-preset-work-today').textContent).not.toMatch(/ready to run/i)
     // Needs-setup without a gate -> no marker either way.
-    expect(screen.getByTestId('explore-preset-find-flight').textContent).not.toMatch(
+    expect(screen.getByTestId('explore-preset-train-my-feed').textContent).not.toMatch(
       /ready to run/i
     )
   })

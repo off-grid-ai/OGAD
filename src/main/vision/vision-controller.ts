@@ -4,7 +4,12 @@
  * synced projections; renderers only receive read-only events.
  */
 import { BrowserWindow, ipcMain } from 'electron'
-import { appendTaskStep, getTaskExecutionDevice, recordTaskRun } from '../tasks/task-history'
+import {
+  appendTaskStep,
+  getTaskExecutionDevice,
+  recordTaskRun,
+  stopOrphanedLocalWebTask
+} from '../tasks/task-history'
 import type { TaskRunUpdate } from '../tasks/task-history-store'
 import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { VisionGuard } from './vision-guard'
@@ -161,7 +166,7 @@ export class VisionController {
     if (command === 'stop') {
       return session
         ? this.stop(taskId, 'stopped from the supervisor', 'Stopped from the supervisor')
-        : true
+        : false
     }
     if (!session) return false
     const { guard } = session
@@ -198,8 +203,11 @@ export class VisionController {
     if (!session) return false
     if (session.guard.isHalted) return true
     if (!session.guard.halt(reason)) return false
-    session.request.abort(reason)
+    // Persist the terminal projection before abort listeners can release this
+    // session. Otherwise the final in-flight model callback can leave the
+    // durable task row at its earlier running/thinking state.
     this.projectSession(taskId, currentAction)
+    session.request.abort(reason)
     return true
   }
 
@@ -285,7 +293,12 @@ export function controlVisionTask(
   command: 'stop' | 'pause' | 'takeover' | 'resume',
   taskId: string
 ): boolean {
-  return controller.control(command, taskId)
+  const controlled = controller.control(command, taskId)
+  // A Web Use process cannot survive an app restart. Its durable row can arrive
+  // after startup recovery through sync, so Stop must also close that local row
+  // when no browser controller remains in memory.
+  const stoppedOrphan = command === 'stop' ? stopOrphanedLocalWebTask(taskId) : false
+  return controlled || stoppedOrphan
 }
 
 export function parseVisionCommand(
@@ -298,7 +311,10 @@ export function parseVisionCommand(
 
 export function registerVisionIpc(owner: VisionController = controller): void {
   ipcMain.handle('vision:current', () => owner.current())
-  ipcMain.handle('vision:control', (_event, command: unknown, taskId: unknown) =>
-    owner.control(command, taskId)
-  )
+  ipcMain.handle('vision:control', (_event, command: unknown, taskId: unknown) => {
+    const parsed = parseVisionCommand(command)
+    const id = typeof taskId === 'string' ? taskId : null
+    if (!parsed || !id) return false
+    return owner === controller ? controlVisionTask(parsed, id) : owner.control(parsed, id)
+  })
 }

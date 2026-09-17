@@ -21,7 +21,8 @@ export type { ElectronPlaywrightPageProvider } from './electron-playwright-attac
 
 const PRODUCT = 'Chrome/OffGrid-WebUse'
 const START_TIMEOUT_MS = 5_000
-const BOUNDARY_TIMEOUT_MS = 15_000
+const BOUNDARY_TIMEOUT_MS = 60_000
+const ACCESSIBILITY_SNAPSHOT_TIMEOUT_MS = 60_000
 const CLOSE_TIMEOUT_MS = 5_000
 const DISCOVERY_COMMANDS = new Set([
   'Target.setDiscoverTargets',
@@ -29,6 +30,14 @@ const DISCOVERY_COMMANDS = new Set([
   'Target.setAutoAttach',
   'Target.attachToTarget'
 ])
+
+function commandTimeout(method: string): number {
+  // Playwright builds its semantic snapshot in one Runtime call. Keep both the
+  // relay command boundary and the debugger boundary open for that same call.
+  return method === 'Runtime.callFunctionOn'
+    ? ACCESSIBILITY_SNAPSHOT_TIMEOUT_MS
+    : BOUNDARY_TIMEOUT_MS
+}
 
 export class ElectronPlaywrightRelay {
   private readonly path = `/cdp/${randomUUID()}`
@@ -38,7 +47,6 @@ export class ElectronPlaywrightRelay {
   private endpointValue = ''
   private autoAttach = false
   private failure: Error | null = null
-  private messageQueue: Promise<void> = Promise.resolve()
 
   constructor(private readonly provider: ElectronPlaywrightPageProvider) {
     this.attachments = new ElectronPlaywrightAttachments(
@@ -81,8 +89,19 @@ export class ElectronPlaywrightRelay {
 
   async syncPages(): Promise<void> {
     this.ensureHealthy()
-    if (!this.autoAttach) return
+    if (!this.autoAttach) {
+      console.warn('[web-use][playwright-relay] page sync skipped', {
+        reason: 'auto-attach-disabled',
+        pageCount: this.attachments.pages().length
+      })
+      return
+    }
+    const startedAt = Date.now()
     await this.attachments.sync()
+    console.log('[web-use][playwright-relay] pages synchronized', {
+      durationMs: Date.now() - startedAt,
+      pageCount: this.attachments.pages().length
+    })
   }
 
   async stop(): Promise<void> {
@@ -98,7 +117,6 @@ export class ElectronPlaywrightRelay {
     }
     this.attachments.clear()
     this.autoAttach = false
-    this.messageQueue = Promise.resolve()
 
     const server = this.server
     this.server = null
@@ -130,9 +148,12 @@ export class ElectronPlaywrightRelay {
     }
     this.client = socket
     const onMessage = (data: RawData): void => {
-      this.messageQueue = this.messageQueue
-        .then(() => this.receive(socket, data))
-        .catch((error) => this.fail(asBoundaryError(error), 'Playwright relay command failed'))
+      // CDP commands are correlated by id and may complete out of order. A
+      // single queue can deadlock Playwright when one Runtime command depends
+      // on a later command reaching the target.
+      void this.receive(socket, data).catch((error) =>
+        this.fail(asBoundaryError(error), 'Playwright relay command failed')
+      )
     }
     const onError = (error: Error): void => this.fail(error, 'Playwright relay socket failed')
     const onClose = (): void => {
@@ -151,17 +172,37 @@ export class ElectronPlaywrightRelay {
   private async receive(socket: WebSocket, data: RawData): Promise<void> {
     let id = 0
     let sessionId: string | undefined
+    let method = 'unparsed'
+    const startedAt = Date.now()
     try {
       const command = parseCdpCommand(JSON.parse(data.toString()) as unknown)
       id = command.id
       sessionId = command.sessionId
+      method = command.method
+      console.log('[web-use][playwright-relay] command started', {
+        commandId: id,
+        method,
+        hasSession: Boolean(sessionId),
+        timeoutMs: commandTimeout(method)
+      })
       const result = await runBounded({
         label: `CDP ${command.method}`,
-        timeoutMs: BOUNDARY_TIMEOUT_MS,
+        timeoutMs: commandTimeout(command.method),
         run: () => this.command(command)
+      })
+      console.log('[web-use][playwright-relay] command complete', {
+        commandId: id,
+        method,
+        durationMs: Date.now() - startedAt
       })
       await sendCdpEvent(socket, { id, sessionId, result }, BOUNDARY_TIMEOUT_MS)
     } catch (error) {
+      console.warn('[web-use][playwright-relay] command failed', {
+        commandId: id,
+        method,
+        durationMs: Date.now() - startedAt,
+        error: asBoundaryError(error).message
+      })
       await sendCdpEvent(
         socket,
         { id, sessionId, error: { message: asBoundaryError(error).message } },
@@ -249,6 +290,16 @@ export class ElectronPlaywrightRelay {
           this.attachments.attachedPage(page.id)?.sessionId
         )
       }
+      case 'Target.detachFromTarget': {
+        const detachedSessionId = String(params.sessionId ?? '')
+        const page = this.attachments.forSession(detachedSessionId)
+        if (!page) throw new Error('The requested session is outside this Web Use journey.')
+        if (page.sessionId === detachedSessionId) {
+          this.attachments.detach(page.id)
+          return {}
+        }
+        return this.forward(method, params, page.sessionId)
+      }
       default:
         if (!sessionId) throw new Error(`Root CDP command ${method} is not allowed.`)
         return this.forward(method, params, sessionId)
@@ -285,7 +336,7 @@ export class ElectronPlaywrightRelay {
     return { success: true }
   }
 
-  private forward(
+  private async forward(
     method: string,
     params: Record<string, unknown>,
     sessionId: string | undefined
@@ -294,11 +345,15 @@ export class ElectronPlaywrightRelay {
     const page = this.attachments.forSession(sessionId)
     if (!page) throw new Error(`CDP session ${sessionId} is outside this Web Use journey.`)
     const childSession = page.sessionId === sessionId ? undefined : sessionId
-    return runBounded({
+    const result = await runBounded({
       label: `Electron debugger ${method}`,
-      timeoutMs: BOUNDARY_TIMEOUT_MS,
+      timeoutMs: commandTimeout(method),
       run: () => page.contents.debugger.sendCommand(method, params, childSession)
     })
+    if (method === 'Page.getFrameTree' && !childSession) {
+      return normalizeMainFrameUrl(result, page.contents.getURL())
+    }
+    return result
   }
 
   private async send(message: CdpEvent): Promise<void> {
@@ -315,4 +370,30 @@ export class ElectronPlaywrightRelay {
   private ensureHealthy(): void {
     if (this.failure) throw this.failure
   }
+}
+
+function normalizeMainFrameUrl(result: unknown, currentUrl: string): unknown {
+  if (typeof result !== 'object' || result === null) return result
+  const frameTree = (result as { frameTree?: unknown }).frameTree
+  if (typeof frameTree !== 'object' || frameTree === null) return result
+  const frame = (frameTree as { frame?: unknown }).frame
+  if (typeof frame !== 'object' || frame === null) return result
+  const reportedUrl = (frame as { url?: unknown }).url
+  console.log('[web-use][playwright-relay] main frame discovered', {
+    reportedUrl: typeof reportedUrl === 'string' ? reportedUrl : undefined,
+    currentUrl
+  })
+  if (
+    (reportedUrl === '' || reportedUrl === ':') &&
+    (currentUrl === 'about:blank' || /^https?:\/\//i.test(currentUrl))
+  ) {
+    return {
+      ...(result as Record<string, unknown>),
+      frameTree: {
+        ...(frameTree as Record<string, unknown>),
+        frame: { ...(frame as Record<string, unknown>), url: currentUrl }
+      }
+    }
+  }
+  return result
 }

@@ -38,12 +38,12 @@ export interface ComputerUseActiveModelProjection {
 export const COMPUTER_USE_SETTINGS_KEY = 'computerUseSettings'
 
 export const DEFAULT_COMPUTER_USE_SETTINGS: Readonly<ComputerUseSettings> = {
-  modelStrategy: 'separate_specialist',
+  modelStrategy: 'text_plus_specialist',
   context: 'auto',
-  screenshotSize: 'balanced',
+  screenshotSize: 'large',
   screenshotQuality: 'balanced',
-  checkpointInterval: 9,
-  visualHistoryFrames: 2,
+  checkpointInterval: 8,
+  visualHistoryFrames: 1,
   retrieveOlderVisuals: false,
   enabledRails: ['vision']
 }
@@ -128,10 +128,7 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
     screenshotQuality,
     checkpointInterval: checkpoint as ComputerUseCheckpointInterval,
     visualHistoryFrames,
-    retrieveOlderVisuals:
-      typeof input.retrieveOlderVisuals === 'boolean'
-        ? input.retrieveOlderVisuals
-        : DEFAULT_COMPUTER_USE_SETTINGS.retrieveOlderVisuals,
+    retrieveOlderVisuals: false,
     enabledRails:
       enabledRails.length > 0 ? enabledRails : [...DEFAULT_COMPUTER_USE_SETTINGS.enabledRails]
   }

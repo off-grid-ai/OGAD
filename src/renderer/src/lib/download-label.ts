@@ -12,5 +12,8 @@ export function companionDownloadLabel(currentFile?: string | null): string | nu
   if (/mmproj|clip/i.test(currentFile)) {
     return 'vision projector'
   }
+  if (/(?:^|[-_.])d-?flash(?:[-_.]|$)/i.test(currentFile)) {
+    return 'DFlash draft model'
+  }
   return null
 }

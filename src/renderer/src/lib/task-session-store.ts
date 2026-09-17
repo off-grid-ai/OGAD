@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 import type { TaskPanelKind } from './task-side-panel'
 import type {
   ComputerUsePhase,
@@ -132,6 +132,47 @@ export function getTaskSessionState(): TaskSessionState {
 
 export function useTaskSessions(): TaskSessionState {
   return useSyncExternalStore(subscribeTaskSessions, getTaskSessionState, getTaskSessionState)
+}
+
+/** Subscribe only to the live task that can receive guidance for one Chat journey. */
+export function useGuidanceTaskForJourney(
+  journeyId: string | null | undefined
+): TaskSession | null {
+  const getSnapshot = useCallback(() => guidanceTaskForJourney(state.tasks, journeyId), [journeyId])
+  return useSyncExternalStore(subscribeTaskSessions, getSnapshot, getSnapshot)
+}
+
+/** Subscribe a persisted tool row only to tasks that can satisfy its references. */
+export function useTaskSessionsForReferences(
+  references: readonly string[]
+): readonly TaskSession[] {
+  const referenceKey = [...new Set(references.filter(Boolean))].sort().join('\u0000')
+  const cache = useRef<{
+    referenceKey: string
+    tasks: readonly TaskSession[]
+  }>({ referenceKey: '', tasks: [] })
+  const getSnapshot = useCallback((): readonly TaskSession[] => {
+    const referenceSet = new Set(referenceKey ? referenceKey.split('\u0000') : [])
+    const journeyIds = new Set(referenceSet)
+    for (const task of state.tasks) {
+      if (referenceSet.has(task.taskId) && task.journeyId) journeyIds.add(task.journeyId)
+    }
+    const selected = state.tasks.filter(
+      (task) =>
+        referenceSet.has(task.taskId) || (!!task.journeyId && journeyIds.has(task.journeyId))
+    )
+    const previous = cache.current
+    if (
+      previous.referenceKey === referenceKey &&
+      previous.tasks.length === selected.length &&
+      previous.tasks.every((task, index) => task === selected[index])
+    ) {
+      return previous.tasks
+    }
+    cache.current = { referenceKey, tasks: selected }
+    return selected
+  }, [referenceKey])
+  return useSyncExternalStore(subscribeTaskSessions, getSnapshot, getSnapshot)
 }
 
 /** One scope rule for every Chat-owned task surface. A fresh Chat has no owner

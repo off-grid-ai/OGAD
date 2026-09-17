@@ -2,18 +2,17 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { SettingsPanel } from '../SettingsPanel'
 
 afterEach(() => {
   cleanup()
-  vi.restoreAllMocks()
 })
 
 describe('<SettingsPanel/> image settings', () => {
   it('opens on the active image model and persists the same image preferences Chat uses', async () => {
-    const saveSetting = vi.fn(async () => undefined)
-    const setActiveModalModel = vi.fn(async () => undefined)
+    const saved: Array<[string, unknown]> = []
+    const selectedModels: Array<[string, string]> = []
     ;(window as unknown as { api: Record<string, unknown> }).api = {
       getLlmSettings: async () => ({}),
       getModelCatalog: async () => ({ models: [] }),
@@ -31,8 +30,12 @@ describe('<SettingsPanel/> image settings', () => {
         imgNegative: 'blurry',
         enhanceImagePrompts: true
       }),
-      saveSetting,
-      setActiveModalModel,
+      saveSetting: async (key: string, value: unknown) => {
+        saved.push([key, value])
+      },
+      setActiveModalModel: async (kind: string, modelId: string) => {
+        selectedModels.push([kind, modelId])
+      },
       ttsVoices: async () => [],
       prepareTtsVoice: async () => ({ ready: true }),
       onTtsVoiceProgress: () => () => {},
@@ -54,29 +57,32 @@ describe('<SettingsPanel/> image settings', () => {
     await user.click(screen.getByRole('button', { name: 'Image size' }))
     await user.click(screen.getByRole('menuitemradio', { name: '1024 × 1024' }))
     await waitFor(() =>
-      expect(saveSetting).toHaveBeenCalledWith(
+      expect(saved).toContainEqual([
         'imageParams',
         expect.objectContaining({
           'dreamshaper-xl-v2-turbo.gguf': expect.objectContaining({ size: 1024 })
         })
-      )
+      ])
     )
 
+    const savesBeforeGuidance = saved.length
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Image guidance' }), {
       target: { value: '4' }
     })
+    expect(saved).toHaveLength(savesBeforeGuidance)
+    fireEvent.blur(screen.getByRole('spinbutton', { name: 'Image guidance' }))
     await waitFor(() =>
-      expect(saveSetting).toHaveBeenCalledWith(
+      expect(saved).toContainEqual([
         'imageParams',
         expect.objectContaining({
           'dreamshaper-xl-v2-turbo.gguf': expect.objectContaining({ cfgScale: 4 })
         })
-      )
+      ])
     )
 
     await user.click(model)
     await user.click(screen.getByRole('menuitemradio', { name: 'juggernaut-xl-v9' }))
-    expect(setActiveModalModel).toHaveBeenCalledWith('image', 'juggernaut-xl-v9.gguf')
+    expect(selectedModels).toContainEqual(['image', 'juggernaut-xl-v9.gguf'])
   })
 
   it('keeps Steps and Guidance editable and restores them when Image settings reopens', async () => {
@@ -109,11 +115,13 @@ describe('<SettingsPanel/> image settings', () => {
     await user.clear(steps)
     await user.type(steps, '45')
     expect((steps as HTMLInputElement).value).toBe('45')
+    await user.tab()
 
     const guidance = screen.getByRole('spinbutton', { name: 'Image guidance' })
     await user.clear(guidance)
     await user.type(guidance, '1.5')
     expect((guidance as HTMLInputElement).value).toBe('1.5')
+    await user.tab()
 
     panel.unmount()
     render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)

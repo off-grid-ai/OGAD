@@ -442,7 +442,10 @@ export function VoiceSettingsTab(): React.JSX.Element {
           max={2}
           step={0.1}
           value={preferences.speed}
-          onChange={(event) => persistPreference('speed', Number(event.target.value), 'ttsSpeed')}
+          onChange={(event) =>
+            setPreferences((current) => ({ ...current, speed: Number(event.target.value) }))
+          }
+          onBlur={(event) => persistPreference('speed', Number(event.target.value), 'ttsSpeed')}
           className="w-full accent-green-500"
         />
       </SettingsRow>

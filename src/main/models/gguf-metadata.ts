@@ -14,6 +14,7 @@ import type { GgufFs } from './gguf'
 export interface GgufMetadata {
   architecture?: string
   contextLength?: number
+  nextnPredictLayers?: number
 }
 
 // GGUF value-type enum (from the spec).
@@ -123,7 +124,7 @@ function skipArray(c: Cursor): void {
   const len = c.u64()
   if (elemType === T.STRING) {
     for (let i = 0; i < len; i++) {
-      c.str()
+      c.take(c.u64())
     }
     return
   }
@@ -163,6 +164,10 @@ export function parseGgufMetadata(buf: Buffer): GgufMetadata {
     for (let i = 0; i < kvCount; i++) {
       const key = c.str()
       const type = c.u32()
+      // Model hyperparameters precede the tokenizer payload in modern GGUF files. Once that
+      // payload begins, an absent NextN field means the model has no embedded MTP heads. Do not
+      // synchronously walk megabytes of token strings each time Settings asks for capabilities.
+      if (key.startsWith('tokenizer.')) return result
       const value = readValue(c, type)
       if (value !== undefined) {
         scalars.set(key, value)
@@ -170,9 +175,15 @@ export function parseGgufMetadata(buf: Buffer): GgufMetadata {
       // Stop as soon as both targets are known — before the huge tokenizer arrays.
       const arch = scalars.get('general.architecture')
       if (typeof arch === 'string') {
+        result.architecture = arch
         const ctx = scalars.get(`${arch}.context_length`)
         if (typeof ctx === 'number') {
-          return { architecture: arch, contextLength: ctx }
+          result.contextLength = ctx
+        }
+        const nextn = scalars.get(`${arch}.nextn_predict_layers`)
+        if (typeof nextn === 'number') {
+          result.nextnPredictLayers = nextn
+          return result
         }
       }
     }
@@ -183,6 +194,10 @@ export function parseGgufMetadata(buf: Buffer): GgufMetadata {
       const ctx = scalars.get(`${arch}.context_length`)
       if (typeof ctx === 'number') {
         result.contextLength = ctx
+      }
+      const nextn = scalars.get(`${arch}.nextn_predict_layers`)
+      if (typeof nextn === 'number') {
+        result.nextnPredictLayers = nextn
       }
     }
     return result
@@ -223,5 +238,28 @@ export function readGgufContextLength(
     return typeof ctx === 'number' && ctx > 0 ? ctx : null
   } catch {
     return null
+  }
+}
+
+/** True only when the GGUF declares one or more embedded NextN/MTP layers. */
+export function readGgufMtpSupport(
+  p: string,
+  fs: GgufFs,
+  maxBytes = GGUF_METADATA_PREFIX_BYTES
+): boolean {
+  try {
+    const size = fs.statSync(p).size
+    const toRead = Math.min(size, maxBytes)
+    if (toRead <= 0) return false
+    const fd = fs.openSync(p, 'r')
+    const buf = Buffer.alloc(toRead)
+    try {
+      fs.readSync(fd, buf, 0, toRead, 0)
+    } finally {
+      fs.closeSync(fd)
+    }
+    return (parseGgufMetadata(buf).nextnPredictLayers ?? 0) > 0
+  } catch {
+    return false
   }
 }

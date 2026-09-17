@@ -21,6 +21,19 @@ export interface VisionCaptureMetadata {
   geometry?: ScreenshotGeometry
   /** CSS-pixel bounds used by browser input for this captured frame. */
   viewport?: Bounds
+  /** Optional OS accessibility controls captured with this same frame. */
+  semanticElements?: readonly VisionSemanticElement[]
+  /** OS accessibility controls used only to verify screen changes. These are
+   * never added to model input unless the Accessibility rail is enabled. */
+  verificationSemanticElements?: readonly VisionSemanticElement[]
+}
+
+export interface VisionSemanticElement {
+  index: number
+  role: string
+  name: string
+  value: string
+  point: { x: number; y: number }
 }
 
 export interface VisionActuationResult {
@@ -30,6 +43,8 @@ export interface VisionActuationResult {
   /** The surface refused a recoverable action before any input was sent. */
   rejected?: string
 }
+
+export type VisionActionEffect = 'confirmed' | 'suspected_noop' | 'unverifiable'
 
 /** A screen can request a fresh observation when its capture boundary changed
  * underneath it. The owning screen must bound retries before using this. */
@@ -46,6 +61,10 @@ export interface VisionGroundingInput {
   guidance: readonly string[]
   currentMilestone?: string
   verifiedActions?: readonly string[]
+  /** Result of comparing the last action's before/after screen and semantic state. */
+  previousActionEffect?: VisionActionEffect
+  previousExpectedEffect?: string
+  semanticElements?: readonly VisionSemanticElement[]
   /** Last action that crossed the execution boundary, in the pixel frame used
    * when the model selected it. The policy runner annotates the exact next
    * screenshot used by both the model and task history. */

@@ -1,7 +1,7 @@
 // Off Grid AI Desktop - one clean Computer Use frame on macOS.
 //
-// ScreenCaptureKit owns window exclusion. The PiP stays visible on the display, but its exact
-// SCWindow is omitted before pixels exist. Output is one PNG at the requested path.
+// ScreenCaptureKit owns window exclusion. Off Grid AI windows stay visible on the display, but
+// their exact SCWindows are omitted before pixels exist. Output is one PNG at the requested path.
 
 import AppKit
 import CoreImage
@@ -15,19 +15,22 @@ func fail(_ message: String, code: Int32 = 2) -> Never {
 }
 
 if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--help" {
-    print("usage: computer-use-capture <output.png> <display-id> <excluded-window-id> <width> <height>")
+    print("usage: computer-use-capture <output.png> <display-id> <excluded-window-ids> <width> <height>")
     exit(0)
 }
 
 guard CommandLine.arguments.count == 6,
       let displayID = UInt32(CommandLine.arguments[2]),
-      let excludedWindowID = UInt32(CommandLine.arguments[3]),
       let width = Int(CommandLine.arguments[4]), width > 0,
       let height = Int(CommandLine.arguments[5]), height > 0 else {
-    fail("usage: computer-use-capture <output.png> <display-id> <excluded-window-id> <width> <height>")
+    fail("usage: computer-use-capture <output.png> <display-id> <excluded-window-ids> <width> <height>")
 }
 
 let outputPath = CommandLine.arguments[1]
+let excludedWindowIDs = Set(CommandLine.arguments[3].split(separator: ",").compactMap { UInt32($0) })
+guard !excludedWindowIDs.isEmpty else {
+    fail("computer-use-capture requires at least one excluded window id")
+}
 
 final class StreamScreenshot: NSObject, SCStreamOutput, SCStreamDelegate {
     private let queue = DispatchQueue(label: "ai.offgrid.computer-use-capture")
@@ -101,9 +104,9 @@ func capture() async throws -> CGImage {
             userInfo: [NSLocalizedDescriptionKey: "display \(displayID) is not available"]
         )
     }
-    // A hidden PiP is not present in `onScreenWindowsOnly` and needs no exclusion.
-    // If it is visible, exclude its exact native window before pixels exist.
-    let excludedWindows = content.windows.filter { $0.windowID == excludedWindowID }
+    // Hidden windows are not present in `onScreenWindowsOnly`. Exclude every visible Off Grid AI
+    // window so a task never treats its own task view as the application it should control.
+    let excludedWindows = content.windows.filter { excludedWindowIDs.contains($0.windowID) }
     let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
     let configuration = SCStreamConfiguration()
     configuration.width = width

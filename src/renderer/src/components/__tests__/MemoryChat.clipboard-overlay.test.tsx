@@ -29,8 +29,8 @@ function installApi(): {
   const api = {
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
-    onImageGenProgress: vi.fn(() => () => {}),
-    onRagStream: vi.fn(() => () => {}),
+    onImageGenProgress: vi.fn(() => () => { }),
+    onRagStream: vi.fn(() => () => { }),
     getRagConversations: vi.fn(async () => [conversation]),
     getRagConversation: vi.fn(async () => conversation),
     // created_at is not decoration: the renderer projects every row through projectSyncedMessageTurn,
@@ -60,13 +60,13 @@ function installApi(): {
       }
     ]),
     getSettings: vi.fn(async () => ({})),
-    saveSetting: vi.fn(async () => {}),
+    saveSetting: vi.fn(async () => { }),
     listProjects: vi.fn(async () => []),
     styleThumbs: vi.fn(async () => ({})),
     listSkills: vi.fn(async () => []),
     writeClipboardText: bridgeWrite
   }
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
+    ; (globalThis as unknown as { window: { api: unknown } }).window.api = api
   return { bridgeWrite, browserWrite }
 }
 
@@ -82,7 +82,7 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
   })
 
   it('copies the exact assistant reply through the available clipboard boundary (#46)', async () => {

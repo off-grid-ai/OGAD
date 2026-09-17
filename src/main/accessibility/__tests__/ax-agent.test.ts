@@ -57,7 +57,7 @@ const world = (
 }
 
 describe('runElementTask', () => {
-  it('uses one execution plan, reports phases, and keeps private guidance out of evidence', async () => {
+  it('keeps the active phase until completion and keeps private guidance out of evidence', async () => {
     const w = world(['{"action":"press","index":1}', '{"action":"done","summary":"sent"}'])
     const plan = fallbackTaskExecutionPlan('Messages', 'computer')
     const prompts: string[] = []
@@ -84,7 +84,7 @@ describe('runElementTask', () => {
     expect(prompts[1]).toContain(privateGuidance)
     expect(evidencePrompts[0]).toContain(TASK_GUIDANCE_TRACE)
     expect(evidencePrompts.join('\n')).not.toContain(privateGuidance)
-    expect(phases).toEqual(['phase-1', 'phase-2', 'phase-3'])
+    expect(phases).toEqual(['phase-1', 'phase-3'])
     expect(result.steps.filter((step) => step.includes('GUIDANCE'))).toEqual([])
   })
 
@@ -520,26 +520,12 @@ describe('buildElementPrompt', () => {
     })
     expect(prompt).toContain('Task: send hi to sidd')
     expect(prompt).toContain('[1] AXButton')
-    expect(prompt).toMatch(/sign-in.*human_required/i)
-    // The type rule must teach the optional-index + trailing-submit shape a
-    // general model needs, or it re-observes forever (the Slack regression).
-    expect(prompt).toMatch(/omit "index".*focused/i)
-    expect(prompt).toMatch(/"keys":"Enter".*send/i)
-    // Messaging guidance (the Slack live-test fixes): open the DM via the quick
-    // switcher (a sidebar-search Enter only filters), then type into the labeled
-    // composer by number - not by assuming focus.
-    expect(prompt).toMatch(/cmd k/i)
-    expect(prompt).toMatch(/Message to <name>/i)
-    expect(prompt).toMatch(/only FILTERS|does NOT open/i)
-    // Completion coaching: stop the instant the goal is achieved (a playing
-    // video is done) - the over-acting seen when it clicked past a playing video.
-    expect(prompt).toMatch(/STOP as soon as the goal is achieved/i)
-    expect(prompt).toMatch(/already playing is done/i)
-    // File-picker coaching: the native dialog is a separate window - drive it
-    // with Go-to-Folder + full path, and never click Open with nothing selected
-    // (the Slack file-attach loop on "Open"/"search").
-    expect(prompt).toMatch(/cmd shift g/i)
-    expect(prompt).toMatch(/never click "open".*before a file is selected/i)
+    expect(prompt).toMatch(/human_required.*sign-in/i)
+    expect(prompt).toMatch(/omit index.*focused/i)
+    expect(prompt).toMatch(/"keys":"Enter".*submit/i)
+    expect(prompt).toMatch(/match the exact target/i)
+    expect(prompt).toMatch(/navigation fields are not content fields/i)
+    expect(prompt).toMatch(/verify that the original item changed/i)
   })
 
   it('includes optional older outcomes as text and keeps bounded recent history', () => {

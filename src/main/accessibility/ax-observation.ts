@@ -65,8 +65,8 @@ function mappedAction(
 }
 
 /** Persist AX planning evidence through the same bounded, redacted task-history
- * adapter as vision Computer Use. The model remains text-grounded; the frame is
- * for user supervision and execution evidence. */
+ * adapter as vision Computer Use. The frame is also available to a
+ * vision-capable AX planner. */
 export function persistAxObservation(
   taskId: string,
   title: string,

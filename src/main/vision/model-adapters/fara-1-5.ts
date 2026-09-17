@@ -262,8 +262,6 @@ function buildFaraRequest(
         ]
       }
     ],
-    maxTokens: 2_048,
-    timeoutMs: 90_000,
     maxAttempts: 2,
     tools: [faraComputerUseTool(bounds)],
     toolChoice: 'required',

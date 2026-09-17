@@ -1,4 +1,6 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
+import fs from 'node:fs/promises'
+import sharp from 'sharp'
 import {
   computerUseHistoryTokenBudget,
   tailWithinTokenBudget
@@ -18,6 +20,7 @@ import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { VisionAction } from './vision-action'
 import {
   RecoverableVisionError,
+  type VisionActionEffect,
   type VisionGroundingInput,
   type VisionGroundingResult,
   type VisionScreen,
@@ -57,6 +60,170 @@ interface CapturedStep {
   history: string[]
   promptContext: string
   currentMilestone?: string
+  evidence: ScreenEvidence
+}
+
+const MAX_CONSECUTIVE_RETHINKS = 3
+const VISUAL_FINGERPRINT_SIZE = 128
+const VISUAL_NOOP_MEAN_DELTA = 0.002
+const VISUAL_CONFIRMED_MEAN_DELTA = 0.01
+const VISUAL_TILE_SIZE = 8
+const VISUAL_LOCAL_CONFIRMED_MEAN_DELTA = 0.05
+const VISUAL_LOCAL_STRONG_PIXEL_DELTA = 32
+const VISUAL_LOCAL_STRONG_PIXEL_COUNT = 6
+
+interface ScreenEvidence {
+  visual?: Buffer
+  semantic?: string
+}
+
+async function screenEvidence(
+  shot: Awaited<ReturnType<VisionScreen['capture']>>
+): Promise<ScreenEvidence> {
+  let visual: Buffer | undefined
+  try {
+    const source = shot.image.startsWith('data:')
+      ? Buffer.from(shot.image.slice(shot.image.indexOf(',') + 1), 'base64')
+      : await fs.readFile(shot.image)
+    visual = await sharp(source)
+      .resize(VISUAL_FINGERPRINT_SIZE, VISUAL_FINGERPRINT_SIZE, { fit: 'fill' })
+      .greyscale()
+      .raw()
+      .toBuffer()
+  } catch {
+    // A missing comparison signal must remain unverifiable, never successful.
+  }
+  const elements = shot.metadata?.verificationSemanticElements ?? shot.metadata?.semanticElements
+  const semantic = elements
+    ? JSON.stringify(
+        elements
+          .map((element) => [element.role, element.name, element.value])
+          .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+      )
+    : undefined
+  return { visual, semantic }
+}
+
+interface ActionEffectMeasurement {
+  effect: VisionActionEffect
+  semanticComparable: boolean
+  semanticChanged: boolean
+  visualComparable: boolean
+  globalMeanDelta?: number
+  localMeanDelta?: number
+  localStrongPixels?: number
+}
+
+function actionEffect(
+  before: ScreenEvidence,
+  after: ScreenEvidence,
+  previousAction?: {
+    action: VisionAction
+    coordinateFrame: ReturnType<typeof coordinateFrame>
+  }
+): ActionEffectMeasurement {
+  const semanticComparable = before.semantic !== undefined && after.semantic !== undefined
+  const semanticChanged = semanticComparable && before.semantic !== after.semantic
+  if (semanticChanged) {
+    return { effect: 'confirmed', semanticComparable, semanticChanged, visualComparable: false }
+  }
+  if (!before.visual || !after.visual || before.visual.length !== after.visual.length) {
+    return {
+      effect: 'unverifiable',
+      semanticComparable,
+      semanticChanged,
+      visualComparable: false
+    }
+  }
+  let delta = 0
+  for (let index = 0; index < before.visual.length; index += 1) {
+    delta += Math.abs(before.visual[index]! - after.visual[index]!)
+  }
+  const meanDelta = delta / (before.visual.length * 255)
+  const local = localVisualChange(before.visual, after.visual, previousAction)
+  const visualConfirmed =
+    meanDelta >= VISUAL_CONFIRMED_MEAN_DELTA ||
+    (local !== undefined &&
+      local.meanDelta >= VISUAL_LOCAL_CONFIRMED_MEAN_DELTA &&
+      local.strongPixels >= VISUAL_LOCAL_STRONG_PIXEL_COUNT)
+  const visuallyUnchanged = meanDelta <= VISUAL_NOOP_MEAN_DELTA
+  return {
+    effect: visualConfirmed
+      ? 'confirmed'
+      : visuallyUnchanged && semanticComparable
+        ? 'suspected_noop'
+        : 'unverifiable',
+    semanticComparable,
+    semanticChanged,
+    visualComparable: true,
+    globalMeanDelta: meanDelta,
+    ...(local
+      ? { localMeanDelta: local.meanDelta, localStrongPixels: local.strongPixels }
+      : {})
+  }
+}
+
+function localVisualChange(
+  before: Buffer,
+  after: Buffer,
+  previousAction:
+    | { action: VisionAction; coordinateFrame: ReturnType<typeof coordinateFrame> }
+    | undefined
+): { meanDelta: number; strongPixels: number } | undefined {
+  const point = verificationPoint(previousAction?.action)
+  const bounds = previousAction?.coordinateFrame.encoded
+  if (!point || !bounds || bounds.width <= 0 || bounds.height <= 0) return undefined
+  const pixelX = Math.min(
+    VISUAL_FINGERPRINT_SIZE - 1,
+    Math.max(0, Math.floor((point.x * VISUAL_FINGERPRINT_SIZE) / bounds.width))
+  )
+  const pixelY = Math.min(
+    VISUAL_FINGERPRINT_SIZE - 1,
+    Math.max(0, Math.floor((point.y * VISUAL_FINGERPRINT_SIZE) / bounds.height))
+  )
+  const tileX = Math.floor(pixelX / VISUAL_TILE_SIZE)
+  const tileY = Math.floor(pixelY / VISUAL_TILE_SIZE)
+  let strongest = { meanDelta: 0, strongPixels: 0 }
+  for (let yOffset = -1; yOffset <= 1; yOffset += 1) {
+    for (let xOffset = -1; xOffset <= 1; xOffset += 1) {
+      const xStart = (tileX + xOffset) * VISUAL_TILE_SIZE
+      const yStart = (tileY + yOffset) * VISUAL_TILE_SIZE
+      if (
+        xStart < 0 ||
+        yStart < 0 ||
+        xStart >= VISUAL_FINGERPRINT_SIZE ||
+        yStart >= VISUAL_FINGERPRINT_SIZE
+      ) {
+        continue
+      }
+      let delta = 0
+      let strongPixels = 0
+      for (let y = yStart; y < yStart + VISUAL_TILE_SIZE; y += 1) {
+        for (let x = xStart; x < xStart + VISUAL_TILE_SIZE; x += 1) {
+          const index = y * VISUAL_FINGERPRINT_SIZE + x
+          const pixelDelta = Math.abs(before[index]! - after[index]!)
+          delta += pixelDelta
+          if (pixelDelta >= VISUAL_LOCAL_STRONG_PIXEL_DELTA) strongPixels += 1
+        }
+      }
+      const meanDelta = delta / (VISUAL_TILE_SIZE * VISUAL_TILE_SIZE * 255)
+      if (meanDelta > strongest.meanDelta) strongest = { meanDelta, strongPixels }
+    }
+  }
+  return strongest
+}
+
+function verificationPoint(action: VisionAction | undefined): { x: number; y: number } | undefined {
+  switch (action?.type) {
+    case 'click':
+    case 'double_click':
+    case 'right_click':
+    case 'middle_click':
+    case 'triple_click':
+      return action.point
+    default:
+      return undefined
+  }
 }
 
 /**
@@ -167,6 +334,14 @@ class VisionTaskGraphRuntime {
     coordinateFrame: ReturnType<typeof coordinateFrame>
   }
   private equivalentClickRecoveries = 0
+  private duplicateTypeRecoveries = 0
+  private consecutiveRethinks = 0
+  private consecutiveSuspectedNoops = 0
+  private previousActionEffect?: VisionActionEffect
+  private previousExpectedEffect?: string
+  private pendingActionEvidence?: ScreenEvidence
+  private pendingExpectedEffect?: string
+  private mustRethink = false
   private handoffs = 0
   private modelStep = 0
   /**
@@ -292,6 +467,33 @@ class VisionTaskGraphRuntime {
       .join('\n\n')
     try {
       const shot = await this.deps.screen.capture()
+      const evidence = await screenEvidence(shot)
+      if (this.pendingActionEvidence) {
+        const measurement = actionEffect(
+          this.pendingActionEvidence,
+          evidence,
+          this.previousVerifiedAction
+        )
+        this.previousActionEffect = measurement.effect
+        this.previousExpectedEffect = this.pendingExpectedEffect
+        this.note(`action effect: ${this.previousActionEffect}`)
+        console.log('[vision][verification] action effect', {
+          action: this.previousVerifiedAction?.action.type,
+          ...measurement
+        })
+        this.pendingActionEvidence = undefined
+        this.pendingExpectedEffect = undefined
+        if (this.previousActionEffect === 'suspected_noop') {
+          this.consecutiveSuspectedNoops += 1
+          if (this.consecutiveSuspectedNoops >= 2) {
+            this.mustRethink = true
+            this.consecutiveSuspectedNoops = 0
+            this.note('two consecutive actions had no observable effect; forcing a rethink')
+          }
+        } else {
+          this.consecutiveSuspectedNoops = 0
+        }
+      }
       this.captured = {
         shot,
         startedAt,
@@ -299,7 +501,8 @@ class VisionTaskGraphRuntime {
         guidance,
         history,
         promptContext,
-        currentMilestone: currentPhase?.title
+        currentMilestone: currentPhase?.title,
+        evidence
       }
       if (!this.deps.guard.markObservationReady()) return { route: 'gate' }
       this.decision = undefined
@@ -331,10 +534,29 @@ class VisionTaskGraphRuntime {
   async decide(): Promise<{ route: WorkflowRoute }> {
     const captured = this.requireCaptured()
     this.progress('thinking', 'Reviewing direction, milestone, and next action')
+    if (this.mustRethink) {
+      this.mustRethink = false
+      this.decision = {
+        kind: 'rethink',
+        actionText: 'Reassess the current screen',
+        summary: 'Two consecutive actions produced no observable screen or Accessibility change.',
+        direction: 'off_course',
+        decisionRationale: 'The action-effect check requires a different strategy.'
+      }
+      return { route: 'handle_decision' }
+    }
     this.beginReasoning()
+    const modelLease = this.deps.guard.currentActionLease()
+    const modelSignal = this.deps.signal
+      ? AbortSignal.any([this.deps.signal, modelLease.signal])
+      : modelLease.signal
     try {
       const decisionStartedAt = this.now()
-      const grounding = await this.deps.decide(this.groundingInput(captured))
+      const grounding = await this.deps.decide(this.groundingInput(captured, modelSignal))
+      if (!this.deps.guard.ownsActionLease(modelLease.epoch)) {
+        this.discardPendingPolicyHistory()
+        return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
+      }
       captured.decisionMs = this.now() - decisionStartedAt
       this.actionResponse = grounding.response
       this.actionModelInput = grounding.modelInput
@@ -351,6 +573,10 @@ class VisionTaskGraphRuntime {
       if (this.deps.signal?.aborted) {
         this.stopAfterAbort()
         return { route: 'handle_decision' }
+      }
+      if (modelLease.signal.aborted) {
+        this.discardPendingPolicyHistory()
+        return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
       }
       const message = errorMessage(error, 'visual decision failed')
       this.observe({
@@ -421,6 +647,27 @@ class VisionTaskGraphRuntime {
       return { route: 'end' }
     }
     if (decision.kind === 'actions') {
+      this.consecutiveRethinks = 0
+      const repeatedType = decision.actions.find((action) =>
+        isRepeatedTypeAction(action, this.previousVerifiedAction)
+      )
+      if (repeatedType) {
+        this.duplicateTypeRecoveries += 1
+        const summary = 'Repeated text input blocked because the same text was already typed.'
+        this.discardPendingPolicyHistory()
+        this.observeDecision('blocked', summary)
+        this.note(summary)
+        this.checkpoint()
+        if (this.duplicateTypeRecoveries > 1) {
+          const failure = 'Computer use repeated the same text without making progress.'
+          this.progress('failed', failure)
+          this.note(failure)
+          this.finish(false, failure)
+          return { route: 'end' }
+        }
+        this.progress('checking', 'Taking a fresh observation and choosing a different action')
+        return { route: 'gate' }
+      }
       const repeatedClick = decision.actions.find((action) =>
         isEquivalentClickTarget(
           action,
@@ -432,7 +679,7 @@ class VisionTaskGraphRuntime {
         this.equivalentClickRecoveries += 1
         const summary = `Repeated click region blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where the earlier attempt landed.`
         const recovery =
-          'Do not guess another Dock or taskbar icon from its color or position. If the target application is not visibly identified, use the operating system application launcher or search.'
+          'Do not guess another control from its appearance or position. Use a visibly identified control, or use the operating system launcher or search when the target application is not visible.'
         this.discardPendingPolicyHistory()
         this.observeDecision('blocked', summary)
         this.note(summary)
@@ -455,15 +702,25 @@ class VisionTaskGraphRuntime {
       return { route: 'execute' }
     }
     if (decision.kind === 'phase_complete') {
+      this.consecutiveRethinks = 0
       this.discardPendingPolicyHistory()
       this.observeDecision('terminal')
       this.checkpoint()
       return { route: 'advance' }
     }
     if (decision.kind === 'rethink') {
+      this.consecutiveRethinks += 1
       this.discardPendingPolicyHistory()
       this.observeDecision('blocked', decision.summary)
       this.note(`${decision.direction}: ${decision.summary}`)
+      if (this.consecutiveRethinks >= MAX_CONSECUTIVE_RETHINKS) {
+        const failure = `Computer use could not make progress after ${MAX_CONSECUTIVE_RETHINKS} fresh observations: ${decision.summary}`
+        this.progress('failed', 'The visual strategy did not make progress')
+        this.note(failure)
+        this.checkpoint()
+        this.finish(false, failure)
+        return { route: 'end' }
+      }
       this.progress('checking', 'Taking a fresh observation after rethinking the action')
       this.checkpoint()
       return { route: 'gate' }
@@ -572,6 +829,7 @@ class VisionTaskGraphRuntime {
           coordinateFrame: coordinateFrame(captured.shot)
         }
         this.equivalentClickRecoveries = 0
+        this.duplicateTypeRecoveries = 0
         if (actuation?.mappedAction) mappedActions.push(actuation.mappedAction)
       }
     } catch (error) {
@@ -628,7 +886,11 @@ class VisionTaskGraphRuntime {
     }
     if (!blocked && !this.deps.guard.isVerifying) this.deps.guard.beginVerification()
     if (blocked) this.discardPendingPolicyHistory()
-    else this.commitPendingPolicyHistory()
+    else {
+      this.pendingActionEvidence = captured.evidence
+      this.pendingExpectedEffect = decision.expectedEffect
+      this.commitPendingPolicyHistory()
+    }
     const blockedPhase: ComputerUsePhase = this.deps.guard.isHalted ? 'stopped' : 'paused'
     this.observe({
       phase: blocked ? blockedPhase : 'checking',
@@ -657,7 +919,7 @@ class VisionTaskGraphRuntime {
     return { route: 'gate' }
   }
 
-  private groundingInput(captured: CapturedStep): VisionGroundingInput {
+  private groundingInput(captured: CapturedStep, signal: AbortSignal): VisionGroundingInput {
     return {
       goal: this.taskBrief.objective,
       image: captured.shot.image,
@@ -667,9 +929,12 @@ class VisionTaskGraphRuntime {
       guidance: captured.guidance,
       currentMilestone: captured.currentMilestone,
       verifiedActions: [...this.verifiedActions],
+      previousActionEffect: this.previousActionEffect,
+      previousExpectedEffect: this.previousExpectedEffect,
+      semanticElements: captured.shot.metadata?.semanticElements,
       previousVerifiedAction: this.previousVerifiedAction,
       coordinateFrame: coordinateFrame(captured.shot),
-      signal: this.deps.signal,
+      signal,
       reportProgress: (action) => this.progress('thinking', action),
       reportReasoning: (text) => this.appendReasoning(text)
     }
@@ -785,6 +1050,19 @@ class VisionTaskGraphRuntime {
       handoffs: this.handoffs
     }
   }
+}
+
+function isRepeatedTypeAction(
+  action: VisionAction,
+  previous:
+    | { action: VisionAction; coordinateFrame: ReturnType<typeof coordinateFrame> }
+    | undefined
+): boolean {
+  return (
+    action.type === 'type' &&
+    previous?.action.type === 'type' &&
+    action.content === previous.action.content
+  )
 }
 
 function coordinateFrame(shot: Awaited<ReturnType<VisionScreen['capture']>>): {

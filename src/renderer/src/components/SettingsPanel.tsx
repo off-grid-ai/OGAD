@@ -21,7 +21,7 @@ import {
   contextWindowHint,
   recommendedContextWindow
 } from '@renderer/lib/ctx-options'
-import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summary'
+import { formatContextWindow, resolveActiveTextModel } from '@renderer/lib/model-summary'
 import {
   invalidateDisplaySettings,
   invalidateLlmSettings
@@ -83,6 +83,7 @@ function budgetChange(s: LlmSettings, patch: LlmSettings): LlmSettings {
 // Tabs: Model (inference params), Image, Voice (Kokoro TTS), Tools (built-in, read-only),
 // Connectors (MCP servers — the user's reusable tool library). All on-device.
 type KvCacheType = 'f16' | 'q8_0' | 'q4_0'
+type SpeculativeDecodingMode = 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
 type LlmSettings = {
   temperature?: number
   ctxSize?: number
@@ -99,6 +100,11 @@ type LlmSettings = {
   gpuLayers?: number
   threads?: number
   batchSize?: number
+  speculativeDecoding?: SpeculativeDecodingMode
+  draftModel?: string
+  supportsMtp?: boolean
+  compatibleDraftModels?: string[]
+  compatibleDflashModels?: string[]
   effectiveCtxSize?: number // reported by the backend (RAM-clamped); read-only
   modelMaxCtx?: number | null // the model's TRAINED window (GGUF); read-only, bounds the picker
   gpuAccelerator?: EngineAccelerator | null // the engine the backend actually spawned; read-only
@@ -109,6 +115,58 @@ type Connector = {
   url?: string | null
   transport?: string
   enabled?: number | boolean
+}
+
+type DraftModelOption = { value: string; label: string }
+type DraftCatalogModel = {
+  id: string
+  name: string
+  kind?: string
+  tags?: string[]
+  files?: Array<{ name: string; role?: string }>
+}
+type DraftCompanionStatus = Record<
+  string,
+  { dflashInstalled?: boolean; dflashFile?: string }
+>
+
+function installedDraftModels(
+  models: readonly DraftCatalogModel[],
+  activeModelId: string | null,
+  companionStatus: DraftCompanionStatus,
+  compatibleDraftFiles: readonly string[],
+  compatibleDflashFiles: readonly string[]
+): { draft: DraftModelOption[]; dflash: DraftModelOption[] } {
+  const draftFiles = new Set(compatibleDraftFiles)
+  const dflashFiles = new Set(compatibleDflashFiles)
+  const draft = new Map<string, DraftModelOption>()
+  const dflashOptions = new Map<string, DraftModelOption>()
+  for (const model of models) {
+    const dflash = companionStatus[model.id]
+    if (
+      dflash?.dflashInstalled &&
+      dflash.dflashFile &&
+      dflashFiles.has(dflash.dflashFile)
+    ) {
+      dflashOptions.set(dflash.dflashFile, {
+        value: dflash.dflashFile,
+        label: `${model.name} · DFlash`
+      })
+    }
+    if (model.id === activeModelId) continue
+    if (!model.tags?.some((tag) => tag === 'Imported' || tag === 'Downloaded')) continue
+    if (model.kind && !['text', 'vision', 'local'].includes(model.kind)) continue
+    const primary = model.files?.find(
+      (file) =>
+        file.name.toLowerCase().endsWith('.gguf') &&
+        file.role !== 'mmproj' &&
+        !/(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(file.name)
+    )?.name
+    if (primary && draftFiles.has(primary)) {
+      draft.set(primary, { value: primary, label: model.name })
+    }
+  }
+  return { draft: [...draft.values()], dflash: [...dflashOptions.values()] }
 }
 
 type TranscriptionInfo = {
@@ -138,7 +196,9 @@ const DEFAULTS: LlmSettings = {
   flashAttn: false,
   gpuLayers: 99,
   threads: 0,
-  batchSize: 512
+  batchSize: 512,
+  speculativeDecoding: 'off',
+  draftModel: ''
 }
 
 export function SettingsPanel({
@@ -158,6 +218,8 @@ export function SettingsPanel({
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
+  const [draftModels, setDraftModels] = useState<DraftModelOption[]>([])
+  const [dflashModels, setDflashModels] = useState<DraftModelOption[]>([])
   // Default hidden, like mobile: the numbers are for when you go looking, not a permanent fixture.
   const [showGenerationDetails, setShowGenerationDetails] = useState(false)
 
@@ -174,14 +236,43 @@ export function SettingsPanel({
       .then((v: LlmSettings) => setS(v))
       .catch(() => {})
     const modelApi = window.api as Partial<
-      Pick<typeof window.api, 'getModelCatalog' | 'getActiveModel'>
+      Pick<
+        typeof window.api,
+        'getModelCatalog' | 'getActiveModel' | 'getActiveModelIds' | 'getModelVisionStatus'
+      >
     >
-    if (modelApi.getModelCatalog && modelApi.getActiveModel) {
-      Promise.all([modelApi.getModelCatalog(), modelApi.getActiveModel()])
-        .then(([catalog, activeId]) =>
-          setActiveModelName(resolveModelName(catalog.models, activeId))
-        )
-        .catch(() => setActiveModelName(null))
+    if (
+      modelApi.getModelCatalog &&
+      modelApi.getActiveModel &&
+      modelApi.getActiveModelIds &&
+      modelApi.getModelVisionStatus
+    ) {
+      Promise.all([
+        modelApi.getModelCatalog(),
+        modelApi.getActiveModel(),
+        modelApi.getActiveModelIds(),
+        modelApi.getModelVisionStatus(),
+        window.api.getLlmSettings?.()
+      ])
+        .then(([catalog, activeId, activeIds, companionStatus, llmSettings]) => {
+          setActiveModelName(
+            resolveActiveTextModel(catalog.models, activeId, new Set(activeIds)).name
+          )
+          const compatible = installedDraftModels(
+            catalog.models,
+            activeId,
+            companionStatus,
+            llmSettings?.compatibleDraftModels ?? [],
+            llmSettings?.compatibleDflashModels ?? []
+          )
+          setDraftModels(compatible.draft)
+          setDflashModels(compatible.dflash)
+        })
+        .catch(() => {
+          setActiveModelName(null)
+          setDraftModels([])
+          setDflashModels([])
+        })
     }
     window.api
       .getTranscriptionInfo?.()
@@ -378,7 +469,10 @@ export function SettingsPanel({
                 max={1.5}
                 step={0.05}
                 value={s.temperature ?? 0.7}
-                onChange={(e) => set({ temperature: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, temperature: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ temperature: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -416,7 +510,13 @@ export function SettingsPanel({
                 max={MAX_MAX_TOOL_CALLS}
                 step={1}
                 value={s.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS}
-                onChange={(e) => set({ maxToolCalls: Math.round(Number(e.target.value)) })}
+                onChange={(e) =>
+                  setS((current) => ({
+                    ...current,
+                    maxToolCalls: Math.round(Number(e.target.value))
+                  }))
+                }
+                onBlur={(e) => set({ maxToolCalls: Math.round(Number(e.target.value)) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -427,7 +527,8 @@ export function SettingsPanel({
                 max={1}
                 step={0.01}
                 value={s.topP ?? 0.95}
-                onChange={(e) => set({ topP: Number(e.target.value) })}
+                onChange={(e) => setS((current) => ({ ...current, topP: Number(e.target.value) }))}
+                onBlur={(e) => set({ topP: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -442,7 +543,8 @@ export function SettingsPanel({
                 max={100}
                 step={1}
                 value={s.topK ?? 40}
-                onChange={(e) => set({ topK: Number(e.target.value) })}
+                onChange={(e) => setS((current) => ({ ...current, topK: Number(e.target.value) }))}
+                onBlur={(e) => set({ topK: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -457,7 +559,8 @@ export function SettingsPanel({
                 max={0.5}
                 step={0.01}
                 value={s.minP ?? 0.05}
-                onChange={(e) => set({ minP: Number(e.target.value) })}
+                onChange={(e) => setS((current) => ({ ...current, minP: Number(e.target.value) }))}
+                onBlur={(e) => set({ minP: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -472,7 +575,10 @@ export function SettingsPanel({
                 max={1.5}
                 step={0.01}
                 value={s.repeatPenalty ?? 1.1}
-                onChange={(e) => set({ repeatPenalty: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, repeatPenalty: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ repeatPenalty: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -550,7 +656,8 @@ export function SettingsPanel({
             >
               <textarea
                 value={s.systemPrompt ?? ''}
-                onChange={(e) => set({ systemPrompt: e.target.value })}
+                onChange={(e) => setS((current) => ({ ...current, systemPrompt: e.target.value }))}
+                onBlur={(e) => set({ systemPrompt: e.target.value })}
                 rows={5}
                 placeholder="e.g. You are a concise, technical assistant."
                 className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
@@ -593,6 +700,65 @@ export function SettingsPanel({
               </button>
             </Row>
             <Row
+              label="Speculative decoding"
+              controlId="speculative-decoding"
+              hint="N-gram needs no second model. MTP uses prediction heads in a compatible main model. Draft and DFlash need a compatible installed draft GGUF."
+            >
+              <SettingsSelect
+                id="speculative-decoding"
+                label="Speculative decoding"
+                value={s.speculativeDecoding ?? 'off'}
+                onValueChange={(value) =>
+                  set({
+                    speculativeDecoding: value,
+                    ...(value === 'draft' && !draftModels.some((m) => m.value === s.draftModel)
+                      ? { draftModel: draftModels[0]?.value ?? '' }
+                      : value === 'dflash' &&
+                          !dflashModels.some((m) => m.value === s.draftModel)
+                        ? { draftModel: dflashModels[0]?.value ?? '' }
+                        : {})
+                  })
+                }
+                options={[
+                  { value: 'off', label: 'Off' },
+                  { value: 'ngram', label: 'N-gram' },
+                  {
+                    value: 'mtp',
+                    label: s.supportsMtp === false ? 'MTP · Not supported by this model' : 'MTP',
+                    disabled: s.supportsMtp === false
+                  },
+                  {
+                    value: 'draft',
+                    label: 'Draft model',
+                    disabled: draftModels.length === 0
+                  },
+                  { value: 'dflash', label: 'DFlash', disabled: dflashModels.length === 0 }
+                ]}
+              />
+            </Row>
+            {(s.speculativeDecoding === 'draft' || s.speculativeDecoding === 'dflash') && (
+              <Row
+                label="Draft model"
+                controlId="speculative-draft-model"
+                hint="Use a smaller GGUF that is tokenizer-compatible with the active model."
+              >
+                <SettingsSelect
+                  id="speculative-draft-model"
+                  label="Draft model"
+                  value={s.draftModel ?? ''}
+                  options={s.speculativeDecoding === 'dflash' ? dflashModels : draftModels}
+                  placeholder="No compatible model installed"
+                  searchable
+                  disabled={
+                    s.speculativeDecoding === 'dflash'
+                      ? dflashModels.length === 0
+                      : draftModels.length === 0
+                  }
+                  onValueChange={(value) => set({ draftModel: value })}
+                />
+              </Row>
+            )}
+            <Row
               label="GPU layers"
               value={String(s.gpuLayers ?? 99)}
               hint={gpuLayersHint(s.gpuAccelerator ?? null)}
@@ -603,7 +769,10 @@ export function SettingsPanel({
                 max={99}
                 step={1}
                 value={s.gpuLayers ?? 99}
-                onChange={(e) => set({ gpuLayers: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, gpuLayers: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ gpuLayers: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -618,7 +787,10 @@ export function SettingsPanel({
                 max={16}
                 step={1}
                 value={s.threads ?? 0}
-                onChange={(e) => set({ threads: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, threads: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ threads: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -633,7 +805,10 @@ export function SettingsPanel({
                 max={2048}
                 step={64}
                 value={s.batchSize ?? 512}
-                onChange={(e) => set({ batchSize: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, batchSize: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ batchSize: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>

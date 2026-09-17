@@ -43,6 +43,7 @@ export interface BrowserRailHost {
 export function registerBrowserRail(registry: HandlerRegistry): void {
   registry.register({
     type: WEB_USE_ACTION_TYPE,
+    attemptTimeoutMs: 2 * 60 * 60_000,
     rail: 'browser',
     // Gates for approval like any mutation; the watched pane + takeover cover
     // the identity boundary within the run.

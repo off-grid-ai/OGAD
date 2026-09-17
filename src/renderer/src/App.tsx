@@ -399,7 +399,7 @@ function AppContent() {
   // memory-mirror views (Day/Replay/Entities/…) and avoid looping the graph.
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(window.api as any)?.reportSelfView?.(viewMode)
+    ; (window.api as any)?.reportSelfView?.(viewMode)
   }, [viewMode])
 
   // Navigation history stacks (back and forward)
@@ -470,7 +470,7 @@ function AppContent() {
     void license
       .status()
       .then(applyStatus)
-      .catch(() => {})
+      .catch(() => { })
     return () => {
       active = false
       off()
@@ -701,7 +701,7 @@ function AppContent() {
       .then((v) => {
         if (v) setUpdateReady(v)
       })
-      .catch(() => {})
+      .catch(() => { })
     unsubscribers.push(
       window.api.onUpdateDownloaded((data) => {
         setUpdateReady(data.version)
@@ -1335,6 +1335,7 @@ function AppContent() {
                         }}
                         onOpenSkillPreset={handleOpenSkillPreset}
                         onOpenConnectors={() => navigateTo('connectors')}
+                        onOpenAssistantUpgrade={() => navigateTo('tasks')}
                         openTarget={chatTarget}
                         onTargetConsumed={() => setChatTarget(null)}
                         onTaskDetailModeChange={setTaskDetailSidebarMode}
@@ -1403,8 +1404,8 @@ function AppContent() {
                         onOpenHit: handleOpenHit,
                         openChatOwner: handleOpenChatOwner
                       } satisfies ProViewContext) ?? (
-                        <UpgradeScreen feature={getProFeature(viewMode)} />
-                      ))
+                          <UpgradeScreen feature={getProFeature(viewMode)} />
+                        ))
                     )}
                   </motion.div>
                 )}

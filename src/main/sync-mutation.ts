@@ -59,6 +59,7 @@ export const SYNCABLE_LLM_SETTING_KEYS = [
 /** Cross-device Computer Use preferences that do not contain device-local paths or secrets. */
 export const SYNCABLE_COMPUTER_USE_SETTING_KEYS = [
   'computerUseSettings',
+  'webUseSettings',
   'computerUseModelId'
 ] as const
 

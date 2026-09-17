@@ -27,6 +27,21 @@ export function hasSemanticReferences(snapshot: string): boolean {
   return /\[ref=[^\]]+\]/.test(snapshot)
 }
 
+export function semanticSnapshotDiagnostics(snapshot: string): {
+  textLength: number
+  lineCount: number
+  referenceCount: number
+  hasReferences: boolean
+} {
+  const references = snapshot.match(/\[ref=[^\]]+\]/g)
+  return {
+    textLength: snapshot.length,
+    lineCount: snapshot.length ? snapshot.split('\n').length : 0,
+    referenceCount: references?.length ?? 0,
+    hasReferences: Boolean(references?.length)
+  }
+}
+
 export function stableActionKey(decision: SemanticDecision): string {
   return JSON.stringify({
     action: decision.action,
