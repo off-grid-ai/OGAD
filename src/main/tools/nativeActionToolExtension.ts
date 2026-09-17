@@ -52,9 +52,12 @@ const OUTCOME_WAIT_MS = 30_000
 function engineResult(
   actionType: string,
   text: string,
-  status: ToolCallStatus = 'completed'
+  status: ToolCallStatus = 'completed',
+  authoritative = true
 ): string | ToolResult {
-  return isTaskAction(actionType) ? { text, status, authoritative: true } : text
+  return isTaskAction(actionType)
+    ? { text, status, ...(authoritative ? { authoritative: true } : {}) }
+    : text
 }
 
 // The inline (non-engine) runner, picked by platform in exactly one place:
@@ -165,8 +168,11 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
-    const reply = (text: string, status?: ToolCallStatus): string | ToolResult =>
-      engineResult(actionType, text, status)
+    const reply = (
+      text: string,
+      status?: ToolCallStatus,
+      authoritative = true
+    ): string | ToolResult => engineResult(actionType, text, status, authoritative)
     const cleanArgs = spec.buildArgs(args)
     const proposed = await actions.propose(
       {
@@ -190,18 +196,21 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!proposed.accepted) {
       return reply(`Error: the action was refused: ${proposed.reason}`, 'failed')
     }
-    const taskReference = isTaskAction(actionType) ? ` Task reference: ${proposed.id}.` : ''
+    const taskReference = isTaskAction(actionType) ? `Task reference: ${proposed.id}. ` : ''
     if (proposed.deduped) {
       return reply(
-        `That exact action is already in flight — not starting a duplicate.${taskReference}`,
-        'pending'
+        'A matching task is already in flight. No duplicate was started.',
+        'completed',
+        false
       )
     }
     actions.kick()
     if (isTaskAction(actionType)) {
+      const label = actionType === 'computer_use' ? 'Computer Use' : 'Web Use'
       return reply(
-        `Started "${spec.title(args)}". Do not call ${actionType} again for this goal. Live progress and the final result will appear in this chat.${taskReference}`,
-        'pending'
+        `${taskReference}${label} started. Live progress and the final result will appear in this chat. Do not call ${actionType} again for this goal.`,
+        'completed',
+        false
       )
     }
     const raced = await Promise.race([
@@ -212,7 +221,7 @@ export class NativeActionToolExtension implements ToolExtension {
     ])
     if (raced.kind === 'parked') {
       return reply(
-        `Error: the action engine held this Chat action instead of starting it. No approval was created.${taskReference}`,
+        `${taskReference}Error: the action engine held this Chat action instead of starting it. No approval was created.`,
         'failed'
       )
     }
@@ -220,34 +229,34 @@ export class NativeActionToolExtension implements ToolExtension {
       // Approved and still running past the wait window - NOT queued. Say so, or
       // the model wrongly tells the user to approve something already in flight.
       return reply(
-        `"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.${taskReference}`,
+        `${taskReference}"${spec.title(args)}" is running now and will finish shortly. It does NOT need approval - do not tell the user to approve it.`,
         'pending'
       )
     }
     const outcome = raced.outcome
     switch (outcome.outcome) {
       case 'done':
-        return reply(`${spec.formatResult(undefined)}${taskReference}`)
+        return reply(`${taskReference}${spec.formatResult(undefined)}`)
       case 'rejected':
         return reply(
-          `The user declined — ${spec.title(args)} was not run.${taskReference}`,
+          `${taskReference}The user declined — ${spec.title(args)} was not run.`,
           'failed'
         )
       case 'needs_help': {
         const lastAttempt = outcome.record.attemptLog.at(-1)
         const detail = lastAttempt?.detail ? ` (${lastAttempt.detail})` : ''
         return reply(
-          `It ran but could not be confirmed${detail}. Tell the user it needs their attention.${taskReference}`,
+          `${taskReference}It ran but could not be confirmed${detail}. Tell the user it needs their attention.`,
           'pending'
         )
       }
       case 'edited':
         return reply(
-          `The user is editing this action before approving it. Tell them it is pending.${taskReference}`,
+          `${taskReference}The user is editing this action before approving it. Tell them it is pending.`,
           'pending'
         )
       case 'poisoned':
-        return reply(`Error: ${outcome.error}${taskReference}`, 'failed')
+        return reply(`${taskReference}Error: ${outcome.error}`, 'failed')
     }
   }
 }
