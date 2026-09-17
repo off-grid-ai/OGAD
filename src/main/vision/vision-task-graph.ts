@@ -66,6 +66,7 @@ interface CapturedStep {
 const MAX_CONSECUTIVE_RETHINKS = 3
 const VISUAL_FINGERPRINT_SIZE = 48
 const VISUAL_NOOP_MEAN_DELTA = 0.002
+const VISUAL_CONFIRMED_MEAN_DELTA = 0.01
 
 interface ScreenEvidence {
   visual?: Buffer
@@ -109,7 +110,9 @@ function actionEffect(before: ScreenEvidence, after: ScreenEvidence): VisionActi
   for (let index = 0; index < before.visual.length; index += 1) {
     delta += Math.abs(before.visual[index]! - after.visual[index]!)
   }
-  const visuallyUnchanged = delta / (before.visual.length * 255) <= VISUAL_NOOP_MEAN_DELTA
+  const meanDelta = delta / (before.visual.length * 255)
+  if (meanDelta >= VISUAL_CONFIRMED_MEAN_DELTA) return 'confirmed'
+  const visuallyUnchanged = meanDelta <= VISUAL_NOOP_MEAN_DELTA
   return visuallyUnchanged && semanticComparable ? 'suspected_noop' : 'unverifiable'
 }
 
@@ -424,9 +427,17 @@ class VisionTaskGraphRuntime {
       return { route: 'handle_decision' }
     }
     this.beginReasoning()
+    const modelLease = this.deps.guard.currentActionLease()
+    const modelSignal = this.deps.signal
+      ? AbortSignal.any([this.deps.signal, modelLease.signal])
+      : modelLease.signal
     try {
       const decisionStartedAt = this.now()
-      const grounding = await this.deps.decide(this.groundingInput(captured))
+      const grounding = await this.deps.decide(this.groundingInput(captured, modelSignal))
+      if (!this.deps.guard.ownsActionLease(modelLease.epoch)) {
+        this.discardPendingPolicyHistory()
+        return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
+      }
       captured.decisionMs = this.now() - decisionStartedAt
       this.actionResponse = grounding.response
       this.actionModelInput = grounding.modelInput
@@ -443,6 +454,10 @@ class VisionTaskGraphRuntime {
       if (this.deps.signal?.aborted) {
         this.stopAfterAbort()
         return { route: 'handle_decision' }
+      }
+      if (modelLease.signal.aborted) {
+        this.discardPendingPolicyHistory()
+        return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
       }
       const message = errorMessage(error, 'visual decision failed')
       this.observe({
@@ -785,7 +800,7 @@ class VisionTaskGraphRuntime {
     return { route: 'gate' }
   }
 
-  private groundingInput(captured: CapturedStep): VisionGroundingInput {
+  private groundingInput(captured: CapturedStep, signal: AbortSignal): VisionGroundingInput {
     return {
       goal: this.taskBrief.objective,
       image: captured.shot.image,
@@ -800,7 +815,7 @@ class VisionTaskGraphRuntime {
       semanticElements: captured.shot.metadata?.semanticElements,
       previousVerifiedAction: this.previousVerifiedAction,
       coordinateFrame: coordinateFrame(captured.shot),
-      signal: this.deps.signal,
+      signal,
       reportProgress: (action) => this.progress('thinking', action),
       reportReasoning: (text) => this.appendReasoning(text)
     }
