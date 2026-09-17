@@ -489,6 +489,7 @@ const offGridApi = {
     ipcRenderer.invoke('models:set-active-modal', kind, modelId),
   getActiveModalities: () => ipcRenderer.invoke('models:active-modalities'),
   getComputerUseActiveModels: () => ipcRenderer.invoke('models:computer-use-active'),
+  getWebUseActiveModels: () => ipcRenderer.invoke('models:web-use-active'),
   onModelProgress: (
     callback: (data: {
       modelId: string

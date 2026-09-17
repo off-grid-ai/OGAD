@@ -1695,6 +1695,9 @@ export function setupIPC() {
       m.getComputerUseActiveModelProjection()
     )
   )
+  ipcMain.handle('models:web-use-active', () =>
+    import('./vision/vision-task-model-strategy').then((m) => m.getWebUseActiveModelProjection())
+  )
 
   // Storage + download manager
   ipcMain.handle('models:storage', () => import('./models-manager').then((m) => m.getStorageInfo()))

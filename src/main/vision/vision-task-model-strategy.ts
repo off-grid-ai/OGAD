@@ -1,5 +1,6 @@
 import { llm } from '../llm'
 import { getComputerUseSettings } from '../computer-use-settings'
+import { getWebUseSettings } from '../web-use-settings'
 import { getActiveModel, resolveModelIdentity, type ModelIdentity } from '../models-manager'
 import type {
   ComputerUseActiveModel,
@@ -109,6 +110,14 @@ export async function getComputerUseActiveModelProjection(
   }
   models.push(await projectedModel('grounding_specialist', specialistModelId, false, dependencies))
   return { strategy, strategyLabel: 'Reasoning + Specialist', models }
+}
+
+/** Web Use has its own strategy settings but shares the installed model runtimes. */
+export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModelProjection> {
+  return getComputerUseActiveModelProjection({
+    ...productionDependencies,
+    strategy: () => getWebUseSettings().modelStrategy
+  })
 }
 
 function activeChatSelection(

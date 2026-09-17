@@ -18,5 +18,8 @@ export function normalizeWebUseSettings(value: unknown): WebUseSettings {
     ...DEFAULT_WEB_USE_SETTINGS,
     ...(typeof value === 'object' && value !== null ? value : {})
   })
-  return normalized
+  // Playwright is the Web Use specialist. The selected reasoning model handles
+  // semantic decisions and the rare screenshot fallback; a second visual model
+  // adds load without adding another control capability.
+  return { ...normalized, modelStrategy: 'same_as_chat' }
 }

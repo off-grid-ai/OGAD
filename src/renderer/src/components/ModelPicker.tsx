@@ -68,6 +68,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [busy, setBusy] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [computerUse, setComputerUse] = useState<ComputerUseActiveModelProjection | null>(null)
+  const [webUse, setWebUse] = useState<ComputerUseActiveModelProjection | null>(null)
 
   const load = useCallback(async () => {
     const cat = await api().getModelCatalog?.()
@@ -78,6 +79,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     const modal = (await api().getActiveModalities?.()) ?? {}
     const nextActiveIds = new Set<string>((await api().getActiveModelIds?.()) ?? [])
     const computerUseProjection = await api().getComputerUseActiveModels?.()
+    const webUseProjection = await api().getWebUseActiveModels?.()
     const remoteTextActive = catalogModels.some(
       (model) => model.remoteServerId && nextActiveIds.has(model.id)
     )
@@ -90,6 +92,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       computer_use: modal.computer_use ?? null
     })
     setComputerUse(computerUseProjection ?? null)
+    setWebUse(webUseProjection ?? null)
   }, [])
   useEffect(() => {
     void load()
@@ -116,6 +119,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         if (result?.success !== false) {
           setActive((current) => ({ ...current, text: m.remoteServerId ? null : m.id }))
           setActiveIds(new Set((await api().getActiveModelIds?.()) ?? []))
+          await load()
         }
       } else {
         const fname = primaryFile(m)
@@ -255,6 +259,42 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
             <p className="px-2 py-1.5 text-xs text-neutral-600">
               No Computer Use model is selected.
             </p>
+          )}
+        </section>
+        <section aria-label="Web Use">
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            <span className="text-[10px] uppercase tracking-wide text-neutral-600">Web Use</span>
+            {webUse ? (
+              <span className="text-[10px] text-neutral-500">{webUse.strategyLabel}</span>
+            ) : null}
+          </div>
+          {webUse?.models.length ? (
+            <div className="space-y-1">
+              {webUse.models.map((model) => (
+                <div
+                  key={model.role}
+                  className="flex items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
+                      {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
+                    </span>
+                    <span className="block truncate text-neutral-200">{model.modelName}</span>
+                  </span>
+                  {model.remote ? (
+                    <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
+                      Remote
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-[9px] uppercase tracking-wide text-neutral-600">
+                      On device
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="px-2 py-1.5 text-xs text-neutral-600">No Web Use model is selected.</p>
           )}
         </section>
         {MODALITIES.map(({ label, kinds, mode }) => {
