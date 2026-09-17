@@ -31,12 +31,12 @@ describe('<ExploreScreen/>', () => {
     const user = userEvent.setup()
     render(<ExploreScreen onRunPreset={onRunPreset} />)
 
-    await user.click(screen.getByTestId('explore-preset-find-flight'))
+    await user.click(screen.getByTestId('explore-preset-train-my-feed'))
 
     expect(onRunPreset).toHaveBeenCalledTimes(1)
     expect(onRunPreset.mock.calls[0]?.[0]).toMatchObject({
-      id: 'find-flight',
-      prompt: expect.stringContaining('flight')
+      id: 'train-my-feed',
+      prompt: expect.stringContaining('Train the selected social feed')
     })
   })
 })

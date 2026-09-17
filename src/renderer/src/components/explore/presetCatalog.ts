@@ -11,13 +11,14 @@ import {
   PaperPlaneTilt,
   SpotifyLogo,
   Tag,
+  YoutubeLogo,
   type Icon
 } from '@phosphor-icons/react'
 
 export type PresetCapability = 'browser' | 'computer-use' | 'memory' | 'phone'
 export type DemoReadiness = 'robust' | 'needs-setup' | 'needs-data'
 export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history'
-export type PresetFieldKind = 'text' | 'textarea' | 'select' | 'folder'
+export type PresetFieldKind = 'text' | 'textarea' | 'select' | 'checkboxes' | 'folder'
 
 export interface PresetFieldOption {
   value: string
@@ -169,7 +170,7 @@ ${EXECUTION_RULES}`,
         prompt: `Use Web Use to find nearby places that match the approved brief below.
 
 Required method:
-1. Search a current maps or local-results service from the stated starting point.
+1. Resolve the stated starting point. If it says to use the current location, call get_current_location and pass its coordinates into the Web Use task. Then search a current maps or local-results service from that point.
 2. Apply the category, time, travel radius, party needs, price range, and dietary or access constraints.
 3. Confirm each shortlisted place is open for the requested time. Do not rely on the search card alone when hours are ambiguous.
 4. Compare rating, review count, recent review themes, distance, travel time, price level, and reservation or walk-in notes.
@@ -189,6 +190,7 @@ ${EXECUTION_RULES}`,
               help: 'Address, neighborhood, or landmark.',
               kind: 'text',
               required: true,
+              defaultValue: 'Use my current location',
               placeholder: 'Union Square, San Francisco'
             },
             {
@@ -295,6 +297,120 @@ ${EXECUTION_RULES}`,
               id: 'constraints',
               label: 'Other buying constraints',
               help: 'Delivery deadline, warranty, returns, quantity, or maximum total.',
+              kind: 'textarea'
+            }
+          ]
+        }
+      },
+      {
+        id: 'train-my-feed',
+        icon: YoutubeLogo,
+        title: 'Train My Feed',
+        prompt: `Train the selected social feed around the approved learning goal below. Use the user's default browser and Computer Use.
+
+Required method:
+1. Read "Actions you allow" as a strict allowlist for this run. An unchecked action is forbidden. Include that allowlist, the session limit, and the follow limit in the Computer Use goal so the approval shows the complete boundary.
+2. Map the selected platform to its official home URL: X = https://x.com/home, LinkedIn = https://www.linkedin.com/feed/, Instagram = https://www.instagram.com/, TikTok = https://www.tiktok.com/, YouTube = https://www.youtube.com/. Call open_url with that URL. The operating system will open it in the user's default browser. Do not choose or install a different browser.
+3. Confirm the visible default browser, selected platform, and signed-in account. If sign-in, CAPTCHA, two-factor authentication, or account recovery is required, stop and ask the user to take over. Never request or handle a password or one-time code.
+4. Call computer_use once with the complete approved brief. Before changing the feed, record a short baseline of its visible topics, creators, and repeated recommendation patterns.
+5. Build a small topic map from the learning goal and related concepts. Search from broad concepts toward specific questions. When search is not allowed, work only from the visible feed and direct navigation already available on the platform.
+6. Judge creators and content before interacting. Prefer first-hand expertise, specific evidence, source links, corrections, and a consistent body of work. Reject engagement bait, copied summaries, unsupported claims, synthetic spam, and creators whose incentives conflict with the learning goal.
+7. Open enough of each candidate item to judge its substance. When watching or reading is allowed, consume a meaningful portion instead of opening and immediately leaving. Keep a short evidence-based reason for every positive or negative signal.
+8. Perform only checked actions. Follow or subscribe only to high-signal creators and never exceed the follow limit. Like only content that directly advances the learning goal. Bookmark posts and save videos only when the platform offers the matching checked action. Use Not interested only for clearly irrelevant recommendations, never for uncertain or adjacent material.
+9. Verify each interaction from the visible UI before counting it. Do not repeat an action that already succeeded. Do not comment, post, repost, share, send messages, join groups, buy anything, start a paid subscription, change account settings, or edit the profile, even if the site suggests it.
+10. Work only for the selected session length, then stop. Never continue unattended or run beyond 60 minutes. Revisit the home feed near the end and compare it with the baseline.
+11. Return a digest with: useful items and why they matter; credible creators and why they passed; searches run; account actions taken; irrelevant material dismissed; observable feed changes; weak sources rejected; and focused topics for the next bounded session. State clearly when the feed did not change enough to verify.
+
+${EXECUTION_RULES}`,
+        blurb: 'Uses your default browser and only the feed actions you approve.',
+        readiness: 'needs-setup',
+        intake: {
+          title: 'Set the learning goal',
+          description:
+            'Choose a platform, topic, and allowed actions. Off Grid AI opens it in your default browser and stops when the session ends.',
+          fields: [
+            {
+              id: 'site',
+              label: 'Social platform',
+              help: 'The site to open in your default browser.',
+              kind: 'select',
+              required: true,
+              options: [
+                { value: 'X', label: 'X' },
+                { value: 'LinkedIn', label: 'LinkedIn' },
+                { value: 'Instagram', label: 'Instagram' },
+                { value: 'TikTok', label: 'TikTok' },
+                { value: 'YouTube', label: 'YouTube' }
+              ]
+            },
+            {
+              id: 'topic',
+              label: 'Learning goal',
+              help: 'What should your feed teach you?',
+              kind: 'textarea',
+              required: true,
+              placeholder: 'Local AI models'
+            },
+            {
+              id: 'allowedActions',
+              label: 'Actions you allow',
+              help: 'Checked actions are allowed for this session. Everything else stays blocked.',
+              kind: 'checkboxes',
+              required: true,
+              defaultValue: 'Search for topics; Watch or read relevant content',
+              options: [
+                { value: 'Search for topics', label: 'Search for topics' },
+                {
+                  value: 'Watch or read relevant content',
+                  label: 'Watch or read relevant content'
+                },
+                { value: 'Follow or subscribe to creators', label: 'Follow or subscribe' },
+                { value: 'Like useful content', label: 'Like useful content' },
+                { value: 'Bookmark useful posts', label: 'Bookmark useful posts' },
+                { value: 'Save videos for later', label: 'Save videos for later' },
+                {
+                  value: 'Mark irrelevant recommendations Not interested',
+                  label: 'Mark irrelevant items Not interested'
+                }
+              ]
+            },
+            {
+              id: 'sessionLength',
+              label: 'Session length',
+              help: 'The run stops at this limit.',
+              kind: 'select',
+              required: true,
+              defaultValue: '30 minutes',
+              options: [
+                { value: '30 minutes', label: '30 minutes' },
+                { value: '45 minutes', label: '45 minutes' },
+                { value: '60 minutes', label: '60 minutes' }
+              ]
+            },
+            {
+              id: 'followLimit',
+              label: 'Creator follow limit',
+              help: 'Maximum creators to follow after approval.',
+              kind: 'select',
+              required: true,
+              defaultValue: 'Up to 3 creators',
+              options: [
+                { value: 'Do not follow creators', label: 'Do not follow' },
+                { value: 'Up to 3 creators', label: 'Up to 3' },
+                { value: 'Up to 5 creators', label: 'Up to 5' }
+              ]
+            },
+            {
+              id: 'relatedTopics',
+              label: 'Related concepts',
+              help: 'Adjacent subjects that belong in the learning plan.',
+              kind: 'textarea',
+              placeholder: 'Quantization, inference, model serving, and hardware'
+            },
+            {
+              id: 'avoid',
+              label: 'Avoid',
+              help: 'Topics, creators, formats, or sources to exclude.',
               kind: 'textarea'
             }
           ]
@@ -723,7 +839,7 @@ ${EXECUTION_RULES}`,
   }
 ] as const
 
-const ASSISTANT_EXAMPLE_IDS = new Set(['best-nearby', 'price-compare', 'play-music'])
+const ASSISTANT_EXAMPLE_IDS = new Set(['best-nearby', 'price-compare', 'train-my-feed'])
 
 export const PRESET_SECTIONS: readonly PresetSection[] = PRESET_CATALOG.map((section) => ({
   ...section,

@@ -120,6 +120,7 @@ export class ChatBoundary {
     thinking: boolean
     turn: ReturnType<typeof deferred<RagResult>>
   }[] = []
+  readonly toolQueries: { query: string; options: Record<string, unknown> }[] = []
 
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
   readonly activeRagStreams: ActiveChatStreamContract[] = []
@@ -277,6 +278,12 @@ export class ChatBoundary {
         })
         return turn.promise
       }
+    ),
+    toolChat: vi.fn(
+      async (_query: string, _history: unknown[], options: Record<string, unknown>) => {
+        this.toolQueries.push({ query: _query, options })
+        return { answer: 'Started the requested run.', unified: [], toolCalls: [] }
+      }
     )
   }
 
@@ -388,6 +395,7 @@ export function renderChat(target: {
   conversationId?: string
   projectId?: string
   draftPrompt?: string
+  presetId?: string
 }): ReturnType<typeof render> {
   return render(
     <TooltipProvider>

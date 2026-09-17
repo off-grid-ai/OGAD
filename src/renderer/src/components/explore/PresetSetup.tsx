@@ -27,6 +27,7 @@ const inputClass =
 
 function IntakeField({ field, value, onChange }: IntakeFieldProps): React.ReactElement {
   const controlId = `preset-field-${field.id}`
+  const labelId = `${controlId}-label`
   const helpId = `${controlId}-help`
   const chooseFolder = async (): Promise<void> => {
     const selected = await window.api.pickLocalFolder({
@@ -70,6 +71,43 @@ function IntakeField({ field, value, onChange }: IntakeFieldProps): React.ReactE
         </select>
       )
     }
+    if (field.kind === 'checkboxes') {
+      const selected = new Set(
+        value
+          .split(';')
+          .map((item) => item.trim())
+          .filter(Boolean)
+      )
+      return (
+        <div
+          id={controlId}
+          role="group"
+          aria-labelledby={labelId}
+          aria-describedby={helpId}
+          className="mt-1 grid gap-2 rounded-md border border-border bg-background p-3 @2xl:grid-cols-2"
+        >
+          {field.options?.map((option) => (
+            <label
+              key={option.value}
+              className="flex items-start gap-2 text-[11px] text-foreground"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(option.value)}
+                onChange={(event) => {
+                  const next = new Set(selected)
+                  if (event.target.checked) next.add(option.value)
+                  else next.delete(option.value)
+                  onChange([...next].join('; '))
+                }}
+                className="mt-0.5 accent-primary"
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+      )
+    }
     if (field.kind === 'folder') {
       return (
         <div className="mt-1 flex gap-2">
@@ -110,14 +148,24 @@ function IntakeField({ field, value, onChange }: IntakeFieldProps): React.ReactE
   })()
 
   return (
-    <div className={field.kind === 'textarea' ? '@3xl:col-span-2' : ''}>
-      <label
-        htmlFor={controlId}
-        className="text-[10px] uppercase tracking-wide text-muted-foreground"
-      >
-        {field.label}
-        {field.required ? ' *' : ''}
-      </label>
+    <div
+      className={field.kind === 'textarea' || field.kind === 'checkboxes' ? '@3xl:col-span-2' : ''}
+    >
+      {field.kind === 'checkboxes' ? (
+        <p id={labelId} className="text-[10px] uppercase tracking-wide text-muted-foreground">
+          {field.label}
+          {field.required ? ' *' : ''}
+        </p>
+      ) : (
+        <label
+          id={labelId}
+          htmlFor={controlId}
+          className="text-[10px] uppercase tracking-wide text-muted-foreground"
+        >
+          {field.label}
+          {field.required ? ' *' : ''}
+        </label>
+      )}
       {control}
       <p id={helpId} className="mt-1 text-[10px] leading-4 text-muted-foreground">
         {field.help}

@@ -6583,7 +6583,7 @@ export function MemoryChat({
                           onOpenConnectors={onOpenConnectors}
                           onSubmit={(prompt) => {
                             setPresetSetup(null)
-                            void sendMessage(prompt, { asUserInput: true })
+                            void sendMessage(prompt, { asUserInput: true, assistantEnabled: true })
                           }}
                         />
                       ) : (
