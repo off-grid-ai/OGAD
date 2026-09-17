@@ -360,6 +360,10 @@ export async function streamRemoteChatCompletion(input: {
 
   const watchdog = createIdleWatchdog(options.timeoutMs, options.signal)
   try {
+    writeDiagnosticLog('remote_chat', 'request.started', {
+      provider: remote.provider,
+      model: remote.model
+    })
     const reasoning =
       request.thinking === undefined
         ? { control: 'none' as const }
@@ -380,7 +384,12 @@ export async function streamRemoteChatCompletion(input: {
     }
     if (!response.body) throw new Error('Remote text model returned an empty response stream.')
     await drainCompletionStream(response.body, accumulator, watchdog.arm)
-    return accumulator.finish()
+    const result = accumulator.finish()
+    writeDiagnosticLog('remote_chat', 'request.completed', {
+      provider: remote.provider,
+      model: remote.model
+    })
+    return result
   } catch (error) {
     // A cancelled request keeps whatever streamed — the caller asked to stop, not to discard.
     if (options.signal?.aborted) return accumulator.finish()
