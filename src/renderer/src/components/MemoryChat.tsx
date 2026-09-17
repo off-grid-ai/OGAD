@@ -7469,7 +7469,7 @@ export function MemoryChat({
                                 aria-pressed={toolsOn}
                                 onClick={() => {
                                   if (!isPro) {
-                                    onOpenAssistantUpgrade?.()
+                                    setAssistantGateOpen(true)
                                     return
                                   }
                                   setToolsOn((current) => !current)
