@@ -70,7 +70,7 @@ const EXECUTION_RULES = `Execution rules:
 - Keep read-only research read-only. Before any external write, send, purchase, booking, destructive edit, or account change, stop at the normal approval gate.
 - Report the concrete result, the important evidence, and any limitation. Do not claim completion without observing it.`
 
-export const PRESET_SECTIONS: readonly PresetSection[] = [
+const PRESET_CATALOG: readonly PresetSection[] = [
   {
     id: 'browser',
     capability: 'browser',
@@ -722,6 +722,13 @@ ${EXECUTION_RULES}`,
     ]
   }
 ] as const
+
+const ASSISTANT_EXAMPLE_IDS = new Set(['best-nearby', 'price-compare', 'play-music'])
+
+export const PRESET_SECTIONS: readonly PresetSection[] = PRESET_CATALOG.map((section) => ({
+  ...section,
+  presets: section.presets.filter((preset) => ASSISTANT_EXAMPLE_IDS.has(preset.id))
+})).filter((section) => section.presets.length > 0)
 
 export const ALL_PRESETS: readonly DemoPreset[] = PRESET_SECTIONS.flatMap(
   (section) => section.presets

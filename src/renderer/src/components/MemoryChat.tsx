@@ -7295,7 +7295,7 @@ export function MemoryChat({
                                   setToolsOn((t) => !t)
                                 }}
                               >
-                                <Wrench /> <span className="flex-1">Tools</span>
+                                <Wrench /> <span className="flex-1">Assistant</span>
                                 <span
                                   className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}
                                 >
@@ -7445,6 +7445,25 @@ export function MemoryChat({
                               </TooltipContent>
                             </Tooltip>
                           )}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                aria-pressed={toolsOn}
+                                onClick={() => setToolsOn((current) => !current)}
+                                className={`h-8 gap-1.5 rounded-md ${toolsOn ? 'border-primary text-primary' : 'text-muted-foreground'}`}
+                              >
+                                <Wrench className="h-3.5 w-3.5" /> Assistant
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {toolsOn
+                                ? 'Assistant on - can use Web Use or Computer Use'
+                                : 'Assistant off - answers without controlling websites or apps'}
+                            </TooltipContent>
+                          </Tooltip>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
