@@ -55,10 +55,23 @@ export class ElectronPlaywrightAttachments {
     const debuggerApi = page.contents.debugger
     const ownsDebugger = !debuggerApi.isAttached()
     if (ownsDebugger) debuggerApi.attach('1.3')
+    let actualTargetId: string
+    try {
+      const target = (await debuggerApi.sendCommand('Target.getTargetInfo')) as {
+        targetInfo?: { targetId?: unknown }
+      }
+      if (typeof target.targetInfo?.targetId !== 'string' || !target.targetInfo.targetId) {
+        throw new Error('Electron debugger did not return a page target ID.')
+      }
+      actualTargetId = target.targetInfo.targetId
+    } catch (error) {
+      if (ownsDebugger && debuggerApi.isAttached()) debuggerApi.detach()
+      throw error
+    }
     const attached: AttachedPage & { release: () => void } = {
       ...page,
       sessionId: `offgrid-page-${page.id}`,
-      targetId: targetId(page.id),
+      targetId: actualTargetId,
       childSessions: new Set(),
       release: () => undefined
     }
@@ -68,7 +81,9 @@ export class ElectronPlaywrightAttachments {
       if (method === 'Target.attachedToTarget' && nestedId) attached.childSessions.add(nestedId)
       if (method === 'Target.detachedFromTarget' && nestedId)
         attached.childSessions.delete(nestedId)
-      void this.publish({ sessionId: childSessionId ?? attached.sessionId, method, params }).catch(
+      // Electron reports events from the attached WebContents with an empty
+      // child session. Playwright needs those events on the synthetic page session.
+      void this.publish({ sessionId: childSessionId || attached.sessionId, method, params }).catch(
         this.onFailure
       )
     }
@@ -124,7 +139,7 @@ export class ElectronPlaywrightAttachments {
   }
 
   forTarget(id: string): RelayPage | undefined {
-    return this.pages().find((page) => targetId(page.id) === id)
+    return this.pages().find((page) => this.targetId(page.id) === id)
   }
 
   forSession(id: string): AttachedPage | undefined {
@@ -138,17 +153,18 @@ export class ElectronPlaywrightAttachments {
   }
 
   targetId(id: number): string {
-    return targetId(id)
+    return this.attached.get(id)?.targetId ?? targetId(id)
   }
 
   info(page: RelayPage): Record<string, unknown> {
+    const attached = this.attached.get(page.id)
     return {
-      targetId: targetId(page.id),
+      targetId: attached?.targetId ?? targetId(page.id),
       type: 'page',
       title: page.contents.getTitle(),
       url: page.contents.getURL() || 'about:blank',
       browserContextId: JOURNEY_BROWSER_CONTEXT_ID,
-      attached: this.attached.has(page.id),
+      attached: Boolean(attached),
       canAccessOpener: false
     }
   }
