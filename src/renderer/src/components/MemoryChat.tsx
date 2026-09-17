@@ -5340,21 +5340,23 @@ export function MemoryChat({
     ): Promise<void> => {
       const convId = cid ?? activeConversationId
       if (!convId) return
+      cancelledRef.current.add(convId)
       if (task?.journeyId === convId) {
         try {
           const stopped = await stopLiveTask(task)
           if (!stopped) {
+            cancelledRef.current.delete(convId)
             setAttachWarn(stopFailureMessage(task.kind))
             return
           }
         } catch (error) {
+          cancelledRef.current.delete(convId)
           console.error(`Failed to stop ${task.kind} task ${task.taskId}:`, error)
           setAttachWarn(stopFailureMessage(task.kind))
           return
         }
       }
       setAttachWarn(null)
-      cancelledRef.current.add(convId)
       const streamingId = (messagesByConv[convId] ?? []).find((m) => m.streaming)?.id
       if (streamingId) {
         window.api.cancelRag(streamingId)
