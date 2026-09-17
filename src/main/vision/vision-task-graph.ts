@@ -64,9 +64,13 @@ interface CapturedStep {
 }
 
 const MAX_CONSECUTIVE_RETHINKS = 3
-const VISUAL_FINGERPRINT_SIZE = 48
+const VISUAL_FINGERPRINT_SIZE = 128
 const VISUAL_NOOP_MEAN_DELTA = 0.002
 const VISUAL_CONFIRMED_MEAN_DELTA = 0.01
+const VISUAL_TILE_SIZE = 8
+const VISUAL_LOCAL_CONFIRMED_MEAN_DELTA = 0.05
+const VISUAL_LOCAL_STRONG_PIXEL_DELTA = 32
+const VISUAL_LOCAL_STRONG_PIXEL_COUNT = 6
 
 interface ScreenEvidence {
   visual?: Buffer
@@ -100,20 +104,126 @@ async function screenEvidence(
   return { visual, semantic }
 }
 
-function actionEffect(before: ScreenEvidence, after: ScreenEvidence): VisionActionEffect {
+interface ActionEffectMeasurement {
+  effect: VisionActionEffect
+  semanticComparable: boolean
+  semanticChanged: boolean
+  visualComparable: boolean
+  globalMeanDelta?: number
+  localMeanDelta?: number
+  localStrongPixels?: number
+}
+
+function actionEffect(
+  before: ScreenEvidence,
+  after: ScreenEvidence,
+  previousAction?: {
+    action: VisionAction
+    coordinateFrame: ReturnType<typeof coordinateFrame>
+  }
+): ActionEffectMeasurement {
   const semanticComparable = before.semantic !== undefined && after.semantic !== undefined
-  if (semanticComparable && before.semantic !== after.semantic) return 'confirmed'
+  const semanticChanged = semanticComparable && before.semantic !== after.semantic
+  if (semanticChanged) {
+    return { effect: 'confirmed', semanticComparable, semanticChanged, visualComparable: false }
+  }
   if (!before.visual || !after.visual || before.visual.length !== after.visual.length) {
-    return 'unverifiable'
+    return {
+      effect: 'unverifiable',
+      semanticComparable,
+      semanticChanged,
+      visualComparable: false
+    }
   }
   let delta = 0
   for (let index = 0; index < before.visual.length; index += 1) {
     delta += Math.abs(before.visual[index]! - after.visual[index]!)
   }
   const meanDelta = delta / (before.visual.length * 255)
-  if (meanDelta >= VISUAL_CONFIRMED_MEAN_DELTA) return 'confirmed'
+  const local = localVisualChange(before.visual, after.visual, previousAction)
+  const visualConfirmed =
+    meanDelta >= VISUAL_CONFIRMED_MEAN_DELTA ||
+    (local !== undefined &&
+      local.meanDelta >= VISUAL_LOCAL_CONFIRMED_MEAN_DELTA &&
+      local.strongPixels >= VISUAL_LOCAL_STRONG_PIXEL_COUNT)
   const visuallyUnchanged = meanDelta <= VISUAL_NOOP_MEAN_DELTA
-  return visuallyUnchanged && semanticComparable ? 'suspected_noop' : 'unverifiable'
+  return {
+    effect: visualConfirmed
+      ? 'confirmed'
+      : visuallyUnchanged && semanticComparable
+        ? 'suspected_noop'
+        : 'unverifiable',
+    semanticComparable,
+    semanticChanged,
+    visualComparable: true,
+    globalMeanDelta: meanDelta,
+    ...(local
+      ? { localMeanDelta: local.meanDelta, localStrongPixels: local.strongPixels }
+      : {})
+  }
+}
+
+function localVisualChange(
+  before: Buffer,
+  after: Buffer,
+  previousAction:
+    | { action: VisionAction; coordinateFrame: ReturnType<typeof coordinateFrame> }
+    | undefined
+): { meanDelta: number; strongPixels: number } | undefined {
+  const point = verificationPoint(previousAction?.action)
+  const bounds = previousAction?.coordinateFrame.encoded
+  if (!point || !bounds || bounds.width <= 0 || bounds.height <= 0) return undefined
+  const pixelX = Math.min(
+    VISUAL_FINGERPRINT_SIZE - 1,
+    Math.max(0, Math.floor((point.x * VISUAL_FINGERPRINT_SIZE) / bounds.width))
+  )
+  const pixelY = Math.min(
+    VISUAL_FINGERPRINT_SIZE - 1,
+    Math.max(0, Math.floor((point.y * VISUAL_FINGERPRINT_SIZE) / bounds.height))
+  )
+  const tileX = Math.floor(pixelX / VISUAL_TILE_SIZE)
+  const tileY = Math.floor(pixelY / VISUAL_TILE_SIZE)
+  let strongest = { meanDelta: 0, strongPixels: 0 }
+  for (let yOffset = -1; yOffset <= 1; yOffset += 1) {
+    for (let xOffset = -1; xOffset <= 1; xOffset += 1) {
+      const xStart = (tileX + xOffset) * VISUAL_TILE_SIZE
+      const yStart = (tileY + yOffset) * VISUAL_TILE_SIZE
+      if (
+        xStart < 0 ||
+        yStart < 0 ||
+        xStart >= VISUAL_FINGERPRINT_SIZE ||
+        yStart >= VISUAL_FINGERPRINT_SIZE
+      ) {
+        continue
+      }
+      let delta = 0
+      let strongPixels = 0
+      for (let y = yStart; y < yStart + VISUAL_TILE_SIZE; y += 1) {
+        for (let x = xStart; x < xStart + VISUAL_TILE_SIZE; x += 1) {
+          const index = y * VISUAL_FINGERPRINT_SIZE + x
+          const pixelDelta = Math.abs(before[index]! - after[index]!)
+          delta += pixelDelta
+          if (pixelDelta >= VISUAL_LOCAL_STRONG_PIXEL_DELTA) strongPixels += 1
+        }
+      }
+      const meanDelta = delta / (VISUAL_TILE_SIZE * VISUAL_TILE_SIZE * 255)
+      if (meanDelta > strongest.meanDelta) strongest = { meanDelta, strongPixels }
+    }
+  }
+  return strongest
+}
+
+function verificationPoint(action: VisionAction | undefined): { x: number; y: number } | undefined {
+  switch (action?.type) {
+    case 'click':
+    case 'double_click':
+    case 'right_click':
+    case 'middle_click':
+    case 'triple_click':
+      return action.point
+    default:
+      return undefined
+  }
 }
 
 /**
@@ -359,9 +469,18 @@ class VisionTaskGraphRuntime {
       const shot = await this.deps.screen.capture()
       const evidence = await screenEvidence(shot)
       if (this.pendingActionEvidence) {
-        this.previousActionEffect = actionEffect(this.pendingActionEvidence, evidence)
+        const measurement = actionEffect(
+          this.pendingActionEvidence,
+          evidence,
+          this.previousVerifiedAction
+        )
+        this.previousActionEffect = measurement.effect
         this.previousExpectedEffect = this.pendingExpectedEffect
         this.note(`action effect: ${this.previousActionEffect}`)
+        console.log('[vision][verification] action effect', {
+          action: this.previousVerifiedAction?.action.type,
+          ...measurement
+        })
         this.pendingActionEvidence = undefined
         this.pendingExpectedEffect = undefined
         if (this.previousActionEffect === 'suspected_noop') {
