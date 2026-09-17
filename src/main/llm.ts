@@ -29,8 +29,9 @@ import { buildMessages, thinkingPayload, type ChatMessage } from './llm/chat-pay
 import { readImages } from './llm/read-images'
 import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dialect'
 import { isValidGgufFile } from './models/gguf'
-import { isGrounderModel } from '@offgrid/models'
-import { readGgufContextLength } from './models/gguf-metadata'
+import { CATALOG, isGrounderModel } from '@offgrid/models'
+import { readGgufContextLength, readGgufMtpSupport } from './models/gguf-metadata'
+import { dflashFileName, primaryFileName, type CatalogEntry } from './models/catalog-logic'
 import { pickFreePort, isPortFree } from './free-port'
 import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
@@ -75,6 +76,9 @@ export interface LlmSettings {
   batchSize?: number // -b: prompt batch size
   speculativeDecoding?: SpeculativeDecodingMode
   draftModel?: string // filename of an installed GGUF in the app's model directory
+  supportsMtp?: boolean // read-only capability of the selected GGUF
+  compatibleDraftModels?: string[] // read-only filenames with the same tokenizer/vocabulary
+  compatibleDflashModels?: string[] // read-only compatible DFlash companions
 }
 
 export interface LlmSettingsUpdateOptions {
@@ -245,6 +249,14 @@ export class LLMService {
     } catch {
       /* defaults */
     }
+    if (!this.speculativeModeSupported(this.speculativeDecoding, this.draftModel)) {
+      this.speculativeDecoding = 'off'
+      try {
+        this.persist()
+      } catch (error) {
+        console.error('[LLMService] could not save the corrected speculative setting:', error)
+      }
+    }
   }
 
   /** Subscribe to process-lifecycle invalidations. This does not define health
@@ -282,6 +294,40 @@ export class LLMService {
     return this.trainedContext()
   }
 
+  private supportsMtp(): boolean {
+    return !!this.modelPath && readGgufMtpSupport(this.modelPath, fs)
+  }
+
+  private speculativeModelCapabilities(): {
+    compatibleDraftModels: string[]
+    compatibleDflashModels: string[]
+  } {
+    const selectedFile = path.basename(this.modelPath)
+    const selectedEntry = (CATALOG as unknown as CatalogEntry[]).find(
+      (entry) => primaryFileName(entry) === selectedFile
+    )
+    const dflash = selectedEntry ? dflashFileName(selectedEntry) : undefined
+    const installedDflash = dflash && isValidGgufFile(path.join(getModelsDir(), dflash), fs)
+    return {
+      // No ordinary draft pair is declared by the catalog. Do not guess from an arbitrary
+      // installed GGUF: llama.cpp also requires an exact vocabulary contract.
+      compatibleDraftModels: [],
+      compatibleDflashModels: installedDflash ? [dflash] : []
+    }
+  }
+
+  private speculativeModeSupported(mode: SpeculativeDecodingMode, draftModel: string): boolean {
+    if (mode === 'off' || mode === 'ngram') return true
+    if (mode === 'mtp') return this.supportsMtp()
+    const candidate = path.basename(draftModel)
+    if (!candidate || candidate !== draftModel) return false
+    const capabilities = this.speculativeModelCapabilities()
+    return (mode === 'dflash'
+      ? capabilities.compatibleDflashModels
+      : capabilities.compatibleDraftModels
+    ).includes(candidate)
+  }
+
   /** The port llama-server is actually on. Usually LLAMA_SERVER_PORT, but prepareModelPort moves it
    *  to a free port when another app owns the preferred one — so consumers (the gateway upstream)
    *  must read this LIVE value, never the constant. */
@@ -306,6 +352,7 @@ export class LLMService {
   }
 
   getSettings(): LlmSettings {
+    const speculativeCapabilities = this.speculativeModelCapabilities()
     return {
       temperature: this.temperature,
       ctxSize: this.ctxSize,
@@ -324,6 +371,8 @@ export class LLMService {
       batchSize: this.batchSize,
       speculativeDecoding: this.speculativeDecoding,
       draftModel: this.draftModel,
+      supportsMtp: this.supportsMtp(),
+      ...speculativeCapabilities,
       performanceMode: this.performanceMode,
       // Report the selected context so the UI can show what's used, plus the
       // model's trained maximum so the UI can offer the slider up to it (not a hardcoded cap),
@@ -364,6 +413,7 @@ export class LLMService {
   }
 
   private draftModelPath(): string | undefined {
+    if (!this.speculativeModeSupported(this.speculativeDecoding, this.draftModel)) return undefined
     if (!this.draftModel || path.basename(this.draftModel) !== this.draftModel) return undefined
     const candidate = path.join(getModelsDir(), this.draftModel)
     return candidate !== this.modelPath && isValidGgufFile(candidate, fs) ? candidate : undefined
@@ -415,30 +465,41 @@ export class LLMService {
   /** Update inference settings; respawns the server if any launch-time arg changed
    *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
   async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
+    this.resolveModel()
+    const requestedMode = s.speculativeDecoding ?? this.speculativeDecoding
+    const requestedDraft =
+      typeof s.draftModel === 'string' ? path.basename(s.draftModel) : this.draftModel
+    const compatibleSettings = this.speculativeModeSupported(requestedMode, requestedDraft)
+      ? s
+      : { ...s, speculativeDecoding: 'off' as const }
     const priorSettings = this.getSettings()
     const priorExplicit = new Set(this.userExplicit)
     const before = options.emitSync === false ? undefined : priorSettings
     // Granular launch-time fields the user sets in THIS patch become pinned: a mode
     // preset (now or on a future restart / mode re-pick) must NOT clobber them. Pin
     // BEFORE applying the preset so an explicit q8_0 in the same patch survives.
-    if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
+    if (
+      compatibleSettings.kvCacheType === 'f16' ||
+      compatibleSettings.kvCacheType === 'q8_0' ||
+      compatibleSettings.kvCacheType === 'q4_0'
+    )
       this.userExplicit.add('kvCacheType')
-    if (typeof s.flashAttn === 'boolean') this.userExplicit.add('flashAttn')
-    if (typeof s.ctxSize === 'number') this.userExplicit.add('ctxSize')
+    if (typeof compatibleSettings.flashAttn === 'boolean') this.userExplicit.add('flashAttn')
+    if (typeof compatibleSettings.ctxSize === 'number') this.userExplicit.add('ctxSize')
     // A resource-usage mode change applies its preset by MERGING: it fills only the
     // preset fields the user has NOT pinned, so it can't wipe an explicit KV choice.
     // Always treated as a launch change.
     let modeChanged = false
     if (
-      (s.performanceMode === 'conservative' ||
-        s.performanceMode === 'balanced' ||
-        s.performanceMode === 'extreme') &&
-      s.performanceMode !== this.performanceMode
+      (compatibleSettings.performanceMode === 'conservative' ||
+        compatibleSettings.performanceMode === 'balanced' ||
+        compatibleSettings.performanceMode === 'extreme') &&
+      compatibleSettings.performanceMode !== this.performanceMode
     ) {
-      this.performanceMode = s.performanceMode
+      this.performanceMode = compatibleSettings.performanceMode
       const merged = applyModePreset(
         { ctxSize: this.ctxSize, kvCacheType: this.kvCacheType, flashAttn: this.flashAttn },
-        s.performanceMode,
+        compatibleSettings.performanceMode,
         this.userExplicit
       )
       this.ctxSize = merged.ctxSize
@@ -448,7 +509,7 @@ export class LLMService {
     }
     // Launch-time args: changing any of these requires a server respawn.
     const launchChanged = launchArgsChanged(
-      s,
+      compatibleSettings,
       {
         ctxSize: this.ctxSize,
         kvCacheType: this.kvCacheType,
@@ -461,32 +522,45 @@ export class LLMService {
       },
       modeChanged
     )
-    if (typeof s.temperature === 'number') this.temperature = s.temperature
-    if (typeof s.ctxSize === 'number') this.ctxSize = s.ctxSize
-    if (typeof s.topP === 'number') this.topP = s.topP
-    if (typeof s.topK === 'number') this.topK = s.topK
-    if (typeof s.minP === 'number') this.minP = s.minP
-    if (typeof s.repeatPenalty === 'number') this.repeatPenalty = s.repeatPenalty
-    if (typeof s.maxTokens === 'number') this.maxTokens = s.maxTokens
-    if (typeof s.maxToolCalls === 'number')
-      this.maxToolCalls = normalizeMaxToolCalls(s.maxToolCalls)
-    if (typeof s.reasoningBudget === 'number') this.reasoningBudget = s.reasoningBudget
-    if (typeof s.systemPrompt === 'string') this.systemPrompt = s.systemPrompt
-    if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
-      this.kvCacheType = s.kvCacheType
-    if (typeof s.flashAttn === 'boolean') this.flashAttn = s.flashAttn
-    if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
-    if (typeof s.threads === 'number') this.threads = s.threads
-    if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
+    if (typeof compatibleSettings.temperature === 'number')
+      this.temperature = compatibleSettings.temperature
+    if (typeof compatibleSettings.ctxSize === 'number') this.ctxSize = compatibleSettings.ctxSize
+    if (typeof compatibleSettings.topP === 'number') this.topP = compatibleSettings.topP
+    if (typeof compatibleSettings.topK === 'number') this.topK = compatibleSettings.topK
+    if (typeof compatibleSettings.minP === 'number') this.minP = compatibleSettings.minP
+    if (typeof compatibleSettings.repeatPenalty === 'number')
+      this.repeatPenalty = compatibleSettings.repeatPenalty
+    if (typeof compatibleSettings.maxTokens === 'number')
+      this.maxTokens = compatibleSettings.maxTokens
+    if (typeof compatibleSettings.maxToolCalls === 'number')
+      this.maxToolCalls = normalizeMaxToolCalls(compatibleSettings.maxToolCalls)
+    if (typeof compatibleSettings.reasoningBudget === 'number')
+      this.reasoningBudget = compatibleSettings.reasoningBudget
+    if (typeof compatibleSettings.systemPrompt === 'string')
+      this.systemPrompt = compatibleSettings.systemPrompt
     if (
-      s.speculativeDecoding === 'off' ||
-      s.speculativeDecoding === 'ngram' ||
-      s.speculativeDecoding === 'mtp' ||
-      s.speculativeDecoding === 'draft' ||
-      s.speculativeDecoding === 'dflash'
+      compatibleSettings.kvCacheType === 'f16' ||
+      compatibleSettings.kvCacheType === 'q8_0' ||
+      compatibleSettings.kvCacheType === 'q4_0'
     )
-      this.speculativeDecoding = s.speculativeDecoding
-    if (typeof s.draftModel === 'string') this.draftModel = path.basename(s.draftModel)
+      this.kvCacheType = compatibleSettings.kvCacheType
+    if (typeof compatibleSettings.flashAttn === 'boolean')
+      this.flashAttn = compatibleSettings.flashAttn
+    if (typeof compatibleSettings.gpuLayers === 'number')
+      this.gpuLayers = compatibleSettings.gpuLayers
+    if (typeof compatibleSettings.threads === 'number') this.threads = compatibleSettings.threads
+    if (typeof compatibleSettings.batchSize === 'number')
+      this.batchSize = compatibleSettings.batchSize
+    if (
+      compatibleSettings.speculativeDecoding === 'off' ||
+      compatibleSettings.speculativeDecoding === 'ngram' ||
+      compatibleSettings.speculativeDecoding === 'mtp' ||
+      compatibleSettings.speculativeDecoding === 'draft' ||
+      compatibleSettings.speculativeDecoding === 'dflash'
+    )
+      this.speculativeDecoding = compatibleSettings.speculativeDecoding
+    if (typeof compatibleSettings.draftModel === 'string')
+      this.draftModel = path.basename(compatibleSettings.draftModel)
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
     try {
@@ -816,6 +890,22 @@ export class LLMService {
             console.warn(`[LLMService] model loaded via fallback: ${at.reason}`)
           }
           return true
+        }
+        const failure = classifyLlamaError(this.stderrTail.join('\n'))
+        if (failure?.code === 'speculation_unsupported') {
+          console.warn(
+            `[LLMService] ${failure.reason} Retrying the selected model with speculative decoding off.`
+          )
+          this.speculativeDecoding = 'off'
+          try {
+            this.persist()
+          } catch (error) {
+            console.error('[LLMService] could not save the corrected speculative setting:', error)
+          }
+          await this.prepareModelPort()
+          if (await this.launchServer(serverPath, this.launchArgsFor(at.ctxSize, at.gpuLayers))) {
+            return true
+          }
         }
         // launchServer already tore its process down; free the port before any retry.
         await this.prepareModelPort()

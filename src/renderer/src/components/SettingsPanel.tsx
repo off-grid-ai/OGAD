@@ -102,6 +102,9 @@ type LlmSettings = {
   batchSize?: number
   speculativeDecoding?: SpeculativeDecodingMode
   draftModel?: string
+  supportsMtp?: boolean
+  compatibleDraftModels?: string[]
+  compatibleDflashModels?: string[]
   effectiveCtxSize?: number // reported by the backend (RAM-clamped); read-only
   modelMaxCtx?: number | null // the model's TRAINED window (GGUF); read-only, bounds the picker
   gpuAccelerator?: EngineAccelerator | null // the engine the backend actually spawned; read-only
@@ -130,13 +133,22 @@ type DraftCompanionStatus = Record<
 function installedDraftModels(
   models: readonly DraftCatalogModel[],
   activeModelId: string | null,
-  companionStatus: DraftCompanionStatus
-): DraftModelOption[] {
-  const options = new Map<string, DraftModelOption>()
+  companionStatus: DraftCompanionStatus,
+  compatibleDraftFiles: readonly string[],
+  compatibleDflashFiles: readonly string[]
+): { draft: DraftModelOption[]; dflash: DraftModelOption[] } {
+  const draftFiles = new Set(compatibleDraftFiles)
+  const dflashFiles = new Set(compatibleDflashFiles)
+  const draft = new Map<string, DraftModelOption>()
+  const dflashOptions = new Map<string, DraftModelOption>()
   for (const model of models) {
     const dflash = companionStatus[model.id]
-    if (dflash?.dflashInstalled && dflash.dflashFile) {
-      options.set(dflash.dflashFile, {
+    if (
+      dflash?.dflashInstalled &&
+      dflash.dflashFile &&
+      dflashFiles.has(dflash.dflashFile)
+    ) {
+      dflashOptions.set(dflash.dflashFile, {
         value: dflash.dflashFile,
         label: `${model.name} · DFlash`
       })
@@ -150,9 +162,11 @@ function installedDraftModels(
         file.role !== 'mmproj' &&
         !/(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(file.name)
     )?.name
-    if (primary) options.set(primary, { value: primary, label: model.name })
+    if (primary && draftFiles.has(primary)) {
+      draft.set(primary, { value: primary, label: model.name })
+    }
   }
-  return [...options.values()]
+  return { draft: [...draft.values()], dflash: [...dflashOptions.values()] }
 }
 
 type TranscriptionInfo = {
@@ -205,6 +219,7 @@ export function SettingsPanel({
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
   const [draftModels, setDraftModels] = useState<DraftModelOption[]>([])
+  const [dflashModels, setDflashModels] = useState<DraftModelOption[]>([])
   // Default hidden, like mobile: the numbers are for when you go looking, not a permanent fixture.
   const [showGenerationDetails, setShowGenerationDetails] = useState(false)
 
@@ -236,17 +251,27 @@ export function SettingsPanel({
         modelApi.getModelCatalog(),
         modelApi.getActiveModel(),
         modelApi.getActiveModelIds(),
-        modelApi.getModelVisionStatus()
+        modelApi.getModelVisionStatus(),
+        window.api.getLlmSettings?.()
       ])
-        .then(([catalog, activeId, activeIds, companionStatus]) => {
+        .then(([catalog, activeId, activeIds, companionStatus, llmSettings]) => {
           setActiveModelName(
             resolveActiveTextModel(catalog.models, activeId, new Set(activeIds)).name
           )
-          setDraftModels(installedDraftModels(catalog.models, activeId, companionStatus))
+          const compatible = installedDraftModels(
+            catalog.models,
+            activeId,
+            companionStatus,
+            llmSettings?.compatibleDraftModels ?? [],
+            llmSettings?.compatibleDflashModels ?? []
+          )
+          setDraftModels(compatible.draft)
+          setDflashModels(compatible.dflash)
         })
         .catch(() => {
           setActiveModelName(null)
           setDraftModels([])
+          setDflashModels([])
         })
     }
     window.api
@@ -686,21 +711,28 @@ export function SettingsPanel({
                 onValueChange={(value) =>
                   set({
                     speculativeDecoding: value,
-                    ...((value === 'draft' || value === 'dflash') && !s.draftModel && draftModels[0]
-                      ? { draftModel: draftModels[0].value }
-                      : {})
+                    ...(value === 'draft' && !draftModels.some((m) => m.value === s.draftModel)
+                      ? { draftModel: draftModels[0]?.value ?? '' }
+                      : value === 'dflash' &&
+                          !dflashModels.some((m) => m.value === s.draftModel)
+                        ? { draftModel: dflashModels[0]?.value ?? '' }
+                        : {})
                   })
                 }
                 options={[
                   { value: 'off', label: 'Off' },
                   { value: 'ngram', label: 'N-gram' },
-                  { value: 'mtp', label: 'MTP' },
+                  {
+                    value: 'mtp',
+                    label: s.supportsMtp === false ? 'MTP · Not supported by this model' : 'MTP',
+                    disabled: s.supportsMtp === false
+                  },
                   {
                     value: 'draft',
                     label: 'Draft model',
                     disabled: draftModels.length === 0
                   },
-                  { value: 'dflash', label: 'DFlash', disabled: draftModels.length === 0 }
+                  { value: 'dflash', label: 'DFlash', disabled: dflashModels.length === 0 }
                 ]}
               />
             </Row>
@@ -714,10 +746,14 @@ export function SettingsPanel({
                   id="speculative-draft-model"
                   label="Draft model"
                   value={s.draftModel ?? ''}
-                  options={draftModels}
+                  options={s.speculativeDecoding === 'dflash' ? dflashModels : draftModels}
                   placeholder="No compatible model installed"
                   searchable
-                  disabled={draftModels.length === 0}
+                  disabled={
+                    s.speculativeDecoding === 'dflash'
+                      ? dflashModels.length === 0
+                      : draftModels.length === 0
+                  }
                   onValueChange={(value) => set({ draftModel: value })}
                 />
               </Row>

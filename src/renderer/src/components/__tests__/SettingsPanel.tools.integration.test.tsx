@@ -15,10 +15,12 @@ afterEach(() => {
 describe('<SettingsPanel/> tool settings', () => {
   it('shows and saves the maximum tool-call setting', async () => {
     let settings = { maxToolCalls: 25 }
-    const setLlmSettings = vi.fn(async (patch: { maxToolCalls?: number }) => {
+    const saved: Array<{ maxToolCalls?: number }> = []
+    const setLlmSettings = async (patch: { maxToolCalls?: number }) => {
+      saved.push(patch)
       settings = { ...settings, ...patch }
       return settings
-    })
+    }
     ;(window as unknown as { api: Record<string, unknown> }).api = {
       getLlmSettings: async () => settings,
       setLlmSettings,
@@ -35,8 +37,10 @@ describe('<SettingsPanel/> tool settings', () => {
     const slider = await screen.findByRole('slider', { name: 'Maximum tool calls' })
     expect((slider as HTMLInputElement).value).toBe('25')
     fireEvent.change(slider, { target: { value: '42' } })
+    expect(saved).toEqual([])
+    fireEvent.blur(slider)
 
-    await waitFor(() => expect(setLlmSettings).toHaveBeenCalledWith({ maxToolCalls: 42 }))
+    await waitFor(() => expect(saved).toEqual([{ maxToolCalls: 42 }]))
     expect(screen.getByText('42')).toBeTruthy()
   })
 

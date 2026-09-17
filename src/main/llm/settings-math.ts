@@ -127,6 +127,8 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     String(i.port),
     '--host',
     '127.0.0.1',
+    '--parallel',
+    '1',
     '-c',
     String(i.effectiveCtxSize),
     '-ngl',
