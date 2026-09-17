@@ -52,8 +52,8 @@ function installApi(
   const api = {
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
-    onImageGenProgress: vi.fn(() => () => {}),
-    onRagStream: vi.fn(() => () => {}),
+    onImageGenProgress: vi.fn(() => () => { }),
+    onRagStream: vi.fn(() => () => { }),
     getRagConversations: vi.fn(async () => (existingConversation ? [existingConversation] : [])),
     getRagConversation: vi.fn(async (id: string) =>
       existingConversation?.id === id ? existingConversation : null
@@ -64,13 +64,13 @@ function installApi(
     saveArtifact: vi.fn(async () => ''),
     getSettings: vi.fn(async () => ({})),
     getLlmSettings: vi.fn(async () => ({})),
-    saveSetting: vi.fn(async () => {}),
+    saveSetting: vi.fn(async () => { }),
     listProjects: vi.fn(async () => [project]),
     styleThumbs: vi.fn(async () => ({})),
     listSkills: vi.fn(async () => []),
     ragChat
   }
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
+    ; (globalThis as unknown as { window: { api: unknown } }).window.api = api
   return { createRagConversation, ragChat }
 }
 
@@ -78,7 +78,7 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
   })
 
   it('uses the project target for both conversation persistence and RAG scope', async () => {

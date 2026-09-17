@@ -40,20 +40,20 @@ function installApi(): { addRagMessage: AddRagMessageBoundary } {
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     cancelImageGen: vi.fn(),
-    onImageGenProgress: vi.fn(() => () => {}),
+    onImageGenProgress: vi.fn(() => () => { }),
     getRagConversations: vi.fn(async () => []),
     getRagMessages: vi.fn(async () => []),
-    createRagConversation: vi.fn(async () => {}),
+    createRagConversation: vi.fn(async () => { }),
     addRagMessage,
-    saveArtifact: vi.fn(async () => {}),
+    saveArtifact: vi.fn(async () => { }),
     getSettings: vi.fn(async () => ({})),
-    saveSetting: vi.fn(async () => {}),
+    saveSetting: vi.fn(async () => { }),
     listProjects: vi.fn(async () => []),
     styleThumbs: vi.fn(async () => ({})),
     listSkills: vi.fn(async () => []),
     onRagStream: vi.fn((cb: (e: StreamEvent) => void) => {
       streamCb = cb
-      return () => {}
+      return () => { }
     }),
     // ragChat: 7th arg is the streamId. Stream a reasoning delta on it (the real handler
     // routes it), then return the final answer + a context object.
@@ -64,7 +64,7 @@ function installApi(): { addRagMessage: AddRagMessageBoundary } {
       return { answer: 'Here is the answer.', context: { unified: [] } }
     })
   }
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
+    ; (globalThis as unknown as { window: { api: unknown } }).window.api = api
   return { addRagMessage }
 }
 
@@ -72,7 +72,7 @@ describe('<MemoryChat/> — streamed reasoning is persisted (survives reload)', 
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
   })
 
   it('reasoning streamed via onRagStream lands in the persisted context (readReasoning restores it)', async () => {

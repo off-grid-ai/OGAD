@@ -60,13 +60,13 @@ function installSavedVoiceBoundary(): void {
   const api = {
     isPro: false,
     imageGenStatus: async () => ({ available: false, models: [], active: '' }),
-    onImageGenProgress: () => () => {},
+    onImageGenProgress: () => () => { },
     getRagConversations: async () => [{ ...conversation }],
     getRagConversation: async () => ({ ...conversation }),
     getRagMessages: async () => messages.map((message) => ({ ...message })),
     getActiveRagStreams: async () => [],
-    onRagStream: () => () => {},
-    onRagConversationsChanged: () => () => {},
+    onRagStream: () => () => { },
+    onRagConversationsChanged: () => () => { },
     addRagMessage: async (
       conversationId: string,
       role: 'user' | 'assistant',
@@ -110,7 +110,7 @@ function installSavedVoiceBoundary(): void {
       return 0
     },
     getSettings: async () => ({ composerVoiceMode: true, composerToolsOn: false }),
-    saveSetting: async () => {},
+    saveSetting: async () => { },
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     listTools: async () => [],
     mcpList: async () => [],
@@ -118,14 +118,14 @@ function installSavedVoiceBoundary(): void {
     listSkills: async () => [],
     styleThumbs: async () => ({}),
     ttsVoices: async () => [],
-    onTtsVoiceProgress: () => () => {},
+    onTtsVoiceProgress: () => () => { },
     prepareTtsVoice: async () => ({ ready: true }),
     speak: async () => ({ dataUrl: 'data:audio/wav;base64,YXVkaW8=' }),
     transcribeAudio: async () => 'Corrected transcript',
-    tasks: { list: async () => [], onChanged: () => () => {} },
+    tasks: { list: async () => [], onChanged: () => () => { } },
     ragChat: async () => ({ answer: 'Edited answer', unified: [] })
   }
-  ;(window as unknown as { api: unknown }).api = api
+    ; (window as unknown as { api: unknown }).api = api
 }
 
 function renderSavedVoiceChat(): ReturnType<typeof render> {
@@ -145,7 +145,7 @@ afterEach(() => {
 
 describe('<MemoryChat/> saved voice actions', () => {
   it('keeps copy and resend in the voice menu and shows the saved message time', async () => {
-    ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}
+    ; (Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => { }
     installSavedVoiceBoundary()
 
     renderSavedVoiceChat()
@@ -170,7 +170,7 @@ describe('<MemoryChat/> saved voice actions', () => {
   })
 
   it('transcribes the saved file again, persists it in place, and keeps later messages', async () => {
-    ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}
+    ; (Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => { }
     globalThis.fetch = async () =>
       ({ ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }) as Response
     installSavedVoiceBoundary()
@@ -194,7 +194,7 @@ describe('<MemoryChat/> saved voice actions', () => {
   })
 
   it('opens the existing editor and saves through the normal resend journey', async () => {
-    ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}
+    ; (Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => { }
     globalThis.fetch = async () =>
       ({ ok: true, arrayBuffer: async () => new Uint8Array([1]).buffer }) as Response
     installSavedVoiceBoundary()
@@ -220,7 +220,7 @@ describe('<MemoryChat/> saved voice actions', () => {
   })
 
   it('keeps the saved transcript and explains when the audio file is missing', async () => {
-    ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}
+    ; (Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => { }
     globalThis.fetch = async () => ({ ok: false }) as Response
     installSavedVoiceBoundary()
     const user = userEvent.setup()

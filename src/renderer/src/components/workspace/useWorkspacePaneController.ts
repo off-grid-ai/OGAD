@@ -119,9 +119,12 @@ export function useWorkspacePaneController(taskWorkspaceVisible: boolean): {
   const reportTaskSize = useCallback((size: number): void => {
     if (size < MIN_TASK_SIZE || size > MAX_TASK_SIZE) return
     // The panel is already at this size (it reported it) - store it for the next
-    // re-expand, never resize back at it per drag frame.
+    // re-expand, never resize back at it per drag frame. React only needs the
+    // rounded value used by the resize handle. Sub-pixel measurements can
+    // otherwise cause a measure -> render -> measure loop across all of Chat.
     taskSizeRef.current = size
-    setTaskWorkspaceSize((current) => (current === size ? current : size))
+    const displayedSize = Math.round(size)
+    setTaskWorkspaceSize((current) => (current === displayedSize ? current : displayedSize))
   }, [])
 
   const resizeTaskFromKeyboard = useCallback(

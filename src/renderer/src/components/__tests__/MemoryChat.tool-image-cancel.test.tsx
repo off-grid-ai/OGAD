@@ -31,16 +31,16 @@ function installApi(): { addRagMessage: AddRag } {
     imageGenStatus: vi.fn(async () => ({ available: true, models: ['sd'], active: 'sd' })),
     cancelImageGen: vi.fn(),
     cancelRag: vi.fn(),
-    onImageGenProgress: vi.fn(() => () => {}),
-    onRagStream: vi.fn(() => () => {}),
+    onImageGenProgress: vi.fn(() => () => { }),
+    onRagStream: vi.fn(() => () => { }),
     getRagConversations: vi.fn(async () => []),
     getRagMessages: vi.fn(async () => []),
-    createRagConversation: vi.fn(async () => {}),
+    createRagConversation: vi.fn(async () => { }),
     addRagMessage,
-    saveArtifact: vi.fn(async () => {}),
+    saveArtifact: vi.fn(async () => { }),
     // Tools ON via the persisted setting (how a returning user reaches this state).
     getSettings: vi.fn(async () => ({ composerToolsOn: true })),
-    saveSetting: vi.fn(async () => {}),
+    saveSetting: vi.fn(async () => { }),
     listProjects: vi.fn(async () => []),
     styleThumbs: vi.fn(async () => ({})),
     listSkills: vi.fn(async () => []),
@@ -57,7 +57,7 @@ function installApi(): { addRagMessage: AddRag } {
       throw new Error('cancelled')
     })
   }
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
+    ; (globalThis as unknown as { window: { api: unknown } }).window.api = api
   return { addRagMessage }
 }
 
@@ -65,7 +65,7 @@ describe('<MemoryChat/> — tool-image cancel keeps the text answer (D12)', () =
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
   })
 
   it('persists the assistant text turn even when the deferred image gen is cancelled', async () => {

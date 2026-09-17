@@ -55,7 +55,12 @@ describe('<MemoryChat/> assistant preset runs', () => {
     expect(boundary.toolQueries[0]?.query).toContain('Save videos for later')
     expect(boundary.toolQueries[0]?.query).toContain('Mark irrelevant recommendations')
     expect(boundary.toolQueries[0]?.query).toContain("user's default browser")
+    expect(boundary.toolQueries[0]?.query).toContain('Never use Web Use')
+    expect(boundary.toolQueries[0]?.query).toContain(
+      'existing browser login, cookies, history, cache, and recommendations'
+    )
     expect(boundary.toolQueries[0]?.query).toContain('Call open_url')
+    expect(boundary.toolQueries[0]?.query).toContain('Do not call web_use')
     expect(boundary.toolQueries[0]?.query).toContain('Call computer_use once')
     expect(boundary.toolQueries[0]?.query).toContain('Never continue unattended')
     expect(boundary.toolQueries[0]?.query).toContain('Do not comment, post, repost, share')
