@@ -158,11 +158,8 @@ export async function resolveModelIdentity(modelId: string): Promise<ModelIdenti
   }
 }
 
-/** Per-model vision status for every vision-CAPABLE model, keyed by id. supportsVision
- *  is derived from files (a projector), projectorInstalled from disk. The renderer uses
- *  this to offer "download vision support" for an installed vision model whose projector
- *  isn't present yet (the Gemma 4 E2B case, where the entry gained a projector after the
- *  user had already downloaded the weights). */
+/** Per-model optional companion status, keyed by id. The renderer uses this to repair
+ *  a missing vision projector or DFlash draft without downloading primary weights again. */
 export async function getVisionStatuses(): Promise<Record<string, VisionStatus>> {
   const { CATALOG } = await import('@offgrid/models')
   const dir = llm.getModelsDir()
@@ -178,7 +175,7 @@ export async function getVisionStatuses(): Promise<Record<string, VisionStatus>>
   const out: Record<string, VisionStatus> = {}
   for (const m of merged) {
     const st = visionStatus(m, present)
-    if (st.supportsVision) {
+    if (st.supportsVision || st.supportsDflash) {
       out[m.id] = st
     }
   }
@@ -674,8 +671,17 @@ type LlamaModelKindGate = (kind: string) => boolean
 async function setActiveLlamaModel(
   modelId: string,
   acceptsKind: LlamaModelKindGate,
-  expectedKind: string
+  expectedKind: string,
+  runtimeOnly = false
 ): Promise<{ success: boolean; error?: string }> {
+  const activate = (model: { id: string; primary: string; mmproj: string | null }): void => {
+    if (runtimeOnly) {
+      llm.useRuntimeModel(model)
+      return
+    }
+    fs.writeFileSync(activeModelFile(), JSON.stringify(model, null, 2))
+    llm.restoreSelectedModel()
+  }
   // Imported local model: resolve from the local registry (not the catalog).
   if (modelId.startsWith('local:')) {
     const lm = getLocalModels().find((m) => m.id === modelId)
@@ -683,11 +689,7 @@ async function setActiveLlamaModel(
     if (!acceptsKind(lm.kind)) {
       return { success: false, error: `${lm.kind} models are not loadable as ${expectedKind}` }
     }
-    fs.writeFileSync(
-      activeModelFile(),
-      JSON.stringify({ id: modelId, primary: lm.primary, mmproj: lm.mmproj ?? null }, null, 2)
-    )
-    llm.reloadModel()
+    activate({ id: modelId, primary: lm.primary, mmproj: lm.mmproj ?? null })
     return { success: true }
   }
   const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
@@ -711,11 +713,7 @@ async function setActiveLlamaModel(
     const primary = downloadedPrimary(transferred)
     if (!primary) return { success: false, error: 'transferred model has no primary file' }
     const mmproj = downloadedProjector(transferred) ?? null
-    fs.writeFileSync(
-      activeModelFile(),
-      JSON.stringify({ id: transferred.id, primary, mmproj }, null, 2)
-    )
-    llm.reloadModel()
+    activate({ id: transferred.id, primary, mmproj })
     return { success: true }
   }
   const entry = catalogEntry ?? (await resolveHuggingFaceModel(modelId))
@@ -724,9 +722,9 @@ async function setActiveLlamaModel(
     return { success: false, error: `${entry.kind} models are not loadable as ${expectedKind}` }
   }
   const primary = primaryFileName(entry as unknown as CatalogEntry)
+  if (!primary) return { success: false, error: 'model has no primary file' }
   const mmproj = entry.files.find((f) => f.role === 'mmproj')?.name ?? null
-  fs.writeFileSync(activeModelFile(), JSON.stringify({ id: modelId, primary, mmproj }, null, 2))
-  llm.reloadModel()
+  activate({ id: modelId, primary, mmproj })
   return { success: true }
 }
 
@@ -739,7 +737,7 @@ export function setActiveModel(modelId: string): Promise<{ success: boolean; err
 export function loadComputerUseModel(
   modelId: string
 ): Promise<{ success: boolean; error?: string }> {
-  return setActiveLlamaModel(modelId, (kind) => kind === 'computer_use', 'Computer Use')
+  return setActiveLlamaModel(modelId, (kind) => kind === 'computer_use', 'Computer Use', true)
 }
 
 export function getActiveModel(): string | null {

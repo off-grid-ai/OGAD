@@ -609,6 +609,8 @@ const offGridApi = {
     gpuLayers?: number
     threads?: number
     batchSize?: number
+    speculativeDecoding?: 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
+    draftModel?: string
     performanceMode?: 'conservative' | 'balanced' | 'extreme'
   }) => ipcRenderer.invoke('llm:set-settings', s),
   getRemoteVisionServer: () => ipcRenderer.invoke('vision:remote-server:get'),

@@ -21,7 +21,7 @@ import {
   contextWindowHint,
   recommendedContextWindow
 } from '@renderer/lib/ctx-options'
-import { formatContextWindow, resolveModelName } from '@renderer/lib/model-summary'
+import { formatContextWindow, resolveActiveTextModel } from '@renderer/lib/model-summary'
 import {
   invalidateDisplaySettings,
   invalidateLlmSettings
@@ -83,6 +83,7 @@ function budgetChange(s: LlmSettings, patch: LlmSettings): LlmSettings {
 // Tabs: Model (inference params), Image, Voice (Kokoro TTS), Tools (built-in, read-only),
 // Connectors (MCP servers — the user's reusable tool library). All on-device.
 type KvCacheType = 'f16' | 'q8_0' | 'q4_0'
+type SpeculativeDecodingMode = 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
 type LlmSettings = {
   temperature?: number
   ctxSize?: number
@@ -99,6 +100,8 @@ type LlmSettings = {
   gpuLayers?: number
   threads?: number
   batchSize?: number
+  speculativeDecoding?: SpeculativeDecodingMode
+  draftModel?: string
   effectiveCtxSize?: number // reported by the backend (RAM-clamped); read-only
   modelMaxCtx?: number | null // the model's TRAINED window (GGUF); read-only, bounds the picker
   gpuAccelerator?: EngineAccelerator | null // the engine the backend actually spawned; read-only
@@ -109,6 +112,47 @@ type Connector = {
   url?: string | null
   transport?: string
   enabled?: number | boolean
+}
+
+type DraftModelOption = { value: string; label: string }
+type DraftCatalogModel = {
+  id: string
+  name: string
+  kind?: string
+  tags?: string[]
+  files?: Array<{ name: string; role?: string }>
+}
+type DraftCompanionStatus = Record<
+  string,
+  { dflashInstalled?: boolean; dflashFile?: string }
+>
+
+function installedDraftModels(
+  models: readonly DraftCatalogModel[],
+  activeModelId: string | null,
+  companionStatus: DraftCompanionStatus
+): DraftModelOption[] {
+  const options = new Map<string, DraftModelOption>()
+  for (const model of models) {
+    const dflash = companionStatus[model.id]
+    if (dflash?.dflashInstalled && dflash.dflashFile) {
+      options.set(dflash.dflashFile, {
+        value: dflash.dflashFile,
+        label: `${model.name} · DFlash`
+      })
+    }
+    if (model.id === activeModelId) continue
+    if (!model.tags?.some((tag) => tag === 'Imported' || tag === 'Downloaded')) continue
+    if (model.kind && !['text', 'vision', 'local'].includes(model.kind)) continue
+    const primary = model.files?.find(
+      (file) =>
+        file.name.toLowerCase().endsWith('.gguf') &&
+        file.role !== 'mmproj' &&
+        !/(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(file.name)
+    )?.name
+    if (primary) options.set(primary, { value: primary, label: model.name })
+  }
+  return [...options.values()]
 }
 
 type TranscriptionInfo = {
@@ -138,7 +182,9 @@ const DEFAULTS: LlmSettings = {
   flashAttn: false,
   gpuLayers: 99,
   threads: 0,
-  batchSize: 512
+  batchSize: 512,
+  speculativeDecoding: 'off',
+  draftModel: ''
 }
 
 export function SettingsPanel({
@@ -158,6 +204,7 @@ export function SettingsPanel({
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
+  const [draftModels, setDraftModels] = useState<DraftModelOption[]>([])
   // Default hidden, like mobile: the numbers are for when you go looking, not a permanent fixture.
   const [showGenerationDetails, setShowGenerationDetails] = useState(false)
 
@@ -174,14 +221,33 @@ export function SettingsPanel({
       .then((v: LlmSettings) => setS(v))
       .catch(() => {})
     const modelApi = window.api as Partial<
-      Pick<typeof window.api, 'getModelCatalog' | 'getActiveModel'>
+      Pick<
+        typeof window.api,
+        'getModelCatalog' | 'getActiveModel' | 'getActiveModelIds' | 'getModelVisionStatus'
+      >
     >
-    if (modelApi.getModelCatalog && modelApi.getActiveModel) {
-      Promise.all([modelApi.getModelCatalog(), modelApi.getActiveModel()])
-        .then(([catalog, activeId]) =>
-          setActiveModelName(resolveModelName(catalog.models, activeId))
-        )
-        .catch(() => setActiveModelName(null))
+    if (
+      modelApi.getModelCatalog &&
+      modelApi.getActiveModel &&
+      modelApi.getActiveModelIds &&
+      modelApi.getModelVisionStatus
+    ) {
+      Promise.all([
+        modelApi.getModelCatalog(),
+        modelApi.getActiveModel(),
+        modelApi.getActiveModelIds(),
+        modelApi.getModelVisionStatus()
+      ])
+        .then(([catalog, activeId, activeIds, companionStatus]) => {
+          setActiveModelName(
+            resolveActiveTextModel(catalog.models, activeId, new Set(activeIds)).name
+          )
+          setDraftModels(installedDraftModels(catalog.models, activeId, companionStatus))
+        })
+        .catch(() => {
+          setActiveModelName(null)
+          setDraftModels([])
+        })
     }
     window.api
       .getTranscriptionInfo?.()
@@ -592,6 +658,54 @@ export function SettingsPanel({
                 {s.flashAttn ? 'Enabled' : 'Disabled'}
               </button>
             </Row>
+            <Row
+              label="Speculative decoding"
+              controlId="speculative-decoding"
+              hint="N-gram needs no second model. MTP uses prediction heads in a compatible main model. Draft and DFlash need a compatible installed draft GGUF."
+            >
+              <SettingsSelect
+                id="speculative-decoding"
+                label="Speculative decoding"
+                value={s.speculativeDecoding ?? 'off'}
+                onValueChange={(value) =>
+                  set({
+                    speculativeDecoding: value,
+                    ...((value === 'draft' || value === 'dflash') && !s.draftModel && draftModels[0]
+                      ? { draftModel: draftModels[0].value }
+                      : {})
+                  })
+                }
+                options={[
+                  { value: 'off', label: 'Off' },
+                  { value: 'ngram', label: 'N-gram' },
+                  { value: 'mtp', label: 'MTP' },
+                  {
+                    value: 'draft',
+                    label: 'Draft model',
+                    disabled: draftModels.length === 0
+                  },
+                  { value: 'dflash', label: 'DFlash', disabled: draftModels.length === 0 }
+                ]}
+              />
+            </Row>
+            {(s.speculativeDecoding === 'draft' || s.speculativeDecoding === 'dflash') && (
+              <Row
+                label="Draft model"
+                controlId="speculative-draft-model"
+                hint="Use a smaller GGUF that is tokenizer-compatible with the active model."
+              >
+                <SettingsSelect
+                  id="speculative-draft-model"
+                  label="Draft model"
+                  value={s.draftModel ?? ''}
+                  options={draftModels}
+                  placeholder="No compatible model installed"
+                  searchable
+                  disabled={draftModels.length === 0}
+                  onValueChange={(value) => set({ draftModel: value })}
+                />
+              </Row>
+            )}
             <Row
               label="GPU layers"
               value={String(s.gpuLayers ?? 99)}

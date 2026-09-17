@@ -78,6 +78,7 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     const available = screen.getByRole('list', { name: 'Models available to download' })
     expect(within(installed).getByText('UI-Mate-9B')).toBeTruthy()
     expect(within(available).getByText('UI-TARS-1.5-7B')).toBeTruthy()
+    expect(within(available).getByText('GUI-Owl-1.5-8B-Instruct')).toBeTruthy()
     expect(within(available).getByText('UI-Mate-27B')).toBeTruthy()
     expect(within(available).getByText('Holo3.1-4B')).toBeTruthy()
     expect(screen.queryByRole('list', { name: 'Computer Use models coming soon' })).toBeNull()
@@ -110,5 +111,20 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     await user.click(within(uiTarsCard as HTMLElement).getByRole('button', { name: 'Download' }))
     expect(await screen.findByText('Queued')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
+  })
+
+  it('places distilled text models and the GUI specialist in their product tabs', async () => {
+    const user = userEvent.setup()
+    render(<ModelsScreen />)
+
+    expect(await screen.findByText('Qwen 3.8 4B Distill')).toBeTruthy()
+    expect(screen.getByText('Qwen 3.8 9B Distill')).toBeTruthy()
+    expect(screen.queryByText('GUI-Owl-1.5-8B-Instruct')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Computer Use' }))
+
+    expect(await screen.findByText('GUI-Owl-1.5-8B-Instruct')).toBeTruthy()
+    expect(screen.queryByText('Qwen 3.8 4B Distill')).toBeNull()
+    expect(screen.queryByText('Qwen 3.8 9B Distill')).toBeNull()
   })
 })

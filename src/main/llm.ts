@@ -22,7 +22,8 @@ import {
   samplingPayload,
   launchArgsChanged,
   buildLaunchArgs,
-  type PresetField
+  type PresetField,
+  type SpeculativeDecodingMode
 } from './llm/settings-math'
 import { buildMessages, thinkingPayload, type ChatMessage } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
@@ -52,7 +53,7 @@ import type { VisionModelArtifacts } from './vision/model-adapters/types'
 import { getActiveRemoteVisionServer } from './vision/remote-vision-server'
 import { currentRemoteScreenTaskSession } from './actions/remote-screen-session'
 
-export type { KvCacheType, PerformanceMode }
+export type { KvCacheType, PerformanceMode, SpeculativeDecodingMode }
 
 export interface LlmSettings {
   performanceMode?: PerformanceMode
@@ -72,6 +73,8 @@ export interface LlmSettings {
   gpuLayers?: number // -ngl: layers offloaded to the GPU. 99 = all.
   threads?: number // CPU threads for inference
   batchSize?: number // -b: prompt batch size
+  speculativeDecoding?: SpeculativeDecodingMode
+  draftModel?: string // filename of an installed GGUF in the app's model directory
 }
 
 export interface LlmSettingsUpdateOptions {
@@ -113,6 +116,7 @@ export class LLMService {
   private initPromise: Promise<void> | null = null
   private modelPath = ''
   private mmProjPath = '' // empty for text-only models (no vision projector)
+  private runtimeModelOverride: { id: string; primary: string; mmproj: string | null } | null = null
   // The model's trained context window (from GGUF metadata), memoized per model path.
   // Reported to the settings UI; the selected launch context is never silently reduced.
   private modelMaxCtx: number | null = null
@@ -178,6 +182,8 @@ export class LLMService {
   private gpuLayers = 99
   private threads: number | undefined
   private batchSize: number | undefined
+  private speculativeDecoding: SpeculativeDecodingMode = 'off'
+  private draftModel = ''
   // Crash recovery: distinguish an intentional kill (stop/reload/settings respawn)
   // from an unexpected crash so we only auto-restart on real crashes.
   private intentionalStop = false
@@ -215,6 +221,15 @@ export class LLMService {
       if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
       if (typeof s.threads === 'number') this.threads = s.threads
       if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
+      if (
+        s.speculativeDecoding === 'off' ||
+        s.speculativeDecoding === 'ngram' ||
+        s.speculativeDecoding === 'mtp' ||
+        s.speculativeDecoding === 'draft' ||
+        s.speculativeDecoding === 'dflash'
+      )
+        this.speculativeDecoding = s.speculativeDecoding
+      if (typeof s.draftModel === 'string') this.draftModel = path.basename(s.draftModel)
       if (
         s.performanceMode === 'conservative' ||
         s.performanceMode === 'balanced' ||
@@ -307,6 +322,8 @@ export class LLMService {
       gpuLayers: this.gpuLayers,
       threads: this.threads,
       batchSize: this.batchSize,
+      speculativeDecoding: this.speculativeDecoding,
+      draftModel: this.draftModel,
       performanceMode: this.performanceMode,
       // Report the selected context so the UI can show what's used, plus the
       // model's trained maximum so the UI can offer the slider up to it (not a hardcoded cap),
@@ -329,6 +346,7 @@ export class LLMService {
 
   /** Build argv for the selected context and a GPU-layer count. */
   private launchArgsFor(effectiveCtxSize: number, gpuLayers: number): string[] {
+    const useSelectedModelSpeculation = this.runtimeModelOverride === null
     return buildLaunchArgs({
       modelPath: this.modelPath,
       mmProjPath: this.mmProjPath,
@@ -339,8 +357,16 @@ export class LLMService {
       kvCacheType: this.kvCacheType,
       threads: this.threads,
       batchSize: this.batchSize,
+      speculativeDecoding: useSelectedModelSpeculation ? this.speculativeDecoding : 'off',
+      draftModelPath: useSelectedModelSpeculation ? this.draftModelPath() : undefined,
       imageMinTokens: this.imageMinTokensForModel()
     })
+  }
+
+  private draftModelPath(): string | undefined {
+    if (!this.draftModel || path.basename(this.draftModel) !== this.draftModel) return undefined
+    const candidate = path.join(getModelsDir(), this.draftModel)
+    return candidate !== this.modelPath && isValidGgufFile(candidate, fs) ? candidate : undefined
   }
 
   /** Grounding models (UI-TARS / Qwen-VL) need a floor on image tokens for
@@ -363,7 +389,11 @@ export class LLMService {
       )
       fs.renameSync(temporaryFile, this.settingsFile)
     } catch (error) {
-      try { fs.rmSync(temporaryFile, { force: true }) } catch { /* keep the original error */ }
+      try {
+        fs.rmSync(temporaryFile, { force: true })
+      } catch {
+        /* keep the original error */
+      }
       throw error
     }
   }
@@ -425,7 +455,9 @@ export class LLMService {
         flashAttn: this.flashAttn,
         gpuLayers: this.gpuLayers,
         threads: this.threads,
-        batchSize: this.batchSize
+        batchSize: this.batchSize,
+        speculativeDecoding: this.speculativeDecoding,
+        draftModel: this.draftModel
       },
       modeChanged
     )
@@ -446,6 +478,15 @@ export class LLMService {
     if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
     if (typeof s.threads === 'number') this.threads = s.threads
     if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
+    if (
+      s.speculativeDecoding === 'off' ||
+      s.speculativeDecoding === 'ngram' ||
+      s.speculativeDecoding === 'mtp' ||
+      s.speculativeDecoding === 'draft' ||
+      s.speculativeDecoding === 'dflash'
+    )
+      this.speculativeDecoding = s.speculativeDecoding
+    if (typeof s.draftModel === 'string') this.draftModel = path.basename(s.draftModel)
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
     try {
@@ -467,8 +508,10 @@ export class LLMService {
       this.gpuLayers = priorSettings.gpuLayers ?? this.gpuLayers
       this.threads = priorSettings.threads ?? this.threads
       this.batchSize = priorSettings.batchSize ?? this.batchSize
+      this.speculativeDecoding = priorSettings.speculativeDecoding ?? this.speculativeDecoding
+      this.draftModel = priorSettings.draftModel ?? this.draftModel
       this.userExplicit.clear()
-      priorExplicit.forEach(field => this.userExplicit.add(field))
+      priorExplicit.forEach((field) => this.userExplicit.add(field))
       throw error
     }
     if (before) {
@@ -488,6 +531,13 @@ export class LLMService {
   // bundled Qwen3-VL vision model when nothing is selected yet.
   private resolveModel(): void {
     const modelsDir = getModelsDir()
+    if (this.runtimeModelOverride) {
+      this.modelPath = path.join(modelsDir, this.runtimeModelOverride.primary)
+      this.mmProjPath = this.runtimeModelOverride.mmproj
+        ? path.join(modelsDir, this.runtimeModelOverride.mmproj)
+        : ''
+      return
+    }
     try {
       const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
       if (cfg?.primary) {
@@ -526,6 +576,18 @@ export class LLMService {
       return
     }
     this.applyModelReload()
+  }
+
+  /** Load a Computer Use specialist without changing the saved Text model. */
+  useRuntimeModel(model: { id: string; primary: string; mmproj: string | null }): void {
+    this.runtimeModelOverride = { ...model }
+    this.reloadModel()
+  }
+
+  /** Return the shared process to the Text model saved in active-model.json. */
+  restoreSelectedModel(): void {
+    this.runtimeModelOverride = null
+    this.reloadModel()
   }
 
   private async beginGeneration(): Promise<void> {
@@ -580,10 +642,12 @@ export class LLMService {
   activeModelInfo(): { id: string; vision: boolean } | null {
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
-    let id = path.basename(this.modelPath)
+    let id = this.runtimeModelOverride?.id ?? path.basename(this.modelPath)
     try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.id) id = cfg.id
+      if (!this.runtimeModelOverride) {
+        const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
+        if (cfg?.id) id = cfg.id
+      }
     } catch {
       /* fall back to the filename */
     }
@@ -594,10 +658,12 @@ export class LLMService {
   activeModelArtifacts(): VisionModelArtifacts | null {
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
-    let id = path.basename(this.modelPath)
+    let id = this.runtimeModelOverride?.id ?? path.basename(this.modelPath)
     try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
-      if (cfg?.id) id = cfg.id
+      if (!this.runtimeModelOverride) {
+        const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
+        if (cfg?.id) id = cfg.id
+      }
     } catch {
       /* fall back to the filename */
     }
@@ -1085,7 +1151,9 @@ export class LLMService {
     opts: {
       responseFormat?: unknown
       temperature?: number
+      enableThinking?: boolean
       disableThinking?: boolean
+      separateReasoning?: boolean
       signal?: AbortSignal
     } = {}
   ): Promise<string> {
@@ -1097,7 +1165,7 @@ export class LLMService {
           timeoutMs,
           maxTokens,
           temperature: opts.temperature,
-          thinking: opts.disableThinking ? false : undefined,
+          thinking: opts.disableThinking ? false : opts.enableThinking,
           signal: opts.signal,
           responseFormat: opts.responseFormat
         })
