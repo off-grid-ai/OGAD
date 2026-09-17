@@ -74,6 +74,17 @@ afterEach(() => {
 })
 
 describe('<SettingsPanel/> speech languages', () => {
+  it('saves playback speed after the slider loses focus', async () => {
+    render(<SettingsPanel onClose={() => {}} initialTab="voice" />)
+
+    const speed = await screen.findByRole('slider', { name: 'Playback speed' })
+    fireEvent.change(speed, { target: { value: '1.5' } })
+    expect((saveSetting.mock.calls as unknown[][]).some(([key]) => key === 'ttsSpeed')).toBe(false)
+
+    fireEvent.blur(speed)
+    await waitFor(() => expect(saveSetting).toHaveBeenCalledWith('ttsSpeed', 1.5))
+  })
+
   it('shows the remote voice source without offering local speakers', async () => {
     const boundary = (window as unknown as { api: Record<string, unknown> }).api
     boundary.getActiveModalities = vi.fn().mockResolvedValue({

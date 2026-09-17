@@ -145,10 +145,6 @@ export function ImageSettingsTab(): React.JSX.Element {
             min={4}
             max={50}
             defaultValue={effective.steps}
-            onChange={(event) => {
-              if (!event.target.value) return
-              saveOverride('steps', Math.max(4, Math.min(50, Number(event.target.value))))
-            }}
             onBlur={(event) => {
               const steps = Math.max(4, Math.min(50, Number(event.target.value) || 4))
               event.target.value = String(steps)
@@ -169,10 +165,6 @@ export function ImageSettingsTab(): React.JSX.Element {
             max={20}
             step={0.5}
             defaultValue={effective.cfgScale}
-            onChange={(event) => {
-              if (!event.target.value) return
-              saveOverride('cfgScale', Math.max(0, Math.min(20, Number(event.target.value))))
-            }}
             onBlur={(event) => {
               const guidance = Math.max(0, Math.min(20, Number(event.target.value) || 0))
               event.target.value = String(guidance)
@@ -191,8 +183,8 @@ export function ImageSettingsTab(): React.JSX.Element {
             onChange={(event) => {
               const next = event.target.value.replace(/[^0-9]/g, '')
               setSeed(next)
-              persist('imgSeed', next)
             }}
+            onBlur={() => persist('imgSeed', seed)}
             placeholder="random"
             className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-700 outline-none focus:border-green-500"
           />
@@ -208,8 +200,8 @@ export function ImageSettingsTab(): React.JSX.Element {
           value={negativePrompt}
           onChange={(event) => {
             setNegativePrompt(event.target.value)
-            persist('imgNegative', event.target.value)
           }}
+          onBlur={() => persist('imgNegative', negativePrompt)}
           rows={3}
           className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
         />

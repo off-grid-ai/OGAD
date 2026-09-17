@@ -444,7 +444,10 @@ export function SettingsPanel({
                 max={1.5}
                 step={0.05}
                 value={s.temperature ?? 0.7}
-                onChange={(e) => set({ temperature: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, temperature: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ temperature: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -482,7 +485,13 @@ export function SettingsPanel({
                 max={MAX_MAX_TOOL_CALLS}
                 step={1}
                 value={s.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS}
-                onChange={(e) => set({ maxToolCalls: Math.round(Number(e.target.value)) })}
+                onChange={(e) =>
+                  setS((current) => ({
+                    ...current,
+                    maxToolCalls: Math.round(Number(e.target.value))
+                  }))
+                }
+                onBlur={(e) => set({ maxToolCalls: Math.round(Number(e.target.value)) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -493,7 +502,8 @@ export function SettingsPanel({
                 max={1}
                 step={0.01}
                 value={s.topP ?? 0.95}
-                onChange={(e) => set({ topP: Number(e.target.value) })}
+                onChange={(e) => setS((current) => ({ ...current, topP: Number(e.target.value) }))}
+                onBlur={(e) => set({ topP: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -508,7 +518,8 @@ export function SettingsPanel({
                 max={100}
                 step={1}
                 value={s.topK ?? 40}
-                onChange={(e) => set({ topK: Number(e.target.value) })}
+                onChange={(e) => setS((current) => ({ ...current, topK: Number(e.target.value) }))}
+                onBlur={(e) => set({ topK: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -523,7 +534,8 @@ export function SettingsPanel({
                 max={0.5}
                 step={0.01}
                 value={s.minP ?? 0.05}
-                onChange={(e) => set({ minP: Number(e.target.value) })}
+                onChange={(e) => setS((current) => ({ ...current, minP: Number(e.target.value) }))}
+                onBlur={(e) => set({ minP: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -538,7 +550,10 @@ export function SettingsPanel({
                 max={1.5}
                 step={0.01}
                 value={s.repeatPenalty ?? 1.1}
-                onChange={(e) => set({ repeatPenalty: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, repeatPenalty: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ repeatPenalty: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -616,7 +631,8 @@ export function SettingsPanel({
             >
               <textarea
                 value={s.systemPrompt ?? ''}
-                onChange={(e) => set({ systemPrompt: e.target.value })}
+                onChange={(e) => setS((current) => ({ ...current, systemPrompt: e.target.value }))}
+                onBlur={(e) => set({ systemPrompt: e.target.value })}
                 rows={5}
                 placeholder="e.g. You are a concise, technical assistant."
                 className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-600 outline-none focus:border-green-500"
@@ -717,7 +733,10 @@ export function SettingsPanel({
                 max={99}
                 step={1}
                 value={s.gpuLayers ?? 99}
-                onChange={(e) => set({ gpuLayers: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, gpuLayers: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ gpuLayers: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -732,7 +751,10 @@ export function SettingsPanel({
                 max={16}
                 step={1}
                 value={s.threads ?? 0}
-                onChange={(e) => set({ threads: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, threads: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ threads: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
@@ -747,7 +769,10 @@ export function SettingsPanel({
                 max={2048}
                 step={64}
                 value={s.batchSize ?? 512}
-                onChange={(e) => set({ batchSize: Number(e.target.value) })}
+                onChange={(e) =>
+                  setS((current) => ({ ...current, batchSize: Number(e.target.value) }))
+                }
+                onBlur={(e) => set({ batchSize: Number(e.target.value) })}
                 className="w-full accent-green-500"
               />
             </Row>
