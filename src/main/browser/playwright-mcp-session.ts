@@ -17,7 +17,7 @@ const ALLOWED_TOOLS = new Set([
   'browser_navigate'
 ])
 const CONNECT_TIMEOUT_MS = 20_000
-const ACTION_TIMEOUT_MS = 15_000
+const ACTION_TIMEOUT_MS = 60_000
 const SNAPSHOT_TIMEOUT_MS = 60_000
 const PAGE_SYNC_TIMEOUT_MS = 5_000
 const NAVIGATION_TIMEOUT_MS = 50_000
@@ -65,7 +65,7 @@ export class PlaywrightMcpSession {
             // The semantic loop takes one explicit snapshot after every action.
             // Disable MCP's second automatic full-page snapshot in the action response.
             snapshot: { mode: 'none', boxes: false },
-            timeouts: { action: 7_500, navigation: 45_000, settle: 350 }
+            timeouts: { action: 45_000, navigation: 45_000, settle: 350 }
           })
       })
       console.log('[web-use][playwright-mcp] connection created', {

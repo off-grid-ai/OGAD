@@ -86,7 +86,7 @@ const NAVIGATION_TIMEOUT_MS = 20_000
  *  rejection - which froze the whole web task at setup with no step, no result,
  *  no error. Bound every command so a wedged transport fails fast and visibly
  *  instead of hanging. */
-const CDP_COMMAND_TIMEOUT_MS = 15_000
+const CDP_COMMAND_TIMEOUT_MS = 60_000
 const POINTER_FRAME_MS = 16
 const POINTER_MIN_DURATION_MS = 120
 const POINTER_MAX_DURATION_MS = 240

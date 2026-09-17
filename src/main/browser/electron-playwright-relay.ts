@@ -21,7 +21,7 @@ export type { ElectronPlaywrightPageProvider } from './electron-playwright-attac
 
 const PRODUCT = 'Chrome/OffGrid-WebUse'
 const START_TIMEOUT_MS = 5_000
-const BOUNDARY_TIMEOUT_MS = 15_000
+const BOUNDARY_TIMEOUT_MS = 60_000
 const ACCESSIBILITY_SNAPSHOT_TIMEOUT_MS = 60_000
 const CLOSE_TIMEOUT_MS = 5_000
 const DISCOVERY_COMMANDS = new Set([
