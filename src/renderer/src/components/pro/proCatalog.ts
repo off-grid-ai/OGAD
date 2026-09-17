@@ -8,7 +8,7 @@ import {
   MagnifyingGlass,
   Broadcast,
   ClipboardText,
-  Compass,
+  Robot,
   ListChecks,
   Waveform,
   ShieldCheck,
@@ -56,7 +56,7 @@ export const PRO_FEATURES: ProFeature[] = [
   {
     route: 'explore',
     label: 'Assistant',
-    icon: Compass,
+    icon: Robot,
     tagline: 'Start a prepared run.',
     description:
       'Choose a workflow, add its details, and start it in Chat. The work stays on this Mac.',
