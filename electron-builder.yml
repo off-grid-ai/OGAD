@@ -89,6 +89,7 @@ mac:
   # notarization → invalidated the staple → "Unnotarized Developer ID". Let
   # electron-builder's signing stand.
 dmg:
+  sign: true
   artifactName: ${name}-${version}.${ext}
   # The app is currently ~3.3 GB before compression. macOS 26 adds an EFI/GPT
   # partition to large HFS images, so dmgbuild's computed size can leave less usable
