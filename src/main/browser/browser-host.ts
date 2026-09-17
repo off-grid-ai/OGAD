@@ -63,7 +63,7 @@ import { BrowserJourneyRunOwners } from './browser-run-owners'
 import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
-import { automationTaskReadStatus } from '@offgrid/automation'
+import { automationTaskReadStatus, isAutomationTaskTerminal } from '@offgrid/automation'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -285,6 +285,31 @@ class BrowserHost implements BrowserRailHost {
     } catch {
       /* already destroyed */
     }
+  }
+
+  /** Keep the current result page available, but release completed Web Use
+   * renderers from older journeys before a new live preview starts. History can
+   * recreate those pages from its saved URL when the user opens them again. */
+  private releaseRetainedTaskViews(activeJourneyId: string): void {
+    let changed = false
+    for (const snapshot of this.sessions.snapshot().sessions) {
+      if (
+        snapshot.kind !== 'task' ||
+        snapshot.journeyId === activeJourneyId ||
+        snapshot.status === 'open' ||
+        !isAutomationTaskTerminal(snapshot.status)
+      ) {
+        continue
+      }
+      const closed = this.sessions.close(snapshot.sessionId)
+      if (!closed) continue
+      changed = true
+      this.taskPointers.delete(snapshot.sessionId)
+      this.destroyView(closed.resource)
+    }
+    if (!changed) return
+    this.syncViewVisibility()
+    this.broadcastSessions()
   }
 
   dispose(): void {
@@ -629,6 +654,7 @@ class BrowserHost implements BrowserRailHost {
 
   async runTask(request: BrowserTaskRequest): Promise<WebTaskResult> {
     const { goal, url, taskId, journeyId, checkpoint } = request
+    this.releaseRetainedTaskViews(journeyId)
     let record = this.sessions.findJourney(journeyId)
     const continuingJourney = Boolean(record)
     if (!record) {
