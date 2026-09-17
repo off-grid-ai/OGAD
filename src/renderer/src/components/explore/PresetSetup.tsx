@@ -160,6 +160,33 @@ function IntakeField({
         </div>
       )
     }
+    if (onEnhance) {
+      return (
+        <div className="relative">
+          <input
+            id={controlId}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={field.placeholder}
+            required={field.required}
+            aria-describedby={helpId}
+            className={`${inputClass} pr-9`}
+          />
+          <Button
+            type="button"
+            onClick={onEnhance}
+            disabled={enhancing}
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Enhance ${field.label.toLowerCase()} with AI`}
+            title="Enhance with local AI"
+            className="absolute bottom-1.5 right-1.5 text-muted-foreground hover:text-primary disabled:cursor-wait"
+          >
+            <Sparkle className={`h-3.5 w-3.5 ${enhancing ? 'animate-pulse text-primary' : ''}`} />
+          </Button>
+        </div>
+      )
+    }
     return (
       <input
         id={controlId}
@@ -220,7 +247,6 @@ export function PresetSetup({
   const [connectorReady, setConnectorReady] = useState<boolean | null>(null)
   const canStart = useMemo(() => hasRequiredPresetAnswers(preset, answers), [answers, preset])
   const recommendedConnector = preset.intake.recommendedConnector
-  const enhanceableFieldIds = new Set(['topic', 'relatedTopics', 'avoid'])
 
   const enhanceField = async (field: PresetIntakeField): Promise<void> => {
     if (enhancingFieldId) return
@@ -236,8 +262,10 @@ export function PresetSetup({
         ? 'Write one clear, specific learning goal in one short sentence.'
         : field.id === 'relatedTopics'
           ? 'Write 3 to 6 specific adjacent concepts as a comma-separated list.'
-          : 'Write a concise comma-separated list of low-signal topics, formats, or source traits to exclude. Do not invent named creators.'
-    const prompt = `Improve one field in a bounded social-feed learning plan.
+          : field.id === 'avoid'
+            ? 'Write a concise comma-separated list of low-signal topics, formats, or source traits to exclude. Do not invent named creators.'
+            : `Rewrite the value so it is clear, specific, concise, and suitable for "${field.label}". Follow this field guidance: ${field.help}`
+    const prompt = `Improve one field in an Assistant workflow.
 
 Field: ${field.label}
 Current value: ${currentValue || '(empty)'}
@@ -245,7 +273,7 @@ Other approved settings:
 ${context || '(none)'}
 
 ${format}
-Preserve the user's intent. Do not add actions, permissions, platforms, creators, hashtags, or commentary. Keep the result under 240 characters. Return only the replacement field value.`
+Preserve the user's intent. Do not invent missing facts or add actions, permissions, platforms, creators, hashtags, or commentary. Keep the result under 240 characters. Return only the replacement field value.`
     try {
       const result = await window.api.ragChat(
         prompt,
@@ -364,7 +392,7 @@ Preserve the user's intent. Do not add actions, permissions, platforms, creators
             value={answers[field.id] ?? ''}
             onChange={(value) => setAnswers((current) => ({ ...current, [field.id]: value }))}
             onEnhance={
-              preset.id === 'train-my-feed' && enhanceableFieldIds.has(field.id)
+              field.kind === 'text' || field.kind === 'textarea'
                 ? () => void enhanceField(field)
                 : undefined
             }
