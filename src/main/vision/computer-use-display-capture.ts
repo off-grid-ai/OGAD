@@ -65,6 +65,7 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
 }
 
 async function captureElectronDisplay(input: CaptureInput): Promise<ComputerUseDisplayCapture> {
+  ensureSupervisorCaptureWindowId()
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
     thumbnailSize: { width: input.width, height: input.height }

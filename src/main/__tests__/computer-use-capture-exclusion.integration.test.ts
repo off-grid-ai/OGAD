@@ -63,6 +63,10 @@ vi.mock('electron', () => ({
     loadFile(): Promise<void> {
       return Promise.resolve()
     }
+
+    static getAllWindows(): Array<{ getMediaSourceId(): string }> {
+      return [{ getMediaSourceId: () => 'window:91:0' }]
+    }
   },
   desktopCapturer: {
     getSources: vi.fn(async () => {
@@ -137,7 +141,7 @@ describe('Computer Use capture exclusion journey', () => {
     expect(JSON.parse(fs.readFileSync(captureArguments, 'utf8'))).toEqual([
       expect.stringMatching(/offgrid-computer-use-.*\.png$/),
       '1',
-      '73',
+      '73,91',
       '1728',
       '1080'
     ])
