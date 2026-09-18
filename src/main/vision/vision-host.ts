@@ -27,6 +27,7 @@ import type { VisionAction, Bounds } from './vision-action'
 import {
   type VisionScreen,
   type VisionSemanticElement,
+  type VisionTaskContinuation,
   type VisionTaskResult
 } from './vision-agent'
 import { VisionGuard } from './vision-guard'
@@ -83,8 +84,13 @@ async function activateDefaultBrowser(): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(helper, ['--default-browser'], { timeout: 4_000 })
     const browser = JSON.parse(stdout) as { name?: unknown; path?: unknown }
-    if (typeof browser.name !== 'string' || !browser.name.trim() ||
-        typeof browser.path !== 'string' || !browser.path.endsWith('.app')) return null
+    if (
+      typeof browser.name !== 'string' ||
+      !browser.name.trim() ||
+      typeof browser.path !== 'string' ||
+      !browser.path.endsWith('.app')
+    )
+      return null
     await execFileAsync('/usr/bin/open', ['-a', browser.path], { timeout: 5_000 })
     return browser.name
   } catch {
@@ -300,13 +306,15 @@ class VisionHost {
     const guard = continuation?.guard ?? new VisionGuard({ taskId, kind: 'computer_use' })
     const request = continuation?.request ?? new AbortController()
     const settings = getComputerUseSettings()
-    const defaultBrowser = process.platform === 'darwin' && /default browser/i.test(goal)
-      ? await activateDefaultBrowser()
-      : null
+    const defaultBrowser =
+      process.platform === 'darwin' && /default browser/i.test(goal)
+        ? await activateDefaultBrowser()
+        : null
     if (process.platform === 'darwin' && /default browser/i.test(goal) && !defaultBrowser) {
       return {
         ok: false,
-        summary: 'Computer Use could not identify and focus the macOS default browser. Check the default browser setting and retry.',
+        summary:
+          'Computer Use could not identify and focus the macOS default browser. Check the default browser setting and retry.',
         steps: [],
         handoffs: 0
       }
@@ -321,7 +329,11 @@ class VisionHost {
             llm.effectiveContextSize()
           )
           const retrievedFacts = [
-            ...(defaultBrowser ? [`macOS default browser: ${defaultBrowser}. It is now frontmost; use this browser for the task.`] : []),
+            ...(defaultBrowser
+              ? [
+                  `macOS default browser: ${defaultBrowser}. It is now frontmost; use this browser for the task.`
+                ]
+              : []),
             ...(checkpoint
               ? [
                   `Resume checkpoint for task ${checkpoint.taskId}: ${checkpoint.steps.join('; ')}`,
@@ -581,12 +593,6 @@ class VisionHost {
       }
     }
   }
-}
-
-export interface VisionTaskContinuation {
-  guard: VisionGuard
-  request: AbortController
-  queuedGuidance: string[]
 }
 
 let host: VisionHost | null = null

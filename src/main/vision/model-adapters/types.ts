@@ -1,6 +1,6 @@
 import type { ContentPart } from '../../llm/chat-payload'
 import type { Bounds, VisionAction } from '../vision-action'
-import type { VisionActionEffect, VisionSemanticElement } from '../vision-agent'
+import type { VisionActionEffect, VisionSemanticElement } from '../vision-common-types'
 
 export interface VisionModelArtifacts {
   id: string
