@@ -93,6 +93,24 @@ func runTextExtractor() {
         runAppsList()
         return
     }
+    // LaunchServices is the authority for the user's HTTPS browser; Dock icons
+    // and running-app order cannot identify the configured default reliably.
+    if args.count >= 2 && args[1] == "--default-browser" {
+        guard let url = URL(string: "https://example.com/"),
+              let appURL = NSWorkspace.shared.urlForApplication(toOpen: url) else {
+            exit(1)
+        }
+        let bundle = Bundle(url: appURL)
+        let name = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? appURL.deletingPathExtension().lastPathComponent
+        guard let data = try? JSONSerialization.data(withJSONObject: ["name": name, "path": appURL.path]),
+              let output = String(data: data, encoding: .utf8) else {
+            exit(1)
+        }
+        print(output)
+        return
+    }
     // Screenshot-only vision asks only whether the focused native field is safe.
     // The helper never reads or emits the field value.
     if args.count >= 2 && args[1] == "--focused-element" {
