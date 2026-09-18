@@ -173,7 +173,7 @@ describe('UI-Mate policy', () => {
         ? { ...message, content: [{ type: 'text', text: UI_MATE_SYSTEM_PROMPT }] }
         : message.role === 'assistant'
           ? { ...message, content: message.content.map((part) => part.type === 'text'
-            ? { ...part, text: part.text.replace(/<think>[\s\S]*?<\/think>\s*/g, '') }
+            ? { ...part, text: (part.text ?? '').replace(/<think>[\s\S]*?<\/think>\s*/g, '') }
             : part) }
           : message
     )
