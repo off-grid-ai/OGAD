@@ -9,6 +9,7 @@
  * relaunch behavior stay real.
  */
 import { afterAll, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -57,6 +58,7 @@ function isFirstUseModelKind(kind: string): kind is JourneyModel['kind'] {
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const delivery = new Map<string, Buffer>()
+const originalCatalogHashes: Array<{ file: { sha256?: string }; sha256?: string }> = []
 const interrupted = new Set<string>()
 const resumedRanges = new Map<string, string>()
 let interruptDownloads = true
@@ -148,6 +150,24 @@ function fixtureBytes(fileName: string, seed: number): Buffer {
   return Buffer.concat([Buffer.from(`off-grid-${fileName}-`), Buffer.alloc(2_048, seed)])
 }
 
+function installCatalogFixtureHashes(
+  models: JourneyModel[],
+  catalog: Array<{ id: string; files: Array<{ name: string; sha256?: string }> }>
+): void {
+  models.forEach((model, modelIndex) => {
+    model.files.forEach((file, fileIndex) => {
+      const bytes = fixtureBytes(file.name, modelIndex * 10 + fileIndex + 1)
+      const catalogFile = catalog
+        .find((entry) => entry.id === model.id)
+        ?.files.find((entry) => entry.name === file.name)
+      if (catalogFile) {
+        originalCatalogHashes.push({ file: catalogFile, sha256: catalogFile.sha256 })
+        catalogFile.sha256 = createHash('sha256').update(bytes).digest('hex')
+      }
+    })
+  })
+}
+
 function installDownloadBoundary(models: JourneyModel[]): void {
   models.forEach((model, modelIndex) => {
     model.files.forEach((file, fileIndex) => {
@@ -230,6 +250,7 @@ function expectWav(dataUrl: string): void {
 }
 
 afterAll(async () => {
+  for (const { file, sha256 } of originalCatalogHashes) file.sha256 = sha256
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   try {
@@ -315,6 +336,9 @@ describe('fresh setup to first use', () => {
       })
     const models = [...baselineModels, ...additionalModels]
     expect(new Set(models.map((model) => model.kind))).toEqual(new Set(requiredKinds))
+    // The HTTP boundary serves tiny valid fixture bytes; give those bytes a matching
+    // test-only catalog digest so the real download integrity gate remains exercised.
+    installCatalogFixtureHashes(models, CATALOG)
     installDownloadBoundary(models)
 
     // Each representative modality download loses its connection after writing a
@@ -334,11 +358,15 @@ describe('fresh setup to first use', () => {
     // then the same download owner resumes the remaining catalog modalities.
     vi.resetModules()
     interruptDownloads = false
-    const [{ llm: resumedLlm }, resumedSetup, resumedManager] = await Promise.all([
+    const [{ llm: resumedLlm }, resumedSetup, resumedManager, resumedCatalog] = await Promise.all([
       import('../llm'),
       import('../setup'),
-      import('../models-manager')
+      import('../models-manager'),
+      import('@offgrid/models')
     ])
+    // A relaunch creates fresh catalog objects too, while the served fixture bytes
+    // stay the same. Preserve checksum verification on both sides of that boundary.
+    installCatalogFixtureHashes(models, resumedCatalog.CATALOG)
     expect(resumedManager.listDownloads()).toEqual(
       expect.arrayContaining(
         models.map((model) =>
