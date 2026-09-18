@@ -220,28 +220,6 @@ function installDownloadBoundary(models: JourneyModel[]): void {
   )
 }
 
-/**
- * Wait until the runtime under test has let go of the port IT bound.
- *
- * Take the port from the runtime (llm.getPort()) rather than naming 8439: when 8439 is already busy the
- * app deliberately falls back to a free port, so a hardcoded number can end up watching a port this
- * runtime never owned - which is either a neighbour's live server (fails for the wrong reason) or nothing
- * at all (passes without proving anything). Every dbtest in this suite shares one worker and the same
- * default port, so that is not hypothetical.
- */
-async function waitForPortRelease(port: number): Promise<void> {
-  const deadline = Date.now() + 2_000
-  while (Date.now() < deadline) {
-    try {
-      await fetch(`http://127.0.0.1:${port}/health`)
-    } catch {
-      return
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-  throw new Error(`runtime boundary still owns port ${port}`)
-}
-
 function expectWav(dataUrl: string): void {
   expect(dataUrl).toMatch(/^data:audio\/wav;base64,/)
   expect(Buffer.from(dataUrl.split(',')[1]!, 'base64').subarray(0, 4).toString('ascii')).toBe(
@@ -486,11 +464,11 @@ describe('fresh setup to first use', () => {
     expect(await resumedManager.getActiveModelIds()).not.toContain(textModel.id)
 
     const requestsAfterFirstUse = remoteRequests
-    const resumedPort = resumedLlm.getPort()
-    resumedLlm.stop()
+    // The awaitable owner verifies its own child exited. A /health probe on a
+    // shared default port can hit another suite's newly started runtime.
+    expect((await resumedLlm.unload()).outcome).not.toBe('stuck')
     const database = await import('../database')
     database.getDB().close()
-    await waitForPortRelease(resumedPort)
 
     // A second relaunch must consume the exact persisted install and selections.
     // It must not repair or redownload anything to make first use work again.
@@ -553,9 +531,7 @@ describe('fresh setup to first use', () => {
     expect(regenerated.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
     expect(remoteRequests).toBe(requestsAfterFirstUse)
 
-    const relaunchedPort = relaunchedLlm.getPort()
-    relaunchedLlm.stop()
-    await waitForPortRelease(relaunchedPort)
+    expect((await relaunchedLlm.unload()).outcome).not.toBe('stuck')
     const relaunchedDatabase = await import('../database')
     relaunchedDatabase.getDB().close()
   }, 30_000)
