@@ -271,6 +271,16 @@ describe('fresh setup to first use', () => {
     )
     const plan = await setup.getSetupPlan()
     expect(plan.mode).toBe('conservative')
+    // Exercise the desktop-only packed-weight recommendation through the same
+    // persisted setup owner, without changing the conservative first-use path.
+    const totalmem = vi.spyOn(os, 'totalmem').mockReturnValue(16e9)
+    try {
+      expect((await setup.recommendChatModel('balanced'))?.id).toBe(
+        'prism-ml/Ternary-Bonsai-2-27B-gguf'
+      )
+    } finally {
+      totalmem.mockRestore()
+    }
     expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
     expect(plan.items.every((item) => item.installed === false)).toBe(true)
 
