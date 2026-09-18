@@ -199,7 +199,7 @@ export async function recommendChatModel(
   const mode: RecMode = modeOverride ?? settingsMode()
   const frac = recommendBudgetFraction(mode)
   const budget = gb * frac * 1e9
-  // Bonsai's packed 1-bit weights fit the Balanced loader's memory envelope at
+  // Bonsai's packed PQ2 weights fit the Balanced loader's memory envelope at
   // 16 GB, even though they exceed the general 38% recommendation budget. Leave
   // room for context and the loader's normal reserve before recommending it.
   const { frac: balancedFrac, reserveGb } = modeBudget('balanced')

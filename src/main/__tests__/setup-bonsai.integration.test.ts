@@ -34,7 +34,7 @@ describe('Balanced setup preview', () => {
       totalmem.mockReturnValue(16e9)
       const capable = await setup.getSetupPlan('balanced')
       expect(capable.items[0]?.id).toBe('prism-ml/Ternary-Bonsai-2-27B-gguf')
-      expect(capable.items[0]!.sizeGb).toBeGreaterThan(6)
+      expect(capable.items[0]!.sizeGb).toBeGreaterThan(7.8)
       expect((await setup.getSetupPlan('conservative')).items[0]?.id).not.toBe(
         'prism-ml/Ternary-Bonsai-2-27B-gguf'
       )

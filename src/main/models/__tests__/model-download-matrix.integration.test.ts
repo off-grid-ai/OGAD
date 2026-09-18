@@ -195,6 +195,41 @@ afterAll(() => {
 })
 
 describe('model download release matrix', () => {
+  it('downloads the GGUF selected in the file picker even when the repo is cataloged', async () => {
+    const repoId = 'prism-ml/Ternary-Bonsai-2-27B-gguf'
+    const selected = 'Ternary-Bonsai-2-27B-PTQ1_0.gguf'
+    const projector = 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf'
+    const requested: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      requested.push(url)
+      if (url.includes('/api/models/')) {
+        return new Response(JSON.stringify({ siblings: [
+          { rfilename: selected, size: 2048 },
+          { rfilename: projector, size: 2048 }
+        ] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.endsWith(selected) || url.endsWith(projector)) {
+        return new Response(new Uint8Array(Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(2044)])), {
+          status: 200,
+          headers: { 'content-length': '2048' }
+        })
+      }
+      throw new Error(`Unexpected download: ${url}`)
+    }))
+
+    try {
+      expect(await manager.downloadModel(repoId, undefined, selected)).toEqual({ success: true })
+      expect(requested.some((url) => url.endsWith(selected))).toBe(true)
+      expect(requested.some((url) => url.endsWith('Ternary-Bonsai-2-27B-PQ2_0.gguf'))).toBe(false)
+      expect(fs.existsSync(path.join(dataDir, 'models', selected))).toBe(true)
+    } finally {
+      fs.rmSync(path.join(dataDir, 'models', selected), { force: true })
+      fs.rmSync(path.join(dataDir, 'models', projector), { force: true })
+      await manager.clearDownload(repoId)
+    }
+  })
+
   it('downloads the chat (vision) model with observable progress and makes it activatable (#17)', async () => {
     const { progress } = await downloadEveryRequiredFile(chatModel)
 

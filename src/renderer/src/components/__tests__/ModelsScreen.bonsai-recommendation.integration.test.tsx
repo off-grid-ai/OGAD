@@ -5,16 +5,22 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const BONSAI = {
   id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
-  name: 'Bonsai 2 27B (1-bit)',
+  name: 'Bonsai 2 27B',
   kind: 'text',
   org: 'Prism ML',
   params: 27,
   minRamGb: 16,
-  files: [{ name: 'Ternary-Bonsai-2-27B-PTQ1_0.gguf', sizeBytes: 5_946_648_928 },
-    { name: 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf', sizeBytes: 629_246_976 }]
+  files: [
+    { name: 'Ternary-Bonsai-2-27B-PQ2_0.gguf', sizeBytes: 7_206_168_928 },
+    { name: 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf', sizeBytes: 629_246_976 }
+  ]
 }
 const SMALL = {
-  id: 'acme/small', name: 'Small Model', kind: 'text', org: 'Acme', params: 2,
+  id: 'acme/small',
+  name: 'Small Model',
+  kind: 'text',
+  org: 'Acme',
+  params: 2,
   files: [{ name: 'small.gguf', sizeBytes: 2_000_000_000 }]
 }
 
@@ -43,7 +49,9 @@ describe('<ModelsScreen/> Bonsai recommendation', () => {
     const { ModelsScreen } = await import('../ModelsScreen')
     render(<ModelsScreen />)
     await screen.findByText(BONSAI.name)
-    await waitFor(() => expect(screen.getAllByRole('listitem')[0]?.textContent).toContain(BONSAI.name))
+    await waitFor(() =>
+      expect(screen.getAllByRole('listitem')[0]?.textContent).toContain(BONSAI.name)
+    )
     const card = screen.getByText(BONSAI.name).closest('[role="listitem"]') as HTMLElement
     expect(within(card).getByText('Works best')).toBeTruthy()
     expect(within(card).getByText('Recommended for you')).toBeTruthy()

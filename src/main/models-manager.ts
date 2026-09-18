@@ -72,22 +72,22 @@ import {
 // runtime cannot load Bonsai 2 yet.
 export const BONSAI_2: ModelEntry = {
   id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
-  name: 'Bonsai 2 27B (1-bit)',
+  name: 'Bonsai 2 27B',
   kind: 'text',
   org: 'Prism ML',
   description: 'Compact 27B reasoning model with optional vision; uses the bundled Prism engine.',
   params: 27,
   minRamGb: 16,
-  quant: 'PTQ1_0',
+  quant: 'PQ2_0',
   tags: [],
   isNew: true,
   releaseDate: '2026-09-17',
   files: [
     {
-      name: 'Ternary-Bonsai-2-27B-PTQ1_0.gguf',
-      url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/6ed5e12bf84b7a63069882c91dd9e9218647d17b/Ternary-Bonsai-2-27B-PTQ1_0.gguf',
-      sizeBytes: 5946648928,
-      sha256: '53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3',
+      name: 'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/6ed5e12bf84b7a63069882c91dd9e9218647d17b/Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      sizeBytes: 7206168928,
+      sha256: '3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1',
       role: 'primary'
     },
     {
@@ -295,13 +295,14 @@ export async function downloadModel(
   const CATALOG = await desktopCatalog()
   const inCatalog = CATALOG.find((m) => m.id === modelId)
   let entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
-  if (fileName && !inCatalog && entry) {
+  if (fileName && entry) {
     const variant = (await getModelFiles(modelId)).find((file) => file.fileName === fileName)
     if (!variant) return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
+    const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
     entry = {
       ...entry,
       files: [
-        { name: variant.fileName, url: variant.downloadUrl, sizeBytes: variant.sizeBytes, role: 'primary' },
+        { name: variant.fileName, url: variant.downloadUrl, sizeBytes: variant.sizeBytes, sha256: catalogFile?.sha256, role: 'primary' },
         ...(variant.mmproj ? [{ name: variant.mmproj.fileName, url: variant.mmproj.url, sizeBytes: variant.mmproj.sizeBytes, role: 'mmproj' as const }] : [])
       ]
     }
