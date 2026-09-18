@@ -15,17 +15,33 @@ set -euo pipefail
 
 # ONE owner for the version: package.json, where every other version in this repo already lives. It was
 # hardcoded here AND in fetch-win-binaries.ps1 AND passed again by two callers - one fact with four homes.
-# The macOS source build and the Windows binary fetch must be the same llama.cpp, or grammar and native
-# tool-call handling differ between the platforms of a single release.
+# The standard macOS source build and Windows binary fetch share one llama.cpp pin.
+# Bonsai 2 needs an additional PrismML fork, pinned separately below.
 LLAMA_REF="${LLAMA_REF:-$(node -p "require('$(cd "$(dirname "$0")/.." && pwd)/package.json').offgrid.llamaRef")}"
+LLAMA_VARIANT="${LLAMA_VARIANT:-standard}"
+if [ "$LLAMA_VARIANT" = prism ]; then
+  LLAMA_REF="${PRISM_LLAMA_REF:-$(node -p "require('$(cd "$(dirname "$0")/.." && pwd)/package.json').offgrid.prismLlamaRef")}"
+  LLAMA_REPO=https://github.com/PrismML-Eng/llama.cpp
+  LLAMA_DIR=llama-prism
+  # The Prism fork currently asks AppleClang for apple-m4 on this build host,
+  # which the installed compiler rejects. Metal remains enabled; generic CPU
+  # code keeps the binary portable across supported Macs.
+  NATIVE_CPU=OFF
+elif [ "$LLAMA_VARIANT" = standard ]; then
+  LLAMA_REPO=https://github.com/ggml-org/llama.cpp
+  LLAMA_DIR=llama
+  NATIVE_CPU=ON
+else
+  echo "[build-llama] unknown variant: $LLAMA_VARIANT" >&2; exit 1
+fi
 TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"             # runs on macOS 13+
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-DEST="$ROOT/resources/bin/llama"
+DEST="$ROOT/resources/bin/$LLAMA_DIR"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "[build-llama] ref=$LLAMA_REF target=$TARGET"
-git clone --depth 1 --branch "$LLAMA_REF" https://github.com/ggml-org/llama.cpp "$WORK/src"
+echo "[build-llama] variant=$LLAMA_VARIANT ref=$LLAMA_REF target=$TARGET"
+git clone --depth 1 --branch "$LLAMA_REF" "$LLAMA_REPO" "$WORK/src"
 cd "$WORK/src"
 
 # No CURL / no OpenSSL: the server runs on 127.0.0.1 HTTP and the app downloads
@@ -34,6 +50,7 @@ cd "$WORK/src"
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$TARGET" \
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
+  -DGGML_NATIVE="$NATIVE_CPU" \
   -DGGML_OPENMP=OFF \
   -DLLAMA_CURL=OFF \
   -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON -DCMAKE_DISABLE_FIND_PACKAGE_CURL=ON \
@@ -67,7 +84,7 @@ if version_exceeds "$MINOS" "$TARGET"; then
   echo "[build-llama] FATAL: minos $MINOS exceeds target $TARGET — would break older macOS"; exit 1
 fi
 
-# Stage the single engine: the server + every shared lib it links, co-located.
+# Stage this engine variant: the server + every shared lib it links, co-located.
 # (llm.ts spawns with DYLD_LIBRARY_PATH=<this dir>, so co-location is enough.)
 rm -rf "$DEST"; mkdir -p "$DEST"
 cp "$BIN" "$DEST/"
@@ -110,4 +127,4 @@ if [ -n "$MISSING" ]; then
   echo "[build-llama] FATAL: engine references @rpath libs missing or not staged as real files: $MISSING"; exit 1
 fi
 
-echo "[build-llama] done — single engine, minos=$MINOS, no foreign deps, all @rpath libs present"
+echo "[build-llama] done — $LLAMA_VARIANT engine, minos=$MINOS, no foreign deps, all @rpath libs present"

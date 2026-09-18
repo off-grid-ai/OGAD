@@ -18,6 +18,7 @@ export const REQUIRED_MAC_BUNDLE_FILES = Object.freeze([
   'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework',
   'Contents/Resources/app.asar',
   'Contents/Resources/bin/llama/llama-server',
+  'Contents/Resources/bin/llama-prism/llama-server',
   'Contents/Resources/bin/meeting-recorder',
   'Contents/Resources/bin/computer-use-capture',
   'Contents/Resources/bin/dictation-hotkey'
@@ -27,6 +28,7 @@ export const REQUIRED_EXECUTABLE_FILES = new Set([
   'Contents/MacOS/Off Grid AI Desktop',
   'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework',
   'Contents/Resources/bin/llama/llama-server',
+  'Contents/Resources/bin/llama-prism/llama-server',
   'Contents/Resources/bin/meeting-recorder',
   'Contents/Resources/bin/computer-use-capture',
   'Contents/Resources/bin/dictation-hotkey'

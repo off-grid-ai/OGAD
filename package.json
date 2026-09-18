@@ -3,7 +3,8 @@
   "productName": "Off Grid AI Desktop",
   "version": "0.0.44",
   "offgrid": {
-    "llamaRef": "b10369"
+    "llamaRef": "b10369",
+    "prismLlamaRef": "prism-b10685-7dffb15"
   },
   "description": "Off Grid AI — a private, local-first AI that runs open models (text, vision, image, voice) entirely on your device. No cloud, no accounts.",
   "license": "AGPL-3.0-only",
