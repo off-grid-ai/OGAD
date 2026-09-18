@@ -1299,6 +1299,7 @@ export function MemoryChat({
             setConvMessages(null, [])
             setActiveProjectId(null)
             setPresetSetup(presetById(openTarget.presetId) ?? null)
+            setToolsOn(true)
           } else if (openTarget.draftPrompt) {
             setActiveConversationId(null)
             setConvMessages(null, [])
@@ -3705,7 +3706,10 @@ export function MemoryChat({
                               </div>
                               {mode !== 'image' ? (
                                 <ExploreSection
-                                  onRun={setPresetSetup}
+                                  onRun={(preset) => {
+                                    setPresetSetup(preset)
+                                    setToolsOn(true)
+                                  }}
                                   requestUrl={REQUEST_FORM_URL}
                                   className="mt-6 w-full text-left"
                                 />
