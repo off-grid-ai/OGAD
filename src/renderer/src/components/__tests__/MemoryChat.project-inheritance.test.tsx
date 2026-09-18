@@ -53,6 +53,21 @@ function installApi(
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     onImageGenProgress: vi.fn(() => () => { }),
+    onImageGenJobState: vi.fn(() => () => { }),
+    onImageGenConversationUpdated: vi.fn(() => () => { }),
+    imageGenJobStatus: vi.fn(async () => ({
+      id: null,
+      phase: 'idle' as const,
+      conversationId: null,
+      projectId: null,
+      stage: null,
+      enhancedPrompt: '',
+      progress: null,
+      outputPath: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null
+    })),
     onRagStream: vi.fn(() => () => { }),
     getRagConversations: vi.fn(async () => (existingConversation ? [existingConversation] : [])),
     getRagConversation: vi.fn(async (id: string) =>

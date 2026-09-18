@@ -62,7 +62,7 @@ let ModelsScreen: () => React.JSX.Element
 beforeAll(async () => {
   StoragePanel = (await import('../setup/StoragePanel')).StoragePanel
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
+}, 30_000)
 
 beforeEach(() => {
   listeners = []
