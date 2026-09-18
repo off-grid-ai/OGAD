@@ -108,6 +108,8 @@ describe('<MemoryChat/> - response limit through public renderer contracts', () 
         models: [{ id: 'local/qwen', name: 'Qwen 3.5 2B' }]
       }),
       getActiveModel: async () => 'local/qwen',
+      getActiveModelIds: async () => ['local/qwen'],
+      getModelVisionStatus: async () => ({}),
       getLlmSettings: async () => settings,
       setLlmSettings,
       ttsVoices: async () => [],
