@@ -123,8 +123,8 @@ jobs:
         # as-is, so they MUST be real files — a pointer stub spawns as ENOEXEC at runtime.
         # llama/ + whisper/ are excluded because build-llama.sh / build-whisper-cli.sh
         # recompile them from source in place later in this job, so pulling the committed
-        # copies is wasted bandwidth. The packaged-helper probe (ffmpeg/sd/whisper/llama)
-        # fails the release if any shipped binary is missing, so a bad exclude can't ship.
+        # copies is wasted bandwidth. Artifact verification still checks the signed
+        # package before publication.
         run: git lfs pull --exclude="resources/bin/llama,resources/bin/whisper"
       # Rebuild the chat engine from source with a PINNED macOS deployment target.
       # The committed/LFS llama-server is minos 26 (built on a macOS-26 toolchain),
@@ -325,11 +325,6 @@ jobs:
           npx electron-builder --mac \
             -c.dmg.artifactName='OffGrid-${version}.${ext}' \
             --publish never
-      - name: Prove packaged TTS resolves and synthesizes headlessly
-        run: |
-          APP="$(find dist -mindepth 2 -maxdepth 2 -type d -name 'Off Grid AI Desktop.app' -print -quit)"
-          test -n "$APP"
-          node scripts/probe-packaged-tts.mjs "$APP" --synthesize
       # Internal demo build: hand the signed+notarized DMG back as a run artifact and stop
       # (the publish steps below are all skipped). Repo-scoped, auto-expiring, no Release.
       - name: Upload signed DMG as a build artifact

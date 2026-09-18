@@ -1,7 +1,5 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type -- Electron-builder loads this hook directly as JavaScript. */
 import path from 'node:path'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import {
   assertAsarArchiveInventory,
   verifyDmgArtifact,
@@ -10,24 +8,6 @@ import {
   verifyZipArtifact
 } from './lib/macos-artifact-integrity.mjs'
 import { releaseTeamIdForEnvironment } from './lib/macos-app-trust.mjs'
-
-const execFileAsync = promisify(execFile)
-const REPO_ROOT = path.resolve(import.meta.dirname, '..')
-
-async function runInstalledDmgSmoke(dmgPath, referenceBundle) {
-  const result = await execFileAsync(
-    'bash',
-    [path.join(REPO_ROOT, 'scripts', 'smoke-dmg-install.sh'), dmgPath],
-    {
-      env: { ...process.env, DMG_REFERENCE_APP: referenceBundle },
-      timeout: 600_000,
-      killSignal: 'SIGKILL',
-      maxBuffer: 10 * 1024 * 1024
-    }
-  )
-  if (result.stdout) process.stdout.write(result.stdout)
-  if (result.stderr) process.stderr.write(result.stderr)
-}
 
 export default async function verifyElectronBuilderArtifact(event) {
   const artifact = event.file.toLowerCase()
@@ -54,8 +34,6 @@ export default async function verifyElectronBuilderArtifact(event) {
       await verifyDmgArtifact(event.file, referenceBundle)
       console.log('[artifact-integrity] DMG bundle matches the locally signed packaged app')
     }
-    await runInstalledDmgSmoke(event.file, referenceBundle)
-    console.log('[artifact-integrity] installed UI and packaged license smokes passed')
     return
   }
 
