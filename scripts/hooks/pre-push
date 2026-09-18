@@ -41,19 +41,26 @@ collect_changed_files() {
 CHANGED_FILES=$(collect_changed_files)
 CHANGED_CODE=$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
 
-if [ -z "$CHANGED_CODE" ]; then
-  echo "[pre-push] no JavaScript or TypeScript changes — fast gate passed."
+if [ -z "$CHANGED_CODE" ] && ! printf '%s\n' "$CHANGED_FILES" | grep -qx 'pro'; then
+  echo "[pre-push] no JavaScript or TypeScript or Pro changes — fast gate passed."
   exit 0
 fi
 
-echo "[pre-push] typecheck"
-npm run --silent typecheck
+if [ -n "$CHANGED_CODE" ]; then
+  echo "[pre-push] typecheck"
+  npm run --silent typecheck
+fi
 
-echo "[pre-push] tests related to pushed files"
-OFFGRID_HOOK_DATA_DIR=$(mktemp -d)
-trap 'rm -rf -- "$OFFGRID_HOOK_DATA_DIR"' EXIT
-export OFFGRID_DATA_DIR="$OFFGRID_HOOK_DATA_DIR"
-printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
-  xargs -0 npx vitest related --run --project product-integration --passWithNoTests --bail=1
+echo "[pre-push] Pro typecheck"
+(cd pro && npx tsc --noEmit -p tsconfig.json)
+
+if [ -n "$CHANGED_CODE" ]; then
+  echo "[pre-push] tests related to pushed files"
+  OFFGRID_HOOK_DATA_DIR=$(mktemp -d)
+  trap 'rm -rf -- "$OFFGRID_HOOK_DATA_DIR"' EXIT
+  export OFFGRID_DATA_DIR="$OFFGRID_HOOK_DATA_DIR"
+  printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
+    xargs -0 npx vitest related --run --project product-integration --passWithNoTests --bail=1
+fi
 
 echo "[pre-push] fast gate passed. CI runs full coverage, DB, heavy integration, and E2E."
