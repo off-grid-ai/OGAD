@@ -201,12 +201,15 @@ afterAll(async () => {
  * The rail is the <aside> (role complementary), so anything outside it is transcript.
  */
 async function inTranscript(text: string | RegExp): Promise<HTMLElement> {
-  return waitFor(() => {
-    const rail = screen.queryByRole('complementary')
-    const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
-    expect(shown.length).toBeGreaterThan(0)
-    return shown[0]!
-  }, { timeout: 5_000 })
+  return waitFor(
+    () => {
+      const rail = screen.queryByRole('complementary')
+      const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
+      expect(shown.length).toBeGreaterThan(0)
+      return shown[0]!
+    },
+    { timeout: 5_000 }
+  )
 }
 
 describe('production workspace bridge', () => {
@@ -272,7 +275,9 @@ describe('production workspace bridge', () => {
         button: 0,
         ctrlKey: false
       })
-      await user.click(await screen.findByRole('menuitem', { name: /Tools/ }))
+      if (screen.queryByRole('menuitem', { name: 'ConnectorsOff' })) {
+        await user.click(screen.getByRole('menuitem', { name: 'ConnectorsOff' }))
+      }
       await user.keyboard('{Escape}')
       fireEvent.change(composer, {
         target: { value: 'Read the supplied web addresses and reject unsupported URL schemes' }
@@ -306,8 +311,8 @@ describe('production workspace bridge', () => {
       const composerOptions = screen.queryByRole('button', { name: 'Composer options' })
       if (composerOptions) {
         fireEvent.pointerDown(composerOptions, { button: 0, ctrlKey: false })
-        const enabledTools = screen.queryByRole('menuitem', { name: 'ToolsOn' })
-        if (enabledTools) await user.click(enabledTools)
+        const enabledConnectors = screen.queryByRole('menuitem', { name: 'ConnectorsOn' })
+        if (enabledConnectors) await user.click(enabledConnectors)
         await user.keyboard('{Escape}')
       }
       await new Promise<void>((resolve, reject) =>
@@ -497,7 +502,9 @@ describe('production workspace bridge', () => {
         button: 0,
         ctrlKey: false
       })
-      await user.click(await screen.findByRole('menuitem', { name: /Tools/ }))
+      if (screen.queryByRole('menuitem', { name: 'ConnectorsOff' })) {
+        await user.click(screen.getByRole('menuitem', { name: 'ConnectorsOff' }))
+      }
       await user.keyboard('{Escape}')
       fireEvent.change(composer, { target: { value: 'Calculate six times seven' } })
       await user.click(screen.getByRole('button', { name: /^send$/i }))
@@ -516,8 +523,8 @@ describe('production workspace bridge', () => {
       const composerOptions = screen.queryByRole('button', { name: 'Composer options' })
       if (composerOptions) {
         fireEvent.pointerDown(composerOptions, { button: 0, ctrlKey: false })
-        const enabledTools = screen.queryByRole('menuitem', { name: 'ToolsOn' })
-        if (enabledTools) await user.click(enabledTools)
+        const enabledConnectors = screen.queryByRole('menuitem', { name: 'ConnectorsOn' })
+        if (enabledConnectors) await user.click(enabledConnectors)
         await user.keyboard('{Escape}')
       }
     }
