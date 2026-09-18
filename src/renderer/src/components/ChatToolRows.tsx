@@ -26,6 +26,8 @@ type DisplayTool =
 interface ChatToolRowsProps {
   tools?: readonly DisplayTool[]
   thinking?: ReactNode
+  /** Whether the thinking row has content beyond a waiting indicator. */
+  thinkingHasContent?: boolean
   /** Live status shown below, but outside, the ordered work timeline. */
   footer?: ReactNode
   timeline?: readonly AssistantTimelineEntry[]
@@ -239,6 +241,7 @@ function liveTaskToolIndex(
 export function ChatToolRows({
   tools,
   thinking,
+  thinkingHasContent = Boolean(thinking),
   footer,
   timeline,
   thinkingLive = false,
@@ -294,6 +297,9 @@ export function ChatToolRows({
       ]
     : projected.map((_, index) => ({ kind: 'tool', toolIndex: index }))
   const hasOrderedThinking = ordered.some((entry) => entry.kind === 'thinking')
+  const hasToolRows = projected.length > 0
+  const hasTimelineContent =
+    hasToolRows || thinkingHasContent || ordered.some((entry) => entry.kind === 'thinking' && !!entry.text.trim())
   // The ephemeral mesh preview retains only its newest tools. Durable toolCalls has every call.
   const toolOffset = Math.max(
     0,
@@ -305,24 +311,28 @@ export function ChatToolRows({
   const workState = workIsLive ? 'live' : stopped ? 'stopped' : failed ? 'failed' : 'done'
   const timelineRows = (
     <ol
-      className="ml-1 mt-1 w-full max-w-[85%] border-l border-neutral-800 text-neutral-500"
+      className={`ml-1 mt-1 w-full max-w-[85%] text-neutral-500 ${hasTimelineContent ? 'border-l border-neutral-800' : ''}`}
       aria-label={thinking || hasOrderedThinking ? 'Thinking and tool calls' : 'Tool calls'}
     >
       {thinking && !hasOrderedThinking ? (
-        <li className="relative pb-2 pl-4">
-          <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
-            <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
-          </span>
+        <li className={`relative pb-2 ${hasTimelineContent ? 'pl-4' : ''}`}>
+          {thinkingHasContent ? (
+            <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
+              <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
+            </span>
+          ) : null}
           {thinking}
         </li>
       ) : null}
       {ordered.map((entry, orderIndex) => {
         if (entry.kind === 'thinking') {
           return (
-            <li key={`thinking:${orderIndex}`} className="relative pb-2 pl-4 last:pb-0">
-              <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
-                <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
-              </span>
+            <li key={`thinking:${orderIndex}`} className={`relative pb-2 last:pb-0 ${hasTimelineContent ? 'pl-4' : ''}`}>
+              {entry.text.trim() ? (
+                <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
+                  <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
+                </span>
+              ) : null}
               <ChatThinkingBlock
                 content={entry.text}
                 live={thinkingLive && orderIndex === ordered.length - 1}
@@ -437,10 +447,12 @@ export function ChatToolRows({
         )
       })}
       {thinking && hasOrderedThinking ? (
-        <li className="relative pb-2 pl-4 last:pb-0">
-          <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
-            <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
-          </span>
+        <li className={`relative pb-2 last:pb-0 ${hasTimelineContent ? 'pl-4' : ''}`}>
+          {thinkingHasContent ? (
+            <span className="absolute -left-1.5 top-1 flex h-3 w-3 items-center justify-center bg-neutral-950">
+              <Circle weight="fill" className="h-2 w-2 text-neutral-500" aria-hidden="true" />
+            </span>
+          ) : null}
           {thinking}
         </li>
       ) : null}

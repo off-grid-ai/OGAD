@@ -3848,6 +3848,7 @@ export function MemoryChat({
                               ) : (
                                 <ChatToolRows
                                   live
+                                  thinkingHasContent={false}
                                   thinking={
                                     <span className="text-[11px] text-neutral-500" role="status">
                                       {waitingLabel({ noMemory, hasProject: !!activeProjectId })}
