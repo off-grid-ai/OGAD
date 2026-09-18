@@ -86,6 +86,18 @@ export function persistTaskResultInChat(db: Database.Database, task: TaskRunSnap
     .get(conversationId)
   if (!conversation) return false
 
+  // An older run may publish its final state long after a replacement has started.
+  // Keep that late result in Task History without presenting it as the current
+  // task's outcome at the end of this Chat.
+  const newerTask = db
+    .prepare(
+      `SELECT 1 FROM task_run_history
+       WHERE journey_id = ? AND task_id <> ? AND started_at > ?
+       LIMIT 1`
+    )
+    .get(conversationId, task.taskId, task.startedAt)
+  if (newerTask) return false
+
   const messages = db
     .prepare(
       `SELECT uuid, content, context
