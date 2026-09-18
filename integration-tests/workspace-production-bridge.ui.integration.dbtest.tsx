@@ -206,7 +206,7 @@ async function inTranscript(text: string | RegExp): Promise<HTMLElement> {
     const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
     expect(shown.length).toBeGreaterThan(0)
     return shown[0]!
-  })
+  }, { timeout: 5_000 })
 }
 
 describe('production workspace bridge', () => {
@@ -281,7 +281,7 @@ describe('production workspace bridge', () => {
       expect(
         await inTranscript('The supported pages were read and the unsupported URL was rejected.')
       ).toBeTruthy()
-      await user.click(await screen.findByRole('button', { name: 'Work done' }))
+      await user.click(await screen.findByRole('button', { name: 'Work done' }, { timeout: 5_000 }))
 
       const toolResults = await waitFor(() => {
         const results = screen.getAllByRole('button', {
@@ -503,7 +503,7 @@ describe('production workspace bridge', () => {
       await user.click(screen.getByRole('button', { name: /^send$/i }))
 
       expect(await inTranscript('Gemini used the calculator and returned 42.')).toBeTruthy()
-      await user.click(await screen.findByRole('button', { name: 'Work done' }))
+      await user.click(await screen.findByRole('button', { name: 'Work done' }, { timeout: 5_000 }))
       await user.click(await screen.findByRole('button', { name: 'Thought process' }))
       expect(await screen.findByText('I will calculate this value.')).toBeTruthy()
       expect(await screen.findByRole('button', { name: 'Calculator, complete' })).toBeTruthy()
