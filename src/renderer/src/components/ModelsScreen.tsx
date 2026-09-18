@@ -131,6 +131,12 @@ interface ModelFile {
   sizeBytes?: number
   role?: string
 }
+interface DownloadableModelFile {
+  fileName: string
+  quant: string
+  sizeBytes: number
+  mmproj?: { fileName: string }
+}
 interface ModelEntry {
   id: string
   sourceModelId?: string
@@ -384,23 +390,46 @@ export function ModelsScreen({
   >([])
   const [searching, setSearching] = useState(false)
   const [variantModel, setVariantModel] = useState<ModelEntry | null>(null)
-  const [variants, setVariants] = useState<{
-    fileName: string; quant: string; sizeBytes: number; mmproj?: { fileName: string }
-  }[]>([])
+  const [variants, setVariants] = useState<DownloadableModelFile[]>([])
   const [variantLoading, setVariantLoading] = useState(false)
   const [variantError, setVariantError] = useState<string | null>(null)
+  const [detailFiles, setDetailFiles] = useState<DownloadableModelFile[]>([])
+  const [detailFilesLoading, setDetailFilesLoading] = useState(false)
+  const [detailFilesError, setDetailFilesError] = useState<string | null>(null)
   const [chosenVariants, setChosenVariants] = useState<Record<string, string>>({})
   const [filterState, setFilterState] = useState<FilterState>(initialFilterState)
   const [sizeBucket, setSizeBucket] = useState<number | null>(null)
   const SIZE_BUCKETS = [2, 4, 6, 8, 16] as const
 
   const openDetail = useCallback((m: ModelEntry) => {
+    setDetailFiles([])
+    setDetailFilesError(null)
+    setDetailFilesLoading(true)
     setDetail(m)
   }, [])
 
   const closeDetail = useCallback(() => {
     setDetail(null)
   }, [])
+
+  useEffect(() => {
+    if (!detail || detail.id.startsWith('local:') || !['text', 'vision', 'computer_use'].includes(detail.kind)) return
+    let cancelled = false
+    setDetailFiles([])
+    setDetailFilesError(null)
+    setDetailFilesLoading(true)
+    void Promise.resolve(api.getModelFiles?.(detail.id))
+      .then((files: DownloadableModelFile[] | undefined) => {
+        if (!cancelled) setDetailFiles(files ?? [])
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setDetailFilesError(error instanceof Error ? error.message : 'Could not load model files.')
+      })
+      .finally(() => {
+        if (!cancelled) setDetailFilesLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [detail])
 
   const importModel = async (): Promise<void> => {
     if (importing) return
@@ -1351,6 +1380,39 @@ export function ModelsScreen({
                     >
                       <IconExternalLink className="h-3 w-3" /> View on Hugging Face
                     </button>
+                  )}
+                  {hfUrl && ['text', 'vision', 'computer_use'].includes(m.kind) && (
+                    <section aria-label="Available model files" className="mt-5 border-t border-neutral-800 pt-4">
+                      <h3 className="mb-2 text-[10px] uppercase tracking-wide text-neutral-400">
+                        Available GGUF files{detailFiles.length > 0 ? ` · ${detailFiles.length}` : ''}
+                      </h3>
+                      {detailFilesLoading && <p className="text-xs text-neutral-500">Loading available files…</p>}
+                      {detailFilesError && <p role="alert" className="text-xs text-red-400">{detailFilesError}</p>}
+                      {!detailFilesLoading && !detailFilesError && detailFiles.length === 0 && (
+                        <p className="text-xs text-neutral-500">No GGUF files found in this repository.</p>
+                      )}
+                      <div className="space-y-2">
+                        {detailFiles.map((file) => (
+                          <div key={file.fileName} className="flex items-start justify-between gap-2 rounded border border-neutral-800 px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="break-all text-[11px] text-neutral-200">{file.fileName}</p>
+                              <p className="mt-1 text-[10px] text-neutral-500">
+                                {file.quant} · {formatSize(file.sizeBytes)}
+                                {file.mmproj ? ` · includes ${file.mmproj.fileName}` : ''}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => download(m.id, file.fileName)}
+                              disabled={comingSoon || !!downloading}
+                              aria-label={`Download ${file.fileName}`}
+                              className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Download
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
                   )}
                 </div>
 
