@@ -35,12 +35,24 @@ else
   echo "[build-llama] unknown variant: $LLAMA_VARIANT" >&2; exit 1
 fi
 TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"             # runs on macOS 13+
+# A shell launched under Rosetta reports x86_64 even on Apple Silicon. Build for
+# the physical host unless a release job explicitly selects another architecture.
+if /usr/bin/arch -arm64 /usr/bin/true 2>/dev/null; then
+  HOST_ARCH=arm64
+else
+  HOST_ARCH=x86_64
+fi
+LLAMA_ARCH="${LLAMA_ARCH:-$HOST_ARCH}"
+case "$LLAMA_ARCH" in
+  arm64|x86_64) ;;
+  *) echo "[build-llama] unsupported architecture: $LLAMA_ARCH" >&2; exit 1 ;;
+esac
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 DEST="$ROOT/resources/bin/$LLAMA_DIR"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "[build-llama] variant=$LLAMA_VARIANT ref=$LLAMA_REF target=$TARGET"
+echo "[build-llama] variant=$LLAMA_VARIANT ref=$LLAMA_REF target=$TARGET arch=$LLAMA_ARCH"
 git clone --depth 1 --branch "$LLAMA_REF" "$LLAMA_REPO" "$WORK/src"
 cd "$WORK/src"
 
@@ -49,6 +61,7 @@ cd "$WORK/src"
 # bake in an absolute /opt/homebrew path that doesn't exist on users' Macs.
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$TARGET" \
+  -DCMAKE_OSX_ARCHITECTURES="$LLAMA_ARCH" \
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
   -DGGML_NATIVE="$NATIVE_CPU" \
   -DGGML_OPENMP=OFF \
@@ -59,6 +72,11 @@ cmake --build build --config Release -j"$(sysctl -n hw.ncpu)" --target llama-ser
 
 BIN="$(find build -name llama-server -type f -perm -111 | head -1)"
 [ -n "$BIN" ] || { echo "[build-llama] FATAL: llama-server not produced"; exit 1; }
+BUILT_ARCH="$(lipo -archs "$BIN")"
+if [ "$BUILT_ARCH" != "$LLAMA_ARCH" ]; then
+  echo "[build-llama] FATAL: built llama-server arch=$BUILT_ARCH (want $LLAMA_ARCH)" >&2
+  exit 1
+fi
 
 # Gate: fail the build if the binary targets a newer macOS than we asked for.
 MINOS="$(otool -l "$BIN" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')"
