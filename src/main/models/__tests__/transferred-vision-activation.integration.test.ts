@@ -73,12 +73,11 @@ describe('transferred vision variant activation', () => {
     const exactId = registry[0]!.id
     expect(
       catalogView.filter((model) => model.id === FAMILY_ID || model.id === exactId).map((m) => m.id)
-    ).toEqual([exactId])
+    ).toEqual([exactId, FAMILY_ID])
     expect(catalogView.find((model) => model.id === exactId)?.files).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: PROJECTOR, role: 'mmproj' })])
     )
-    expect(await manager.listInstalled()).toEqual(expect.arrayContaining([exactId]))
-    expect(await manager.listInstalled()).not.toContain(FAMILY_ID)
+    expect(await manager.listInstalled()).toEqual(expect.arrayContaining([exactId, FAMILY_ID]))
 
     expect(await manager.reconcileActiveModelProjector()).toBe(true)
     expect(JSON.parse(fs.readFileSync(path.join(modelsDir, 'active-model.json'), 'utf8'))).toEqual({
