@@ -97,7 +97,7 @@ afterAll(() => {
 })
 
 describe('Computer Use capture exclusion journey', () => {
-  it('excludes the visible PiP before capture and stores the exact clean model frame', async () => {
+  it('keeps the visible main window in the model frame so clicks match the screen', async () => {
     const cleanFrame = await sharp({
       create: { width: 320, height: 200, channels: 3, background: '#34d399' }
     })
@@ -110,11 +110,11 @@ describe('Computer Use capture exclusion journey', () => {
       .toBuffer()
     expect(cleanFrame).not.toEqual(obstructedFrame)
     const binDir = path.join(nativeCapture.profile, 'bin')
-    const cleanSource = path.join(nativeCapture.profile, 'clean-source.png')
+    const visibleSource = path.join(nativeCapture.profile, 'visible-source.png')
     const captureArguments = path.join(nativeCapture.profile, 'capture-arguments.json')
     const helper = path.join(binDir, 'computer-use-capture')
     fs.mkdirSync(binDir, { recursive: true })
-    fs.writeFileSync(cleanSource, cleanFrame)
+    fs.writeFileSync(visibleSource, obstructedFrame)
     fs.writeFileSync(
       helper,
       [
@@ -126,7 +126,7 @@ describe('Computer Use capture exclusion journey', () => {
       { mode: 0o755 }
     )
     process.env.OFFGRID_CAPTURE_ARGUMENTS = captureArguments
-    process.env.OFFGRID_CAPTURE_CLEAN_SOURCE = cleanSource
+    process.env.OFFGRID_CAPTURE_CLEAN_SOURCE = visibleSource
     configureRuntime({ binRoots: [binDir] })
 
     showSupervisorWindow()
@@ -141,12 +141,12 @@ describe('Computer Use capture exclusion journey', () => {
     expect(JSON.parse(fs.readFileSync(captureArguments, 'utf8'))).toEqual([
       expect.stringMatching(/offgrid-computer-use-.*\.png$/),
       '1',
-      '73,91',
+      '73',
       '1728',
       '1080'
     ])
     expect(captured?.path).toBe(savedPath)
-    expect(fs.readFileSync(savedPath)).toEqual(cleanFrame)
+    expect(fs.readFileSync(savedPath)).toEqual(obstructedFrame)
 
     const modelFrame = await modelScreenshot({
       image: savedPath,
@@ -161,6 +161,6 @@ describe('Computer Use capture exclusion journey', () => {
       }
     })
     const modelBytes = Buffer.from(modelFrame.dataUrl.split(',')[1]!, 'base64')
-    expect(fs.readFileSync(savedPath)).toEqual(modelBytes)
+    expect(modelBytes).toEqual(obstructedFrame)
   })
 })
