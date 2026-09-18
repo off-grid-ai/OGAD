@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const src = readFileSync(join(__dirname, '..', 'MemoryChat.tsx'), 'utf8')
+const src = readFileSync(join(__dirname, '..', 'MemoryChat/index.tsx'), 'utf8')
 
 describe('MemoryChat image-gen state is per-conversation (D9)', () => {
   it('no longer stores generatingImage as a global bool', () => {

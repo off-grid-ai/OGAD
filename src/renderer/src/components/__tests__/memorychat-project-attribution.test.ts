@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const src = readFileSync(join(__dirname, '..', 'MemoryChat.tsx'), 'utf8')
+const src = readFileSync(join(__dirname, '..', 'MemoryChat/index.tsx'), 'utf8')
 const send = src.slice(src.indexOf('const sendMessage = async'), src.indexOf('const drainQueue ='))
 const sendCode = send.replace(/\/\/.*$/gm, '').replace(/\s+/g, ' ')
 
