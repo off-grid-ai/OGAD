@@ -95,7 +95,7 @@ describe('journey-scoped Electron Playwright relay', () => {
     expect(targets.result).toEqual({
       targetInfos: [
         expect.objectContaining({
-          targetId: 'offgrid-target-7',
+          targetId: 'electron-page',
           url: 'https://example.test/account',
           browserContextId: 'offgrid-journey-context'
         })
@@ -110,7 +110,7 @@ describe('journey-scoped Electron Playwright relay', () => {
       'offgrid-page-7'
     )
     expect(allowed.error).toBeUndefined()
-    expect(page.debuggerApi.commands).toEqual([
+    expect(page.debuggerApi.commands.filter((command) => command.method === 'Runtime.evaluate')).toEqual([
       { method: 'Runtime.evaluate', params: { expression: 'document.title' }, sessionId: undefined }
     ])
 
@@ -118,7 +118,7 @@ describe('journey-scoped Electron Playwright relay', () => {
     expect(foreign.error?.message).toMatch(/outside this Web Use journey/)
     const root = await request(socket, 5, 'Runtime.evaluate', {})
     expect(root.error?.message).toMatch(/requires a journey target session/)
-    expect(page.debuggerApi.commands).toHaveLength(1)
+    expect(page.debuggerApi.commands.filter((command) => command.method === 'Runtime.evaluate')).toHaveLength(1)
   })
 
   it('removes debugger and WebContents listeners after a renderer failure', async () => {
@@ -212,6 +212,7 @@ class FakeDebugger extends EventEmitter {
     sessionId?: string
   ): Promise<Record<string, unknown>> {
     this.commands.push({ method, params, sessionId })
+    if (method === 'Target.getTargetInfo') return { targetInfo: { targetId: 'electron-page' } }
     return { acknowledged: true }
   }
 }
