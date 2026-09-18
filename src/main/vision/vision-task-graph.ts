@@ -555,6 +555,7 @@ class VisionTaskGraphRuntime {
       const grounding = await this.deps.decide(this.groundingInput(captured, modelSignal))
       if (!this.deps.guard.ownsActionLease(modelLease.epoch)) {
         this.discardPendingPolicyHistory()
+        if (this.deps.guard.isHalted) this.stopAfterAbort()
         return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
       }
       captured.decisionMs = this.now() - decisionStartedAt
@@ -576,6 +577,7 @@ class VisionTaskGraphRuntime {
       }
       if (modelLease.signal.aborted) {
         this.discardPendingPolicyHistory()
+        if (this.deps.guard.isHalted) this.stopAfterAbort()
         return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
       }
       const message = errorMessage(error, 'visual decision failed')
