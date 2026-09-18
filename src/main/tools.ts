@@ -611,7 +611,10 @@ export async function toolChat(
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
-  const exts = selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
+  const toolsEnabled = getSetting<boolean>('toolsEnabled', true) !== false
+  const exts = toolsEnabled
+    ? selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
+    : []
   const extSchemas: unknown[] = []
   const hints: string[] = []
   const disabled = disabledSet()
@@ -634,7 +637,7 @@ export async function toolChat(
     projectActive: !!opts.projectId,
     allMemory: !!opts.allMemory
   })
-  const rawTools = extSchemas.length ? [...builtins, ...extSchemas] : builtins
+  const rawTools = toolsEnabled ? [...builtins, ...extSchemas] : []
   // Keep the tool payload within the model's context. llama-server inlines every
   // tool schema into the prompt AND compiles it to a grammar, so a big connector
   // set can blow past the context window and 400 the whole turn. Budget to a

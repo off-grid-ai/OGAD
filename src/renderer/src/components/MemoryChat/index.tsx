@@ -117,6 +117,7 @@ import {
   Sparkle as Sparkles,
   FolderPlus,
   Robot,
+  Wrench,
   Plug,
   SlidersHorizontal,
   Brain,
@@ -507,6 +508,7 @@ export function MemoryChat({
   const [, setProjectMenuOpen] = useState(false)
   const [projCreating, setProjCreating] = useState(false)
   const [toolsOn, setToolsOn] = useState(false)
+  const [toolsEnabled, setToolsEnabled] = useState(true)
   const [assistantGateOpen, setAssistantGateOpen] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
@@ -587,6 +589,7 @@ export function MemoryChat({
           })
           if (typeof s.composerNoMemory === 'boolean') setNoMemory(s.composerNoMemory)
           if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
+          setToolsEnabled(s.toolsEnabled !== false)
           if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
           setShowGenerationDetails(s.showGenerationDetails === true)
           const voicePreferences = readVoicePreferences(s)
@@ -612,6 +615,13 @@ export function MemoryChat({
           console.error('Failed to load composer prefs', e)
         }
       })()
+  }, [])
+  useEffect(() => {
+    const syncToolsEnabled = (event: Event): void => {
+      setToolsEnabled((event as CustomEvent<boolean>).detail)
+    }
+    window.addEventListener('offgrid-tools-enabled-changed', syncToolsEnabled)
+    return () => window.removeEventListener('offgrid-tools-enabled-changed', syncToolsEnabled)
   }, [])
   useEffect(() => {
     console.log('MemoryChat effect: persist no-memory preference')
@@ -4386,6 +4396,20 @@ export function MemoryChat({
                                     className={`text-xs ${toolsOn ? 'text-primary' : 'text-muted-foreground'}`}
                                   >
                                     {toolsOn ? 'On' : 'Off'}
+                                  </span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault()
+                                    const next = !toolsEnabled
+                                    setToolsEnabled(next)
+                                    void window.api.saveSetting('toolsEnabled', next)
+                                    window.dispatchEvent(new CustomEvent('offgrid-tools-enabled-changed', { detail: next }))
+                                  }}
+                                >
+                                  <Wrench /> <span className="flex-1">Tools</span>
+                                  <span className={`text-xs ${toolsEnabled ? 'text-primary' : 'text-muted-foreground'}`}>
+                                    {toolsEnabled ? 'On' : 'Off'}
                                   </span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
