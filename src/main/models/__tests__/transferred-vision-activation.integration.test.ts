@@ -88,6 +88,12 @@ describe('transferred vision variant activation', () => {
     })
     expect(await manager.setActiveModel(FAMILY_ID)).toEqual({ success: true })
     expect(JSON.parse(fs.readFileSync(path.join(modelsDir, 'active-model.json'), 'utf8'))).toEqual({
+      id: FAMILY_ID,
+      primary: catalogPrimary,
+      mmproj: catalogProjector
+    })
+    expect(await manager.setActiveModel(exactId)).toEqual({ success: true })
+    expect(JSON.parse(fs.readFileSync(path.join(modelsDir, 'active-model.json'), 'utf8'))).toEqual({
       id: exactId,
       primary: PRIMARY,
       mmproj: PROJECTOR
