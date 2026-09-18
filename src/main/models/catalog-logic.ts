@@ -24,10 +24,12 @@ interface CatalogFile {
 }
 export interface CatalogEntry {
   id: string
+  sourceModelId?: string
   name: string
   kind: string
   org?: string
   params?: number
+  minRamGb?: number
   tags?: string[]
   files: CatalogFile[]
   runtime?: string
@@ -83,7 +85,8 @@ export function localsForCatalog(locals: LocalModelLike[], present: FilePresent)
 export function downloadedForCatalog(
   downloaded: DownloadedModelLike[],
   installedDownloadIds: Iterable<string>,
-  catalog: readonly CatalogEntry[] = []
+  catalog: readonly CatalogEntry[] = [],
+  sizeOf: SizeOf = () => 0
 ): CatalogEntry[] {
   const installed = new Set(installedDownloadIds)
   return downloaded
@@ -92,16 +95,19 @@ export function downloadedForCatalog(
       const family = m.familyId ? catalog.find((entry) => entry.id === m.familyId) : undefined
       return {
         id: m.id,
+        ...(m.familyId ? { sourceModelId: m.familyId } : {}),
         name: family?.name ?? m.name,
         kind: family?.kind ?? m.kind,
         org: family?.org ?? 'Hugging Face',
         tags: [...new Set([...(family?.tags ?? []), 'Downloaded'])],
         ...(family?.params !== undefined ? { params: family.params } : {}),
+        ...(family?.minRamGb !== undefined ? { minRamGb: family.minRamGb } : {}),
         ...(family?.availability ? { availability: family.availability } : {}),
         ...(family?.availabilityNote ? { availabilityNote: family.availabilityNote } : {}),
         files: m.files.map((name) => ({
           name,
           url: '',
+          sizeBytes: sizeOf(name) || family?.files.find((file) => file.name === name)?.sizeBytes || 0,
           role: isProjectorFileName(name) ? 'mmproj' : 'primary'
         }))
       }
@@ -116,6 +122,7 @@ export function mergeCatalog(opts: {
   installedDownloadedIds: Iterable<string>
   catalog: CatalogEntry[]
   present: FilePresent
+  sizeOf?: SizeOf
 }): CatalogEntry[] {
   const installed = new Set(opts.installedDownloadedIds)
   const representedFamilies = new Set(
@@ -126,7 +133,7 @@ export function mergeCatalog(opts: {
   )
   return [
     ...localsForCatalog(opts.locals, opts.present),
-    ...downloadedForCatalog(opts.downloaded, opts.installedDownloadedIds, opts.catalog),
+    ...downloadedForCatalog(opts.downloaded, opts.installedDownloadedIds, opts.catalog, opts.sizeOf),
     ...opts.catalog.filter((entry) => !representedFamilies.has(entry.id))
   ]
 }

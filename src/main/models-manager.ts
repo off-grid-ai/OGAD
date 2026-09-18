@@ -79,7 +79,7 @@ export const BONSAI_2: ModelEntry = {
   params: 27,
   minRamGb: 16,
   quant: 'PTQ1_0',
-  tags: ['Challenger'],
+  tags: [],
   isNew: true,
   releaseDate: '2026-09-17',
   files: [
@@ -173,7 +173,8 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     downloaded,
     installedDownloadedIds: installedDownloadedIds(dir),
     catalog: CATALOG as unknown as CatalogEntry[],
-    present
+    present,
+    sizeOf: (name) => fileSizeOf(dir, name)
   })
   const remoteModels = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers)
   return { kinds: MODEL_KINDS, models: [...models, ...remoteModels] }

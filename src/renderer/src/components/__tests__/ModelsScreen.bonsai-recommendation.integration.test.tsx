@@ -19,10 +19,12 @@ const SMALL = {
 }
 
 let ramGb = 16
+let catalogModels: Array<typeof BONSAI | typeof SMALL | Record<string, unknown>> = [SMALL, BONSAI]
+let installedIds: string[] = []
 ;(window as unknown as { api: unknown }).api = {
   systemHealth: async () => ({ ramGb }),
-  getModelCatalog: async () => ({ kinds: ['text'], models: [SMALL, BONSAI] }),
-  getInstalledModels: async () => [],
+  getModelCatalog: async () => ({ kinds: ['text'], models: catalogModels }),
+  getInstalledModels: async () => installedIds,
   getActiveModelIds: async () => [],
   getModelVisionStatus: async () => ({}),
   onModelProgress: () => () => {},
@@ -30,7 +32,11 @@ let ramGb = 16
 }
 
 describe('<ModelsScreen/> Bonsai recommendation', () => {
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    catalogModels = [SMALL, BONSAI]
+    installedIds = []
+  })
 
   it('shows Bonsai first with recommendation badges on a 16 GB machine', async () => {
     ramGb = 16
@@ -51,5 +57,28 @@ describe('<ModelsScreen/> Bonsai recommendation', () => {
     const card = screen.getByText(BONSAI.name).closest('[role="listitem"]') as HTMLElement
     expect(within(card).queryByText('Works best')).toBeNull()
     expect(within(card).queryByText('Recommended for you')).toBeNull()
+  })
+
+  it('recognizes a downloaded Bonsai variant by its source model ID', async () => {
+    ramGb = 34
+    const packageId = 'model-package-v1:bonsai-variant'
+    installedIds = [packageId]
+    catalogModels = [
+      {
+        ...BONSAI,
+        id: packageId,
+        sourceModelId: BONSAI.id,
+        tags: ['Downloaded'],
+        files: [
+          BONSAI.files[0],
+          { name: 'Ternary-Bonsai-2-27B-mmproj-BF16.gguf', sizeBytes: 931_145_856 }
+        ]
+      }
+    ]
+    const { ModelsScreen } = await import('../ModelsScreen')
+    render(<ModelsScreen />)
+    const card = (await screen.findByText(BONSAI.name)).closest('[role="listitem"]') as HTMLElement
+    await waitFor(() => expect(within(card).getByText('Works best')).toBeTruthy())
+    expect(within(card).getByText('Recommended for you')).toBeTruthy()
   })
 })

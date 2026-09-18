@@ -209,14 +209,14 @@ function fmtReleaseDate(iso?: string): string {
 const BONSAI_2_ID = 'prism-ml/Ternary-Bonsai-2-27B-gguf'
 
 function featureRank(
-  m: { id?: string; credibility?: string; tags?: string[] },
+  m: { id?: string; sourceModelId?: string; credibility?: string; tags?: string[] },
   recommendedId?: string | null,
   bonsaiRecommended = false
 ): number {
   // The model recommended for THIS machine's RAM sorts to the very top (above a
   // plain 'Fast' pick). Then distilled few-step models (tagged "Fast") render in
   // ~30s vs ~100s, so surface them next. Then our own org's models, then the rest.
-  if (bonsaiRecommended && m.id === BONSAI_2_ID) return -2
+  if (bonsaiRecommended && (m.sourceModelId ?? m.id) === BONSAI_2_ID) return -2
   if (recommendedId && m.id === recommendedId) return -1
   if (m.tags?.some((t) => /^fast/i.test(t))) return 0
   if (m.credibility !== 'offgrid') return 2
@@ -584,7 +584,7 @@ export function ModelsScreen({
   // Q8 above) — one pure rule, reused for both the badge and the top-of-list sort.
   const recommendedImageId = recommendedImageModelId(models, ramGb)
   const bonsaiFits = (m: ModelEntry): boolean =>
-    m.id === BONSAI_2_ID &&
+    (m.sourceModelId ?? m.id) === BONSAI_2_ID &&
     ramGb !== null &&
     ramGb >= (m.minRamGb ?? 0) &&
     ['easy', 'fits'].includes(fitTier(totalBytes(m) / 1e9, ramGb))
