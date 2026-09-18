@@ -73,7 +73,7 @@ import {
 export const BONSAI_2: ModelEntry = {
   id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
   name: 'Bonsai 2 27B',
-  kind: 'text',
+  kind: 'vision',
   org: 'Prism ML',
   description: 'Compact 27B reasoning model with optional vision; uses the bundled Prism engine.',
   params: 27,
@@ -499,10 +499,34 @@ export async function downloadModel(
           })
         }
         if (signal.aborted) return interruptedResult(signal, activePartPath)
-        // Register a free-form Hugging Face download (not a catalog entry) so it counts
-        // as installed + activatable and its files aren't flagged as "unused". Catalog
-        // models are recognized by CATALOG membership already, so skip them.
-        if (!inCatalog) {
+        // An alternate file from a cataloged repository is a separate installed
+        // package. Keep it alongside the catalog default and protect its files.
+        const matchesCatalog = inCatalog &&
+          entry.files.length === inCatalog.files.length &&
+          entry.files.every((file) => inCatalog.files.some((catalogFile) => catalogFile.name === file.name))
+        if (inCatalog && !matchesCatalog) {
+          const files = entry.files.map((file) => ({
+            name: file.name,
+            sizeBytes: fileSizeOf(dir, file.name),
+            role: file.role === 'mmproj' ? 'projector' as const : 'primary' as const
+          }))
+          const packageIdentity = modelPackageIdentity({
+            id: modelId,
+            name: entry.name,
+            kind: entry.kind,
+            source: 'downloaded',
+            files: files as [typeof files[number], ...typeof files],
+            engine: 'llama'
+          })
+          recordDownloaded(dir, {
+            id: packageIdentity,
+            familyId: modelId,
+            packageIdentity,
+            name: entry.name,
+            kind: entry.kind,
+            files: entry.files.map((file) => file.name)
+          })
+        } else if (!inCatalog) {
           recordDownloaded(dir, {
             id: modelId,
             name: entry.name,

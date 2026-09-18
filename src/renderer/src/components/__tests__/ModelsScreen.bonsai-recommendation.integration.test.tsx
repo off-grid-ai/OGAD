@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 const BONSAI = {
   id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
   name: 'Bonsai 2 27B',
-  kind: 'text',
+  kind: 'vision',
   org: 'Prism ML',
   params: 27,
   minRamGb: 16,

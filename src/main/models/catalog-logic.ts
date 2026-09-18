@@ -128,6 +128,11 @@ export function mergeCatalog(opts: {
   const representedFamilies = new Set(
     opts.downloaded
       .filter((model) => installed.has(model.id))
+      .filter((model) => {
+        const family = opts.catalog.find((entry) => entry.id === model.familyId)
+        return family && model.files.length === family.files.length &&
+          model.files.every((name) => family.files.some((file) => file.name === name))
+      })
       .map((model) => model.familyId)
       .filter((id): id is string => Boolean(id))
   )
@@ -165,6 +170,11 @@ export function installedIds(opts: {
   const representedFamilies = new Set(
     (opts.downloaded ?? [])
       .filter((model) => installed.has(model.id))
+      .filter((model) => {
+        const family = opts.catalog.find((entry) => entry.id === model.familyId)
+        return family && model.files.length === family.files.length &&
+          model.files.every((name) => family.files.some((file) => file.name === name))
+      })
       .map((model) => model.familyId)
       .filter((id): id is string => Boolean(id))
   )
@@ -280,13 +290,14 @@ export function buildDiskEntry(opts: {
   if (dl && !opts.isCatalogId(id)) {
     const bytes = dl.files.reduce((s, n) => s + sizeOf(n), 0)
     const primary = dl.files.find((name) => !isProjectorFileName(name)) ?? dl.files[0]
+    const kind = (dl.familyId ? opts.catalogById(dl.familyId)?.kind : undefined) ?? dl.kind
     return {
       id,
       name: dl.name,
-      kind: dl.kind,
+      kind,
       bytes,
       active: isModelActive({
-        kind: dl.kind,
+        kind,
         id,
         primaryFile: primary,
         activeChatId: opts.activeChatId,

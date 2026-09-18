@@ -223,6 +223,7 @@ describe('model download release matrix', () => {
       expect(requested.some((url) => url.endsWith(selected))).toBe(true)
       expect(requested.some((url) => url.endsWith('Ternary-Bonsai-2-27B-PQ2_0.gguf'))).toBe(false)
       expect(fs.existsSync(path.join(dataDir, 'models', selected))).toBe(true)
+      expect((await manager.getStorageInfo()).models.find((model) => model.name === 'Bonsai 2 27B')?.kind).toBe('vision')
       const catalogPrimary = 'Ternary-Bonsai-2-27B-PQ2_0.gguf'
       fs.writeFileSync(path.join(dataDir, 'models', catalogPrimary), 'GGUF')
       expect(await manager.setActiveModel(repoId)).toEqual({ success: true })
