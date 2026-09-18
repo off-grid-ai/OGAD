@@ -220,7 +220,7 @@ jobs:
           cache: 'npm'
       # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
       # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
-      # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
+      # bundle then fails on imports from it. `ci.yml` has done this since
       # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
       #
       # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
@@ -259,7 +259,7 @@ jobs:
           npm --prefix ../shared/packages/sync run build
           # @offgrid/use (the durable action engine) is consumed the same way as sync
           # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ types before the typecheck runs.
+          # its dist/ output before the app bundle runs.
           npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
@@ -289,8 +289,8 @@ jobs:
       # latest-mac.yml (electron-builder emits no beta-mac.yml without publish.channel).
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
-      - name: Build (typecheck + bundle)
-        run: npm run build
+      - name: Stage native files and bundle
+        run: node scripts/stage-native.mjs && npx electron-vite build
       # Same approach as mobile (.github/workflows/release.yml): collect the commits
       # since the previous release tag into release-notes.md. Generated BEFORE publish
       # so the tag electron-builder is about to create (v$VERSION) is not yet the
@@ -490,7 +490,7 @@ jobs:
           python-version: '3.12'
       # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
       # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
-      # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
+      # bundle then fails on imports from it. `ci.yml` has done this since
       # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
       #
       # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
@@ -532,7 +532,7 @@ jobs:
           npm --prefix ../shared/packages/sync run build
           # @offgrid/use (the durable action engine) is consumed the same way as sync
           # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ types before the typecheck runs.
+          # its dist/ output before the app bundle runs.
           npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
@@ -563,8 +563,8 @@ jobs:
         run: ./scripts/fetch-win-binaries.ps1
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
-      - name: Build (typecheck + bundle)
-        run: npm run build
+      - name: Stage native files and bundle
+        run: node scripts/stage-native.mjs && npx electron-vite build
       - name: Package & publish (NSIS installer + auto-update metadata)
         shell: bash
         env:
