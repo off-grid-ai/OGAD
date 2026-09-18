@@ -15,6 +15,9 @@ import type {
 } from './model-adapters/types'
 import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
+import type { VisionActionEffect, VisionSemanticElement } from './vision-common-types'
+
+export type { VisionActionEffect, VisionSemanticElement } from './vision-common-types'
 
 export interface VisionCaptureMetadata {
   path?: string
@@ -28,14 +31,6 @@ export interface VisionCaptureMetadata {
   verificationSemanticElements?: readonly VisionSemanticElement[]
 }
 
-export interface VisionSemanticElement {
-  index: number
-  role: string
-  name: string
-  value: string
-  point: { x: number; y: number }
-}
-
 export interface VisionActuationResult {
   mappedAction?: VisionAction
   /** Execution-boundary handoff. The private value is intentionally absent. */
@@ -44,7 +39,11 @@ export interface VisionActuationResult {
   rejected?: string
 }
 
-export type VisionActionEffect = 'confirmed' | 'suspected_noop' | 'unverifiable'
+export interface VisionTaskContinuation {
+  guard: VisionGuard
+  request: AbortController
+  queuedGuidance: string[]
+}
 
 /** A screen can request a fresh observation when its capture boundary changed
  * underneath it. The owning screen must bound retries before using this. */

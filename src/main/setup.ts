@@ -15,7 +15,9 @@ import {
   downloadModel,
   listInstalled,
   setActiveModel,
-  setActiveModalChoice
+  setActiveModalChoice,
+  BONSAI_2,
+  desktopCatalog
 } from './models-manager'
 import { getGatewayPort } from './model-server'
 import { deviceNoun } from '../shared/device'
@@ -188,15 +190,27 @@ function settingsMode(): RecMode {
 export async function recommendChatModel(
   modeOverride?: RecMode
 ): Promise<{ id: string; name: string } | null> {
-  const { CATALOG, recommendForRam } = await import('@offgrid/models')
-  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, totalBytes } =
+  const { recommendForRam } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
+  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, totalBytes, modeBudget } =
     await import('./model-sizing')
   const gb = ramGb()
   const tier = recommendForRam(gb)
   const mode: RecMode = modeOverride ?? settingsMode()
   const frac = recommendBudgetFraction(mode)
   const budget = gb * frac * 1e9
-  // 1) Curated default for the tier (16GB → Gemma 4 E2B), if it fits the budget.
+  // Bonsai's packed PQ2 weights fit the Balanced loader's memory envelope at
+  // 16 GB, even though they exceed the general 38% recommendation budget. Leave
+  // room for context and the loader's normal reserve before recommending it.
+  const { frac: balancedFrac, reserveGb } = modeBudget('balanced')
+  if (
+    mode === 'balanced' &&
+    gb >= (BONSAI_2.minRamGb ?? 0) &&
+    totalBytes(BONSAI_2) / 1e9 + reserveGb + 0.5 <= gb * balancedFrac
+  ) {
+    return { id: BONSAI_2.id, name: BONSAI_2.name }
+  }
+  // 1) Curated default for the tier, if it fits the normal recommendation budget.
   for (const id of preferredModelIds(gb, mode)) {
     const e = CATALOG.find((m) => m.id === id)
     if (e && totalBytes(e as never) <= budget) return { id: e.id, name: e.name }
@@ -223,7 +237,8 @@ export interface FitEstimate {
 export async function estimateModelFit(modelId: string): Promise<FitEstimate> {
   const gb = ramGb()
   try {
-    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+    const { resolveHuggingFaceModel } = await import('@offgrid/models')
+    const CATALOG = await desktopCatalog()
     const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
     const { fitLevel } = await import('./model-sizing')
     const weightsGb =
@@ -251,7 +266,7 @@ export interface Recommendation {
 export async function getRecommendation(mode?: RecMode): Promise<Recommendation | null> {
   const pick = await recommendChatModel(mode)
   if (!pick) return null
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const entry = CATALOG.find((m) => m.id === pick.id)
   const sizeGb =
     (entry?.files.reduce((s: number, f: { sizeBytes?: number }) => s + (f.sizeBytes ?? 0), 0) ??
@@ -289,7 +304,7 @@ export interface SetupPlan {
  *  autoConfigure() consumes the same plan, so the preview and the action never drift. */
 export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
   const effMode: RecMode = mode ?? settingsMode()
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   let installed: string[] = []
   try {
     installed = await listInstalled()

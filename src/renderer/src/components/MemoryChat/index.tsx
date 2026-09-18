@@ -117,6 +117,7 @@ import {
   Sparkle as Sparkles,
   FolderPlus,
   Robot,
+  Wrench,
   Plug,
   SlidersHorizontal,
   Brain,
@@ -507,6 +508,7 @@ export function MemoryChat({
   const [, setProjectMenuOpen] = useState(false)
   const [projCreating, setProjCreating] = useState(false)
   const [toolsOn, setToolsOn] = useState(false)
+  const [toolsEnabled, setToolsEnabled] = useState(true)
   const [assistantGateOpen, setAssistantGateOpen] = useState(false)
   const [connectorsOn, setConnectorsOn] = useState(false)
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
@@ -587,6 +589,7 @@ export function MemoryChat({
           })
           if (typeof s.composerNoMemory === 'boolean') setNoMemory(s.composerNoMemory)
           if (typeof s.composerConnectorsOn === 'boolean') setConnectorsOn(s.composerConnectorsOn)
+          setToolsEnabled(s.toolsEnabled !== false)
           if (typeof s.composerThinking === 'boolean') setThinkingEnabled(s.composerThinking)
           setShowGenerationDetails(s.showGenerationDetails === true)
           const voicePreferences = readVoicePreferences(s)
@@ -612,6 +615,13 @@ export function MemoryChat({
           console.error('Failed to load composer prefs', e)
         }
       })()
+  }, [])
+  useEffect(() => {
+    const syncToolsEnabled = (event: Event): void => {
+      setToolsEnabled((event as CustomEvent<boolean>).detail)
+    }
+    window.addEventListener('offgrid-tools-enabled-changed', syncToolsEnabled)
+    return () => window.removeEventListener('offgrid-tools-enabled-changed', syncToolsEnabled)
   }, [])
   useEffect(() => {
     console.log('MemoryChat effect: persist no-memory preference')
@@ -1289,6 +1299,7 @@ export function MemoryChat({
             setConvMessages(null, [])
             setActiveProjectId(null)
             setPresetSetup(presetById(openTarget.presetId) ?? null)
+            setToolsOn(true)
           } else if (openTarget.draftPrompt) {
             setActiveConversationId(null)
             setConvMessages(null, [])
@@ -1797,6 +1808,7 @@ export function MemoryChat({
           toolStreamMessage
         ])
         const tr = await window.api.toolChat(modelQuery, fullHistory.slice(0, -1), {
+          assistantOnly: assistantForTurn,
           connectors: connectorsOn,
           conversationId: convId,
           // Memory scope drives which memory tools the model gets: a project offers its
@@ -3694,7 +3706,10 @@ export function MemoryChat({
                               </div>
                               {mode !== 'image' ? (
                                 <ExploreSection
-                                  onRun={setPresetSetup}
+                                  onRun={(preset) => {
+                                    setPresetSetup(preset)
+                                    setToolsOn(true)
+                                  }}
                                   requestUrl={REQUEST_FORM_URL}
                                   className="mt-6 w-full text-left"
                                 />
@@ -3838,6 +3853,7 @@ export function MemoryChat({
                               ) : (
                                 <ChatToolRows
                                   live
+                                  thinkingHasContent={false}
                                   thinking={
                                     <span className="text-[11px] text-neutral-500" role="status">
                                       {waitingLabel({ noMemory, hasProject: !!activeProjectId })}
@@ -4391,6 +4407,20 @@ export function MemoryChat({
                                 <DropdownMenuItem
                                   onSelect={(e) => {
                                     e.preventDefault()
+                                    const next = !toolsEnabled
+                                    setToolsEnabled(next)
+                                    void window.api.saveSetting('toolsEnabled', next)
+                                    window.dispatchEvent(new CustomEvent('offgrid-tools-enabled-changed', { detail: next }))
+                                  }}
+                                >
+                                  <Wrench /> <span className="flex-1">Tools</span>
+                                  <span className={`text-xs ${toolsEnabled ? 'text-primary' : 'text-muted-foreground'}`}>
+                                    {toolsEnabled ? 'On' : 'Off'}
+                                  </span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={(e) => {
+                                    e.preventDefault()
                                     setConnectorsOn((t) => !t)
                                   }}
                                 >
@@ -4703,7 +4733,10 @@ export function MemoryChat({
                                       size="icon"
                                       aria-label="Stop generating"
                                       onClick={() =>
-                                        void stopGeneration(activeConversationId, liveJourneyTask)
+                                        void stopGeneration(
+                                          activeConversationId,
+                                          guidanceTaskForJourney(getTaskSessionState().tasks, activeConversationId)
+                                        )
                                       }
                                       className="size-8 rounded-full border-red-500/50 text-red-400 hover:bg-red-500/10"
                                     >
@@ -4724,7 +4757,10 @@ export function MemoryChat({
                                 type="button"
                                 variant="outline"
                                 onClick={() => {
-                                  void stopGeneration(activeConversationId, liveJourneyTask)
+                                  void stopGeneration(
+                                    activeConversationId,
+                                    guidanceTaskForJourney(getTaskSessionState().tasks, activeConversationId)
+                                  )
                                 }}
                                 className="h-8 gap-1.5 border-red-500/50 text-red-400 hover:bg-red-500/10"
                               >

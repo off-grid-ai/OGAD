@@ -9,6 +9,7 @@
  * relaunch behavior stay real.
  */
 import { afterAll, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -57,6 +58,7 @@ function isFirstUseModelKind(kind: string): kind is JourneyModel['kind'] {
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const delivery = new Map<string, Buffer>()
+const originalCatalogHashes: Array<{ file: { sha256?: string }; sha256?: string }> = []
 const interrupted = new Set<string>()
 const resumedRanges = new Map<string, string>()
 let interruptDownloads = true
@@ -148,6 +150,24 @@ function fixtureBytes(fileName: string, seed: number): Buffer {
   return Buffer.concat([Buffer.from(`off-grid-${fileName}-`), Buffer.alloc(2_048, seed)])
 }
 
+function installCatalogFixtureHashes(
+  models: JourneyModel[],
+  catalog: Array<{ id: string; files: Array<{ name: string; sha256?: string }> }>
+): void {
+  models.forEach((model, modelIndex) => {
+    model.files.forEach((file, fileIndex) => {
+      const bytes = fixtureBytes(file.name, modelIndex * 10 + fileIndex + 1)
+      const catalogFile = catalog
+        .find((entry) => entry.id === model.id)
+        ?.files.find((entry) => entry.name === file.name)
+      if (catalogFile) {
+        originalCatalogHashes.push({ file: catalogFile, sha256: catalogFile.sha256 })
+        catalogFile.sha256 = createHash('sha256').update(bytes).digest('hex')
+      }
+    })
+  })
+}
+
 function installDownloadBoundary(models: JourneyModel[]): void {
   models.forEach((model, modelIndex) => {
     model.files.forEach((file, fileIndex) => {
@@ -200,28 +220,6 @@ function installDownloadBoundary(models: JourneyModel[]): void {
   )
 }
 
-/**
- * Wait until the runtime under test has let go of the port IT bound.
- *
- * Take the port from the runtime (llm.getPort()) rather than naming 8439: when 8439 is already busy the
- * app deliberately falls back to a free port, so a hardcoded number can end up watching a port this
- * runtime never owned - which is either a neighbour's live server (fails for the wrong reason) or nothing
- * at all (passes without proving anything). Every dbtest in this suite shares one worker and the same
- * default port, so that is not hypothetical.
- */
-async function waitForPortRelease(port: number): Promise<void> {
-  const deadline = Date.now() + 2_000
-  while (Date.now() < deadline) {
-    try {
-      await fetch(`http://127.0.0.1:${port}/health`)
-    } catch {
-      return
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-  throw new Error(`runtime boundary still owns port ${port}`)
-}
-
 function expectWav(dataUrl: string): void {
   expect(dataUrl).toMatch(/^data:audio\/wav;base64,/)
   expect(Buffer.from(dataUrl.split(',')[1]!, 'base64').subarray(0, 4).toString('ascii')).toBe(
@@ -230,6 +228,7 @@ function expectWav(dataUrl: string): void {
 }
 
 afterAll(async () => {
+  for (const { file, sha256 } of originalCatalogHashes) file.sha256 = sha256
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   try {
@@ -272,6 +271,16 @@ describe('fresh setup to first use', () => {
     )
     const plan = await setup.getSetupPlan()
     expect(plan.mode).toBe('conservative')
+    // Exercise the desktop-only packed-weight recommendation through the same
+    // persisted setup owner, without changing the conservative first-use path.
+    const totalmem = vi.spyOn(os, 'totalmem').mockReturnValue(16e9)
+    try {
+      expect((await setup.recommendChatModel('balanced'))?.id).toBe(
+        'prism-ml/Ternary-Bonsai-2-27B-gguf'
+      )
+    } finally {
+      totalmem.mockRestore()
+    }
     expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
     expect(plan.items.every((item) => item.installed === false)).toBe(true)
 
@@ -315,6 +324,9 @@ describe('fresh setup to first use', () => {
       })
     const models = [...baselineModels, ...additionalModels]
     expect(new Set(models.map((model) => model.kind))).toEqual(new Set(requiredKinds))
+    // The HTTP boundary serves tiny valid fixture bytes; give those bytes a matching
+    // test-only catalog digest so the real download integrity gate remains exercised.
+    installCatalogFixtureHashes(models, CATALOG)
     installDownloadBoundary(models)
 
     // Each representative modality download loses its connection after writing a
@@ -334,11 +346,15 @@ describe('fresh setup to first use', () => {
     // then the same download owner resumes the remaining catalog modalities.
     vi.resetModules()
     interruptDownloads = false
-    const [{ llm: resumedLlm }, resumedSetup, resumedManager] = await Promise.all([
+    const [{ llm: resumedLlm }, resumedSetup, resumedManager, resumedCatalog] = await Promise.all([
       import('../llm'),
       import('../setup'),
-      import('../models-manager')
+      import('../models-manager'),
+      import('@offgrid/models')
     ])
+    // A relaunch creates fresh catalog objects too, while the served fixture bytes
+    // stay the same. Preserve checksum verification on both sides of that boundary.
+    installCatalogFixtureHashes(models, resumedCatalog.CATALOG)
     expect(resumedManager.listDownloads()).toEqual(
       expect.arrayContaining(
         models.map((model) =>
@@ -458,11 +474,11 @@ describe('fresh setup to first use', () => {
     expect(await resumedManager.getActiveModelIds()).not.toContain(textModel.id)
 
     const requestsAfterFirstUse = remoteRequests
-    const resumedPort = resumedLlm.getPort()
-    resumedLlm.stop()
+    // The awaitable owner verifies its own child exited. A /health probe on a
+    // shared default port can hit another suite's newly started runtime.
+    expect((await resumedLlm.unload()).outcome).not.toBe('stuck')
     const database = await import('../database')
     database.getDB().close()
-    await waitForPortRelease(resumedPort)
 
     // A second relaunch must consume the exact persisted install and selections.
     // It must not repair or redownload anything to make first use work again.
@@ -525,9 +541,7 @@ describe('fresh setup to first use', () => {
     expect(regenerated.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
     expect(remoteRequests).toBe(requestsAfterFirstUse)
 
-    const relaunchedPort = relaunchedLlm.getPort()
-    relaunchedLlm.stop()
-    await waitForPortRelease(relaunchedPort)
+    expect((await relaunchedLlm.unload()).outcome).not.toBe('stuck')
     const relaunchedDatabase = await import('../database')
     relaunchedDatabase.getDB().close()
   }, 30_000)

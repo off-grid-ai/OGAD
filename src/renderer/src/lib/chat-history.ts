@@ -12,8 +12,19 @@
 export interface HistoryTurn {
   role: string
   content: string
-  context?: { taskGuidance?: unknown } | null
+  context?: { taskGuidance?: unknown; attachments?: { name: string; kind: string; text?: string }[] } | null
+  attachments?: { name: string; kind: string; text?: string }[]
   notice?: boolean
+}
+
+function modelContent(turn: HistoryTurn): string {
+  if (turn.role !== 'user') return turn.content
+  const attachments = turn.attachments ?? turn.context?.attachments ?? []
+  const text = attachments
+    .filter((attachment) => attachment.text && attachment.kind !== 'audio')
+    .map((attachment) => `--- attached ${attachment.kind}: ${attachment.name} ---\n${attachment.text}`)
+    .join('\n\n')
+  return text ? `${text}\n\n${turn.content}` : turn.content
 }
 
 export const EARLIER_CHAT_EXCERPTS_PREFIX = 'Earlier chat excerpts'
@@ -68,7 +79,7 @@ export function buildSendHistory<T extends HistoryTurn>(
     ...convMsgs
       .slice(lastCompaction + 1)
       .filter((message) => !message.context?.taskGuidance && !message.notice)
-  ].map((m) => ({ role: m.role, content: m.content }))
+  ].map((m) => ({ role: m.role, content: modelContent(m) }))
   let base: HistoryTurn[]
   if (regen) {
     const lastUserIdx = flat.map((m) => m.role).lastIndexOf('user')

@@ -1656,11 +1656,16 @@ export function setupIPC() {
   ipcMain.handle('models:search', (_, query: string, kind?: string) =>
     import('./models-manager').then((m) => m.searchModels(query, kind))
   )
+  ipcMain.handle('models:files', (_, modelId: string) =>
+    import('@offgrid/models').then((m) => m.getModelFiles(modelId))
+  )
 
-  ipcMain.handle('models:download', async (_, modelId: string) => {
+  ipcMain.handle('models:download', async (_, modelId: string, fileName?: string) => {
     const { downloadModel } = await import('./models-manager')
-    return downloadModel(modelId, (p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p))
+    return downloadModel(
+      modelId,
+      (p) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p)),
+      fileName
     )
   })
   ipcMain.handle('models:cancel-download', (_evt, modelId: string) =>
@@ -1977,6 +1982,7 @@ export function setupIPC() {
       query: string,
       history?: { role: string; content: string }[],
       opts?: {
+        assistantOnly?: boolean
         connectors?: boolean
         conversationId?: string
         projectId?: string

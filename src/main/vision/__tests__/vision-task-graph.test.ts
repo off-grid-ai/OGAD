@@ -200,7 +200,7 @@ describe('runVisionTaskGraph', () => {
       'Repeated click region blocked at (118, 304). The previous click marker shows where the earlier attempt landed.'
     )
     expect(result.steps).toContain(
-      'Do not guess another Dock or taskbar icon from its color or position. If the target application is not visibly identified, use the operating system application launcher or search.'
+      'Do not guess another control from its appearance or position. Use a visibly identified control, or use the operating system launcher or search when the target application is not visible.'
     )
     expect(w.observations.map((item) => item.result)).toEqual([
       'reviewed',

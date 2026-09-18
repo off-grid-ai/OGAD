@@ -936,7 +936,7 @@ class BrowserHost implements BrowserRailHost {
               if (!ownsRun()) owner.controller.abort()
               owner.controller.signal.throwIfAborted()
               recordTaskRun({ taskId, journeyId, kind: 'web_use', title: goal, ...identity })
-              return runBrowserVisualTask({
+              const result = await runBrowserVisualTask({
                 goal,
                 taskId,
                 journeyId,
@@ -985,6 +985,13 @@ class BrowserHost implements BrowserRailHost {
                 takeGuidance: () => (ownsRun() ? queuedGuidance.splice(0) : []),
                 signal: owner.controller.signal
               })
+              // The visual graph can fail before the model lease is released. Publish its
+              // terminal guard state now so a failed run never remains visibly "waiting"
+              // with a Continue button that cannot resume it.
+              if (ownsRun() && guard.isHalted) {
+                setState(automationTaskReadStatus(guard.automationStatus), result.summary)
+              }
+              return result
             })
           : {
               ok: semantic.ok,

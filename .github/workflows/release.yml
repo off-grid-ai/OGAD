@@ -136,7 +136,9 @@ jobs:
         run: |
           command -v cmake >/dev/null || brew install cmake
           MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
+          LLAMA_VARIANT=prism MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
           otool -l resources/bin/llama/llama-server | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled engine minos="$2; exit}'
+          otool -l resources/bin/llama-prism/llama-server | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled Prism engine minos="$2; exit}'
       # Rebuild the one-shot Whisper CLI instead of trusting the committed LFS
       # payload. The production script disables OpenMP/BLAS auto-discovery and
       # rejects Homebrew paths, missing @rpath names, symlinks, and a newer minos.

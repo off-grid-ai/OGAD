@@ -54,6 +54,12 @@ function primaryFile(m: ModelEntry): string {
   return m.files?.find((f) => f.role === 'primary')?.name ?? m.files?.[0]?.name ?? m.id
 }
 
+function primaryVariant(m: ModelEntry): string | null {
+  const file = primaryFile(m)
+  if (!file.toLowerCase().endsWith('.gguf')) return null
+  return file.slice(0, -'.gguf'.length).split('-').at(-1) ?? null
+}
+
 function openSettings(onClose: () => void): void {
   onClose()
   openModelSettingsPanel('model')
@@ -322,6 +328,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         </section>
         {MODALITIES.map(({ label, kinds, mode }) => {
           const list = models.filter((m) => kinds.includes(m.kind) && installed.includes(m.id))
+          const duplicateNames = new Set(
+            list
+              .filter((m, index) =>
+                list.some((other, otherIndex) => otherIndex !== index && other.name === m.name)
+              )
+              .map((m) => m.name)
+          )
           const cur = active[mode]
           const status = unload[mode]
           const isActive = (m: ModelEntry): boolean =>
@@ -379,6 +392,14 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="truncate">{m.name}</span>
+                        {duplicateNames.has(m.name) && primaryVariant(m) ? (
+                          <span
+                            className="shrink-0 text-[10px] text-neutral-500"
+                            title={primaryFile(m)}
+                          >
+                            {primaryVariant(m)}
+                          </span>
+                        ) : null}
                         {m.remoteServerId ? (
                           <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
                             Remote

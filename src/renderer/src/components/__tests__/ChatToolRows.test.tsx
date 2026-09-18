@@ -39,6 +39,21 @@ async function openCompletedWork(): Promise<void> {
 }
 
 describe('<ChatToolRows/> work timeline', () => {
+  it('waits for real timeline content before showing the gray marker', () => {
+    const view = render(
+      <ChatToolRows live thinking={<span>Waiting for a response</span>} thinkingHasContent={false} />
+    )
+    const timeline = screen.getByRole('list', { name: 'Thinking and tool calls' })
+    expect(timeline.querySelector('svg')).toBeNull()
+    expect(timeline.className).not.toContain('border-l')
+
+    view.rerender(
+      <ChatToolRows live thinking={<span>Thought process</span>} thinkingHasContent />
+    )
+    expect(timeline.querySelector('svg')).toBeTruthy()
+    expect(timeline.className).toContain('border-l')
+  })
+
   it('uses the meeting search result for the collapsed summary', async () => {
     const user = userEvent.setup()
     render(

@@ -87,6 +87,31 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     }
   })
 
+  it('includes a saved pasted attachment when sending a follow-up in the same chat', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      {
+        id: 'pasted-brief',
+        role: 'user',
+        content: '(1 attachment)',
+        context: {
+          attachments: [{ name: 'Pasted text', kind: 'pasted', text: 'Find nearby beef ribs under $100' }]
+        }
+      },
+      { id: 'previous-reply', role: 'assistant', content: 'What is your starting address?' }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('670 Gateway Blvd, South San Francisco, CA 94080', userEvent.setup())
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    const history = vi.mocked(boundary.api.ragChat).mock.calls[0]?.[2] as
+      | { content: string }[]
+      | undefined
+    expect(history?.[0]?.content).toContain('Find nearby beef ribs under $100')
+    expect(history?.[0]?.content).toContain('(1 attachment)')
+  })
+
   it('opens a task follow-up as a confirmed draft in its owning conversation', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)

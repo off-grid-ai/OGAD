@@ -13,7 +13,7 @@
 import type { ActionRecord, ExecuteResult, HandlerRegistry } from '@offgrid/use'
 import type { VisionTaskResult } from './vision-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
-import type { VisionTaskContinuation } from './vision-host'
+import type { VisionTaskContinuation } from './vision-agent'
 
 export interface VisionRailHost {
   runTask(

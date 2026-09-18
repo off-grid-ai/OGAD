@@ -2,10 +2,24 @@
 
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-boundary'
 
-afterEach(cleanup)
+const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get() {
+      return this.classList.contains('overflow-y-auto') ? 600 : 0
+    }
+  })
+})
+afterEach(() => {
+  cleanup()
+  if (originalOffsetHeight) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)
+  }
+})
 
 it('keeps a message edit in its editor and sends the saved text', async () => {
   const boundary = new ChatBoundary()

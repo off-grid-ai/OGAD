@@ -13,6 +13,29 @@ afterEach(() => {
 })
 
 describe('<SettingsPanel/> tool settings', () => {
+  it('turns all chat tools off from the side panel', async () => {
+    const saved: Array<[string, unknown]> = []
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getLlmSettings: async () => ({}),
+      getModelCatalog: async () => ({ models: [] }),
+      getActiveModel: async () => null,
+      getSettings: async () => ({ toolsEnabled: true }),
+      getTranscriptionInfo: async () => null,
+      listTools: async () => [],
+      mcpList: async () => [],
+      saveSetting: async (key: string, value: unknown) => {
+        saved.push([key, value])
+      }
+    }
+
+    render(<SettingsPanel embedded initialTab="tools" onClose={() => {}} />)
+    const toggle = await screen.findByRole('switch', { name: 'Enable tools' })
+    await userEvent.click(toggle)
+
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(saved).toContainEqual(['toolsEnabled', false])
+  })
+
   it('shows and saves the maximum tool-call setting', async () => {
     let settings = { maxToolCalls: 25 }
     const saved: Array<{ maxToolCalls?: number }> = []

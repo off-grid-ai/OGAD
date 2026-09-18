@@ -215,6 +215,7 @@ export function SettingsPanel({
   const [s, setS] = useState<LlmSettings>({})
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null)
   const [tools, setTools] = useState<{ name: string; description: string; enabled?: boolean }[]>([])
+  const [toolsEnabled, setToolsEnabled] = useState(true)
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
@@ -222,6 +223,13 @@ export function SettingsPanel({
   const [dflashModels, setDflashModels] = useState<DraftModelOption[]>([])
   // Default hidden, like mobile: the numbers are for when you go looking, not a permanent fixture.
   const [showGenerationDetails, setShowGenerationDetails] = useState(false)
+  useEffect(() => {
+    const syncToolsEnabled = (event: Event): void => {
+      setToolsEnabled((event as CustomEvent<boolean>).detail)
+    }
+    window.addEventListener('offgrid-tools-enabled-changed', syncToolsEnabled)
+    return () => window.removeEventListener('offgrid-tools-enabled-changed', syncToolsEnabled)
+  }, [])
 
   const refreshConnectors = useCallback((): void => {
     window.api
@@ -280,7 +288,10 @@ export function SettingsPanel({
       .catch(() => setTranscriptionInfo(null))
     window.api
       .getSettings?.()
-      .then((settings) => setShowGenerationDetails(settings.showGenerationDetails === true))
+      .then((settings) => {
+        setShowGenerationDetails(settings.showGenerationDetails === true)
+        setToolsEnabled(settings.toolsEnabled !== false)
+      })
       .catch(() => {})
     window.api
       .listTools?.()
@@ -876,6 +887,27 @@ export function SettingsPanel({
 
         {tab === 'tools' && (
           <>
+            <div className="mb-3 flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+              <div>
+                <div className="text-sm">Enable tools</div>
+                <div className="text-[11px] text-neutral-500">Controls whether any tools are sent to the chat model.</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label="Enable tools"
+                aria-checked={toolsEnabled}
+                onClick={() => {
+                  const next = !toolsEnabled
+                  setToolsEnabled(next)
+                  void window.api.saveSetting('toolsEnabled', next)
+                  window.dispatchEvent(new CustomEvent('offgrid-tools-enabled-changed', { detail: next }))
+                }}
+                className={`shrink-0 rounded px-2 py-1 text-[11px] ${toolsEnabled ? 'text-green-500' : 'text-neutral-500'}`}
+              >
+                {toolsEnabled ? 'On' : 'Off'}
+              </button>
+            </div>
             <p className="mb-3 text-[11px] text-neutral-500">
               Built-in tools the model can call when “Tools” is on in the composer.
             </p>

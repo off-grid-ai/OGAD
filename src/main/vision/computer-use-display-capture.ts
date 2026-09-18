@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { BrowserWindow, desktopCapturer } from 'electron'
+import { desktopCapturer } from 'electron'
 import sharp from 'sharp'
 import { binRoots, exe } from '../runtime-env'
 import { existing } from '../transcription/bin-resolution'
@@ -30,13 +30,6 @@ function captureBinary(): string | null {
   return existing(binRoots().map((root) => path.join(root, exe('computer-use-capture'))))
 }
 
-function captureWindowId(sourceId: string): number | null {
-  const match = /^window:(\d+):/.exec(sourceId)
-  if (!match) return null
-  const value = Number(match[1])
-  return Number.isInteger(value) && value > 0 ? value : null
-}
-
 async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDisplayCapture> {
   const binary = captureBinary()
   if (!binary) throw new Error('Computer Use screen-capture helper is not installed.')
@@ -44,11 +37,8 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
   if (!supervisorWindowId) {
     throw new Error('Computer Use cannot identify its supervisor window for safe screen capture.')
   }
-  const excludedWindowIds = new Set<number>([supervisorWindowId])
-  for (const window of BrowserWindow.getAllWindows()) {
-    const windowId = captureWindowId(window.getMediaSourceId())
-    if (windowId) excludedWindowIds.add(windowId)
-  }
+  // The main window can still be in front of the target app and intercept clicks.
+  // Keep it in the frame so Computer Use acts on the same pixels the user sees.
   const output = path.join(
     os.tmpdir(),
     `offgrid-computer-use-${process.pid}-${crypto.randomUUID()}.png`
@@ -59,7 +49,7 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
       [
         output,
         String(input.displayId),
-        [...excludedWindowIds].join(','),
+        String(supervisorWindowId),
         String(input.width),
         String(input.height)
       ],

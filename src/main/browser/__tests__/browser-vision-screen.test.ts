@@ -208,6 +208,59 @@ describe('browser shortcut normalization', () => {
 })
 
 describe('browser screenshot evidence', () => {
+  it('captures the visible page through Chromium when Electron loses its display surface', async () => {
+    const pagePng = await sharp({
+      create: { width: 1440, height: 900, channels: 4, background: '#ffffff' }
+    })
+      .composite([
+        {
+          input: Buffer.from(
+            '<svg width="100" height="60"><rect width="100" height="60" fill="red"/></svg>'
+          ),
+          left: 100,
+          top: 100
+        }
+      ])
+      .png()
+      .toBuffer()
+    const captureScreenshot = vi.fn(async () => pagePng)
+    const screen = createBrowserVisionScreen({
+      evidence: evidenceSink,
+      activePage: () => ({
+        view: {
+          webContents: {
+            invalidate: () => undefined,
+            capturePage: async () => {
+              throw new Error('Current display surface not available for capture')
+            },
+            getURL: () => 'https://example.test',
+            getTitle: () => 'Example'
+          }
+        } as unknown as WebContentsView,
+        driver: {
+          ensurePageReady: async () => ({ documentId: 'document-a' }),
+          ensurePointer: async () => undefined,
+          viewportSize: async () => ({ width: 1440, height: 900 }),
+          captureScreenshot
+        } as unknown as BrowserDriver
+      }),
+      taskId: 'surface-recovery',
+      journeyId: 'surface-recovery-chat',
+      goal: 'Read the visible page',
+      settings: DEFAULT_COMPUTER_USE_SETTINGS
+    })
+
+    const captured = await screen.capture()
+    expect(captureScreenshot).toHaveBeenCalledOnce()
+    expect(captured.metadata?.geometry?.sourceBounds).toEqual({
+      x: 0,
+      y: 0,
+      width: 1440,
+      height: 900
+    })
+    expect(browserEvidenceMocks.writeFileSync).toHaveBeenCalledOnce()
+  })
+
   it('uses the selected screenshot size for one fixed 16:10 browser frame', async () => {
     const retina = await sharp({
       create: { width: 2048, height: 1280, channels: 4, background: '#ffffff' }

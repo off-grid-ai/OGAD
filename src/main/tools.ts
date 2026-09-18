@@ -531,6 +531,7 @@ export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
   opts: {
+    assistantOnly?: boolean
     connectors?: boolean
     conversationId?: string
     /** Active project — offers search_knowledge_base + scopes it to this project. */
@@ -598,7 +599,7 @@ export async function toolChat(
   // this; fall back to the main-process check so a caller that omits it still gates
   // correctly (single source of truth for "can we make an image right now").
   let imageAvailable = opts.imageAvailable ?? false
-  if (opts.imageAvailable === undefined) {
+  if (!opts.assistantOnly && opts.imageAvailable === undefined) {
     try {
       const { activeImageModel } = await import('./imagegen')
       imageAvailable = !!activeImageModel()
@@ -611,7 +612,10 @@ export async function toolChat(
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
-  const exts = selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
+  const toolsEnabled = getSetting<boolean>('toolsEnabled', true) !== false
+  const exts = toolsEnabled || opts.assistantOnly
+    ? selectToolExtensions(getToolExtensions(), { connectors: !opts.assistantOnly && !!opts.connectors })
+    : []
   const extSchemas: unknown[] = []
   const hints: string[] = []
   const disabled = disabledSet()
@@ -620,21 +624,24 @@ export async function toolChat(
       const s = await e.schemas()
       const enabledSchemas = s.filter((schema) => {
         const name = (schema as { function?: { name?: unknown } }).function?.name
+        if (opts.assistantOnly) return name === 'web_use' || name === 'computer_use'
         return typeof name !== 'string' || !disabled.has(name)
       })
       if (enabledSchemas.length) {
         extSchemas.push(...enabledSchemas)
-        if (e.systemHint) hints.push(e.systemHint())
+        if (e.systemHint && !opts.assistantOnly) hints.push(e.systemHint())
       }
     } catch (err) {
       console.error('[tools] extension schemas', e.id, err)
     }
   }
-  const builtins = schemas(imageAvailable, {
-    projectActive: !!opts.projectId,
-    allMemory: !!opts.allMemory
-  })
-  const rawTools = extSchemas.length ? [...builtins, ...extSchemas] : builtins
+  const builtins = opts.assistantOnly
+    ? []
+    : schemas(imageAvailable, {
+        projectActive: !!opts.projectId,
+        allMemory: !!opts.allMemory
+      })
+  const rawTools = opts.assistantOnly ? extSchemas : toolsEnabled ? [...builtins, ...extSchemas] : []
   // Keep the tool payload within the model's context. llama-server inlines every
   // tool schema into the prompt AND compiles it to a grammar, so a big connector
   // set can blow past the context window and 400 the whole turn. Budget to a
@@ -681,6 +688,9 @@ export async function toolChat(
   const tools = budgeted.tools
   const sys =
     'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
+    (opts.assistantOnly
+      ? ' You can use web_use for website tasks and computer_use for visible desktop app tasks. No other tools are available.'
+      : '') +
     (hints.length ? ' ' + hints.join(' ') : '')
 
   // Attached images ride on the current user turn so the vision model can read
@@ -872,11 +882,14 @@ export async function toolChat(
             rawArgs: JSON.stringify(c.args)
           }))
 
-    if (effective.length) {
+    const permitted = opts.assistantOnly
+      ? effective.filter((call) => call.name === 'web_use' || call.name === 'computer_use')
+      : effective
+    if (permitted.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
       let remainingImageRequests = requestedImageCount - imageRequests.length
-      const callsToRun = callsWithinToolBudget(effective, toolCalls.length, maxToolCalls).filter(
+      const callsToRun = callsWithinToolBudget(permitted, toolCalls.length, maxToolCalls).filter(
         (call) => call.name !== 'generate_image' || remainingImageRequests-- > 0
       )
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.

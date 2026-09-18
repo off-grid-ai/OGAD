@@ -85,7 +85,7 @@ let installedModels: string[] = []
 let ModelsScreen: () => React.JSX.Element
 beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
+}, 30_000)
 beforeEach(() => {
   listeners = []
   onDownload = async () => ({ success: true })

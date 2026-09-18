@@ -23,7 +23,7 @@ import { axRailViable } from './ax-router'
 import type { AxRouting } from './ax-host'
 import type { ElementTaskResult } from './ax-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
-import type { VisionTaskContinuation } from '../vision/vision-host'
+import type { VisionTaskContinuation } from '../vision/vision-agent'
 import type { ComputerUseRail } from '../../shared/computer-use-settings'
 
 export interface ComputerTaskTiers {

@@ -14,6 +14,7 @@ export const OFFGRID_APPLE_TEAM_ID = '84V6KCAC49'
 export const CRITICAL_SIGNED_CODE = Object.freeze([
   'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework',
   'Contents/Resources/bin/llama/llama-server',
+  'Contents/Resources/bin/llama-prism/llama-server',
   'Contents/Resources/bin/meeting-recorder',
   'Contents/Resources/bin/computer-use-capture',
   'Contents/Resources/bin/dictation-hotkey'

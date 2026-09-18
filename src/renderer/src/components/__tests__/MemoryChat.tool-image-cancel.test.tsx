@@ -6,7 +6,7 @@
 // addRagMessage entirely — so the assistant turn was never persisted and vanished
 // on the next reload (only the user turn survived).
 //
-// Mounts the real screen with tools on (loaded from the persisted setting), sends a
+// Mounts the real screen with connectors on (loaded from the persisted setting), sends a
 // message, and drives the tool path where toolChat returns an imageRequest and
 // generateImage rejects 'cancelled'. Terminal artifact: the assistant answer is
 // PERSISTED via addRagMessage (the row a reload re-renders) — asserted on its
@@ -32,14 +32,29 @@ function installApi(): { addRagMessage: AddRag } {
     cancelImageGen: vi.fn(),
     cancelRag: vi.fn(),
     onImageGenProgress: vi.fn(() => () => { }),
+    onImageGenJobState: vi.fn(() => () => { }),
+    onImageGenConversationUpdated: vi.fn(() => () => { }),
+    imageGenJobStatus: vi.fn(async () => ({
+      id: null,
+      phase: 'idle' as const,
+      conversationId: null,
+      projectId: null,
+      stage: null,
+      enhancedPrompt: '',
+      progress: null,
+      outputPath: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null
+    })),
     onRagStream: vi.fn(() => () => { }),
     getRagConversations: vi.fn(async () => []),
     getRagMessages: vi.fn(async () => []),
     createRagConversation: vi.fn(async () => { }),
     addRagMessage,
     saveArtifact: vi.fn(async () => { }),
-    // Tools ON via the persisted setting (how a returning user reaches this state).
-    getSettings: vi.fn(async () => ({ composerToolsOn: true })),
+    // Connectors keep the agentic tool path on for the turn.
+    getSettings: vi.fn(async () => ({ composerConnectorsOn: true })),
     saveSetting: vi.fn(async () => { }),
     listProjects: vi.fn(async () => []),
     styleThumbs: vi.fn(async () => ({})),

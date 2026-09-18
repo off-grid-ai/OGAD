@@ -223,6 +223,7 @@ function VoiceMessageRow({
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
+          thinkingHasContent={Boolean(message.reasoning?.trim())}
           footer={
             workFooter ??
             (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
@@ -273,6 +274,7 @@ function VoiceMessageRow({
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
+          thinkingHasContent={Boolean(message.reasoning?.trim())}
           footer={
             workFooter ??
             (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
@@ -484,6 +486,7 @@ function StandardMessageRow({
       <ChatToolRows
         tools={message.toolCalls}
         thinking={thinking}
+        thinkingHasContent={Boolean(message.reasoning?.trim())}
         footer={
           workFooter ??
           (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)

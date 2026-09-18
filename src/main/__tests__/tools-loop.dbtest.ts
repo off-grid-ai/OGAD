@@ -264,7 +264,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       expect(steps).toEqual(['web_use'])
       expect(result.toolCalls.map(({ name }) => name)).toEqual(['web_use'])
       expect(result.answer).toBe(
-        `Started "${query}". Do not call web_use again for this goal. Live progress and the final result will appear in this chat. Task reference: web-skyscanner-1.`
+        'Task reference: web-skyscanner-1. Web Use started. Live progress and the final result will appear in this chat. Do not call web_use again for this goal.'
       )
       expect(fake.requests).toHaveLength(1)
       expect(proposals).toEqual([
@@ -338,7 +338,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       })
 
       expect(second.answer).toBe(
-        `Started "${completeGoal}". Do not call web_use again for this goal. Live progress and the final result will appear in this chat. Task reference: web-flight-follow-up.`
+        'Task reference: web-flight-follow-up. Web Use started. Live progress and the final result will appear in this chat. Do not call web_use again for this goal.'
       )
       expect(second.toolCalls).toEqual([
         expect.objectContaining({ name: 'web_use', status: 'pending' })
@@ -400,7 +400,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     try {
       const result = await toolChat('do it', [], { conversationId: 'chat-reactive-intake' })
       expect(result.answer).toBe(
-        'Started "Find a flight". Do not call web_use again for this goal. Live progress and the final result will appear in this chat. Task reference: reactive-web-task.'
+        'Task reference: reactive-web-task. Web Use started. Live progress and the final result will appear in this chat. Do not call web_use again for this goal.'
       )
       expect(result.toolCalls[0]?.status).toBe('pending')
       expect(proposals).toHaveLength(1)

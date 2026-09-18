@@ -53,6 +53,7 @@ import {
   type TransferredModelManifest
 } from '@offgrid/sync'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
+import type { ModelEntry } from '@offgrid/models'
 import {
   parseRemoteVisionModelId,
   remoteVisionInventoryModels,
@@ -65,6 +66,44 @@ import {
   deactivateRemoteVisionModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
+
+// Desktop ships the Prism llama.cpp engine required by these packed weights.
+// Keep this entry here: the shared catalog also feeds Mobile, whose llama.rn
+// runtime cannot load Bonsai 2 yet.
+export const BONSAI_2: ModelEntry = {
+  id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
+  name: 'Bonsai 2 27B',
+  kind: 'vision',
+  org: 'Prism ML',
+  description: 'Compact 27B reasoning model with optional vision; uses the bundled Prism engine.',
+  params: 27,
+  minRamGb: 16,
+  quant: 'PQ2_0',
+  tags: [],
+  isNew: true,
+  releaseDate: '2026-09-17',
+  files: [
+    {
+      name: 'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/6ed5e12bf84b7a63069882c91dd9e9218647d17b/Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      sizeBytes: 7206168928,
+      sha256: '3907dc1658db1f78a9826bf8d5bcb8dc65db0d466388937af57f2294fae62ec1',
+      role: 'primary'
+    },
+    {
+      name: 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf',
+      url: 'https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf/resolve/6ed5e12bf84b7a63069882c91dd9e9218647d17b/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf',
+      sizeBytes: 629246976,
+      sha256: '6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903',
+      role: 'mmproj'
+    }
+  ]
+}
+
+export async function desktopCatalog(): Promise<ModelEntry[]> {
+  const { CATALOG } = await import('@offgrid/models')
+  return [BONSAI_2, ...CATALOG]
+}
 
 export interface DownloadProgress {
   modelId: string
@@ -120,7 +159,8 @@ function downloadedVariant(models: DownloadedModel[], id: string): DownloadedMod
 }
 
 export async function getCatalog(): Promise<{ kinds: readonly string[]; models: unknown[] }> {
-  const { CATALOG, MODEL_KINDS } = await import('@offgrid/models')
+  const { MODEL_KINDS } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const dir = llm.getModelsDir()
   // Merge the three model sources (imported locals, tagged "Imported"; free-form
   // HF downloads whose files are all present, tagged "Downloaded"; then the
@@ -133,7 +173,8 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     downloaded,
     installedDownloadedIds: installedDownloadedIds(dir),
     catalog: CATALOG as unknown as CatalogEntry[],
-    present
+    present,
+    sizeOf: (name) => fileSizeOf(dir, name)
   })
   const remoteModels = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers)
   return { kinds: MODEL_KINDS, models: [...models, ...remoteModels] }
@@ -161,7 +202,7 @@ export async function resolveModelIdentity(modelId: string): Promise<ModelIdenti
 /** Per-model optional companion status, keyed by id. The renderer uses this to repair
  *  a missing vision projector or DFlash draft without downloading primary weights again. */
 export async function getVisionStatuses(): Promise<Record<string, VisionStatus>> {
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const dir = llm.getModelsDir()
   const present = (name: string): boolean => fileSizeOf(dir, name) > 0
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
@@ -184,7 +225,7 @@ export async function getVisionStatuses(): Promise<Record<string, VisionStatus>>
 
 /** Catalog ids (plus imported local ids) whose files are fully present on disk. */
 export async function listInstalled(): Promise<string[]> {
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const { isMfluxModelCached } = await import('./mflux')
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
@@ -240,7 +281,8 @@ function publishRefusal(
  *  AND a status registry (so a headless poller can read it). */
 export async function downloadModel(
   modelId: string,
-  onProgress?: ProgressCb
+  onProgress?: ProgressCb,
+  fileName?: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!downloadQueue.isAccepting()) {
     writeDiagnosticLog('models.download', 'request.rejected', {
@@ -249,9 +291,22 @@ export async function downloadModel(
     })
     return publishRefusal(modelId, DOWNLOAD_INTERRUPTED_ERROR, onProgress)
   }
-  const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const { getModelFiles, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const inCatalog = CATALOG.find((m) => m.id === modelId)
-  const entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
+  let entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
+  if (fileName && entry) {
+    const variant = (await getModelFiles(modelId)).find((file) => file.fileName === fileName)
+    if (!variant) return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
+    const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
+    entry = {
+      ...entry,
+      files: [
+        { name: variant.fileName, url: variant.downloadUrl, sizeBytes: variant.sizeBytes, sha256: catalogFile?.sha256, role: 'primary' },
+        ...(variant.mmproj ? [{ name: variant.mmproj.fileName, url: variant.mmproj.url, sizeBytes: variant.mmproj.sizeBytes, role: 'mmproj' as const }] : [])
+      ]
+    }
+  }
   if (!entry) {
     writeDiagnosticLog('models.download', 'request.rejected', { modelId, reason: 'unknown_model' })
     return publishRefusal(modelId, 'unknown model', onProgress)
@@ -444,10 +499,34 @@ export async function downloadModel(
           })
         }
         if (signal.aborted) return interruptedResult(signal, activePartPath)
-        // Register a free-form Hugging Face download (not a catalog entry) so it counts
-        // as installed + activatable and its files aren't flagged as "unused". Catalog
-        // models are recognized by CATALOG membership already, so skip them.
-        if (!inCatalog) {
+        // An alternate file from a cataloged repository is a separate installed
+        // package. Keep it alongside the catalog default and protect its files.
+        const matchesCatalog = inCatalog &&
+          entry.files.length === inCatalog.files.length &&
+          entry.files.every((file) => inCatalog.files.some((catalogFile) => catalogFile.name === file.name))
+        if (inCatalog && !matchesCatalog) {
+          const files = entry.files.map((file) => ({
+            name: file.name,
+            sizeBytes: fileSizeOf(dir, file.name),
+            role: file.role === 'mmproj' ? 'projector' as const : 'primary' as const
+          }))
+          const packageIdentity = modelPackageIdentity({
+            id: modelId,
+            name: entry.name,
+            kind: entry.kind,
+            source: 'downloaded',
+            files: files as [typeof files[number], ...typeof files],
+            engine: 'llama'
+          })
+          recordDownloaded(dir, {
+            id: packageIdentity,
+            familyId: modelId,
+            packageIdentity,
+            name: entry.name,
+            kind: entry.kind,
+            files: entry.files.map((file) => file.name)
+          })
+        } else if (!inCatalog) {
           recordDownloaded(dir, {
             id: modelId,
             name: entry.name,
@@ -601,7 +680,8 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
     }
     return { success: true, freedFiles: freedLocal }
   }
-  const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const { resolveHuggingFaceModel } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const catalog = CATALOG as unknown as CatalogEntry[]
   const downloaded = reconcileDownloadedModelRegistry(dir, catalog)
   const transferred = downloadedVariant(downloaded, modelId)
@@ -692,7 +772,8 @@ async function setActiveLlamaModel(
     activate({ id: modelId, primary: lm.primary, mmproj: lm.mmproj ?? null })
     return { success: true }
   }
-  const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const { resolveHuggingFaceModel } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const catalogEntry = CATALOG.find((model) => model.id === modelId)
   if (catalogEntry?.availability === 'coming_soon') {
     return {
@@ -702,7 +783,10 @@ async function setActiveLlamaModel(
   }
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
-  const transferred = downloadedVariant(downloaded, modelId)
+  // An exact catalog pick takes precedence once its files are present. A prior
+  // download of another quantization in this family must not override it.
+  const catalogReady = catalogEntry?.files.every((file) => fileSizeOf(dir, file.name) > 0)
+  const transferred = catalogReady ? undefined : downloadedVariant(downloaded, modelId)
   if (transferred) {
     if (!acceptsKind(transferred.kind)) {
       return {
@@ -763,7 +847,7 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
   } catch {
     return false // no active selection yet
   }
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
   const active = cfg!
@@ -842,7 +926,8 @@ export async function activateModel(
   if (modelId.startsWith('local:')) {
     kind = getLocalModels().find((m) => m.id === modelId)?.kind
   } else {
-    const { CATALOG, modelSupportsKind, resolveHuggingFaceModel } = await import('@offgrid/models')
+    const { modelSupportsKind, resolveHuggingFaceModel } = await import('@offgrid/models')
+    const CATALOG = await desktopCatalog()
     const downloaded = reconcileDownloadedModelRegistry(
       llm.getModelsDir(),
       CATALOG as unknown as CatalogEntry[]
@@ -877,7 +962,7 @@ export async function setActiveModalChoice(
     // to the entry's primary filename so an in-app pick (e.g. Juggernaut) takes effect.
     if (modelId && modal === 'image') {
       try {
-        const { CATALOG } = await import('@offgrid/models')
+        const CATALOG = await desktopCatalog()
         const e = CATALOG.find((m) => m.id === modelId)
         const fname = e ? primaryFileName(e as unknown as CatalogEntry) : undefined
         if (fname) stored = fname
@@ -1002,7 +1087,7 @@ export async function getTransferableModel(
   dir = llm.getModelsDir()
 ): Promise<TransferableModel | null> {
   const local = getLocalModels(dir).find((model) => model.id === modelId)
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const catalog = CATALOG.find((model) => model.id === modelId)
   const downloaded = downloadedVariant(
     reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[]),
@@ -1073,7 +1158,7 @@ export async function registerTransferredModel(
       ? { ...manifest, kind: 'vision' }
       : manifest
 
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const catalog = CATALOG.find((model) => model.id === normalizedManifest.id)
   if (catalog) {
     const expected = new Set<string>(catalog.files.map((file) => file.name))
@@ -1228,7 +1313,7 @@ export interface StorageInfo {
  *  (gguf/.part in the models dir that no catalog entry or active selection claims). */
 export async function getStorageInfo(): Promise<StorageInfo> {
   const dir = llm.getModelsDir()
-  const { CATALOG } = await import('@offgrid/models')
+  const CATALOG = await desktopCatalog()
   const catalog = CATALOG as unknown as CatalogEntry[]
   const reconciledDownloaded = reconcileDownloadedModelRegistry(dir, catalog)
   // Protect catalog + imported-local + free-form-download files, plus the active
@@ -1385,7 +1470,8 @@ export async function clearDownload(
   let freedBytes = 0
   try {
     const dir = llm.getModelsDir()
-    const { CATALOG, resolveHuggingFaceModel } = await import('@offgrid/models')
+    const { resolveHuggingFaceModel } = await import('@offgrid/models')
+    const CATALOG = await desktopCatalog()
     const entry =
       CATALOG.find((m) => m.id === modelId) ??
       (await resolveHuggingFaceModel(modelId).catch(() => null))

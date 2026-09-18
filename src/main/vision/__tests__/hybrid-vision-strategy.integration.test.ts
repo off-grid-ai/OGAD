@@ -80,10 +80,12 @@ describe('Text + Specialist visual task journey', () => {
       const specialistScreens: string[] = []
       const swapEvents: string[] = []
       const reasonerResponses = [
-        toolResponse('delegate_grounded_action', {
-          instruction: 'Click the visible Continue button.',
+        toolResponse('ground_pointer_target', {
+          action: 'click',
+          target: 'Continue button',
           summary: 'Continue to the next screen.',
-          visible_evidence: 'A Continue button is visible in the center.'
+          visible_evidence: 'A Continue button is visible in the center.',
+          expected_effect: 'The next screen opens.'
         }),
         toolResponse('complete_milestone', {
           summary: 'The next screen is open.',
@@ -165,7 +167,7 @@ describe('Text + Specialist visual task journey', () => {
       })
       expect(projection).toEqual({
         strategy: 'text_plus_specialist',
-        strategyLabel: 'Text + Specialist',
+        strategyLabel: 'Reasoning + Specialist',
         models: [
           {
             role: 'reasoner',

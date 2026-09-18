@@ -18,6 +18,8 @@
  * Accessibility grant), which no headless runner has.
  */
 import fs from 'fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import sharp from 'sharp'
 import { globalShortcut, screen } from 'electron'
 import { llm } from '../llm'
@@ -25,6 +27,7 @@ import type { VisionAction, Bounds } from './vision-action'
 import {
   type VisionScreen,
   type VisionSemanticElement,
+  type VisionTaskContinuation,
   type VisionTaskResult
 } from './vision-agent'
 import { VisionGuard } from './vision-guard'
@@ -71,6 +74,29 @@ import { computerUsePermissionBlock } from './computer-use-permissions'
 import { runVisionTaskGraph } from './vision-task-graph'
 import { captureComputerUseDisplay } from './computer-use-display-capture'
 import { snapshotAccessibilityApp } from '../accessibility/ax-host'
+import { accessibilityHelperPath } from '../accessibility/ax-helper'
+
+const execFileAsync = promisify(execFile)
+
+async function activateDefaultBrowser(): Promise<string | null> {
+  const helper = accessibilityHelperPath()
+  if (!helper) return null
+  try {
+    const { stdout } = await execFileAsync(helper, ['--default-browser'], { timeout: 4_000 })
+    const browser = JSON.parse(stdout) as { name?: unknown; path?: unknown }
+    if (
+      typeof browser.name !== 'string' ||
+      !browser.name.trim() ||
+      typeof browser.path !== 'string' ||
+      !browser.path.endsWith('.app')
+    )
+      return null
+    await execFileAsync('/usr/bin/open', ['-a', browser.path], { timeout: 5_000 })
+    return browser.name
+  } catch {
+    return null
+  }
+}
 
 export type { ActuationPort }
 
@@ -280,6 +306,20 @@ class VisionHost {
     const guard = continuation?.guard ?? new VisionGuard({ taskId, kind: 'computer_use' })
     const request = continuation?.request ?? new AbortController()
     const settings = getComputerUseSettings()
+    const defaultBrowser =
+      process.platform === 'darwin' && /default browser/i.test(goal)
+        ? await activateDefaultBrowser()
+        : null
+    if (process.platform === 'darwin' && /default browser/i.test(goal) && !defaultBrowser) {
+      return {
+        ok: false,
+        summary:
+          'Computer Use could not identify and focus the macOS default browser. Check the default browser setting and retry.',
+        steps: [],
+        handoffs: 0
+      }
+    }
+    const resolvedTargetLabel = targetLabel ?? defaultBrowser ?? undefined
     try {
       return await withVisionTaskModelStrategy(
         'desktop',
@@ -289,6 +329,11 @@ class VisionHost {
             llm.effectiveContextSize()
           )
           const retrievedFacts = [
+            ...(defaultBrowser
+              ? [
+                  `macOS default browser: ${defaultBrowser}. It is now frontmost; use this browser for the task.`
+                ]
+              : []),
             ...(checkpoint
               ? [
                   `Resume checkpoint for task ${checkpoint.taskId}: ${checkpoint.steps.join('; ')}`,
@@ -315,7 +360,7 @@ class VisionHost {
             contextTokens,
             retrievedFacts,
             continuation,
-            targetLabel
+            targetLabel: resolvedTargetLabel
           })
         }
       )
@@ -548,12 +593,6 @@ class VisionHost {
       }
     }
   }
-}
-
-export interface VisionTaskContinuation {
-  guard: VisionGuard
-  request: AbortController
-  queuedGuidance: string[]
 }
 
 let host: VisionHost | null = null

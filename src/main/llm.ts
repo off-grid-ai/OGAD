@@ -827,25 +827,30 @@ export class LLMService {
       this.mmProjPath = ''
     }
 
-    // ONE engine: bin/llama/llama-server, built in CI from source with a pinned
-    // macOS deployment target (scripts/build-llama.sh) so it both supports the
-    // newest model archs (gemma4/qwen35) AND runs on macOS 13+. The old dual-
-    // engine setup shipped a second, older binary as a "fallback" that silently
-    // couldn't load those models — removed.
+    // Bonsai 2's packed ternary weights require PrismML's llama.cpp fork. Never
+    // fall through to the stock server: it may accept a Q2_0 pack but produce
+    // incorrect output without the fork's Hadamard activation runtime.
+    const requiresPrism = /^Ternary-Bonsai-2-27B-(?!mmproj).+\.gguf$/i.test(
+      path.basename(this.modelPath)
+    )
     // Engines to try, IN ORDER. On Windows we ship a Vulkan (GPU) build in
     // bin/llama and a CPU-only fallback in bin/llama-cpu: if the Vulkan server
     // can't start (e.g. no Vulkan loader on the box) we fall through to CPU. On
-    // macOS/Linux only bin/llama exists, so this is a single-entry list and the
-    // behaviour is unchanged.
+    // macOS also ships a separate Prism build for Bonsai 2.
     const roots = binRoots()
     const serverPaths = roots
-      .flatMap((r) => [
-        path.join(r, 'llama', exe('llama-server')),
-        path.join(r, 'llama-cpu', exe('llama-server')),
-        path.join(r, exe('llama-server'))
-      ])
+      .flatMap((r) => requiresPrism
+        ? [path.join(r, 'llama-prism', exe('llama-server'))]
+        : [
+            path.join(r, 'llama', exe('llama-server')),
+            path.join(r, 'llama-cpu', exe('llama-server')),
+            path.join(r, exe('llama-server'))
+          ])
       .filter((p) => fs.existsSync(p))
     if (!serverPaths.length) {
+      if (requiresPrism) {
+        throw new Error('Bonsai 2 requires the bundled Prism llama.cpp engine, which is missing from this build.')
+      }
       console.error(`[LLMService] llama-server binary not found under: ${roots.join(', ')}`)
       return
     }

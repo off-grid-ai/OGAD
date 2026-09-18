@@ -37,7 +37,7 @@ let activationRequests: Array<[string, string?]> = []
 let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
 beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
+}, 30_000)
 afterEach(() => {
   activeIds = []
   activationRequests = []

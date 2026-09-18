@@ -104,8 +104,8 @@ describe('downloadedForCatalog', () => {
         org: 'Hugging Face',
         tags: ['Downloaded'],
         files: [
-          { name: 'hf.gguf', url: '', role: 'primary' },
-          { name: 'hf-mmproj.gguf', url: '', role: 'mmproj' }
+          { name: 'hf.gguf', url: '', sizeBytes: 0, role: 'primary' },
+          { name: 'hf-mmproj.gguf', url: '', sizeBytes: 0, role: 'mmproj' }
         ]
       }
     ])
@@ -153,7 +153,7 @@ describe('mergeCatalog — order + all three sources', () => {
     expect(out).toEqual([])
   })
   it('projects one installed row when an exact variant represents a catalog family', () => {
-    const variant = { ...dl, id: 'model-package-v1:exact', familyId: catEntry.id }
+    const variant = { ...dl, id: 'model-package-v1:exact', familyId: catEntry.id, files: ['cat.gguf'] }
     const out = mergeCatalog({
       locals: [],
       downloaded: [variant],
@@ -162,12 +162,32 @@ describe('mergeCatalog — order + all three sources', () => {
       present: presentAll
     })
     expect(out.map((model) => model.id)).toEqual([variant.id])
-    expect(out[0]!.files.find((file) => file.role === 'mmproj')?.name).toBe('hf-mmproj.gguf')
+    expect(out[0]!.files.find((file) => file.role === 'primary')?.name).toBe('cat.gguf')
     expect(out[0]).toMatchObject({
       id: variant.id,
       name: catEntry.name,
       kind: catEntry.kind
     })
+  })
+
+  it('keeps an alternate installed variant and the catalog default as separate rows', () => {
+    const variant = { ...dl, id: 'model-package-v1:alternate', familyId: catEntry.id }
+    const out = mergeCatalog({
+      locals: [],
+      downloaded: [variant],
+      installedDownloadedIds: [variant.id],
+      catalog: [catEntry],
+      present: presentAll
+    })
+    expect(out.map((model) => model.id)).toEqual([variant.id, catEntry.id])
+    expect(installedIds({
+      locals: [],
+      installedDownloadedIds: [variant.id],
+      downloaded: [variant],
+      catalog: [catEntry],
+      present: presentAll,
+      mfluxCached: () => false
+    })).toEqual([variant.id, catEntry.id])
   })
 
   it('uses the current catalog role for an installed family variant', () => {
@@ -241,7 +261,7 @@ describe('installedIds — order + per-source predicate', () => {
     expect(out).toEqual(['cat/text'])
   })
   it('does not list the catalog alias beside an installed exact family variant', () => {
-    const variant = { ...dl, id: 'model-package-v1:exact', familyId: catEntry.id }
+    const variant = { ...dl, id: 'model-package-v1:exact', familyId: catEntry.id, files: ['cat.gguf'] }
     expect(
       installedIds({
         locals: [],
@@ -340,6 +360,21 @@ describe('buildDiskEntry — source resolution + active flag', () => {
     })
     // vision => chat LLM path (not a modality), so not active unless it is the chat id.
     expect(e).toEqual({ id: 'org/hf', name: 'HF', kind: 'vision', bytes: 360, active: false })
+  })
+  it('groups an older family download by its current catalog kind', () => {
+    const family = { ...catEntry, kind: 'vision' }
+    const variant = { ...dl, id: 'model-package-v1:older', familyId: family.id, kind: 'text' }
+    const e = buildDiskEntry({
+      id: variant.id,
+      locals: [],
+      downloaded: [variant],
+      catalogById: (id) => id === family.id ? family : undefined,
+      isCatalogId: () => false,
+      activeChatId: variant.id,
+      modals: noModals,
+      sizeOf
+    })
+    expect(e).toMatchObject({ kind: 'vision', active: true })
   })
   it('download id that IS also a catalog id falls through to the catalog branch', () => {
     const e = buildDiskEntry({

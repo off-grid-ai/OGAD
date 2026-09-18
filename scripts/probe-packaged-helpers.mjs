@@ -29,6 +29,13 @@ const probes = [
     libraryPath: true
   },
   {
+    name: 'Prism llama-server',
+    relative: 'bin/llama-prism/llama-server',
+    args: ['--help'],
+    output: /-+\s*common params|--help,\s*--usage|LLAMA_ARG_THREADS|usage:.*llama-server/is,
+    libraryPath: true
+  },
+  {
     name: 'ffmpeg',
     relative: 'bin/ffmpeg',
     args: ['-version'],
