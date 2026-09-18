@@ -253,6 +253,17 @@ export class BrowserDriver {
     )
   }
 
+  /** Capture the page through Chromium when Electron's native display surface is unavailable. */
+  async captureScreenshot(): Promise<Buffer> {
+    const result = await this.send<{ data: string }>('Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: false,
+      captureBeyondViewport: false
+    })
+    if (!result.data) throw new Error('Chromium returned an empty browser screenshot.')
+    return Buffer.from(result.data, 'base64')
+  }
+
   /** Draw the agent pointer inside the Chromium page itself. Electron places a
    * WebContentsView above renderer DOM, so a React overlay cannot appear over
    * the live page. CDP evaluation keeps the visual at the exact viewport

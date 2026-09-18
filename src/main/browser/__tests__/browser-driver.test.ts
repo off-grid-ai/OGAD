@@ -45,6 +45,22 @@ const makeTransport = (
 }
 
 describe('snapshot', () => {
+  it('reads a browser screenshot from Chromium when the native surface cannot be captured', async () => {
+    const png = Buffer.from('png screenshot bytes')
+    const transport = makeTransport((method) =>
+      method === 'Page.captureScreenshot' ? { data: png.toString('base64') } : {}
+    )
+    const driver = new BrowserDriver(transport.cdp)
+
+    expect(await driver.captureScreenshot()).toEqual(png)
+    expect(transport.sent).toEqual([
+      {
+        method: 'Page.captureScreenshot',
+        params: { format: 'png', fromSurface: false, captureBeyondViewport: false }
+      }
+    ])
+  })
+
   it('parks and publishes the semantic pointer before the first browser action', async () => {
     const t = makeTransport()
     const pointer: Array<{ phase: string; x: number; y: number }> = []
