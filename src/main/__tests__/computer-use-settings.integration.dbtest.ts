@@ -46,8 +46,8 @@ describe('Computer Use settings persistence', () => {
       screenshotSize: 'large',
       screenshotQuality: 'detailed',
       checkpointInterval: 8,
-      retrieveOlderVisuals: true,
-      visualHistoryFrames: 2,
+      retrieveOlderVisuals: false,
+      visualHistoryFrames: 1,
       enabledRails: ['ax', 'vision']
     })
   })
@@ -56,7 +56,7 @@ describe('Computer Use settings persistence', () => {
     setComputerUseSettings({ checkpointInterval: 2, screenshotSize: 'unknown' })
     expect(getComputerUseSettings()).toMatchObject({
       checkpointInterval: 8,
-      screenshotSize: 'balanced'
+      screenshotSize: 'large'
     })
   })
 

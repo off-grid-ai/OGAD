@@ -26,6 +26,7 @@ vi.mock('electron', () => ({
 }))
 
 const database = await import('@offgrid/core/main/database')
+const rag = await import('@offgrid/core/main/rag/store')
 const skills = await import('@offgrid/core/main/skills')
 const { MemoryChat } = await import('@renderer/components/MemoryChat')
 const { TooltipProvider } = await import('@renderer/components/ui/tooltip')
@@ -39,6 +40,7 @@ function installApi(): void {
       updateRagConversationTitle: async (id: string, title: string) =>
         database.updateRagConversationTitle(id, title),
       getSettings: async () => database.getSettings(),
+      listProjects: async () => rag.listProjects(),
       saveSetting: async (key: string, value: unknown) => database.saveSetting(key, value),
       listSkills: async () => skills.listSkills(),
       imageGenStatus: async () => ({ available: false, models: [], active: '' }),

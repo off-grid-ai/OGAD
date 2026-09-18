@@ -22,6 +22,7 @@ beforeAll(() => {
 })
 
 vi.mock('electron', () => ({
+  BrowserWindow: { getAllWindows: () => [] },
   app: {
     isPackaged: false,
     getPath: () => tempDir,
