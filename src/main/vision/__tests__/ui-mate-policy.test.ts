@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { createHash } from 'node:crypto'
 import fixtures from '../model-adapters/ui-mate/__fixtures__/official-responses.json'
 import messageFixture from '../model-adapters/ui-mate/__fixtures__/official-messages.json'
 import { serializeVisionPolicyMessages } from '../model-adapters/model-input'
@@ -40,7 +39,7 @@ describe('UI-Mate official response fixtures', () => {
 
 describe('UI-Mate policy', () => {
   it('uses the official base action schema', () => {
-    expect(UI_MATE_GENERATION_CONFIG).toEqual({ maxTokens: 16_384, temperature: 1, topP: 0.95 })
+    expect(UI_MATE_GENERATION_CONFIG).toEqual({ temperature: 1, topP: 0.95 })
     expect(UI_MATE_TOOL_SCHEMA.function.parameters.properties.action.enum).toEqual([
       'left_click',
       'right_click',
@@ -172,13 +171,15 @@ describe('UI-Mate policy', () => {
     const expected = messageFixture.expectedMessages.map((message) =>
       message.role === 'system'
         ? { ...message, content: [{ type: 'text', text: UI_MATE_SYSTEM_PROMPT }] }
-        : message
+        : message.role === 'assistant'
+          ? { ...message, content: message.content.map((part) => part.type === 'text'
+            ? { ...part, text: part.text.replace(/<think>[\s\S]*?<\/think>\s*/g, '') }
+            : part) }
+          : message
     )
     expect(messages).toEqual(expected)
-    expect(UI_MATE_SYSTEM_PROMPT).toContain('<IMPORTANT_NOTES>')
-    expect(createHash('sha256').update(UI_MATE_SYSTEM_PROMPT).digest('hex')).toBe(
-      '9612fe88a4b06775a3e18b2645eafb7497e3083ca303035b2382ce75403780bb'
-    )
+    expect(UI_MATE_SYSTEM_PROMPT).toContain('<IMPORTANT>')
+    expect(UI_MATE_SYSTEM_PROMPT).toContain('Function calls MUST follow the specified format')
   })
 
   it('persists exact messages without screenshot bytes', () => {

@@ -141,14 +141,14 @@ describe('makeComputerTaskExecutor', () => {
   })
 
   describe('forced rail (A/B)', () => {
-    it("forcedRail 'vision' skips the AX read entirely and uses the grounder", async () => {
+    it("forcedRail 'vision' resolves the target app without running AX and uses the grounder", async () => {
       const routingSnapshot = vi.fn(async () => ({ app: 'Slack', snapshot: richSnapshot() }))
       const tiers = makeTiers({ routingSnapshot })
       const exec = makeComputerTaskExecutor(tiers, { forcedRail: 'vision' })
 
       const result = await exec(action())
 
-      expect(routingSnapshot).not.toHaveBeenCalled() // no AX read at all
+      expect(routingSnapshot).toHaveBeenCalledWith('message sidd on Slack')
       expect(tiers.runAx).not.toHaveBeenCalled()
       expect(tiers.visionExecute).toHaveBeenCalledOnce()
       expect(result).toEqual({ ok: true, effectId: 'vision' })

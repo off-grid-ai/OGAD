@@ -17,7 +17,8 @@ describe('native tool specs', () => {
     expect(openUrl).toMatch(/web_use/)
     expect(webUse).toMatch(/play or watch a video|YouTube/i)
     expect(webUse).toMatch(/built-in browser/i)
-    expect(webUse).toMatch(/not open_url/i)
+    expect(webUse).toMatch(/not merely open it/i)
+    expect(webUse).toMatch(/explicitly requires their existing default-browser session/i)
     expect(findNativeToolSpec('web_use')?.name).toBe('web_use')
   })
 
