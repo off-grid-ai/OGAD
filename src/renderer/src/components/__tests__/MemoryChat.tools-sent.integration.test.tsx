@@ -11,7 +11,7 @@ it('shows the tools offered to a model even when it calls none, and keeps them a
   ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
   const boundary = new ChatBoundary()
   Object.assign(boundary.api, {
-    getSettings: async () => ({ composerToolsOn: true }),
+    getSettings: async () => ({ composerConnectorsOn: true }),
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     listTools: async () => [],
     mcpList: async () => [],

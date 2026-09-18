@@ -38,7 +38,7 @@ describe('<MemoryChat/> remote image memory refusal', () => {
     const requests: ImageGenerationRequestContract[] = []
     installBoundary(boundary)
     if (toolPrompt) {
-      window.api.getSettings = async () => ({ composerToolsOn: true })
+      window.api.getSettings = async () => ({ composerConnectorsOn: true })
       window.api.toolChat = async () => ({
         answer: 'I will make the illustration.',
         toolCalls: [{ name: 'generate_image', result: 'Image generation started' }],
