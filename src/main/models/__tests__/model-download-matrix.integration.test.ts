@@ -50,7 +50,8 @@ const byKind = (kind: CatalogModel['kind'], fileCount?: number): CatalogModel =>
 // model ships an mmproj so it's classified 'vision', and the vision model IS the
 // chat model (activates into the `.text` chat slot). Single-file download
 // mechanics are exercised with any single-file model (image/voice exist).
-const singleFileModels = CATALOG.filter((m) => m.files.length === 1)
+// Synthetic HTTP fixtures cannot satisfy immutable catalog checksums.
+const singleFileModels = CATALOG.filter((m) => m.files.length === 1 && !m.files[0]?.sha256)
 const chatModel = byKind('vision', 2)
 const visionModel = byKind('vision', 2)
 const holoGrounder = CATALOG.find((candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF')
