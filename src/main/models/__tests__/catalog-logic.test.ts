@@ -104,8 +104,8 @@ describe('downloadedForCatalog', () => {
         org: 'Hugging Face',
         tags: ['Downloaded'],
         files: [
-          { name: 'hf.gguf', url: '', role: 'primary' },
-          { name: 'hf-mmproj.gguf', url: '', role: 'mmproj' }
+          { name: 'hf.gguf', url: '', sizeBytes: 0, role: 'primary' },
+          { name: 'hf-mmproj.gguf', url: '', sizeBytes: 0, role: 'mmproj' }
         ]
       }
     ])
