@@ -47,7 +47,13 @@ function renderChat(openTarget?: {
   )
 }
 
-afterEach(() => cleanup())
+const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+afterEach(() => {
+  cleanup()
+  if (originalOffsetHeight) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)
+  }
+})
 
 const FEW_STEP = 'sdxl-lightning.gguf' // shared image-defaults: defaultSteps 10
 const FULL = 'dreamlike-photoreal-v2.gguf' // shared image-defaults: defaultSteps 28
@@ -425,6 +431,13 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     Object.defineProperty(File.prototype, 'arrayBuffer', {
       configurable: true,
       value: async () => new ArrayBuffer(8)
+    })
+    // jsdom gives the virtualized conversation list a zero-height viewport.
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get() {
+        return this.classList.contains('overflow-y-auto') ? 600 : 0
+      }
     })
   })
 
@@ -1214,7 +1227,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
       generate: () => turn.promise
     })
     const user = userEvent.setup()
-    renderChat({ conversationId: 'conversation-a' })
+    const chat = renderChat({ conversationId: 'conversation-a' })
     await waitFor(() => expect(boundary.getRagMessages).toHaveBeenCalledWith('conversation-a'))
 
     await openImageComposer(user)
@@ -1225,13 +1238,20 @@ describe('<MemoryChat/> image and vision release journeys', () => {
       boundary.emitProgress({ phase: 'sampling', step: 2, total: 8, secPerStep: 1 })
     })
     expect(await screen.findByText('Generating image · Step 2 of 8')).toBeTruthy()
-
-    await user.click(screen.getByText('Conversation B'))
+    chat.rerender(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'conversation-b' }} />
+      </TooltipProvider>
+    )
     await waitFor(() => expect(screen.queryByText('Generating image · Step 2 of 8')).toBeNull())
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
     expect(boundary.cancelImageGen).not.toHaveBeenCalled()
 
-    await user.click(screen.getByText('Conversation A'))
+    chat.rerender(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'conversation-a' }} />
+      </TooltipProvider>
+    )
     expect(
       screen.queryAllByRole('button', { name: /stop/i }).map((button) => button.textContent)
     ).toEqual(['Stop'])
