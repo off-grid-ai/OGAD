@@ -1807,6 +1807,7 @@ export function MemoryChat({
           toolStreamMessage
         ])
         const tr = await window.api.toolChat(modelQuery, fullHistory.slice(0, -1), {
+          assistantOnly: assistantForTurn,
           connectors: connectorsOn,
           conversationId: convId,
           // Memory scope drives which memory tools the model gets: a project offers its

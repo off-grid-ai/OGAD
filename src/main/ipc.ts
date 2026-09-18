@@ -1982,6 +1982,7 @@ export function setupIPC() {
       query: string,
       history?: { role: string; content: string }[],
       opts?: {
+        assistantOnly?: boolean
         connectors?: boolean
         conversationId?: string
         projectId?: string
