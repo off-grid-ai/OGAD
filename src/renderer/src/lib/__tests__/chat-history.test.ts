@@ -52,7 +52,7 @@ describe('buildSendHistory (D8)', () => {
 })
 
 describe('MemoryChat builds send history from the target conversation (D8 wiring)', () => {
-  const src = readFileSync(join(__dirname, '..', '..', 'components', 'MemoryChat.tsx'), 'utf8')
+  const src = readFileSync(join(__dirname, '..', '..', 'components', 'MemoryChat', 'index.tsx'), 'utf8')
 
   it('no longer builds history from the active-tab `messages` slice', () => {
     // The exact buggy construction that fed the active tab's transcript to a send
