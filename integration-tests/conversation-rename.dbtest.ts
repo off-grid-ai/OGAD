@@ -25,6 +25,34 @@ vi.mock('electron', () => ({
   }
 }))
 
+// jsdom has no layout measurements; keep the production sidebar and its actions,
+// but make its third-party virtualizer expose every row in this tiny fixture.
+vi.mock('@tanstack/react-virtual', () => ({
+  useVirtualizer: ({
+    count,
+    estimateSize
+  }: {
+    count: number
+    estimateSize: (index: number) => number
+  }) => ({
+    getTotalSize: () =>
+      Array.from({ length: count }, (_, index) => estimateSize(index)).reduce(
+        (sum, height) => sum + height,
+        0
+      ),
+    getVirtualItems: () =>
+      Array.from({ length: count }, (_, index) => ({
+        index,
+        key: index,
+        start: Array.from({ length: index }, (_, previous) => estimateSize(previous)).reduce(
+          (sum, height) => sum + height,
+          0
+        )
+      })),
+    measureElement: () => undefined
+  })
+}))
+
 const database = await import('@offgrid/core/main/database')
 const rag = await import('@offgrid/core/main/rag/store')
 const skills = await import('@offgrid/core/main/skills')
@@ -41,11 +69,27 @@ function installApi(): void {
         database.updateRagConversationTitle(id, title),
       getSettings: async () => database.getSettings(),
       listProjects: async () => rag.listProjects(),
+      styleThumbs: async () => ({}),
       saveSetting: async (key: string, value: unknown) => database.saveSetting(key, value),
       listSkills: async () => skills.listSkills(),
       imageGenStatus: async () => ({ available: false, models: [], active: '' }),
+      imageGenJobStatus: async () => ({
+        id: null,
+        phase: 'idle',
+        conversationId: null,
+        projectId: null,
+        stage: null,
+        enhancedPrompt: '',
+        progress: null,
+        outputPath: null,
+        error: null,
+        startedAt: null,
+        finishedAt: null
+      }),
       onRagStream: () => () => undefined,
-      onImageGenProgress: () => () => undefined
+      onImageGenProgress: () => () => undefined,
+      onImageGenJobState: () => () => undefined,
+      onImageGenConversationUpdated: () => () => undefined
     }
   })
 }
