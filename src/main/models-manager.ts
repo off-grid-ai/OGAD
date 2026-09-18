@@ -759,7 +759,10 @@ async function setActiveLlamaModel(
   }
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
-  const transferred = downloadedVariant(downloaded, modelId)
+  // An exact catalog pick takes precedence once its files are present. A prior
+  // download of another quantization in this family must not override it.
+  const catalogReady = catalogEntry?.files.every((file) => fileSizeOf(dir, file.name) > 0)
+  const transferred = catalogReady ? undefined : downloadedVariant(downloaded, modelId)
   if (transferred) {
     if (!acceptsKind(transferred.kind)) {
       return {
