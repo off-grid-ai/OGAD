@@ -24,6 +24,7 @@ function chatBoundary(
     userContext?: unknown
     imageJob?: unknown
     activeStreams?: unknown[]
+    agentic?: boolean
   }
 ): {
   status: () => { streamId: string; messages: string[]; voice: string; syntheses: string[] }
@@ -81,8 +82,10 @@ function chatBoundary(
     getRagConversation: async () => conversation,
     getRagMessages: async () => messages.map((message) => ({ ...message })),
     getActiveRagStreams: async () => options?.activeStreams ?? [],
-    ...(options?.imageJob ? { imageGenJobStatus: async () => options.imageJob } : {}),
     onImageGenJobState: () => () => { },
+    onImageGenConversationUpdated: () => () => { },
+    imageGenJobStatus: async () => ({ id: null, phase: 'idle' as const, conversationId: null, projectId: null, stage: null, enhancedPrompt: '', progress: null, outputPath: null, error: null, startedAt: null, finishedAt: null }),
+    ...(options?.imageJob ? { imageGenJobStatus: async () => options.imageJob } : {}),
     onRagStream: (callback: (event: Event) => void) => {
       onStream = callback
       return () => {
@@ -111,6 +114,7 @@ function chatBoundary(
     },
     getSettings: async () => ({
       composerToolsOn: true,
+      composerConnectorsOn: options?.agentic === true,
       composerVoiceMode: voiceMode,
       showGenerationDetails,
       ttsVoice: voice
@@ -326,7 +330,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
   it('replaces failed model text with the new answer and keeps the model-change row after reload', async () => {
     ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
-    const boundary = chatBoundary(undefined, false, true)
+    const boundary = chatBoundary(undefined, false, true, { agentic: true })
     const user = userEvent.setup()
     const chat = render(
       <TooltipProvider>
@@ -381,7 +385,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
   it('interleaves reasoning with tools live and keeps the same completed timeline after reload', async () => {
     ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
-    const boundary = chatBoundary()
+    const boundary = chatBoundary(undefined, false, false, { agentic: true })
     const user = userEvent.setup()
     const chat = render(
       <TooltipProvider>

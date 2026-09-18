@@ -4728,7 +4728,10 @@ export function MemoryChat({
                                       size="icon"
                                       aria-label="Stop generating"
                                       onClick={() =>
-                                        void stopGeneration(activeConversationId, liveJourneyTask)
+                                        void stopGeneration(
+                                          activeConversationId,
+                                          guidanceTaskForJourney(getTaskSessionState().tasks, activeConversationId)
+                                        )
                                       }
                                       className="size-8 rounded-full border-red-500/50 text-red-400 hover:bg-red-500/10"
                                     >
@@ -4749,7 +4752,10 @@ export function MemoryChat({
                                 type="button"
                                 variant="outline"
                                 onClick={() => {
-                                  void stopGeneration(activeConversationId, liveJourneyTask)
+                                  void stopGeneration(
+                                    activeConversationId,
+                                    guidanceTaskForJourney(getTaskSessionState().tasks, activeConversationId)
+                                  )
                                 }}
                                 className="h-8 gap-1.5 border-red-500/50 text-red-400 hover:bg-red-500/10"
                               >
