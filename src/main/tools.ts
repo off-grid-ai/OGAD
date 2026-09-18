@@ -531,6 +531,7 @@ export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
   opts: {
+    /** Assistant is selected for this turn; always include its browser and desktop tools. */
     assistantOnly?: boolean
     connectors?: boolean
     conversationId?: string
@@ -598,8 +599,9 @@ export async function toolChat(
   // Offer generate_image only when an image model is available. The renderer passes
   // this; fall back to the main-process check so a caller that omits it still gates
   // correctly (single source of truth for "can we make an image right now").
+  const toolsEnabled = getSetting<boolean>('toolsEnabled', true) !== false
   let imageAvailable = opts.imageAvailable ?? false
-  if (!opts.assistantOnly && opts.imageAvailable === undefined) {
+  if ((!opts.assistantOnly || toolsEnabled) && opts.imageAvailable === undefined) {
     try {
       const { activeImageModel } = await import('./imagegen')
       imageAvailable = !!activeImageModel()
@@ -612,10 +614,10 @@ export async function toolChat(
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
-  const toolsEnabled = getSetting<boolean>('toolsEnabled', true) !== false
-  const exts = toolsEnabled || opts.assistantOnly
-    ? selectToolExtensions(getToolExtensions(), { connectors: !opts.assistantOnly && !!opts.connectors })
-    : []
+  const exts =
+    toolsEnabled || opts.assistantOnly
+      ? selectToolExtensions(getToolExtensions(), { connectors: toolsEnabled && !!opts.connectors })
+      : []
   const extSchemas: unknown[] = []
   const hints: string[] = []
   const disabled = disabledSet()
@@ -624,24 +626,34 @@ export async function toolChat(
       const s = await e.schemas()
       const enabledSchemas = s.filter((schema) => {
         const name = (schema as { function?: { name?: unknown } }).function?.name
-        if (opts.assistantOnly) return name === 'web_use' || name === 'computer_use'
-        return typeof name !== 'string' || !disabled.has(name)
+        if (opts.assistantOnly && (name === 'web_use' || name === 'computer_use')) return true
+        return toolsEnabled && (typeof name !== 'string' || !disabled.has(name))
       })
       if (enabledSchemas.length) {
         extSchemas.push(...enabledSchemas)
-        if (e.systemHint && !opts.assistantOnly) hints.push(e.systemHint())
+        if (e.systemHint && toolsEnabled) hints.push(e.systemHint())
       }
     } catch (err) {
       console.error('[tools] extension schemas', e.id, err)
     }
   }
-  const builtins = opts.assistantOnly
-    ? []
-    : schemas(imageAvailable, {
+  const builtins = toolsEnabled
+    ? schemas(imageAvailable, {
         projectActive: !!opts.projectId,
         allMemory: !!opts.allMemory
       })
-  const rawTools = opts.assistantOnly ? extSchemas : toolsEnabled ? [...builtins, ...extSchemas] : []
+    : []
+  const assistantRequiredTools = opts.assistantOnly
+    ? extSchemas.filter((schema) => {
+        const name = (schema as { function?: { name?: unknown } }).function?.name
+        return name === 'web_use' || name === 'computer_use'
+      })
+    : []
+  const otherExtSchemas = opts.assistantOnly
+    ? extSchemas.filter((schema) => !assistantRequiredTools.includes(schema))
+    : extSchemas
+  const rawTools = [...assistantRequiredTools, ...builtins, ...otherExtSchemas]
+  const protectedToolCount = assistantRequiredTools.length + builtins.length
   // Keep the tool payload within the model's context. llama-server inlines every
   // tool schema into the prompt AND compiles it to a grammar, so a big connector
   // set can blow past the context window and 400 the whole turn. Budget to a
@@ -654,16 +666,16 @@ export async function toolChat(
   // meaning, e.g. "meetings" → a calendar tool); fall back to lexical term-overlap
   // if the embeddings backend isn't ready. No-op with 0-1 connector tools.
   let rankedTools = rawTools
-  if (rawTools.length - builtins.length > 1) {
+  if (rawTools.length - protectedToolCount > 1) {
     try {
       const { embeddings } = await import('./embeddings')
       const { rankConnectorToolsSemantic } = await import('./tools/tool-embedding-ranking')
-      rankedTools = await rankConnectorToolsSemantic(query, rawTools, builtins.length, {
+      rankedTools = await rankConnectorToolsSemantic(query, rawTools, protectedToolCount, {
         embed: (t) => embeddings.generateEmbedding(t)
       })
     } catch {
       const { rankConnectorTools } = await import('./tools/tool-ranking')
-      rankedTools = rankConnectorTools(query, rawTools, builtins.length)
+      rankedTools = rankConnectorTools(query, rawTools, protectedToolCount)
     }
   }
   const { budgetTools } = await import('./tools/tool-budget')
@@ -675,7 +687,7 @@ export async function toolChat(
   // roughly halving per-round prompt cost vs the old 45%-of-a-big-context budget.
   const MAX_TOOL_TOKENS = 4000
   const toolBudget = Math.max(1024, Math.min(Math.floor(ctx * 0.4), MAX_TOOL_TOKENS))
-  const budgeted = budgetTools(rankedTools, toolBudget, builtins.length)
+  const budgeted = budgetTools(rankedTools, toolBudget, protectedToolCount)
   if (budgeted.pruned || budgeted.droppedCount) {
     console.warn(
       `[tools] context budget ${toolBudget} tok: pruned schemas${budgeted.droppedCount ? `, dropped ${budgeted.droppedCount} connector tool(s)` : ''} to fit (final ~${budgeted.estTokens} tok)`
@@ -689,7 +701,7 @@ export async function toolChat(
   const sys =
     'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
     (opts.assistantOnly
-      ? ' You can use web_use for website tasks and computer_use for visible desktop app tasks. No other tools are available.'
+      ? ' web_use and computer_use are available for website and desktop tasks.'
       : '') +
     (hints.length ? ' ' + hints.join(' ') : '')
 
@@ -814,7 +826,10 @@ export async function toolChat(
       0,
       Math.floor((maxPromptChars - toolPromptChars(messages)) / 4)
     )
-    const fittedTools = budgetTools(tools, availableToolTokens, builtins.length)
+    const fittedTools = budgetTools(tools, availableToolTokens, protectedToolCount)
+    if (opts.assistantOnly && fittedTools.estTokens > availableToolTokens) {
+      return resultWithImages({ answer: 'Context is full.', toolCalls, unified })
+    }
     const roundTools =
       !finishAfterDeferredImages && fittedTools.estTokens <= availableToolTokens
         ? fittedTools.tools
@@ -882,9 +897,7 @@ export async function toolChat(
             rawArgs: JSON.stringify(c.args)
           }))
 
-    const permitted = opts.assistantOnly
-      ? effective.filter((call) => call.name === 'web_use' || call.name === 'computer_use')
-      : effective
+    const permitted = effective
     if (permitted.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
