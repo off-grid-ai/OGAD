@@ -27,6 +27,7 @@ describe('renderer content security policy', () => {
   it('limits artifact network access to the exact package runtime host', () => {
     expect(ARTIFACT_CONTENT_SECURITY_POLICY).toContain("default-src 'none'")
     expect(ARTIFACT_CONTENT_SECURITY_POLICY).toContain('https://esm.sh')
+    expect(ARTIFACT_CONTENT_SECURITY_POLICY).toContain('img-src data: blob: ogcapture:')
     expect(ARTIFACT_CONTENT_SECURITY_POLICY).not.toContain('*')
   })
 })
