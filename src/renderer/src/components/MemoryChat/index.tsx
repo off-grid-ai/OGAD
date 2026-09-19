@@ -35,6 +35,14 @@ import { createChatDraftStore } from '../chat-draft-store'
 import { NewProjectNameField } from '../NewProjectNameField'
 import { ExploreSection } from '../explore/ExploreSection'
 import { PresetSetup } from '../explore/PresetSetup'
+import {
+  buildComicBookReader,
+  comicBookHeroImage,
+  comicBookPageFromPrompt,
+  comicBookPageCount,
+  comicBookTitle,
+  type ComicBookPage
+} from '../explore/comicBookReader'
 import { ApprovalSetup, type ApprovalSetupRecord } from '../actions/ApprovalSetup'
 import {
   REQUEST_FORM_URL,
@@ -1905,13 +1913,80 @@ export function MemoryChat({
           setImgProgress(null)
           setImageGenConv(convId)
           let generatedImageCount = 0
+          const comicPageTotal = modelQuery.includes('<!-- offgrid-action:comic-book -->')
+            ? comicBookPageCount(modelQuery)
+            : null
+          const comicPages: ComicBookPage[] = []
+          const comicTitle = comicPageTotal
+            ? comicBookTitle(imageRequests[0]?.prompt ?? '') ??
+              comicBookTitle(modelQuery) ??
+              'Comic Book'
+            : 'Comic Book'
+          const comicHeroSource = comicPageTotal ? comicBookHeroImage(modelQuery) : null
+          const keptComicHero = comicHeroSource
+            ? await window.api.keepInitImage(comicHeroSource).catch(() => null)
+            : null
+          const comicHeroPath = keptComicHero?.path ?? comicHeroSource
+          const comicReaderMessageId = `comic-reader-${toolStreamId}`
+          let comicArtifactId: string | null = null
+          const updateComicReader = async (): Promise<void> => {
+            if (!comicPageTotal) return
+            const html = buildComicBookReader(comicPages, comicPageTotal, comicTitle)
+            const content = `Comic book reader: ${comicPages.length} of ${comicPageTotal} pages ready.\n\n\`\`\`html\n${html}\n\`\`\``
+            setConvMessages(convId, (previous) => {
+              const reader: ChatMessage = {
+                id: comicReaderMessageId,
+                role: 'assistant',
+                content
+              }
+              const existing = previous.findIndex((message) => message.id === comicReaderMessageId)
+              return existing === -1
+                ? [...previous, reader]
+                : previous.map((message, index) => (index === existing ? reader : message))
+            })
+            setCanvasArtifact({ kind: 'html', code: html, title: comicTitle })
+            try {
+              const previousArtifactId = comicArtifactId
+              const saved = await window.api.saveArtifact({
+                kind: 'html',
+                code: html,
+                title: comicTitle,
+                conversationId: convId,
+                projectId
+              })
+              comicArtifactId = saved.id
+              setArtifacts((current) => [
+                saved,
+                ...current.filter(
+                  (artifact) =>
+                    artifact.id !== saved.id && artifact.id !== previousArtifactId
+                )
+              ])
+              if (previousArtifactId && previousArtifactId !== saved.id) {
+                await window.api.deleteArtifact(previousArtifactId)
+              }
+            } catch {
+              /* The live reader remains available if artifact persistence fails. */
+            }
+          }
+          if (comicPageTotal) {
+            setConvMessages(convId, (previous) =>
+              previous.filter((message) => message.id !== toolStreamId)
+            )
+            await updateComicReader()
+          }
           try {
             for (const imageRequest of imageRequests) {
               if (cancelledRef.current.has(convId)) break
               setImgProgress(null)
+              const comicPage = comicPageTotal
+                ? comicBookPageFromPrompt(imageRequest.prompt)
+                : null
+              const generationPrompt = comicPage?.prompt ?? imageRequest.prompt
               try {
                 const img = await window.api.generateImage({
-                  prompt: imageRequest.prompt,
+                  prompt: generationPrompt,
+                  ...(comicHeroPath ? { initImage: comicHeroPath, strength: 0.72 } : {}),
                   conversationId: convId,
                   projectId: projectId
                 })
@@ -1933,60 +2008,72 @@ export function MemoryChat({
                   typeof img.durationMs === 'number'
                     ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
                     : undefined
-                const ownsToolTurn = generatedImageCount === 0
-                const imageContent =
-                  ownsToolTurn && !pureImageToolTurn
-                    ? answer
-                    : `Generated for: ${imageRequest.prompt}`
-                const completedImage = completedImageMessage(
-                  imageContent,
-                  imageRequest.prompt,
-                  img.prompt
-                )
-                let imageMessageId: string = crypto.randomUUID()
-                try {
-                  const stored = await window.api.addRagMessage(
-                    convId,
-                    'assistant',
-                    completedImage.storedContent,
-                    withGeneratedImageReference(
-                      {
-                        ...(ownsToolTurn ? toolCtxWithReasoning : {}),
-                        ...(imageMetadata ? { imageMetadata } : {}),
-                        ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
-                        ...(imageMetrics ? { metrics: imageMetrics } : {})
-                      },
-                      { id: img.syncId, path: img.path }
-                    )
+                if (!comicPageTotal) {
+                  const ownsToolTurn = generatedImageCount === 0
+                  const imageContent =
+                    ownsToolTurn && !pureImageToolTurn
+                      ? answer
+                      : `Generated for: ${imageRequest.prompt}`
+                  const completedImage = completedImageMessage(
+                    imageContent,
+                    imageRequest.prompt,
+                    img.prompt
                   )
-                  imageMessageId = stored.uuid
-                  await announceImageMessagePersisted(convId, stored.uuid)
-                } catch {
-                  /* Keep the generated file visible even if this database write fails. */
-                }
-                setConvMessages(convId, (prev) => [
-                  ...prev.filter((message) => !ownsToolTurn || message.id !== toolStreamId),
-                  {
-                    id: imageMessageId,
-                    role: 'assistant',
-                    ...completedImage,
-                    image: img.dataUrl,
-                    imagePath: img.path,
-                    imageMetadata,
-                    ...(ownsToolTurn
-                      ? {
-                        context,
-                        reasoning: toolReasoning,
-                        timeline: toolTimeline,
-                        toolCalls,
-                        toolsOffered: tr?.toolsOffered
-                      }
-                      : {}),
-                    ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
-                    ...(imageMetrics ? { metrics: imageMetrics } : {})
+                  let imageMessageId: string = crypto.randomUUID()
+                  try {
+                    const stored = await window.api.addRagMessage(
+                      convId,
+                      'assistant',
+                      completedImage.storedContent,
+                      withGeneratedImageReference(
+                        {
+                          ...(ownsToolTurn ? toolCtxWithReasoning : {}),
+                          ...(imageMetadata ? { imageMetadata } : {}),
+                          ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
+                          ...(imageMetrics ? { metrics: imageMetrics } : {})
+                        },
+                        { id: img.syncId, path: img.path }
+                      )
+                    )
+                    imageMessageId = stored.uuid
+                    await announceImageMessagePersisted(convId, stored.uuid)
+                  } catch {
+                    /* Keep the generated file visible even if this database write fails. */
                   }
-                ])
-                if (voiceMode) setAutoPlayId(imageMessageId)
+                  setConvMessages(convId, (prev) => [
+                    ...prev.filter((message) => !ownsToolTurn || message.id !== toolStreamId),
+                    {
+                      id: imageMessageId,
+                      role: 'assistant',
+                      ...completedImage,
+                      image: img.dataUrl,
+                      imagePath: img.path,
+                      imageMetadata,
+                      ...(ownsToolTurn
+                        ? {
+                          context,
+                          reasoning: toolReasoning,
+                          timeline: toolTimeline,
+                          toolCalls,
+                          toolsOffered: tr?.toolsOffered
+                        }
+                        : {}),
+                      ...(img.durationMs === undefined
+                        ? {}
+                        : { generationTimeMs: img.durationMs }),
+                      ...(imageMetrics ? { metrics: imageMetrics } : {})
+                    }
+                  ])
+                  if (voiceMode) setAutoPlayId(imageMessageId)
+                }
+                if (comicPageTotal) {
+                  comicPages.push({
+                    src: captureUrlForPath(img.path),
+                    story: comicPage?.story ?? imageRequest.prompt,
+                    prompt: generationPrompt
+                  })
+                  await updateComicReader()
+                }
                 generatedImageCount += 1
               } catch (error) {
                 // One failed image does not erase or block another completed tool request. Stop is
@@ -2015,6 +2102,31 @@ export function MemoryChat({
                   ])
                 }
               }
+            }
+            if (comicPageTotal && comicPages.length > 0) {
+              const finalHtml = buildComicBookReader(comicPages, comicPageTotal, comicTitle)
+              const finalContent = `Comic book reader: ${comicPages.length} of ${comicPageTotal} pages ready.\n\n\`\`\`html\n${finalHtml}\n\`\`\``
+              try {
+                const stored = await window.api.addRagMessage(convId, 'assistant', finalContent)
+                setConvMessages(convId, (previous) =>
+                  previous.map((message) =>
+                    message.id === comicReaderMessageId ? { ...message, id: stored.uuid } : message
+                  )
+                )
+              } catch {
+                /* The live reader remains available if persistence fails. */
+              }
+            } else if (comicPageTotal) {
+              if (comicArtifactId) {
+                await window.api.deleteArtifact(comicArtifactId).catch(() => false)
+                setArtifacts((current) =>
+                  current.filter((artifact) => artifact.id !== comicArtifactId)
+                )
+              }
+              setConvMessages(convId, (previous) =>
+                previous.filter((message) => message.id !== comicReaderMessageId)
+              )
+              setCanvasArtifact(null)
             }
           } finally {
             setImgProgress(null)
@@ -3665,6 +3777,7 @@ export function MemoryChat({
                               preset={presetSetup}
                               onCancel={() => setPresetSetup(null)}
                               onOpenConnectors={onOpenConnectors}
+                              styleThumbs={styleThumbs}
                               onSubmit={(prompt) => {
                                 setPresetSetup(null)
                                 void sendMessage(prompt, { asUserInput: true, assistantEnabled: true })
