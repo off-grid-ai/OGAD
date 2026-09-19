@@ -59,6 +59,7 @@ stage_native_helpers() {
   MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-computer-use-capture.sh resources/bin
   bash scripts/build-dictation-hotkey.sh
   bash scripts/build-actions-helper.sh
+  bash scripts/build-location.sh resources/bin
   mkdir -p resources/bin
   cp scripts/meeting-recorder/meeting-recorder resources/bin/meeting-recorder
   cp scripts/dictation-hotkey/dictation-hotkey resources/bin/dictation-hotkey

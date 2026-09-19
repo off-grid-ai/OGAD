@@ -32,6 +32,7 @@ resources/bin/parakeet/
 # Pro MultipeerConnectivity helper - built from the private Pro repo and staged for packaging.
 resources/bin/proximity-helper
 resources/bin/keychain-bootstrap.node
+resources/bin/location.node
 # Gateway probe scratch output
 .gateway-probe/
 # TS build cache

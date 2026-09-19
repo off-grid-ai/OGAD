@@ -75,6 +75,7 @@ mac:
     NSRemindersFullAccessUsageDescription: Off Grid AI reads and creates reminders when you ask, on your device. Your reminders never leave your Mac.
     NSContactsUsageDescription: Off Grid AI reads your contacts to complete actions you ask for, like sending a message. Your contacts never leave your Mac.
     NSLocationUsageDescription: Off Grid AI uses your current location when you ask for nearby results. Your location stays on your Mac.
+    NSLocationWhenInUseUsageDescription: Off Grid AI uses your current location when you ask for nearby results. Your location stays on your Mac.
     NSPhotoLibraryUsageDescription: Off Grid AI works with photos you ask it to, like picking one to send. Your photos never leave your Mac.
   notarize: true
   icon: resources/icon.png
