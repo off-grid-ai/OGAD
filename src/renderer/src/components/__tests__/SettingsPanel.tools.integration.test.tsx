@@ -85,8 +85,8 @@ describe('<SettingsPanel/> tool settings', () => {
     expect(screen.getByText('Task settings content')).toBeTruthy()
   })
 
-  it('shows meeting search and toggles it independently', async () => {
-    const setToolEnabled = vi.fn(async () => undefined)
+  it('groups related tools and keeps group and individual control', async () => {
+    const saved: Array<[string, boolean]> = []
     ;(window as unknown as { api: Record<string, unknown> }).api = {
       getLlmSettings: async () => ({}),
       getModelCatalog: async () => ({ models: [] }),
@@ -95,23 +95,70 @@ describe('<SettingsPanel/> tool settings', () => {
       getTranscriptionInfo: async () => null,
       listTools: async () => [
         {
-          name: 'search_meetings',
-          description: "Search the user's recorded meetings.",
+          name: 'computer_use',
+          description: 'Control the Mac.',
+          enabled: true
+        },
+        {
+          name: 'web_use',
+          description: 'Browse the web.',
+          enabled: true
+        },
+        {
+          name: 'calendar_create_event',
+          description: 'Create a calendar event.',
+          enabled: true
+        },
+        {
+          name: 'calendar_list_events',
+          description: 'List calendar events.',
+          enabled: true
+        },
+        {
+          name: 'calculator',
+          description: 'Evaluate basic arithmetic.',
           enabled: true
         }
       ],
-      setToolEnabled,
+      setToolEnabled: async (name: string, enabled: boolean) => {
+        saved.push([name, enabled])
+      },
       mcpList: async () => []
     }
 
     render(<SettingsPanel embedded initialTab="tools" onClose={() => {}} />)
 
-    expect(await screen.findByText('search_meetings')).toBeTruthy()
-    expect(screen.getByText("Search the user's recorded meetings.")).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Assistant' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Calendar' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Utilities' })).toBeTruthy()
+    expect(screen.queryByRole('switch', { name: 'Enable computer_use' })).toBeNull()
 
-    await userEvent.click(screen.getByRole('button', { name: 'On' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Assistant/ }))
 
-    await waitFor(() => expect(setToolEnabled).toHaveBeenCalledWith('search_meetings', false))
-    expect(screen.getByRole('button', { name: 'Off' })).toBeTruthy()
+    expect(screen.getByRole('switch', { name: 'Enable computer_use' })).toBeTruthy()
+    expect(screen.getByRole('switch', { name: 'Enable web_use' })).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Enable Calendar tools' }))
+
+    await waitFor(() =>
+      expect(saved).toEqual([
+        ['calendar_create_event', false],
+        ['calendar_list_events', false]
+      ])
+    )
+    expect(screen.getByText('0 of 2 on')).toBeTruthy()
+
+    await userEvent.click(screen.getByRole('button', { name: /^Calendar/ }))
+    await userEvent.click(screen.getByRole('switch', { name: 'Enable calendar_create_event' }))
+
+    await waitFor(() =>
+      expect(saved).toEqual([
+        ['calendar_create_event', false],
+        ['calendar_list_events', false],
+        ['calendar_create_event', true]
+      ])
+    )
+    expect(screen.getByText('1 of 2 on')).toBeTruthy()
+    expect(screen.getByRole('switch', { name: 'Enable Calendar tools' }).textContent).toBe('Mixed')
   })
 })

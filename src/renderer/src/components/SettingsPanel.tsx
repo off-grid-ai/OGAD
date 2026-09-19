@@ -37,7 +37,7 @@ import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 import { SettingsRow as Row } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
 import type { SpeechLanguage } from '@offgrid/speech'
-import { X } from '@phosphor-icons/react'
+import { CaretRight, X } from '@phosphor-icons/react'
 import { getSlot, SLOTS } from '@renderer/bootstrap/slotRegistry'
 
 const MAX_OUTPUT_AUTO = MAX_TOKENS_AUTO
@@ -117,6 +117,60 @@ type Connector = {
   enabled?: number | boolean
 }
 
+type ToolSetting = { name: string; description: string; enabled?: boolean }
+
+const TOOL_GROUPS = [
+  {
+    label: 'Assistant',
+    matches: (name: string): boolean => ['computer_use', 'web_use'].includes(name)
+  },
+  {
+    label: 'Calendar',
+    matches: (name: string): boolean => name.startsWith('calendar_')
+  },
+  {
+    label: 'Reminders',
+    matches: (name: string): boolean => name.startsWith('reminders_')
+  },
+  {
+    label: 'Web',
+    matches: (name: string): boolean =>
+      ['web_search', 'brave_search', 'read_url', 'open_url'].includes(name)
+  },
+  {
+    label: 'Memory',
+    matches: (name: string): boolean =>
+      ['read_screen', 'search_memory', 'search_knowledge_base', 'search_meetings'].includes(name)
+  },
+  {
+    label: 'Communication',
+    matches: (name: string): boolean =>
+      name.startsWith('contacts_') || name.startsWith('messages_') || name.startsWith('mail_')
+  },
+  {
+    label: 'Device',
+    matches: (name: string): boolean => name === 'get_current_location'
+  },
+  {
+    label: 'Media',
+    matches: (name: string): boolean => name === 'generate_image'
+  },
+  {
+    label: 'Utilities',
+    matches: (name: string): boolean => ['calculator', 'get_datetime'].includes(name)
+  }
+] as const
+
+function groupTools(tools: ToolSetting[]): { label: string; tools: ToolSetting[] }[] {
+  const groups = TOOL_GROUPS.map((group) => ({
+    label: group.label,
+    tools: tools.filter((tool) => group.matches(tool.name))
+  })).filter((group) => group.tools.length > 0)
+  const known = new Set(groups.flatMap((group) => group.tools.map((tool) => tool.name)))
+  const other = tools.filter((tool) => !known.has(tool.name))
+  return other.length > 0 ? [...groups, { label: 'Other', tools: other }] : groups
+}
+
 type DraftModelOption = { value: string; label: string }
 type DraftCatalogModel = {
   id: string
@@ -125,10 +179,7 @@ type DraftCatalogModel = {
   tags?: string[]
   files?: Array<{ name: string; role?: string }>
 }
-type DraftCompanionStatus = Record<
-  string,
-  { dflashInstalled?: boolean; dflashFile?: string }
->
+type DraftCompanionStatus = Record<string, { dflashInstalled?: boolean; dflashFile?: string }>
 
 function installedDraftModels(
   models: readonly DraftCatalogModel[],
@@ -143,11 +194,7 @@ function installedDraftModels(
   const dflashOptions = new Map<string, DraftModelOption>()
   for (const model of models) {
     const dflash = companionStatus[model.id]
-    if (
-      dflash?.dflashInstalled &&
-      dflash.dflashFile &&
-      dflashFiles.has(dflash.dflashFile)
-    ) {
+    if (dflash?.dflashInstalled && dflash.dflashFile && dflashFiles.has(dflash.dflashFile)) {
       dflashOptions.set(dflash.dflashFile, {
         value: dflash.dflashFile,
         label: `${model.name} · DFlash`
@@ -214,8 +261,9 @@ export function SettingsPanel({
   const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null)
-  const [tools, setTools] = useState<{ name: string; description: string; enabled?: boolean }[]>([])
+  const [tools, setTools] = useState<ToolSetting[]>([])
   const [toolsEnabled, setToolsEnabled] = useState(true)
+  const [expandedToolGroups, setExpandedToolGroups] = useState<Set<string>>(new Set())
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
   const [activeModelName, setActiveModelName] = useState<string | null>(null)
@@ -295,7 +343,7 @@ export function SettingsPanel({
       .catch(() => {})
     window.api
       .listTools?.()
-      .then((t: { name: string; description: string }[]) => setTools(t))
+      .then((t: ToolSetting[]) => setTools(t))
       .catch(() => {})
     refreshConnectors()
   }, [refreshConnectors])
@@ -724,8 +772,7 @@ export function SettingsPanel({
                     speculativeDecoding: value,
                     ...(value === 'draft' && !draftModels.some((m) => m.value === s.draftModel)
                       ? { draftModel: draftModels[0]?.value ?? '' }
-                      : value === 'dflash' &&
-                          !dflashModels.some((m) => m.value === s.draftModel)
+                      : value === 'dflash' && !dflashModels.some((m) => m.value === s.draftModel)
                         ? { draftModel: dflashModels[0]?.value ?? '' }
                         : {})
                   })
@@ -890,7 +937,9 @@ export function SettingsPanel({
             <div className="mb-3 flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
               <div>
                 <div className="text-sm">Enable tools</div>
-                <div className="text-[11px] text-neutral-500">Controls whether any tools are sent to the chat model.</div>
+                <div className="text-[11px] text-neutral-500">
+                  Controls whether any tools are sent to the chat model.
+                </div>
               </div>
               <button
                 type="button"
@@ -901,7 +950,9 @@ export function SettingsPanel({
                   const next = !toolsEnabled
                   setToolsEnabled(next)
                   void window.api.saveSetting('toolsEnabled', next)
-                  window.dispatchEvent(new CustomEvent('offgrid-tools-enabled-changed', { detail: next }))
+                  window.dispatchEvent(
+                    new CustomEvent('offgrid-tools-enabled-changed', { detail: next })
+                  )
                 }}
                 className={`shrink-0 rounded px-2 py-1 text-[11px] ${toolsEnabled ? 'text-green-500' : 'text-neutral-500'}`}
               >
@@ -914,36 +965,125 @@ export function SettingsPanel({
             {tools.length === 0 ? (
               <p className="text-xs text-neutral-600">No tools.</p>
             ) : (
-              <div className="flex flex-col gap-2">
-                {tools.map((t) => (
-                  <div
-                    key={t.name}
-                    className="flex items-start justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <div
-                        className={`text-sm ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
-                      >
-                        {t.name}
-                      </div>
-                      <div className="text-[11px] text-neutral-500">{t.description}</div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const next = t.enabled === false
-                        void persistToggle(
-                          tools.map((x) => (x.name === t.name ? { ...x, enabled: next } : x)),
-                          tools,
-                          setTools,
-                          () => window.api.setToolEnabled?.(t.name, next)
-                        )
-                      }}
-                      className={`shrink-0 rounded px-2 py-1 text-[11px] ${t.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
+              <div className="flex flex-col gap-3">
+                {groupTools(tools).map((group) => {
+                  const enabledCount = group.tools.filter((tool) => tool.enabled !== false).length
+                  const allEnabled = enabledCount === group.tools.length
+                  const groupState = enabledCount === 0 ? 'Off' : allEnabled ? 'On' : 'Mixed'
+                  const groupId = group.label.toLowerCase().replaceAll(' ', '-')
+                  const isExpanded = expandedToolGroups.has(group.label)
+
+                  return (
+                    <section
+                      key={group.label}
+                      aria-labelledby={`tool-group-${groupId}`}
+                      className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/40"
                     >
-                      {t.enabled === false ? 'Off' : 'On'}
-                    </button>
-                  </div>
-                ))}
+                      <div
+                        className={`flex items-center justify-between gap-3 px-3 py-2 ${isExpanded ? 'border-b border-neutral-800' : ''}`}
+                      >
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          aria-controls={`tool-group-items-${groupId}`}
+                          onClick={() => {
+                            setExpandedToolGroups((current) => {
+                              const next = new Set(current)
+                              if (next.has(group.label)) next.delete(group.label)
+                              else next.add(group.label)
+                              return next
+                            })
+                          }}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        >
+                          <CaretRight
+                            size={14}
+                            aria-hidden="true"
+                            className={`shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
+                          />
+                          <span>
+                            <span
+                              id={`tool-group-${groupId}`}
+                              role="heading"
+                              aria-level={3}
+                              className="text-[11px] uppercase tracking-wide text-neutral-400"
+                            >
+                              {group.label}
+                            </span>
+                            <span className="block text-[10px] text-neutral-600">
+                              {enabledCount} of {group.tools.length} on
+                            </span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-label={`Enable ${group.label} tools`}
+                          aria-checked={allEnabled}
+                          onClick={() => {
+                            const next = !allEnabled
+                            const names = new Set(group.tools.map((tool) => tool.name))
+                            const nextTools = tools.map((tool) =>
+                              names.has(tool.name) ? { ...tool, enabled: next } : tool
+                            )
+                            void persistToggle(nextTools, tools, setTools, async () => {
+                              for (const tool of group.tools) {
+                                await window.api.setToolEnabled?.(tool.name, next)
+                              }
+                            })
+                          }}
+                          className={`shrink-0 rounded px-2 py-1 text-[11px] transition-all duration-150 active:scale-95 ${allEnabled ? 'text-green-500' : 'text-neutral-500'}`}
+                        >
+                          {groupState}
+                        </button>
+                      </div>
+                      {isExpanded && (
+                        <div
+                          id={`tool-group-items-${groupId}`}
+                          className="divide-y divide-neutral-800/70"
+                        >
+                          {group.tools.map((tool) => (
+                            <div
+                              key={tool.name}
+                              className="flex items-start justify-between gap-3 px-3 py-2 transition-colors duration-150 hover:bg-neutral-800/30"
+                            >
+                              <div className="min-w-0">
+                                <div
+                                  className={`text-sm ${tool.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
+                                >
+                                  {tool.name}
+                                </div>
+                                <div className="text-[11px] text-neutral-500">
+                                  {tool.description}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-label={`Enable ${tool.name}`}
+                                aria-checked={tool.enabled !== false}
+                                onClick={() => {
+                                  const next = tool.enabled === false
+                                  void persistToggle(
+                                    tools.map((item) =>
+                                      item.name === tool.name ? { ...item, enabled: next } : item
+                                    ),
+                                    tools,
+                                    setTools,
+                                    () => window.api.setToolEnabled?.(tool.name, next)
+                                  )
+                                }}
+                                className={`shrink-0 rounded px-2 py-1 text-[11px] transition-all duration-150 active:scale-95 ${tool.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
+                              >
+                                {tool.enabled === false ? 'Off' : 'On'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )
+                })}
               </div>
             )}
           </>
