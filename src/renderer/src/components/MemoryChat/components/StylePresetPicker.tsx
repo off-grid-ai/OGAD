@@ -96,11 +96,13 @@ function styleKey(name: string): string {
 function StylePresetPickerComponent({
   activeStyle,
   compact = false,
+  presets = STYLE_PRESETS,
   styleThumbs,
   onChange
 }: Readonly<{
   activeStyle: string | null
   compact?: boolean
+  presets?: readonly { name: string; prompt: string }[]
   styleThumbs: Record<string, string>
   onChange: (style: string | null) => void
 }>): React.JSX.Element {
@@ -122,19 +124,21 @@ function StylePresetPickerComponent({
       <div
         className={`grid w-full grid-cols-2 gap-2.5 sm:grid-cols-4 ${compact ? 'lg:grid-cols-8' : ''}`}
       >
-        {STYLE_PRESETS.map((style) => {
+        {presets.map((style) => {
           const thumb = styleThumbs[styleKey(style.name)]
           const selected = activeStyle === style.name
           return (
             <button
               key={style.name}
               type="button"
+              aria-label={style.name}
               aria-pressed={selected}
               onClick={() => onChange(selected ? null : style.name)}
-              className={`group relative overflow-hidden rounded-md border transition-all ${compact ? 'h-48' : 'aspect-[16/9]'} ${selected
-                ? 'border-green-500 ring-1 ring-green-500'
-                : 'border-neutral-800 hover:border-neutral-600'
-                }`}
+              className={`group relative overflow-hidden rounded-md border transition-all ${compact ? 'h-48' : 'aspect-[16/9]'} ${
+                selected
+                  ? 'border-green-500 ring-1 ring-green-500'
+                  : 'border-neutral-800 hover:border-neutral-600'
+              }`}
             >
               {thumb ? (
                 <img

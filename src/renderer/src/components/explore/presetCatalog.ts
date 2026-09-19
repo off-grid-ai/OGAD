@@ -3,6 +3,7 @@
 
 import {
   AirplaneTilt,
+  BookOpenText,
   ClockCounterClockwise,
   Crop,
   EnvelopeSimple,
@@ -15,10 +16,18 @@ import {
   type Icon
 } from '@phosphor-icons/react'
 
-export type PresetCapability = 'browser' | 'computer-use' | 'memory' | 'phone'
+export type PresetCapability = 'browser' | 'computer-use' | 'memory' | 'phone' | 'creation'
 export type DemoReadiness = 'robust' | 'needs-setup' | 'needs-data'
-export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history'
-export type PresetFieldKind = 'text' | 'textarea' | 'select' | 'checkboxes' | 'folder'
+export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history' | 'image-model'
+export type PresetFieldKind =
+  | 'text'
+  | 'textarea'
+  | 'select'
+  | 'checkboxes'
+  | 'folder'
+  | 'number'
+  | 'style'
+  | 'image'
 
 export interface PresetFieldOption {
   value: string
@@ -34,6 +43,9 @@ export interface PresetIntakeField {
   placeholder?: string
   defaultValue?: string
   options?: readonly PresetFieldOption[]
+  min?: number
+  max?: number
+  promptSuffix?: string
 }
 
 export interface PresetIntake {
@@ -72,6 +84,118 @@ const EXECUTION_RULES = `Execution rules:
 - Report the concrete result, the important evidence, and any limitation. Do not claim completion without observing it.`
 
 const PRESET_CATALOG: readonly PresetSection[] = [
+  {
+    id: 'creation',
+    capability: 'creation',
+    title: 'Create something new',
+    teaches: 'Set the brief once. Off Grid AI plans, illustrates, and packages the result.',
+    presets: [
+      {
+        id: 'comic-book',
+        icon: BookOpenText,
+        title: 'Create a comic book',
+        prompt: `<!-- offgrid-action:comic-book -->
+Create a complete comic book from the approved brief below.
+
+Required method:
+1. Read the brief, selected art style, and exact page count. Plan a beginning, escalation, climax, and ending before calling a tool.
+2. Write a compact continuity bible for the cast, clothing, distinctive features, locations, props, palette, line work, lighting, and era. Keep these facts unchanged unless the story itself changes them.
+3. Choose one short original book title. Create exactly one image-generation prompt per comic page, in story order. Use this exact three-part format for every prompt, and repeat the same book title in every prompt:
+BOOK TITLE: The short title only.
+PAGE STORY: Write 2 to 4 sentences of finished narration or dialogue that moves the story forward. Write story text for the reader, not production notes. Keep it under 80 words.
+ILLUSTRATION: Identify the page number and story beat, then repeat the selected style treatment and every continuity fact needed to keep recurring characters and locations recognizable.
+4. Make each illustration a finished comic page with a clear panel layout, readable visual action, stable character scale, and reserved caption or speech areas. Keep important text out of the generated art because image models render lettering poorly. Off Grid AI displays PAGE STORY beside the illustration in the reader.
+5. Call generate_image exactly once for every page. Submit all calls in the same tool round, in page order. Do not replace pages with prose and do not omit pages.
+6. After the images finish, Off Grid AI will feed them into its bundled offline comic reader. Do not generate another reader or HTML template.
+7. If fewer image calls are available than the approved page count, create as many consecutive pages as the limit permits and state the exact missing range.
+
+Style treatments:
+- American superhero: bold black inks, saturated primary colors, dramatic foreshortening, halftone shadows.
+- Manga: black and white manga, expressive ink linework, screentone shading, speed lines, cinematic panel rhythm.
+- Ligne claire: Franco-Belgian ligne claire graphic novel, uniform clean outlines, flat colors, precise architecture, readable staging.
+- Noir: film noir graphic novel, stark black and white chiaroscuro, heavy brush inks, rain, sharp silhouettes.
+- Indie risograph: independent risograph comic, rough hand-drawn lines, limited coral, teal, and black palette, offset ink texture.
+- Painterly fantasy: painterly fantasy graphic novel, watercolor and gouache, luminous atmosphere, elegant ink accents, detailed environment.
+
+${EXECUTION_RULES}`,
+        blurb:
+          'Plans one continuous story, generates every page, and opens it in an offline reader.',
+        readiness: 'needs-setup',
+        requires: 'image-model',
+        intake: {
+          title: 'Plan the comic book',
+          description:
+            'Add the story brief, choose one visual style, and set 10 to 100 pages. Each page is generated on your Mac, so long books can take hours and use substantial disk space.',
+          fields: [
+            {
+              id: 'brief',
+              label: 'Story brief',
+              help: 'Include the premise, characters, setting, tone, audience, and ending you want.',
+              kind: 'textarea',
+              required: true,
+              placeholder:
+                'A retired lunar courier must cross a flooded city to return one last undelivered letter.'
+            },
+            {
+              id: 'style',
+              label: 'Comic art style',
+              help: 'The selected treatment is repeated in every page prompt.',
+              kind: 'style',
+              required: true,
+              defaultValue: 'American superhero',
+              options: [
+                { value: 'American superhero', label: 'American superhero' },
+                { value: 'Manga', label: 'Manga' },
+                { value: 'Ligne claire', label: 'Ligne claire' },
+                { value: 'Noir', label: 'Noir' },
+                { value: 'Indie risograph', label: 'Indie risograph' },
+                { value: 'Painterly fantasy', label: 'Painterly fantasy' }
+              ]
+            },
+            {
+              id: 'heroReference',
+              label: 'Hero reference image',
+              help:
+                'Optional. Choose a clear local photo of one person. Image-to-image models use it privately on your Mac to keep that person as the hero.',
+              kind: 'image'
+            },
+            {
+              id: 'pages',
+              label: 'Story length',
+              help: 'One generated image per page. Enter any whole number from 10 to 100.',
+              kind: 'number',
+              required: true,
+              defaultValue: '10',
+              min: 10,
+              max: 100,
+              promptSuffix: 'distinct images'
+            },
+            {
+              id: 'format',
+              label: 'Page format',
+              help: 'Choose how each page should be composed.',
+              kind: 'select',
+              required: true,
+              defaultValue: 'Portrait page, 3 to 5 panels',
+              options: [
+                { value: 'Portrait page, 3 to 5 panels', label: 'Portrait, 3 to 5 panels' },
+                { value: 'Portrait page, 1 full-page panel', label: 'Portrait, full-page art' },
+                { value: 'Landscape page, 3 to 5 panels', label: 'Landscape, 3 to 5 panels' },
+                { value: 'Square page, 2 to 4 panels', label: 'Square, 2 to 4 panels' }
+              ]
+            },
+            {
+              id: 'constraints',
+              label: 'Content and continuity rules',
+              help: 'Add rating, topics to avoid, required scenes, dialogue tone, or visual rules.',
+              kind: 'textarea',
+              placeholder: 'All ages. No gore. The red scarf must appear on every page.'
+            }
+          ]
+        }
+      }
+    ]
+  },
   {
     id: 'browser',
     capability: 'browser',
@@ -839,7 +963,12 @@ ${EXECUTION_RULES}`,
   }
 ] as const
 
-const ASSISTANT_EXAMPLE_IDS = new Set(['best-nearby', 'price-compare', 'train-my-feed'])
+const ASSISTANT_EXAMPLE_IDS = new Set([
+  'comic-book',
+  'best-nearby',
+  'price-compare',
+  'train-my-feed'
+])
 
 export const PRESET_SECTIONS: readonly PresetSection[] = PRESET_CATALOG.map((section) => ({
   ...section,

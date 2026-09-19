@@ -40,9 +40,9 @@ describe('the Explore preset catalog', () => {
     }
   })
 
-  it('keeps the visible runs in the browser capability', () => {
+  it('keeps the visible runs in the creation and browser capabilities', () => {
     const capabilities = PRESET_SECTIONS.map((section) => section.capability)
-    expect(new Set(capabilities)).toEqual(new Set(['browser']))
+    expect(new Set(capabilities)).toEqual(new Set(['creation', 'browser']))
   })
 
   it('every preset carries its own icon, defined once in the catalog', () => {
@@ -62,8 +62,9 @@ describe('the Explore preset catalog', () => {
     }
   })
 
-  it('shows nearby places, price comparison, and Train My Feed', () => {
+  it('shows comic creation, nearby places, price comparison, and Train My Feed', () => {
     expect(ALL_PRESETS.map((preset) => preset.id)).toEqual([
+      'comic-book',
       'best-nearby',
       'price-compare',
       'train-my-feed'
