@@ -84,6 +84,8 @@ export function activityLabel(activity?: {
 }): string {
   if (!activity) return ''
   if (activity.kind === 'planning') return 'Planning next action…'
+  if (activity.kind === 'preparing_tool_calls')
+    return activity.name === 'generate_image' ? 'Preparing image requests…' : 'Preparing actions…'
   if (activity.kind === 'running_tool') return runningToolLabel(activity.name)
   if (activity.kind === 'reading')
     return `Reading the page${(activity.counts?.urls ?? 0) > 1 ? 's' : ''}…`

@@ -326,6 +326,15 @@ export class ChatBoundary {
     })
   }
 
+  emitPreparingToolCalls(callIndex: number, name: string): void {
+    const call = this.calls[callIndex]!
+    this.streamCallback?.({
+      streamId: call.streamId,
+      type: 'step',
+      step: { kind: 'preparing_tool_calls', name }
+    })
+  }
+
   emitToolResult(
     callIndex: number,
     name: string,

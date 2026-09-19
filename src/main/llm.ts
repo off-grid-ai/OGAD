@@ -1216,6 +1216,7 @@ export class LLMService {
       responseFormat?: unknown
       tools?: unknown[]
       toolChoice?: string
+      onToolCallStart?: (name?: string) => void
     }
   ): Promise<StreamResult> {
     return streamRemoteChatCompletion({
@@ -1234,7 +1235,11 @@ export class LLMService {
         toolChoice: options.toolChoice
       },
       onDelta,
-      options: { signal: options.signal, timeoutMs: options.timeoutMs }
+      options: {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+        onToolCallStart: options.onToolCallStart
+      }
     })
   }
 
@@ -1486,6 +1491,7 @@ export class LLMService {
       toolChoice?: string
       maxTokens?: number
       responseFormat?: unknown
+      onToolCallStart?: (name?: string) => void
     } = {},
     timeoutMs?: number
   ): Promise<StreamResult> {
@@ -1500,7 +1506,8 @@ export class LLMService {
         signal: opts.signal,
         responseFormat: opts.responseFormat,
         tools: opts.tools,
-        toolChoice: opts.toolChoice
+        toolChoice: opts.toolChoice,
+        onToolCallStart: opts.onToolCallStart
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),
@@ -1534,7 +1541,8 @@ export class LLMService {
       // assembled tool calls are surfaced too (this powers the agentic loop).
       const result = await streamCompletion(this.port, body, onDelta, {
         signal: opts.signal,
-        timeoutMs
+        timeoutMs,
+        onToolCallStart: opts.onToolCallStart
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),

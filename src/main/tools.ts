@@ -76,6 +76,7 @@ export type ToolCallStatus = 'completed' | 'failed' | 'pending'
 
 export type ToolActivity =
   | { kind: 'planning'; label: 'Planning next action…' }
+  | { kind: 'preparing_tool_calls'; label: 'Preparing actions…'; name?: string }
   | { kind: 'compacted'; label: 'Compacted' }
 
 // A tool's structured result. Most tools just return text (a bare string, which the
@@ -898,7 +899,9 @@ export async function toolChat(
       // this round has room to generate inside the configured context window.
       maxTokens: roundMaxTokens,
       thinking: opts.thinking,
-      signal: opts.signal
+      signal: opts.signal,
+      onToolCallStart: (name) =>
+        opts.onActivity?.({ kind: 'preparing_tool_calls', label: 'Preparing actions…', name })
     })
 
     // Stop pressed during the round: streamCompletion resolves with the partial

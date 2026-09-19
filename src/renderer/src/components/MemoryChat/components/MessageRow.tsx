@@ -18,6 +18,7 @@ import type {
   StoredMessageAttachment
 } from '../types'
 import {
+  activityLabel,
   assistantWorkIsSettled,
   isPromptEnhancementMessage,
   isSupportingMessage,
@@ -460,6 +461,9 @@ function StandardMessageRow({
   const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const speechState = speechControlState(message.id, state.speakingId, state.speakLoadingId)
   const speechError = state.speakError?.id === message.id ? state.speakError.message : undefined
+  const preparingToolCalls =
+    (message.activity as { kind?: unknown } | undefined)?.kind === 'preparing_tool_calls'
+  const liveActivity = activityLabel(message.activity)
   const hasTimelineThinking = message.timeline?.some((entry) => entry.kind === 'thinking') ?? false
   const shouldShowThinking =
     message.role === 'assistant' &&
@@ -489,10 +493,16 @@ function StandardMessageRow({
         thinkingHasContent={Boolean(message.reasoning?.trim())}
         footer={
           workFooter ??
-          (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+          (message.streaming && hasLiveStreamActivity(message) ? (
+            liveActivity ? (
+              <span className="text-[11px] text-neutral-500">{liveActivity}</span>
+            ) : (
+              <LoadingDots />
+            )
+          ) : undefined)
         }
         timeline={message.timeline}
-        thinkingLive={Boolean(message.streaming && !message.content)}
+        thinkingLive={Boolean(message.streaming && !message.content && !preparingToolCalls)}
         memorySources={memorySources}
         liveTask={liveTask}
         live={Boolean(message.streaming || continuation)}

@@ -305,6 +305,25 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(screen.queryByText(/<\/?think>/i)).toBeNull()
   })
 
+  it('ends the live thinking state when tool-call preparation starts', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await user.click(await screen.findByRole('button', { name: 'Thinking' }))
+    await send('Create the comic', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+
+    await act(async () => boundary.emitReasoning(0, 'Planning ten comic pages.'))
+    expect(await screen.findByRole('button', { name: 'Thinking…' })).toBeTruthy()
+
+    await act(async () => boundary.emitPreparingToolCalls(0, 'generate_image'))
+    expect(await screen.findByText('Preparing image requests…')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Thought process' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Thinking…' })).toBeNull()
+  })
+
   it('reattaches an OpenRouter thinking stream after navigation without losing its phase', async () => {
     const boundary = new ChatBoundary()
     boundary.activeRagStreams.push({

@@ -33,6 +33,7 @@ export interface RemoteChatRequest {
 export interface RemoteChatOptions {
   signal?: AbortSignal
   timeoutMs?: number
+  onToolCallStart?: (name?: string) => void
 }
 
 export interface RemoteNativeToolCapability {
@@ -348,7 +349,7 @@ export async function streamRemoteChatCompletion(input: {
   options: RemoteChatOptions
 }): Promise<StreamResult> {
   const { remote, request, options } = input
-  const accumulator = createCompletionStreamAccumulator(input.onDelta)
+  const accumulator = createCompletionStreamAccumulator(input.onDelta, options.onToolCallStart)
   if (options.signal?.aborted) return accumulator.finish()
 
   if (request.tools?.length) {

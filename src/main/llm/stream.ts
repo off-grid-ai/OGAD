@@ -42,6 +42,7 @@ export interface StreamResult {
 export interface StreamOptions {
   signal?: AbortSignal
   timeoutMs?: number
+  onToolCallStart?: (name?: string) => void
 }
 
 export interface CompletionStreamAccumulator {
@@ -53,7 +54,8 @@ export interface CompletionStreamAccumulator {
  * models feed the same parser, reasoning split, markup filter, and tool-call
  * accumulator so model location cannot change the caller-visible contract. */
 export function createCompletionStreamAccumulator(
-  onDelta: (text: string, kind: 'content' | 'reasoning') => void
+  onDelta: (text: string, kind: 'content' | 'reasoning') => void,
+  onToolCallStart?: (name?: string) => void
 ): CompletionStreamAccumulator {
   let buffer = ''
   let finishReason: string | null = null
@@ -70,6 +72,7 @@ export function createCompletionStreamAccumulator(
     else reasoningMarkup.push(event.text)
   })
   const tools = createToolCallAccumulator()
+  let toolCallStarted = false
   const reasoningDetails: SseReasoningDetail[] = []
 
   const push = (chunk: string): void => {
@@ -92,7 +95,15 @@ export function createCompletionStreamAccumulator(
       if ((reasoning || frame.delta.content) && firstTokenAtMs === undefined) firstTokenAtMs = now()
       if (reasoning) reasoningMarkup.push(reasoning)
       if (frame.delta.content) splitter.push(frame.delta.content)
-      if (frame.delta.tool_calls) tools.push(frame.delta.tool_calls)
+      if (frame.delta.tool_calls) {
+        if (!toolCallStarted) {
+          toolCallStarted = true
+          onToolCallStart?.(
+            frame.delta.tool_calls.find((call) => call.function?.name)?.function?.name
+          )
+        }
+        tools.push(frame.delta.tool_calls)
+      }
     }
   }
 
@@ -144,7 +155,7 @@ export function streamCompletion(
   return new Promise<StreamResult>((resolve, reject) => {
     let timedOut = false
     let aborted = false
-    const accumulator = createCompletionStreamAccumulator(onDelta)
+    const accumulator = createCompletionStreamAccumulator(onDelta, opts.onToolCallStart)
     // opts.signal is REUSED across the whole tool loop, so every completed stream
     // must detach its abort listener — otherwise handlers accumulate on the shared
     // signal for the loop's lifetime. cleanup() runs on every terminal path.
