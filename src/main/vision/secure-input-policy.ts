@@ -32,6 +32,23 @@ function containsPaymentCard(content: string): boolean {
   return false
 }
 
+function isPublicNavigationUrl(content: string): boolean {
+  try {
+    const url = new URL(content.trim())
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return false
+    for (const key of url.searchParams.keys()) {
+      if (/\b(token|key|password|passcode|code|auth|credential|secret|session)\b/i.test(key)) {
+        return false
+      }
+    }
+    return (
+      !EXPLICIT_TOKEN.test(content) && !NAMED_SECRET.test(content) && !containsPaymentCard(content)
+    )
+  } catch {
+    return false
+  }
+}
+
 /** Classify only in memory. Callers must never log or persist the supplied content. */
 export function isCredentialLikeInput(content: string, goal: string): boolean {
   if (PRIVATE_GOAL.test(goal)) return true
@@ -46,7 +63,21 @@ export function secureInputDecision(input: {
   goal: string
   target: FocusedInputTarget
 }): SecureInputDecision {
-  if (input.target.state === 'secure' || isCredentialLikeInput(input.content, input.goal)) {
+  if (input.target.state === 'secure') {
+    return { kind: 'handoff', reason: PRIVATE_INPUT_HANDOFF }
+  }
+  if (isPublicNavigationUrl(input.content)) return { kind: 'allow' }
+  if (input.target.state === 'safe') {
+    if (
+      EXPLICIT_TOKEN.test(input.content) ||
+      NAMED_SECRET.test(input.content) ||
+      containsPaymentCard(input.content)
+    ) {
+      return { kind: 'handoff', reason: PRIVATE_INPUT_HANDOFF }
+    }
+    return { kind: 'allow' }
+  }
+  if (isCredentialLikeInput(input.content, input.goal)) {
     return { kind: 'handoff', reason: PRIVATE_INPUT_HANDOFF }
   }
   return { kind: 'allow' }

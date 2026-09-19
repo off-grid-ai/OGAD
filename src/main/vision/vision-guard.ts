@@ -43,6 +43,7 @@ export class VisionGuard {
   private readonly waiters = new Set<(snapshot: GuardSnapshot) => void>()
   private actionLease = new AbortController()
   private readonly maxSteps: number
+  private completionReason = ''
 
   constructor(options: VisionGuardOptions) {
     this.task = runningTask(options.taskId, options.kind)
@@ -146,6 +147,21 @@ export class VisionGuard {
     return this.apply({ type: 'COMPLETE' })
   }
 
+  /** End a time-boxed session as successful work. A deadline is not a user
+   * stop or a failure, so move through the existing verification contract and
+   * then complete the task. */
+  completeForSessionLimit(reason: string): boolean {
+    if (this.isHalted) return false
+    if (this.isPaused && !this.resume()) return false
+    if (this.task.observationRequired) this.markObservationReady()
+    if (this.task.status === 'running' && !this.beginVerification()) return false
+    if (this.task.observationRequired) this.markObservationReady()
+    if (!this.complete()) return false
+    this.completionReason = reason
+    this.resolveWaiters()
+    return true
+  }
+
   fail(message: string): boolean {
     if (!this.apply({ type: 'FAIL', message })) return false
     this.resolveWaiters()
@@ -209,7 +225,7 @@ export class VisionGuard {
     return {
       ...this.task,
       steps: this.steps,
-      reason: this.task.failure ?? this.task.humanRequired?.message ?? ''
+      reason: this.task.failure ?? this.task.humanRequired?.message ?? this.completionReason
     }
   }
 

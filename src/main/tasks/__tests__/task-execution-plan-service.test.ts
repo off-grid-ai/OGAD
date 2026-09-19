@@ -21,6 +21,8 @@ describe('task execution plan service', () => {
           'put each route, date, filter, or other constraint in exactly one setup phase'
         )
         expect(prompt).toContain('Do not repeat those constraints in a later results phase')
+        expect(prompt).toContain('Return 2 to 4 outcome-based phases')
+        expect(prompt).toContain('Do not add a separate verification, reporting, or summary phase')
         expect(prompt).toContain('Name the visible result that completes the final phase')
         expect(prompt).toContain('Do not use a generic phase')
         return JSON.stringify({

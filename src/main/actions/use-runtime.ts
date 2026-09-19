@@ -260,8 +260,16 @@ export function getActionsRuntime(): ActionsRuntime {
   // The vision rail's live host (screen capture + actuation + grounding model),
   // created lazily on first computer_use.
   const visionExecute = makeVisionRailExecutor({
-    runTask: (goal, taskId, journeyId, checkpoint, continuation, targetLabel) =>
-      getVisionRailHost().runTask(goal, taskId, journeyId, checkpoint, continuation, targetLabel)
+    runTask: (goal, taskId, journeyId, checkpoint, continuation, targetLabel, sessionLimitMs) =>
+      getVisionRailHost().runTask(
+        goal,
+        taskId,
+        journeyId,
+        checkpoint,
+        continuation,
+        targetLabel,
+        sessionLimitMs
+      )
   })
   // VisionHost owns the selected model strategy for the whole task. The outer
   // Computer Use gate binds the selected local or remote model to every rail.
@@ -279,6 +287,7 @@ export function getActionsRuntime(): ActionsRuntime {
     runAx: (goal, taskId, journeyId, app, request) =>
       getAxRailHost().runTask(goal, taskId, app, request.initial, {
         journeyId,
+        sessionLimitMs: request.sessionLimitMs,
         recoverWithVision: request.recoverWithVision
       }),
     visionExecute: groundedVisionExecute

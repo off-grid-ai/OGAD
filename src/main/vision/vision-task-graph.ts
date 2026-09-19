@@ -157,9 +157,7 @@ function actionEffect(
     semanticChanged,
     visualComparable: true,
     globalMeanDelta: meanDelta,
-    ...(local
-      ? { localMeanDelta: local.meanDelta, localStrongPixels: local.strongPixels }
-      : {})
+    ...(local ? { localMeanDelta: local.meanDelta, localStrongPixels: local.strongPixels } : {})
   }
 }
 
@@ -561,6 +559,9 @@ class VisionTaskGraphRuntime {
       captured.decisionMs = this.now() - decisionStartedAt
       this.actionResponse = grounding.response
       this.actionModelInput = grounding.modelInput
+      console.log(
+        `[computer-task] inference=${this.previousActionEffect ? 'task-verification' : 'task-action'} durationMs=${captured.decisionMs} inputChars=${grounding.modelInput.length} accessibilityElements=${captured.shot.metadata?.semanticElements?.length ?? 0}`
+      )
       this.decision =
         grounding.decision ??
         this.parseResponse(grounding.response, captured.shot.bounds, coordinateFrame(captured.shot))

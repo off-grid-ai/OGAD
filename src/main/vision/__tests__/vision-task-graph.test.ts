@@ -723,6 +723,30 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     expect(JSON.stringify(durableProjection)).not.toContain(secret)
   })
 
+  it('types a public navigation URL when the goal also mentions sign-in checks', async () => {
+    const url = 'https://www.instagram.com/explore/search/keyword/?q=local%20AI'
+    const w = scripted([`type(content='${url}')`, "finished(content='opened')"])
+    const typed: string[] = []
+    w.deps.screen.actuate = (nextAction) =>
+      dispatchVisionAction({
+        actuation: {
+          typeText: async (text: string) => void typed.push(text)
+        } as ActuationPort,
+        action: nextAction,
+        goal: 'Open Instagram and verify the signed-in account',
+        inspectFocused: async () => ({ state: 'unknown' })
+      })
+
+    const result = await runVisionTaskGraph(
+      'Open Instagram and verify the signed-in account',
+      w.deps
+    )
+
+    expect(result.ok).toBe(true)
+    expect(typed).toEqual([url])
+    expect(w.userWaits).toEqual([])
+  })
+
   it('records completed actions and the failing action when an ordered response fails', async () => {
     const w = scripted([])
     const observations: VisionStepObservation[] = []

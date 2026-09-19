@@ -21,7 +21,7 @@ import fs from 'fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import sharp from 'sharp'
-import { globalShortcut, screen } from 'electron'
+import { globalShortcut, screen, shell } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import {
@@ -77,6 +77,19 @@ import { snapshotAccessibilityApp } from '../accessibility/ax-host'
 import { accessibilityHelperPath } from '../accessibility/ax-helper'
 
 const execFileAsync = promisify(execFile)
+const MAX_MODEL_SEMANTIC_ELEMENTS = 100
+const MAX_VERIFICATION_SEMANTIC_ELEMENTS = 240
+const MAX_MODEL_INTERACTIVE_ELEMENTS = 60
+
+function semanticElementKey(element: VisionSemanticElement): string {
+  return [
+    element.role,
+    element.name,
+    element.value,
+    Math.round(element.point.x / 4),
+    Math.round(element.point.y / 4)
+  ].join('\n')
+}
 
 async function activateDefaultBrowser(): Promise<string | null> {
   const helper = accessibilityHelperPath()
@@ -193,7 +206,7 @@ function makeScreen(input: {
         encodedSize,
         scale: Math.min(encodedSize.width / width, encodedSize.height / height)
       }
-      const semanticElements: VisionSemanticElement[] = (semanticSnapshot?.elements ?? [])
+      const visibleSemanticElements = (semanticSnapshot?.elements ?? [])
         .filter((element) => element.enabled && (element.name || element.value))
         .flatMap((element) => {
           const globalPoint =
@@ -205,23 +218,58 @@ function makeScreen(input: {
           if (localX < 0 || localY < 0 || localX >= width || localY >= height) return []
           return [
             {
-              index: element.index,
-              role: element.role,
-              name: element.name,
-              value: element.value,
-              point: {
-                x: Math.min(
-                  encodedSize.width - 1,
-                  Math.round((localX * encodedSize.width) / width)
-                ),
-                y: Math.min(
-                  encodedSize.height - 1,
-                  Math.round((localY * encodedSize.height) / height)
+              semantic: {
+                index: element.index,
+                role: element.role,
+                name: element.name,
+                value: element.value,
+                point: {
+                  x: Math.min(
+                    encodedSize.width - 1,
+                    Math.round((localX * encodedSize.width) / width)
+                  ),
+                  y: Math.min(
+                    encodedSize.height - 1,
+                    Math.round((localY * encodedSize.height) / height)
+                  )
+                }
+              } satisfies VisionSemanticElement,
+              interactive:
+                element.actionable ||
+                /(?:button|link|textfield|textarea|combobox|checkbox|radio|menuitem)/i.test(
+                  element.role
                 )
-              }
             }
           ]
         })
+      const seenSemanticElements = new Set<string>()
+      const uniqueSemanticElements = visibleSemanticElements.filter(({ semantic }) => {
+        const key = semanticElementKey(semantic)
+        if (seenSemanticElements.has(key)) return false
+        seenSemanticElements.add(key)
+        return true
+      })
+      const interactiveSemanticElements = uniqueSemanticElements
+        .filter((element) => element.interactive)
+        .slice(0, MAX_MODEL_INTERACTIVE_ELEMENTS)
+      const informationalSemanticElements = uniqueSemanticElements.filter(
+        (element) => !element.interactive
+      )
+      const semanticElements = [
+        ...interactiveSemanticElements,
+        ...informationalSemanticElements.slice(
+          0,
+          MAX_MODEL_SEMANTIC_ELEMENTS - interactiveSemanticElements.length
+        )
+      ].map((element) => element.semantic)
+      const verificationSemanticElements = uniqueSemanticElements
+        .slice(0, MAX_VERIFICATION_SEMANTIC_ELEMENTS)
+        .map((element) => element.semantic)
+      if (uniqueSemanticElements.length > MAX_MODEL_SEMANTIC_ELEMENTS) {
+        console.log(
+          `[computer-task] accessibility raw=${semanticSnapshot?.elements.length ?? 0} visible=${visibleSemanticElements.length} unique=${uniqueSemanticElements.length} model=${semanticElements.length} verification=${verificationSemanticElements.length}`
+        )
+      }
       captureNumber += 1
       const savedScreenshot = taskScreenshotPath(taskId, captureNumber)
       fs.writeFileSync(savedScreenshot, png)
@@ -241,7 +289,7 @@ function makeScreen(input: {
         metadata: {
           path: savedScreenshot,
           geometry: capturedGeometry,
-          ...(semanticElements.length ? { verificationSemanticElements: semanticElements } : {}),
+          ...(verificationSemanticElements.length ? { verificationSemanticElements } : {}),
           ...(exposeSemanticElements && semanticElements.length ? { semanticElements } : {})
         }
       }
@@ -258,7 +306,12 @@ function makeScreen(input: {
       if (!mapped) {
         throw new Error('model returned a point outside the current screenshot')
       }
-      const result = await dispatchVisionAction({ actuation, action: mapped, goal })
+      const result = await dispatchVisionAction({
+        actuation,
+        action: mapped,
+        goal,
+        navigate: (url) => shell.openExternal(url)
+      })
       return result.handoff ? result : { mappedAction: mapped }
     }
   }
@@ -288,7 +341,8 @@ class VisionHost {
     journeyId = taskId,
     checkpoint?: TaskRetryCheckpoint,
     continuation?: VisionTaskContinuation,
-    targetLabel?: string
+    targetLabel?: string,
+    sessionLimitMs?: number
   ): Promise<VisionTaskResult> {
     const actuation = loadActuation()
     if (!actuation) {
@@ -360,7 +414,8 @@ class VisionHost {
             contextTokens,
             retrievedFacts,
             continuation,
-            targetLabel: resolvedTargetLabel
+            targetLabel: resolvedTargetLabel,
+            sessionLimitMs
           })
         }
       )
@@ -390,6 +445,7 @@ class VisionHost {
     retrievedFacts: string[]
     continuation?: VisionTaskContinuation
     targetLabel?: string
+    sessionLimitMs?: number
   }): Promise<VisionTaskResult> {
     const {
       goal,
@@ -406,7 +462,8 @@ class VisionHost {
       contextTokens,
       retrievedFacts,
       continuation,
-      targetLabel
+      targetLabel,
+      sessionLimitMs
     } = input
     // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
     // Stop routes to the SAME guard via the controller session.
@@ -417,7 +474,7 @@ class VisionHost {
         })
       : true
     const releaseSession = ownsControls
-      ? registerVisionSession(taskId, guard, request)
+      ? registerVisionSession(taskId, guard, request, undefined, sessionLimitMs)
       : () => undefined
     if (ownsControls) showSupervisorWindow()
     // The only run-level notice is an unavailable emergency shortcut. Model
@@ -579,11 +636,14 @@ class VisionHost {
         journeyId,
         goal,
         status: finalStatus,
-        phase: finalStatus === 'failed' ? 'failed' : 'stopped',
+        phase:
+          finalStatus === 'done' ? 'complete' : finalStatus === 'failed' ? 'failed' : 'stopped',
         currentAction: summary,
         summary
       })
-      return { ok: false, summary, steps: [], handoffs: 0 }
+      return finalStatus === 'done'
+        ? { ok: true, summary, steps: [], handoffs: 0 }
+        : { ok: false, summary, steps: [], handoffs: 0 }
     } finally {
       releaseGuidance()
       if (ownsControls && escapeRegistered) globalShortcut.unregister('Escape')

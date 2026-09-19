@@ -138,10 +138,11 @@ export function taskPlanPrompt(
     `Create a short execution plan for a ${agent}.`,
     `User goal: ${goal}`,
     targetLabel ? `${target}: ${targetLabel}` : '',
-    'Return 3 to 6 outcome-based phases in the order the user and agent should expect.',
+    'Return 2 to 4 outcome-based phases in the order the user and agent should expect.',
     'Make every phase a distinct, non-overlapping outcome. A phase must not repeat, contain, or depend on work assigned to a later phase.',
     'Include every required user detail in exactly one phase, after its prerequisites and before any phase that uses its result.',
     ...surfaceRules,
+    'Keep the plan compact. Do not add a separate verification, reporting, or summary phase; the agent verifies each visible outcome while it works.',
     'Name the visible result that completes the final phase. Do not use a generic phase such as "Complete the requested work" or "Verify the result".',
     'Use short, specific titles such as "Open booking.com", "Set Paris stays for 2 guests", or "Show the matching stays".',
     'Do not include individual clicks, typing actions, hidden reasoning, or safety policy.',
@@ -162,7 +163,7 @@ export const TASK_PLAN_RESPONSE_FORMAT = {
         phases: {
           type: 'array',
           minItems: 2,
-          maxItems: 7,
+          maxItems: 4,
           items: { type: 'string' }
         }
       },

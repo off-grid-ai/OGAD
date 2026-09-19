@@ -24,6 +24,33 @@ function actuation(): ActuationPort {
 }
 
 describe('vision secure-input actuation boundary', () => {
+  it('opens a validated navigation action through the screen navigation boundary', async () => {
+    const visited: string[] = []
+    const passiveActuation: ActuationPort = {
+      moveMouse: async () => undefined,
+      click: async () => undefined,
+      dragTo: async () => undefined,
+      typeText: async () => undefined,
+      tapKeys: async () => undefined,
+      pressKeys: async () => undefined,
+      keyDown: async () => undefined,
+      keyUp: async () => undefined,
+      scroll: async () => undefined,
+      scrollBy: async () => undefined
+    }
+
+    await dispatchVisionAction({
+      actuation: passiveActuation,
+      action: { type: 'navigate', url: 'https://example.com/path' },
+      goal: 'Open the supplied website',
+      navigate: async (url) => {
+        visited.push(url)
+      }
+    })
+
+    expect(visited).toEqual(['https://example.com/path'])
+  })
+
   it.each([
     ['Enter the one-time code', '839201'],
     ['Enter your PIN', '4821'],

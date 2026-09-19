@@ -22,7 +22,8 @@ export interface VisionRailHost {
     journeyId: string,
     checkpoint?: TaskRetryCheckpoint,
     continuation?: VisionTaskContinuation,
-    targetLabel?: string
+    targetLabel?: string,
+    sessionLimitMs?: number
   ): Promise<VisionTaskResult>
 }
 
@@ -52,14 +53,14 @@ export function makeVisionRailExecutor(
     const args = action.args as Record<string, unknown>
     const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
     const journeyId = action.sourceRef ?? action.id
-    const result = await host.runTask(
-      goal,
-      action.id,
-      journeyId,
-      checkpoint,
-      continuation,
-      targetLabel
-    )
+    const sessionLimitMs =
+      typeof args.sessionLimitMs === 'number' && Number.isFinite(args.sessionLimitMs)
+        ? args.sessionLimitMs
+        : undefined
+    const baseArgs = [goal, action.id, journeyId, checkpoint, continuation, targetLabel] as const
+    const result = sessionLimitMs
+      ? await host.runTask(...baseArgs, sessionLimitMs)
+      : await host.runTask(...baseArgs)
     if (!result.ok) {
       return { ok: false, detail: result.summary }
     }

@@ -61,6 +61,18 @@ const ACCESSIBILITY_CLICK_TOOL = nativeTool({
 
 const HYBRID_REASONER_TOOLS = [
   nativeTool({
+    name: 'navigate_to_url',
+    description:
+      'Open one explicit public HTTP or HTTPS URL directly. Prefer this when the task already supplies the destination URL.',
+    properties: {
+      url: text,
+      summary: text,
+      visible_evidence: text,
+      expected_effect: text
+    },
+    required: ['url', 'summary', 'visible_evidence', 'expected_effect']
+  }),
+  nativeTool({
     name: 'ground_pointer_target',
     description:
       'Choose one pointer action and name its exact visible target. The grounding specialist returns only the target point.',
@@ -159,6 +171,7 @@ const HYBRID_REASONER_SYSTEM_PROMPT = [
   'Inspect the supplied screen and choose exactly one task transition.',
   'You own task direction, milestone completion, replanning, and user handoff.',
   'Choose the action verb, visible target, and expected effect. Do not choose coordinates.',
+  'When the task supplies a public HTTP or HTTPS URL, use navigate_to_url instead of clicking the address bar, typing the URL, and pressing Return.',
   'Use click_accessibility_element only when its label and listed position identify the exact target.',
   'For a pointer action, call ground_pointer_target. The grounding specialist returns only its point.',
   'Type, key, scroll, and wait actions bypass the grounding specialist.',
@@ -291,6 +304,22 @@ function reasonerOutcome(
           }
         }
       : { error: 'click_accessibility_element arguments were invalid' }
+  }
+  if (call.name === 'navigate_to_url') {
+    const common = commonEvidence(value, ['url', 'summary', 'visible_evidence', 'expected_effect'])
+    const rawUrl = normalizedText(value.url)
+    const expectedEffect = normalizedText(value.expected_effect)
+    if (!common || !rawUrl || !expectedEffect) {
+      return { error: 'navigate_to_url arguments were invalid' }
+    }
+    try {
+      const url = new URL(rawUrl)
+      return url.protocol === 'http:' || url.protocol === 'https:'
+        ? actionDecision({ type: 'navigate', url: url.toString() }, common, expectedEffect)
+        : { error: 'navigate_to_url requires an HTTP or HTTPS URL' }
+    } catch {
+      return { error: 'navigate_to_url requires a valid URL' }
+    }
   }
   if (call.name === 'ground_pointer_target') {
     const common = commonEvidence(value, [

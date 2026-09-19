@@ -24,6 +24,7 @@ import {
   isTaskAction,
   specsForPlatform,
   systemHintForPlatform,
+  taskSessionLimitMinutes,
   type NativeToolSpec
 } from './nativeActionToolExtension-logic'
 import { createHash } from 'node:crypto'
@@ -90,14 +91,9 @@ function currentCoordinates(result: unknown): { latitude: number; longitude: num
 }
 
 function needsCurrentLocation(args: Record<string, unknown>, context?: ToolContext): boolean {
-  const text = [
-    typeof args.goal === 'string' ? args.goal : '',
-    context?.userQuery ?? ''
-  ].join('\n')
+  const text = [typeof args.goal === 'string' ? args.goal : '', context?.userQuery ?? ''].join('\n')
   if (
-    /\blatitude\s*[:=]?\s*-?\d+(?:\.\d+)?[^\n]*\blongitude\s*[:=]?\s*-?\d+(?:\.\d+)?/i.test(
-      text
-    )
+    /\blatitude\s*[:=]?\s*-?\d+(?:\.\d+)?[^\n]*\blongitude\s*[:=]?\s*-?\d+(?:\.\d+)?/i.test(text)
   ) {
     return false
   }
@@ -166,6 +162,10 @@ export class NativeActionToolExtension implements ToolExtension {
     const spec = this.canHandle(name) ? findNativeToolSpec(name) : undefined
     if (!spec) {
       return `Error: unknown action ${name}`
+    }
+    if (name === 'computer_use' && args.sessionLimitMinutes === undefined) {
+      const sessionLimitMinutes = taskSessionLimitMinutes(context?.userQuery)
+      if (sessionLimitMinutes) args = { ...args, sessionLimitMinutes }
     }
     if (isTaskAction(name) && needsCurrentLocation(args, context)) {
       const location = context?.currentLocation

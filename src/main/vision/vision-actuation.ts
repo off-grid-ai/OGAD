@@ -13,6 +13,7 @@ export async function dispatchVisionAction(input: {
   action: VisionAction
   goal: string
   inspectFocused?: () => Promise<FocusedInputTarget>
+  navigate?: (url: string) => Promise<void>
 }): Promise<VisionDispatchResult> {
   const { actuation, action, goal } = input
   if (action.type === 'type') {
@@ -72,6 +73,10 @@ export async function dispatchVisionAction(input: {
       return {}
     case 'scroll_by':
       await actuation.scrollBy(action.axis, action.amount)
+      return {}
+    case 'navigate':
+      if (!input.navigate) throw new Error('URL navigation is not available on this screen.')
+      await input.navigate(action.url)
       return {}
     default:
       return {}

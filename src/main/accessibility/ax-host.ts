@@ -218,6 +218,7 @@ class AxRailHost {
     initial?: AxSnapshot,
     options: {
       journeyId?: string
+      sessionLimitMs?: number
       recoverWithVision?: (
         checkpoint: TaskRetryCheckpoint,
         continuation: VisionTaskContinuation
@@ -270,7 +271,13 @@ class AxRailHost {
     const escapeRegistered = globalShortcut.register('Escape', () => {
       stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
     })
-    const releaseSession = registerVisionSession(taskId, guard, request)
+    const releaseSession = registerVisionSession(
+      taskId,
+      guard,
+      request,
+      undefined,
+      options.sessionLimitMs
+    )
     // The AX rail is model-agnostic and needs no grounding-model notice.
     emitVisionState({
       taskId,
@@ -497,12 +504,15 @@ class AxRailHost {
         journeyId,
         goal,
         status: finalStatus,
-        phase: finalStatus === 'failed' ? 'failed' : 'stopped',
+        phase:
+          finalStatus === 'done' ? 'complete' : finalStatus === 'failed' ? 'failed' : 'stopped',
         currentStep: liveStep,
         currentAction: summary,
         summary
       })
-      return { ok: false, summary, steps: [] }
+      return finalStatus === 'done'
+        ? { ok: true, summary, steps: [] }
+        : { ok: false, summary, steps: [] }
     } finally {
       releaseGuidance()
       if (escapeRegistered) globalShortcut.unregister('Escape')

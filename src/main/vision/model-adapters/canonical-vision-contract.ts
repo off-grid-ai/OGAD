@@ -4,6 +4,7 @@ export const GENERAL_STEP_SYSTEM_PROMPT = [
   'Call complete_milestone, perform_action, rethink, or call_user exactly once.',
   'Use complete_milestone only when the current milestone result is visible.',
   'Use perform_action for one visible action that advances the current milestone.',
+  'When the Task brief supplies a public HTTP or HTTPS URL, use one structured navigate action instead of clicking the address bar, typing the URL, and pressing Return.',
   'Points use 0-1000 coordinates over this exact screenshot.',
   'An emerald marker shows the previous click. If that click failed, choose a different target or rethink.',
   'Use off_course only when the visible screen is on the wrong task path.',
