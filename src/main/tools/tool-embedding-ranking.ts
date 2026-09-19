@@ -11,6 +11,14 @@ export interface EmbedDeps {
   embed: (text: string) => Promise<number[]>
 }
 
+const MAX_RELEVANT_TOOLS = 6
+const STRONG_RELEVANCE = 0.24
+const INTENT_RELEVANCE = 0.16
+const SCORE_WINDOW = 0.1
+
+const TOOL_INTENT =
+  /\b(search|find|look up|latest|current|today|tomorrow|meeting|calendar|schedule|remind|tell|send|email|message|open|browse|website|web|screen|memory|remember|calculate|math|time|date|image|picture|photo|draw|generate|location|weather)\b|\d\s*[+*/-]\s*\d/i
+
 // Process-lifetime cache of tool embeddings, keyed by a hash of the tool text.
 const toolVecCache = new Map<string, number[]>()
 
@@ -85,6 +93,39 @@ export async function rankConnectorToolsSemantic(
   )
   scored.sort((a, b) => b.score - a.score || a.i - b.i)
   return [...builtins, ...scored.map((s) => s.tool)]
+}
+
+/** Select the small set of tools that is pertinent to this message. Unlike the
+ *  older rank-only path, this scores built-ins and connector tools together, so
+ *  an unrelated schema is never sent merely because there is room for it. A
+ *  clear tool-intent phrase permits a lower score for short requests such as
+ *  "tell Ali"; ordinary chat needs stronger semantic evidence. */
+export async function selectRelevantToolsSemantic(
+  query: string,
+  tools: unknown[],
+  deps: EmbedDeps
+): Promise<unknown[]> {
+  if (!query.trim() || tools.length === 0) return []
+
+  const qv = await deps.embed(query)
+  const scored = await Promise.all(
+    tools.map(async (tool, index) => {
+      try {
+        return { tool, index, score: dot(qv, await embedTool(toolText(tool), deps.embed)) }
+      } catch {
+        return { tool, index, score: -1 }
+      }
+    })
+  )
+  scored.sort((a, b) => b.score - a.score || a.index - b.index)
+  const best = scored[0]?.score ?? -1
+  const floor = TOOL_INTENT.test(query) ? INTENT_RELEVANCE : STRONG_RELEVANCE
+  if (best < floor) return []
+
+  return scored
+    .filter((candidate) => candidate.score >= floor && candidate.score >= best - SCORE_WINDOW)
+    .slice(0, MAX_RELEVANT_TOOLS)
+    .map((candidate) => candidate.tool)
 }
 
 /** Test-only: clear the tool-embedding cache between cases. */

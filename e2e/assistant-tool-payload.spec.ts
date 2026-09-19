@@ -53,7 +53,7 @@ test.afterEach(async () => {
   fs.rmSync(profileDir, { recursive: true, force: true })
 })
 
-test('Assistant sends Web Use and Computer Use alongside the ordinary tools', async () => {
+test('Assistant sends only tools pertinent to the message', async () => {
   await page.keyboard.press('Meta+K')
   const palette = page.getByRole('dialog', { name: 'Search Off Grid AI' })
   await expect(palette).toBeVisible()
@@ -69,13 +69,13 @@ test('Assistant sends Web Use and Computer Use alongside the ordinary tools', as
     .getByRole('button', { name: 'Assistant', exact: true })
   await assistant.click()
   await expect(assistant).toHaveAttribute('aria-pressed', 'true')
-  await composer.fill('Which tools are available?')
+  await composer.fill('What meetings do I have tomorrow?')
   await composer.press('Enter')
 
   const toolsSent = page.getByRole('button', { name: /^Tools sent in request \(/ }).last()
   await expect(toolsSent).toBeVisible({ timeout: 30_000 })
   await toolsSent.click()
-  await expect(page.getByText('web_use', { exact: true }).last()).toBeVisible()
-  await expect(page.getByText('computer_use', { exact: true }).last()).toBeVisible()
-  await expect(page.getByText('get_datetime', { exact: true }).last()).toBeVisible()
+  await expect(page.getByText('search_meetings', { exact: true }).last()).toBeVisible()
+  await expect(page.getByText('get_datetime', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('computer_use', { exact: true })).toHaveCount(0)
 })

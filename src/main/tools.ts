@@ -19,6 +19,7 @@ import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
+import { isTaskAction } from './tools/nativeActionToolExtension-logic'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import {
   boundToolResult,
@@ -620,6 +621,7 @@ export async function toolChat(
       : []
   const extSchemas: unknown[] = []
   const hints: string[] = []
+  const extensionHints: { names: Set<string>; text: string }[] = []
   const disabled = disabledSet()
   for (const e of exts) {
     try {
@@ -631,7 +633,17 @@ export async function toolChat(
       })
       if (enabledSchemas.length) {
         extSchemas.push(...enabledSchemas)
-        if (e.systemHint && toolsEnabled) hints.push(e.systemHint())
+        if (e.systemHint && toolsEnabled) {
+          extensionHints.push({
+            names: new Set(
+              enabledSchemas.flatMap((schema) => {
+                const name = (schema as { function?: { name?: unknown } }).function?.name
+                return typeof name === 'string' ? [name] : []
+              })
+            ),
+            text: e.systemHint()
+          })
+        }
       }
     } catch (err) {
       console.error('[tools] extension schemas', e.id, err)
@@ -653,31 +665,51 @@ export async function toolChat(
     ? extSchemas.filter((schema) => !assistantRequiredTools.includes(schema))
     : extSchemas
   const rawTools = [...assistantRequiredTools, ...builtins, ...otherExtSchemas]
-  const protectedToolCount = assistantRequiredTools.length + builtins.length
   // Keep the tool payload within the model's context. llama-server inlines every
   // tool schema into the prompt AND compiles it to a grammar, so a big connector
   // set can blow past the context window and 400 the whole turn. Budget to a
   // fraction of the effective context (leaving room for system + history +
   // answer); prune verbose schemas first, drop connector tools only if needed.
-  // Smart routing: rank connector tools by relevance to this turn's message BEFORE
-  // budgeting, so the budgeter (which drops from the end) keeps the tools that
-  // actually match the request rather than whichever were last. Built-ins keep
-  // their position. Prefer SEMANTIC ranking (embedding similarity — matches on
-  // meaning, e.g. "meetings" → a calendar tool); fall back to lexical term-overlap
-  // if the embeddings backend isn't ready. No-op with 0-1 connector tools.
-  let rankedTools = rawTools
-  if (rawTools.length - protectedToolCount > 1) {
+  // Route every enabled built-in and connector through local MiniLM. The older
+  // path ranked connectors only, and only when there were at least two of them;
+  // all built-ins were sent on every turn. Selection now runs for any non-empty
+  // catalog and sends only the tools pertinent to this message. If MiniLM cannot
+  // load, the lexical fallback fails closed to direct matches.
+  let relevantTools: unknown[] = []
+  if (rawTools.length > 0) {
     try {
       const { embeddings } = await import('./embeddings')
-      const { rankConnectorToolsSemantic } = await import('./tools/tool-embedding-ranking')
-      rankedTools = await rankConnectorToolsSemantic(query, rawTools, protectedToolCount, {
+      const { selectRelevantToolsSemantic } = await import('./tools/tool-embedding-ranking')
+      relevantTools = await selectRelevantToolsSemantic(query, rawTools, {
         embed: (t) => embeddings.generateEmbedding(t)
       })
     } catch {
-      const { rankConnectorTools } = await import('./tools/tool-ranking')
-      rankedTools = rankConnectorTools(query, rawTools, protectedToolCount)
+      const { selectRelevantTools } = await import('./tools/tool-ranking')
+      relevantTools = selectRelevantTools(query, rawTools)
     }
   }
+  if (!/\bbrave\b/i.test(query)) {
+    const hasPrimarySearch = relevantTools.some(
+      (schema) => (schema as { function?: { name?: unknown } }).function?.name === 'web_search'
+    )
+    if (hasPrimarySearch) {
+      relevantTools = relevantTools.filter(
+        (schema) => (schema as { function?: { name?: unknown } }).function?.name !== 'brave_search'
+      )
+    }
+  }
+  const relevantNames = new Set(
+    relevantTools.flatMap((schema) => {
+      const name = (schema as { function?: { name?: unknown } }).function?.name
+      return typeof name === 'string' ? [name] : []
+    })
+  )
+  hints.push(
+    ...extensionHints
+      .filter((hint) => [...hint.names].some((name) => relevantNames.has(name)))
+      .map((hint) => hint.text)
+  )
+  const protectedToolCount = 0
   const { budgetTools } = await import('./tools/tool-budget')
   const ctx = llm.effectiveContextSize()
   // Cap tool tokens in ABSOLUTE terms too, not just as a fraction of context:
@@ -687,7 +719,7 @@ export async function toolChat(
   // roughly halving per-round prompt cost vs the old 45%-of-a-big-context budget.
   const MAX_TOOL_TOKENS = 4000
   const toolBudget = Math.max(1024, Math.min(Math.floor(ctx * 0.4), MAX_TOOL_TOKENS))
-  const budgeted = budgetTools(rankedTools, toolBudget, protectedToolCount)
+  const budgeted = budgetTools(relevantTools, toolBudget, protectedToolCount)
   if (budgeted.pruned || budgeted.droppedCount) {
     console.warn(
       `[tools] context budget ${toolBudget} tok: pruned schemas${budgeted.droppedCount ? `, dropped ${budgeted.droppedCount} connector tool(s)` : ''} to fit (final ~${budgeted.estTokens} tok)`
@@ -897,7 +929,11 @@ export async function toolChat(
             rawArgs: JSON.stringify(c.args)
           }))
 
-    const permitted = effective
+    // A long-running Web Use or Computer Use call owns the whole goal. If a model
+    // emits several calls in one response, execute only the first task call. The
+    // task runtime does its own observing, planning, acting, and retrying.
+    const taskCall = effective.find((call) => isTaskAction(call.name))
+    const permitted = taskCall ? [taskCall] : effective
     if (permitted.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
@@ -973,7 +1009,10 @@ export async function toolChat(
         // tool call + result as it lands, not only in the final batch.
         opts.onToolResult?.({ name: c.name, result: res.text, status })
         messages.push({ role: 'tool', tool_call_id: c.id, content: res.text })
-        if (res.authoritative) {
+        // Long-running tasks are always terminal for this outer Chat turn. Keep
+        // this boundary independent of extension result flags so a regression or
+        // a model retry cannot start a second task for the same user request.
+        if (isTaskAction(c.name) || res.authoritative) {
           onDelta(res.text, 'content')
           return resultWithImages({ answer: res.text, toolCalls, unified, metrics })
         }
