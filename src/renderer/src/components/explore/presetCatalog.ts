@@ -291,15 +291,13 @@ ${EXECUTION_RULES}`,
         id: 'best-nearby',
         icon: MapPin,
         title: 'Best-reviewed spots nearby',
-        prompt: `Use Web Use to find nearby places that match the approved brief below.
+        prompt: `Use Web Use to find nearby places that match the approved brief.
 
-Required method:
-1. Resolve the stated starting point. If it says to use the current location, call get_current_location and pass its coordinates into the Web Use task. Then search a current maps or local-results service from that point.
-2. Apply the category, time, travel radius, party needs, price range, and dietary or access constraints.
-3. Confirm each shortlisted place is open for the requested time. Do not rely on the search card alone when hours are ambiguous.
-4. Compare rating, review count, recent review themes, distance, travel time, price level, and reservation or walk-in notes.
-5. Return three ranked choices when three valid choices exist. Explain the specific reason for each rank and include one caution from the evidence.
-6. Include the address and source page. Do not reserve a table or contact a venue.
+- If the starting point is the current location, call get_current_location and give its coordinates to Web Use.
+- Apply every stated time, travel, party, price, dietary, and access constraint.
+- Verify current hours on the source page when they are unclear.
+- Return up to three ranked choices with address, distance or travel time, rating and review count, price, availability notes, one reason, one caution, and the source page.
+- Do not reserve or contact a venue.
 
 ${EXECUTION_RULES}`,
         blurb: 'Collects the location, time, and preferences before it ranks nearby places.',
@@ -361,16 +359,14 @@ ${EXECUTION_RULES}`,
         id: 'price-compare',
         icon: Tag,
         title: 'Compare prices across stores',
-        prompt: `Use Web Use to compare the exact product in the approved brief below.
+        prompt: `Use Web Use to compare the exact product in the approved brief.
 
-Required method:
-1. Resolve the exact product, variant, quantity, condition, and must-have specifications before comparing offers.
-2. Check at least four reputable retailers when four valid offers exist. Prefer first-party product pages over snippets or affiliate summaries.
-3. Normalize each offer to the same quantity and condition.
-4. Include item price, shipping, known taxes or fees, delivery estimate, stock state, seller identity, return terms, and warranty when shown.
-5. Exclude marketplace offers that do not match the requested seller or condition rules.
-6. Rank the valid offers by delivered total, then explain any trade-off that could make another offer better.
-7. Include direct source pages and the time checked. Do not add anything to a cart or buy it.
+- Match the requested model, variant, quantity, condition, and specifications.
+- Check up to four reputable retailers. Use product pages, not snippets or affiliate summaries.
+- Compare the same quantity and condition. Exclude offers that break the seller rules.
+- Rank valid offers by delivered total. Include item price, shipping, known fees, delivery estimate, stock, seller, returns, warranty, source page, and time checked.
+- Note any trade-off that could make another offer better.
+- Do not add anything to a cart or buy it.
 
 ${EXECUTION_RULES}`,
         blurb: 'Collects the exact product and buying constraints before it compares totals.',
@@ -430,22 +426,16 @@ ${EXECUTION_RULES}`,
         id: 'train-my-feed',
         icon: YoutubeLogo,
         title: 'Train My Feed',
-        prompt: `Train the selected social feed around the approved learning goal below. Use the user's default browser and Computer Use. Never use Web Use or Off Grid AI's in-app browser for this run because the task depends on the user's existing browser login, cookies, history, cache, and recommendations.
+        prompt: `Train the selected social feed toward the approved topics in the default browser.
 
-Required method:
-1. Read "Actions you allow" as a strict allowlist for this run. An unchecked action is forbidden. Include that allowlist, the session limit, and the follow limit in the Computer Use goal so the approval shows the complete boundary.
-2. Map the selected platform to its official home URL: X = https://x.com/home, LinkedIn = https://www.linkedin.com/feed/, Instagram = https://www.instagram.com/, TikTok = https://www.tiktok.com/, YouTube = https://www.youtube.com/. Call open_url with that URL. The operating system will open it in the user's default browser. Do not choose or install a different browser. Do not call web_use.
-3. Confirm the visible default browser, selected platform, and signed-in account. If sign-in, CAPTCHA, two-factor authentication, or account recovery is required, stop and ask the user to take over. Never request or handle a password or one-time code.
-4. Call computer_use once with the complete approved brief. Before any browser click, verify that the browser is visible and frontmost in the Computer Use screenshot. If Off Grid AI covers it, minimize Off Grid AI or switch to the browser, then capture the screen again. Before changing the feed, record a short baseline of its visible topics, creators, and repeated recommendation patterns.
-5. Build a small topic map from the learning goal and related concepts. Search from broad concepts toward specific questions. For Instagram, when "Search for topics" is allowed, use Computer Use to navigate the default browser directly to https://www.instagram.com/explore/search/keyword/?q=<URL-encoded search phrase>. Replace the q value with each actual search phrase from the learning goal and topic map; never use a fixed query. Instagram's web search control does not reliably expose keyword search. When search is not allowed, work only from the visible feed and direct navigation already available on the platform.
-6. Judge creators and content before interacting. Prefer first-hand expertise, specific evidence, source links, corrections, and a consistent body of work. Reject engagement bait, copied summaries, unsupported claims, synthetic spam, and creators whose incentives conflict with the learning goal.
-7. Open enough of each candidate item to judge its substance. When watching or reading is allowed, consume a meaningful portion instead of opening and immediately leaving. Keep a short evidence-based reason for every positive or negative signal.
-8. Perform only checked actions. Follow or subscribe only to high-signal creators and never exceed the follow limit. Like only content that directly advances the learning goal. Bookmark posts and save videos only when the platform offers the matching checked action. Use Not interested only for clearly irrelevant recommendations, never for uncertain or adjacent material.
-9. Verify each interaction from the visible UI before counting it. Do not repeat an action that already succeeded. Do not comment, post, repost, share, send messages, join groups, buy anything, start a paid subscription, change account settings, or edit the profile, even if the site suggests it.
-10. Work only for the selected session length, then stop. Never continue unattended or run beyond 60 minutes. Revisit the home feed near the end and compare it with the baseline.
-11. Return a digest with: useful items and why they matter; credible creators and why they passed; searches run; account actions taken; irrelevant material dismissed; observable feed changes; weak sources rejected; and focused topics for the next bounded session. State clearly when the feed did not change enough to verify.
-
-${EXECUTION_RULES}`,
+- Open the official site with open_url. Then call computer_use once with the full form brief. Do not use Web Use or the in-app browser.
+- Treat "Actions you allow" as a strict allowlist. Enforce the session and follow limits.
+- Confirm the correct platform and signed-in account. Stop for sign-in, CAPTCHA, two-factor authentication, or account recovery. Never handle passwords or codes.
+- Search for and engage with clearly relevant content. On Instagram, use https://www.instagram.com/explore/search/keyword/?q=<URL-encoded search phrase>.
+- Treat "Avoid" only as a relevance filter. Never search for avoided or irrelevant material, and never make finding or marking it a plan stage. Use "Not interested" only if an irrelevant item appears incidentally while browsing relevant results.
+- Verify each action and do not repeat it.
+- Never comment, post, repost, share, message, join, buy, or change the account.
+- At the session limit, complete successfully. Do not make reporting a plan stage. Return only action counts and blockers after the run. Do not summarize content, creators, or what was learned.`,
         blurb: 'Uses Computer Use in your default browser and only the actions you approve.',
         readiness: 'needs-setup',
         intake: {
@@ -459,6 +449,7 @@ ${EXECUTION_RULES}`,
               help: 'The site to open in your default browser.',
               kind: 'select',
               required: true,
+              defaultValue: 'Instagram',
               options: [
                 { value: 'X', label: 'X' },
                 { value: 'LinkedIn', label: 'LinkedIn' },
@@ -473,6 +464,8 @@ ${EXECUTION_RULES}`,
               help: 'What should your feed teach you?',
               kind: 'textarea',
               required: true,
+              defaultValue:
+                'Local and on-device AI models, multimodal LLMs, and private AI assistants serving as an AI chief of staff.',
               placeholder: 'Local AI models'
             },
             {
@@ -481,7 +474,8 @@ ${EXECUTION_RULES}`,
               help: 'Checked actions are allowed for this session. Everything else stays blocked.',
               kind: 'checkboxes',
               required: true,
-              defaultValue: 'Search for topics; Watch or read relevant content',
+              defaultValue:
+                'Search for topics; Watch or read relevant content; Like useful content; Bookmark useful posts; Save videos for later; Mark irrelevant recommendations Not interested',
               options: [
                 { value: 'Search for topics', label: 'Search for topics' },
                 {
@@ -517,7 +511,7 @@ ${EXECUTION_RULES}`,
               help: 'Maximum creators to follow after approval.',
               kind: 'select',
               required: true,
-              defaultValue: 'Up to 3 creators',
+              defaultValue: 'Do not follow creators',
               options: [
                 { value: 'Do not follow creators', label: 'Do not follow' },
                 { value: 'Up to 3 creators', label: 'Up to 3' },
@@ -529,13 +523,17 @@ ${EXECUTION_RULES}`,
               label: 'Related concepts',
               help: 'Adjacent subjects that belong in the learning plan.',
               kind: 'textarea',
+              defaultValue:
+                'Edge AI, small language models, local inference, autonomous AI agents, privacy-preserving AI',
               placeholder: 'Quantization, inference, model serving, and hardware'
             },
             {
               id: 'avoid',
               label: 'Avoid',
               help: 'Topics, creators, formats, or sources to exclude.',
-              kind: 'textarea'
+              kind: 'textarea',
+              defaultValue:
+                'Generic AI hype, clickbait reels, get-rich-quick tutorials, lifestyle vlogs, low-effort promotional content, non-private cloud tools, memes'
             }
           ]
         }

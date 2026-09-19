@@ -25,7 +25,9 @@ describe('<MemoryChat/> assistant preset runs', () => {
 
     await user.click(await screen.findByTestId('explore-preset-price-compare'))
     await screen.findByTestId('preset-intake-price-compare')
-    expect(screen.getByRole('button', { name: 'Assistant' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Assistant' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
   })
 
   it('starts Train My Feed as an Assistant run with the approved bounds', async () => {
@@ -35,29 +37,50 @@ describe('<MemoryChat/> assistant preset runs', () => {
     renderChat({ presetId: 'train-my-feed' })
 
     await screen.findByTestId('preset-intake-train-my-feed')
-    expect(screen.getByRole('button', { name: 'Assistant' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Assistant' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
+    expect((screen.getByLabelText(/Social platform/) as HTMLSelectElement).value).toBe('Instagram')
+    expect((screen.getByLabelText(/Learning goal/) as HTMLTextAreaElement).value).toBe(
+      'Local and on-device AI models, multimodal LLMs, and private AI assistants serving as an AI chief of staff.'
+    )
+    expect((screen.getByLabelText('Follow or subscribe') as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByLabelText('Like useful content') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText('Bookmark useful posts') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByLabelText('Save videos for later') as HTMLInputElement).checked).toBe(true)
+    expect(
+      (screen.getByLabelText('Mark irrelevant items Not interested') as HTMLInputElement).checked
+    ).toBe(true)
+    expect((screen.getByLabelText(/Session length/) as HTMLSelectElement).value).toBe('30 minutes')
+    expect((screen.getByLabelText(/Creator follow limit/) as HTMLSelectElement).value).toBe(
+      'Do not follow creators'
+    )
+    expect((screen.getByLabelText(/Related concepts/) as HTMLTextAreaElement).value).toBe(
+      'Edge AI, small language models, local inference, autonomous AI agents, privacy-preserving AI'
+    )
+    expect((screen.getByLabelText(/^Avoid/) as HTMLTextAreaElement).value).toBe(
+      'Generic AI hype, clickbait reels, get-rich-quick tutorials, lifestyle vlogs, low-effort promotional content, non-private cloud tools, memes'
+    )
     fireEvent.change(screen.getByLabelText(/Learning goal/), {
       target: { value: 'Local AI models' }
     })
     await user.selectOptions(screen.getByLabelText(/Session length/), '45 minutes')
     const start = screen.getByRole('button', { name: 'Start in chat' }) as HTMLButtonElement
-    expect(start.disabled).toBe(true)
+    expect(start.disabled).toBe(false)
     await user.selectOptions(screen.getByLabelText(/Social platform/), 'YouTube')
     expect((screen.getByLabelText('Search for topics') as HTMLInputElement).checked).toBe(true)
     expect(
       (screen.getByLabelText('Watch or read relevant content') as HTMLInputElement).checked
     ).toBe(true)
     await user.click(screen.getByLabelText('Follow or subscribe'))
-    await user.click(screen.getByLabelText('Like useful content'))
-    await user.click(screen.getByLabelText('Bookmark useful posts'))
-    await user.click(screen.getByLabelText('Save videos for later'))
-    await user.click(screen.getByLabelText('Mark irrelevant items Not interested'))
     expect(start.disabled).toBe(false)
     await user.click(start)
 
     await waitFor(() => expect(boundary.api.createRagConversation).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(boundary.toolQueries).toHaveLength(1))
-    expect(screen.getByRole('button', { name: 'Assistant' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Assistant' }).getAttribute('aria-pressed')).toBe(
+      'true'
+    )
     expect(boundary.toolQueries[0]?.query).toContain('A: Local AI models')
     expect(boundary.toolQueries[0]?.query).toContain('A: 45 minutes')
     expect(boundary.toolQueries[0]?.query).toContain('A: YouTube')
@@ -66,19 +89,19 @@ describe('<MemoryChat/> assistant preset runs', () => {
     expect(boundary.toolQueries[0]?.query).toContain('Bookmark useful posts')
     expect(boundary.toolQueries[0]?.query).toContain('Save videos for later')
     expect(boundary.toolQueries[0]?.query).toContain('Mark irrelevant recommendations')
-    expect(boundary.toolQueries[0]?.query).toContain("user's default browser")
-    expect(boundary.toolQueries[0]?.query).toContain('Never use Web Use')
+    expect(boundary.toolQueries[0]?.query).toContain('default browser')
+    expect(boundary.toolQueries[0]?.query).toContain('Do not use Web Use')
+    expect(boundary.toolQueries[0]?.query).toContain('open_url')
+    expect(boundary.toolQueries[0]?.query).toContain('computer_use once')
+    expect(boundary.toolQueries[0]?.query).toContain('complete successfully')
     expect(boundary.toolQueries[0]?.query).toContain(
-      'existing browser login, cookies, history, cache, and recommendations'
+      'Never search for avoided or irrelevant material'
     )
-    expect(boundary.toolQueries[0]?.query).toContain('Call open_url')
-    expect(boundary.toolQueries[0]?.query).toContain('Do not call web_use')
-    expect(boundary.toolQueries[0]?.query).toContain('Call computer_use once')
     expect(boundary.toolQueries[0]?.query).toContain(
-      'verify that the browser is visible and frontmost in the Computer Use screenshot'
+      'never make finding or marking it a plan stage'
     )
-    expect(boundary.toolQueries[0]?.query).toContain('Never continue unattended')
-    expect(boundary.toolQueries[0]?.query).toContain('Do not comment, post, repost, share')
+    expect(boundary.toolQueries[0]?.query).toContain('Do not make reporting a plan stage')
+    expect(boundary.toolQueries[0]?.query).toContain('Do not summarize content')
   })
 
   it('directs an Instagram feed run to keyword URLs using the chosen topic', async () => {
@@ -100,7 +123,7 @@ describe('<MemoryChat/> assistant preset runs', () => {
     expect(boundary.toolQueries[0]?.query).toContain(
       'https://www.instagram.com/explore/search/keyword/?q=<URL-encoded search phrase>'
     )
-    expect(boundary.toolQueries[0]?.query).toContain('Replace the q value with each actual search phrase')
+    expect(boundary.toolQueries[0]?.query).toContain('URL-encoded search phrase')
     expect(boundary.toolQueries[0]?.query).not.toContain('q=offgridai')
   })
 
