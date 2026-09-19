@@ -11,7 +11,7 @@ set -euo pipefail
 # official llama.cpp release binaries are now minos 26. The only reliable fix is
 # to build it ourselves with the target pinned. Run in CI before packaging.
 #
-#   LLAMA_REF=b10369 MACOS_DEPLOYMENT_TARGET=13.0 scripts/build-llama.sh   (override; default is package.json offgrid.llamaRef)
+#   LLAMA_REF=<tag> MACOS_DEPLOYMENT_TARGET=13.0 scripts/build-llama.sh   (override; default is package.json offgrid.llamaRef)
 
 # ONE owner for the version: package.json, where every other version in this repo already lives. It was
 # hardcoded here AND in fetch-win-binaries.ps1 AND passed again by two callers - one fact with four homes.
@@ -59,6 +59,7 @@ cd "$WORK/src"
 # No CURL / no OpenSSL: the server runs on 127.0.0.1 HTTP and the app downloads
 # models itself, so we don't need TLS — and linking Homebrew's OpenSSL would
 # bake in an absolute /opt/homebrew path that doesn't exist on users' Macs.
+# The desktop app also supplies its own UI, so do not build or download llama.cpp's UI.
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$TARGET" \
   -DCMAKE_OSX_ARCHITECTURES="$LLAMA_ARCH" \
@@ -66,6 +67,8 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DGGML_NATIVE="$NATIVE_CPU" \
   -DGGML_OPENMP=OFF \
   -DLLAMA_CURL=OFF \
+  -DLLAMA_BUILD_UI=OFF \
+  -DLLAMA_USE_PREBUILT_UI=OFF \
   -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON -DCMAKE_DISABLE_FIND_PACKAGE_CURL=ON \
   -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TOOLS=ON
 cmake --build build --config Release -j"$(sysctl -n hw.ncpu)" --target llama-server
