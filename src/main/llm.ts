@@ -91,6 +91,58 @@ export interface ChatStreamResult extends StreamResult {
   maxTokens: number
 }
 
+export interface OptionDecision {
+  choice: number
+  confidence: number
+  probabilities: number[]
+}
+
+const DECISION_LABELS = 'ABCDEFGHIJ'
+
+export function buildDecisionPrompt(
+  context: string,
+  question: string,
+  options: readonly string[]
+): string {
+  if (options.length < 2 || options.length > DECISION_LABELS.length) {
+    throw new Error('A decision needs between 2 and 10 options.')
+  }
+  return [
+    `Context:\n${context}`,
+    `Question: ${question}`,
+    'Options:',
+    ...options.map((option, index) => `(${DECISION_LABELS[index]}) ${option}`),
+    'Answer: ('
+  ].join('\n')
+}
+
+export function parseOptionDecision(raw: string, optionCount: number): OptionDecision {
+  const data = JSON.parse(raw) as {
+    completion_probabilities?: Array<{
+      top_logprobs?: Array<{ token?: string; prob?: number }>
+      top_probs?: Array<{ token?: string; prob?: number }>
+    }>
+  }
+  const first = data.completion_probabilities?.[0]
+  const top = first?.top_probs ?? first?.top_logprobs ?? []
+  const probabilities = Array.from({ length: optionCount }, () => 0)
+  for (const item of top) {
+    const label = item.token?.trim()
+    const index = label ? DECISION_LABELS.indexOf(label) : -1
+    if (index >= 0 && index < optionCount && typeof item.prob === 'number') {
+      probabilities[index] = item.prob
+    }
+  }
+  const total = probabilities.reduce((sum, value) => sum + value, 0)
+  if (!(total > 0)) throw new Error('The Decision model returned no option probabilities.')
+  const normalized = probabilities.map((value) => value / total)
+  const choice = normalized.reduce(
+    (best, value, index) => (value > normalized[best]! ? index : best),
+    0
+  )
+  return { choice, confidence: normalized[choice]!, probabilities: normalized }
+}
+
 function withContextMetrics(
   result: StreamResult,
   messages: unknown[],
@@ -1183,6 +1235,40 @@ export class LLMService {
     signal?: AbortSignal
   ): Promise<string> {
     return postCompletionOnce(this.port, body, timeoutMs, signal)
+  }
+
+  /** Score one typed decision with the resident Decision model. The raw completion
+   * endpoint preserves the model's trained answer-slot prompt and returns the
+   * grammar-restricted option distribution without free-text generation. */
+  async decideOptions(
+    context: string,
+    question: string,
+    options: readonly string[],
+    signal?: AbortSignal
+  ): Promise<OptionDecision> {
+    const prompt = buildDecisionPrompt(context, question, options)
+    await this.beginGeneration()
+    try {
+      await this.ensureReady()
+      return await this.chatMutex.runExclusive(async () => {
+        const labels = DECISION_LABELS.slice(0, options.length)
+        const body = JSON.stringify({
+          prompt,
+          n_predict: 1,
+          n_probs: options.length,
+          post_sampling_probs: true,
+          temperature: 1.3,
+          top_k: 0,
+          top_p: 1,
+          min_p: 0,
+          grammar: `root ::= [${labels}]`
+        })
+        const raw = await postCompletionOnce(this.port, body, 60_000, signal, '/completion')
+        return parseOptionDecision(raw, options.length)
+      })
+    } finally {
+      this.finishGeneration()
+    }
   }
 
   /** Resolve the selected text model once at request admission. Every text

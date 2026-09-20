@@ -66,6 +66,7 @@ import {
   deactivateRemoteVisionMediaModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
+import { getComputerUseSettings, setComputerUseSettings } from './computer-use-settings'
 
 // Desktop ships the Prism llama.cpp engine required by these packed weights.
 // Keep this entry here: the shared catalog also feeds Mobile, whose llama.rn
@@ -100,9 +101,36 @@ export const BONSAI_2: ModelEntry = {
   ]
 }
 
+// Desktop-only typed Decision model. It uses the bundled llama.cpp raw
+// completion endpoint and stays in the existing Computer Use catalog without
+// becoming the selected visual grounder.
+export const DECIDER_2B: ModelEntry = {
+  id: 'cosetoenor/decider-2b-GGUF',
+  name: 'Decider 2B',
+  kind: 'computer_use',
+  org: 'Mapika',
+  description: 'Fast typed action decisions with calibrated option probabilities.',
+  params: 2,
+  minRamGb: 4,
+  quant: 'Q8_0',
+  tags: ['Decision', 'Fast'],
+  grounder: false,
+  isNew: true,
+  releaseDate: '2026-09-19',
+  files: [
+    {
+      name: 'decider-2b-q8_0.gguf',
+      url: 'https://huggingface.co/cosetoenor/decider-2b-GGUF/resolve/a087dd15c820ce3a5a7c8c8fbee949019e944155/decider-2b-q8_0.gguf',
+      sizeBytes: 2012012544,
+      sha256: 'cac2782be4136164e0594bd67b4128e86cb2838c309a0e6f7465d6f7e268483f',
+      role: 'primary'
+    }
+  ]
+}
+
 export async function desktopCatalog(): Promise<ModelEntry[]> {
   const { CATALOG } = await import('@offgrid/models')
-  return [BONSAI_2, ...CATALOG]
+  return [BONSAI_2, DECIDER_2B, ...CATALOG]
 }
 
 export interface DownloadProgress {
@@ -901,9 +929,20 @@ export async function getActiveModelIds(): Promise<string[]> {
         model.active && (!remote || !remoteModelSelected('text') || model.id !== activeChatId)
     )
     .map((model) => model.id)
+  const computerUseSettings = getComputerUseSettings()
+  const decisionModelId =
+    computerUseSettings.decisionModelId ??
+    (computerUseSettings.modelStrategy === 'decision_plus_specialist' ||
+    computerUseSettings.modelStrategy === 'decision_plus_reasoning'
+      ? DECIDER_2B.id
+      : null)
+  const withDecision =
+    decisionModelId && info.models.some((model) => model.id === decisionModelId)
+      ? [...new Set([...localIds, decisionModelId])]
+      : localIds
   return remote && remote.enabled !== false
     ? [
-        ...localIds,
+        ...withDecision,
         ...remoteVisionInventoryModels([remote])
           .filter((model) =>
             remoteModelSelected(
@@ -912,7 +951,7 @@ export async function getActiveModelIds(): Promise<string[]> {
           )
           .map((model) => model.id)
       ]
-    : localIds
+    : withDecision
 }
 
 /**
@@ -955,6 +994,13 @@ export async function activateModel(
     const requested = requestedKind as Parameters<typeof modelSupportsKind>[1]
     if (catalogEntry && requestedKind && modelSupportsKind(catalogEntry, requested)) {
       requestedModal = modalityForModel(requestedKind)
+    }
+    if (
+      requestedKind === 'computer_use' &&
+      catalogEntry?.tags?.some((tag) => tag.toLowerCase() === 'decision')
+    ) {
+      setComputerUseSettings({ ...getComputerUseSettings(), decisionModelId: modelId })
+      return { success: true }
     }
   }
   const modal = requestedModal ?? modalityForModel(kind)

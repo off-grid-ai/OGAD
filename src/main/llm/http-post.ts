@@ -114,11 +114,15 @@ export function serverResponseError(
 
 /** The request options that guarantee a fresh, non-pooled connection to the model server.
  *  This is the contract that unbroke the tool loop — defined once, consumed everywhere. */
-export function modelRequestOptions(port: number, contentLength: number): http.RequestOptions {
+export function modelRequestOptions(
+  port: number,
+  contentLength: number,
+  requestPath = '/v1/chat/completions'
+): http.RequestOptions {
   return {
     hostname: '127.0.0.1',
     port,
-    path: '/v1/chat/completions',
+    path: requestPath,
     method: 'POST',
     // Fresh connection per request — do NOT reuse a pooled keep-alive socket (the server
     // closes its socket after each response; a reused one is half-closed -> ECONNRESET).
@@ -140,7 +144,8 @@ export function postCompletionOnce(
   port: number,
   body: string,
   timeoutMs: number | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requestPath = '/v1/chat/completions'
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -173,21 +178,24 @@ export function postCompletionOnce(
             )
           }, timeoutMs)
 
-    const req = http.request(modelRequestOptions(port, Buffer.byteLength(body)), (res) => {
-      let data = ''
-      res.on('data', (chunk) => {
-        data += chunk
-      })
-      res.on('end', () =>
-        finish(() => {
-          if (res.statusCode !== 200) {
-            reject(serverResponseError(res.statusCode, data))
-            return
-          }
-          resolve(data)
+    const req = http.request(
+      modelRequestOptions(port, Buffer.byteLength(body), requestPath),
+      (res) => {
+        let data = ''
+        res.on('data', (chunk) => {
+          data += chunk
         })
-      )
-    })
+        res.on('end', () =>
+          finish(() => {
+            if (res.statusCode !== 200) {
+              reject(serverResponseError(res.statusCode, data))
+              return
+            }
+            resolve(data)
+          })
+        )
+      }
+    )
     // A transport error (ECONNREFUSED, ECONNRESET, socket hang up) means the server never
     // answered. Always retryable — never a property of this request.
     req.on('error', (e) =>

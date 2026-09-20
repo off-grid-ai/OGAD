@@ -25,6 +25,7 @@ import { createVisionGrounder } from './vision-policy-runner'
 import { getActiveRemoteVisionServer } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
+import { selectedDecisionModelId } from '../accessibility/decision-model-loader'
 
 export interface VisionTaskModelSession {
   adapter: VisionModelAdapter
@@ -48,6 +49,7 @@ export interface VisionTaskModelStrategyDependencies {
   activeRemote(): RemoteModelSelection | null
   selectedChatId(): string | null
   selectedSpecialistId(): string
+  selectedDecisionId?(): string
   resolveIdentity(modelId: string): Promise<ModelIdentity>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   runReasoner: typeof productionHybridReasoner
@@ -63,6 +65,7 @@ const productionDependencies: VisionTaskModelStrategyDependencies = {
   },
   selectedChatId: getActiveModel,
   selectedSpecialistId: selectedGrounderModelId,
+  selectedDecisionId: selectedDecisionModelId,
   resolveIdentity: resolveModelIdentity,
   withSpecialist: withGrounder,
   runReasoner: productionHybridReasoner
@@ -103,6 +106,35 @@ export async function getComputerUseActiveModelProjection(
       strategyLabel: 'Specialist',
       models: [await projectedModel('grounding_specialist', specialistModelId, false, dependencies)]
     }
+  }
+  if (strategy === 'decision_plus_specialist') {
+    return {
+      strategy,
+      strategyLabel: 'Decision + Specialist',
+      models: [
+        await projectedModel(
+          'decision',
+          dependencies.selectedDecisionId?.() ?? selectedDecisionModelId(),
+          false,
+          dependencies
+        ),
+        await projectedModel('grounding_specialist', specialistModelId, false, dependencies)
+      ]
+    }
+  }
+  if (strategy === 'decision_plus_reasoning') {
+    const models: ComputerUseActiveModel[] = [
+      await projectedModel(
+        'decision',
+        dependencies.selectedDecisionId?.() ?? selectedDecisionModelId(),
+        false,
+        dependencies
+      )
+    ]
+    if (chatModelId) {
+      models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
+    }
+    return { strategy, strategyLabel: 'Decision + Reasoning', models }
   }
   const models: ComputerUseActiveModel[] = []
   if (chatModelId) {
@@ -211,6 +243,9 @@ export async function withVisionTaskModelStrategy<T>(
     return task(await hybridSession(environment, dependencies))
   }
   if (strategy === 'same_as_chat') {
+    return task(await directSession(environment, activeChatSelection(dependencies), dependencies))
+  }
+  if (strategy === 'decision_plus_reasoning') {
     return task(await directSession(environment, activeChatSelection(dependencies), dependencies))
   }
   const { result } = await dependencies.withSpecialist(async () => {

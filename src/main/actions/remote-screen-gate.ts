@@ -4,11 +4,10 @@ import { getWebUseSettings } from '../web-use-settings'
 import { getActiveRemoteVisionServer } from '../vision/remote-vision-server'
 import { remoteScreenDecision, type ScreenTaskKind } from '../../shared/remote-screen-privacy'
 import { runWithRemoteScreenTaskSession } from './remote-screen-session'
+import type { ComputerUseModelStrategy } from '../../shared/computer-use-settings'
 
 interface RemoteScreenGateDependencies {
-  modelStrategy(
-    taskKind: ScreenTaskKind
-  ): 'same_as_chat' | 'separate_specialist' | 'text_plus_specialist'
+  modelStrategy(taskKind: ScreenTaskKind): ComputerUseModelStrategy
   activeServer(): ReturnType<typeof getActiveRemoteVisionServer>
 }
 
