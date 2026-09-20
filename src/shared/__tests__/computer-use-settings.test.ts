@@ -8,6 +8,10 @@ import {
 } from '../computer-use-settings'
 
 describe('Computer Use settings', () => {
+  it('accepts ten prior visual-history frames', () => {
+    expect(normalizeComputerUseSettings({ visualHistoryFrames: 10 }).visualHistoryFrames).toBe(10)
+  })
+
   it('normalizes unknown values to one safe settings object', () => {
     expect(
       normalizeComputerUseSettings({

@@ -148,7 +148,8 @@ export async function getComputerUseActiveModelProjection(
 export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModelProjection> {
   return getComputerUseActiveModelProjection({
     ...productionDependencies,
-    strategy: () => getWebUseSettings().modelStrategy
+    strategy: () => getWebUseSettings().modelStrategy,
+    selectedDecisionId: () => getWebUseSettings().decisionModelId ?? selectedDecisionModelId()
   })
 }
 

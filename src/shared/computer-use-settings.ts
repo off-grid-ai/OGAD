@@ -2,7 +2,7 @@ export type ComputerUseContext = 'auto' | '16k' | '32k'
 export type ComputerUseScreenshotSize = 'compact' | 'balanced' | 'large'
 export type ComputerUseScreenshotQuality = 'efficient' | 'balanced' | 'detailed'
 export type ComputerUseCheckpointInterval = 8 | 9 | 10
-export type ComputerUseVisualHistoryFrames = 0 | 1 | 2 | 5
+export type ComputerUseVisualHistoryFrames = 0 | 1 | 2 | 5 | 10
 export type ComputerUseRail = 'ax' | 'vision'
 export type ComputerUseModelStrategy =
   | 'same_as_chat'
@@ -113,7 +113,8 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
     input.visualHistoryFrames === 0 ||
     input.visualHistoryFrames === 1 ||
     input.visualHistoryFrames === 2 ||
-    input.visualHistoryFrames === 5
+    input.visualHistoryFrames === 5 ||
+    input.visualHistoryFrames === 10
       ? input.visualHistoryFrames
       : DEFAULT_COMPUTER_USE_SETTINGS.visualHistoryFrames
   const enabledRails = (['ax', 'vision'] as const).filter(

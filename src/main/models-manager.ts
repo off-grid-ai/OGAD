@@ -113,7 +113,7 @@ export const DECIDER_2B: ModelEntry = {
   params: 2,
   minRamGb: 4,
   quant: 'Q8_0',
-  tags: ['Decision', 'Fast'],
+  tags: ['Decision', 'Decider', 'Fast'],
   grounder: false,
   isNew: true,
   releaseDate: '2026-09-19',
@@ -128,9 +128,46 @@ export const DECIDER_2B: ModelEntry = {
   ]
 }
 
+export const DECIDER_2B_VISION: ModelEntry = {
+  id: 'mradermacher/decider-2b-vision-GGUF',
+  sourceModelId: 'Mapika/decider-2b-vision',
+  name: 'Decider 2B Vision',
+  kind: 'computer_use',
+  org: 'Mapika',
+  description: 'Fast typed action decisions from accessibility text and the current screenshot.',
+  params: 2,
+  minRamGb: 4,
+  quant: 'Q4_K_M',
+  tags: ['Decision', 'Decider', 'Vision', 'Fast'],
+  grounder: false,
+  isNew: true,
+  releaseDate: '2026-09-19',
+  files: [
+    {
+      name: 'decider-2b-vision.Q4_K_M.gguf',
+      url: 'https://huggingface.co/mradermacher/decider-2b-vision-GGUF/resolve/a813595a7a92e358d1741bf973d363be4da77db9/decider-2b-vision.Q4_K_M.gguf',
+      sizeBytes: 1274397056,
+      sha256: 'b3e38aa90856d6b93df0d2b186e941e57fa6fd4b022a3a89fe538ff01ebd9985',
+      role: 'primary'
+    },
+    {
+      name: 'decider-2b-vision.mmproj-Q8_0.gguf',
+      url: 'https://huggingface.co/mradermacher/decider-2b-vision-GGUF/resolve/a813595a7a92e358d1741bf973d363be4da77db9/decider-2b-vision.mmproj-Q8_0.gguf',
+      sizeBytes: 364664448,
+      sha256: '79e636085e90f1b4bdc5df22003cde0dd0d88086a04b7c101e6bd7d1cc9f2c91',
+      role: 'mmproj'
+    }
+  ]
+}
+
 export async function desktopCatalog(): Promise<ModelEntry[]> {
   const { CATALOG } = await import('@offgrid/models')
-  return [BONSAI_2, DECIDER_2B, ...CATALOG]
+  const catalog = CATALOG.map((model) =>
+    model.grounder
+      ? { ...model, tags: [...new Set(['Specialist', ...(model.tags ?? [])])] }
+      : model
+  )
+  return [BONSAI_2, DECIDER_2B, DECIDER_2B_VISION, ...catalog]
 }
 
 export interface DownloadProgress {
