@@ -265,7 +265,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                     {model.role === 'grounding_specialist' || model.role === 'decision' ? (
                       <SettingsSelect<string>
                         id={`active-computer-use-${model.role}-model`}
-                        label={`Active Computer Use ${model.role === 'decision' ? 'Decision' : 'grounding'} model`}
+                        label={
+                          model.role === 'decision'
+                            ? 'Active Computer Use Decision model'
+                            : 'Active Computer Use model'
+                        }
                         value={model.modelId}
                         disabled={busy !== null}
                         onValueChange={(modelId) =>
@@ -336,7 +340,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                     {model.role === 'grounding_specialist' || model.role === 'decision' ? (
                       <SettingsSelect<string>
                         id={`active-web-use-${model.role}-model`}
-                        label={`Active Web Use ${model.role === 'decision' ? 'Decision' : 'grounding'} model`}
+                        label={
+                          model.role === 'decision'
+                            ? 'Active Web Use Decision model'
+                            : 'Active Web Use grounding model'
+                        }
                         value={model.modelId}
                         disabled={busy !== null}
                         onValueChange={(modelId) =>
