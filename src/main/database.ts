@@ -1,8 +1,9 @@
 // better-sqlite3-multiple-ciphers is a drop-in superset of better-sqlite3 that
 // adds SQLCipher-style `PRAGMA key` encryption. Same API surface + types.
 import Database from 'better-sqlite3-multiple-ciphers'
-import { app, safeStorage } from 'electron'
+import { safeStorage } from 'electron'
 import path from 'path'
+import { dataDir } from './runtime-env'
 import fs from 'fs'
 import crypto from 'crypto'
 import { createSettingsStore, initializeSettingsStore } from './settings-store'
@@ -88,7 +89,7 @@ export function getDB(): Database.Database {
   // handle, so a closed cached instance must be treated as absent.
   db = null
 
-  const dbPath = path.join(app.getPath('userData'), 'memories.db')
+  const dbPath = path.join(dataDir(), 'memories.db')
   console.log('Opening database at:', dbPath)
 
   const key = loadOrCreateKey(dbPath)
