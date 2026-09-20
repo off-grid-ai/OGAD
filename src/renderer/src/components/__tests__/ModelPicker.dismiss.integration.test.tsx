@@ -100,6 +100,39 @@ describe('<ModelPicker/> dismissal', () => {
     expect(computerUse.textContent).toContain('On device')
   })
 
+  it('shows the catalog name for a transferred grounding specialist', async () => {
+    const packageId =
+      'model-package-v1:06433bf5529bd5ad660b4b4d516f425de0b6fb599dc282742cefe1bc9686945b7'
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getModelCatalog: async () => ({
+        models: [{ id: packageId, name: 'UI-Mate 9B', kind: 'computer_use' }]
+      }),
+      getInstalledModels: async () => [packageId],
+      getActiveModel: async () => null,
+      getActiveModalities: async () => ({ computer_use: packageId }),
+      getActiveModelIds: async () => [],
+      getComputerUseActiveModels: async () => ({
+        strategy: 'separate_specialist',
+        strategyLabel: 'Specialist',
+        models: [
+          {
+            role: 'grounding_specialist',
+            modelId: packageId,
+            modelName: 'UI-Mate 9B',
+            remote: false
+          }
+        ]
+      }),
+      getWebUseActiveModels: async () => null
+    }
+
+    render(<ModelPicker onClose={() => {}} />)
+
+    const picker = await screen.findByRole('button', { name: 'Active Computer Use model' })
+    expect(picker.textContent).toContain('UI-Mate 9B')
+    expect(picker.textContent).not.toContain('model-package-v1:')
+  })
+
   it('shows and activates a saved remote model through the shared model seam', async () => {
     const activateModel = renderPickerWithRemote()
     const button = (await screen.findByText('google/gemma-4')).closest('button')

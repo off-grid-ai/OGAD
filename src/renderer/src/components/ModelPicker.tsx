@@ -20,6 +20,7 @@ interface ModelEntry {
   files?: ModelFile[]
   remoteServerId?: string
   grounder?: boolean
+  tags?: string[]
   availability?: 'ready' | 'coming_soon'
 }
 
@@ -58,6 +59,10 @@ function primaryVariant(m: ModelEntry): string | null {
   const file = primaryFile(m)
   if (!file.toLowerCase().endsWith('.gguf')) return null
   return file.slice(0, -'.gguf'.length).split('-').at(-1) ?? null
+}
+
+function isGroundingSpecialist(model: ModelEntry): boolean {
+  return model.grounder === true || (model.kind === 'computer_use' && !model.tags?.includes('Decision'))
 }
 
 function openSettings(onClose: () => void): void {
@@ -237,7 +242,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                               (candidate) =>
                                 installed.includes(candidate.id) &&
                                 candidate.availability !== 'coming_soon' &&
-                                (candidate.kind === 'computer_use' || candidate.grounder === true)
+                                isGroundingSpecialist(candidate)
                             )
                             .map((candidate) => ({ value: candidate.id, label: candidate.name })),
                           ...(models.some((candidate) => candidate.id === model.modelId)
@@ -298,7 +303,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                               (candidate) =>
                                 installed.includes(candidate.id) &&
                                 candidate.availability !== 'coming_soon' &&
-                                (candidate.kind === 'computer_use' || candidate.grounder === true)
+                                isGroundingSpecialist(candidate)
                             )
                             .map((candidate) => ({ value: candidate.id, label: candidate.name })),
                           ...(models.some((candidate) => candidate.id === model.modelId)
