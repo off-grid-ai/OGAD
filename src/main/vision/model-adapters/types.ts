@@ -16,6 +16,12 @@ export interface VisionPolicyHistoryStep {
   screenshotDataUrl?: string
 }
 
+export interface VisionContinuationCapsule {
+  done: readonly string[]
+  next: string
+  remember: string
+}
+
 export interface VisionPolicyInput {
   goal: string
   /** The action surface changes which shortcuts are real controls. */
@@ -24,6 +30,10 @@ export interface VisionPolicyInput {
   history: readonly VisionPolicyHistoryStep[]
   recentSteps: readonly string[]
   olderVisualFacts: readonly string[]
+  /** Small replacement state for continuity. It is advisory and never proves completion. */
+  continuation?: VisionContinuationCapsule
+  /** User-selected visual-history count, also used as the completed-outcome budget. */
+  continuationCapacity?: number
   /** Explicit plan state. Do not force an adapter to recover it from free-form history. */
   currentMilestone?: string
   /** Actions that crossed the execution boundary without an error. */
@@ -109,6 +119,8 @@ export type VisionPolicyDecision = (
 ) & {
   /** Short, redacted explanation for user-visible task evidence. Never raw chain-of-thought. */
   decisionRationale?: string
+  /** Bounded replacement state for the next decision. */
+  continuation?: VisionContinuationCapsule
 }
 
 export interface VisionModelAdapter {

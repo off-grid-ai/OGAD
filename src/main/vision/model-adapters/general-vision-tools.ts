@@ -1,4 +1,5 @@
 import { denormalize, type Bounds, type Point, type VisionAction } from '../vision-action'
+import { CONTINUATION_CAPSULE_SCHEMA, parseContinuationCapsule } from './continuation-capsule'
 import type { VisionPolicyDecision, VisionPolicyResponse, VisionPolicyToolCall } from './types'
 
 export const GENERAL_VISION_TOOL_NAMES = [
@@ -37,6 +38,19 @@ function normalizedText(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const text = value.replace(/\s+/g, ' ').trim()
   return text || null
+}
+
+function fieldsWithContinuation(
+  value: ObjectValue,
+  fields: readonly string[]
+): readonly string[] {
+  return Object.hasOwn(value, 'continuation') ? [...fields, 'continuation'] : fields
+}
+
+function optionalContinuation(value: ObjectValue) {
+  return Object.hasOwn(value, 'continuation')
+    ? parseContinuationCapsule(value.continuation)
+    : undefined
 }
 
 function direction(value: unknown): Direction | null {
@@ -146,17 +160,22 @@ function commonText(
 }
 
 function completeMilestone(value: ObjectValue): DecisionResult {
-  const common = commonText(value, ['summary', 'visible_evidence'])
-  return 'error' in common
-    ? common
-    : {
-        decision: {
-          kind: 'phase_complete',
-          actionText: 'Milestone complete',
-          summary: common.summary,
-          decisionRationale: common.visibleEvidence
-        }
-      }
+  const common = commonText(
+    value,
+    fieldsWithContinuation(value, ['summary', 'visible_evidence'])
+  )
+  if ('error' in common) return common
+  const continuation = optionalContinuation(value)
+  if (continuation === null) return { error: 'continuation was not a valid bounded capsule' }
+  return {
+    decision: {
+      kind: 'phase_complete',
+      actionText: 'Milestone complete',
+      summary: common.summary,
+      decisionRationale: common.visibleEvidence,
+      ...(continuation ? { continuation } : {})
+    }
+  }
 }
 
 function rethink(value: ObjectValue): DecisionResult {
@@ -198,11 +217,13 @@ function callUser(value: ObjectValue): DecisionResult {
 
 function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
   const common = commonText(value, [
-    'direction',
-    'summary',
-    'visible_evidence',
-    'action',
-    'action_reason'
+    ...fieldsWithContinuation(value, [
+      'direction',
+      'summary',
+      'visible_evidence',
+      'action',
+      'action_reason'
+    ])
   ])
   if ('error' in common) return common
   if (!direction(value.direction)) {
@@ -212,15 +233,18 @@ function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
   }
   const action = structuredAction(value.action, bounds)
   const actionReason = normalizedText(value.action_reason)
+  const continuation = optionalContinuation(value)
   if (!action) return { error: 'action was not one supported structured action' }
   if (!actionReason) return { error: 'action_reason was empty or was not text' }
+  if (continuation === null) return { error: 'continuation was not a valid bounded capsule' }
   if (action.type === 'wait') {
     return {
       decision: {
         kind: 'wait',
         actionText: 'wait',
         durationMs: action.durationMs ?? 0,
-        decisionRationale: common.visibleEvidence
+        decisionRationale: common.visibleEvidence,
+        ...(continuation ? { continuation } : {})
       }
     }
   }
@@ -229,7 +253,8 @@ function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
       kind: 'actions',
       actionText: common.summary,
       actions: [action],
-      decisionRationale: `${common.visibleEvidence} ${actionReason}`
+      decisionRationale: `${common.visibleEvidence} ${actionReason}`,
+      ...(continuation ? { continuation } : {})
     }
   }
 }
@@ -367,8 +392,12 @@ export const GENERAL_VISION_TOOLS = [
   nativeTool({
     name: 'complete_milestone',
     description: 'Report that the current milestone result is visibly complete.',
-    properties: { summary: text, visible_evidence: text },
-    required: ['summary', 'visible_evidence']
+    properties: {
+      summary: text,
+      visible_evidence: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
+    },
+    required: ['summary', 'visible_evidence', 'continuation']
   }),
   nativeTool({
     name: 'perform_action',
@@ -378,9 +407,17 @@ export const GENERAL_VISION_TOOLS = [
       summary: text,
       visible_evidence: text,
       action: structuredActionSchema,
-      action_reason: text
+      action_reason: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
     },
-    required: ['direction', 'summary', 'visible_evidence', 'action', 'action_reason']
+    required: [
+      'direction',
+      'summary',
+      'visible_evidence',
+      'action',
+      'action_reason',
+      'continuation'
+    ]
   }),
   nativeTool({
     name: 'rethink',

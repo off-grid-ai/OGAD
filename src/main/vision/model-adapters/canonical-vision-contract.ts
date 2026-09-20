@@ -11,5 +11,6 @@ export const GENERAL_STEP_SYSTEM_PROMPT = [
   'Use rethink when no safe action or completion is visible.',
   'For text entry, click the intended field first. Type only when that field is visibly focused.',
   'For sign-in, passwords, one-time codes, or payment, call call_user.',
-  'Keep tool arguments concise. Do not expose private reasoning.'
+  'Keep tool arguments concise. Do not expose private reasoning.',
+  'Continuation is bounded advisory working state. Include only confirmed outcomes, the next objective, and one important note.'
 ].join('\n')

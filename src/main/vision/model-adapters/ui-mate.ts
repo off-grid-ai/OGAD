@@ -9,6 +9,7 @@ import {
   type UIMateAction
 } from './ui-mate/policy'
 import type { VisionModelAdapter, VisionPolicyDecision } from './types'
+import { formatContinuationCapsule } from './continuation-capsule'
 
 const MAX_WAIT_MS = 30_000
 
@@ -107,6 +108,7 @@ function policyInstruction(input: Parameters<VisionModelAdapter['buildRequest']>
     input.currentMilestone
       ? `Current execution plan and verified progress:\nCurrent milestone: ${input.currentMilestone}`
       : '',
+    formatContinuationCapsule(input.continuation),
     input.recentSteps.length
       ? `Recent verified task events:\n${input.recentSteps.slice(-4).join('\n')}`
       : ''
