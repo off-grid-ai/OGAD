@@ -371,6 +371,8 @@ function visionPolicyInput(
     history: input.policyHistory,
     recentSteps: input.history,
     olderVisualFacts: input.retrievedFacts,
+    continuation: input.continuation,
+    continuationCapacity: input.continuationCapacity,
     currentMilestone: input.currentMilestone,
     verifiedActions: input.verifiedActions,
     previousActionEffect: input.previousActionEffect,

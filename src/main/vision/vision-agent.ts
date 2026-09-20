@@ -10,6 +10,7 @@ import type { VisionGuard } from './vision-guard'
 import type { ScreenshotGeometry } from './screenshot-geometry'
 import type {
   VisionPolicyCoordinateFrame,
+  VisionContinuationCapsule,
   VisionPolicyDecision,
   VisionPolicyHistoryStep
 } from './model-adapters/types'
@@ -43,6 +44,8 @@ export interface VisionTaskContinuation {
   guard: VisionGuard
   request: AbortController
   queuedGuidance: string[]
+  /** Return to the owning accessibility loop after one successful visual action. */
+  returnAfterAction?: boolean
 }
 
 /** A screen can request a fresh observation when its capture boundary changed
@@ -56,6 +59,8 @@ export interface VisionGroundingInput {
   image: string
   history: string[]
   retrievedFacts: string[]
+  continuation?: VisionContinuationCapsule
+  continuationCapacity?: number
   policyHistory: readonly VisionPolicyHistoryStep[]
   guidance: readonly string[]
   currentMilestone?: string
@@ -174,6 +179,8 @@ export interface VisionTaskDeps {
   retrievedFacts?: string[]
   now?: () => number
   maxPlanningSteps?: number
+  /** Recovery mode: stop after one successful action without completing the shared task. */
+  returnAfterAction?: boolean
   plan?: TaskExecutionPlan
   onPhase?: (phaseId: string) => void
   /** The trace this run is resuming from, so a retry restarts at the phase it reached instead of
