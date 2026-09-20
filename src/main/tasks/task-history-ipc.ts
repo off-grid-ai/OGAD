@@ -1,6 +1,6 @@
 /** Composition root for task history, guidance, and retry IPC. */
 import { ipcMain } from 'electron'
-import { initializeTaskHistory, listTaskRuns } from './task-history'
+import { initializeTaskHistory, listTaskRuns, removeTaskRuns } from './task-history'
 import { registerTaskRetryIpc } from './task-retry-ipc'
 import { registerTaskGuideIpc } from './task-guide-ipc'
 import { configureTaskRetryRunner } from './task-retry'
@@ -31,6 +31,13 @@ export function registerTaskHistoryIpc(): void {
   })
   ipcMain.handle('tasks:list', (_event, limit: unknown) =>
     listTaskRuns(typeof limit === 'number' ? limit : undefined)
+  )
+  ipcMain.handle('tasks:remove', (_event, taskIds: unknown) =>
+    removeTaskRuns(
+      Array.isArray(taskIds)
+        ? taskIds.filter((taskId): taskId is string => typeof taskId === 'string')
+        : []
+    )
   )
   registerTaskRetryIpc(ipcMain, {
     availability: async (taskId) => {

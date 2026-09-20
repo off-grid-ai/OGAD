@@ -23,6 +23,7 @@ import type {
 } from './types'
 import { noticeText } from './utlis'
 import type { TaskSession } from '@renderer/lib/task-session-store'
+import { taskReferenceFromResult } from '../chat-tool-projection'
 
 export function completedImageMessage(
   content: string,
@@ -326,6 +327,23 @@ export function mergeRemotePreviewTools(
 
 export function mapRagMessages(raw: RawRagMessage[]): ChatMessage[] {
   return raw.flatMap<ChatMessage>(mapRagMessage)
+}
+
+export function taskReferencesInMessages(messages: readonly ChatMessage[]): string[] {
+  const references = new Set<string>()
+  for (const message of messages) {
+    const resultTaskId = message.context?.taskResult?.taskId
+    if (resultTaskId) references.add(resultTaskId)
+    for (const tool of message.toolCalls ?? []) {
+      const taskId = taskReferenceFromResult(tool.result)
+      if (taskId) references.add(taskId)
+    }
+    if (message.role === 'tool') {
+      const taskId = taskReferenceFromResult(message.content)
+      if (taskId) references.add(taskId)
+    }
+  }
+  return [...references]
 }
 
 export function mergeDurableAndStreaming(

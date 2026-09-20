@@ -118,6 +118,14 @@ function start(): void {
     })
   })
   api.onChanged((task) => upsert(task as TaskSession))
+  api.onRemoved?.((taskIds) => {
+    const removed = new Set(taskIds)
+    emit({
+      tasks: state.tasks.filter((task) => !removed.has(task.taskId)),
+      ready: true,
+      lastChangedTaskId: removed.has(state.lastChangedTaskId ?? '') ? null : state.lastChangedTaskId
+    })
+  })
 }
 
 export function subscribeTaskSessions(listener: () => void): () => void {

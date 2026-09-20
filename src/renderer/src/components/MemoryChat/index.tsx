@@ -66,10 +66,7 @@ import {
   type VoicePreferences
 } from '@renderer/lib/voice-preferences'
 import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-intent'
-import {
-  buildAssistantContext,
-  type AssistantTimelineEntry
-} from '../../lib/message-persistence'
+import { buildAssistantContext, type AssistantTimelineEntry } from '../../lib/message-persistence'
 import type { GenerationMetrics } from '../../../../shared/generation-metrics'
 import { withGeneratedImageReference } from '../../../../shared/generated-image-reference'
 import type {
@@ -189,7 +186,11 @@ import {
   seedStreamViewMessage
 } from './stream-view-store'
 
-import { stopLiveTask, stopLiveWebUseForConversation } from './helper'
+import {
+  stopLiveTask,
+  stopLiveWebUseForConversation,
+  taskReferencesInMessages
+} from './helper'
 import {
   ACTIVE_CHAT_TAB_KEY,
   EMPTY_MSGS,
@@ -392,10 +393,7 @@ export function MemoryChat({
   const mergedRemoteWorkMessageId = remoteWorkPreview ? durableWorkMessageId : undefined
   // Read without subscribing the whole Chat tree. The streaming row owns the
   // journey-specific live subscription; this snapshot only gates image progress.
-  const liveJourneyTask = guidanceTaskForJourney(
-    getTaskSessionState().tasks,
-    activeConversationId
-  )
+  const liveJourneyTask = guidanceTaskForJourney(getTaskSessionState().tasks, activeConversationId)
   const promptEnhancementActive = messages.some(isPromptEnhancementMessage)
   const promptEnhancementComplete = messages.some(
     (message) =>
@@ -2226,10 +2224,7 @@ export function MemoryChat({
         streaming: true
       }
       seedStreamViewMessage(streamMessage)
-      setConvMessages(convId, (prev) => [
-        ...prev,
-        streamMessage
-      ])
+      setConvMessages(convId, (prev) => [...prev, streamMessage])
       const result = await window.api.ragChat(
         modelQuery,
         'All',
@@ -3055,6 +3050,7 @@ export function MemoryChat({
         const mi = messages[i]! // 0 <= i <= idx
         if (mi.role === 'user') {
           const content = mi.content
+          const replacedTaskIds = taskReferencesInMessages(messages.slice(i + 1))
           // Drop everything after that user turn (the old answer) and re-run in
           // place — no new user bubble. Also prune the persisted rows so reopening
           // the chat doesn't show old answers stacked.
@@ -3067,9 +3063,16 @@ export function MemoryChat({
             await stopLiveWebUseForConversation(activeConversationId)
             if (activeConversationId)
               await window.api.truncateRagMessages(activeConversationId, i + 1)
+            if (replacedTaskIds.length) await window.api.tasks?.remove?.(replacedTaskIds)
             // The turn's own attachments, not the composer's - the composer was cleared when this
             // turn was first sent, so regenerating without them re-asks the question WITHOUT its image.
-            await sendMessage(content, { regen: true, atts: attachmentsOf(mi) })
+            try {
+              await sendMessage(content, { regen: true, atts: attachmentsOf(mi) })
+            } finally {
+              // A stopped task can publish its terminal state while the replacement starts.
+              // Delete the same known task ids again so that late terminal write cannot restore them.
+              if (replacedTaskIds.length) await window.api.tasks?.remove?.(replacedTaskIds)
+            }
           })()
           return
         }
@@ -3096,6 +3099,7 @@ export function MemoryChat({
     // record of it - so the chip vanished from the thread and every later regenerate lost it too.
     const cid = activeConversationId
     const edited = messages[idx]
+    const replacedTaskIds = taskReferencesInMessages(messages.slice(idx + 1))
     const keptAtts = edited
       ? attachmentsOf(edited).map((attachment) =>
         attachment.kind === 'audio' ? { ...attachment, text } : attachment
@@ -3120,6 +3124,7 @@ export function MemoryChat({
           await window.api.truncateRagMessages(cid, idx)
           await window.api.addRagMessage(cid, 'user', text, persisted)
         }
+        if (replacedTaskIds.length) await window.api.tasks?.remove?.(replacedTaskIds)
       } catch (error) {
         console.error('Failed to persist the edited user message:', error)
         if (cid) {
@@ -3135,6 +3140,8 @@ export function MemoryChat({
         await sendMessage(text, { regen: true, atts: keptAtts })
       } catch (error) {
         console.error('Failed to regenerate the edited message:', error)
+      } finally {
+        if (replacedTaskIds.length) await window.api.tasks?.remove?.(replacedTaskIds)
       }
     })()
   }
@@ -3396,8 +3403,7 @@ export function MemoryChat({
       startEdit: (...args) => messageActionsRef.current.startEdit(...args),
       cancelEdit: (...args) => messageActionsRef.current.cancelEdit(...args),
       saveEdit: (...args) => messageActionsRef.current.saveEdit(...args),
-      updateVoiceTranscript: (...args) =>
-        messageActionsRef.current.updateVoiceTranscript(...args),
+      updateVoiceTranscript: (...args) => messageActionsRef.current.updateVoiceTranscript(...args),
       retryImageMemory: (...args) => messageActionsRef.current.retryImageMemory(...args),
       openArtifact: (...args) => messageActionsRef.current.openArtifact(...args),
       selectAskOption: (...args) => messageActionsRef.current.selectAskOption(...args),
