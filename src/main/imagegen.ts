@@ -558,7 +558,10 @@ export async function generateImage(
         dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}`,
         path: outputPath,
         seed: params.seed ?? -1,
-        model: remoteId!,
+        model:
+          remote.modelCatalog?.find(
+            (model) => model.id === remote.selectedModel && model.kind === 'image'
+          )?.name ?? remote.selectedModel,
         prompt: enhanced
       }
     } finally {
