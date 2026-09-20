@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { remoteVoiceSelected, setRemoteVoiceSelected } from '../active-models'
+import { remoteModelSelected, setRemoteModelSelected } from '../active-models'
 import { modelsDir } from '../runtime-env'
 import { deleteSecret, getSecret, setSecret } from '../secrets'
 import {
@@ -170,6 +170,7 @@ export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
 export function getActiveRemoteVisionServer():
   | (StoredRemoteVisionServer & { apiKey: string })
   | null {
+  if (!remoteModelSelected('text')) return null
   const stored = readStored()
   const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false && !!server.model)
   return active ? { ...active, apiKey: serverApiKey(active.id) } : null
@@ -178,7 +179,7 @@ export function getActiveRemoteVisionServer():
 export function getActiveRemoteVisionServerForModality(
   modality: RemoteVisionModality
 ): (StoredRemoteVisionServer & { apiKey: string; selectedModel: string }) | null {
-  if (modality === 'voice' && !remoteVoiceSelected()) return null
+  if (!remoteModelSelected(modality)) return null
   const stored = readStored()
   const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false)
   const selectedModel = active?.mediaModels?.[modality]
@@ -194,13 +195,14 @@ export function activateRemoteVisionModel(serverId: string, modelId: string): bo
   )
   if (!server) return false
   writeStored({ ...stored, activeServerId: server.id })
+  setRemoteModelSelected('text', true)
   return true
 }
 
 export function deactivateRemoteVisionModel(): void {
   const stored = readStored()
-  if (stored.activeServerId === null) return
-  writeStored({ ...stored, activeServerId: null })
+  setRemoteModelSelected('text', false)
+  if (stored.activeServerId !== null) writeStored({ ...stored, activeServerId: null })
 }
 
 export function activateRemoteVisionMediaModel(
@@ -214,22 +216,12 @@ export function activateRemoteVisionMediaModel(
   )
   if (!server) return false
   writeStored({ ...stored, activeServerId: serverId })
-  if (modality === 'voice') setRemoteVoiceSelected(true)
+  setRemoteModelSelected(modality, true)
   return true
 }
 
 export function deactivateRemoteVisionMediaModel(modality: Exclude<RemoteVisionModality, 'text'>): void {
-  const stored = readStored()
-  const server = stored.servers.find((candidate) => candidate.id === stored.activeServerId)
-  if (!server?.mediaModels?.[modality]) return
-  const mediaModels = { ...server.mediaModels }
-  delete mediaModels[modality]
-  writeStored({
-    ...stored,
-    servers: stored.servers.map((candidate) =>
-      candidate.id === server.id ? { ...candidate, mediaModels } : candidate
-    )
-  })
+  setRemoteModelSelected(modality, false)
 }
 
 export function setRemoteVisionServerSettings(
@@ -237,6 +229,9 @@ export function setRemoteVisionServerSettings(
 ): RemoteVisionServerSettings {
   const stored = readStored()
   if (update.provider === 'local') {
+    for (const modality of ['text', 'image', 'voice', 'transcription'] as const) {
+      setRemoteModelSelected(modality, false)
+    }
     writeStored({
       ...stored,
       activeServerId: null,
@@ -252,6 +247,7 @@ export function setRemoteVisionServerSettings(
     throw new Error('Remote model server and at least one model are required.')
   }
   const id = update.serverId || randomUUID()
+  const isNewServer = !stored.servers.some((server) => server.id === id)
   const next: StoredRemoteVisionServer = {
     id,
     name: update.name?.trim() || defaultServerName(endpoint),
@@ -269,13 +265,23 @@ export function setRemoteVisionServerSettings(
   if (update.clearApiKey) deleteSecret(secretKey(id))
   else if (update.apiKey?.trim()) setSecret(secretKey(id), update.apiKey.trim())
   writeStored({ version: CONFIG_VERSION, activeServerId: id, servers })
-  if (mediaModels.voice) setRemoteVoiceSelected(true)
+  if (isNewServer) {
+    setRemoteModelSelected('text', Boolean(mediaModels.text))
+    setRemoteModelSelected('image', false)
+    setRemoteModelSelected('voice', false)
+    setRemoteModelSelected('transcription', false)
+  }
   return getRemoteVisionServerSettings()
 }
 
 export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSettings {
   const stored = readStored()
   deleteSecret(secretKey(serverId))
+  if (stored.activeServerId === serverId) {
+    for (const modality of ['text', 'image', 'voice', 'transcription'] as const) {
+      setRemoteModelSelected(modality, false)
+    }
+  }
   writeStored({
     version: CONFIG_VERSION,
     activeServerId: stored.activeServerId === serverId ? null : stored.activeServerId,
