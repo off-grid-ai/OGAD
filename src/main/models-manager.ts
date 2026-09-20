@@ -265,7 +265,9 @@ export async function listInstalled(): Promise<string[]> {
     present: (name) => fileSizeOf(dir, name) > 0,
     mfluxCached: (id) => isMfluxModelCached(id)
   })
-  const remoteInstalled = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers).map((model) => model.id)
+  const remoteInstalled = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers).map(
+    (model) => model.id
+  )
   return [...localInstalled, ...remoteInstalled]
 }
 
@@ -325,13 +327,29 @@ export async function downloadModel(
   let entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
   if (fileName && entry) {
     const variant = (await getModelFiles(modelId)).find((file) => file.fileName === fileName)
-    if (!variant) return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
+    if (!variant)
+      return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
     const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
     entry = {
       ...entry,
       files: [
-        { name: variant.fileName, url: variant.downloadUrl, sizeBytes: variant.sizeBytes, sha256: catalogFile?.sha256, role: 'primary' },
-        ...(variant.mmproj ? [{ name: variant.mmproj.fileName, url: variant.mmproj.url, sizeBytes: variant.mmproj.sizeBytes, role: 'mmproj' as const }] : [])
+        {
+          name: variant.fileName,
+          url: variant.downloadUrl,
+          sizeBytes: variant.sizeBytes,
+          sha256: catalogFile?.sha256,
+          role: 'primary'
+        },
+        ...(variant.mmproj
+          ? [
+              {
+                name: variant.mmproj.fileName,
+                url: variant.mmproj.url,
+                sizeBytes: variant.mmproj.sizeBytes,
+                role: 'mmproj' as const
+              }
+            ]
+          : [])
       ]
     }
   }
@@ -529,21 +547,24 @@ export async function downloadModel(
         if (signal.aborted) return interruptedResult(signal, activePartPath)
         // An alternate file from a cataloged repository is a separate installed
         // package. Keep it alongside the catalog default and protect its files.
-        const matchesCatalog = inCatalog &&
+        const matchesCatalog =
+          inCatalog &&
           entry.files.length === inCatalog.files.length &&
-          entry.files.every((file) => inCatalog.files.some((catalogFile) => catalogFile.name === file.name))
+          entry.files.every((file) =>
+            inCatalog.files.some((catalogFile) => catalogFile.name === file.name)
+          )
         if (inCatalog && !matchesCatalog) {
           const files = entry.files.map((file) => ({
             name: file.name,
             sizeBytes: fileSizeOf(dir, file.name),
-            role: file.role === 'mmproj' ? 'projector' as const : 'primary' as const
+            role: file.role === 'mmproj' ? ('projector' as const) : ('primary' as const)
           }))
           const packageIdentity = modelPackageIdentity({
             id: modelId,
             name: entry.name,
             kind: entry.kind,
             source: 'downloaded',
-            files: files as [typeof files[number], ...typeof files],
+            files: files as [(typeof files)[number], ...typeof files],
             engine: 'llama'
           })
           recordDownloaded(dir, {
@@ -966,12 +987,19 @@ export async function activateModel(
 ): Promise<{ success: boolean; error?: string }> {
   const remote = parseRemoteVisionModelId(modelId)
   if (remote) {
-    const server = getRemoteVisionServerSettings().servers.find((candidate) => candidate.id === remote.serverId)
+    const server = getRemoteVisionServerSettings().servers.find(
+      (candidate) => candidate.id === remote.serverId
+    )
     const selected = server?.mediaModels ?? (server?.model ? { text: server.model } : {})
-    const modality = (['text', 'image', 'transcription', 'voice'] as const).find((kind) => selected[kind] === remote.modelId)
-    const activated = modality === 'text'
-      ? activateRemoteVisionModel(remote.serverId, remote.modelId)
-      : modality ? activateRemoteVisionMediaModel(remote.serverId, modality, remote.modelId) : false
+    const modality = (['text', 'image', 'transcription', 'voice'] as const).find(
+      (kind) => selected[kind] === remote.modelId
+    )
+    const activated =
+      modality === 'text'
+        ? activateRemoteVisionModel(remote.serverId, remote.modelId)
+        : modality
+          ? activateRemoteVisionMediaModel(remote.serverId, modality, remote.modelId)
+          : false
     return activated
       ? { success: true }
       : { success: false, error: 'Remote model is no longer available.' }
@@ -1042,9 +1070,12 @@ export async function setActiveModalChoice(
 
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
   const settings = getRemoteVisionServerSettings()
-  const remote = settings.servers.find((server) => server.id === settings.activeServerId && server.enabled !== false)
+  const remote = settings.servers.find(
+    (server) => server.id === settings.activeServerId && server.enabled !== false
+  )
   const remoteId = (modality: 'text' | 'image' | 'transcription' | 'voice'): string | null => {
-    const model = remote?.mediaModels?.[modality] ?? (modality === 'text' ? remote?.model : undefined)
+    const model =
+      remote?.mediaModels?.[modality] ?? (modality === 'text' ? remote?.model : undefined)
     return remote && model ? remoteVisionModelId(remote.id, model) : null
   }
   return {

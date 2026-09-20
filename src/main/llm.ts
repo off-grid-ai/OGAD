@@ -374,9 +374,8 @@ export class LLMService {
     const candidate = path.basename(draftModel)
     if (!candidate || candidate !== draftModel) return false
     const capabilities = this.speculativeModelCapabilities()
-    return (mode === 'dflash'
-      ? capabilities.compatibleDflashModels
-      : capabilities.compatibleDraftModels
+    return (
+      mode === 'dflash' ? capabilities.compatibleDflashModels : capabilities.compatibleDraftModels
     ).includes(candidate)
   }
 
@@ -891,17 +890,21 @@ export class LLMService {
     // macOS also ships a separate Prism build for Bonsai 2.
     const roots = binRoots()
     const serverPaths = roots
-      .flatMap((r) => requiresPrism
-        ? [path.join(r, 'llama-prism', exe('llama-server'))]
-        : [
-            path.join(r, 'llama', exe('llama-server')),
-            path.join(r, 'llama-cpu', exe('llama-server')),
-            path.join(r, exe('llama-server'))
-          ])
+      .flatMap((r) =>
+        requiresPrism
+          ? [path.join(r, 'llama-prism', exe('llama-server'))]
+          : [
+              path.join(r, 'llama', exe('llama-server')),
+              path.join(r, 'llama-cpu', exe('llama-server')),
+              path.join(r, exe('llama-server'))
+            ]
+      )
       .filter((p) => fs.existsSync(p))
     if (!serverPaths.length) {
       if (requiresPrism) {
-        throw new Error('Bonsai 2 requires the bundled Prism llama.cpp engine, which is missing from this build.')
+        throw new Error(
+          'Bonsai 2 requires the bundled Prism llama.cpp engine, which is missing from this build.'
+        )
       }
       console.error(`[LLMService] llama-server binary not found under: ${roots.join(', ')}`)
       return
