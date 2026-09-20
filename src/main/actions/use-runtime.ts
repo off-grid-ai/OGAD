@@ -299,7 +299,11 @@ export function getActionsRuntime(): ActionsRuntime {
       // never bypass verified native application controls. The environment
       // override remains available only for explicit rail diagnostics.
       forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL),
-      enabledRails: settings.enabledRails,
+      enabledRails:
+        settings.modelStrategy === 'decision_plus_specialist' ||
+        settings.modelStrategy === 'decision_plus_reasoning'
+          ? ['ax', ...settings.enabledRails.filter((rail) => rail !== 'ax')]
+          : settings.enabledRails,
       preferVisionGraph: settings.modelStrategy === 'text_plus_specialist'
     })(action)
   })

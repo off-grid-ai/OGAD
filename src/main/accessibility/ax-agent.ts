@@ -46,6 +46,9 @@ export interface ElementTaskDeps {
   actuator: ElementActuator
   /** Goal + numbered elements + the current frame in, one step decision out. */
   decide: (prompt: string, screenshotPath?: string) => Promise<string>
+  /** Optional typed-decision path. It receives the exact observation so it
+   * does not need to parse the rendered element list back into controls. */
+  decideElement?: (prompt: string, snapshot: AxSnapshot) => Promise<string>
   screenshotPath?: () => string | undefined
   onStep?: (note: string) => void
   onObservation?: (observation: ElementStepObservation) => void
@@ -95,6 +98,7 @@ export type ElementStep =
   | { action: 'type'; index?: number; text: string; submitKeys?: string }
   | { action: 'key'; keys: string }
   | { action: 'human_required'; why: string }
+  | { action: 'vision_required'; why: string }
   | { action: 'done'; summary: string }
   | { action: 'give_up'; why: string }
 
@@ -128,7 +132,16 @@ export const ELEMENT_STEP_FORMAT = {
       properties: {
         action: {
           type: 'string',
-          enum: ['click', 'press', 'type', 'key', 'human_required', 'done', 'give_up']
+          enum: [
+            'click',
+            'press',
+            'type',
+            'key',
+            'human_required',
+            'vision_required',
+            'done',
+            'give_up'
+          ]
         },
         index: { type: 'integer' },
         text: { type: 'string' },
@@ -192,6 +205,8 @@ export function parseElementStep(raw: string): ElementStep | null {
       return { action: 'done', summary: str('summary') ?? 'done' }
     case 'human_required':
       return { action: 'human_required', why: str('why') ?? 'Complete this step' }
+    case 'vision_required':
+      return { action: 'vision_required', why: str('why') ?? 'Visual grounding is required' }
     case 'give_up':
       return { action: 'give_up', why: str('why') ?? 'could not finish' }
     default:
@@ -234,6 +249,7 @@ export function buildElementPrompt(input: {
     '- Enter text: {"action":"type","index":N,"text":"..."}. Omit index only when the correct field is already focused. Add "keys":"Enter" to submit.',
     '- Send keys: {"action":"key","keys":"Enter"}.',
     '- Use human_required for sign-in, passwords, one-time codes, or payment.',
+    '- Use vision_required when the next safe step needs visual grounding or free-form text entry.',
     '- Use done only when the goal is visibly complete. Use give_up only when it cannot be completed.',
     '- For an edit, change, or replacement, verify that the original item changed. A new copy elsewhere is not completion.',
     'Match the exact target and intended control. Navigation fields are not content fields.',
@@ -375,7 +391,9 @@ export async function runElementTask(
         modelPrompt
       )
       const decisionLeaseEpoch = deps.control?.snapshot().inputLease.epoch
-      rawResponse = await decide(modelPrompt, deps.screenshotPath?.())
+      rawResponse = deps.decideElement
+        ? await deps.decideElement(modelPrompt, snapshot)
+        : await decide(modelPrompt, deps.screenshotPath?.())
       const stoppedAfterDecision = await waitForControl()
       if (stoppedAfterDecision) return stoppedAfterDecision
       const controlAfterDecision = deps.control?.snapshot()
@@ -440,6 +458,18 @@ export async function runElementTask(
         note(`gave up: ${action.why}`)
         checkpoint()
         return { ok: false, summary: action.why, steps }
+      }
+      if (action.action === 'vision_required') {
+        observe('handoff')
+        note(`vision required: ${action.why}`)
+        checkpoint()
+        return {
+          ok: false,
+          summary: action.why,
+          steps,
+          recovery: 'vision',
+          guidance: [...taskBrief.guidance]
+        }
       }
       if (action.action === 'human_required') {
         observe('handoff')
