@@ -1020,7 +1020,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
         code: '<div>Alpha artifact</div>'
       })
     )
-    expect(await screen.findByText('Alpha result')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
   })
 
   it('regenerates from the same user turn without duplicating it (#47)', async () => {
