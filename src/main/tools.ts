@@ -696,6 +696,17 @@ export async function toolChat(
       relevantTools = selectRelevantTools(query, rawTools)
     }
   }
+  const explicitlyNamedTools = rawTools.filter((schema) => {
+    const name = (schema as { function?: { name?: unknown } }).function?.name
+    return typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())
+  })
+  if (explicitlyNamedTools.length) {
+    const explicitNames = new Set(explicitlyNamedTools)
+    relevantTools = [
+      ...explicitlyNamedTools,
+      ...relevantTools.filter((schema) => !explicitNames.has(schema))
+    ]
+  }
   if (!/\bbrave\b/i.test(query)) {
     const hasPrimarySearch = relevantTools.some(
       (schema) => (schema as { function?: { name?: unknown } }).function?.name === 'web_search'
@@ -717,7 +728,7 @@ export async function toolChat(
       .filter((hint) => [...hint.names].some((name) => relevantNames.has(name)))
       .map((hint) => hint.text)
   )
-  const protectedToolCount = 0
+  const protectedToolCount = explicitlyNamedTools.length
   const { budgetTools } = await import('./tools/tool-budget')
   const ctx = llm.effectiveContextSize()
   // Cap tool tokens in ABSOLUTE terms too, not just as a fraction of context:
@@ -939,11 +950,16 @@ export async function toolChat(
             rawArgs: JSON.stringify(c.args)
           }))
 
-    // A long-running Web Use or Computer Use call owns the whole goal. If a model
-    // emits several calls in one response, execute only the first task call. The
-    // task runtime does its own observing, planning, acting, and retrying.
+    // A long-running Web Use or Computer Use call owns the whole goal. Preserve
+    // an explicit open_url prerequisite before Computer Use, then execute only
+    // the first task call. The task runtime owns all later work and retries.
     const taskCall = effective.find((call) => isTaskAction(call.name))
-    const permitted = taskCall ? [taskCall] : effective
+    const taskIndex = taskCall ? effective.indexOf(taskCall) : -1
+    const prerequisites =
+      taskCall?.name === 'computer_use'
+        ? effective.slice(0, taskIndex).filter((call) => call.name === 'open_url')
+        : []
+    const permitted = taskCall ? [...prerequisites, taskCall] : effective
     if (permitted.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
