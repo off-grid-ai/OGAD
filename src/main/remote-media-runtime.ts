@@ -94,27 +94,21 @@ export async function generateRemoteImage(
   allowUnsafeMemoryOverride: boolean,
   signal?: AbortSignal
 ): Promise<{ bytes: Buffer; mime: string }> {
-  const openRouter = server.provider === 'openrouter'
-  const response = await checked(await fetch(`${server.endpoint}/${openRouter ? 'chat/completions' : 'images/generations'}`, {
+  const response = await checked(await fetch(`${server.endpoint}/images/generations`, {
     method: 'POST',
     headers: headers(server, 'application/json'),
     signal,
-    body: JSON.stringify(openRouter
-      ? { model: server.selectedModel, messages: [{ role: 'user', content: prompt }], modalities: ['image'] }
-      : {
-          model: server.selectedModel,
-          prompt,
-          ...(width && height ? { size: `${width}x${height}` } : {}),
-          allow_unsafe_memory_override: allowUnsafeMemoryOverride
-        })
+    body: JSON.stringify({
+      model: server.selectedModel,
+      prompt,
+      ...(width && height ? { size: `${width}x${height}` } : {}),
+      allow_unsafe_memory_override: allowUnsafeMemoryOverride
+    })
   }))
   const body = await response.json() as {
     data?: Array<{ b64_json?: string; url?: string }>
-    choices?: Array<{ message?: { images?: Array<{ image_url?: { url?: string } }> } }>
   }
-  const value = openRouter
-    ? body.choices?.[0]?.message?.images?.[0]?.image_url?.url
-    : body.data?.[0]?.url ?? (body.data?.[0]?.b64_json ? `data:image/png;base64,${body.data[0].b64_json}` : undefined)
+  const value = body.data?.[0]?.url ?? (body.data?.[0]?.b64_json ? `data:image/png;base64,${body.data[0].b64_json}` : undefined)
   if (!value) throw new Error('The remote server returned no image.')
   if (value.startsWith('data:')) return decodeImageDataUrl(value)
   const url = new URL(value)
