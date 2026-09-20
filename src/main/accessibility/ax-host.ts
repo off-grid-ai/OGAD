@@ -59,7 +59,7 @@ import type { ExecuteResult } from '@offgrid/use'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { remoteVisionModelId } from '../../shared/remote-vision-server'
 import { chooseElementStep, serializeElementStep } from './ax-decision'
-import { withDecisionModel } from './decision-model-loader'
+import { withDecisionModel, withReasoningModel } from './decision-model-loader'
 
 const execFileAsync = promisify(execFile)
 
@@ -407,7 +407,15 @@ class AxRailHost {
                     prompt,
                     snapshot,
                     (context, question, options) =>
-                      llm.decideOptions(context, question, options, request.signal)
+                      llm.decideOptions(
+                        context,
+                        question,
+                        options,
+                        request.signal,
+                        llm.activeModelInfo()?.vision
+                          ? observationFrame?.capture.path
+                          : undefined
+                      )
                   )
                   console.log(
                     `[ax-rail] decision confidence=${decision.confidence.toFixed(3)} action=${decision.step.action}`
@@ -433,6 +441,46 @@ class AxRailHost {
           onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
           takeGuidance: () => queuedGuidance.splice(0),
           waitForUser: (why, signal) => waitForVisionUser(taskId, why, signal),
+          ...(recoverWithVision
+            ? {
+                recoverWithVision: async (recovery: {
+                  summary: string
+                  steps: readonly string[]
+                  guidance: readonly string[]
+                  currentStep: number
+                }) =>
+                  withReasoningModel(async () => {
+                    emitVisionStep(
+                      taskId,
+                      'Accessibility control stalled. Switching to vision for one recovery action.'
+                    )
+                    emitVisionState({
+                      taskId,
+                      journeyId,
+                      goal,
+                      status: 'running',
+                      phase: 'observing',
+                      currentStep: recovery.currentStep,
+                      currentAction: 'Capturing the current screen for vision grounding'
+                    })
+                    if (recovery.guidance.length) queuedGuidance.unshift(...recovery.guidance)
+                    const task = getTaskRun(taskId)
+                    return recoverWithVision(
+                      {
+                        taskId,
+                        steps: task?.steps ?? [...recovery.steps],
+                        ...(task?.stepDetails?.length ? { stepDetails: task.stepDetails } : {}),
+                        plan,
+                        ...(recovery.guidance.length ? { guidance: [...recovery.guidance] } : {}),
+                        summary: recovery.summary,
+                        currentStep: recovery.currentStep,
+                        currentAction: recovery.summary
+                      },
+                      { guard, request, queuedGuidance, returnAfterAction: true }
+                    )
+                  })
+              }
+            : {}),
           signal: request.signal,
           control: guard,
           contextTokens,
@@ -453,60 +501,11 @@ class AxRailHost {
           ? await withDecisionModel(runLoop)
           : await runLoop()
       if (result.recovery === 'vision') {
-        emitVisionStep(taskId, 'Accessibility control stalled. Switching to vision grounding.')
-        emitVisionState({
-          taskId,
-          journeyId,
-          goal,
-          status: 'running',
-          phase: 'observing',
-          currentStep: liveStep,
-          currentAction: 'Capturing the current screen for vision grounding'
-        })
-        if (result.guidance?.length) queuedGuidance.unshift(...result.guidance)
-        if (recoverWithVision) {
-          const task = getTaskRun(taskId)
-          try {
-            const outcome = await recoverWithVision(
-              {
-                taskId,
-                steps: task?.steps ?? result.steps,
-                ...(task?.stepDetails?.length ? { stepDetails: task.stepDetails } : {}),
-                plan,
-                ...(result.guidance?.length ? { guidance: result.guidance } : {}),
-                summary: result.summary,
-                currentStep: liveStep,
-                currentAction: result.summary
-              },
-              { guard, request, queuedGuidance }
-            )
-            const visionSummary = getTaskRun(taskId)?.summary
-            result = outcome.ok
-              ? {
-                  ok: true,
-                  summary: visionSummary || 'Vision grounding completed the task.',
-                  steps: result.steps
-                }
-              : {
-                  ok: false,
-                  summary: `Computer Use could not make progress. Vision recovery could not continue${outcome.detail ? `: ${outcome.detail}` : '.'}`,
-                  steps: result.steps
-                }
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : 'the vision model failed'
-            result = {
-              ok: false,
-              summary: `Computer Use could not make progress. Vision recovery could not continue: ${reason}`,
-              steps: result.steps
-            }
-          }
-        } else {
-          result = {
-            ok: false,
-            summary:
-              'Computer Use could not make progress. Vision recovery is unavailable. Check that a vision model is installed, then retry Computer Use.',
-            steps: result.steps
-          }
+        result = {
+          ok: false,
+          summary:
+            'Computer Use could not make progress. Vision recovery is unavailable. Check that a vision model is installed, then retry Computer Use.',
+          steps: result.steps
         }
       }
       if (!result.ok && !guard.isHalted) guard.fail(result.summary)

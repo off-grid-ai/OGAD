@@ -538,6 +538,7 @@ class VisionHost {
         contextTokens,
         checkpointInterval: settings.checkpointInterval,
         visualHistoryFrames: settings.visualHistoryFrames,
+        returnAfterAction: continuation?.returnAfterAction,
         retrievedFacts,
         signal: request.signal,
         onCheckpoint: () => {
@@ -594,6 +595,17 @@ class VisionHost {
           })
         }
       })
+      if (continuation?.returnAfterAction && result.ok) {
+        emitVisionState({
+          taskId,
+          journeyId,
+          goal,
+          status: 'running',
+          phase: 'checking',
+          currentAction: result.summary
+        })
+        return result
+      }
       const finalStatus = automationTaskReadStatus(guard.automationStatus)
       emitVisionState({
         taskId,

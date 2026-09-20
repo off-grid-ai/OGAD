@@ -32,3 +32,22 @@ export async function withDecisionModel<T>(task: () => Promise<T>): Promise<T> {
     }
   }
 }
+
+/** Temporarily yield the shared llama.cpp process to the saved reasoning model
+ * while an active Decision-model AX loop performs one visual recovery action. */
+export async function withReasoningModel<T>(task: () => Promise<T>): Promise<T> {
+  const modelId = selectedDecisionModelId()
+  const decisionModelLoaded = llm.activeModelInfo()?.id === modelId
+  if (!decisionModelLoaded) return task()
+  llm.restoreSelectedModel()
+  await llm.restart()
+  try {
+    return await task()
+  } finally {
+    const loaded = await loadComputerUseModel(modelId)
+    if (!loaded.success) {
+      throw new Error(loaded.error ?? 'The Decision model could not resume.')
+    }
+    await llm.restart()
+  }
+}

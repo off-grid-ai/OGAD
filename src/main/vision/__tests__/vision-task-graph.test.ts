@@ -104,6 +104,21 @@ function workflow(decisions: VisionPolicyDecision[]): {
 }
 
 describe('runVisionTaskGraph', () => {
+  it('returns to the owning rail after one successful recovery action', async () => {
+    const w = workflow([action(), action({ x: 300, y: 295 })])
+    w.deps.returnAfterAction = true
+
+    const result = await runVisionTaskGraph('Recover the blocked step.', w.deps)
+
+    expect(result).toMatchObject({
+      ok: true,
+      summary: 'Vision completed one recovery action. Returning to accessibility control.'
+    })
+    expect(w.actuated).toEqual(['click:100,295'])
+    expect(w.decisionCalls).toBe(1)
+    expect(w.deps.guard.automationStatus).toBe('verifying')
+  })
+
   it('records and advances every completed milestone exactly once without an action request', async () => {
     const w = workflow([
       complete('Site visible.'),

@@ -223,6 +223,30 @@ describe('runElementTask', () => {
     })
   })
 
+  it('continues the same accessibility loop after one visual recovery action', async () => {
+    const w = world([
+      '{"action":"vision_required","why":"The post tile has no accessible label."}',
+      '{"action":"press","index":1}',
+      '{"action":"done","summary":"post opened"}'
+    ])
+    const recoveries: string[] = []
+
+    const result = await runElementTask('open the post', {
+      ...w.deps,
+      recoverWithVision: async (recovery) => {
+        recoveries.push(recovery.summary)
+        return { ok: true }
+      }
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'post opened' })
+    expect(recoveries).toEqual(['The post tile has no accessible label.'])
+    expect(w.acted).toEqual(['press:1'])
+    expect(result.steps).toContain(
+      'Vision recovery completed one action. Returning to accessibility control.'
+    )
+  })
+
   it('hands a private step to the user and re-observes after Continue', async () => {
     const w = world([
       '{"action":"human_required","why":"Enter the one-time code"}',

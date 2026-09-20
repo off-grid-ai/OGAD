@@ -64,6 +64,13 @@ export interface ElementTaskDeps {
   /** Park this same task when a private step needs the user. Continue returns
    * the loop to a fresh Accessibility observation. */
   waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
+  /** Use vision for one recovery action, then continue this same AX loop. */
+  recoverWithVision?: (recovery: {
+    summary: string
+    steps: readonly string[]
+    guidance: readonly string[]
+    currentStep: number
+  }) => Promise<{ ok: boolean; detail?: string }>
   signal?: AbortSignal
   /** The Computer Use task owner. The loop checks it after every external wait,
    *  so Pause parks before another action and Stop cannot be overwritten by a
@@ -328,6 +335,38 @@ export async function runElementTask(
   const taskBrief = new CurrentTaskBrief(goal)
   let consecutiveParseFailures = 0
   let consecutiveNoProgress = 0
+  const recoverWithVision = async (
+    summary: string,
+    currentStep: number
+  ): Promise<ElementTaskResult | null> => {
+    if (!deps.recoverWithVision) {
+      return {
+        ok: false,
+        summary,
+        steps,
+        recovery: 'vision',
+        guidance: [...taskBrief.guidance]
+      }
+    }
+    const recovery = await deps.recoverWithVision({
+      summary,
+      steps,
+      guidance: [...taskBrief.guidance],
+      currentStep
+    })
+    if (!recovery.ok) {
+      return {
+        ok: false,
+        summary: `Computer Use could not make progress. Vision recovery could not continue${recovery.detail ? `: ${recovery.detail}` : '.'}`,
+        steps
+      }
+    }
+    note('Vision recovery completed one action. Returning to accessibility control.')
+    consecutiveParseFailures = 0
+    consecutiveNoProgress = 0
+    lastActionSig = null
+    return null
+  }
   const requireFreshVerification = (): void => {
     if (deps.control && !deps.control.isVerifying) deps.control.beginVerification()
   }
@@ -418,13 +457,9 @@ export async function runElementTask(
         if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
           const summary = AX_INVALID_REPLY_SUMMARY
           note(summary)
-          return {
-            ok: false,
-            summary,
-            steps,
-            recovery: 'vision',
-            guidance: [...taskBrief.guidance]
-          }
+          const failedRecovery = await recoverWithVision(summary, planningStep)
+          if (failedRecovery) return failedRecovery
+          continue
         }
         continue
       }
@@ -463,13 +498,9 @@ export async function runElementTask(
         observe('handoff')
         note(`vision required: ${action.why}`)
         checkpoint()
-        return {
-          ok: false,
-          summary: action.why,
-          steps,
-          recovery: 'vision',
-          guidance: [...taskBrief.guidance]
-        }
+        const failedRecovery = await recoverWithVision(action.why, planningStep)
+        if (failedRecovery) return failedRecovery
+        continue
       }
       if (action.action === 'human_required') {
         observe('handoff')
@@ -499,13 +530,9 @@ export async function runElementTask(
         consecutiveNoProgress += 1
         if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
           note(AX_NO_PROGRESS_SUMMARY)
-          return {
-            ok: false,
-            summary: AX_NO_PROGRESS_SUMMARY,
-            steps,
-            recovery: 'vision',
-            guidance: [...taskBrief.guidance]
-          }
+          const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, planningStep)
+          if (failedRecovery) return failedRecovery
+          continue
         }
         continue
       }
@@ -534,13 +561,9 @@ export async function runElementTask(
           consecutiveNoProgress += 1
           if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
             note(AX_NO_PROGRESS_SUMMARY)
-            return {
-              ok: false,
-              summary: AX_NO_PROGRESS_SUMMARY,
-              steps,
-              recovery: 'vision',
-              guidance: [...taskBrief.guidance]
-            }
+            const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, planningStep)
+            if (failedRecovery) return failedRecovery
+            continue
           }
           continue
         }
@@ -565,13 +588,9 @@ export async function runElementTask(
             observe('invalid_target', summary)
             note(summary)
             checkpoint()
-            return {
-              ok: false,
-              summary,
-              steps,
-              recovery: 'vision',
-              guidance: [...taskBrief.guidance]
-            }
+            const failedRecovery = await recoverWithVision(summary, planningStep)
+            if (failedRecovery) return failedRecovery
+            continue
           }
         }
         await actuator.type(target, action.text)
