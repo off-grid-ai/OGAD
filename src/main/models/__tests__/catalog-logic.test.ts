@@ -190,6 +190,32 @@ describe('mergeCatalog — order + all three sources', () => {
     })).toEqual([variant.id, catEntry.id])
   })
 
+  it('keeps a variant with an alternate projector separate from its catalog family', () => {
+    const family = {
+      ...catEntry,
+      kind: 'vision',
+      files: [
+        { name: 'vision.gguf', role: 'primary' as const },
+        { name: 'catalog-mmproj.gguf', role: 'mmproj' as const }
+      ]
+    }
+    const variant = {
+      ...dl,
+      id: 'model-package-v1:alternate-projector',
+      familyId: family.id,
+      files: ['vision.gguf', 'alternate-mmproj.gguf']
+    }
+    const out = mergeCatalog({
+      locals: [],
+      downloaded: [variant],
+      installedDownloadedIds: [variant.id],
+      catalog: [family],
+      present: presentAll
+    })
+
+    expect(out.map((model) => model.id)).toEqual([variant.id, family.id])
+  })
+
   it('uses the current catalog role for an installed family variant', () => {
     const family = {
       ...catEntry,

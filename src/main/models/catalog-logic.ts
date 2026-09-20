@@ -130,12 +130,11 @@ export function mergeCatalog(opts: {
       .filter((model) => installed.has(model.id))
       .filter((model) => {
         const family = opts.catalog.find((entry) => entry.id === model.familyId)
-        return family && model.files.length === family.files.length &&
-          model.files.every((name) =>
-            family.files.some(
-              (file) => file.name === name || (file.role === 'mmproj' && isProjectorFileName(name))
-            )
-          )
+        return (
+          family &&
+          model.files.length === family.files.length &&
+          model.files.every((name) => family.files.some((file) => file.name === name))
+        )
       })
       .map((model) => model.familyId)
       .filter((id): id is string => Boolean(id))
@@ -176,12 +175,11 @@ export function installedIds(opts: {
       .filter((model) => installed.has(model.id))
       .filter((model) => {
         const family = opts.catalog.find((entry) => entry.id === model.familyId)
-        return family && model.files.length === family.files.length &&
-          model.files.every((name) =>
-            family.files.some(
-              (file) => file.name === name || (file.role === 'mmproj' && isProjectorFileName(name))
-            )
-          )
+        return (
+          family &&
+          model.files.length === family.files.length &&
+          model.files.every((name) => family.files.some((file) => file.name === name))
+        )
       })
       .map((model) => model.familyId)
       .filter((id): id is string => Boolean(id))
