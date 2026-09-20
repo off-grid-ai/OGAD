@@ -147,6 +147,57 @@ function createWindow(): void {
     if (windowPresentation.showWindow) mainWindow.show()
   })
 
+  const rendererTarget =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? process.env['ELECTRON_RENDERER_URL']
+      : rendererHtmlPath()
+  let rendererLoadAttempt = 0
+  let rendererLoadRetry: NodeJS.Timeout | undefined
+
+  const loadRenderer = async (): Promise<void> => {
+    rendererLoadAttempt += 1
+    try {
+      if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+        await mainWindow.loadURL(rendererTarget)
+      } else {
+        await mainWindow.loadFile(rendererTarget)
+      }
+      writeDiagnosticLog('renderer', 'load.completed', {
+        attempt: rendererLoadAttempt,
+        target: rendererTarget
+      })
+    } catch (error) {
+      writeDiagnosticLog(
+        'renderer',
+        'load.rejected',
+        {
+          attempt: rendererLoadAttempt,
+          target: rendererTarget,
+          error: error instanceof Error ? error.message : String(error)
+        },
+        'error'
+      )
+      if (rendererLoadAttempt >= 3 || mainWindow.isDestroyed()) return
+      rendererLoadRetry = setTimeout(() => void loadRenderer(), 1_000)
+    }
+  }
+
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, code, description, validatedURL, isMainFrame) => {
+      if (!isMainFrame) return
+      writeDiagnosticLog(
+        'renderer',
+        'load.failed',
+        { code, description, url: validatedURL },
+        'error'
+      )
+    }
+  )
+  mainWindow.on('closed', () => {
+    if (rendererLoadRetry) clearTimeout(rendererLoadRetry)
+  })
+
   // Restore the user's page zoom after each load and keep pinch zoom disabled.
   mainWindow.webContents.on('did-finish-load', () => {
     const savedZoomLevel = getSetting('windowZoomLevel', 0)
@@ -184,11 +235,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(rendererHtmlPath())
-  }
+  void loadRenderer()
 }
 
 // The menu-bar (Tray) control surface for always-on capture (pause/resume +
