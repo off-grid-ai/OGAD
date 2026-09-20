@@ -105,7 +105,7 @@ BOOK TITLE: The short title only.
 PAGE STORY: Write 2 to 4 sentences of finished narration or dialogue that moves the story forward. Write story text for the reader, not production notes. Keep it under 80 words.
 ILLUSTRATION: Identify the page number and story beat, then repeat the selected style treatment and every continuity fact needed to keep recurring characters and locations recognizable.
 4. Make each illustration a finished comic page with a clear panel layout, readable visual action, stable character scale, and reserved caption or speech areas. Keep important text out of the generated art because image models render lettering poorly. Off Grid AI displays PAGE STORY beside the illustration in the reader.
-5. Call generate_image exactly once for every page. Submit all calls in the same tool round, in page order. Do not replace pages with prose and do not omit pages.
+5. Call generate_image exactly once for every page with enhance_prompt set to false because each ILLUSTRATION is already a final generation prompt. Submit all calls in the same tool round, in page order. Do not replace pages with prose and do not omit pages.
 6. After the images finish, Off Grid AI will feed them into its bundled offline comic reader. Do not generate another reader or HTML template.
 7. If fewer image calls are available than the approved page count, create as many consecutive pages as the limit permits and state the exact missing range.
 

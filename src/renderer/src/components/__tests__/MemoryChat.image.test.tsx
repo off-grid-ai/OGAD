@@ -64,6 +64,7 @@ type GenPayload = {
   width?: number
   height?: number
   prompt?: string
+  enhancePrompt?: boolean
   negativePrompt?: string
   seed?: number
   cfgScale?: number
@@ -133,7 +134,7 @@ type InstallApiOptions = {
     answer: string
     toolCalls: { name: string; result: string }[]
     unified: never[]
-    imageRequests?: { prompt: string }[]
+    imageRequests?: { prompt: string; enhancePrompt?: boolean }[]
     metrics?: { decodeTokensPerSecond?: number; completionTokens?: number }
   }
 }
@@ -148,7 +149,7 @@ type InstalledApi = {
       answer: string
       toolCalls: { name: string; result: string }[]
       unified: never[]
-      imageRequests?: { prompt: string }[]
+      imageRequests?: { prompt: string; enhancePrompt?: boolean }[]
       metrics?: { decodeTokensPerSecond?: number; completionTokens?: number }
     }>
   >
@@ -906,6 +907,63 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       prompt: 'a red Ferrari in a studio'
     })
     expect(await screen.findByAltText('Generated')).toBeTruthy()
+    await openLatestCompletedWork(user)
+    expect(screen.getByRole('button', { name: 'Generated image, complete' })).toBeTruthy()
+  })
+
+  it('opens the comic reader before its first page and keeps prompt enhancement disabled', async () => {
+    const image = deferred<ImageResult>()
+    const boundary = installApi({
+      active: FULL,
+      models: [FULL],
+      isPro: true,
+      toolResult: {
+        answer: 'The comic plan is ready.',
+        toolCalls: [{ name: 'generate_image', result: 'Image generation started' }],
+        unified: [],
+        imageRequests: [
+          {
+            prompt:
+              'BOOK TITLE: Local Light\nPAGE STORY: Mac sees the grid.\nILLUSTRATION: Page 1, finished comic page.',
+            enhancePrompt: false
+          }
+        ]
+      },
+      generate: () => image.promise
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    await sendChat(
+      user,
+      '<!-- offgrid-action:comic-book -->\nQ: Story brief\nA: Mac builds local AI.\nQ: Story length\nA: 10 distinct images'
+    )
+
+    expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
+    await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
+    expect(boundary.generateImage.mock.calls[0]![0]).toMatchObject({
+      prompt: 'Page 1, finished comic page.',
+      enhancePrompt: false
+    })
+
+    image.resolve({
+      dataUrl: 'data:image/png;base64,PAGE1',
+      path: '/generated/page-1.png',
+      prompt: 'Page 1, finished comic page.'
+    })
+    await waitFor(() =>
+      expect(boundary.addRagMessage).toHaveBeenCalledWith(
+        expect.any(String),
+        'assistant',
+        expect.stringContaining('Comic book reader: 1 of 10 pages ready.'),
+        expect.objectContaining({
+          toolCalls: [
+            expect.objectContaining({ name: 'generate_image', status: 'completed' })
+          ]
+        })
+      )
+    )
     await openLatestCompletedWork(user)
     expect(screen.getByRole('button', { name: 'Generated image, complete' })).toBeTruthy()
   })

@@ -1,6 +1,8 @@
 /** Image-generation request shared by main, preload, and renderer. */
 export interface ImageGenerationRequestContract {
   prompt: string
+  /** Override the saved prompt-enhancement preference for this request. */
+  enhancePrompt?: boolean
   negativePrompt?: string
   width?: number
   height?: number

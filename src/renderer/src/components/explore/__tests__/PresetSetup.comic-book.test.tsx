@@ -43,6 +43,7 @@ describe('<PresetSetup/> comic book action', () => {
     expect(submissions).toHaveLength(1)
     expect(submissions[0]).toContain('A: American superhero')
     expect(submissions[0]).toContain('A: 37 distinct images')
+    expect(submissions[0]).toContain('enhance_prompt set to false')
   })
 
   it('lets the user choose a private local hero reference image', async () => {

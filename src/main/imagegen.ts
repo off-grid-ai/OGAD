@@ -539,7 +539,7 @@ export async function generateImage(
   // Prompt enhancement runs FIRST, while the chat model is still resident — the
   // image job below evicts the LLM, so the text pass must precede it. Gated by a
   // setting; failure/timeout silently keeps the original prompt.
-  const enhanced = await maybeEnhancePrompt(params.prompt, onUpdate)
+  const enhanced = await maybeEnhancePrompt(params.prompt, onUpdate, params.enhancePrompt)
   const remote = getActiveRemoteVisionServerForModality('image')
   const remoteId = remote ? remoteVisionModelId(remote.id, remote.selectedModel) : null
   if (remote && (!params.model || params.model === remote.selectedModel || params.model === remoteId)) {
@@ -611,9 +611,10 @@ export async function generateImage(
  *  Any failure returns the original prompt unchanged — enhancement is best-effort. */
 async function maybeEnhancePrompt(
   prompt: string,
-  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void
+  onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
+  requestOverride?: boolean
 ): Promise<string> {
-  const enabled = getSetting('enhanceImagePrompts', true)
+  const enabled = requestOverride ?? getSetting('enhanceImagePrompts', true)
   if (enabled) onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
   let streamed = ''
   return enhancePrompt(prompt, {

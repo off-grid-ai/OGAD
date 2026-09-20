@@ -655,7 +655,14 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
   it('records the requested prompt as imageRequest, fires onStep, and still returns the answer', async () => {
     enqueueReactiveAfterEmptyPlan(
-      { toolCalls: [{ name: 'generate_image', args: { prompt: 'a red bicycle on a beach' } }] },
+      {
+        toolCalls: [
+          {
+            name: 'generate_image',
+            args: { prompt: 'a red bicycle on a beach', enhance_prompt: false }
+          }
+        ]
+      },
       { content: 'Here is your image.' }
     )
     const steps: string[] = []
@@ -664,7 +671,10 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       onStep: (c) => steps.push(c.name)
     })
     expect(steps).toEqual(['generate_image'])
-    expect(r.imageRequest).toEqual({ prompt: 'a red bicycle on a beach' })
+    expect(r.imageRequest).toEqual({
+      prompt: 'a red bicycle on a beach',
+      enhancePrompt: false
+    })
     expect(r.toolCalls[0]!.result).toMatch(/will appear in the chat/i) // placeholder fed back
     expect(r.answer).toBe('Here is your image.')
   })

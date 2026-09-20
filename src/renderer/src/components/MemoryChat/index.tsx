@@ -44,11 +44,7 @@ import {
   type ComicBookPage
 } from '../explore/comicBookReader'
 import { ApprovalSetup, type ApprovalSetupRecord } from '../actions/ApprovalSetup'
-import {
-  REQUEST_FORM_URL,
-  presetById,
-  type DemoPreset
-} from '../explore/presetCatalog'
+import { REQUEST_FORM_URL, presetById, type DemoPreset } from '../explore/presetCatalog'
 import { useChatVoiceTurns } from '../use-chat-voice-turns'
 import { SkillsPanel } from '../SkillsPanel'
 import { ModelPicker } from '../ModelPicker'
@@ -1811,10 +1807,56 @@ export function MemoryChat({
           streaming: true
         }
         seedStreamViewMessage(toolStreamMessage)
-        setConvMessages(convId, (prev) => [
-          ...prev,
-          toolStreamMessage
+        setConvMessages(convId, (prev) => [...prev, toolStreamMessage])
+        const comicPageTotal = modelQuery.includes('<!-- offgrid-action:comic-book -->')
+          ? comicBookPageCount(modelQuery)
+          : null
+        const comicPages: ComicBookPage[] = []
+        let comicTitle = comicPageTotal
+          ? (comicBookTitle(modelQuery) ?? 'Comic Book')
+          : 'Comic Book'
+        const comicReaderMessageId = `comic-reader-${toolStreamId}`
+        let comicArtifactId: string | null = null
+        const updateComicReader = async (): Promise<void> => {
+          if (!comicPageTotal) return
+          const html = buildComicBookReader(comicPages, comicPageTotal, comicTitle)
+          const content = `Comic book reader: ${comicPages.length} of ${comicPageTotal} pages ready.\n\n\`\`\`html\n${html}\n\`\`\``
+          setConvMessages(convId, (previous) => {
+            const reader: ChatMessage = {
+              id: comicReaderMessageId,
+              role: 'assistant',
+              content
+            }
+            const existing = previous.findIndex((message) => message.id === comicReaderMessageId)
+            return existing === -1
+              ? [...previous, reader]
+              : previous.map((message, index) => (index === existing ? reader : message))
+          })
+          setCanvasArtifact({ kind: 'html', code: html, title: comicTitle })
+          try {
+            const previousArtifactId = comicArtifactId
+            const saved = await window.api.saveArtifact({
+              kind: 'html',
+              code: html,
+              title: comicTitle,
+              conversationId: convId,
+              projectId
+            })
+            comicArtifactId = saved.id
+            setArtifacts((current) => [
+              saved,
+              ...current.filter(
+                (artifact) => artifact.id !== saved.id && artifact.id !== previousArtifactId
+              )
         ])
+            if (previousArtifactId && previousArtifactId !== saved.id) {
+              await window.api.deleteArtifact(previousArtifactId)
+            }
+          } catch {
+            /* The live reader remains available if artifact persistence fails. */
+          }
+        }
+        if (comicPageTotal) await updateComicReader()
         const tr = await window.api.toolChat(modelQuery, fullHistory.slice(0, -1), {
           assistantOnly: assistantForTurn,
           connectors: connectorsOn,
@@ -1902,10 +1944,7 @@ export function MemoryChat({
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
         // on one row would make the last context write replace the first association.
-        if (
-          imageRequests.length > 0 &&
-          !cancelledRef.current.has(convId)
-        ) {
+        if (imageRequests.length > 0 && !cancelledRef.current.has(convId)) {
           // The tool loop has finished its text answer and handed ownership to the
           // deferred image job. Mark that ownership exactly like explicit image mode
           // so the rendered Stop control cancels imagegen (not the already-finished
@@ -1913,79 +1952,47 @@ export function MemoryChat({
           setImgProgress(null)
           setImageGenConv(convId)
           let generatedImageCount = 0
-          const comicPageTotal = modelQuery.includes('<!-- offgrid-action:comic-book -->')
-            ? comicBookPageCount(modelQuery)
-            : null
-          const comicPages: ComicBookPage[] = []
-          const comicTitle = comicPageTotal
-            ? comicBookTitle(imageRequests[0]?.prompt ?? '') ??
-              comicBookTitle(modelQuery) ??
-              'Comic Book'
-            : 'Comic Book'
+          if (comicPageTotal) {
+            comicTitle = comicBookTitle(imageRequests[0]?.prompt ?? '') ?? comicTitle
+            await updateComicReader()
+          }
           const comicHeroSource = comicPageTotal ? comicBookHeroImage(modelQuery) : null
           const keptComicHero = comicHeroSource
             ? await window.api.keepInitImage(comicHeroSource).catch(() => null)
             : null
           const comicHeroPath = keptComicHero?.path ?? comicHeroSource
-          const comicReaderMessageId = `comic-reader-${toolStreamId}`
-          let comicArtifactId: string | null = null
-          const updateComicReader = async (): Promise<void> => {
+          const setComicImageToolStatus = (
+            requestIndex: number,
+            status: 'completed' | 'failed'
+          ): void => {
             if (!comicPageTotal) return
-            const html = buildComicBookReader(comicPages, comicPageTotal, comicTitle)
-            const content = `Comic book reader: ${comicPages.length} of ${comicPageTotal} pages ready.\n\n\`\`\`html\n${html}\n\`\`\``
-            setConvMessages(convId, (previous) => {
-              const reader: ChatMessage = {
-                id: comicReaderMessageId,
-                role: 'assistant',
-                content
-              }
-              const existing = previous.findIndex((message) => message.id === comicReaderMessageId)
-              return existing === -1
-                ? [...previous, reader]
-                : previous.map((message, index) => (index === existing ? reader : message))
-            })
-            setCanvasArtifact({ kind: 'html', code: html, title: comicTitle })
-            try {
-              const previousArtifactId = comicArtifactId
-              const saved = await window.api.saveArtifact({
-                kind: 'html',
-                code: html,
-                title: comicTitle,
-                conversationId: convId,
-                projectId
-              })
-              comicArtifactId = saved.id
-              setArtifacts((current) => [
-                saved,
-                ...current.filter(
-                  (artifact) =>
-                    artifact.id !== saved.id && artifact.id !== previousArtifactId
-                )
-              ])
-              if (previousArtifactId && previousArtifactId !== saved.id) {
-                await window.api.deleteArtifact(previousArtifactId)
-              }
-            } catch {
-              /* The live reader remains available if artifact persistence fails. */
-            }
-          }
-          if (comicPageTotal) {
             setConvMessages(convId, (previous) =>
-              previous.filter((message) => message.id !== toolStreamId)
+              previous.map((message) => {
+                if (message.id !== toolStreamId || !message.toolCalls) return message
+                let imageIndex = -1
+                return {
+                  ...message,
+                  toolCalls: message.toolCalls.map((toolCall) => {
+                    if (toolCall.name !== 'generate_image') return toolCall
+                    imageIndex += 1
+                    return imageIndex === requestIndex ? { ...toolCall, status } : toolCall
+              })
+            }
+              })
             )
-            await updateComicReader()
           }
           try {
-            for (const imageRequest of imageRequests) {
+            for (const [imageRequestIndex, imageRequest] of imageRequests.entries()) {
               if (cancelledRef.current.has(convId)) break
               setImgProgress(null)
-              const comicPage = comicPageTotal
-                ? comicBookPageFromPrompt(imageRequest.prompt)
-                : null
+              const comicPage = comicPageTotal ? comicBookPageFromPrompt(imageRequest.prompt) : null
               const generationPrompt = comicPage?.prompt ?? imageRequest.prompt
               try {
                 const img = await window.api.generateImage({
                   prompt: generationPrompt,
+                  ...(imageRequest.enhancePrompt === undefined
+                    ? {}
+                    : { enhancePrompt: imageRequest.enhancePrompt }),
                   ...(comicHeroPath ? { initImage: comicHeroPath, strength: 0.72 } : {}),
                   conversationId: convId,
                   projectId: projectId
@@ -2058,9 +2065,7 @@ export function MemoryChat({
                           toolsOffered: tr?.toolsOffered
                         }
                         : {}),
-                      ...(img.durationMs === undefined
-                        ? {}
-                        : { generationTimeMs: img.durationMs }),
+                      ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
                       ...(imageMetrics ? { metrics: imageMetrics } : {})
                     }
                   ])
@@ -2074,6 +2079,7 @@ export function MemoryChat({
                   })
                   await updateComicReader()
                 }
+                setComicImageToolStatus(imageRequestIndex, 'completed')
                 generatedImageCount += 1
               } catch (error) {
                 // One failed image does not erase or block another completed tool request. Stop is
@@ -2084,6 +2090,7 @@ export function MemoryChat({
                   memoryGuard?.message ||
                   (error instanceof Error ? error.message : 'Image generation failed.')
                 if (!/cancel/i.test(message)) {
+                  setComicImageToolStatus(imageRequestIndex, 'failed')
                   setConvMessages(convId, (previous) => [
                     ...previous,
                     {

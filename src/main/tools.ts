@@ -91,8 +91,8 @@ export interface ToolResult {
   /** When true, `text` is the final user-facing answer and no model may rewrite it. */
   authoritative?: boolean
   sources?: UnifiedSource[]
-  imageRequest?: { prompt: string }
-  imageRequests?: { prompt: string }[]
+  imageRequest?: { prompt: string; enhancePrompt?: boolean }
+  imageRequests?: { prompt: string; enhancePrompt?: boolean }[]
 }
 
 type ToolDef = {
@@ -402,16 +402,23 @@ const TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'a detailed description of the image to create' }
+        prompt: { type: 'string', description: 'a detailed description of the image to create' },
+        enhance_prompt: {
+          type: 'boolean',
+          description:
+            'whether to rewrite the prompt before generation; set false when the prompt is already detailed and final'
+        }
       },
       required: ['prompt']
     },
     run: (a): ToolResult => {
       const prompt = String(a.prompt ?? '').trim()
+      const enhancePrompt =
+        typeof a.enhance_prompt === 'boolean' ? a.enhance_prompt : undefined
       return prompt
         ? {
             text: 'Image generation started - it will appear in the chat.',
-            imageRequest: { prompt }
+            imageRequest: { prompt, ...(enhancePrompt === undefined ? {} : { enhancePrompt }) }
           }
         : { text: 'Error: no image prompt provided.' }
     }
@@ -556,9 +563,9 @@ export async function toolChat(
   answer: string
   toolCalls: ToolCall[]
   unified: UnifiedSource[]
-  imageRequests: { prompt: string }[]
+  imageRequests: { prompt: string; enhancePrompt?: boolean }[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
-  imageRequest?: { prompt: string }
+  imageRequest?: { prompt: string; enhancePrompt?: boolean }
   toolsOffered?: string[]
   metrics?: GenerationMetrics
 }> {
@@ -787,7 +794,7 @@ export async function toolChat(
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
-  const imageRequests: { prompt: string }[] = []
+  const imageRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   let finishAfterDeferredImages = false
   const resultWithImages = (result: {
     answer: string
@@ -799,8 +806,8 @@ export async function toolChat(
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
     metrics?: GenerationMetrics
-    imageRequests: { prompt: string }[]
-    imageRequest?: { prompt: string }
+    imageRequests: { prompt: string; enhancePrompt?: boolean }[]
+    imageRequest?: { prompt: string; enhancePrompt?: boolean }
     toolsOffered?: string[]
   } => {
     const finalImageRequest = imageRequests.at(-1)
