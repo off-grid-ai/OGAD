@@ -52,6 +52,20 @@ it('keeps a message edit in its editor and sends the saved text', async () => {
   expect(await screen.findByText('Updated answer')).toBeTruthy()
 })
 
+it('shows a completed artifact card without its raw HTML', async () => {
+  const boundary = new ChatBoundary()
+  await boundary.addRagMessage(
+    'conversation-a',
+    'assistant',
+    '```html\n<!doctype html><html><body>ARTIFACT_ONLY_MARKER</body></html>\n```'
+  )
+  installBoundary(boundary)
+  renderChat({ conversationId: 'conversation-a' })
+
+  expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
+  expect(screen.queryByText(/ARTIFACT_ONLY_MARKER/)).toBeNull()
+})
+
 it('completes a skill in the draft and sends it from a populated chat', async () => {
   const boundary = new ChatBoundary()
   await boundary.addRagMessage('conversation-a', 'assistant', 'Earlier answer')
