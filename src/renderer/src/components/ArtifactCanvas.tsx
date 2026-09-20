@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
+import { resolveModelName } from '@renderer/lib/model-summary'
 import { capturePathFromUrl } from '../../../shared/ogcapture-url'
 import { SidePanel } from './SidePanel'
 
@@ -45,14 +46,7 @@ export function artifactSpeechModelName(
       model.files?.some((file) => file.name === activeModel)
   )
   if (catalogModel?.name) return catalogModel.name
-  const encodedModel = activeModel.startsWith('remote-vision:')
-    ? activeModel.slice(activeModel.lastIndexOf(':') + 1)
-    : activeModel
-  try {
-    return decodeURIComponent(encodedModel)
-  } catch {
-    return encodedModel
-  }
+  return resolveModelName([], activeModel) ?? activeModel
 }
 
 // npm packages a React artifact imports beyond react/react-dom (loaded from esm.sh).

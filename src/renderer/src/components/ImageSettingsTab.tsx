@@ -6,7 +6,7 @@ import {
   type ImageParamStore
 } from '@renderer/lib/image-params'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
-import { parseRemoteVisionModelId } from '../../../shared/remote-vision-server'
+import { resolveModelName } from '@renderer/lib/model-summary'
 import { SettingsSelect } from './SettingsSelect'
 
 type ImageSettings = {
@@ -17,7 +17,7 @@ type ImageSettings = {
 }
 
 const modelLabel = (model: string): string =>
-  (parseRemoteVisionModelId(model)?.modelId ?? model)
+  (resolveModelName([], model) ?? model)
     .replace(/\.gguf$/i, '')
     .replace(/-Q\d.*$/i, '')
 
