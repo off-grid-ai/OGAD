@@ -495,7 +495,10 @@ function StandardMessageRow({
           workFooter ??
           (message.streaming && hasLiveStreamActivity(message) ? (
             liveActivity ? (
-              <span className="text-[11px] text-neutral-500">{liveActivity}</span>
+              <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
+                {liveActivity}
+                <LoadingDots size="small" />
+              </span>
             ) : (
               <LoadingDots />
             )
