@@ -143,6 +143,31 @@ export function parseOptionDecision(raw: string, optionCount: number): OptionDec
   return { choice, confidence: normalized[choice]!, probabilities: normalized }
 }
 
+export function buildDecisionRequest(
+  prompt: string,
+  optionCount: number,
+  imageBase64?: string,
+  mediaMarker?: string
+): Record<string, unknown> {
+  if (imageBase64 && !mediaMarker) {
+    throw new Error('The local model server did not publish its media marker.')
+  }
+  const labels = DECISION_LABELS.slice(0, optionCount)
+  return {
+    prompt: imageBase64
+      ? { prompt_string: `${mediaMarker}\n${prompt}`, multimodal_data: [imageBase64] }
+      : prompt,
+    n_predict: 1,
+    n_probs: optionCount,
+    post_sampling_probs: true,
+    temperature: 1.3,
+    top_k: 0,
+    top_p: 1,
+    min_p: 0,
+    grammar: `root ::= [${labels}]`
+  }
+}
+
 function withContextMetrics(
   result: StreamResult,
   messages: unknown[],
@@ -1182,20 +1207,26 @@ export class LLMService {
    *  template llama-server publishes at /props; 'enable-thinking' until then, which is the
    *  behaviour every model got before this was resolved at all. */
   private thinkingDialect: ThinkingDialect = 'enable-thinking'
+  private mediaMarker: string | null = null
 
-  /** Read the loaded model's chat template and remember which thinking dialect it speaks.
+  /** Read the loaded model's properties and remember its request dialects.
    *  Best-effort: a server that will not answer /props keeps the safe default rather than
-   *  retaining the dialect of the model that was loaded before it. */
-  private async resolveThinkingDialect(): Promise<void> {
+   *  retaining values from the model that was loaded before it. */
+  private async resolveServerProperties(): Promise<void> {
     this.thinkingDialect = 'enable-thinking'
+    this.mediaMarker = null
     try {
       const res = await fetch(`http://127.0.0.1:${this.port}/props`)
       if (!res.ok) return
-      const body = (await res.json()) as { chat_template?: string }
+      const body = (await res.json()) as { chat_template?: string; media_marker?: unknown }
       this.thinkingDialect = detectThinkingDialect(body.chat_template)
+      this.mediaMarker =
+        typeof body.media_marker === 'string' && body.media_marker.length > 0
+          ? body.media_marker
+          : null
       console.log(`[LLMService] thinking dialect: ${this.thinkingDialect}`)
     } catch (e) {
-      console.warn('[LLMService] could not read /props for the thinking dialect:', e)
+      console.warn('[LLMService] could not read /props:', e)
     }
   }
 
@@ -1215,7 +1246,7 @@ export class LLMService {
           if (res.ok) {
             const body = await res.json().catch(() => null)
             if (Array.isArray(body?.data) && body.data.length > 0) {
-              await this.resolveThinkingDialect()
+              await this.resolveServerProperties()
               return
             }
           }
@@ -1247,25 +1278,22 @@ export class LLMService {
     context: string,
     question: string,
     options: readonly string[],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    screenshotPath?: string
   ): Promise<OptionDecision> {
     const prompt = buildDecisionPrompt(context, question, options)
     await this.beginGeneration()
     try {
+      this.assertImageInputSupported(screenshotPath ? [screenshotPath] : [])
       await this.ensureReady()
       return await this.chatMutex.runExclusive(async () => {
-        const labels = DECISION_LABELS.slice(0, options.length)
-        const body = JSON.stringify({
-          prompt,
-          n_predict: 1,
-          n_probs: options.length,
-          post_sampling_probs: true,
-          temperature: 1.3,
-          top_k: 0,
-          top_p: 1,
-          min_p: 0,
-          grammar: `root ::= [${labels}]`
-        })
+        const image = screenshotPath ? readImages([screenshotPath])[0] : undefined
+        if (screenshotPath && !image) {
+          throw new Error('The Decision model screenshot could not be read.')
+        }
+        const body = JSON.stringify(
+          buildDecisionRequest(prompt, options.length, image?.base64, this.mediaMarker ?? undefined)
+        )
         const raw = await postCompletionOnce(this.port, body, 60_000, signal, '/completion')
         return parseOptionDecision(raw, options.length)
       })
