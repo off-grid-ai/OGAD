@@ -2107,12 +2107,29 @@ export function MemoryChat({
               const finalHtml = buildComicBookReader(comicPages, comicPageTotal, comicTitle)
               const finalContent = `Comic book reader: ${comicPages.length} of ${comicPageTotal} pages ready.\n\n\`\`\`html\n${finalHtml}\n\`\`\``
               try {
-                const stored = await window.api.addRagMessage(convId, 'assistant', finalContent)
-                setConvMessages(convId, (previous) =>
-                  previous.map((message) =>
-                    message.id === comicReaderMessageId ? { ...message, id: stored.uuid } : message
-                  )
+                const stored = await window.api.addRagMessage(
+                  convId,
+                  'assistant',
+                  finalContent,
+                  toolCtxWithReasoning
                 )
+                setConvMessages(convId, (previous) => [
+                  ...previous.filter(
+                    (message) => message.id !== toolStreamId && message.id !== comicReaderMessageId
+                  ),
+                  {
+                    id: stored.uuid,
+                    role: 'assistant',
+                    content: finalContent,
+                    context,
+                    reasoning: toolReasoning,
+                    timeline: toolTimeline,
+                    toolCalls,
+                    toolsOffered: tr?.toolsOffered,
+                    metrics: tr?.metrics,
+                    streaming: false
+                  }
+                ])
               } catch {
                 /* The live reader remains available if persistence fails. */
               }

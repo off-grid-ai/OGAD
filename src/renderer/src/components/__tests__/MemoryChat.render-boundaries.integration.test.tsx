@@ -66,6 +66,25 @@ it('shows a completed artifact card without its raw HTML', async () => {
   expect(screen.queryByText(/ARTIFACT_ONLY_MARKER/)).toBeNull()
 })
 
+it('restores completed work with a saved artifact', async () => {
+  const boundary = new ChatBoundary()
+  await boundary.addRagMessage(
+    'conversation-a',
+    'assistant',
+    '```html\n<!doctype html><html><body>COMIC</body></html>\n```',
+    {
+      toolCalls: [
+        { name: 'generate_image', result: 'Created comic page 1.', status: 'completed' }
+      ]
+    }
+  )
+  installBoundary(boundary)
+  renderChat({ conversationId: 'conversation-a' })
+
+  expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Work done' })).toBeTruthy()
+})
+
 it('completes a skill in the draft and sends it from a populated chat', async () => {
   const boundary = new ChatBoundary()
   await boundary.addRagMessage('conversation-a', 'assistant', 'Earlier answer')
