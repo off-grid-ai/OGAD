@@ -227,7 +227,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
-                      {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
+                      {model.role === 'reasoner'
+                        ? 'Reasoner'
+                        : model.role === 'decision'
+                          ? 'Decision model'
+                          : 'Grounding specialist'}
                     </span>
                     {model.role === 'grounding_specialist' ? (
                       <SettingsSelect<string>
@@ -288,7 +292,11 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
-                      {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
+                      {model.role === 'reasoner'
+                        ? 'Reasoner'
+                        : model.role === 'decision'
+                          ? 'Decision model'
+                          : 'Grounding specialist'}
                     </span>
                     {model.role === 'grounding_specialist' ? (
                       <SettingsSelect<string>

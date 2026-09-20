@@ -28,7 +28,12 @@ export function providerNeedsScreenDisclosure(provider: RemoteVisionProvider): b
  */
 export function remoteScreenDecision(input: {
   taskKind: ScreenTaskKind
-  modelStrategy: 'same_as_chat' | 'separate_specialist' | 'text_plus_specialist'
+  modelStrategy:
+    | 'same_as_chat'
+    | 'separate_specialist'
+    | 'text_plus_specialist'
+    | 'decision_plus_specialist'
+    | 'decision_plus_reasoning'
   activeServer: Pick<
     RemoteVisionSavedServer,
     'name' | 'provider' | 'endpoint' | 'screenFramesAllowed'
@@ -37,6 +42,7 @@ export function remoteScreenDecision(input: {
   const { activeServer } = input
   if (
     input.modelStrategy === 'separate_specialist' ||
+    input.modelStrategy === 'decision_plus_specialist' ||
     !activeServer ||
     !providerNeedsScreenDisclosure(activeServer.provider)
   ) {
