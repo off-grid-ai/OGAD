@@ -17,10 +17,10 @@ import { BrowserWindow, ipcMain, screen } from 'electron'
 import { preloadPath } from '../preload-path'
 import { rendererHtmlPath } from '../renderer-path'
 
-const WIN_WIDTH = 520
-const WIN_HEIGHT = 680
 const MIN_WIN_WIDTH = 360
 const MIN_WIN_HEIGHT = 480
+const WIN_WIDTH = MIN_WIN_WIDTH
+const WIN_HEIGHT = MIN_WIN_HEIGHT
 const MARGIN = 24
 let supervisor: BrowserWindow | null = null
 let supervisorCaptureWindowId: number | null = null
@@ -109,7 +109,15 @@ export function ensureSupervisorCaptureWindowId(): number | null {
 /** Show the supervisor window (creating it if needed) WITHOUT stealing focus
  *  from the app being driven. Idempotent. */
 export function showSupervisorWindow(): void {
-  // The separate PiP is disabled. The main window remains visible during Computer Use.
+  if (closeTimer) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
+  const win = supervisor && !supervisor.isDestroyed() ? supervisor : create()
+  if (!win.isVisible()) {
+    // Keep keyboard and pointer focus in the app that Computer Use controls.
+    win.showInactive()
+  }
 }
 
 /** Hide the PiP without changing the task. The task controller remains the only owner of
