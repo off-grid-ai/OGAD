@@ -17,7 +17,7 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { globalShortcut, systemPreferences } from 'electron'
+import { systemPreferences } from 'electron'
 import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
@@ -35,7 +35,6 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask,
   waitForVisionUser
 } from '../vision/vision-controller'
 import { hideSupervisorWindow } from '../vision/supervisor-window'
@@ -68,7 +67,7 @@ const execFileAsync = promisify(execFile)
  *  the user approves the task). */
 const SELF_APP_NAME = 'Off Grid AI Desktop'
 
-/** Thrown when the kill switch (Esc / overlay Stop) halts a run mid-action so
+/** Thrown when Stop or Take Over halts a run mid-action so
  *  the loop unwinds instead of actuating again. */
 class HaltError extends Error {}
 
@@ -279,11 +278,6 @@ class AxRailHost {
       llm.effectiveContextSize()
     )
     const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
-    // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
-    // guard through the controller session, so both paths end one run.
-    const escapeRegistered = globalShortcut.register('Escape', () => {
-      stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
-    })
     const releaseSession = registerVisionSession(
       taskId,
       guard,
@@ -300,10 +294,7 @@ class AxRailHost {
       status: 'running',
       phase: 'preparing',
       currentStep: 0,
-      currentAction: `Preparing to control ${app}`,
-      ...(escapeRegistered
-        ? {}
-        : { notice: 'Esc is unavailable. Use Stop or Take Over in the task controls.' })
+      currentAction: `Preparing to control ${app}`
     })
     let usedInitial = false
     let liveStep = 0
@@ -561,7 +552,6 @@ class AxRailHost {
         : { ok: false, summary, steps: [] }
     } finally {
       releaseGuidance()
-      if (escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       hideSupervisorWindow()
     }

@@ -21,7 +21,7 @@ import fs from 'fs'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import sharp from 'sharp'
-import { globalShortcut, screen, shell } from 'electron'
+import { screen, shell } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import {
@@ -36,7 +36,6 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask,
   waitForVisionUser
 } from './vision-controller'
 import { hideSupervisorWindow, showSupervisorWindow } from './supervisor-window'
@@ -465,25 +464,11 @@ class VisionHost {
       targetLabel,
       sessionLimitMs
     } = input
-    // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
-    // Stop routes to the SAME guard via the controller session.
     const ownsControls = !continuation
-    const escapeRegistered = ownsControls
-      ? globalShortcut.register('Escape', () => {
-          stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
-        })
-      : true
     const releaseSession = ownsControls
       ? registerVisionSession(taskId, guard, request, undefined, sessionLimitMs)
       : () => undefined
     if (ownsControls) showSupervisorWindow()
-    // The only run-level notice is an unavailable emergency shortcut. Model
-    // selection guidance belongs in settings, not in a live task.
-    const notice = [
-      escapeRegistered ? null : 'Esc is unavailable. Use Stop or Take Over in the task controls.'
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join(' ')
     emitVisionState({
       taskId,
       journeyId,
@@ -492,8 +477,7 @@ class VisionHost {
       status: 'running',
       phase: 'preparing',
       currentStep: 0,
-      currentAction: 'Preparing local screen control',
-      ...(notice ? { notice } : {})
+      currentAction: 'Preparing local screen control'
     })
     const queuedGuidance = continuation?.queuedGuidance ?? [...(checkpoint?.guidance ?? [])]
     const releaseGuidance = ownsControls
@@ -548,8 +532,7 @@ class VisionHost {
                   : 'running',
             phase: progress.phase,
             currentStep: progress.step,
-            currentAction: progress.action,
-            ...(notice ? { notice } : {})
+            currentAction: progress.action
           })
         },
         contextTokens,
@@ -646,7 +629,6 @@ class VisionHost {
         : { ok: false, summary, steps: [], handoffs: 0 }
     } finally {
       releaseGuidance()
-      if (ownsControls && escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       if (ownsControls) {
         hideSupervisorWindow()
