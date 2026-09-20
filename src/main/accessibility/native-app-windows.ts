@@ -6,6 +6,22 @@ import { UIA_APPS_SCRIPT, psQuote, uiaActivateScript } from './ax-uia-script'
 const execFileAsync = promisify(execFile)
 const INVENTORY_TTL_MS = 5 * 60_000
 const START_APPS_SCRIPT = 'Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress'
+const DEFAULT_BROWSER_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$choice = Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice'
+$progId = $choice.ProgId
+if (-not $progId) { exit 1 }
+$commandKey = Get-Item ('Registry::HKEY_CLASSES_ROOT\\' + $progId + '\\shell\\open\\command')
+$command = [string]$commandKey.GetValue('')
+if ($command -match '^\\s*"([^"]+\\.exe)"' -or $command -match '^\\s*([^\\s]+\\.exe)') {
+  $executable = $Matches[1]
+} else { exit 1 }
+$file = Get-Item $executable
+$name = $file.VersionInfo.ProductName
+if (-not $name) { $name = $file.VersionInfo.FileDescription }
+if (-not $name) { $name = $file.BaseName }
+[ordered]@{ id=$progId; name=$name; launchRef=$file.FullName } | ConvertTo-Json -Compress
+`.trim()
 
 let cachedInventory: { expiresAt: number; apps: InstalledNativeApp[] } | null = null
 
@@ -31,6 +47,33 @@ async function listInstalled(): Promise<InstalledNativeApp[]> {
   return apps
 }
 
+export async function resolveWindowsDefaultBrowser(): Promise<InstalledNativeApp | null> {
+  try {
+    const browser = JSON.parse(await runPowerShell(DEFAULT_BROWSER_SCRIPT, 4_000)) as {
+      id?: unknown
+      name?: unknown
+      launchRef?: unknown
+    }
+    if (
+      typeof browser.id !== 'string' ||
+      !browser.id.trim() ||
+      typeof browser.name !== 'string' ||
+      !browser.name.trim() ||
+      typeof browser.launchRef !== 'string' ||
+      !browser.launchRef.trim()
+    ) {
+      return null
+    }
+    return {
+      id: browser.id.trim(),
+      name: browser.name.trim(),
+      launchRef: browser.launchRef.trim()
+    }
+  } catch {
+    return null
+  }
+}
+
 export const windowsNativeAppPlatform: NativeAppPlatform = {
   async listRunning() {
     return (await runPowerShell(UIA_APPS_SCRIPT, 4_000))
@@ -40,6 +83,13 @@ export const windowsNativeAppPlatform: NativeAppPlatform = {
   },
   listInstalled,
   async launch(app) {
+    if (app.launchRef) {
+      await runPowerShell(
+        `[System.Diagnostics.Process]::Start(${psQuote(app.launchRef)}) | Out-Null`,
+        5_000
+      )
+      return
+    }
     const target = `shell:AppsFolder\\${app.id}`
     await runPowerShell(
       `[System.Diagnostics.Process]::Start('explorer.exe', ${psQuote(target)}) | Out-Null`,

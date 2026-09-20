@@ -51,8 +51,8 @@ import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { registerTaskGuideHandler } from '../tasks/task-guide'
 import { resolveModelIdentity } from '../models-manager'
 import { NativeAppTargeter } from './native-app-target'
-import { createMacNativeAppPlatform } from './native-app-macos'
-import { windowsNativeAppPlatform } from './native-app-windows'
+import { createMacNativeAppPlatform, resolveMacDefaultBrowser } from './native-app-macos'
+import { resolveWindowsDefaultBrowser, windowsNativeAppPlatform } from './native-app-windows'
 import { automationTaskReadStatus } from '@offgrid/automation'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
 import type { VisionTaskContinuation } from '../vision/vision-agent'
@@ -107,6 +107,15 @@ function nativeAppTargeter(): NativeAppTargeter | null {
     return helper
       ? new NativeAppTargeter(createMacNativeAppPlatform(helper), { selfName: SELF_APP_NAME })
       : null
+  }
+  return null
+}
+
+async function defaultBrowserTarget() {
+  if (process.platform === 'win32') return resolveWindowsDefaultBrowser()
+  if (process.platform === 'darwin') {
+    const helper = accessibilityHelperPath()
+    return helper ? resolveMacDefaultBrowser(helper) : null
   }
   return null
 }
@@ -194,13 +203,15 @@ class AxRailHost {
     if (!backend.available()) {
       return null
     }
-    // A web goal must never drive a native app (a word like 'music' matching the
-    // Music app is a false target) - the browser rail handles websites.
-    if (namesWebsite(goal)) {
-      return null
-    }
     const targeter = nativeAppTargeter()
-    const target = targeter ? await targeter.resolve(goal) : null
+    // Website tasks normally enter Web Use before this point. When Computer Use
+    // receives one, it means the visible OS browser is required. Resolve that
+    // browser directly so website words cannot falsely match another native app.
+    const target = targeter
+      ? namesWebsite(goal)
+        ? await defaultBrowserTarget()
+        : await targeter.resolve(goal)
+      : null
     if (!target) {
       return null
     }

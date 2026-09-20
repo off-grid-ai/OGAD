@@ -59,6 +59,31 @@ async function installedMacApps(): Promise<InstalledNativeApp[]> {
   return apps
 }
 
+export async function resolveMacDefaultBrowser(
+  helper: string
+): Promise<InstalledNativeApp | null> {
+  try {
+    const { stdout } = await execFileAsync(helper, ['--default-browser'], { timeout: 4_000 })
+    const browser = JSON.parse(stdout) as { name?: unknown; path?: unknown }
+    if (
+      typeof browser.name !== 'string' ||
+      !browser.name.trim() ||
+      typeof browser.path !== 'string' ||
+      !browser.path.endsWith('.app')
+    ) {
+      return null
+    }
+    const stableId = await bundleId(browser.path)
+    return {
+      id: stableId ?? browser.path,
+      name: browser.name.trim(),
+      launchRef: browser.path
+    }
+  } catch {
+    return null
+  }
+}
+
 export function createMacNativeAppPlatform(helper: string): NativeAppPlatform {
   return {
     listRunning: () => runningAppNames(helper),
