@@ -16,9 +16,10 @@ import {
 } from './models/download-queue'
 import {
   getAllActiveModals,
+  remoteModelSelected,
   remoteVoiceSelected,
   setActiveModal as setModal,
-  setRemoteVoiceSelected,
+  setRemoteModelSelected,
   type Modality
 } from './active-models'
 import {
@@ -63,7 +64,6 @@ import {
   activateRemoteVisionModel,
   activateRemoteVisionMediaModel,
   deactivateRemoteVisionMediaModel,
-  deactivateRemoteVisionModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
 
@@ -813,8 +813,12 @@ async function setActiveLlamaModel(
 }
 
 /** Set the chat LLM (text/vision). Writes active-model.json + reloads llama-server. */
-export function setActiveModel(modelId: string): Promise<{ success: boolean; error?: string }> {
-  return setActiveLlamaModel(modelId, isChatLoadable, 'the chat LLM')
+export async function setActiveModel(
+  modelId: string
+): Promise<{ success: boolean; error?: string }> {
+  const result = await setActiveLlamaModel(modelId, isChatLoadable, 'the chat LLM')
+  if (result.success) setRemoteModelSelected('text', false)
+  return result
 }
 
 /** Load the selected Computer Use policy into the shared llama.cpp runtime for one supervised run. */
@@ -892,10 +896,22 @@ export async function getActiveModelIds(): Promise<string[]> {
   const remote = settings.servers.find((server) => server.id === settings.activeServerId)
   const activeChatId = getActiveModel()
   const localIds = info.models
-    .filter((model) => model.active && (!remote || model.id !== activeChatId))
+    .filter(
+      (model) =>
+        model.active && (!remote || !remoteModelSelected('text') || model.id !== activeChatId)
+    )
     .map((model) => model.id)
   return remote && remote.enabled !== false
-    ? [...localIds, ...remoteVisionInventoryModels([remote]).map((model) => model.id)]
+    ? [
+        ...localIds,
+        ...remoteVisionInventoryModels([remote])
+          .filter((model) =>
+            remoteModelSelected(
+              model.kind === 'vision' ? 'text' : model.kind === 'speech' ? 'voice' : model.kind
+            )
+          )
+          .map((model) => model.id)
+      ]
     : localIds
 }
 
@@ -943,7 +959,6 @@ export async function activateModel(
   }
   const modal = requestedModal ?? modalityForModel(kind)
   const result = modal ? await setActiveModalChoice(modal, modelId) : await setActiveModel(modelId)
-  if (result.success && kind && isChatLoadable(kind)) deactivateRemoteVisionModel()
   return result
 }
 
@@ -972,7 +987,8 @@ export async function setActiveModalChoice(
     }
     setModal(modal, stored)
     if (modal === 'image') deactivateRemoteVisionMediaModel('image')
-    if (modal === 'speech') setRemoteVoiceSelected(false)
+    if (modal === 'speech') deactivateRemoteVisionMediaModel('voice')
+    if (modal === 'transcription') deactivateRemoteVisionMediaModel('transcription')
     return { success: true }
   }
   return { success: false, error: 'use setActiveModel for the chat LLM (text/vision)' }
@@ -986,11 +1002,13 @@ export function getActiveModalities(): { text: string | null } & Record<Modality
     return remote && model ? remoteVisionModelId(remote.id, model) : null
   }
   return {
-    text: remoteId('text') ?? getActiveModel(),
+    text: (remoteModelSelected('text') ? remoteId('text') : null) ?? getActiveModel(),
     ...getAllActiveModals(),
-    image: remoteId('image') ?? getAllActiveModals().image,
+    image: (remoteModelSelected('image') ? remoteId('image') : null) ?? getAllActiveModals().image,
     speech: (remoteVoiceSelected() ? remoteId('voice') : null) ?? getAllActiveModals().speech,
-    transcription: remoteId('transcription') ?? getAllActiveModals().transcription
+    transcription:
+      (remoteModelSelected('transcription') ? remoteId('transcription') : null) ??
+      getAllActiveModals().transcription
   }
 }
 

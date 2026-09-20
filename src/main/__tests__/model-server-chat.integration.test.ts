@@ -206,6 +206,72 @@ describe('model gateway chat streaming', () => {
     }
   })
 
+  it('keeps remote and local choices independent across all four modalities', async () => {
+    const remote = await import('../vision/remote-vision-server')
+    const activeModels = await import('../active-models')
+    const manager = await import('../models-manager')
+    const codec = await import('../../shared/remote-vision-server')
+    const serverId = 'model-family-switch'
+    const mediaModels = {
+      text: 'remote-text',
+      image: 'remote-image',
+      voice: 'remote-voice',
+      transcription: 'remote-transcription'
+    }
+
+    try {
+      remote.setRemoteVisionServerSettings({
+        provider: 'custom',
+        endpoint: 'https://example.com/v1',
+        model: mediaModels.text,
+        mediaModels,
+        serverId,
+        name: 'Remote family'
+      })
+      await manager.setActiveModalChoice('image', 'local-image')
+      await manager.setActiveModalChoice('speech', 'local-voice')
+      await manager.setActiveModalChoice('transcription', 'local-transcription')
+      expect(
+        remote.getRemoteVisionServerSettings().servers.find((server) => server.id === serverId)
+          ?.mediaModels
+      ).toEqual(mediaModels)
+
+      expect(
+        await manager.activateModel(codec.remoteVisionModelId(serverId, mediaModels.text))
+      ).toEqual({ success: true })
+      expect(manager.getActiveModalities()).toEqual({
+        computer_use: null,
+        text: codec.remoteVisionModelId(serverId, mediaModels.text),
+        image: 'local-image',
+        speech: 'local-voice',
+        transcription: 'local-transcription'
+      })
+
+      await manager.activateModel(codec.remoteVisionModelId(serverId, mediaModels.voice))
+      expect(manager.getActiveModalities()).toMatchObject({
+        text: codec.remoteVisionModelId(serverId, mediaModels.text),
+        image: 'local-image',
+        speech: codec.remoteVisionModelId(serverId, mediaModels.voice),
+        transcription: 'local-transcription'
+      })
+
+      await manager.activateModel(codec.remoteVisionModelId(serverId, mediaModels.image))
+      await manager.activateModel(codec.remoteVisionModelId(serverId, mediaModels.transcription))
+      await manager.setActiveModalChoice('speech', 'local-voice')
+      expect(manager.getActiveModalities()).toMatchObject({
+        text: codec.remoteVisionModelId(serverId, mediaModels.text),
+        image: codec.remoteVisionModelId(serverId, mediaModels.image),
+        speech: 'local-voice',
+        transcription: codec.remoteVisionModelId(serverId, mediaModels.transcription)
+      })
+    } finally {
+      activeModels.setActiveModal('image', null)
+      activeModels.setActiveModal('speech', null)
+      activeModels.setActiveModal('transcription', null)
+      remote.removeRemoteVisionServer(serverId)
+    }
+  })
+
   it('routes a Mobile remote inventory id through its configured provider', async () => {
     const remote = await import('../vision/remote-vision-server')
     const codec = await import('../../shared/remote-vision-server')
