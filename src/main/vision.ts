@@ -62,7 +62,7 @@ class VisionService {
   async captureDisplayFrame(
     bounds?: { x: number; y: number; width: number; height: number },
     outputPath?: string,
-    options: { excludeComputerUseSupervisor?: boolean } = {}
+    options: { forComputerUse?: boolean } = {}
   ): Promise<CapturedDisplayFrame | null> {
     try {
       const point =
@@ -73,7 +73,7 @@ class VisionService {
             }
           : screen.getCursorScreenPoint()
       const display = screen.getDisplayNearestPoint(point)
-      if (options.excludeComputerUseSupervisor) {
+      if (options.forComputerUse) {
         const scale = Math.min(1920 / display.bounds.width, 1080 / display.bounds.height)
         const captured = await captureComputerUseDisplay({
           displayId: Number(display.id),

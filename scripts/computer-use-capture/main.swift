@@ -1,7 +1,7 @@
 // Off Grid AI Desktop - one clean Computer Use frame on macOS.
 //
-// ScreenCaptureKit owns window exclusion. Off Grid AI windows stay visible on the display, but
-// their exact SCWindows are omitted before pixels exist. Output is one PNG at the requested path.
+// ScreenCaptureKit captures the visible display, including the Computer Use PiP.
+// Output is one PNG at the requested path.
 
 import AppKit
 import CoreImage
@@ -15,22 +15,18 @@ func fail(_ message: String, code: Int32 = 2) -> Never {
 }
 
 if CommandLine.arguments.count == 2 && CommandLine.arguments[1] == "--help" {
-    print("usage: computer-use-capture <output.png> <display-id> <excluded-window-ids> <width> <height>")
+    print("usage: computer-use-capture <output.png> <display-id> <width> <height>")
     exit(0)
 }
 
-guard CommandLine.arguments.count == 6,
+guard CommandLine.arguments.count == 5,
       let displayID = UInt32(CommandLine.arguments[2]),
-      let width = Int(CommandLine.arguments[4]), width > 0,
-      let height = Int(CommandLine.arguments[5]), height > 0 else {
-    fail("usage: computer-use-capture <output.png> <display-id> <excluded-window-ids> <width> <height>")
+      let width = Int(CommandLine.arguments[3]), width > 0,
+      let height = Int(CommandLine.arguments[4]), height > 0 else {
+    fail("usage: computer-use-capture <output.png> <display-id> <width> <height>")
 }
 
 let outputPath = CommandLine.arguments[1]
-let excludedWindowIDs = Set(CommandLine.arguments[3].split(separator: ",").compactMap { UInt32($0) })
-guard !excludedWindowIDs.isEmpty else {
-    fail("computer-use-capture requires at least one excluded window id")
-}
 
 final class StreamScreenshot: NSObject, SCStreamOutput, SCStreamDelegate {
     private let queue = DispatchQueue(label: "ai.offgrid.computer-use-capture")
@@ -104,10 +100,7 @@ func capture() async throws -> CGImage {
             userInfo: [NSLocalizedDescriptionKey: "display \(displayID) is not available"]
         )
     }
-    // Exclude only the supervisor window requested by the caller. Other visible
-    // windows must remain in the frame because they can intercept a click.
-    let excludedWindows = content.windows.filter { excludedWindowIDs.contains($0.windowID) }
-    let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
+    let filter = SCContentFilter(display: display, excludingWindows: [])
     let configuration = SCStreamConfiguration()
     configuration.width = width
     configuration.height = height

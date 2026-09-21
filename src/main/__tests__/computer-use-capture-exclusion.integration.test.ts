@@ -9,7 +9,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 const nativeCapture = vi.hoisted(() => ({
   profile: `/tmp/offgrid-computer-use-exclusion-${process.pid}`,
-  protectedWindowSources: new Set<string>(),
   electronCaptureCalls: 0
 }))
 fs.mkdirSync(nativeCapture.profile, { recursive: true })
@@ -36,17 +35,6 @@ vi.mock('electron', () => ({
   },
   ipcMain: { handle: vi.fn() },
   BrowserWindow: class BrowserWindow {
-    private readonly sourceId = 'window:73:0'
-
-    getMediaSourceId(): string {
-      return this.sourceId
-    }
-
-    setContentProtection(protectedFromCapture: boolean): void {
-      if (protectedFromCapture) nativeCapture.protectedWindowSources.add(this.sourceId)
-      else nativeCapture.protectedWindowSources.delete(this.sourceId)
-    }
-
     isDestroyed(): boolean {
       return false
     }
@@ -96,8 +84,8 @@ afterAll(() => {
   fs.rmSync(nativeCapture.profile, { recursive: true, force: true })
 })
 
-describe('Computer Use capture exclusion journey', () => {
-  it('keeps the visible main window in the model frame so clicks match the screen', async () => {
+describe('Computer Use visible capture journey', () => {
+  it('keeps visible app windows and the PiP in the model frame', async () => {
     const cleanFrame = await sharp({
       create: { width: 320, height: 200, channels: 3, background: '#34d399' }
     })
@@ -133,15 +121,13 @@ describe('Computer Use capture exclusion journey', () => {
     const savedPath = path.join(nativeCapture.profile, 'task-run-snapshots', 'clean-frame.png')
     fs.mkdirSync(path.dirname(savedPath), { recursive: true })
     const captured = await vision.captureDisplayFrame(undefined, savedPath, {
-      excludeComputerUseSupervisor: true
+      forComputerUse: true
     })
 
-    expect(nativeCapture.protectedWindowSources).toEqual(new Set(['window:73:0']))
     expect(nativeCapture.electronCaptureCalls).toBe(0)
     expect(JSON.parse(fs.readFileSync(captureArguments, 'utf8'))).toEqual([
       expect.stringMatching(/offgrid-computer-use-.*\.png$/),
       '1',
-      '73',
       '1728',
       '1080'
     ])
