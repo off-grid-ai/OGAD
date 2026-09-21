@@ -7,6 +7,9 @@ import {
 } from '../model-filter'
 
 describe('isImageModelFile', () => {
+  it('accepts Qwen-Image 2.1 diffusion GGUF variants', () => {
+    expect(isImageModelFile('qwen_image_2.1-Q4_K.gguf')).toBe(true)
+  })
   it('accepts a known diffusion .gguf family', () => {
     expect(isImageModelFile('dreamshaper-xl-turbo.gguf')).toBe(true)
     expect(isImageModelFile('sdxl-lightning-4step.gguf')).toBe(true)

@@ -18,19 +18,14 @@ import { preloadPath } from '../preload-path'
 import { rendererHtmlPath } from '../renderer-path'
 
 const MIN_WIN_WIDTH = 360
-const MIN_WIN_HEIGHT = 480
+const COLLAPSED_WIN_HEIGHT = 130
+const EXPANDED_WIN_HEIGHT = 480
+const MIN_WIN_HEIGHT = COLLAPSED_WIN_HEIGHT
 const WIN_WIDTH = MIN_WIN_WIDTH
-const WIN_HEIGHT = MIN_WIN_HEIGHT
+const WIN_HEIGHT = COLLAPSED_WIN_HEIGHT
 const MARGIN = 24
 let supervisor: BrowserWindow | null = null
-let supervisorCaptureWindowId: number | null = null
 let closeTimer: NodeJS.Timeout | null = null
-
-function captureWindowId(sourceId: string): number | null {
-  const match = /^window:(\d+):/.exec(sourceId)
-  const id = Number(match?.[1])
-  return Number.isSafeInteger(id) && id > 0 ? id : null
-}
 
 function bottomRight(): { x: number; y: number } {
   const area = screen.getPrimaryDisplay().workArea
@@ -70,10 +65,6 @@ function create(): BrowserWindow {
     }
   })
   supervisor = win
-  supervisorCaptureWindowId = captureWindowId(win.getMediaSourceId())
-  // Windows excludes protected windows at the compositor. Newer macOS ScreenCaptureKit ignores
-  // this flag, so the capture adapter also uses the exact source ID in SCContentFilter.
-  win.setContentProtection(true)
   // Float above full-screen apps, on every Space; plain alwaysOnTop is not enough.
   win.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
@@ -83,7 +74,6 @@ function create(): BrowserWindow {
   win.on('closed', () => {
     if (supervisor === win) {
       supervisor = null
-      supervisorCaptureWindowId = null
     }
   })
 
@@ -93,17 +83,6 @@ function create(): BrowserWindow {
     void win.loadFile(rendererHtmlPath(), { hash: 'cu-supervisor' })
   }
   return win
-}
-
-/** Exact native window ID used by the Computer Use capture filter. */
-export function getSupervisorCaptureWindowId(): number | null {
-  return supervisorCaptureWindowId
-}
-
-/** Create the protected capture-exclusion window without making the PiP visible. */
-export function ensureSupervisorCaptureWindowId(): number | null {
-  if (!supervisor || supervisor.isDestroyed()) create()
-  return supervisorCaptureWindowId
 }
 
 /** Show the supervisor window (creating it if needed) WITHOUT stealing focus
@@ -130,6 +109,18 @@ export function dismissSupervisorWindow(): void {
   if (supervisor && !supervisor.isDestroyed()) supervisor.hide()
 }
 
+/** Resize the PiP without moving its bottom edge away from the screen corner. */
+export function setSupervisorExpanded(expanded: boolean): boolean {
+  if (!supervisor || supervisor.isDestroyed()) return false
+  const bounds = supervisor.getBounds()
+  const area = screen.getDisplayMatching(bounds).workArea
+  const height = expanded ? EXPANDED_WIN_HEIGHT : COLLAPSED_WIN_HEIGHT
+  const bottom = bounds.y + bounds.height
+  const y = Math.max(area.y, Math.min(bottom - height, area.y + area.height - height))
+  supervisor.setBounds({ ...bounds, y, height }, true)
+  return true
+}
+
 /** Hide the supervisor window after a short delay, so the final state (done /
  *  failed + summary) is readable before it disappears. */
 export function hideSupervisorWindow(delayMs = 4000): void {
@@ -154,4 +145,7 @@ export function registerSupervisorWindowIpc(): void {
     dismissSupervisorWindow()
     return true
   })
+  ipcMain.handle('vision:supervisor:set-expanded', (_event, expanded: boolean) =>
+    setSupervisorExpanded(expanded)
+  )
 }

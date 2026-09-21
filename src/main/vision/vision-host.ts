@@ -157,7 +157,7 @@ function makeScreen(input: {
           : {})
       }
       // Capture can return no pixels while the system is busy (for example, after a model swap).
-      // Retry the one native capture owner, which excludes the supervisor before pixels exist.
+      // Retry the one native capture owner when the system is temporarily busy.
       let png: Buffer | null = null
       let encodedSize: { width: number; height: number } | null = null
       for (let attempt = 0; attempt < 4 && (png === null || png.length === 0); attempt += 1) {
@@ -473,6 +473,7 @@ class VisionHost {
       taskId,
       journeyId,
       ...modelIdentity,
+      rail: 'vision',
       goal,
       status: 'running',
       phase: 'preparing',

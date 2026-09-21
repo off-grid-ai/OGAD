@@ -1,6 +1,6 @@
 /**
  * The Computer Use supervisor boundary configured against an Electron window boundary.
- * The compact PiP stays visible without taking focus and remains excluded from capture.
+ * The compact PiP stays visible without taking focus and remains visible in capture.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,7 +8,7 @@ const electron = vi.hoisted(() => ({
   options: [] as Array<Record<string, unknown>>,
   shown: 0,
   hidden: 0,
-  protected: [] as boolean[],
+  bounds: [] as Array<{ x: number; y: number; width: number; height: number }>,
   handlers: new Map<string, (...args: unknown[]) => unknown>()
 }))
 
@@ -17,7 +17,8 @@ vi.mock('electron', () => ({
     getAppPath: () => '/tmp/offgrid-supervisor-test'
   },
   screen: {
-    getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })
+    getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
+    getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })
   },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
@@ -25,13 +26,16 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class BrowserWindow {
     private visible = false
+    private bounds: { x: number; y: number; width: number; height: number }
 
     constructor(options: Record<string, unknown>) {
       electron.options.push(options)
-    }
-
-    getMediaSourceId(): string {
-      return 'window:73:0'
+      this.bounds = {
+        x: options.x as number,
+        y: options.y as number,
+        width: options.width as number,
+        height: options.height as number
+      }
     }
 
     isDestroyed(): boolean {
@@ -49,9 +53,6 @@ vi.mock('electron', () => ({
 
     setVisibleOnAllWorkspaces(): void {}
     setAlwaysOnTop(): void {}
-    setContentProtection(protectedFromCapture: boolean): void {
-      electron.protected.push(protectedFromCapture)
-    }
     on(): void {}
     loadURL(): Promise<void> {
       return Promise.resolve()
@@ -63,6 +64,13 @@ vi.mock('electron', () => ({
       this.visible = false
       electron.hidden += 1
     }
+    getBounds(): { x: number; y: number; width: number; height: number } {
+      return this.bounds
+    }
+    setBounds(bounds: { x: number; y: number; width: number; height: number }): void {
+      this.bounds = bounds
+      electron.bounds.push(bounds)
+    }
   }
 }))
 
@@ -72,28 +80,18 @@ describe('Computer Use supervisor window', () => {
     electron.options.length = 0
     electron.shown = 0
     electron.hidden = 0
-    electron.protected.length = 0
+    electron.bounds.length = 0
     electron.handlers.clear()
   })
 
-  it('shows a compact protected PiP without taking focus', async () => {
+  it('shows a compact PiP without taking focus or enabling capture protection', async () => {
     const { showSupervisorWindow } = await import('../vision/supervisor-window')
 
     showSupervisorWindow()
 
     expect(electron.options).toHaveLength(1)
-    expect(electron.options[0]).toMatchObject({ width: 360, height: 480, show: false })
-    expect(electron.protected).toEqual([true])
+    expect(electron.options[0]).toMatchObject({ width: 360, height: 130, show: false })
     expect(electron.shown).toBe(1)
-  })
-
-  it('creates the protected capture exclusion without showing the PiP', async () => {
-    const { ensureSupervisorCaptureWindowId } = await import('../vision/supervisor-window')
-
-    expect(ensureSupervisorCaptureWindowId()).toBe(73)
-    expect(electron.options).toHaveLength(1)
-    expect(electron.protected).toEqual([true])
-    expect(electron.shown).toBe(0)
   })
 
   it('lets supervisor IPC show and dismiss the PiP without issuing a task command', async () => {
@@ -107,5 +105,18 @@ describe('Computer Use supervisor window', () => {
     expect(electron.handlers.get('vision:supervisor:show')?.()).toBe(true)
     expect(electron.options).toHaveLength(1)
     expect(electron.shown).toBe(2)
+  })
+
+  it('expands upward from the anchored bottom edge and collapses again', async () => {
+    const { registerSupervisorWindowIpc, showSupervisorWindow } =
+      await import('../vision/supervisor-window')
+    registerSupervisorWindowIpc()
+    showSupervisorWindow()
+
+    expect(electron.handlers.get('vision:supervisor:set-expanded')?.({}, true)).toBe(true)
+    expect(electron.bounds.at(-1)).toEqual({ x: 1056, y: 396, width: 360, height: 480 })
+
+    expect(electron.handlers.get('vision:supervisor:set-expanded')?.({}, false)).toBe(true)
+    expect(electron.bounds.at(-1)).toEqual({ x: 1056, y: 746, width: 360, height: 130 })
   })
 })

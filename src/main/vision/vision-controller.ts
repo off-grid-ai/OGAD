@@ -27,9 +27,11 @@ function broadcast(channel: string, payload: unknown): void {
 
 export interface VisionTaskState {
   taskId: string
+  startedAt?: number
   journeyId?: string
   modelId?: string
   modelName?: string
+  rail?: 'accessibility' | 'vision'
   goal: string
   status: AutomationTaskReadStatus
   phase?: ComputerUsePhase
@@ -111,7 +113,7 @@ export class VisionController {
         const reason = `Session limit reached after ${minutes} minute${minutes === 1 ? '' : 's'}.`
         this.completeSession(taskId, reason)
       }, sessionLimitMs)
-      session.deadline.unref?.()
+      session.deadline.unref()
     }
     this.sessions.set(taskId, session)
     return () => {
@@ -149,9 +151,11 @@ export class VisionController {
     const device = this.persistence.executionDevice()
     const next: VisionTaskState = {
       ...state,
+      startedAt: state.startedAt ?? previous?.startedAt ?? Date.now(),
       journeyId: state.journeyId ?? previous?.journeyId ?? state.taskId,
       modelId: state.modelId ?? previous?.modelId,
       modelName: state.modelName ?? previous?.modelName,
+      rail: state.rail ?? previous?.rail,
       executionDeviceId: state.executionDeviceId ?? previous?.executionDeviceId ?? device.id,
       executionDeviceName:
         state.executionDeviceName ?? previous?.executionDeviceName ?? device.name,

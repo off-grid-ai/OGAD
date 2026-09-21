@@ -1,4 +1,4 @@
-/** One capture owner for Computer Use. Platform boundaries exclude the supervisor before pixels. */
+/** One capture owner for Computer Use. */
 import { execFile } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -9,7 +9,6 @@ import { desktopCapturer } from 'electron'
 import sharp from 'sharp'
 import { binRoots, exe } from '../runtime-env'
 import { existing } from '../transcription/bin-resolution'
-import { ensureSupervisorCaptureWindowId } from './supervisor-window'
 
 const execFileAsync = promisify(execFile)
 const CAPTURE_TIMEOUT_MS = 10_000
@@ -33,12 +32,6 @@ function captureBinary(): string | null {
 async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDisplayCapture> {
   const binary = captureBinary()
   if (!binary) throw new Error('Computer Use screen-capture helper is not installed.')
-  const supervisorWindowId = ensureSupervisorCaptureWindowId()
-  if (!supervisorWindowId) {
-    throw new Error('Computer Use cannot identify its supervisor window for safe screen capture.')
-  }
-  // The main window can still be in front of the target app and intercept clicks.
-  // Keep it in the frame so Computer Use acts on the same pixels the user sees.
   const output = path.join(
     os.tmpdir(),
     `offgrid-computer-use-${process.pid}-${crypto.randomUUID()}.png`
@@ -46,13 +39,7 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
   try {
     await execFileAsync(
       binary,
-      [
-        output,
-        String(input.displayId),
-        String(supervisorWindowId),
-        String(input.width),
-        String(input.height)
-      ],
+      [output, String(input.displayId), String(input.width), String(input.height)],
       { timeout: CAPTURE_TIMEOUT_MS, maxBuffer: 1024 * 1024 }
     )
     const png = await fs.promises.readFile(output)
@@ -67,7 +54,6 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
 }
 
 async function captureElectronDisplay(input: CaptureInput): Promise<ComputerUseDisplayCapture> {
-  ensureSupervisorCaptureWindowId()
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
     thumbnailSize: { width: input.width, height: input.height }
@@ -82,7 +68,7 @@ async function captureElectronDisplay(input: CaptureInput): Promise<ComputerUseD
   return { png: source.thumbnail.toPNG(), width: size.width, height: size.height }
 }
 
-/** Capture the display with the Computer Use PiP excluded at the native source. */
+/** Capture the display, including the visible Computer Use PiP. */
 export async function captureComputerUseDisplay(
   input: CaptureInput
 ): Promise<ComputerUseDisplayCapture> {

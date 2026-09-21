@@ -9,6 +9,7 @@ const PROBE = path.join(REPO_ROOT, 'scripts', 'probe-packaged-helpers.mjs')
 const CAN_COMPILE_NATIVE = process.platform === 'darwin' && fs.existsSync('/usr/bin/clang')
 const HELPER_PATHS = [
   'bin/llama/llama-server',
+  'bin/llama-prism/llama-server',
   'bin/ffmpeg',
   'bin/whisper/whisper-cli',
   'bin/computer-use-capture',
@@ -44,7 +45,7 @@ int main(int argc, char **argv) {
   if (strcmp(name, "llama-server") == 0) puts("----- common params -----\n-h, --help, --usage    print usage and exit\n-t, --threads N    number of CPU threads (env: LLAMA_ARG_THREADS)");
   else if (strcmp(name, "ffmpeg") == 0) puts("ffmpeg version 6.0-fixture");
   else if (strcmp(name, "whisper-cli") == 0) puts("usage: whisper-cli [options] file\noptions:");
-  else if (strcmp(name, "computer-use-capture") == 0) puts("usage: computer-use-capture <output.png> <display-id> <excluded-window-id> <width> <height>");
+  else if (strcmp(name, "computer-use-capture") == 0) puts("usage: computer-use-capture <output.png> <display-id> <width> <height>");
   else if (strcmp(name, "sd-server") == 0) puts("stable-diffusion.cpp version fixture\nUsage: sd-server [options]");
   else if (strcmp(name, "sd-cli") == 0) puts("stable-diffusion.cpp version fixture\nUsage: sd-cli [options]");
   else return 64;
@@ -111,12 +112,13 @@ describe.skipIf(!CAN_COMPILE_NATIVE)('packaged native helper execution probe', (
         'computer-use-capture',
         'ffmpeg',
         'llama-server',
+        'llama-server',
         'sd-cli',
         'sd-server',
         'whisper-cli'
       ].sort()
     )
-    expect(result.stdout).toContain('6 packaged helpers executed successfully')
+    expect(result.stdout).toContain('7 packaged helpers executed successfully')
   })
 
   it('resolves a supplied relative app path before changing helper working directories', () => {
@@ -125,7 +127,7 @@ describe.skipIf(!CAN_COMPILE_NATIVE)('packaged native helper execution probe', (
     const result = runProbe(path.basename(app), {}, root)
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
-    expect(result.stdout).toContain('6 packaged helpers executed successfully')
+    expect(result.stdout).toContain('7 packaged helpers executed successfully')
   })
 
   it('rejects a missing mandatory helper before claiming the package is usable', () => {
