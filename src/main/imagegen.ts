@@ -37,7 +37,12 @@ import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
-import { hasMlmodelc, isZImageModel, isQuantizedModel } from './imagegen/runtime-detect'
+import {
+  hasMlmodelc,
+  isQwenImage21Model,
+  isZImageModel,
+  isQuantizedModel
+} from './imagegen/runtime-detect'
 import {
   isImageModelFile,
   hasCheckpointExt,
@@ -47,6 +52,7 @@ import {
 import { evaluateMemoryGuard } from './imagegen/memory-guard'
 import {
   buildCoreMLArgs,
+  buildQwenImage21Args,
   buildZImageArgs,
   buildStandardArgs,
   DEFAULT_NEGATIVE
@@ -580,9 +586,10 @@ export async function generateImage(
     prompt: enhanced,
     steps: params.steps ?? modelParameters?.steps,
     cfgScale: params.cfgScale ?? modelParameters?.cfgScale,
-    // Keep source-derived dimensions for img2img when the caller did not choose a size.
-    width: params.width ?? (params.initImage ? undefined : modelParameters?.size),
-    height: params.height ?? (params.initImage ? undefined : modelParameters?.size)
+    // The selected model size is authoritative for both txt2img and img2img.
+    // Only fall back to source dimensions when no model size can be resolved.
+    width: params.width ?? modelParameters?.size,
+    height: params.height ?? modelParameters?.size
   }
   onUpdate?.({ stage: 'preparing', enhancedPrompt: enhanced })
   const progressObserver = onUpdate
@@ -751,13 +758,22 @@ async function runImageGen(
   // its footprint. Count the encoder + VAE too, or the guard waves through a
   // combo that then overflows unified memory and freezes the box.
   const zImageStack = isZImageModel(path.basename(model))
+  const qwenImageStack = isQwenImage21Model(path.basename(model))
   const guard = evaluateMemoryGuard({
     totalGb,
     modelSizeGb: safeSizeGb(model),
     coreml,
     zImageStack,
     zEncoderGb: zImageStack ? safeSizeGb(findInModels(/qwen3-4b-instruct.*\.gguf$/i)) : 0,
-    zVaeGb: zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0
+    zVaeGb: zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0,
+    qwenImageStack,
+    qwenEncoderGb: qwenImageStack ? safeSizeGb(findInModels(/^Qwen3VL-8B-Instruct-.*\.gguf$/i)) : 0,
+    qwenVisionGb: qwenImageStack
+      ? safeSizeGb(findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i))
+      : 0,
+    qwenVaeGb: qwenImageStack
+      ? safeSizeGb(findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i))
+      : 0
   })
   if (guard.overBudget && !params.allowUnsafeMemoryOverride) {
     throw new Error(
@@ -796,6 +812,7 @@ async function runImageGen(
 
   const base = path.basename(model)
   const isZImage = isZImageModel(base)
+  const isQwenImage21 = isQwenImage21Model(base)
 
   // --- RESIDENT fast path (opt-in) --------------------------------------------
   // When the user sets image residency to 'resident', a plain full-checkpoint
@@ -812,6 +829,7 @@ async function runImageGen(
     !onProgress &&
     !coreml &&
     !isZImage &&
+    !isQwenImage21 &&
     !loras.length &&
     !params.initImage &&
     ggufIsFullCheckpoint(model)
@@ -915,6 +933,36 @@ async function runImageGen(
       seed,
       threads,
       previewArgs
+    })
+  } else if (isQwenImage21) {
+    const llm = findInModels(/^Qwen3VL-8B-Instruct-(?!mmproj).*\.gguf$/i)
+    const llmVision = findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i)
+    const vae = findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i)
+    if (!llm)
+      throw new Error(
+        'Qwen-Image 2.1 text encoder (Qwen3-VL-8B-Instruct) not found — download the complete model from Models.'
+      )
+    if (!llmVision && params.initImage)
+      throw new Error(
+        'Qwen-Image 2.1 vision projector not found — download the complete model from Models.'
+      )
+    if (!vae)
+      throw new Error('Qwen-Image 2.1 VAE not found — download the complete model from Models.')
+    args = buildQwenImage21Args({
+      model,
+      llm,
+      llmVision: llmVision ?? '',
+      vae,
+      prompt: params.prompt,
+      outPath,
+      width: params.width,
+      height: params.height,
+      steps: params.steps,
+      cfgScale: params.cfgScale,
+      seed,
+      threads,
+      previewArgs,
+      initImage: params.initImage
     })
   } else {
     // Full checkpoint → load with -m. UNET-only quant → load the diffusion model

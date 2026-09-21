@@ -102,6 +102,11 @@ export async function runVisionPolicyRequest(
   signal?: AbortSignal,
   onReasoningDelta?: (text: string) => void
 ): Promise<VisionPolicyResponse> {
+  if (request.unsupportedSamplingFields?.length) {
+    console.warn(
+      `[vision-policy] unsupported recommended sampling fields: ${request.unsupportedSamplingFields.join(', ')}`
+    )
+  }
   let lastError: unknown
   let priorInvalidAnswer: string | undefined
   let priorValidationError: string | undefined
@@ -131,6 +136,10 @@ export async function runVisionPolicyRequest(
             {
               temperature: request.temperature,
               topP: request.topP,
+              topK: request.topK,
+              minP: request.minP,
+              presencePenalty: request.presencePenalty,
+              repeatPenalty: request.repeatPenalty,
               thinking: request.enableThinking === true && request.disableThinking !== true,
               responseFormat: request.responseFormat,
               tools: request.tools,
@@ -142,6 +151,10 @@ export async function runVisionPolicyRequest(
             content: await llm.chatMessages(messages, undefined, undefined, {
               temperature: request.temperature,
               topP: request.topP,
+              topK: request.topK,
+              minP: request.minP,
+              presencePenalty: request.presencePenalty,
+              repeatPenalty: request.repeatPenalty,
               responseFormat: request.responseFormat,
               enableThinking: request.enableThinking,
               disableThinking: request.disableThinking,

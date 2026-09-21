@@ -35,6 +35,7 @@ vi.mock('electron', () => ({
 const IMAGE_MODEL = 'navigation-image-fixture.safetensors'
 const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111'
 const MESSAGE_ID = '22222222-2222-4222-8222-222222222222'
+const INIT_IMAGE = path.join(fixture.dataDir, 'comic-hero.png')
 const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
@@ -62,6 +63,10 @@ setTimeout(() => fs.writeFileSync(output, Buffer.from('${PNG_BASE64}', 'base64')
 
   const database = await import('../database')
   database.saveSetting('enhanceImagePrompts', false)
+  database.saveSetting('imageParams', {
+    [IMAGE_MODEL]: { size: 512, steps: 4 }
+  })
+  fs.writeFileSync(INIT_IMAGE, Buffer.from(PNG_BASE64, 'base64'))
   jobs = (await import('../imagegen/job-service')).imageGenerationJobs
 })
 
@@ -85,9 +90,7 @@ describe('image generation across feature navigation', () => {
       conversationId: CONVERSATION_ID,
       projectId: 'project-navigation',
       seed: 91,
-      width: 512,
-      height: 512,
-      steps: 4
+      initImage: INIT_IMAGE
     })
     expect(jobs.status()).toMatchObject({
       phase: 'running',
@@ -101,6 +104,7 @@ describe('image generation across feature navigation', () => {
 
     const image = await generation
     expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+    expect(image).toMatchObject({ width: 512, height: 512, steps: 4 })
     expect(firstScreen).not.toContain('succeeded')
     expect(returnedScreen).toContain('succeeded')
     expect(jobs.status()).toMatchObject({

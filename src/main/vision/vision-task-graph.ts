@@ -345,9 +345,11 @@ class VisionTaskGraphRuntime {
   private previousExpectedEffect?: string
   private pendingActionEvidence?: ScreenEvidence
   private pendingExpectedEffect?: string
+  private consecutiveCaptureFailures = 0
   private mustRethink = false
   private handoffs = 0
   private modelStep = 0
+  private actionsInPhase = 0
   /**
    * The plan phase this run is working on.
    *
@@ -471,6 +473,7 @@ class VisionTaskGraphRuntime {
       .join('\n\n')
     try {
       const shot = await this.deps.screen.capture()
+      this.consecutiveCaptureFailures = 0
       const evidence = await screenEvidence(shot)
       if (this.pendingActionEvidence) {
         const measurement = actionEffect(
@@ -480,6 +483,12 @@ class VisionTaskGraphRuntime {
         )
         this.previousActionEffect = measurement.effect
         this.previousExpectedEffect = this.pendingExpectedEffect
+        const trajectoryStep = this.policyHistory.at(-1)
+        if (trajectoryStep) {
+          trajectoryStep.result = this.previousExpectedEffect
+            ? `Fresh observation captured. Expected state: ${this.previousExpectedEffect}. Mechanical change check: ${measurement.effect}. The model must verify whether the expected state is visible; unrelated change is inconclusive.`
+            : `Fresh observation captured. Mechanical change check: ${measurement.effect}.`
+        }
         this.note(`action effect: ${this.previousActionEffect}`)
         console.log('[vision][verification] action effect', {
           action: this.previousVerifiedAction?.action.type,
@@ -524,7 +533,14 @@ class VisionTaskGraphRuntime {
         error: message
       })
       if (error instanceof RecoverableVisionError) {
+        this.consecutiveCaptureFailures += 1
         this.note(`rejected observation: ${message}`)
+        if (this.consecutiveCaptureFailures >= MAX_CONSECUTIVE_RETHINKS) {
+          const failure = `Computer use could not refresh the target after ${MAX_CONSECUTIVE_RETHINKS} attempts: ${message}`
+          this.progress('failed', failure)
+          this.finish(false, failure)
+          return { route: 'end' }
+        }
         this.progress('checking', 'Refreshing the browser observation')
         this.checkpoint()
         return { route: 'gate' }
@@ -574,6 +590,7 @@ class VisionTaskGraphRuntime {
       this.pendingPolicyHistory = {
         response: grounding.response,
         actionText: this.decision.actionText,
+        ...(this.currentReasoning ? { reasoning: this.currentReasoning } : {}),
         ...(grounding.screenshotDataUrl ? { screenshotDataUrl: grounding.screenshotDataUrl } : {})
       }
       return { route: 'handle_decision' }
@@ -637,6 +654,7 @@ class VisionTaskGraphRuntime {
     this.policyHistory.length = 0
     this.pendingPolicyHistory = undefined
     this.phaseIndex += 1
+    this.actionsInPhase = 0
     const next = this.deps.plan?.phases[this.phaseIndex]
     this.continuation = boundedContinuationCapsule(
       {
@@ -647,6 +665,15 @@ class VisionTaskGraphRuntime {
       this.visualHistoryFrames
     )
     this.reportPhase(this.phaseIndex)
+    if (this.deps.returnAfterPhase) {
+      this.finalResult = {
+        ok: true,
+        summary: 'Vision completed the active milestone. Returning to accessibility control.',
+        steps: [...this.steps],
+        handoffs: this.handoffs
+      }
+      return { route: 'end' }
+    }
     return { route: 'gate' }
   }
 
@@ -689,13 +716,16 @@ class VisionTaskGraphRuntime {
         this.progress('checking', 'Taking a fresh observation and choosing a different action')
         return { route: 'gate' }
       }
-      const repeatedClick = decision.actions.find((action) =>
-        isEquivalentClickTarget(
-          action,
-          coordinateFrame(this.requireCaptured().shot),
-          this.previousVerifiedAction
-        )
-      )
+      const repeatedClick =
+        this.previousActionEffect === 'confirmed'
+          ? undefined
+          : decision.actions.find((action) =>
+              isEquivalentClickTarget(
+                action,
+                coordinateFrame(this.requireCaptured().shot),
+                this.previousVerifiedAction
+              )
+            )
       if (repeatedClick) {
         this.equivalentClickRecoveries += 1
         const summary = `Repeated click region blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where the earlier attempt landed.`
@@ -723,6 +753,9 @@ class VisionTaskGraphRuntime {
       return { route: 'execute' }
     }
     if (decision.kind === 'phase_complete') {
+      if (this.blockUnactedMilestoneCompletion() || this.blockMissingSeparatePreview()) {
+        return { route: 'gate' }
+      }
       this.consecutiveRethinks = 0
       this.discardPendingPolicyHistory()
       this.observeDecision('terminal')
@@ -787,6 +820,9 @@ class VisionTaskGraphRuntime {
       return { route: 'gate' }
     }
     if (decision.kind === 'done' && this.deps.plan?.phases.length) {
+      if (this.blockUnactedMilestoneCompletion() || this.blockMissingSeparatePreview()) {
+        return { route: 'gate' }
+      }
       // The execution plan is the task lifecycle SSOT. A model-level `done`
       // verdict is stronger than completion of the current milestone, but it
       // must not skip the remaining visible checks or release the specialist.
@@ -802,6 +838,77 @@ class VisionTaskGraphRuntime {
     this.checkpoint()
     this.finish(decision.kind === 'done', decision.summary)
     return { route: 'end' }
+  }
+
+  private blockMissingSeparatePreview(): boolean {
+    const currentPhase = this.deps.plan?.phases[this.phaseIndex]
+    const requiredWindowTarget =
+      /\bseparate\s+preview\s+window\b[^.!?]*?\bfor\s+(.+)$/iu.exec(
+        currentPhase?.title ?? ''
+      )?.[1]?.trim() ?? ''
+    if (!requiredWindowTarget) return false
+
+    const currentWindowTitle = this.captured?.shot.metadata?.windowTitle?.trim() ?? ''
+    const requiredTitleWords = requiredWindowTarget
+      .toLocaleLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(
+        (word) =>
+          word.length >= 3 &&
+          !['entry', 'file', 'font', 'item', 'preview', 'row', 'view', 'window'].includes(word)
+      )
+    const normalizedWindowTitle = currentWindowTitle.toLocaleLowerCase()
+    if (
+      currentWindowTitle &&
+      requiredTitleWords.length > 0 &&
+      requiredTitleWords.every((word) => normalizedWindowTitle.includes(word))
+    ) {
+      return false
+    }
+
+    this.consecutiveRethinks += 1
+    const summary = currentWindowTitle
+      ? `The separate preview window is not open. The current window title is ${JSON.stringify(currentWindowTitle)}.`
+      : 'The separate preview window is not confirmed by the native window title.'
+    this.taskBrief.accept([
+      `${summary} Do not complete this milestone from an inline details pane. Open the separate preview window or Quick Look view for ${requiredWindowTarget}.`
+    ])
+    this.discardPendingPolicyHistory()
+    this.observeDecision('blocked', summary)
+    this.note(summary)
+    this.checkpoint()
+    this.progress('checking', 'Opening the required separate preview window')
+    return true
+  }
+
+  private blockUnactedMilestoneCompletion(): boolean {
+    const currentPhase = this.deps.plan?.phases[this.phaseIndex]
+    const title = currentPhase?.title ?? ''
+    const requiresAction =
+      /\b(?:change|choose|click|create|disable|enable|enter|open|press|remove|select|set|submit|switch|toggle|type)\b/iu.test(
+        title
+      )
+    if (
+      !requiresAction ||
+      (this.actionsInPhase > 0 && this.previousActionEffect === 'confirmed')
+    ) {
+      return false
+    }
+
+    this.consecutiveRethinks += 1
+    const summary =
+      this.actionsInPhase === 0
+        ? 'The milestone requires an action, but no action ran in this milestone.'
+        : `The milestone action is not confirmed. Its measured effect is ${this.previousActionEffect ?? 'unknown'}.`
+    this.taskBrief.accept([
+      `${summary} Seeing an available target is not completion. Perform the requested action and confirm its resulting state before completing ${JSON.stringify(title)}.`
+    ])
+    this.discardPendingPolicyHistory()
+    this.observeDecision('blocked', summary)
+    this.note(summary)
+    this.checkpoint()
+    this.progress('checking', 'Performing and confirming the required milestone action')
+    return true
   }
 
   async execute(): Promise<{ route: WorkflowRoute }> {
@@ -849,6 +956,7 @@ class VisionTaskGraphRuntime {
           action,
           coordinateFrame: coordinateFrame(captured.shot)
         }
+        this.actionsInPhase += 1
         this.equivalentClickRecoveries = 0
         this.duplicateTypeRecoveries = 0
         if (actuation?.mappedAction) mappedActions.push(actuation.mappedAction)

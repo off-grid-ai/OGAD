@@ -1,6 +1,7 @@
 import { llm } from '../llm'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { DECIDER_2B, listInstalled, loadComputerUseModel } from '../models-manager'
+import { decisionRuntime, DecisionRuntimeError } from './decision-runtime'
 import type { OptionDecision } from '../llm'
 import { parseRemoteVisionModelId } from '../../shared/remote-vision-server'
 import {
@@ -10,6 +11,8 @@ import {
 import { getRemoteVisionServerForModel } from '../vision/remote-vision-server'
 import { decideWithOpenRouter, usesOpenRouterDecisions } from './remote-decision'
 
+let swapFallbackActive = false
+
 export function selectedDecisionModelId(): string {
   return getComputerUseSettings().decisionModelId ?? DECIDER_2B.id
 }
@@ -18,27 +21,43 @@ export function selectedDecisionModelId(): string {
  * shared llama.cpp process to the saved Chat model before vision recovery. */
 export async function withDecisionModel<T>(task: () => Promise<T>): Promise<T> {
   const modelId = selectedDecisionModelId()
-  if (getRemoteVisionServerForModel(modelId, 'decision')) return task()
+  const remote = getRemoteVisionServerForModel(modelId, 'decision')
+  // Each remote decision binds only its own request. Keep the outer task bound
+  // to Chat so reasoning recovery does not accidentally use the Decider.
+  if (remote) return task()
   if (!(await listInstalled()).includes(modelId)) {
     throw new Error(
       `The selected Decision model is not downloaded: ${modelId}. Download it from the Computer Use catalog first.`
     )
   }
-  const alreadyLoaded = llm.activeModelInfo()?.id === modelId
-  if (!alreadyLoaded) {
-    const loaded = await loadComputerUseModel(modelId)
-    if (!loaded.success) {
-      throw new Error(loaded.error ?? 'The Decision model could not load.')
+  try {
+    await decisionRuntime.start(modelId)
+  } catch (error) {
+    if (!(error instanceof DecisionRuntimeError) || error.code !== 'out_of_memory') throw error
+    console.warn(
+      '[computer-use] dedicated Decision runtime out of memory; using explicit swap fallback'
+    )
+    const alreadyLoaded = llm.activeModelInfo()?.id === modelId
+    if (!alreadyLoaded) {
+      const loaded = await loadComputerUseModel(modelId)
+      if (!loaded.success) throw new Error(loaded.error ?? 'The Decision model could not load.')
+      await llm.restart()
     }
-    await llm.restart()
+    try {
+      swapFallbackActive = true
+      return await task()
+    } finally {
+      swapFallbackActive = false
+      if (!alreadyLoaded) {
+        llm.restoreSelectedModel()
+        await llm.restart()
+      }
+    }
   }
   try {
     return await task()
   } finally {
-    if (!alreadyLoaded) {
-      llm.restoreSelectedModel()
-      await llm.restart()
-    }
+    await decisionRuntime.shutdown()
   }
 }
 
@@ -118,8 +137,7 @@ export async function decideWithDecisionModel(
   context: string,
   question: string,
   options: readonly string[],
-  signal?: AbortSignal,
-  screenshotPath?: string
+  signal?: AbortSignal
 ): Promise<OptionDecision> {
   const selected = selectedDecisionModelId()
   if (parseRemoteVisionModelId(selected)) {
@@ -127,24 +145,33 @@ export async function decideWithDecisionModel(
     if (!remote) throw new Error('The selected remote Decision model is not available.')
     return decideWithRemoteModel(remote, context, question, options, signal)
   }
-  return llm.decideOptions(context, question, options, signal, screenshotPath)
+  if (decisionRuntime.running) return decisionRuntime.decide(context, question, options, signal)
+  if (swapFallbackActive) return llm.decideOptions(context, question, options, signal)
+  throw new DecisionRuntimeError(
+    'The dedicated Decision runtime stopped before selection.',
+    'startup'
+  )
 }
 
 /** Temporarily yield the shared llama.cpp process to the saved reasoning model
  * while an active Decision-model AX loop performs one visual recovery action. */
 export async function withReasoningModel<T>(task: () => Promise<T>): Promise<T> {
+  if (decisionRuntime.running) return task()
   const modelId = selectedDecisionModelId()
   const decisionModelLoaded = llm.activeModelInfo()?.id === modelId
   if (!decisionModelLoaded) return task()
   llm.restoreSelectedModel()
   await llm.restart()
+  let result: T | undefined
+  let taskError: unknown
   try {
-    return await task()
-  } finally {
-    const loaded = await loadComputerUseModel(modelId)
-    if (!loaded.success) {
-      throw new Error(loaded.error ?? 'The Decision model could not resume.')
-    }
-    await llm.restart()
+    result = await task()
+  } catch (error) {
+    taskError = error
   }
+  const loaded = await loadComputerUseModel(modelId)
+  if (!loaded.success) throw new Error(loaded.error ?? 'The Decision model could not resume.')
+  await llm.restart()
+  if (taskError !== undefined) throw taskError
+  return result as T
 }

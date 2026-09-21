@@ -40,6 +40,109 @@ function imageFrom(request: VisionPolicyRequest): string {
 }
 
 describe('Text + Specialist visual task journey', () => {
+  it('projects the implicit Chat reasoner in Decision + Specialist Computer Use', async () => {
+    const dependencies: VisionTaskModelStrategyDependencies = {
+      strategy: () => 'decision_plus_specialist',
+      activeArtifacts: () => null,
+      activeRemote: () => null,
+      selectedChatId: () => 'chat/reasoner',
+      selectedSpecialistId: () => 'vision/specialist',
+      selectedDecisionId: () => 'decision/selector',
+      resolveIdentity: async (modelId) => ({ modelId, modelName: modelId }),
+      withSpecialist: async (task) => ({ result: await task() }),
+      runReasoner: async () => ({ content: '', toolCalls: [], finishReason: 'stop' })
+    }
+
+    await expect(getComputerUseActiveModelProjection(dependencies)).resolves.toEqual({
+      strategy: 'decision_plus_specialist',
+      strategyLabel: 'Decision + Reasoning + Specialist',
+      models: [
+        {
+          role: 'decision',
+          modelId: 'decision/selector',
+          modelName: 'decision/selector',
+          remote: false
+        },
+        {
+          role: 'reasoner',
+          modelId: 'chat/reasoner',
+          modelName: 'chat/reasoner',
+          remote: false
+        },
+        {
+          role: 'grounding_specialist',
+          modelId: 'vision/specialist',
+          modelName: 'vision/specialist',
+          remote: false
+        }
+      ]
+    })
+  })
+
+  it('keeps Bonsai and the configured specialist as separate hybrid roles', async () => {
+    const bonsai = {
+      id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
+      primaryFile: 'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      projectorFile: 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf',
+      availableFiles: ['Ternary-Bonsai-2-27B-PQ2_0.gguf', 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf']
+    }
+    const dependencies: VisionTaskModelStrategyDependencies = {
+      strategy: () => 'text_plus_specialist',
+      activeArtifacts: () => bonsai,
+      activeRemote: () => null,
+      selectedChatId: () => bonsai.id,
+      selectedSpecialistId: () => 'specialist/model',
+      resolveIdentity: async (modelId) => ({ modelId, modelName: modelId }),
+      withSpecialist: async (task) => ({ result: await task() }),
+      runReasoner: async () => ({
+        content: '',
+        toolCalls: [
+          {
+            id: 'completion-1',
+            name: 'complete_milestone',
+            arguments: JSON.stringify({
+              summary: 'The requested result is visible.',
+              visible_evidence: 'The result is visible.',
+              continuation: { done: [], current: 'Confirm the result', next: [], irreversible: [] }
+            })
+          }
+        ],
+        finishReason: 'tool_calls'
+      })
+    }
+
+    const selected = await withVisionTaskModelStrategy(
+      'desktop',
+      async (session) => ({
+        adapterId: session.adapter.id,
+        identity: session.identity
+      }),
+      dependencies
+    )
+    const projection = await getComputerUseActiveModelProjection(dependencies)
+
+    expect(selected).toEqual({
+      adapterId: 'general-vision-operator',
+      identity: {
+        modelId: `${bonsai.id} + specialist/model`,
+        modelName: `${bonsai.id} + specialist/model`
+      }
+    })
+    expect(projection).toEqual({
+      strategy: 'text_plus_specialist',
+      strategyLabel: 'Reasoning + Specialist',
+      models: [
+        { role: 'reasoner', modelId: bonsai.id, modelName: bonsai.id, remote: false },
+        {
+          role: 'grounding_specialist',
+          modelId: 'specialist/model',
+          modelName: 'specialist/model',
+          remote: false
+        }
+      ]
+    })
+  })
+
   it('turns one public URL decision into one deterministic navigation action', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-hybrid-navigation-'))
     tempDirs.push(directory)

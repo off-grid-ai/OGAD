@@ -18,9 +18,11 @@ import { preloadPath } from '../preload-path'
 import { rendererHtmlPath } from '../renderer-path'
 
 const MIN_WIN_WIDTH = 360
-const MIN_WIN_HEIGHT = 480
+const COLLAPSED_WIN_HEIGHT = 130
+const EXPANDED_WIN_HEIGHT = 480
+const MIN_WIN_HEIGHT = COLLAPSED_WIN_HEIGHT
 const WIN_WIDTH = MIN_WIN_WIDTH
-const WIN_HEIGHT = MIN_WIN_HEIGHT
+const WIN_HEIGHT = COLLAPSED_WIN_HEIGHT
 const MARGIN = 24
 let supervisor: BrowserWindow | null = null
 let supervisorCaptureWindowId: number | null = null
@@ -130,6 +132,18 @@ export function dismissSupervisorWindow(): void {
   if (supervisor && !supervisor.isDestroyed()) supervisor.hide()
 }
 
+/** Resize the PiP without moving its bottom edge away from the screen corner. */
+export function setSupervisorExpanded(expanded: boolean): boolean {
+  if (!supervisor || supervisor.isDestroyed()) return false
+  const bounds = supervisor.getBounds()
+  const area = screen.getDisplayMatching(bounds).workArea
+  const height = expanded ? EXPANDED_WIN_HEIGHT : COLLAPSED_WIN_HEIGHT
+  const bottom = bounds.y + bounds.height
+  const y = Math.max(area.y, Math.min(bottom - height, area.y + area.height - height))
+  supervisor.setBounds({ ...bounds, y, height }, true)
+  return true
+}
+
 /** Hide the supervisor window after a short delay, so the final state (done /
  *  failed + summary) is readable before it disappears. */
 export function hideSupervisorWindow(delayMs = 4000): void {
@@ -154,4 +168,7 @@ export function registerSupervisorWindowIpc(): void {
     dismissSupervisorWindow()
     return true
   })
+  ipcMain.handle('vision:supervisor:set-expanded', (_event, expanded: boolean) =>
+    setSupervisorExpanded(expanded)
+  )
 }

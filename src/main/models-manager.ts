@@ -163,9 +163,7 @@ export const DECIDER_2B_VISION: ModelEntry = {
 export async function desktopCatalog(): Promise<ModelEntry[]> {
   const { CATALOG } = await import('@offgrid/models')
   const catalog = CATALOG.map((model) =>
-    model.grounder
-      ? { ...model, tags: [...new Set(['Specialist', ...(model.tags ?? [])])] }
-      : model
+    model.grounder ? { ...model, tags: [...new Set(['Specialist', ...(model.tags ?? [])])] } : model
   )
   return [BONSAI_2, DECIDER_2B, DECIDER_2B_VISION, ...catalog]
 }
@@ -308,6 +306,47 @@ export async function listInstalled(): Promise<string[]> {
   return [...localInstalled, ...remoteInstalled]
 }
 
+export interface ComputerUseModelArtifact {
+  id: string
+  primaryPath: string
+  projectorPath?: string
+}
+
+/** Resolve one installed Decision artifact without changing active-model.json or the Chat runtime. */
+export async function resolveComputerUseModelArtifact(
+  modelId: string
+): Promise<ComputerUseModelArtifact | null> {
+  const catalog = (await desktopCatalog()) as unknown as CatalogEntry[]
+  const directory = llm.getModelsDir()
+  const entry = catalog.find((candidate) => candidate.id === modelId)
+  if (entry && entry.kind === 'computer_use') {
+    const primary = primaryFileName(entry)
+    const projector = entry.files.find((file) => file.role === 'mmproj')?.name
+    if (!primary || fileSizeOf(directory, primary) <= 0) return null
+    if (projector && fileSizeOf(directory, projector) <= 0) return null
+    return {
+      id: modelId,
+      primaryPath: path.join(directory, primary),
+      ...(projector ? { projectorPath: path.join(directory, projector) } : {})
+    }
+  }
+  const downloaded = downloadedVariant(
+    reconcileDownloadedModelRegistry(directory, catalog),
+    modelId
+  )
+  if (!downloaded || downloaded.kind !== 'computer_use') return null
+  const primary = downloadedPrimary(downloaded)
+  const projector = downloadedProjector(downloaded)
+  if (!primary || fileSizeOf(directory, primary) <= 0) return null
+  return {
+    id: downloaded.id,
+    primaryPath: path.join(directory, primary),
+    ...(projector && fileSizeOf(directory, projector) > 0
+      ? { projectorPath: path.join(directory, projector) }
+      : {})
+  }
+}
+
 export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
   try {
     const { searchHuggingFace } = await import('@offgrid/models')
@@ -367,6 +406,18 @@ export async function downloadModel(
     if (!variant)
       return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
     const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
+    const catalogAuxFiles =
+      inCatalog?.files.filter((file) => file.role !== 'primary' && file.role !== 'mmproj') ?? []
+    const projectorFiles = variant.mmproj
+      ? [
+          {
+            name: variant.mmproj.fileName,
+            url: variant.mmproj.url,
+            sizeBytes: variant.mmproj.sizeBytes,
+            role: 'mmproj' as const
+          }
+        ]
+      : (inCatalog?.files.filter((file) => file.role === 'mmproj') ?? [])
     entry = {
       ...entry,
       files: [
@@ -377,16 +428,8 @@ export async function downloadModel(
           sha256: catalogFile?.sha256,
           role: 'primary'
         },
-        ...(variant.mmproj
-          ? [
-              {
-                name: variant.mmproj.fileName,
-                url: variant.mmproj.url,
-                sizeBytes: variant.mmproj.sizeBytes,
-                role: 'mmproj' as const
-              }
-            ]
-          : [])
+        ...projectorFiles,
+        ...catalogAuxFiles
       ]
     }
   }

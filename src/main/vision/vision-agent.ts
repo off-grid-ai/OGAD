@@ -23,6 +23,8 @@ export type { VisionActionEffect, VisionSemanticElement } from './vision-common-
 export interface VisionCaptureMetadata {
   path?: string
   geometry?: ScreenshotGeometry
+  /** Native title of the captured target window, when accessibility provides it. */
+  windowTitle?: string
   /** CSS-pixel bounds used by browser input for this captured frame. */
   viewport?: Bounds
   /** Optional OS accessibility controls captured with this same frame. */
@@ -46,6 +48,8 @@ export interface VisionTaskContinuation {
   queuedGuidance: string[]
   /** Return to the owning accessibility loop after one successful visual action. */
   returnAfterAction?: boolean
+  /** Return to the owning accessibility loop after the active milestone is complete. */
+  returnAfterPhase?: boolean
 }
 
 /** A screen can request a fresh observation when its capture boundary changed
@@ -181,6 +185,8 @@ export interface VisionTaskDeps {
   maxPlanningSteps?: number
   /** Recovery mode: stop after one successful action without completing the shared task. */
   returnAfterAction?: boolean
+  /** Recovery mode: keep visual control until the active milestone is complete. */
+  returnAfterPhase?: boolean
   plan?: TaskExecutionPlan
   onPhase?: (phaseId: string) => void
   /** The trace this run is resuming from, so a retry restarts at the phase it reached instead of

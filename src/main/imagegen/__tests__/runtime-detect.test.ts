@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { hasMlmodelc, isZImageModel, isQuantizedModel, isMfluxModelId } from '../runtime-detect'
+import {
+  hasMlmodelc,
+  isQwenImage21Model,
+  isZImageModel,
+  isQuantizedModel,
+  isMfluxModelId
+} from '../runtime-detect'
 
 describe('hasMlmodelc', () => {
   it('true when a directory listing contains a .mlmodelc resource', () => {
@@ -27,6 +33,16 @@ describe('isZImageModel', () => {
   })
   it('false for an unrelated checkpoint', () => {
     expect(isZImageModel('dreamshaper-xl.gguf')).toBe(false)
+  })
+})
+
+describe('isQwenImage21Model', () => {
+  it('matches the upstream GGUF filename spellings', () => {
+    expect(isQwenImage21Model('qwen_image_2.1-Q4_K.gguf')).toBe(true)
+    expect(isQwenImage21Model('Qwen-Image-2-1-Q8_0.gguf')).toBe(true)
+  })
+  it('does not match the earlier Qwen-Image family', () => {
+    expect(isQwenImage21Model('qwen-image-Q4_K.gguf')).toBe(false)
   })
 })
 

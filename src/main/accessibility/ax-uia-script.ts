@@ -16,7 +16,7 @@
 /** Single-quote a value for a PowerShell string literal (embedded quotes doubled).
  *  This is the injection boundary: an app name is only ever a quoted literal. */
 export function psQuote(value: string): string {
-  return `'${String(value ?? '').replace(/'/g, "''")}'`
+  return `'${String(value).replace(/'/g, "''")}'`
 }
 
 /** `--apps`: one display name per line for every app that owns a foreground window. */
@@ -54,6 +54,12 @@ if (-not $proc) { exit }
 $root = [System.Windows.Automation.AutomationElement]::FromHandle($proc.MainWindowHandle)
 if (-not $root) { exit }
 Write-Output ('[WINDOW_TITLE] ' + $root.Current.Name)
+$wr = $root.Current.BoundingRectangle
+$windowContext = [ordered]@{
+  pid=$proc.Id; process=$proc.ProcessName; windowId=([string]$proc.MainWindowHandle);
+  windowX=[int]$wr.X; windowY=[int]$wr.Y; windowW=[int]$wr.Width; windowH=[int]$wr.Height; revision=0
+}
+Write-Output ('[WINDOW_CONTEXT] ' + ($windowContext | ConvertTo-Json -Compress))
 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $stack = New-Object System.Collections.Stack
 $stack.Push($root)
@@ -74,7 +80,22 @@ while ($stack.Count -gt 0 -and $count -lt 400) {
           if ($vp) { $val = $vp.Current.Value }
         }
       } catch {}
-      $obj = [ordered]@{ role=$role; label=$c.Name; value=$val; x=[int]$r.X; y=[int]$r.Y; w=[int]$r.Width; h=[int]$r.Height; press=$press; enabled=$c.IsEnabled }
+      $checked = $null
+      try {
+        $tp = $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+        if ($tp) { $checked = ($tp.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) }
+      } catch {}
+      $selected = $null
+      try {
+        $sp = $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        if ($sp) { $selected = $sp.Current.IsSelected }
+      } catch {}
+      $hasPopup = $false
+      try {
+        $ep = $el.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        if ($ep) { $hasPopup = ($ep.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::LeafNode) }
+      } catch {}
+      $obj = [ordered]@{ role=$role; label=$c.Name; value=$val; x=[int]$r.X; y=[int]$r.Y; w=[int]$r.Width; h=[int]$r.Height; press=$press; enabled=$c.IsEnabled; focused=$c.HasKeyboardFocus; checked=$checked; selected=$selected; hasPopup=$hasPopup }
       Write-Output ($obj | ConvertTo-Json -Compress)
       $count++
     }

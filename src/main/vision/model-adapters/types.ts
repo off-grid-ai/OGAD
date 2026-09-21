@@ -12,6 +12,11 @@ export interface VisionModelArtifacts {
 export interface VisionPolicyHistoryStep {
   response: string
   actionText: string
+  /** Separated reasoning from the assistant turn. Qwen agent runs require this
+   * content to remain in the ordered trajectory instead of being discarded. */
+  reasoning?: string
+  /** Fresh-observation result for the action selected by this turn. */
+  result?: string
   /** Recent visual state. Older steps keep text only after the image window collapses. */
   screenshotDataUrl?: string
 }
@@ -84,6 +89,14 @@ export interface VisionPolicyRequest {
   toolChoice?: string
   temperature?: number
   topP?: number
+  topK?: number
+  minP?: number
+  presencePenalty?: number
+  repeatPenalty?: number
+  /** Recommended model fields that the active inference transport cannot send. */
+  unsupportedSamplingFields?: readonly string[]
+  /** Keep bounded ordered reasoning turns for model families whose tool policy depends on them. */
+  preserveThinking?: boolean
   /** Preserve the model's inline <think> protocol while explicitly enabling its template mode. */
   enableThinking?: boolean
   disableThinking?: boolean

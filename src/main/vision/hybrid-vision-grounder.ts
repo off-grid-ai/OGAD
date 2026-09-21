@@ -253,7 +253,9 @@ function fieldsWithContinuation(
   return Object.hasOwn(value, 'continuation') ? [...fields, 'continuation'] : fields
 }
 
-function optionalContinuation(value: Record<string, unknown>) {
+function optionalContinuation(
+  value: Record<string, unknown>
+): VisionContinuationCapsule | null | undefined {
   return Object.hasOwn(value, 'continuation')
     ? parseContinuationCapsule(value.continuation)
     : undefined
@@ -565,7 +567,8 @@ function taskContext(input: VisionPolicyInput, guidance: readonly string[]): str
 
 function reasonerRequest(
   input: VisionPolicyInput,
-  guidance: readonly string[]
+  guidance: readonly string[],
+  profile: 'default' | 'qwen3.8'
 ): VisionPolicyRequest {
   return {
     messages: [
@@ -583,8 +586,17 @@ function reasonerRequest(
       ? [ACCESSIBILITY_CLICK_TOOL, ...HYBRID_REASONER_TOOLS]
       : [...HYBRID_REASONER_TOOLS],
     toolChoice: 'required',
-    temperature: 0.1,
-    topP: 0.9,
+    temperature: profile === 'qwen3.8' ? 1 : 0.1,
+    topP: profile === 'qwen3.8' ? 0.95 : 0.9,
+    ...(profile === 'qwen3.8'
+      ? {
+          topK: 20,
+          minP: 0,
+          presencePenalty: 0,
+          repeatPenalty: 1,
+          preserveThinking: true
+        }
+      : {}),
     enableThinking: true,
     separateReasoning: true,
     validateResponse: (response) =>
@@ -653,6 +665,7 @@ export interface HybridVisionGrounderDependencies {
   ): Promise<VisionPolicyResponse>
   withSpecialist<T>(task: () => Promise<T>): Promise<{ result: T }>
   activeSpecialistAdapter(): VisionModelAdapter
+  reasonerProfile?: () => 'default' | 'qwen3.8'
 }
 
 /** Compose one text reasoner and one grounding specialist inside the existing
@@ -663,7 +676,11 @@ export function createHybridVisionGrounder(
 ): (input: VisionGroundingInput) => Promise<VisionGroundingResult> {
   return async (input) => {
     const prepared = await prepareVisionGrounding(input, environment)
-    const request = reasonerRequest(prepared.policyInput, input.guidance)
+    const request = reasonerRequest(
+      prepared.policyInput,
+      input.guidance,
+      dependencies.reasonerProfile?.() ?? 'default'
+    )
     const response = await dependencies.runReasoner(request, input.signal, input.reportReasoning)
     const outcome = reasonerOutcome(response, prepared.policyInput.semanticElements ?? [])
     const serializedReasoner = serializeVisionPolicyResponse(response)

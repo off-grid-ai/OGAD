@@ -10,6 +10,8 @@ const stageDir = path.join(root, 'resources', 'bin')
 const moduleCache = path.join(process.env.TMPDIR || '/tmp', 'offgrid-swift-module-cache')
 fs.mkdirSync(moduleCache, { recursive: true })
 
+/** @returns {boolean} */
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function electronCanLoadSqlite() {
   const require = createRequire(import.meta.url)
   const electronBinary = require('electron')
@@ -25,6 +27,8 @@ function electronCanLoadSqlite() {
   return result.status === 0
 }
 
+/** @returns {void} */
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function ensureElectronSqlite() {
   if (electronCanLoadSqlite()) return
 
@@ -47,6 +51,12 @@ ensureElectronSqlite()
 
 if (process.platform !== 'darwin') process.exit(0)
 
+/**
+ * @param {string} script
+ * @param {string} cwd
+ * @returns {void}
+ */
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 function run(script, cwd) {
   if (!fs.existsSync(script)) return
   const result = spawnSync('bash', [script, stageDir], {
@@ -65,5 +75,6 @@ function run(script, cwd) {
 run(path.join(root, 'scripts', 'build-keychain-bootstrap.sh'), root)
 run(path.join(root, 'scripts', 'build-location.sh'), root)
 run(path.join(root, 'scripts', 'build-computer-use-capture.sh'), root)
+run(path.join(root, 'scripts', 'build-ocr.sh'), root)
 run(path.join(root, 'scripts', 'build-actions-helper.sh'), root)
 run(path.join(root, 'pro', 'scripts', 'build-proximity-helper.sh'), path.join(root, 'pro'))

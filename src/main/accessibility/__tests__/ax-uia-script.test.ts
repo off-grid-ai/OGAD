@@ -33,8 +33,11 @@ describe('uiaElementsScript', () => {
     expect(script).toContain('AutomationElement]::FromHandle')
   })
 
-  it('emits the parseAxElements contract: [WINDOW_TITLE] + JSON with every field', () => {
+  it('emits the window-bound parseAxElements contract and exact element bounds', () => {
     expect(script).toContain("Write-Output ('[WINDOW_TITLE] '")
+    expect(script).toContain("Write-Output ('[WINDOW_CONTEXT] '")
+    expect(script).toContain('windowId=([string]$proc.MainWindowHandle)')
+    expect(script).toContain('windowW=[int]$wr.Width')
     expect(script).toContain('ConvertTo-Json -Compress')
     // Every field parseAxElements reads must be produced.
     for (const key of ['role', 'label', 'value', 'x', 'y', 'w', 'h', 'press', 'enabled']) {

@@ -88,9 +88,24 @@ func runTextExtractor() {
         runElementsExtractor(args[2])
         return
     }
+    // Deterministic native slider actuation. The screen point binds the write
+    // to the slider from the latest structured observation.
+    if args.count >= 6 && args[1] == "--set-slider-value",
+       let x = Double(args[3]),
+       let y = Double(args[4]),
+       let value = Double(args[5]) {
+        runSetSliderValue(args[2], x: x, y: y, value: value)
+        return
+    }
     // R5 T1d: the foreground running-app list for target resolution.
     if args.count >= 2 && args[1] == "--apps" {
         runAppsList()
+        return
+    }
+    // Execution-time ownership check for Computer Use. It emits only the
+    // foreground process name, so callers can fail closed before actuation.
+    if args.count >= 2 && args[1] == "--frontmost-app" {
+        runFrontmostAppName()
         return
     }
     // LaunchServices is the authority for the user's HTTPS browser; Dock icons
@@ -118,7 +133,7 @@ func runTextExtractor() {
         return
     }
     if args.count < 2 {
-        print("Usage: text-extractor <app-name> | --elements <app-name> | --focused-element")
+        print("Usage: text-extractor <app-name> | --elements <app-name> | --set-slider-value <app-name> <x> <y> <value> | --frontmost-app | --focused-element")
         exit(1)
     }
 

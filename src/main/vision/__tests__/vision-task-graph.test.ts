@@ -197,6 +197,42 @@ describe('runVisionTaskGraph', () => {
     expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'actuated', 'terminal'])
   })
 
+  it('returns expected-state verification evidence to the same operator on a fresh observation', async () => {
+    const seen: Array<{
+      expected?: string
+      result?: string
+      historyLength: number
+    }> = []
+    const expectedAction: VisionPolicyDecision = {
+      kind: 'actions',
+      actionText: 'Click the visible control',
+      actions: [{ type: 'click', point: { x: 100, y: 295 } }],
+      decisionRationale: 'The point is visibly inside the named control.',
+      expectedEffect: 'The result panel is visible.'
+    }
+    const decisions: VisionPolicyDecision[] = [expectedAction, complete(), complete()]
+    const graph = workflow(decisions)
+    graph.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Open the result' }] }
+    graph.deps.decide = async (input) => {
+      seen.push({
+        expected: input.previousExpectedEffect,
+        result: input.policyHistory.at(-1)?.result,
+        historyLength: input.policyHistory.length
+      })
+      return { response: `decision-${seen.length}`, modelInput: 'one visual request' }
+    }
+
+    const result = await runVisionTaskGraph('Open the visible result.', graph.deps)
+
+    expect(result.ok).toBe(true)
+    expect(seen[0]).toEqual({ expected: undefined, result: undefined, historyLength: 0 })
+    expect(seen[1]).toMatchObject({
+      expected: 'The result panel is visible.',
+      historyLength: 1,
+      result: expect.stringContaining('unrelated change is inconclusive')
+    })
+  })
+
   it('blocks a nearby repeated click and recovers with a different visible target', async () => {
     const w = workflow([
       action(),

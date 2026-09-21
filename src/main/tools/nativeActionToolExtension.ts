@@ -50,19 +50,10 @@ export interface NativeActionToolBoundary {
  * Computer Use return as soon as their durable task has started. */
 const OUTCOME_WAIT_MS = 30_000
 
-function taskGoalWithConversation(
-  goal: unknown,
-  context: ToolContext | undefined
-): string {
+function taskGoalWithConversation(goal: unknown, context: ToolContext | undefined): string {
   const summary = typeof goal === 'string' ? goal.trim() : ''
   const currentRequest = context?.userQuery?.trim() ?? ''
-  const priorTurns = (context?.history ?? [])
-    .filter((turn) => turn.content.trim())
-    .map(
-      (turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content.trim()}`
-    )
   const sections = [
-    priorTurns.length ? `Prior conversation:\n${priorTurns.join('\n')}` : '',
     currentRequest ? `Current user request (authoritative):\n${currentRequest}` : '',
     summary && summary.toLowerCase() !== 'placeholder' && summary !== currentRequest
       ? `Structured task summary:\n${summary}`

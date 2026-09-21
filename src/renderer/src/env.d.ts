@@ -228,6 +228,7 @@ interface RendererAPIOverrides {
     ) => Promise<boolean>
     showSupervisor: () => Promise<boolean>
     dismissSupervisor: () => Promise<boolean>
+    setSupervisorExpanded: (expanded: boolean) => Promise<boolean>
     getCurrent: () => Promise<{ state: unknown; steps: string[] } | null>
     onStep: (cb: (step: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void

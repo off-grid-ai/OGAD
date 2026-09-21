@@ -30,6 +30,7 @@ export interface VisionTaskState {
   journeyId?: string
   modelId?: string
   modelName?: string
+  rail?: 'accessibility' | 'vision'
   goal: string
   status: AutomationTaskReadStatus
   phase?: ComputerUsePhase
@@ -152,6 +153,7 @@ export class VisionController {
       journeyId: state.journeyId ?? previous?.journeyId ?? state.taskId,
       modelId: state.modelId ?? previous?.modelId,
       modelName: state.modelName ?? previous?.modelName,
+      rail: state.rail ?? previous?.rail,
       executionDeviceId: state.executionDeviceId ?? previous?.executionDeviceId ?? device.id,
       executionDeviceName:
         state.executionDeviceName ?? previous?.executionDeviceName ?? device.name,

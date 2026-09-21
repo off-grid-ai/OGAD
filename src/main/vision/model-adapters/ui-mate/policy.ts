@@ -310,6 +310,10 @@ function actionText(response: string): string {
   return response.match(/<action>\s*([\s\S]*?)\s*<\/action>/i)?.[1]?.trim() ?? ''
 }
 
+function invokedActionText(response: string): string {
+  return response.match(/<invoke\b[^>]*\bname=["']([^"']+)["'][^>]*>/i)?.[1]?.trim() ?? ''
+}
+
 const MAX_DECISION_RATIONALE_LENGTH = 320
 const SENSITIVE_RATIONALE_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   [/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[redacted]'],
@@ -477,12 +481,15 @@ export function parseUIMateResponse(
   response: string,
   viewport: { width: number; height: number }
 ): UIMateParsedResponse {
-  const summary = actionText(response)
+  const rawCalls = toolCalls(response)
+  const summary =
+    actionText(response) ||
+    invokedActionText(response) ||
+    (typeof rawCalls[0]?.action === 'string' ? rawCalls[0].action.replaceAll('_', ' ') : '')
   const decisionRationale = summarizeUIMateThinking(response)
   if (!summary) {
     return { actionText: '', actions: [], control: 'FAIL', decisionRationale }
   }
-  const rawCalls = toolCalls(response)
   if (rawCalls.length === 0) {
     return {
       actionText: summary,

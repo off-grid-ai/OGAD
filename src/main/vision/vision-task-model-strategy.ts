@@ -15,7 +15,10 @@ import {
   resolveVisionModelAdapter,
   resolveVisionModelAdapterForStrategy
 } from './model-adapters'
-import { generalVisionOperatorAdapter } from './model-adapters/general-vision-operator'
+import {
+  bonsaiVisionOperatorAdapter,
+  generalVisionOperatorAdapter
+} from './model-adapters/general-vision-operator'
 import type {
   VisionModelAdapter,
   VisionModelArtifacts,
@@ -83,7 +86,8 @@ async function projectedModel(
 
 /** Canonical read-only model-role projection for Active Models. */
 export async function getComputerUseActiveModelProjection(
-  dependencies: VisionTaskModelStrategyDependencies = productionDependencies
+  dependencies: VisionTaskModelStrategyDependencies = productionDependencies,
+  options: { decisionSpecialistUsesReasoner?: boolean } = {}
 ): Promise<ComputerUseActiveModelProjection> {
   const strategy = dependencies.strategy()
   const remote = dependencies.activeRemote()
@@ -118,18 +122,25 @@ export async function getComputerUseActiveModelProjection(
   if (strategy === 'decision_plus_specialist') {
     const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
     const remoteDecision = getRemoteVisionServerForModel(decisionModelId, 'decision')
+    const usesReasoner = options.decisionSpecialistUsesReasoner ?? true
+    const models: ComputerUseActiveModel[] = [
+      await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies)
+    ]
+    if (usesReasoner && chatModelId) {
+      models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
+    }
+    models.push(
+      await projectedModel(
+        'grounding_specialist',
+        specialistModelId,
+        Boolean(remoteSpecialist),
+        dependencies
+      )
+    )
     return {
       strategy,
-      strategyLabel: 'Decision + Specialist',
-      models: [
-        await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies),
-        await projectedModel(
-          'grounding_specialist',
-          specialistModelId,
-          Boolean(remoteSpecialist),
-          dependencies
-        )
-      ]
+      strategyLabel: usesReasoner ? 'Decision + Reasoning + Specialist' : 'Decision + Specialist',
+      models
     }
   }
   if (strategy === 'decision_plus_reasoning') {
@@ -160,11 +171,14 @@ export async function getComputerUseActiveModelProjection(
 
 /** Web Use has its own strategy settings but shares the installed model runtimes. */
 export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModelProjection> {
-  return getComputerUseActiveModelProjection({
-    ...productionDependencies,
-    strategy: () => getWebUseSettings().modelStrategy,
-    selectedDecisionId: () => getWebUseSettings().decisionModelId ?? selectedDecisionModelId()
-  })
+  return getComputerUseActiveModelProjection(
+    {
+      ...productionDependencies,
+      strategy: () => getWebUseSettings().modelStrategy,
+      selectedDecisionId: () => getWebUseSettings().decisionModelId ?? selectedDecisionModelId()
+    },
+    { decisionSpecialistUsesReasoner: false }
+  )
 }
 
 function activeChatSelection(
@@ -251,7 +265,11 @@ async function hybridSession(
     decide: createHybridVisionGrounder(environment, {
       runReasoner: dependencies.runReasoner,
       withSpecialist: dependencies.withSpecialist,
-      activeSpecialistAdapter: () => activeSpecialistSelection(dependencies).adapter
+      activeSpecialistAdapter: () => activeSpecialistSelection(dependencies).adapter,
+      reasonerProfile: () => {
+        const artifacts = dependencies.activeRemote() ? null : dependencies.activeArtifacts()
+        return artifacts && bonsaiVisionOperatorAdapter.matches(artifacts) ? 'qwen3.8' : 'default'
+      }
     })
   }
 }

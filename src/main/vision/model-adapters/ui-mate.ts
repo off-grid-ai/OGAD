@@ -182,7 +182,7 @@ function uiMateDecision(
   const actions =
     parsed.actions.length === 2 &&
     firstAction.type === 'mouse_move' &&
-    secondAction?.type === 'scroll_by'
+    (secondAction?.type === 'scroll_by' || secondAction?.type === 'drag_to')
       ? [firstAction, secondAction]
       : [firstAction]
   return {

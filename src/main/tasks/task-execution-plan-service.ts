@@ -4,6 +4,7 @@ import {
   TASK_PLAN_RESPONSE_FORMAT,
   encodeTaskExecutionPlan,
   fallbackTaskExecutionPlan,
+  groundTaskExecutionPlan,
   normalizeTaskExecutionPlan,
   taskPlanPrompt,
   type TaskExecutionPlan,
@@ -14,6 +15,7 @@ export interface TaskExecutionPlanRequest {
   goal: string
   surface: TaskExecutionSurface
   targetLabel?: string
+  currentState?: string
   signal?: AbortSignal
   generate?: (prompt: string, signal?: AbortSignal) => Promise<string>
 }
@@ -23,7 +25,12 @@ export async function createTaskExecutionPlan(
   request: TaskExecutionPlanRequest
 ): Promise<TaskExecutionPlan> {
   const startedAt = Date.now()
-  const prompt = taskPlanPrompt(request.goal, request.targetLabel, request.surface)
+  const prompt = taskPlanPrompt(
+    request.goal,
+    request.targetLabel,
+    request.surface,
+    request.currentState
+  )
   const generate =
     request.generate ??
     ((input: string, signal?: AbortSignal) =>
@@ -36,7 +43,12 @@ export async function createTaskExecutionPlan(
     const raw = await generate(prompt, request.signal)
     const json = extractJsonObject(raw)
     const plan = json ? normalizeTaskExecutionPlan(JSON.parse(json)) : null
-    const resolved = plan ?? fallbackTaskExecutionPlan(request.targetLabel, request.surface)
+    const resolved = groundTaskExecutionPlan(
+      plan ?? fallbackTaskExecutionPlan(request.targetLabel, request.surface),
+      request.goal,
+      request.currentState,
+      request.targetLabel
+    )
     console.log(
       `[${request.surface}-task] inference=task-plan durationMs=${Date.now() - startedAt} inputChars=${prompt.length} phases=${resolved.phases.length}`
     )

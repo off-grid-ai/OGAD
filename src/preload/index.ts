@@ -161,6 +161,8 @@ const offGridApi = {
       ipcRenderer.invoke('vision:control', command, taskId),
     showSupervisor: () => ipcRenderer.invoke('vision:supervisor:show'),
     dismissSupervisor: () => ipcRenderer.invoke('vision:supervisor:dismiss'),
+    setSupervisorExpanded: (expanded: boolean) =>
+      ipcRenderer.invoke('vision:supervisor:set-expanded', expanded),
     // The current run's state + step history, for a surface that mounts mid-task.
     getCurrent: () => ipcRenderer.invoke('vision:current'),
     onStep: (cb: (step: unknown) => void) => {
