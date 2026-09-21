@@ -13,6 +13,7 @@ export type ComputerUseModelStrategy =
 
 export interface ComputerUseSettings {
   modelStrategy: ComputerUseModelStrategy
+  groundingModelId: string | null
   decisionModelId: string | null
   context: ComputerUseContext
   screenshotSize: ComputerUseScreenshotSize
@@ -42,6 +43,7 @@ export const COMPUTER_USE_SETTINGS_KEY = 'computerUseSettings'
 
 export const DEFAULT_COMPUTER_USE_SETTINGS: Readonly<ComputerUseSettings> = {
   modelStrategy: 'text_plus_specialist',
+  groundingModelId: null,
   decisionModelId: null,
   context: 'auto',
   screenshotSize: 'large',
@@ -130,6 +132,10 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
       input.modelStrategy === 'decision_plus_reasoning'
         ? input.modelStrategy
         : DEFAULT_COMPUTER_USE_SETTINGS.modelStrategy,
+    groundingModelId:
+      typeof input.groundingModelId === 'string' && input.groundingModelId.length > 0
+        ? input.groundingModelId
+        : null,
     decisionModelId:
       typeof input.decisionModelId === 'string' && input.decisionModelId.length > 0
         ? input.decisionModelId

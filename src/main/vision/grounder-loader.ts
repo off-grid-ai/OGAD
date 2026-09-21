@@ -25,8 +25,10 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import {
   activateRemoteVisionModel,
   deactivateRemoteVisionModel,
-  getActiveRemoteVisionServer
+  getActiveRemoteVisionServer,
+  getRemoteVisionServerForModel
 } from './remote-vision-server'
+import { parseRemoteVisionModelId } from '../../shared/remote-vision-server'
 import type { ComputerUseModelStrategy } from '../../shared/computer-use-settings'
 import {
   currentRemoteScreenTaskSession,
@@ -37,10 +39,15 @@ const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 /** The saved Computer Use choice, or the current catalog default. */
 export function selectedGrounderModelId(): string {
-  return getActiveModal('computer_use') ?? DEFAULT_GROUNDER_MODEL_ID
+  return (
+    getComputerUseSettings().groundingModelId ??
+    getActiveModal('computer_use') ??
+    DEFAULT_GROUNDER_MODEL_ID
+  )
 }
 
 async function grounderInstalled(modelId: string): Promise<boolean> {
+  if (parseRemoteVisionModelId(modelId)) return getRemoteVisionServerForModel(modelId) !== null
   return (await listInstalled()).includes(modelId)
 }
 
@@ -190,6 +197,17 @@ export async function withGrounder<T>(
   now: () => number = Date.now
 ): Promise<{ result: T; timing: GrounderTiming }> {
   const screenTask = currentRemoteScreenTaskSession()
+  const remoteGrounder = getRemoteVisionServerForModel(selectedGrounderModelId())
+  if (remoteGrounder) {
+    return runWithRemoteScreenTaskSession(
+      {
+        taskKind: screenTask?.taskKind ?? 'computer_use',
+        modelStrategy: screenTask?.modelStrategy ?? getComputerUseSettings().modelStrategy,
+        activeServer: remoteGrounder
+      },
+      () => directRun(task, now)
+    )
+  }
   const remoteReasoner = screenTask?.activeServer
   if (!screenTask || !remoteReasoner) return runWithProductionGrounder(task, now)
   // A remote Chat reasoner remains bound to the outer task session. The grounding specialist is

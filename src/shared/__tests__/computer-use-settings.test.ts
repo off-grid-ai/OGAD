@@ -12,6 +12,18 @@ describe('Computer Use settings', () => {
     expect(normalizeComputerUseSettings({ visualHistoryFrames: 10 }).visualHistoryFrames).toBe(10)
   })
 
+  it('keeps remote model references for specialist roles', () => {
+    expect(
+      normalizeComputerUseSettings({
+        groundingModelId: 'remote-vision:home:grounder',
+        decisionModelId: 'remote-vision:home:decider'
+      })
+    ).toMatchObject({
+      groundingModelId: 'remote-vision:home:grounder',
+      decisionModelId: 'remote-vision:home:decider'
+    })
+  })
+
   it('normalizes unknown values to one safe settings object', () => {
     expect(
       normalizeComputerUseSettings({

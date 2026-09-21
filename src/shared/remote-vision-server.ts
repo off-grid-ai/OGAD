@@ -15,6 +15,10 @@ export interface RemoteVisionCatalogModel {
   id: string
   name: string
   kind: RemoteVisionModality
+  inputModalities?: string[]
+  outputModalities?: string[]
+  supportedParameters?: string[]
+  reasoning?: boolean
 }
 
 export interface RemoteVisionSavedServer {
@@ -79,17 +83,26 @@ export function remoteVisionInventoryModels(
     return (['text', 'image', 'transcription', 'voice'] as const).flatMap((modality) => {
       const modelId = selections[modality]
       if (!modelId) return []
-      return [{
-        id: remoteVisionModelId(server.id, modelId),
-        name: server.modelCatalog?.find((model) => model.id === modelId && model.kind === modality)?.name ?? modelId,
-        kind: modality === 'text' ? 'vision' as const : modality === 'voice' ? 'speech' as const : modality,
-        org: server.name,
-        description: `Runs through ${server.name}.`,
-        files: [] as [],
-        tags: ['Remote'] as ['Remote'],
-        remoteServerId: server.id,
-        remoteModelId: modelId
-      }]
+      return [
+        {
+          id: remoteVisionModelId(server.id, modelId),
+          name:
+            server.modelCatalog?.find((model) => model.id === modelId && model.kind === modality)
+              ?.name ?? modelId,
+          kind:
+            modality === 'text'
+              ? ('vision' as const)
+              : modality === 'voice'
+                ? ('speech' as const)
+                : modality,
+          org: server.name,
+          description: `Runs through ${server.name}.`,
+          files: [] as [],
+          tags: ['Remote'] as ['Remote'],
+          remoteServerId: server.id,
+          remoteModelId: modelId
+        }
+      ]
     })
   })
 }

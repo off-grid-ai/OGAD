@@ -22,7 +22,7 @@ import type {
   VisionPolicyInput
 } from './model-adapters/types'
 import { createVisionGrounder } from './vision-policy-runner'
-import { getActiveRemoteVisionServer } from './remote-vision-server'
+import { getActiveRemoteVisionServer, getRemoteVisionServerForModel } from './remote-vision-server'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { selectedDecisionModelId } from '../accessibility/decision-model-loader'
@@ -91,6 +91,7 @@ export async function getComputerUseActiveModelProjection(
     ? remoteVisionModelId(remote.id, remote.model)
     : dependencies.selectedChatId()
   const specialistModelId = dependencies.selectedSpecialistId()
+  const remoteSpecialist = getRemoteVisionServerForModel(specialistModelId)
   if (strategy === 'same_as_chat') {
     return {
       strategy,
@@ -104,32 +105,38 @@ export async function getComputerUseActiveModelProjection(
     return {
       strategy,
       strategyLabel: 'Specialist',
-      models: [await projectedModel('grounding_specialist', specialistModelId, false, dependencies)]
+      models: [
+        await projectedModel(
+          'grounding_specialist',
+          specialistModelId,
+          Boolean(remoteSpecialist),
+          dependencies
+        )
+      ]
     }
   }
   if (strategy === 'decision_plus_specialist') {
+    const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
+    const remoteDecision = getRemoteVisionServerForModel(decisionModelId)
     return {
       strategy,
       strategyLabel: 'Decision + Specialist',
       models: [
+        await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies),
         await projectedModel(
-          'decision',
-          dependencies.selectedDecisionId?.() ?? selectedDecisionModelId(),
-          false,
+          'grounding_specialist',
+          specialistModelId,
+          Boolean(remoteSpecialist),
           dependencies
-        ),
-        await projectedModel('grounding_specialist', specialistModelId, false, dependencies)
+        )
       ]
     }
   }
   if (strategy === 'decision_plus_reasoning') {
+    const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
+    const remoteDecision = getRemoteVisionServerForModel(decisionModelId)
     const models: ComputerUseActiveModel[] = [
-      await projectedModel(
-        'decision',
-        dependencies.selectedDecisionId?.() ?? selectedDecisionModelId(),
-        false,
-        dependencies
-      )
+      await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies)
     ]
     if (chatModelId) {
       models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
@@ -140,7 +147,14 @@ export async function getComputerUseActiveModelProjection(
   if (chatModelId) {
     models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
   }
-  models.push(await projectedModel('grounding_specialist', specialistModelId, false, dependencies))
+  models.push(
+    await projectedModel(
+      'grounding_specialist',
+      specialistModelId,
+      Boolean(remoteSpecialist),
+      dependencies
+    )
+  )
   return { strategy, strategyLabel: 'Reasoning + Specialist', models }
 }
 
@@ -176,6 +190,13 @@ function activeChatSelection(
 function activeSpecialistSelection(
   dependencies: VisionTaskModelStrategyDependencies
 ): VisionModelSelection {
+  const remote = getRemoteVisionServerForModel(dependencies.selectedSpecialistId())
+  if (remote) {
+    return {
+      adapter: generalVisionOperatorAdapter,
+      modelId: remoteVisionModelId(remote.id, remote.model)
+    }
+  }
   const artifacts = dependencies.activeArtifacts()
   if (!artifacts) {
     throw new Error('The selected Computer Use specialist did not load.')
@@ -185,6 +206,9 @@ function activeSpecialistSelection(
 
 function specialistFamily(dependencies: VisionTaskModelStrategyDependencies): VisionModelSelection {
   const modelId = dependencies.selectedSpecialistId()
+  if (getRemoteVisionServerForModel(modelId)) {
+    return { modelId, adapter: generalVisionOperatorAdapter }
+  }
   return {
     modelId,
     adapter: matchVisionModelAdapter({

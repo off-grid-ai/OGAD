@@ -64,4 +64,15 @@ describe('remote screen privacy decision', () => {
       })
     ).toEqual({ allowed: true, remote: false })
   })
+
+  it('gates remote specialist roles independently from the Chat model', () => {
+    expect(
+      remoteScreenDecision({
+        taskKind: 'computer_use',
+        modelStrategy: 'decision_plus_specialist',
+        activeServer: null,
+        activeServers: [OPENROUTER]
+      })
+    ).toMatchObject({ allowed: false, remote: true })
+  })
 })

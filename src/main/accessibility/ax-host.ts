@@ -59,7 +59,11 @@ import type { ExecuteResult } from '@offgrid/use'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { remoteVisionModelId } from '../../shared/remote-vision-server'
 import { chooseElementStep, serializeElementStep } from './ax-decision'
-import { withDecisionModel, withReasoningModel } from './decision-model-loader'
+import {
+  decideWithDecisionModel,
+  withDecisionModel,
+  withReasoningModel
+} from './decision-model-loader'
 
 const execFileAsync = promisify(execFile)
 
@@ -407,14 +411,12 @@ class AxRailHost {
                     prompt,
                     snapshot,
                     (context, question, options) =>
-                      llm.decideOptions(
+                      decideWithDecisionModel(
                         context,
                         question,
                         options,
                         request.signal,
-                        llm.activeModelInfo()?.vision
-                          ? observationFrame?.capture.path
-                          : undefined
+                        llm.activeModelInfo()?.vision ? observationFrame?.capture.path : undefined
                       )
                   )
                   console.log(
