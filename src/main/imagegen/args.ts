@@ -99,6 +99,61 @@ export function buildZImageArgs(i: ZImageArgsInput): string[] {
   ]
 }
 
+export interface QwenImage21ArgsInput {
+  model: string
+  llm: string
+  llmVision: string
+  vae: string
+  prompt: string
+  outPath: string
+  width?: number
+  height?: number
+  steps?: number
+  cfgScale?: number
+  seed: number
+  threads: string
+  previewArgs: string[]
+  initImage?: string
+}
+
+/** Qwen-Image 2.1 uses a standalone DiT, Qwen3-VL encoder, vision projector,
+ * and its own VAE. Reference images use sd.cpp's `-r` edit path. */
+export function buildQwenImage21Args(i: QwenImage21ArgsInput): string[] {
+  const args = [
+    '-M',
+    'img_gen',
+    '--diffusion-model',
+    i.model,
+    '--llm',
+    i.llm,
+    '--vae',
+    i.vae,
+    '-p',
+    i.prompt,
+    '-o',
+    i.outPath,
+    '-W',
+    String(i.width ?? 1024),
+    '-H',
+    String(i.height ?? 1024),
+    '--steps',
+    String(i.steps ?? 40),
+    '--cfg-scale',
+    String(i.cfgScale ?? 6),
+    '--sampling-method',
+    'euler',
+    '--offload-to-cpu',
+    '--diffusion-fa',
+    '-t',
+    i.threads,
+    '-s',
+    String(i.seed),
+    ...i.previewArgs
+  ]
+  if (i.initImage) args.push('--llm_vision', i.llmVision, '-r', i.initImage)
+  return args
+}
+
 export interface StandardArgsInput {
   /** Model filename (basename) — drives the shared defaults. */
   base: string

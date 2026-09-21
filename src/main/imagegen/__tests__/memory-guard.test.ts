@@ -78,6 +78,21 @@ describe('evaluateMemoryGuard', () => {
     expect(r.overBudget).toBe(true)
   })
 
+  it('counts the complete Qwen-Image 2.1 stack', () => {
+    const result = evaluateMemoryGuard({
+      totalGb: 24,
+      modelSizeGb: 4.2,
+      coreml: false,
+      zImageStack: false,
+      qwenImageStack: true,
+      qwenEncoderGb: 5,
+      qwenVisionGb: 1.1,
+      qwenVaeGb: 0.7
+    })
+    expect(result.modelGb).toBeCloseTo(15.4)
+    expect(result.overBudget).toBe(false)
+  })
+
   it('ignores encoder/VAE sizes when the stack flag is off', () => {
     const r = evaluateMemoryGuard({
       totalGb: 16,
