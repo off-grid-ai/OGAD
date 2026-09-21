@@ -9,6 +9,7 @@ const electron = vi.hoisted(() => ({
   shown: 0,
   hidden: 0,
   protected: [] as boolean[],
+  bounds: [] as Array<{ x: number; y: number; width: number; height: number }>,
   handlers: new Map<string, (...args: unknown[]) => unknown>()
 }))
 
@@ -17,7 +18,8 @@ vi.mock('electron', () => ({
     getAppPath: () => '/tmp/offgrid-supervisor-test'
   },
   screen: {
-    getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })
+    getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } }),
+    getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1440, height: 900 } })
   },
   ipcMain: {
     handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
@@ -25,9 +27,16 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class BrowserWindow {
     private visible = false
+    private bounds: { x: number; y: number; width: number; height: number }
 
     constructor(options: Record<string, unknown>) {
       electron.options.push(options)
+      this.bounds = {
+        x: options.x as number,
+        y: options.y as number,
+        width: options.width as number,
+        height: options.height as number
+      }
     }
 
     getMediaSourceId(): string {
@@ -63,6 +72,13 @@ vi.mock('electron', () => ({
       this.visible = false
       electron.hidden += 1
     }
+    getBounds(): { x: number; y: number; width: number; height: number } {
+      return this.bounds
+    }
+    setBounds(bounds: { x: number; y: number; width: number; height: number }): void {
+      this.bounds = bounds
+      electron.bounds.push(bounds)
+    }
   }
 }))
 
@@ -73,6 +89,7 @@ describe('Computer Use supervisor window', () => {
     electron.shown = 0
     electron.hidden = 0
     electron.protected.length = 0
+    electron.bounds.length = 0
     electron.handlers.clear()
   })
 
@@ -82,7 +99,7 @@ describe('Computer Use supervisor window', () => {
     showSupervisorWindow()
 
     expect(electron.options).toHaveLength(1)
-    expect(electron.options[0]).toMatchObject({ width: 360, height: 480, show: false })
+    expect(electron.options[0]).toMatchObject({ width: 360, height: 130, show: false })
     expect(electron.protected).toEqual([true])
     expect(electron.shown).toBe(1)
   })
@@ -107,5 +124,18 @@ describe('Computer Use supervisor window', () => {
     expect(electron.handlers.get('vision:supervisor:show')?.()).toBe(true)
     expect(electron.options).toHaveLength(1)
     expect(electron.shown).toBe(2)
+  })
+
+  it('expands upward from the anchored bottom edge and collapses again', async () => {
+    const { registerSupervisorWindowIpc, showSupervisorWindow } =
+      await import('../vision/supervisor-window')
+    registerSupervisorWindowIpc()
+    showSupervisorWindow()
+
+    expect(electron.handlers.get('vision:supervisor:set-expanded')?.({}, true)).toBe(true)
+    expect(electron.bounds.at(-1)).toEqual({ x: 1056, y: 396, width: 360, height: 480 })
+
+    expect(electron.handlers.get('vision:supervisor:set-expanded')?.({}, false)).toBe(true)
+    expect(electron.bounds.at(-1)).toEqual({ x: 1056, y: 746, width: 360, height: 130 })
   })
 })

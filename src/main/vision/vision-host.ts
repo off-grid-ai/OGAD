@@ -473,6 +473,7 @@ class VisionHost {
       taskId,
       journeyId,
       ...modelIdentity,
+      rail: 'vision',
       goal,
       status: 'running',
       phase: 'preparing',

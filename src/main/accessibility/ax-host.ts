@@ -290,6 +290,7 @@ class AxRailHost {
       taskId,
       journeyId,
       ...modelIdentity,
+      rail: 'accessibility',
       goal,
       status: 'running',
       phase: 'preparing',
