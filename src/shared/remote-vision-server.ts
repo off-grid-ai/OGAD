@@ -11,6 +11,8 @@ export type RemoteVisionProvider = (typeof REMOTE_VISION_PROVIDERS)[number]
 
 export type RemoteVisionModality = 'text' | 'image' | 'transcription' | 'voice'
 export type RemoteVisionSelections = Partial<Record<RemoteVisionModality, string>>
+export type RemoteVisionTaskRole = 'grounding' | 'decision'
+export type RemoteVisionRoleSelections = Partial<Record<RemoteVisionTaskRole, string>>
 export interface RemoteVisionCatalogModel {
   id: string
   name: string
@@ -29,6 +31,7 @@ export interface RemoteVisionSavedServer {
   model: string
   enabled?: boolean
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   /** The user has confirmed that this remote server can receive screen images. */
@@ -112,6 +115,7 @@ export interface RemoteVisionServerSettings {
   endpoint: string
   model: string
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   activeServerId: string | null
@@ -123,6 +127,7 @@ export interface RemoteVisionServerUpdate {
   endpoint: string
   model: string
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   serverId?: string
   name?: string

@@ -91,7 +91,7 @@ export async function getComputerUseActiveModelProjection(
     ? remoteVisionModelId(remote.id, remote.model)
     : dependencies.selectedChatId()
   const specialistModelId = dependencies.selectedSpecialistId()
-  const remoteSpecialist = getRemoteVisionServerForModel(specialistModelId)
+  const remoteSpecialist = getRemoteVisionServerForModel(specialistModelId, 'grounding')
   if (strategy === 'same_as_chat') {
     return {
       strategy,
@@ -117,7 +117,7 @@ export async function getComputerUseActiveModelProjection(
   }
   if (strategy === 'decision_plus_specialist') {
     const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
-    const remoteDecision = getRemoteVisionServerForModel(decisionModelId)
+    const remoteDecision = getRemoteVisionServerForModel(decisionModelId, 'decision')
     return {
       strategy,
       strategyLabel: 'Decision + Specialist',
@@ -134,7 +134,7 @@ export async function getComputerUseActiveModelProjection(
   }
   if (strategy === 'decision_plus_reasoning') {
     const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
-    const remoteDecision = getRemoteVisionServerForModel(decisionModelId)
+    const remoteDecision = getRemoteVisionServerForModel(decisionModelId, 'decision')
     const models: ComputerUseActiveModel[] = [
       await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies)
     ]
@@ -190,7 +190,7 @@ function activeChatSelection(
 function activeSpecialistSelection(
   dependencies: VisionTaskModelStrategyDependencies
 ): VisionModelSelection {
-  const remote = getRemoteVisionServerForModel(dependencies.selectedSpecialistId())
+  const remote = getRemoteVisionServerForModel(dependencies.selectedSpecialistId(), 'grounding')
   if (remote) {
     return {
       adapter: generalVisionOperatorAdapter,
@@ -206,7 +206,7 @@ function activeSpecialistSelection(
 
 function specialistFamily(dependencies: VisionTaskModelStrategyDependencies): VisionModelSelection {
   const modelId = dependencies.selectedSpecialistId()
-  if (getRemoteVisionServerForModel(modelId)) {
+  if (getRemoteVisionServerForModel(modelId, 'grounding')) {
     return { modelId, adapter: generalVisionOperatorAdapter }
   }
   return {

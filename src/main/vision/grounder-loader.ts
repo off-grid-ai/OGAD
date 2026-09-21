@@ -47,7 +47,8 @@ export function selectedGrounderModelId(): string {
 }
 
 async function grounderInstalled(modelId: string): Promise<boolean> {
-  if (parseRemoteVisionModelId(modelId)) return getRemoteVisionServerForModel(modelId) !== null
+  if (parseRemoteVisionModelId(modelId))
+    return getRemoteVisionServerForModel(modelId, 'grounding') !== null
   return (await listInstalled()).includes(modelId)
 }
 
@@ -197,7 +198,7 @@ export async function withGrounder<T>(
   now: () => number = Date.now
 ): Promise<{ result: T; timing: GrounderTiming }> {
   const screenTask = currentRemoteScreenTaskSession()
-  const remoteGrounder = getRemoteVisionServerForModel(selectedGrounderModelId())
+  const remoteGrounder = getRemoteVisionServerForModel(selectedGrounderModelId(), 'grounding')
   if (remoteGrounder) {
     return runWithRemoteScreenTaskSession(
       {

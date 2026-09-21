@@ -5,6 +5,7 @@ import {
   type RemoteVisionConnectionResult,
   type RemoteVisionCatalogModel,
   type RemoteVisionSelections,
+  type RemoteVisionRoleSelections,
   type RemoteVisionSavedServer,
   type RemoteVisionServerSettings,
   type RemoteVisionServerUpdate
@@ -28,6 +29,7 @@ interface ServerForm {
   endpoint: string
   model: string
   mediaModels: RemoteVisionSelections
+  roleModels: RemoteVisionRoleSelections
   modelCatalog: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   screenFramesAllowed: boolean
@@ -39,6 +41,7 @@ const EMPTY_FORM: ServerForm = {
   endpoint: '',
   model: '',
   mediaModels: {},
+  roleModels: {},
   modelCatalog: [],
   hasApiKey: false,
   screenFramesAllowed: false
@@ -51,6 +54,7 @@ function formFromServer(server: RemoteVisionSavedServer): ServerForm {
     endpoint: server.endpoint,
     model: server.model,
     mediaModels: server.mediaModels ?? { text: server.model },
+    roleModels: server.roleModels ?? {},
     modelCatalog: server.modelCatalog ?? [],
     hasApiKey: server.hasApiKey,
     screenFramesAllowed: server.screenFramesAllowed
@@ -100,7 +104,10 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const selectServer = (server: RemoteVisionSavedServer): void => {
     setForm(formFromServer(server))
     setApiKey('')
-    setModels(server.modelCatalog ?? (server.model ? [{ id: server.model, name: server.model, kind: 'text' }] : []))
+    setModels(
+      server.modelCatalog ??
+        (server.model ? [{ id: server.model, name: server.model, kind: 'text' }] : [])
+    )
     setModelQuery(server.model)
     setShowModels(false)
     setStatus(server.id === settings.activeServerId ? 'This server is active.' : 'Ready to edit.')
@@ -133,7 +140,10 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
           normalized.servers[0]
         if (selected) {
           setForm(formFromServer(selected))
-          setModels(selected.modelCatalog ?? (selected.model ? [{ id: selected.model, name: selected.model, kind: 'text' }] : []))
+          setModels(
+            selected.modelCatalog ??
+              (selected.model ? [{ id: selected.model, name: selected.model, kind: 'text' }] : [])
+          )
           setModelQuery(selected.model)
         }
         setStatus(normalized.activeServerId ? 'Remote server is active.' : 'Local model is active.')
@@ -144,7 +154,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const filteredModels = useMemo(() => {
     const query = modelQuery.trim().toLowerCase()
     return models
-      .filter((model) => model.kind === 'text' && (!query || `${model.name} ${model.id}`.toLowerCase().includes(query)))
+      .filter(
+        (model) =>
+          model.kind === 'text' &&
+          (!query || `${model.name} ${model.id}`.toLowerCase().includes(query))
+      )
       .slice(0, 75)
   }, [modelQuery, models])
 
@@ -156,6 +170,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       endpoint,
       model: form.model,
       mediaModels: form.mediaModels,
+      roleModels: form.roleModels,
       modelCatalog: form.modelCatalog,
       serverId: form.id ?? undefined,
       name: form.name,
@@ -179,7 +194,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
         return
       }
       const discovered = result.models ?? []
-      const nextModel = discovered.some((model) => model.id === selectedModel && model.kind === 'text') ? selectedModel : ''
+      const nextModel = discovered.some(
+        (model) => model.id === selectedModel && model.kind === 'text'
+      )
+        ? selectedModel
+        : ''
       setModels(discovered)
       setForm((current) => ({
         ...current,
@@ -189,9 +208,18 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
           (['text', 'image', 'transcription', 'voice'] as const).flatMap((kind) => {
             const id = kind === 'text' ? nextModel : current.mediaModels[kind]
             return id && discovered.some((model) => model.id === id && model.kind === kind)
-              ? [[kind, id]] : []
+              ? [[kind, id]]
+              : []
           })
-        ) as RemoteVisionSelections
+        ) as RemoteVisionSelections,
+        roleModels: Object.fromEntries(
+          (['grounding', 'decision'] as const).flatMap((role) => {
+            const id = current.roleModels[role]
+            return id && discovered.some((model) => model.id === id && model.kind === 'text')
+              ? [[role, id]]
+              : []
+          })
+        ) as RemoteVisionRoleSelections
       }))
       setModelQuery(nextModel)
       setShowModels(true)
@@ -243,7 +271,10 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       setStatus('Enter a server name first.')
       return
     }
-    if (remoteEnabled && !Object.values(form.mediaModels).some(Boolean)) {
+    if (
+      remoteEnabled &&
+      ![...Object.values(form.mediaModels), ...Object.values(form.roleModels)].some(Boolean)
+    ) {
       setStatus('Test the connection and select at least one model first.')
       return
     }
@@ -408,6 +439,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                     endpoint: event.target.value,
                     model: '',
                     mediaModels: {},
+                    roleModels: {},
                     modelCatalog: [],
                     screenFramesAllowed: false
                   }))
@@ -475,59 +507,97 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 </Row>
               </div>
             ) : null}
+            <Row
+              label="Text + Vision"
+              controlId="remote-server-model-search"
+              hint={form.model ? `Selected: ${form.model}` : 'Search and select one model.'}
+            >
+              <div className="relative">
+                <input
+                  id="remote-server-model-search"
+                  value={modelQuery}
+                  onFocus={() => setShowModels(true)}
+                  onChange={(event) => {
+                    setModelQuery(event.target.value)
+                    setForm((current) => ({
+                      ...current,
+                      model: '',
+                      mediaModels: { ...current.mediaModels, text: undefined }
+                    }))
+                    setShowModels(true)
+                  }}
+                  placeholder="Search models"
+                  autoComplete="off"
+                  className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
+                />
+                {showModels ? (
+                  <div className="mt-1 max-h-56 overflow-y-auto border border-neutral-800 bg-neutral-950 p-1">
+                    {filteredModels.length > 0 ? (
+                      filteredModels.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => {
+                            setForm((current) => ({
+                              ...current,
+                              model: model.id,
+                              mediaModels: { ...current.mediaModels, text: model.id }
+                            }))
+                            setModelQuery(model.name)
+                            setShowModels(false)
+                            setStatus('Not saved.')
+                          }}
+                          className="block w-full px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 hover:text-white"
+                        >
+                          <span className="block truncate">{model.name}</span>
+                          {model.name !== model.id ? (
+                            <span className="block truncate text-[9px] text-neutral-600">
+                              {model.id}
+                            </span>
+                          ) : null}
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-2 py-3 text-[10px] text-neutral-600">No matching models.</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </Row>
+            {(['grounding', 'decision'] as const).map((role) => (
               <Row
-                label="Text + Vision"
-                controlId="remote-server-model-search"
-                hint={form.model ? `Selected: ${form.model}` : 'Search and select one model.'}
+                key={role}
+                label={role === 'grounding' ? 'Grounding specialist' : 'Decision model'}
+                controlId={`remote-server-${role}-model`}
+                hint="Only this selection appears in Tasks."
               >
-                <div className="relative">
-                  <input
-                    id="remote-server-model-search"
-                    value={modelQuery}
-                    onFocus={() => setShowModels(true)}
-                    onChange={(event) => {
-                      setModelQuery(event.target.value)
-                      setForm((current) => ({ ...current, model: '', mediaModels: { ...current.mediaModels, text: undefined } }))
-                      setShowModels(true)
-                    }}
-                    placeholder="Search models"
-                    autoComplete="off"
-                    className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus-visible:border-green-500"
-                  />
-                  {showModels ? (
-                    <div className="mt-1 max-h-56 overflow-y-auto border border-neutral-800 bg-neutral-950 p-1">
-                      {filteredModels.length > 0 ? (
-                        filteredModels.map((model) => (
-                          <button
-                            key={model.id}
-                            type="button"
-                            onClick={() => {
-                              setForm((current) => ({ ...current, model: model.id, mediaModels: { ...current.mediaModels, text: model.id } }))
-                              setModelQuery(model.name)
-                              setShowModels(false)
-                              setStatus('Not saved.')
-                            }}
-                            className="block w-full px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 hover:text-white"
-                          >
-                            <span className="block truncate">{model.name}</span>
-                            {model.name !== model.id ? (
-                              <span className="block truncate text-[9px] text-neutral-600">
-                                {model.id}
-                              </span>
-                            ) : null}
-                          </button>
-                        ))
-                      ) : (
-                        <p className="px-2 py-3 text-[10px] text-neutral-600">
-                          No matching models.
-                        </p>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
+                <SettingsSelect
+                  id={`remote-server-${role}-model`}
+                  label={`${role} model`}
+                  value={form.roleModels[role] ?? ''}
+                  searchable
+                  options={[
+                    { value: '', label: `No remote ${role} model` },
+                    ...models
+                      .filter((model) => model.kind === 'text')
+                      .map((model) => ({ value: model.id, label: model.name }))
+                  ]}
+                  onValueChange={(value) => {
+                    setForm((current) => ({
+                      ...current,
+                      roleModels: { ...current.roleModels, [role]: value || undefined }
+                    }))
+                    setStatus('Not saved.')
+                  }}
+                />
               </Row>
+            ))}
             {(['image', 'transcription', 'voice'] as const).map((kind) => (
-              <Row key={kind} label={kind === 'image' ? 'Image' : kind === 'voice' ? 'Voice' : 'Transcription'} controlId={`remote-server-${kind}-model`}>
+              <Row
+                key={kind}
+                label={kind === 'image' ? 'Image' : kind === 'voice' ? 'Voice' : 'Transcription'}
+                controlId={`remote-server-${kind}-model`}
+              >
                 <SettingsSelect
                   id={`remote-server-${kind}-model`}
                   label={`${kind} model`}
@@ -535,10 +605,15 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                   searchable
                   options={[
                     { value: '', label: `No ${kind} model` },
-                    ...models.filter((model) => model.kind === kind).map((model) => ({ value: model.id, label: model.name }))
+                    ...models
+                      .filter((model) => model.kind === kind)
+                      .map((model) => ({ value: model.id, label: model.name }))
                   ]}
                   onValueChange={(value) => {
-                    setForm((current) => ({ ...current, mediaModels: { ...current.mediaModels, [kind]: value || undefined } }))
+                    setForm((current) => ({
+                      ...current,
+                      mediaModels: { ...current.mediaModels, [kind]: value || undefined }
+                    }))
                     setStatus('Not saved.')
                   }}
                 />

@@ -24,10 +24,13 @@ const productionDependencies: RemoteScreenGateDependencies = {
       ? getWebUseSettings().modelStrategy
       : getComputerUseSettings().modelStrategy,
   activeServer: getActiveRemoteVisionServer,
-  specialistServer: () => getRemoteVisionServerForModel(selectedGrounderModelId()),
+  specialistServer: () => getRemoteVisionServerForModel(selectedGrounderModelId(), 'grounding'),
   decisionServer: (taskKind) => {
     const settings = taskKind === 'web_use' ? getWebUseSettings() : getComputerUseSettings()
-    return getRemoteVisionServerForModel(settings.decisionModelId ?? selectedDecisionModelId())
+    return getRemoteVisionServerForModel(
+      settings.decisionModelId ?? selectedDecisionModelId(),
+      'decision'
+    )
   }
 }
 

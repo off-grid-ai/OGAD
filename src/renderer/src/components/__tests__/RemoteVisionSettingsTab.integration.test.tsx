@@ -32,18 +32,42 @@ describe('<RemoteVisionSettingsTab/>', () => {
         ]
       }),
       setRemoteVisionServer: async (update: {
-        provider: 'local' | 'openrouter'; endpoint: string; model: string;
-        name?: string; mediaModels?: Record<string, string>; modelCatalog?: unknown[]
+        provider: 'local' | 'openrouter'
+        endpoint: string
+        model: string
+        name?: string
+        mediaModels?: Record<string, string>
+        modelCatalog?: unknown[]
       }) => {
-        saved = update.provider === 'local'
-          ? { ...saved, provider: 'local', activeServerId: null,
-              servers: saved.servers.map(server => ({ ...server, enabled: false })) }
-          : { provider: 'openrouter', endpoint: update.endpoint, model: update.model,
-              hasApiKey: false, activeServerId: 'media-server',
-              servers: [{ id: 'media-server', name: update.name, provider: update.provider,
-                endpoint: update.endpoint, model: update.model, mediaModels: update.mediaModels,
-                modelCatalog: update.modelCatalog, enabled: true, hasApiKey: false,
-                screenFramesAllowed: false }] }
+        saved =
+          update.provider === 'local'
+            ? {
+                ...saved,
+                provider: 'local',
+                activeServerId: null,
+                servers: saved.servers.map((server) => ({ ...server, enabled: false }))
+              }
+            : {
+                provider: 'openrouter',
+                endpoint: update.endpoint,
+                model: update.model,
+                hasApiKey: false,
+                activeServerId: 'media-server',
+                servers: [
+                  {
+                    id: 'media-server',
+                    name: update.name,
+                    provider: update.provider,
+                    endpoint: update.endpoint,
+                    model: update.model,
+                    mediaModels: update.mediaModels,
+                    modelCatalog: update.modelCatalog,
+                    enabled: true,
+                    hasApiKey: false,
+                    screenFramesAllowed: false
+                  }
+                ]
+              }
         return saved
       },
       removeRemoteVisionServer: async () => saved
@@ -53,7 +77,9 @@ describe('<RemoteVisionSettingsTab/>', () => {
     await screen.findByText('Local model is active.')
     fireEvent.click(screen.getByRole('button', { name: 'Add server' }))
     fireEvent.change(screen.getByLabelText('Server name'), { target: { value: 'Media provider' } })
-    fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'https://openrouter.ai/api/v1' } })
+    fireEvent.change(screen.getByLabelText('Address'), {
+      target: { value: 'https://openrouter.ai/api/v1' }
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
     await screen.findByText('Connected in 12 ms. 3 models found.')
     const user = userEvent.setup()
@@ -69,13 +95,17 @@ describe('<RemoteVisionSettingsTab/>', () => {
     render(<RemoteVisionSettingsTab />)
     await screen.findByDisplayValue('Media provider')
     expect(screen.getByRole('button', { name: 'image model' }).textContent).toContain('Image Maker')
-    expect(screen.getByRole('button', { name: 'transcription model' }).textContent).toContain('Listener')
+    expect(screen.getByRole('button', { name: 'transcription model' }).textContent).toContain(
+      'Listener'
+    )
     expect(screen.getByRole('button', { name: 'voice model' }).textContent).toContain('Speaker')
 
     fireEvent.click(screen.getByRole('switch', { name: 'Use remote server' }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await screen.findByText('Local model is active.')
-    expect(screen.getByRole('switch', { name: 'Use remote server' }).getAttribute('aria-checked')).toBe('false')
+    expect(
+      screen.getByRole('switch', { name: 'Use remote server' }).getAttribute('aria-checked')
+    ).toBe('false')
   })
 
   it('tests and saves one remote vision configuration without exposing a stored key', async () => {
@@ -146,6 +176,11 @@ describe('<RemoteVisionSettingsTab/>', () => {
     fireEvent.change(screen.getByPlaceholderText('Search models'), { target: { value: 'new' } })
     expect(screen.queryByText('Vision model')).toBeNull()
     fireEvent.click(screen.getByText('New vision model'))
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'grounding model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'New vision model' }))
+    await user.click(screen.getByRole('button', { name: 'decision model' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Vision model' }))
     fireEvent.click(screen.getByRole('switch', { name: 'Allow screen images' }))
     expect(
       screen.getByText(/can send screen images with visible text, apps, and other content/i)
@@ -164,6 +199,10 @@ describe('<RemoteVisionSettingsTab/>', () => {
         endpoint: 'https://models.example/v1',
         model: 'new-vision-model',
         mediaModels: { text: 'new-vision-model' },
+        roleModels: {
+          grounding: 'new-vision-model',
+          decision: 'vision-model'
+        },
         modelCatalog: [
           { id: 'vision-model', name: 'Vision model', kind: 'text' },
           { id: 'new-vision-model', name: 'New vision model', kind: 'text' }

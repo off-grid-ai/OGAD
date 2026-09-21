@@ -17,7 +17,7 @@ export function selectedDecisionModelId(): string {
  * shared llama.cpp process to the saved Chat model before vision recovery. */
 export async function withDecisionModel<T>(task: () => Promise<T>): Promise<T> {
   const modelId = selectedDecisionModelId()
-  if (getRemoteVisionServerForModel(modelId)) return task()
+  if (getRemoteVisionServerForModel(modelId, 'decision')) return task()
   if (!(await listInstalled()).includes(modelId)) {
     throw new Error(
       `The selected Decision model is not downloaded: ${modelId}. Download it from the Computer Use catalog first.`
@@ -119,7 +119,7 @@ export async function decideWithDecisionModel(
 ): Promise<OptionDecision> {
   const selected = selectedDecisionModelId()
   if (parseRemoteVisionModelId(selected)) {
-    const remote = getRemoteVisionServerForModel(selected)
+    const remote = getRemoteVisionServerForModel(selected, 'decision')
     if (!remote) throw new Error('The selected remote Decision model is not available.')
     return decideWithRemoteModel(remote, context, question, options, signal)
   }

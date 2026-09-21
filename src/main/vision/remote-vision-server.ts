@@ -12,6 +12,8 @@ import {
   type RemoteVisionCatalogModel,
   type RemoteVisionModality,
   type RemoteVisionSelections,
+  type RemoteVisionRoleSelections,
+  type RemoteVisionTaskRole,
   type RemoteVisionProvider,
   type RemoteVisionSavedServer,
   type RemoteVisionServerSettings,
@@ -30,6 +32,7 @@ interface StoredRemoteVisionServer {
   model: string
   enabled?: boolean
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   screenFramesAllowed: boolean
 }
@@ -74,7 +77,12 @@ function normalizeServer(
 ): StoredRemoteVisionServer | null {
   if (!value.id || !value.endpoint || !validProvider(value.provider)) return null
   const selections = value.mediaModels ?? (value.model ? { text: value.model } : {})
-  if (!Object.values(selections).some((model) => typeof model === 'string' && model.trim()))
+  const roleModels = value.roleModels ?? {}
+  if (
+    ![...Object.values(selections), ...Object.values(roleModels)].some(
+      (model) => typeof model === 'string' && model.trim()
+    )
+  )
     return null
   return {
     id: value.id,
@@ -84,6 +92,7 @@ function normalizeServer(
     model: (selections.text ?? value.model ?? '').trim(),
     enabled: value.enabled !== false,
     mediaModels: selections,
+    roleModels,
     modelCatalog: Array.isArray(value.modelCatalog) ? value.modelCatalog : [],
     screenFramesAllowed: value.screenFramesAllowed === true
   }
@@ -185,7 +194,8 @@ export function getActiveRemoteVisionServer():
 /** Resolve any saved text/vision model reference through its owning server.
  * Task roles use this seam instead of depending on a provider or catalog kind. */
 export function getRemoteVisionServerForModel(
-  modelReference: string | null | undefined
+  modelReference: string | null | undefined,
+  role?: RemoteVisionTaskRole
 ): (StoredRemoteVisionServer & { apiKey: string }) | null {
   if (!modelReference) return null
   const reference = parseRemoteVisionModelId(modelReference)
@@ -195,6 +205,7 @@ export function getRemoteVisionServerForModel(
     (candidate) => candidate.id === reference.serverId && candidate.enabled !== false
   )
   if (!server) return null
+  if (role && server.roleModels?.[role] !== reference.modelId) return null
   const catalogModel = server.modelCatalog?.find((model) => model.id === reference.modelId)
   if (catalogModel && catalogModel.kind !== 'text') return null
   return {
@@ -279,7 +290,13 @@ export function setRemoteVisionServerSettings(
   const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
   const model = update.model.trim()
   const mediaModels = update.mediaModels ?? (model ? { text: model } : {})
-  if (!endpoint || !Object.values(mediaModels).some((selected) => !!selected.trim())) {
+  const roleModels = update.roleModels ?? {}
+  if (
+    !endpoint ||
+    ![...Object.values(mediaModels), ...Object.values(roleModels)].some((selected) =>
+      Boolean(selected?.trim())
+    )
+  ) {
     throw new Error('Remote model server and at least one model are required.')
   }
   const id = update.serverId || randomUUID()
@@ -292,6 +309,7 @@ export function setRemoteVisionServerSettings(
     model: mediaModels.text?.trim() ?? '',
     enabled: true,
     mediaModels,
+    roleModels,
     modelCatalog:
       update.modelCatalog ?? stored.servers.find((server) => server.id === id)?.modelCatalog ?? [],
     screenFramesAllowed: update.screenFramesAllowed === true
@@ -360,10 +378,11 @@ export async function testRemoteVisionServer(
       }
       throw new Error((message || `Server returned HTTP ${response.status}.`).slice(0, 500))
     }
-    const body = (await response.json()) as {
+    type ModelsBody = {
       data?: Array<{
         id?: unknown
         name?: unknown
+        model?: unknown
         kind?: unknown
         supported_parameters?: unknown
         reasoning?: unknown
@@ -379,6 +398,14 @@ export async function testRemoteVisionServer(
         architecture?: { input_modalities?: unknown; output_modalities?: unknown }
       }>
     }
+    const bodies: ModelsBody[] = [(await response.json()) as ModelsBody]
+    if (update.provider === 'openrouter') {
+      const decisionResponse = await fetch(`${endpoint}/models?output_modalities=decisions`, {
+        headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+        signal: AbortSignal.timeout(10_000)
+      }).catch(() => null)
+      if (decisionResponse?.ok) bodies.push((await decisionResponse.json()) as ModelsBody)
+    }
     const entries: Array<{
       id?: unknown
       name?: unknown
@@ -387,7 +414,13 @@ export async function testRemoteVisionServer(
       supported_parameters?: unknown
       reasoning?: unknown
       architecture?: { input_modalities?: unknown; output_modalities?: unknown }
-    }> = body.data ?? body.models ?? []
+    }> = [
+      ...new Map(
+        bodies
+          .flatMap((body) => body.data ?? body.models ?? [])
+          .map((entry) => [String(entry.id ?? entry.model ?? ''), entry] as const)
+      ).values()
+    ]
     const models = entries.flatMap((entry) => {
       const id =
         typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
