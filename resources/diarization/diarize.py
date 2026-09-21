@@ -46,7 +46,7 @@ def _load_pipeline():
     global _pipeline
     if _pipeline is None:
         _pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-community-1", use_auth_token=_HF_TOKEN
+            "pyannote/speaker-diarization-community-1", token=_HF_TOKEN
         )
         try:
             _pipeline.to(torch.device(DEVICE))

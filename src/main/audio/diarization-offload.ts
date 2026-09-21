@@ -8,6 +8,8 @@
  * PYTORCH_ENABLE_MPS_FALLBACK is forced on so unsupported MPS ops fall back to CPU quietly.
  */
 import { execFile } from 'node:child_process'
+import os from 'node:os'
+import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 
@@ -24,8 +26,15 @@ function scriptPath(): string {
   return path.join(base, 'resources', 'diarization', 'diarize.py')
 }
 
+function defaultPython(): string {
+  if (process.env.OGRID_DIARIZE_PYTHON) return process.env.OGRID_DIARIZE_PYTHON
+  // The setup guide creates this venv; prefer it so a normally-launched app finds it.
+  const venv = path.join(os.homedir(), '.offgrid-diarize', 'bin', 'python3')
+  return fs.existsSync(venv) ? venv : 'python3'
+}
+
 function run(mode: 'diarize' | 'embed', wavPath: string): Promise<unknown> {
-  const python = process.env.OGRID_DIARIZE_PYTHON || 'python3'
+  const python = defaultPython()
   return new Promise((resolve, reject) => {
     execFile(
       python,
