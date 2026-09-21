@@ -1,92 +1,103 @@
 #!/usr/bin/env python3
 """
-Speaker diarization + embedding offload for the Off Grid gateway (Mac).
+Speaker diarization + embedding offload for the Off Grid gateway (Mac) — via sherpa-onnx.
 
-Two modes, both reading 16 kHz mono WAV and printing JSON on stdout:
+No HuggingFace account or token: uses the same ungated ONNX models as the on-device path
+(pyannote-segmentation-3.0 + a speaker embedding), downloaded once from sherpa-onnx's GitHub releases.
 
-  diarize <wav>   -> {"turns":[{"startMs","endMs","cluster","embedding":[...]}]}
-     pyannote Community-1 finds the speaker turns ("who spoke when"); for each turn we compute a
-     SpeechBrain ECAPA voiceprint so the app can put a name on each cluster.
+Two modes, both reading a WAV and printing JSON on stdout:
+  diarize <wav> -> {"turns":[{"startMs","endMs","cluster","embedding":[...]}]}
+  embed   <wav> -> {"embedding":[...]}
 
-  embed <wav>     -> {"embedding":[...]}
-     One ECAPA voiceprint for a whole clip — used for enrollment, so enrolled profiles live in the
-     SAME vector space as the diarized turns (this is the alignment the app needs).
-
-Runtime is the user's own Mac (an accelerator, not something every user runs). Metal via MPS:
-set PYTORCH_ENABLE_MPS_FALLBACK=1 so any op pyannote doesn't support on MPS quietly runs on CPU.
-pyannote Community-1 is gated — export HF_TOKEN with a HuggingFace token that has accepted its terms.
+Models are looked up in OGRID_DIARIZE_MODELS (default ~/.offgrid-diarize/models):
+  <dir>/sherpa-onnx-pyannote-segmentation-3-0/model.onnx   (segmentation)
+  <dir>/campplus.onnx                                       (embedding)
 """
 import json
 import os
 import sys
 
-import torch
-import torchaudio
-from pyannote.audio import Pipeline
-from speechbrain.inference.speaker import EncoderClassifier
-
-DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
-_HF_TOKEN = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-
-_ecapa = None
-_pipeline = None
+import numpy as np
+import sherpa_onnx  # deps: sherpa-onnx soundfile numpy scipy (no torch, no HF)
 
 
-def _load_ecapa():
-    global _ecapa
-    if _ecapa is None:
-        _ecapa = EncoderClassifier.from_hparams(
-            source="speechbrain/spkrec-ecapa-voxceleb",
-            run_opts={"device": DEVICE},
-        )
-    return _ecapa
+def _models_dir():
+    return os.environ.get(
+        "OGRID_DIARIZE_MODELS", os.path.join(os.path.expanduser("~"), ".offgrid-diarize", "models")
+    )
 
 
-def _load_pipeline():
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-community-1", token=_HF_TOKEN
-        )
-        try:
-            _pipeline.to(torch.device(DEVICE))
-        except Exception:
-            pass  # CPU is fine if MPS placement fails
-    return _pipeline
+def _seg_path():
+    return os.path.join(_models_dir(), "sherpa-onnx-pyannote-segmentation-3-0", "model.onnx")
 
 
-def _wav(path):
-    wav, sr = torchaudio.load(path)
-    if wav.shape[0] > 1:
-        wav = wav.mean(dim=0, keepdim=True)
+def _emb_path():
+    return os.path.join(_models_dir(), "campplus.onnx")
+
+
+def _read_wav_16k(path):
+    import soundfile as sf
+    data, sr = sf.read(path, dtype="float32", always_2d=True)
+    mono = data.mean(axis=1)  # [N]
     if sr != 16000:
-        wav = torchaudio.functional.resample(wav, sr, 16000)
-        sr = 16000
-    return wav, sr
+        from scipy.signal import resample_poly
+        from math import gcd
+        g = gcd(sr, 16000)
+        mono = resample_poly(mono, 16000 // g, sr // g).astype(np.float32)
+    return np.ascontiguousarray(mono, dtype=np.float32)
 
 
-def _embed(wav):
-    # wav: [1, N] float. encode_batch -> [1, 1, 192]; L2-normalize for cosine.
-    emb = _load_ecapa().encode_batch(wav).squeeze().detach().cpu()
-    emb = torch.nn.functional.normalize(emb, dim=0)
+_extractor = None
+
+
+def _get_extractor():
+    global _extractor
+    if _extractor is None:
+        _extractor = sherpa_onnx.SpeakerEmbeddingExtractor(
+            sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=_emb_path())
+        )
+    return _extractor
+
+
+def _embed(samples):
+    ext = _get_extractor()
+    stream = ext.create_stream()
+    stream.accept_waveform(16000, samples)
+    stream.input_finished()
+    emb = np.asarray(ext.compute(stream), dtype=np.float32)
+    n = np.linalg.norm(emb)
+    if n > 0:
+        emb = emb / n
     return emb.tolist()
 
 
 def do_diarize(path):
-    wav, sr = _wav(path)
-    diar = _load_pipeline()(path)
+    samples = _read_wav_16k(path)
+    config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+        segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+            pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=_seg_path())
+        ),
+        embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=_emb_path()),
+        clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=0.5),
+        min_duration_on=0.3,
+        min_duration_off=0.5,
+    )
+    sd = sherpa_onnx.OfflineSpeakerDiarization(config)
+    result = sd.process(samples).sort_by_start_time()
     turns = []
-    for turn, _, speaker in diar.itertracks(yield_label=True):
-        s, e = int(turn.start * 1000), int(turn.end * 1000)
-        seg = wav[:, int(turn.start * sr):int(turn.end * sr)]
-        emb = _embed(seg) if seg.shape[1] >= sr // 4 else None  # skip <0.25s blips
-        turns.append({"startMs": s, "endMs": e, "cluster": str(speaker), "embedding": emb})
+    for seg in result:
+        s0, s1 = int(seg.start * 16000), int(seg.end * 16000)
+        chunk = samples[s0:s1]
+        emb = _embed(chunk) if chunk.shape[0] >= 4000 else None  # skip <0.25s blips
+        turns.append(
+            {"startMs": int(seg.start * 1000), "endMs": int(seg.end * 1000),
+             "cluster": f"spk{seg.speaker}", "embedding": emb}
+        )
     return {"turns": turns}
 
 
 def do_embed(path):
-    wav, _ = _wav(path)
-    return {"embedding": _embed(wav)}
+    return {"embedding": _embed(_read_wav_16k(path))}
 
 
 def main():
@@ -95,9 +106,8 @@ def main():
         sys.exit(2)
     mode, path = sys.argv[1], sys.argv[2]
     try:
-        out = do_diarize(path) if mode == "diarize" else do_embed(path)
-        print(json.dumps(out))
-    except Exception as exc:  # surface a clean error to the gateway
+        print(json.dumps(do_diarize(path) if mode == "diarize" else do_embed(path)))
+    except Exception as exc:
         print(json.dumps({"error": str(exc)}))
         sys.exit(1)
 
