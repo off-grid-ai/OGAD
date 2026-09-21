@@ -8,6 +8,7 @@ import {
   runWithRemoteScreenTaskSession
 } from '../actions/remote-screen-session'
 import { getRemoteVisionServerForModel } from '../vision/remote-vision-server'
+import { decideWithOpenRouter, usesOpenRouterDecisions } from './remote-decision'
 
 export function selectedDecisionModelId(): string {
   return getComputerUseSettings().decisionModelId ?? DECIDER_2B.id
@@ -76,6 +77,9 @@ async function decideWithRemoteModel(
   options: readonly string[],
   signal?: AbortSignal
 ): Promise<OptionDecision> {
+  if (usesOpenRouterDecisions(remote)) {
+    return decideWithOpenRouter(remote, context, question, options, signal)
+  }
   const session = currentRemoteScreenTaskSession()
   return runWithRemoteScreenTaskSession(
     {

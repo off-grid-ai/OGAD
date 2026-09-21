@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { buildDecisionRequest } from '../llm'
 import { parseRemoteDecision } from '../accessibility/decision-model-loader'
+import {
+  buildOpenRouterDecisionRequest,
+  openRouterDecisionsEndpoint,
+  parseOpenRouterDecisionResponse,
+  usesOpenRouterDecisions
+} from '../accessibility/remote-decision'
 
 describe('Decision model request', () => {
   it('uses the media marker published by the active llama server', () => {
@@ -36,5 +42,63 @@ describe('Remote Decision model output', () => {
       confidence: 1,
       probabilities: [0, 0, 1]
     })
+  })
+})
+
+describe('OpenRouter Decisions transport', () => {
+  it('selects the dedicated transport from model capability metadata', () => {
+    expect(
+      usesOpenRouterDecisions({
+        provider: 'openrouter',
+        endpoint: 'https://openrouter.ai/api/v1',
+        model: '~typesafe/jev-latest',
+        apiKey: 'stored-key',
+        modelCatalog: [
+          {
+            id: '~typesafe/jev-latest',
+            name: 'TypeSafe: Jev Latest',
+            kind: 'text',
+            outputModalities: ['decisions']
+          }
+        ]
+      })
+    ).toBe(true)
+  })
+
+  it('builds the provider Decisions endpoint and typed choice request', () => {
+    expect(openRouterDecisionsEndpoint('https://openrouter.ai/api/v1')).toBe(
+      'https://openrouter.ai/api/alpha/decisions'
+    )
+    expect(buildOpenRouterDecisionRequest('typesafe/jev-1.13', 'screen state', 'Next action?', [
+      'Click Save',
+      'Wait'
+    ])).toEqual({
+      model: 'typesafe/jev-1.13',
+      state: { context: 'screen state' },
+      questions: {
+        decision: {
+          type: 'choice',
+          instructions: 'Next action?',
+          criteria: { option_0: 'Click Save', option_1: 'Wait' }
+        }
+      }
+    })
+  })
+
+  it('maps a Decisions choice distribution to the shared result', () => {
+    expect(
+      parseOpenRouterDecisionResponse(
+        {
+          answers: {
+            decision: {
+              type: 'choice',
+              choice: 'option_1',
+              probabilities: { option_0: 0.2, option_1: 0.8 }
+            }
+          }
+        },
+        2
+      )
+    ).toEqual({ choice: 1, confidence: 0.8, probabilities: [0.2, 0.8] })
   })
 })
