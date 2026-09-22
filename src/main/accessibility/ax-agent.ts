@@ -347,7 +347,6 @@ const DECISION_OBJECTIVE_CHARS = 480
 const DECISION_GUIDANCE_CHARS = 120
 const DECISION_HISTORY_CHARS = 160
 const DECISION_STATE_CHARS = 280
-const DECISION_VISIBLE_TEXT_CHARS = 220
 
 function boundedDecisionText(text: string, maxChars: number): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
@@ -420,15 +419,11 @@ export function buildElementDecisionContext(input: {
         .join(' ')
     : ''
   const currentState = decisionState(input.snapshot)
-  const visibleText = input.snapshot.visibleText
-    ? boundedDecisionText(input.snapshot.visibleText, DECISION_VISIBLE_TEXT_CHARS)
-    : ''
   return [
     `Current milestone: ${boundedDecisionText(input.milestone ?? decisionObjective(input.goal), DECISION_OBJECTIVE_CHARS)}`,
     operation ? `Planned operation: ${operation}` : '',
     target ? `Target application/window: ${target}` : '',
     currentState ? `Current structured state: ${currentState}` : '',
-    visibleText ? `Visible screen text: ${visibleText}` : '',
     `Available structured controls: ${input.snapshot.elements.filter((element) => element.enabled && element.executable !== false).length}`,
     previous.length
       ? `Previous action and verification: ${boundedDecisionText(previous.join(' | '), DECISION_HISTORY_CHARS)}`
