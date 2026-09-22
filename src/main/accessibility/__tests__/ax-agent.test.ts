@@ -14,7 +14,6 @@ import {
   type ElementTaskDeps
 } from '../ax-agent'
 import type { AxElement, AxSnapshot } from '../ax-elements'
-import { fallbackTaskExecutionPlan } from '../../../shared/task-execution-plan'
 import { TASK_GUIDANCE_TRACE } from '../../tasks/task-guide'
 import { VisionGuard } from '../../vision/vision-guard'
 
@@ -59,7 +58,14 @@ const world = (
 describe('runElementTask', () => {
   it('keeps the active phase until completion and keeps private guidance out of evidence', async () => {
     const w = world(['{"action":"press","index":1}', '{"action":"done","summary":"sent"}'])
-    const plan = fallbackTaskExecutionPlan('Messages', 'computer')
+    const plan = {
+      version: 1 as const,
+      phases: [
+        { id: 'phase-1', title: 'Open Messages' },
+        { id: 'phase-2', title: 'Send the note' },
+        { id: 'phase-3', title: 'Verify it was sent' }
+      ]
+    }
     const prompts: string[] = []
     const evidencePrompts: string[] = []
     const phases: string[] = []
