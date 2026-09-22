@@ -8,6 +8,7 @@ import { formatAxElementsForModel, parseAxElements } from '../ax-elements'
 
 const sample = [
   '[WINDOW_TITLE] Slack - direct messages',
+  '[WINDOW_CONTEXT] {"pid":44,"process":"Slack","windowId":"44:main","windowX":300,"windowY":100,"windowW":1000,"windowH":800,"revision":2}',
   '{"role":"AXButton","label":"Send","x":1200,"y":790,"w":60,"h":30,"press":true,"enabled":true}',
   '{"role":"AXTextField","label":"Message sidd","x":400,"y":780,"w":700,"h":40,"press":false,"enabled":true,"value":"hi"}',
   '{"role":"AXButton","label":"Attach","x":360,"y":790,"w":24,"h":24,"press":true,"enabled":true}'
@@ -24,7 +25,30 @@ describe('parseAxElements', () => {
   it('computes the element center from the frame for clicking', () => {
     const [send] = parseAxElements(sample).elements
     // 1200 + 60/2 = 1230 ; 790 + 30/2 = 805
-    expect(send).toMatchObject({ name: 'Send', cx: 1230, cy: 805, actionable: true })
+    expect(send).toMatchObject({
+      name: 'Send',
+      x: 1200,
+      y: 790,
+      width: 60,
+      height: 30,
+      cx: 1230,
+      cy: 805,
+      actionable: true,
+      source: 'ax',
+      processId: 44,
+      windowId: '44:main',
+      revision: 2
+    })
+  })
+
+  it('preserves the exact process and target-window contract', () => {
+    expect(parseAxElements(sample)).toMatchObject({
+      processId: 44,
+      processName: 'Slack',
+      windowId: '44:main',
+      windowBounds: { x: 300, y: 100, width: 1000, height: 800 },
+      revision: 2
+    })
   })
 
   it('carries value and actionability, and defaults enabled to true', () => {
@@ -39,6 +63,19 @@ describe('parseAxElements', () => {
       '{"role":"AXButton","label":"Send","x":0,"y":0,"w":10,"h":10,"press":true,"enabled":false}'
     )
     expect(snap.elements[0]).toMatchObject({ enabled: false, actionable: true })
+  })
+
+  it('keeps semantic state as evidence that cannot be executed', () => {
+    const snap = parseAxElements(
+      '{"role":"AXStaticText","label":"","value":"1.4142135624","x":10,"y":10,"w":100,"h":30,"press":false,"enabled":true,"executable":false}'
+    )
+    expect(snap.elements[0]).toMatchObject({
+      role: 'AXStaticText',
+      value: '1.4142135624',
+      executable: false,
+      actionable: false
+    })
+    expect(formatAxElementsForModel(snap)).toContain('(evidence only)')
   })
 
   it('fails closed: skips malformed lines, blank lines, and text-mode markers', () => {

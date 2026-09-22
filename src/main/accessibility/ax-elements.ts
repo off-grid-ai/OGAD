@@ -20,9 +20,35 @@ export interface AxElement {
   name: string
   /** Current value (text fields); never a secure field's contents. */
   value: string
+  /** Native numeric range metadata for value-aware controls such as sliders. */
+  minValue?: number
+  maxValue?: number
+  valueSettable?: boolean
   /** Element-center in screen pixels, for a click or AXPress dispatch. */
   cx: number
   cy: number
+  /** Exact screen-pixel bounds from AX/UIA. */
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  /** Stable only for equivalent observations of the same window. */
+  stableId?: string
+  source?: 'ax' | 'ocr' | 'ax+ocr'
+  processId?: number
+  windowId?: string
+  revision?: number
+  region?: string
+  checked?: boolean
+  /** True when AX/UIA reports a selected option, tab, row, or menu item. */
+  selected?: boolean
+  /** True when activating the item opens a nested menu or popup. */
+  hasPopup?: boolean
+  /** True when the OS reports keyboard focus on this element. */
+  focused?: boolean
+  /** False for observation-only evidence such as OCR text. */
+  executable?: boolean
+  risk?: 'reversible' | 'private' | 'authentication' | 'payment' | 'destructive'
   /** Exposes AXPress - a press is preferred over a synthetic click when true. */
   actionable: boolean
   enabled: boolean
@@ -31,6 +57,17 @@ export interface AxElement {
 export interface AxSnapshot {
   windowTitle: string
   elements: AxElement[]
+  /** Visible OCR text from the captured window. This includes screen-level
+   * overlays that are not present in the target process's AX tree. */
+  visibleText?: string
+  processId?: number
+  processName?: string
+  windowId?: string
+  /** Native window handle used for exact capture. It is valid only while this window exists. */
+  platformWindowId?: number
+  windowBounds?: { x: number; y: number; width: number; height: number }
+  revision?: number
+  degradedReason?: string
 }
 
 interface RawElement {
@@ -43,6 +80,23 @@ interface RawElement {
   h?: unknown
   press?: unknown
   enabled?: unknown
+  pid?: unknown
+  process?: unknown
+  windowId?: unknown
+  platformWindowId?: unknown
+  windowX?: unknown
+  windowY?: unknown
+  windowW?: unknown
+  windowH?: unknown
+  revision?: unknown
+  checked?: unknown
+  selected?: unknown
+  hasPopup?: unknown
+  focused?: unknown
+  executable?: unknown
+  minValue?: unknown
+  maxValue?: unknown
+  valueSettable?: unknown
 }
 
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
@@ -60,6 +114,12 @@ const MIN_ELEMENT_SIZE = 3
 export function parseAxElements(stdout: string): AxSnapshot {
   let windowTitle = ''
   const elements: AxElement[] = []
+  let processId = 0
+  let processName = ''
+  let windowId = ''
+  let platformWindowId = 0
+  let revision = 0
+  let windowBounds = { x: 0, y: 0, width: 0, height: 0 }
   for (const raw of stdout.split(/\r?\n/)) {
     const line = raw.trim()
     if (!line) {
@@ -67,6 +127,25 @@ export function parseAxElements(stdout: string): AxSnapshot {
     }
     if (line.startsWith('[WINDOW_TITLE]')) {
       windowTitle = line.slice('[WINDOW_TITLE]'.length).trim()
+      continue
+    }
+    if (line.startsWith('[WINDOW_CONTEXT]')) {
+      try {
+        const context = JSON.parse(line.slice('[WINDOW_CONTEXT]'.length).trim()) as RawElement
+        processId = Math.round(num(context.pid))
+        processName = str(context.process)
+        windowId = str(context.windowId)
+        platformWindowId = Math.max(0, Math.round(num(context.platformWindowId)))
+        revision = Math.max(0, Math.round(num(context.revision)))
+        windowBounds = {
+          x: num(context.windowX),
+          y: num(context.windowY),
+          width: num(context.windowW),
+          height: num(context.windowH)
+        }
+      } catch {
+        /* A legacy helper has no context line. */
+      }
       continue
     }
     if (!line.startsWith('{')) {
@@ -96,8 +175,27 @@ export function parseAxElements(stdout: string): AxSnapshot {
       role,
       name: str(parsed.label).replace(/\s+/g, ' ').trim(),
       value: str(parsed.value),
+      ...(typeof parsed.minValue === 'number' ? { minValue: parsed.minValue } : {}),
+      ...(typeof parsed.maxValue === 'number' ? { maxValue: parsed.maxValue } : {}),
+      ...(typeof parsed.valueSettable === 'boolean'
+        ? { valueSettable: parsed.valueSettable }
+        : {}),
       cx: Math.round(x + w / 2),
       cy: Math.round(y + h / 2),
+      x,
+      y,
+      width: w,
+      height: h,
+      stableId: `${windowId || windowTitle}:${role}:${str(parsed.label).replace(/\s+/g, ' ').trim().toLocaleLowerCase()}:${Math.round(x)}:${Math.round(y)}:${Math.round(w)}:${Math.round(h)}`,
+      source: 'ax',
+      processId,
+      windowId,
+      revision,
+      ...(typeof parsed.checked === 'boolean' ? { checked: parsed.checked } : {}),
+      ...(typeof parsed.selected === 'boolean' ? { selected: parsed.selected } : {}),
+      ...(typeof parsed.hasPopup === 'boolean' ? { hasPopup: parsed.hasPopup } : {}),
+      ...(typeof parsed.focused === 'boolean' ? { focused: parsed.focused } : {}),
+      executable: parsed.executable !== false,
       actionable: parsed.press === true,
       enabled: parsed.enabled !== false
     })
@@ -105,22 +203,53 @@ export function parseAxElements(stdout: string): AxSnapshot {
   elements.forEach((el, i) => {
     el.index = i + 1
   })
-  return { windowTitle, elements }
+  if (windowBounds.width <= 0 || windowBounds.height <= 0) {
+    const visible = elements.filter(
+      (element) => (element.width ?? 0) > 0 && (element.height ?? 0) > 0
+    )
+    if (visible.length) {
+      const left = Math.min(...visible.map((element) => element.x ?? element.cx))
+      const top = Math.min(...visible.map((element) => element.y ?? element.cy))
+      const right = Math.max(
+        ...visible.map((element) => (element.x ?? element.cx) + (element.width ?? 0))
+      )
+      const bottom = Math.max(
+        ...visible.map((element) => (element.y ?? element.cy) + (element.height ?? 0))
+      )
+      windowBounds = { x: left, y: top, width: right - left, height: bottom - top }
+    }
+  }
+  return {
+    windowTitle,
+    elements,
+    processId,
+    processName,
+    windowId: windowId || `${processId}:${windowTitle}`,
+    ...(platformWindowId > 0 ? { platformWindowId } : {}),
+    windowBounds,
+    revision
+  }
 }
 
 /** The numbered element list rendered for the model - same shape as the browser
  *  collector's, so the model faces one consistent "pick [n]" surface. */
-export function formatAxElementsForModel(snapshot: AxSnapshot, maxElements = 120): string {
+export function formatAxElementsForModel(
+  snapshot: AxSnapshot,
+  maxElements = Number.POSITIVE_INFINITY
+): string {
   const lines = snapshot.elements.slice(0, maxElements).map((el) => {
     const parts = [`[${el.index}]`, el.role]
     if (el.name) {
       parts.push(JSON.stringify(el.name))
     }
     if (el.value) {
-      parts.push(`value=${JSON.stringify(el.value.slice(0, 60))}`)
+      parts.push(`value=${JSON.stringify(el.value.slice(0, 240))}`)
     }
     if (!el.enabled) {
       parts.push('(disabled)')
+    }
+    if (el.executable === false) {
+      parts.push('(evidence only)')
     }
     return parts.join(' ')
   })

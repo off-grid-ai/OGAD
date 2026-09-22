@@ -23,6 +23,8 @@ interface CaptureInput {
   displayId: number
   width: number
   height: number
+  /** macOS CGWindowID for exact target-window capture. */
+  targetWindowId?: number
 }
 
 function captureBinary(): string | null {
@@ -37,11 +39,14 @@ async function captureMacDisplay(input: CaptureInput): Promise<ComputerUseDispla
     `offgrid-computer-use-${process.pid}-${crypto.randomUUID()}.png`
   )
   try {
-    await execFileAsync(
-      binary,
-      [output, String(input.displayId), String(input.width), String(input.height)],
-      { timeout: CAPTURE_TIMEOUT_MS, maxBuffer: 1024 * 1024 }
-    )
+    const args = [
+      output,
+      String(input.displayId),
+      String(input.width),
+      String(input.height)
+    ]
+    if (input.targetWindowId) args.push(String(input.targetWindowId))
+    await execFileAsync(binary, args, { timeout: CAPTURE_TIMEOUT_MS, maxBuffer: 1024 * 1024 })
     const png = await fs.promises.readFile(output)
     const metadata = await sharp(png).metadata()
     if (!metadata.width || !metadata.height) {
