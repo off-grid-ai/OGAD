@@ -22,7 +22,10 @@ export interface WriterResult {
 }
 
 export function writerInputIsPrivate(input: WriterInput): boolean {
-  return input.field.secure === true
+  if (input.field.secure === true || /SecureTextField/iu.test(input.field.role)) return true
+  return /\b(?:password|passcode|pin|one[- ]?time code|verification code|security code|card number|credit card|debit card|cvv|cvc|payment)\b/iu.test(
+    `${input.field.label} ${input.field.placeholder ?? ''}`
+  )
 }
 
 export function compactWriterPrompt(input: WriterInput): string {
