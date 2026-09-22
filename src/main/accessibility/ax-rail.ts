@@ -25,6 +25,7 @@ import type { ElementTaskResult } from './ax-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
 import type { VisionTaskContinuation } from '../vision/vision-agent'
 import type { ComputerUseRail } from '../../shared/computer-use-settings'
+import type { VisionExecuteResult } from '../vision/vision-rail'
 
 export interface ComputerTaskTiers {
   /** Resolve + read the target app for routing, or null to fall to vision. */
@@ -41,7 +42,7 @@ export interface ComputerTaskTiers {
       recoverWithVision?: (
         checkpoint: TaskRetryCheckpoint,
         continuation: VisionTaskContinuation
-      ) => Promise<ExecuteResult>
+      ) => Promise<VisionExecuteResult>
     }
   ): Promise<ElementTaskResult>
   /** The vision-rail executor, used when AX can't drive this surface. */
@@ -50,7 +51,7 @@ export interface ComputerTaskTiers {
     checkpoint?: TaskRetryCheckpoint,
     continuation?: VisionTaskContinuation,
     targetLabel?: string
-  ): Promise<ExecuteResult>
+  ): Promise<VisionExecuteResult>
 }
 
 /** Extract the task goal the same way the vision rail does. */
