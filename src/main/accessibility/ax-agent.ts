@@ -18,8 +18,11 @@ import {
   computerUseHistoryTokenBudget,
   tailWithinTokenBudget
 } from '../../shared/computer-use-settings'
-import { DEFAULT_COMPUTER_USE_STEP_BUDGET } from '../../shared/computer-use-limits'
-import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
+import {
+  taskExecutionPlanProgress,
+  type TaskExecutionPhase,
+  type TaskExecutionPlan
+} from '../../shared/task-execution-plan'
 import {
   createTaskPhaseReporter,
   formatTaskExecutionPlanContext
@@ -27,12 +30,19 @@ import {
 import { TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
 import { CurrentTaskBrief } from '../tasks/current-task-brief'
 import type { GuardSnapshot } from '../vision/vision-guard'
+import type { ComputerUseVerificationResult } from './ax-state'
 
 export interface ElementActuator {
   /** Click at the element's center. */
   click(el: AxElement): Promise<void>
+  /** Move the pointer to the element without clicking, for nested menus. */
+  hover?(el: AxElement): Promise<void>
   /** AXPress the element (preferred when it exposes a press action). */
   press(el: AxElement): Promise<void>
+  /** Scroll the view under the element. The element is an anchor, not a click target. */
+  scroll?(el: AxElement, direction: 'up' | 'down' | 'left' | 'right'): Promise<void>
+  /** Set a native value-aware control without guessing a pointer coordinate. */
+  setValue?(el: AxElement, value: number): Promise<void>
   /** Type text. With an element, focus it first (click its center); a null
    *  element types into whatever the app already has focused - which is how a
    *  general model drives a compose box it cannot pick out of the element list. */
@@ -48,7 +58,16 @@ export interface ElementTaskDeps {
   decide: (prompt: string, screenshotPath?: string) => Promise<string>
   /** Optional typed-decision path. It receives the exact observation so it
    * does not need to parse the rendered element list back into controls. */
-  decideElement?: (prompt: string, snapshot: AxSnapshot) => Promise<string>
+  decideElement?: (
+    prompt: string,
+    snapshot: AxSnapshot,
+    phase?: TaskExecutionPhase,
+    allowCompletion?: boolean
+  ) => Promise<string>
+  /** Re-read the bound window before mutation. False rejects a stale action. */
+  validateAction?: (snapshot: AxSnapshot, step: ElementStep) => Promise<boolean>
+  /** Deterministic bounded postcondition verification after one mutation. */
+  verifyAction?: (snapshot: AxSnapshot, step: ElementStep) => Promise<ComputerUseVerificationResult>
   screenshotPath?: () => string | undefined
   onStep?: (note: string) => void
   onObservation?: (observation: ElementStepObservation) => void
@@ -59,8 +78,13 @@ export interface ElementTaskDeps {
   retrievedFacts?: string[]
   now?: () => number
   plan?: TaskExecutionPlan
+  resumedSteps?: readonly string[]
+  initialStep?: number
   onPhase?: (phaseId: string) => void
   takeGuidance?: () => readonly string[]
+  /** Long-running tasks can require continued useful work until their session
+   *  boundary. Model completion claims are deferred while this returns false. */
+  completionAllowed?: () => boolean
   /** Park this same task when a private step needs the user. Continue returns
    * the loop to a fresh Accessibility observation. */
   waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
@@ -70,7 +94,14 @@ export interface ElementTaskDeps {
     steps: readonly string[]
     guidance: readonly string[]
     currentStep: number
-  }) => Promise<{ ok: boolean; detail?: string }>
+  }) => Promise<{
+    ok: boolean
+    detail?: string
+    activePhaseIndex?: number
+    completed?: boolean
+    summary?: string
+    submittedDraft?: boolean
+  }>
   signal?: AbortSignal
   /** The Computer Use task owner. The loop checks it after every external wait,
    *  so Pause parks before another action and Stop cannot be overwritten by a
@@ -98,14 +129,19 @@ export interface ElementTaskResult {
 
 export type ElementStep =
   | { action: 'click'; index: number }
+  | { action: 'hover'; index: number }
   | { action: 'press'; index: number }
+  | { action: 'scroll'; index: number; direction: 'up' | 'down' | 'left' | 'right' }
+  | { action: 'set_value'; index: number; value: number }
   // index is OPTIONAL: a general model often cannot pick the compose box out of
   // the list and types into the focused field. submitKeys carries a trailing
   // "Enter" so "type hi and send" lands in one step (how the model phrases it).
   | { action: 'type'; index?: number; text: string; submitKeys?: string }
   | { action: 'key'; keys: string }
+  | { action: 'wait'; durationMs: number }
   | { action: 'human_required'; why: string }
   | { action: 'vision_required'; why: string }
+  | { action: 'milestone_complete'; summary: string }
   | { action: 'done'; summary: string }
   | { action: 'give_up'; why: string }
 
@@ -115,6 +151,7 @@ export interface ElementStepObservation {
   retrievedFacts: string[]
   rawResponse?: string
   parsedAction?: ElementStep | null
+  verification?: ComputerUseVerificationResult
   durationMs: number
   result:
     | 'parse_failed'
@@ -141,11 +178,16 @@ export const ELEMENT_STEP_FORMAT = {
           type: 'string',
           enum: [
             'click',
+            'hover',
             'press',
+            'scroll',
+            'set_value',
             'type',
             'key',
+            'wait',
             'human_required',
             'vision_required',
+            'milestone_complete',
             'done',
             'give_up'
           ]
@@ -153,6 +195,9 @@ export const ELEMENT_STEP_FORMAT = {
         index: { type: 'integer' },
         text: { type: 'string' },
         keys: { type: 'string' },
+        direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
+        value: { type: 'number' },
+        durationMs: { type: 'integer' },
         summary: { type: 'string' },
         why: { type: 'string' }
       },
@@ -187,8 +232,26 @@ export function parseElementStep(raw: string): ElementStep | null {
   switch (value.action) {
     case 'click':
       return idx !== undefined ? { action: 'click', index: idx } : null
+    case 'hover':
+      return idx !== undefined ? { action: 'hover', index: idx } : null
     case 'press':
       return idx !== undefined ? { action: 'press', index: idx } : null
+    case 'scroll': {
+      const direction = str('direction')
+      return idx !== undefined &&
+        (direction === 'up' ||
+          direction === 'down' ||
+          direction === 'left' ||
+          direction === 'right')
+        ? { action: 'scroll', index: idx, direction }
+        : null
+    }
+    case 'set_value': {
+      const targetValue = typeof value.value === 'number' ? value.value : undefined
+      return idx !== undefined && targetValue !== undefined && Number.isFinite(targetValue)
+        ? { action: 'set_value', index: idx, value: targetValue }
+        : null
+    }
     case 'type': {
       // text is required; index is OPTIONAL (type into the focused field when
       // omitted). A "keys"/"key" on a type step is a trailing submit ("Enter").
@@ -208,8 +271,19 @@ export function parseElementStep(raw: string): ElementStep | null {
       const keys = str('keys')
       return keys ? { action: 'key', keys } : null
     }
+    case 'wait': {
+      const durationMs = typeof value.durationMs === 'number' ? value.durationMs : undefined
+      return durationMs !== undefined &&
+        Number.isInteger(durationMs) &&
+        durationMs >= 0 &&
+        durationMs <= 5_000
+        ? { action: 'wait', durationMs }
+        : null
+    }
     case 'done':
       return { action: 'done', summary: str('summary') ?? 'done' }
+    case 'milestone_complete':
+      return { action: 'milestone_complete', summary: str('summary') ?? 'milestone complete' }
     case 'human_required':
       return { action: 'human_required', why: str('why') ?? 'Complete this step' }
     case 'vision_required':
@@ -253,8 +327,10 @@ export function buildElementPrompt(input: {
     boundedHistory.length ? `Previous steps:\n${boundedHistory.join('\n')}` : '',
     'Return exactly one JSON action:',
     '- Click or press an element: {"action":"click","index":N} or {"action":"press","index":N}.',
+    '- Scroll the view under an element: {"action":"scroll","index":N,"direction":"up"}.',
     '- Enter text: {"action":"type","index":N,"text":"..."}. Omit index only when the correct field is already focused. Add "keys":"Enter" to submit.',
     '- Send keys: {"action":"key","keys":"Enter"}.',
+    '- Wait only while the interface is changing: {"action":"wait","durationMs":250}.',
     '- Use human_required for sign-in, passwords, one-time codes, or payment.',
     '- Use vision_required when the next safe step needs visual grounding or free-form text entry.',
     '- Use done only when the goal is visibly complete. Use give_up only when it cannot be completed.',
@@ -267,11 +343,108 @@ export function buildElementPrompt(input: {
     .join('\n')
 }
 
-const DEFAULT_MAX_STEPS = DEFAULT_COMPUTER_USE_STEP_BUDGET
+const DECISION_OBJECTIVE_CHARS = 480
+const DECISION_GUIDANCE_CHARS = 120
+const DECISION_HISTORY_CHARS = 160
+const DECISION_STATE_CHARS = 280
+const DECISION_VISIBLE_TEXT_CHARS = 220
+
+function boundedDecisionText(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  return normalized.length <= maxChars
+    ? normalized
+    : `${normalized.slice(0, maxChars - 1).trimEnd()}…`
+}
+
+function decisionObjective(goal: string): string {
+  const marker = 'Structured task summary:\n'
+  const summary = goal.includes(marker)
+    ? goal.slice(goal.lastIndexOf(marker) + marker.length)
+    : goal
+  return boundedDecisionText(summary, DECISION_OBJECTIVE_CHARS)
+}
+
+/** Preserve compact observable state for the small local decider. Values,
+ * focus, selection, and checked state describe what is true now without
+ * semantically choosing a control or action for the model. */
+function decisionState(snapshot: AxSnapshot): string {
+  const state = snapshot.elements
+    .filter(
+      (element) =>
+        element.enabled &&
+        element.executable !== false &&
+        ((Boolean(element.value) && typeof element.checked !== 'boolean') ||
+          element.focused === true ||
+          element.selected === true ||
+          element.checked === true)
+    )
+    .slice(0, 4)
+    .map((element) => {
+      const identity = [element.role, element.name ? JSON.stringify(element.name) : '']
+        .filter(Boolean)
+        .join(' ')
+      const facts = [
+        element.value ? `value=${JSON.stringify(boundedDecisionText(element.value, 80))}` : '',
+        element.focused === true ? 'focused' : '',
+        element.selected === true ? 'selected' : '',
+        element.checked === true ? 'checked=true' : ''
+      ].filter(Boolean)
+      return `${identity} ${facts.join(' ')}`.trim()
+    })
+  return boundedDecisionText(state.join('; '), DECISION_STATE_CHARS)
+}
+
+/** Keep the A-J Decider packet within Laya's small useful context. The selected
+ * decision level supplies its complete choices, so the AX tree must not be
+ * repeated in the context. */
+export function buildElementDecisionContext(input: {
+  goal: string
+  milestone?: string
+  operation?: TaskExecutionPhase['operation']
+  snapshot: AxSnapshot
+  history: readonly string[]
+  guidance?: readonly string[]
+}): string {
+  const target = [input.snapshot.processName, input.snapshot.windowTitle]
+    .filter(Boolean)
+    .join(' / ')
+  const previous = input.history.slice(-2)
+  const guidance = (input.guidance ?? []).map((item) => item.trim()).filter(Boolean)
+  const operation = input.operation
+    ? [
+        `kind=${input.operation.kind}`,
+        input.operation.target ? `target=${JSON.stringify(input.operation.target)}` : '',
+        input.operation.value ? `value=${JSON.stringify(input.operation.value)}` : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : ''
+  const currentState = decisionState(input.snapshot)
+  const visibleText = input.snapshot.visibleText
+    ? boundedDecisionText(input.snapshot.visibleText, DECISION_VISIBLE_TEXT_CHARS)
+    : ''
+  return [
+    `Current milestone: ${boundedDecisionText(input.milestone ?? decisionObjective(input.goal), DECISION_OBJECTIVE_CHARS)}`,
+    operation ? `Planned operation: ${operation}` : '',
+    target ? `Target application/window: ${target}` : '',
+    currentState ? `Current structured state: ${currentState}` : '',
+    visibleText ? `Visible screen text: ${visibleText}` : '',
+    `Available structured controls: ${input.snapshot.elements.filter((element) => element.enabled && element.executable !== false).length}`,
+    previous.length
+      ? `Previous action and verification: ${boundedDecisionText(previous.join(' | '), DECISION_HISTORY_CHARS)}`
+      : '',
+    guidance.length
+      ? `Current authoritative guidance: ${boundedDecisionText(guidance.join(' | '), DECISION_GUIDANCE_CHARS)}`
+      : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 const MAX_CONSECUTIVE_PARSE_FAILURES = 3
 const MAX_CONSECUTIVE_NO_PROGRESS = 3
 export const AX_INVALID_REPLY_SUMMARY = `The action model returned an invalid reply ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row.`
-export const AX_NO_PROGRESS_SUMMARY = `The action model made no progress ${MAX_CONSECUTIVE_NO_PROGRESS} times in a row.`
+export const AX_NO_PROGRESS_SUMMARY = 'The action did not produce its required result.'
 
 /** A stable signature of an actuating step, used to detect a runaway loop. Two
  *  consecutive identical signatures mean the model is repeating itself (it sent
@@ -281,23 +454,78 @@ export function actionSignature(step: ElementStep): string | null {
   switch (step.action) {
     case 'click':
       return `click:${step.index}`
+    case 'hover':
+      return `hover:${step.index}`
     case 'press':
       return `press:${step.index}`
+    case 'scroll':
+      return `scroll:${step.index}:${step.direction}`
+    case 'set_value':
+      return `set_value:${step.index}:${step.value}`
     case 'type':
       return `type:${step.index ?? 'focus'}:${step.text}:${step.submitKeys ?? ''}`
     case 'key':
       return `key:${step.keys}`
+    case 'wait':
+      return `wait:${step.durationMs}`
     default:
       return null
   }
 }
 
-function isSubmitKey(keys: string): boolean {
-  return /(^|\s)(enter|return)(\s|$)/i.test(keys)
+/** Identify equivalent actionable state without relying on a transient display
+ * index or observation revision. Focus is omitted because it can change as a
+ * side effect without proving progress toward the task. */
+export function observationStateSignature(snapshot: AxSnapshot): string {
+  const elements = snapshot.elements
+    .map((element) => ({
+      id:
+        element.stableId ??
+        `${element.role}:${element.name}:${element.x ?? element.cx}:${element.y ?? element.cy}`,
+      role: element.role,
+      name: element.name,
+      value: element.value,
+      checked: element.checked,
+      selected: element.selected,
+      enabled: element.enabled,
+      executable: element.executable !== false
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id))
+  return JSON.stringify({
+    processId: snapshot.processId,
+    windowId: snapshot.windowId,
+    title: snapshot.windowTitle,
+    elements
+  })
 }
 
-function isSubmitElement(element: AxElement): boolean {
-  return /\b(send|submit|post)\b/i.test(`${element.name} ${element.role}`)
+function boundMutationSignature(snapshot: AxSnapshot, step: ElementStep): string | null {
+  const signature = actionSignature(step)
+  if (!signature || step.action === 'wait') return null
+  if (
+    step.action !== 'click' &&
+    step.action !== 'hover' &&
+    step.action !== 'press' &&
+    step.action !== 'scroll' &&
+    step.action !== 'set_value' &&
+    step.action !== 'type'
+  ) {
+    return signature
+  }
+  if (step.index === undefined) return signature
+  const target = snapshot.elements.find((element) => element.index === step.index)
+  if (!target) return signature
+  return `${step.action}:${target.stableId ?? `${target.role}:${target.name}:${target.cx}:${target.cy}`}${
+    step.action === 'type'
+      ? `:${step.text}:${step.submitKeys ?? ''}`
+      : step.action === 'set_value'
+        ? `:${step.value}`
+        : ''
+  }`
+}
+
+function isSubmitKey(keys: string): boolean {
+  return /(^|\s)(enter|return)(\s|$)/i.test(keys)
 }
 
 function isEditableElement(element: AxElement): boolean {
@@ -311,13 +539,16 @@ export async function runElementTask(
   deps: ElementTaskDeps
 ): Promise<ElementTaskResult> {
   const { read, actuator, decide, onStep } = deps
-  const maxSteps = deps.maxSteps ?? DEFAULT_MAX_STEPS
+  const maxSteps = deps.maxSteps ?? Number.POSITIVE_INFINITY
   const checkpointInterval = Math.max(1, Math.floor(deps.checkpointInterval ?? 9))
   const retrievedFacts = deps.retrievedFacts ?? []
   const now = deps.now ?? Date.now
-  const steps: string[] = []
+  const steps: string[] = [...(deps.resumedSteps ?? [])]
   const reportPhase = createTaskPhaseReporter(deps.plan, deps.onPhase)
-  reportPhase(0)
+  let activePhaseIndex = taskExecutionPlanProgress(steps)?.activePhaseIndex ?? 0
+  let continuingAfterFinalPhase = false
+  let activePhaseActed = false
+  reportPhase(activePhaseIndex)
   const note = (line: string): void => {
     steps.push(line)
     onStep?.(line)
@@ -335,6 +566,9 @@ export async function runElementTask(
   const taskBrief = new CurrentTaskBrief(goal)
   let consecutiveParseFailures = 0
   let consecutiveNoProgress = 0
+  let currentObservationKey = ''
+  const recoveredObservationKeys = new Set<string>()
+  const attemptedMutations = new Set<string>()
   const recoverWithVision = async (
     summary: string,
     currentStep: number
@@ -348,6 +582,14 @@ export async function runElementTask(
         guidance: [...taskBrief.guidance]
       }
     }
+    if (currentObservationKey && recoveredObservationKeys.has(currentObservationKey)) {
+      return {
+        ok: false,
+        summary: 'Computer Use stopped because recovery already ran for this unchanged state.',
+        steps
+      }
+    }
+    if (currentObservationKey) recoveredObservationKeys.add(currentObservationKey)
     const recovery = await deps.recoverWithVision({
       summary,
       steps,
@@ -361,6 +603,28 @@ export async function runElementTask(
         steps
       }
     }
+    if (recovery.completed) {
+      const summary = recovery.summary ?? 'The requested result is visible.'
+      note(`done: ${summary}`)
+      return { ok: true, summary, steps }
+    }
+    let advancedPhase = false
+    if (deps.plan && recovery.activePhaseIndex !== undefined) {
+      const recoveredPhaseIndex = Math.max(
+        0,
+        Math.min(recovery.activePhaseIndex, deps.plan.phases.length - 1)
+      )
+      if (recoveredPhaseIndex > activePhaseIndex) {
+        advancedPhase = true
+        activePhaseIndex = recoveredPhaseIndex
+        activePhaseActed = false
+        reportPhase(activePhaseIndex)
+      }
+    }
+    if (recovery.submittedDraft || advancedPhase) draftAwaitingSubmit = false
+    // The recovery action belongs to the phase that just completed. A newly
+    // activated phase still needs its own action before it can complete.
+    if (!advancedPhase) activePhaseActed = true
     note('Vision recovery completed one action. Returning to accessibility control.')
     consecutiveParseFailures = 0
     consecutiveNoProgress = 0
@@ -369,6 +633,28 @@ export async function runElementTask(
   }
   const requireFreshVerification = (): void => {
     if (deps.control && !deps.control.isVerifying) deps.control.beginVerification()
+  }
+  const handleVerification = async (
+    verification: ComputerUseVerificationResult | undefined,
+    currentStep: number
+  ): Promise<ElementTaskResult | 'recovered' | null> => {
+    if (!verification) return null
+    if (verification.status === 'satisfied') {
+      consecutiveNoProgress = 0
+      note('action effect confirmed; re-observe the required milestone result')
+      return null
+    }
+    consecutiveNoProgress += 1
+    if (verification.status === 'unknown' || verification.status === 'timeout') {
+      note(
+        `verification ${verification.status}; the mutation will not be replayed; re-observing after the unconfirmed result`
+      )
+      return null
+    }
+    note(`verification ${verification.status}; the mutation will not be replayed`)
+    note(AX_NO_PROGRESS_SUMMARY)
+    const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, currentStep)
+    return failedRecovery ?? 'recovered'
   }
 
   const waitForControl = async (): Promise<ElementTaskResult | null> => {
@@ -379,10 +665,11 @@ export async function runElementTask(
         : before
     if (!after || !['completed', 'failed', 'stopped'].includes(after.status)) return null
     const summary = after.reason || 'stopped'
-    return { ok: false, summary, steps }
+    return { ok: after.status === 'completed', summary, steps }
   }
 
-  for (let step = 0; step < maxSteps; step += 1) {
+  const initialStep = Math.max(0, Math.floor(deps.initialStep ?? 0))
+  for (let step = initialStep; step < maxSteps; step += 1) {
     const stoppedBeforeStep = await waitForControl()
     if (stoppedBeforeStep) return stoppedBeforeStep
     const planningStep = step + 1
@@ -391,6 +678,7 @@ export async function runElementTask(
     let modelPrompt = ''
     let rawResponse: string | undefined
     let decision: ElementStep | null | undefined
+    let verificationResult: ComputerUseVerificationResult | undefined
     let observed = false
     const observe = (result: ElementStepObservation['result'], error?: string): void => {
       if (observed) return
@@ -401,6 +689,7 @@ export async function runElementTask(
         retrievedFacts,
         rawResponse,
         parsedAction: decision,
+        ...(verificationResult ? { verification: verificationResult } : {}),
         durationMs: now() - startedAt,
         result,
         error
@@ -413,10 +702,15 @@ export async function runElementTask(
     }
     try {
       const snapshot = await read()
+      currentObservationKey = observationStateSignature(snapshot)
       const stoppedAfterRead = await waitForControl()
       if (stoppedAfterRead) return stoppedAfterRead
       if (deps.control && !deps.control.markObservationReady()) continue
       taskBrief.accept(deps.takeGuidance?.() ?? [])
+      const activePhase = continuingAfterFinalPhase
+        ? undefined
+        : deps.plan?.phases[activePhaseIndex]
+      const activeMilestone = activePhase?.title
       modelPrompt = buildElementPrompt({
         goal: taskBrief.objective,
         snapshot,
@@ -425,13 +719,28 @@ export async function runElementTask(
         contextTokens: deps.contextTokens,
         plan: deps.plan
       })
+      const decisionPrompt = deps.decideElement
+        ? buildElementDecisionContext({
+            goal: taskBrief.objective,
+            milestone: activeMilestone,
+            operation: activePhase?.operation,
+            snapshot,
+            history: steps,
+            guidance: taskBrief.guidance
+          })
+        : modelPrompt
       prompt = taskBrief.guidance.reduce(
         (safePrompt, privateText) => safePrompt.split(privateText).join(TASK_GUIDANCE_TRACE),
-        modelPrompt
+        decisionPrompt
       )
       const decisionLeaseEpoch = deps.control?.snapshot().inputLease.epoch
       rawResponse = deps.decideElement
-        ? await deps.decideElement(modelPrompt, snapshot)
+        ? await deps.decideElement(
+          decisionPrompt,
+          snapshot,
+          activePhase,
+          activePhaseActed
+        )
         : await decide(modelPrompt, deps.screenshotPath?.())
       const stoppedAfterDecision = await waitForControl()
       if (stoppedAfterDecision) return stoppedAfterDecision
@@ -465,11 +774,84 @@ export async function runElementTask(
       }
       consecutiveParseFailures = 0
       const action = parsedDecision
+      if (action.action === 'milestone_complete') {
+        const verifiedFieldValue =
+          deps.plan?.phases[activePhaseIndex]?.completion?.kind === 'field_value'
+        if (draftAwaitingSubmit && !verifiedFieldValue) {
+          observe('skipped')
+          note('milestone completion rejected: text is still a draft')
+          checkpoint()
+          consecutiveNoProgress += 1
+          if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
+            note(AX_NO_PROGRESS_SUMMARY)
+            const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, planningStep)
+            if (failedRecovery) return failedRecovery
+          }
+          continue
+        }
+        if (verifiedFieldValue) draftAwaitingSubmit = false
+        const phaseCount = deps.plan?.phases.length ?? 1
+        const completed = deps.plan?.phases[activePhaseIndex]?.title ?? action.summary
+        if (activePhaseIndex + 1 < phaseCount) {
+          activePhaseIndex += 1
+          activePhaseActed = false
+          reportPhase(activePhaseIndex)
+          lastActionSig = null
+          consecutiveNoProgress = 0
+          observe('terminal')
+          note(`milestone complete: ${completed}`)
+          checkpoint()
+          continue
+        }
+        if (deps.completionAllowed && !deps.completionAllowed()) {
+          observe('skipped')
+          note('completion deferred until the session limit; continue with another useful action')
+          checkpoint()
+          continuingAfterFinalPhase = true
+          lastActionSig = null
+          consecutiveNoProgress = 0
+          continue
+        }
+        if (deps.control && !deps.control.isVerifying) {
+          observe('terminal')
+          note(`verification requested: ${action.summary}`)
+          checkpoint()
+          deps.control.beginVerification()
+          continue
+        }
+        deps.control?.complete()
+        reportPhase(phaseCount - 1)
+        observe('terminal')
+        note(`done: ${action.summary}`)
+        checkpoint()
+        return { ok: true, summary: action.summary, steps }
+      }
       if (action.action === 'done') {
+        if (deps.plan && !activePhaseActed) {
+          observe('skipped')
+          note('completion rejected: the current phase has not executed an action')
+          checkpoint()
+          continue
+        }
         if (draftAwaitingSubmit) {
           observe('skipped')
           note('completion rejected: text is still a draft; press Enter or click Send')
           checkpoint()
+          consecutiveNoProgress += 1
+          if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
+            note(AX_NO_PROGRESS_SUMMARY)
+            const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, planningStep)
+            if (failedRecovery) return failedRecovery
+          }
+          continue
+        }
+        if (deps.completionAllowed && !deps.completionAllowed()) {
+          observe('skipped')
+          note('completion deferred until the session limit; continue with another useful action')
+          checkpoint()
+          continuingAfterFinalPhase = true
+          lastActionSig = null
+          consecutiveNoProgress = 0
           continue
         }
         if (deps.control && !deps.control.isVerifying) {
@@ -516,7 +898,7 @@ export async function runElementTask(
       // did (e.g. send "hi" again). Stop before actuating the duplicate - a live
       // action like a message must never fire twice because the model looped.
       const sig = actionSignature(action)
-      if (sig !== null && sig === lastActionSig) {
+      if (sig !== null && sig === lastActionSig && action.action !== 'scroll') {
         // Repeat of the last action: SKIP re-firing it (so a live action never
         // fires twice) but keep going - a repeat should not kill the task. The
         // user can stop a run that does not make useful progress.
@@ -537,14 +919,44 @@ export async function runElementTask(
         continue
       }
       lastActionSig = sig
+      if (action.action === 'wait') {
+        await new Promise((resolve) => setTimeout(resolve, action.durationMs))
+        observe('skipped')
+        note(`waited ${action.durationMs} ms; re-observing`)
+        checkpoint()
+        continue
+      }
+      if (deps.validateAction && !(await deps.validateAction(snapshot, action))) {
+        observe(
+          'invalid_target',
+          'The target window or observation revision changed before actuation.'
+        )
+        note('stale action refused; re-observing the target window')
+        checkpoint()
+        continue
+      }
+      const mutation = boundMutationSignature(snapshot, action)
+      const boundMutation = mutation ? `${currentObservationKey}\n${mutation}` : null
+      if (boundMutation && attemptedMutations.has(boundMutation)) {
+        observe('skipped')
+        note('refused a mutation that already ran against this unchanged state')
+        checkpoint()
+        const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, planningStep)
+        if (failedRecovery) return failedRecovery
+        continue
+      }
+      if (boundMutation) attemptedMutations.add(boundMutation)
       if (action.action === 'key') {
-        consecutiveNoProgress = 0
         await actuator.keys(action.keys)
+        activePhaseActed = true
         if (isSubmitKey(action.keys)) draftAwaitingSubmit = false
         requireFreshVerification()
+        verificationResult = await deps.verifyAction?.(snapshot, action)
+        const verificationOutcome = await handleVerification(verificationResult, planningStep)
         observe('actuated')
         note(`key ${action.keys}`)
         checkpoint()
+        if (verificationOutcome && verificationOutcome !== 'recovered') return verificationOutcome
         continue
       }
       if (action.action === 'type') {
@@ -567,7 +979,6 @@ export async function runElementTask(
           }
           continue
         }
-        consecutiveNoProgress = 0
         if (typed.length > 0) {
           typedTexts.add(typed)
         }
@@ -594,6 +1005,7 @@ export async function runElementTask(
           }
         }
         await actuator.type(target, action.text)
+        activePhaseActed = true
         note(
           target
             ? `typed into [${target.index}] ${target.name || target.role}`
@@ -604,12 +1016,48 @@ export async function runElementTask(
           await actuator.keys(action.submitKeys)
           note(`key ${action.submitKeys}`)
           if (isSubmitKey(action.submitKeys)) draftAwaitingSubmit = false
-        } else if (typed.length > 0) {
-          draftAwaitingSubmit = true
+        } else {
+          draftAwaitingSubmit = typed.length > 0
         }
         requireFreshVerification()
+        verificationResult = await deps.verifyAction?.(snapshot, action)
+        const verificationOutcome = await handleVerification(verificationResult, planningStep)
         observe('actuated')
         checkpoint()
+        if (verificationOutcome && verificationOutcome !== 'recovered') return verificationOutcome
+        continue
+      }
+      if (action.action === 'set_value') {
+        const target = snapshot.elements.find((candidate) => candidate.index === action.index)
+        if (!target) {
+          observe('invalid_target')
+          note(`no element [${action.index}] on this screen`)
+          checkpoint()
+          continue
+        }
+        if (
+          !/Slider/i.test(target.role) ||
+          !target.valueSettable ||
+          (typeof target.minValue === 'number' && action.value < target.minValue) ||
+          (typeof target.maxValue === 'number' && action.value > target.maxValue) ||
+          !actuator.setValue
+        ) {
+          observe('invalid_target')
+          note(
+            `value ${action.value} is not valid for [${target.index}] ${target.name || target.role}`
+          )
+          checkpoint()
+          continue
+        }
+        await actuator.setValue(target, action.value)
+        activePhaseActed = true
+        note(`set [${target.index}] ${target.name || target.role} to ${action.value}`)
+        requireFreshVerification()
+        verificationResult = await deps.verifyAction?.(snapshot, action)
+        const verificationOutcome = await handleVerification(verificationResult, planningStep)
+        observe('actuated')
+        checkpoint()
+        if (verificationOutcome && verificationOutcome !== 'recovered') return verificationOutcome
         continue
       }
       const targetIndex = action.index
@@ -620,20 +1068,37 @@ export async function runElementTask(
         checkpoint()
         continue
       }
-      // click or press: prefer AXPress when the element exposes it.
-      if (action.action === 'press' || el.actionable) {
-        consecutiveNoProgress = 0
+      // A submenu opener needs pointer movement without selection. Other
+      // controls prefer AXPress when the element exposes it.
+      if (action.action === 'hover') {
+        if (!actuator.hover) {
+          throw new Error('Pointer hover is unavailable for this actuator.')
+        }
+        await actuator.hover(el)
+        note(`hovered [${el.index}] ${el.name || el.role}`)
+      } else if (action.action === 'scroll') {
+        if (!actuator.scroll) {
+          throw new Error('Scrolling is unavailable for this actuator.')
+        }
+        await actuator.scroll(el, action.direction)
+        note(`scrolled ${action.direction} over [${el.index}] ${el.name || el.role}`)
+      } else if (action.action === 'press' || el.actionable) {
         await actuator.press(el)
         note(`pressed [${el.index}] ${el.name || el.role}`)
       } else {
-        consecutiveNoProgress = 0
         await actuator.click(el)
         note(`clicked [${el.index}] ${el.name || el.role}`)
       }
-      if (isSubmitElement(el)) draftAwaitingSubmit = false
+      activePhaseActed = true
+      if (draftAwaitingSubmit && (action.action === 'click' || action.action === 'press')) {
+        draftAwaitingSubmit = false
+      }
       requireFreshVerification()
+      verificationResult = await deps.verifyAction?.(snapshot, action)
+      const verificationOutcome = await handleVerification(verificationResult, planningStep)
       observe('actuated')
       checkpoint()
+      if (verificationOutcome && verificationOutcome !== 'recovered') return verificationOutcome
     } catch (error) {
       const message = error instanceof Error ? error.message : 'accessibility step failed'
       observe('error', message)
