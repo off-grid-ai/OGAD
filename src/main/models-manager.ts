@@ -67,6 +67,7 @@ import {
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
 import { getComputerUseSettings, setComputerUseSettings } from './computer-use-settings'
+import { binRoots, dataDir } from './runtime-env'
 
 // Desktop ships the Prism llama.cpp engine required by these packed weights.
 // Keep this entry here: the shared catalog also feeds Mobile, whose llama.rn
@@ -119,10 +120,10 @@ export const DECIDER_2B: ModelEntry = {
   releaseDate: '2026-09-19',
   files: [
     {
-      name: 'decider-2b-q8_0.gguf',
-      url: 'https://huggingface.co/cosetoenor/decider-2b-GGUF/resolve/a087dd15c820ce3a5a7c8c8fbee949019e944155/decider-2b-q8_0.gguf',
-      sizeBytes: 2012012544,
-      sha256: 'cac2782be4136164e0594bd67b4128e86cb2838c309a0e6f7465d6f7e268483f',
+      name: 'decider-2b-v10-q8_0.gguf',
+      url: 'https://huggingface.co/cosetoenor/decider-2b-GGUF/resolve/dcc6e5537f922266d1126c15682ac0929517ee33/decider-2b-q8_0.gguf',
+      sizeBytes: 2012012576,
+      sha256: 'cc136df323a0d10745447c3cb429a5978a3aa24bd261c00b85bdcba92b859184',
       role: 'primary'
     }
   ]
@@ -158,6 +159,55 @@ export const DECIDER_2B_VISION: ModelEntry = {
       role: 'mmproj'
     }
   ]
+}
+
+export const KEV_4B_ID = 'jaredpalmer/kev-4b'
+
+const KEV_4B: ModelEntry = {
+  id: KEV_4B_ID,
+  name: 'Kev 4B',
+  kind: 'computer_use',
+  org: 'Jared Palmer',
+  description: 'Local pointer-head model for typed Computer Use decisions.',
+  params: 4,
+  minRamGb: 16,
+  tags: ['Decision', 'Decider', 'Fast'],
+  grounder: false,
+  files: [{ name: 'head.pt', url: '', sizeBytes: 0, role: 'primary' }]
+}
+
+export interface KevRuntimeArtifact {
+  checkpoint: string
+  base: string
+  source: string
+  python: string
+  script: string
+}
+
+/** Kev currently uses its locally installed Python/MLX runtime and two model directories. */
+export function resolveKevRuntimeArtifact(): KevRuntimeArtifact | null {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return null
+  const root = path.join(dataDir(), 'decision-models')
+  const checkpoint = path.join(root, 'kev-4b-qwen3.5')
+  const base = path.join(root, 'qwen3.5-4b-base')
+  const source = path.join(root, 'kev-source')
+  const python = path.join(source, '.venv', 'bin', 'python')
+  const script = binRoots()
+    .map((directory) => path.join(directory, 'kev-local-server.py'))
+    .find((candidate) => fs.existsSync(candidate))
+  const required = [
+    path.join(checkpoint, 'head.pt'),
+    path.join(checkpoint, 'adapter_model.safetensors'),
+    path.join(base, 'config.json'),
+    path.join(base, 'model.safetensors.index.json'),
+    path.join(base, 'model.safetensors-00001-of-00002.safetensors'),
+    path.join(base, 'model.safetensors-00002-of-00002.safetensors'),
+    path.join(source, 'kev', 'serve.py'),
+    python
+  ]
+  return script && required.every((file) => fileSizeOf(path.dirname(file), path.basename(file)) > 0)
+    ? { checkpoint, base, source, python, script }
+    : null
 }
 
 export async function desktopCatalog(): Promise<ModelEntry[]> {
@@ -240,7 +290,10 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     sizeOf: (name) => fileSizeOf(dir, name)
   })
   const remoteModels = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers)
-  return { kinds: MODEL_KINDS, models: [...models, ...remoteModels] }
+  return {
+    kinds: MODEL_KINDS,
+    models: [...models, ...(resolveKevRuntimeArtifact() ? [KEV_4B] : []), ...remoteModels]
+  }
 }
 
 export interface ModelIdentity {
@@ -251,6 +304,18 @@ export interface ModelIdentity {
 /** Resolve a captured model ID to its display name without consulting which
  * model is active now. Task runs use this once, then persist the result. */
 export async function resolveModelIdentity(modelId: string): Promise<ModelIdentity> {
+  const remoteReference = parseRemoteVisionModelId(modelId)
+  if (remoteReference) {
+    const server = getRemoteVisionServerSettings().servers.find(
+      (candidate) => candidate.id === remoteReference.serverId
+    )
+    const model = server?.modelCatalog?.find(
+      (candidate) => candidate.id === remoteReference.modelId
+    )
+    if (server && model) {
+      return { modelId, modelName: `${model.name} - ${server.name}` }
+    }
+  }
   try {
     const catalog = (await getCatalog()).models as Array<{ id: string; name?: string }>
     return {
@@ -303,7 +368,7 @@ export async function listInstalled(): Promise<string[]> {
   const remoteInstalled = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers).map(
     (model) => model.id
   )
-  return [...localInstalled, ...remoteInstalled]
+  return [...localInstalled, ...(resolveKevRuntimeArtifact() ? [KEV_4B_ID] : []), ...remoteInstalled]
 }
 
 export interface ComputerUseModelArtifact {
@@ -322,12 +387,16 @@ export async function resolveComputerUseModelArtifact(
   if (entry && entry.kind === 'computer_use') {
     const primary = primaryFileName(entry)
     const projector = entry.files.find((file) => file.role === 'mmproj')?.name
-    if (!primary || fileSizeOf(directory, primary) <= 0) return null
-    if (projector && fileSizeOf(directory, projector) <= 0) return null
-    return {
-      id: modelId,
-      primaryPath: path.join(directory, primary),
-      ...(projector ? { projectorPath: path.join(directory, projector) } : {})
+    if (
+      primary &&
+      fileSizeOf(directory, primary) > 0 &&
+      (!projector || fileSizeOf(directory, projector) > 0)
+    ) {
+      return {
+        id: modelId,
+        primaryPath: path.join(directory, primary),
+        ...(projector ? { projectorPath: path.join(directory, projector) } : {})
+      }
     }
   }
   const downloaded = downloadedVariant(
@@ -1038,7 +1107,9 @@ export async function getActiveModelIds(): Promise<string[]> {
       ? DECIDER_2B.id
       : null)
   const withDecision =
-    decisionModelId && info.models.some((model) => model.id === decisionModelId)
+    decisionModelId &&
+    (info.models.some((model) => model.id === decisionModelId) ||
+      (decisionModelId === KEV_4B_ID && Boolean(resolveKevRuntimeArtifact())))
       ? [...new Set([...localIds, decisionModelId])]
       : localIds
   return remote && remote.enabled !== false
@@ -1517,7 +1588,9 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   // active and image models can't be activated from the UI.
   const modals = getAllActiveModals()
   const locals = getLocalModels()
-  const installed = (await listInstalled()).filter((id) => !parseRemoteVisionModelId(id))
+  const installed = (await listInstalled()).filter(
+    (id) => id !== KEV_4B_ID && !parseRemoteVisionModelId(id)
+  )
   const sizeOf = (name: string): number => fileSizeOf(dir, name)
   const downloaded = reconciledDownloaded
   const catalogIds = new Set(catalog.map((m) => m.id))
