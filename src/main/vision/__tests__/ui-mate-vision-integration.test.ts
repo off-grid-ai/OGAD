@@ -65,8 +65,11 @@ describe('specialist vision protocols', () => {
     expect(serialized).toContain('Current milestone: Open the menu.')
     expect(serialized).toContain('Only active instruction: Open the menu.')
     expect(serialized).toContain('If this result is already visible, return subtask_complete now.')
+    expect(serialized).toContain(
+      'Bounded task context for constraints only: Use the visible control.'
+    )
     expect(serialized.indexOf('Only active instruction: Open the menu.')).toBeLessThan(
-      serialized.indexOf('Full task context for reference only: Use the visible control.')
+      serialized.indexOf('Bounded task context for constraints only: Use the visible control.')
     )
     expect(serialized).toContain('subtask_complete')
     expect(serialized).toContain('exact web page viewport')
@@ -178,7 +181,10 @@ describe('specialist vision protocols', () => {
 
     expect(request.tools).toBeUndefined()
     expect(request.disableThinking).toBe(true)
-    expect(JSON.stringify(request.messages)).toContain('Current milestone: Open the menu.')
+    expect(JSON.stringify(request.messages)).toContain('Only active instruction: Open the menu.')
+    expect(JSON.stringify(request.messages)).toContain(
+      'Full task context for reference only: Use the visible control.'
+    )
     expect(JSON.stringify(request.messages)).toContain('This screenshot is 960 by 544 pixels')
     expect(
       uiTarsAdapter.parseResponse("Action: click(point='<point>500 250</point>')", bounds)
