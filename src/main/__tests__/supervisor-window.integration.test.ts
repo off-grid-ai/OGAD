@@ -74,6 +74,10 @@ vi.mock('electron', () => ({
   }
 }))
 
+vi.mock('../computer-use-settings', () => ({
+  getComputerUseSettings: () => ({ showPictureInPicture: true })
+}))
+
 describe('Computer Use supervisor window', () => {
   beforeEach(() => {
     vi.resetModules()
