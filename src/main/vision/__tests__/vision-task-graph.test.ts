@@ -123,6 +123,33 @@ describe('runVisionTaskGraph', () => {
     expect(w.deps.guard.automationStatus).toBe('verifying')
   })
 
+  it('sends the bounded semantic action ledger into a resumed recovery', async () => {
+    const w = workflow([action()])
+    w.deps.returnAfterAction = true
+    w.deps.visualHistoryFrames = 2
+    w.deps.resumedSteps = [
+      'action approved: Click reel A.',
+      'click at (420, 519)',
+      'action approved: Click reel B.',
+      'click at (424, 536)',
+      'action approved: Click reel C.',
+      'click at (420, 524)'
+    ]
+    let continuation
+    w.deps.decide = async (input) => {
+      continuation = input.continuation
+      return { response: 'decision-1', modelInput: 'one visual request' }
+    }
+
+    await runVisionTaskGraph('Recover without repeating a reel.', w.deps)
+
+    expect(continuation).toEqual({
+      done: ['Attempted: Click reel B.', 'Attempted: Click reel C.'],
+      next: 'Navigate to the site',
+      remember: 'Do not repeat an earlier attempted action or content target.'
+    })
+  })
+
   it('records and advances every completed milestone exactly once without an action request', async () => {
     const w = workflow([
       complete('Site visible.'),

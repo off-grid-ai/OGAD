@@ -55,6 +55,11 @@ describe('specialist vision protocols', () => {
       history: [],
       recentSteps: ['The page is ready.'],
       olderVisualFacts: [],
+      continuation: {
+        done: ['Attempted: Click reel A.'],
+        next: 'Open a different relevant reel.',
+        remember: 'Do not repeat an earlier target.'
+      },
       verifiedActions: []
     })
     const serialized = JSON.stringify(request.messages)
@@ -75,6 +80,8 @@ describe('specialist vision protocols', () => {
     expect(serialized).toContain('exact web page viewport')
     expect(serialized).toContain('does not include a browser address bar')
     expect(serialized).toContain('Do not add an offset')
+    expect(serialized).toContain('Attempted: Click reel A.')
+    expect(serialized).toContain('Open a different relevant reel.')
   })
 
   it('uses the exact display frame for desktop Computer Use', () => {

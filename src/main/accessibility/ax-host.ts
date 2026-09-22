@@ -101,6 +101,7 @@ import { runWindowsOCR } from './windows-ocr'
 import { decisionRuntime, DecisionRuntimeError } from './decision-runtime'
 import { selectedGrounderModelId } from '../vision/grounder-loader'
 import { getRemoteVisionServerForModel } from '../vision/remote-vision-server'
+import { continuationFromTaskSteps } from '../vision/model-adapters/continuation-capsule'
 
 const execFileAsync = promisify(execFile)
 
@@ -843,10 +844,18 @@ class AxRailHost {
                     currentStep: liveStep,
                     currentAction: 'Scoring the next action'
                   })
+                  const actionMemory = continuationFromTaskSteps(
+                    getTaskRun(taskId)?.steps ?? [],
+                    settings.visualHistoryFrames,
+                    phase?.title ?? 'Choose the next safe action'
+                  )
+                  const deciderPrompt = actionMemory
+                    ? `${prompt}\nBounded semantic action memory: ${JSON.stringify(actionMemory)}`
+                    : prompt
                   let decision
                   try {
                     decision = await chooseFactorizedElementStep(
-                      prompt,
+                      deciderPrompt,
                       snapshot,
                       (context, question, options) =>
                         decideWithDecisionModel(context, question, options, request.signal),

@@ -171,7 +171,12 @@ describe('general vision native tool policy', () => {
         result: `result-${index + 1}`
       })),
       recentSteps: [],
-      olderVisualFacts: []
+      olderVisualFacts: [],
+      continuation: {
+        done: ['Attempted: Click reel A.'],
+        next: 'Open a different relevant reel.',
+        remember: 'Do not repeat an earlier target.'
+      }
     })
     const transcript = request.messages.map((message) => JSON.stringify(message.content)).join('\n')
 
@@ -179,6 +184,8 @@ describe('general vision native tool policy', () => {
     expect(transcript).toContain('tool-call-6')
     expect(transcript).toContain('Tool result: result-6')
     expect(transcript.indexOf('tool-call-1')).toBeLessThan(transcript.indexOf('tool-call-6'))
+    expect(transcript).toContain('Attempted: Click reel A.')
+    expect(transcript).toContain('Open a different relevant reel.')
   })
 
   it('returns Bonsai intent and expected state through the direct action contract', () => {

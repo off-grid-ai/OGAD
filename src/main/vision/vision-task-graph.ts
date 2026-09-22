@@ -33,7 +33,10 @@ import type {
   VisionPolicyDecision,
   VisionPolicyHistoryStep
 } from './model-adapters/types'
-import { boundedContinuationCapsule } from './model-adapters/continuation-capsule'
+import {
+  boundedContinuationCapsule,
+  continuationFromTaskSteps
+} from './model-adapters/continuation-capsule'
 import { uiTarsAdapter } from './model-adapters/ui-tars'
 
 type WorkflowRoute =
@@ -391,6 +394,11 @@ class VisionTaskGraphRuntime {
       .join('\n\n')
     this.checkpointInterval = Math.max(1, Math.floor(deps.checkpointInterval ?? 9))
     this.visualHistoryFrames = Math.max(0, Math.floor(deps.visualHistoryFrames ?? 2))
+    this.continuation = continuationFromTaskSteps(
+      deps.resumedSteps ?? [],
+      this.visualHistoryFrames,
+      deps.plan?.phases[this.phaseIndex]?.title ?? 'Choose the next safe action'
+    )
     this.maxPlanningSteps = Math.max(
       1,
       Math.floor(deps.maxPlanningSteps ?? DEFAULT_COMPUTER_USE_STEP_BUDGET)
@@ -1092,8 +1100,15 @@ class VisionTaskGraphRuntime {
 
   private updateContinuation(decision: VisionPolicyDecision): void {
     if (decision.continuation) {
+      const done = [...(this.continuation?.done ?? []), ...decision.continuation.done].filter(
+        (item, index, all) => all.indexOf(item) === index
+      )
       this.continuation = boundedContinuationCapsule(
-        decision.continuation,
+        {
+          done,
+          next: decision.continuation.next,
+          remember: decision.continuation.remember || this.continuation?.remember || ''
+        },
         this.visualHistoryFrames
       )
       return
