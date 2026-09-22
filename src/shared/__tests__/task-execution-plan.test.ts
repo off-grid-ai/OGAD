@@ -23,7 +23,9 @@ describe('task execution plan', () => {
   })
 
   it('provides a stable fallback and validates phase markers', () => {
-    expect(fallbackTaskExecutionPlan('booking.com').phases[0]?.title).toBe('Open booking.com')
+    expect(fallbackTaskExecutionPlan('booking.com').phases[0]?.title).toBe(
+      'Complete the requested work in booking.com'
+    )
     expect(decodeTaskPhase(encodeTaskPhase('phase-2'))).toBe('phase-2')
     expect(decodeTaskPhase('TASK PHASE · ../../secret')).toBeNull()
     expect(
@@ -38,9 +40,7 @@ describe('task execution plan', () => {
   it('provides computer-use phases without web-only copy', () => {
     const plan = fallbackTaskExecutionPlan('Messages', 'computer')
     expect(plan.phases.map((phase) => phase.title)).toEqual([
-      'Open Messages',
-      'Complete the requested work',
-      'Verify the result'
+      'Complete the requested work in Messages'
     ])
   })
 })
