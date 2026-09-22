@@ -8,7 +8,11 @@ import {
 import { selectedGrounderModelId } from '../vision/grounder-loader'
 import { selectedDecisionModelId } from '../accessibility/decision-model-loader'
 import { remoteScreenDecision, type ScreenTaskKind } from '../../shared/remote-screen-privacy'
-import { runWithRemoteScreenTaskSession } from './remote-screen-session'
+import {
+  createComputerUseRunTelemetry,
+  finishComputerUseRunTelemetry,
+  runWithRemoteScreenTaskSession
+} from './remote-screen-session'
 import type { ComputerUseModelStrategy } from '../../shared/computer-use-settings'
 
 interface RemoteScreenGateDependencies {
@@ -55,10 +59,6 @@ export function withRemoteScreenGate(
       modelStrategy === 'text_plus_specialist' ||
       modelStrategy === 'decision_plus_specialist'
         ? [specialistServer]
-        : []),
-      ...(modelStrategy === 'decision_plus_specialist' ||
-      modelStrategy === 'decision_plus_reasoning'
-        ? [decisionServer]
         : [])
     ].filter((server): server is NonNullable<typeof server> => server !== null)
     const decision = remoteScreenDecision({
@@ -68,8 +68,35 @@ export function withRemoteScreenGate(
       activeServers
     })
     if (!decision.allowed) return { ok: false, detail: decision.message }
-    return runWithRemoteScreenTaskSession({ taskKind, modelStrategy, activeServer }, () =>
-      execute(action)
-    )
+    const telemetry =
+      taskKind === 'computer_use'
+        ? createComputerUseRunTelemetry({
+            actionId: action.id,
+            task:
+              typeof (action.args as Record<string, unknown>).goal === 'string'
+                ? String((action.args as Record<string, unknown>).goal)
+                : action.intent,
+            strategy: modelStrategy,
+            reasoningServer: activeServer,
+            groundingServer: specialistServer,
+            deciderServer: decisionServer
+          })
+        : undefined
+    try {
+      const result = await runWithRemoteScreenTaskSession(
+        { taskKind, modelStrategy, activeServer, telemetry },
+        () => execute(action)
+      )
+      if (telemetry) await finishComputerUseRunTelemetry(telemetry, result)
+      return result
+    } catch (error) {
+      if (telemetry) {
+        await finishComputerUseRunTelemetry(telemetry, {
+          ok: false,
+          detail: error instanceof Error ? error.message : String(error)
+        })
+      }
+      throw error
+    }
   }
 }
