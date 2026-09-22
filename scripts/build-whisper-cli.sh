@@ -70,24 +70,29 @@ cp "$BIN" "$DEST/"
 find build \( -name 'libwhisper*.dylib' -o -name 'libggml*.dylib' \) -exec cp -f {} "$DEST/" \;
 chmod +x "$DEST/whisper-cli"
 
-# The staged dylibs sit NEXT TO whisper-cli, but a cmake build only records the
-# build-tree rpaths (temp dirs that don't exist on a user's Mac), so dyld fails
-# "Library not loaded: @rpath/libwhisper.1.dylib" even though it's right there. Add
-# @loader_path so @rpath/<name> resolves the staged sibling, and strip every foreign
-# (absolute) rpath so nothing leaks the build machine or dangles.
-install_name_tool -add_rpath @loader_path "$DEST/whisper-cli" 2>/dev/null || true
-while IFS= read -r rp; do
-  case "$rp" in
-  @loader_path | @executable_path) : ;;
-  *) install_name_tool -delete_rpath "$rp" "$DEST/whisper-cli" 2>/dev/null || true ;;
-  esac
-done < <(otool -l "$DEST/whisper-cli" | awk '/LC_RPATH/{getline;getline;print $2}')
+# The executable and every dylib inherit build-tree LC_RPATH values from CMake.
+# Apple's distribution policy rejects any one of those temporary absolute paths,
+# even when dyld can find the libraries by another route. Keep the entire staged
+# closure self-contained before electron-builder signs it.
+for f in "$DEST"/whisper-cli "$DEST"/*.dylib; do
+  while IFS= read -r rpath; do
+    install_name_tool -delete_rpath "$rpath" "$f"
+  done < <(otool -l "$f" | awk '/cmd LC_RPATH/{found=1; next} found && $1 == "path" {print $2; found=0}')
+  install_name_tool -add_rpath @loader_path "$f"
+done
 
-# Gate: without a @loader_path/@executable_path rpath the staged dylibs are unreachable
-# (this is the voice-note "nothing happened" bug — transcription failed on dyld load).
-if ! otool -l "$DEST/whisper-cli" | awk '/LC_RPATH/{getline;getline;print $2}' |
-  grep -qE '^@(loader|executable)_path'; then
-  echo "[build-whisper-cli] FATAL: whisper-cli has no @loader_path rpath - cannot load its staged dylibs"
+BAD_RPATHS="$(for f in "$DEST"/whisper-cli "$DEST"/*.dylib; do
+  otool -l "$f" | awk -v file="$f" '
+    /cmd LC_RPATH/ { found=1; next }
+    found && $1 == "path" {
+      if ($2 != "@loader_path") print file ": " $2
+      found=0
+    }
+  '
+done)"
+if [ -n "$BAD_RPATHS" ]; then
+  echo "[build-whisper-cli] FATAL: engine contains runtime paths outside its bundled directory:"
+  echo "$BAD_RPATHS"
   exit 1
 fi
 
@@ -118,4 +123,4 @@ if [ -n "$MISSING" ]; then
   exit 1
 fi
 
-echo "[build-whisper-cli] done - minos=$MINOS, no foreign deps, all @rpath libs present"
+echo "[build-whisper-cli] done - minos=$MINOS, @loader_path only, no foreign deps, all @rpath libs present"
