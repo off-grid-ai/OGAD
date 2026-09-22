@@ -51,6 +51,31 @@ function isActionTarget(element: AxSnapshot['elements'][number]): boolean {
   )
 }
 
+const GENERIC_CONTROL_LABEL =
+  /^(?:like|reply|comment|share|save|follow|more|menu|options|open|view|edit|delete)(?:\s+\d+)?$/iu
+
+function nearbyVisibleContext(
+  target: AxSnapshot['elements'][number],
+  snapshot: AxSnapshot
+): string {
+  const label = (target.name || target.value).trim()
+  if (!GENERIC_CONTROL_LABEL.test(label)) return ''
+
+  let nearest: { text: string; distance: number } | undefined
+  for (const element of snapshot.elements) {
+    if (element.executable !== false || element.enabled === false) continue
+    if (target.region && element.region && target.region !== element.region) continue
+    const text = compactCandidateText(element.name || element.value, 64)
+    if (!text || text.toLocaleLowerCase() === label.toLocaleLowerCase()) continue
+    const horizontalDistance = Math.abs(element.cx - target.cx)
+    const verticalDistance = Math.abs(element.cy - target.cy)
+    if (horizontalDistance > 360 || verticalDistance > 120) continue
+    const distance = horizontalDistance + verticalDistance * 3
+    if (!nearest || distance < nearest.distance) nearest = { text, distance }
+  }
+  return nearest ? ` near visible text ${JSON.stringify(nearest.text)}` : ''
+}
+
 function elementState(element: AxSnapshot['elements'][number]): string {
   const toggleEffect =
     typeof element.checked === 'boolean' && /CheckBox|Switch|Toggle/i.test(element.role)
@@ -111,7 +136,7 @@ export function elementDecisionCandidates(snapshot: AxSnapshot): DecisionCandida
   return [
     ...elements.map((element) => {
       const label = compactCandidateText(element.name || element.value || 'unnamed', 72)
-      const description = `${element.hasPopup ? 'Open the application action named' : 'Perform the application action named'} ${JSON.stringify(label)} ${element.hasPopup ? 'from' : 'with'} control [${element.index}] ${element.role}${element.region ? ` in the ${element.region} region` : ''}${elementState(element) ? ` ${elementState(element)}` : ''}`
+      const description = `${element.hasPopup ? 'Open the application action named' : 'Perform the application action named'} ${JSON.stringify(label)} ${element.hasPopup ? 'from' : 'with'} control [${element.index}] ${element.role}${element.region ? ` in the ${element.region} region` : ''}${elementState(element) ? ` ${elementState(element)}` : ''}${nearbyVisibleContext(element, snapshot)}`
       return {
         description: compactCandidateText(description, 160),
         coarseLabel: `${element.role.replace(/^AX/u, '')} ${JSON.stringify(label)}`,
@@ -297,20 +322,13 @@ function actionFamilyCandidates(
       description: `Activate one visible non-editable control only if its current action advances rather than reverses the planned result. ${activatable.length} controls are available; the exact target is chosen next.`
     })
   }
-  if (
-    scrollDecisionCandidates(snapshot).length > 0 &&
-    !excludedFamilies.has('scroll_view')
-  ) {
+  if (scrollDecisionCandidates(snapshot).length > 0 && !excludedFamilies.has('scroll_view')) {
     candidates.push({
       family: 'scroll_view',
       description: 'Scroll one visible region to reveal an off-screen control or item.'
     })
   }
-  if (
-    editable.length > 0 &&
-    textEntryAvailable &&
-    !excludedFamilies.has('type_text')
-  ) {
+  if (editable.length > 0 && textEntryAvailable && !excludedFamilies.has('type_text')) {
     candidates.push({
       family: 'type_text',
       description: `Write the exact value supplied by the active plan into one visible editable field. ${editable.length} fields are available; the exact field is chosen in the next decision.`
@@ -467,10 +485,7 @@ export async function chooseFactorizedElementStep(
           return false
         }
         const element = snapshot.elements.find((item) => item.index === step.index)
-        return Boolean(
-          element &&
-          !isEditable(element)
-        )
+        return Boolean(element && !isEditable(element))
       }),
       'Which structural group contains the control that best matches the planned operation target in Context?',
       'Which single listed control performs the planned operation without reversing or undoing the planned result?'
