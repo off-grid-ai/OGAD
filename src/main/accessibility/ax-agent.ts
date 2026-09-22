@@ -789,6 +789,59 @@ export async function runElementTask(
           }
           continue
         }
+        // Laya can propose completion, but it must not verify its own semantic
+        // claim. Ask the heavy reasoner to review fresh evidence before the
+        // lifecycle owner advances the plan. The grounding specialist remains
+        // reserved for target localization and recovery actions.
+        if (deps.decideElement) {
+          const reviewLeaseEpoch = deps.control?.snapshot().inputLease.epoch
+          const reviewPrompt = [
+            'Independently verify the current milestone from fresh visible evidence.',
+            'Do not infer completion from an attempted action or from a generic UI change.',
+            `Task: ${taskBrief.objective}`,
+            activePhase ? `Current milestone: ${activePhase.title}` : '',
+            activePhase?.operation
+              ? `Required operation: ${JSON.stringify(activePhase.operation)}`
+              : '',
+            activePhase?.completion
+              ? `Completion condition: ${JSON.stringify(activePhase.completion)}`
+              : '',
+            formatAxElementsForModel(snapshot, 60),
+            'If the evidence proves the milestone, return {"action":"milestone_complete","summary":"..."}.',
+            'Otherwise return {"action":"vision_required","why":"the missing evidence"}.',
+            'Return JSON only.'
+          ]
+            .filter(Boolean)
+            .join('\n')
+          const reviewRaw = await decide(reviewPrompt, deps.screenshotPath?.())
+          const stoppedAfterReview = await waitForControl()
+          if (stoppedAfterReview) return stoppedAfterReview
+          const controlAfterReview = deps.control?.snapshot()
+          if (
+            reviewLeaseEpoch !== undefined &&
+            controlAfterReview &&
+            (controlAfterReview.inputLease.epoch !== reviewLeaseEpoch ||
+              controlAfterReview.inputLease.owner !== 'agent')
+          ) {
+            observe('skipped')
+            note('control changed during milestone review; re-observing')
+            checkpoint()
+            continue
+          }
+          const review = parseElementStep(reviewRaw)
+          if (review?.action !== 'milestone_complete') {
+            activePhaseActed = false
+            consecutiveNoProgress += 1
+            observe('skipped')
+            note(
+              `milestone completion rejected by the heavy reasoner${
+                review?.action === 'vision_required' ? `: ${review.why}` : ''
+              }`
+            )
+            checkpoint()
+            continue
+          }
+        }
         if (verifiedFieldValue) draftAwaitingSubmit = false
         const phaseCount = deps.plan?.phases.length ?? 1
         const completed = deps.plan?.phases[activePhaseIndex]?.title ?? action.summary
