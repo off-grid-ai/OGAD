@@ -92,7 +92,8 @@ const offGridApi = {
     list: (limit?: number): Promise<TaskRunSnapshot[]> => ipcRenderer.invoke('tasks:list', limit),
     remove: (taskIds: string[]): Promise<string[]> => ipcRenderer.invoke('tasks:remove', taskIds),
     retryAvailability: (taskId: string) => ipcRenderer.invoke('tasks:retry-availability', taskId),
-    retry: (taskId: string) => ipcRenderer.invoke('tasks:retry', taskId),
+    retry: (taskId: string, phaseIndex?: number) =>
+      ipcRenderer.invoke('tasks:retry', taskId, phaseIndex),
     guideAvailability: (taskId: string) => ipcRenderer.invoke('tasks:guide-availability', taskId),
     guideTask: (taskId: string, input: TaskGuideInput) =>
       ipcRenderer.invoke('tasks:guide', taskId, input),
@@ -484,7 +485,8 @@ const offGridApi = {
   getModelVisionStatus: () => ipcRenderer.invoke('models:vision-status'),
   searchModels: (query: string, kind?: string) => ipcRenderer.invoke('models:search', query, kind),
   getModelFiles: (modelId: string) => ipcRenderer.invoke('models:files', modelId),
-  downloadModel: (modelId: string, fileName?: string) => ipcRenderer.invoke('models:download', modelId, fileName),
+  downloadModel: (modelId: string, fileName?: string) =>
+    ipcRenderer.invoke('models:download', modelId, fileName),
   cancelModelDownload: (modelId: string) => ipcRenderer.invoke('models:cancel-download', modelId),
   deleteModel: (modelId: string) => ipcRenderer.invoke('models:delete', modelId),
   setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),

@@ -1,6 +1,10 @@
 import type { TaskRetryAvailability, TaskRetryResult } from './task-retry'
 
-type RetryIpcHandler = (_event: unknown, taskId: unknown) => Promise<unknown> | unknown
+type RetryIpcHandler = (
+  _event: unknown,
+  taskId: unknown,
+  phaseIndex?: unknown
+) => Promise<unknown> | unknown
 
 export interface TaskRetryIpcBoundary {
   handle(channel: string, handler: RetryIpcHandler): void
@@ -8,7 +12,7 @@ export interface TaskRetryIpcBoundary {
 
 export interface TaskRetryCommands {
   availability(taskId: string): Promise<TaskRetryAvailability> | TaskRetryAvailability
-  retry(taskId: string): Promise<TaskRetryResult> | TaskRetryResult
+  retry(taskId: string, phaseIndex?: number): Promise<TaskRetryResult> | TaskRetryResult
 }
 
 const missingTask = (): TaskRetryAvailability => ({
@@ -21,7 +25,10 @@ export function registerTaskRetryIpc(ipc: TaskRetryIpcBoundary, commands: TaskRe
   ipc.handle('tasks:retry-availability', (_event, taskId) =>
     typeof taskId === 'string' ? commands.availability(taskId) : missingTask()
   )
-  ipc.handle('tasks:retry', (_event, taskId) =>
-    typeof taskId === 'string' ? commands.retry(taskId) : missingTask()
+  ipc.handle('tasks:retry', (_event, taskId, phaseIndex) =>
+    typeof taskId === 'string' &&
+    (phaseIndex === undefined || (typeof phaseIndex === 'number' && Number.isInteger(phaseIndex)))
+      ? commands.retry(taskId, phaseIndex)
+      : missingTask()
   )
 }

@@ -162,8 +162,13 @@ interface RendererAPIOverrides {
       reason?: string
       executionDeviceId?: string
       executionDeviceName?: string
+      phases?: ReadonlyArray<{ index: number; title: string }>
+      activePhaseIndex?: number
     }>
-    retry: (taskId: string) => Promise<{
+    retry: (
+      taskId: string,
+      phaseIndex?: number
+    ) => Promise<{
       available: boolean
       reason?: string
       taskId?: string

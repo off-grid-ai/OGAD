@@ -19,14 +19,46 @@ export function registerTaskHistoryIpc(): void {
       })
     },
     async computer(task, taskId, checkpoint) {
-      const [{ withGrounder }, { getVisionRailHost }] = await Promise.all([
-        import('../vision/grounder-loader'),
-        import('../vision/vision-host')
+      const [{ getVisionRailHost }, { getAxRailHost }, { axRailViable }] = await Promise.all([
+        import('../vision/vision-host'),
+        import('../accessibility/ax-host'),
+        import('../accessibility/ax-router')
       ])
-      const { result } = await withGrounder(() =>
-        getVisionRailHost().runTask(task.title, taskId, task.journeyId, checkpoint)
-      )
-      return result
+      const runVision = async (
+        recoveryCheckpoint = checkpoint,
+        continuation?: import('../vision/vision-agent').VisionTaskContinuation,
+        targetLabel?: string
+      ) => {
+        return getVisionRailHost().runTask(
+          task.title,
+          taskId,
+          task.journeyId,
+          recoveryCheckpoint,
+          continuation,
+          targetLabel
+        )
+      }
+      const axHost = getAxRailHost()
+      const routing = await axHost.routingSnapshot(task.title)
+      if (routing && axRailViable(routing.snapshot)) {
+        return axHost.runTask(task.title, taskId, routing.app, routing.snapshot, {
+          journeyId: task.journeyId,
+          checkpoint,
+          recoverWithVision: async (recoveryCheckpoint, continuation) => {
+            const result = await runVision(recoveryCheckpoint, continuation, routing.app)
+            return result.ok
+              ? {
+                  ok: true,
+                  effectId: taskId,
+                  ...(result.performedActions?.length
+                    ? { performedActions: result.performedActions }
+                    : {})
+                }
+              : { ok: false, detail: result.summary }
+          }
+        })
+      }
+      return runVision()
     }
   })
   ipcMain.handle('tasks:list', (_event, limit: unknown) =>
@@ -44,9 +76,9 @@ export function registerTaskHistoryIpc(): void {
       const { getTaskRetryAvailability } = await import('./task-retry')
       return getTaskRetryAvailability(taskId)
     },
-    retry: async (taskId) => {
+    retry: async (taskId, phaseIndex) => {
       const { retryTask } = await import('./task-retry')
-      return retryTask(taskId)
+      return retryTask(taskId, phaseIndex)
     }
   })
   registerTaskGuideIpc(ipcMain, {
