@@ -59,8 +59,14 @@ if [ -n "$CHANGED_CODE" ]; then
   OFFGRID_HOOK_DATA_DIR=$(mktemp -d)
   trap 'rm -rf -- "$OFFGRID_HOOK_DATA_DIR"' EXIT
   export OFFGRID_DATA_DIR="$OFFGRID_HOOK_DATA_DIR"
+  # Native app dependencies are installed for Electron's ABI. Run the fast
+  # Vitest gate with Electron's bundled Node runtime so related integration
+  # tests can load those packages without rebuilding node_modules for the
+  # caller's global Node version.
   printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
-    xargs -0 npx vitest related --run --project product-integration --passWithNoTests --bail=1
+    xargs -0 env ELECTRON_RUN_AS_NODE=1 \
+      ./node_modules/.bin/electron ./node_modules/vitest/vitest.mjs \
+      related --run --project product-integration --passWithNoTests --bail=1
 fi
 
 echo "[pre-push] fast gate passed. CI runs full coverage, DB, heavy integration, and E2E."
