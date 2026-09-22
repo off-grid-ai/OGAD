@@ -25,6 +25,7 @@ import { screen, shell } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import {
+  RecoverableVisionError,
   type VisionScreen,
   type VisionSemanticElement,
   type VisionTaskContinuation,
@@ -45,6 +46,7 @@ import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-map
 import {
   appendComputerUseStepDetail,
   getTaskExecutionDevice,
+  getTaskRun,
   recordTaskRun,
   taskScreenshotPath
 } from '../tasks/task-history'
@@ -74,11 +76,11 @@ import { runVisionTaskGraph } from './vision-task-graph'
 import { captureComputerUseDisplay } from './computer-use-display-capture'
 import { snapshotAccessibilityApp } from '../accessibility/ax-host'
 import { accessibilityHelperPath } from '../accessibility/ax-helper'
+import { recordComputerUseMetric } from '../actions/remote-screen-session'
 
 const execFileAsync = promisify(execFile)
-const MAX_MODEL_SEMANTIC_ELEMENTS = 100
-const MAX_VERIFICATION_SEMANTIC_ELEMENTS = 240
-const MAX_MODEL_INTERACTIVE_ELEMENTS = 60
+const MAX_MODEL_SEMANTIC_ELEMENTS = 40
+const MAX_MODEL_INTERACTIVE_ELEMENTS = 28
 
 function semanticElementKey(element: VisionSemanticElement): string {
   return [
@@ -110,6 +112,19 @@ async function activateDefaultBrowser(): Promise<string | null> {
   }
 }
 
+async function activateAndConfirmTarget(targetLabel: string): Promise<boolean> {
+  if (process.platform !== 'darwin') return true
+  const helper = accessibilityHelperPath()
+  if (!helper) return false
+  try {
+    await execFileAsync('/usr/bin/open', ['-a', targetLabel], { timeout: 5_000 })
+    const { stdout } = await execFileAsync(helper, ['--frontmost-app'], { timeout: 2_000 })
+    return stdout.trim().toLocaleLowerCase() === targetLabel.trim().toLocaleLowerCase()
+  } catch {
+    return false
+  }
+}
+
 export type { ActuationPort }
 
 /** Back-compat alias: the rail-neutral availability check now lives in the
@@ -134,15 +149,58 @@ function makeScreen(input: {
   // Windows). capture() always runs before actuate() in the vision loop.
   let capturedDisplay: DisplayGeometry | null = null
   let capturedGeometry: ScreenshotGeometry | null = null
+  let capturedProcessId: number | undefined
+  let capturedWindowId: string | undefined
+  let capturedPlatformWindowId: number | undefined
   let captureNumber = 0
   return {
     async capture() {
-      const point = screen.getCursorScreenPoint()
-      const display = screen.getDisplayNearestPoint(point)
-      const { width, height } = display.size
+      if (targetLabel && !(await activateAndConfirmTarget(targetLabel))) {
+        throw new RecoverableVisionError(`The target app ${targetLabel} is not frontmost.`)
+      }
       const semanticSnapshot = targetLabel ? await snapshotAccessibilityApp(targetLabel) : null
+      capturedProcessId = semanticSnapshot?.processId
+      capturedWindowId = semanticSnapshot?.windowId
+      capturedPlatformWindowId = semanticSnapshot?.platformWindowId
+      const rawWindowBounds = semanticSnapshot?.windowBounds
+      const windowBounds =
+        rawWindowBounds && rawWindowBounds.width > 0 && rawWindowBounds.height > 0
+          ? process.platform === 'win32'
+            ? (() => {
+                const origin = screen.screenToDipPoint({
+                  x: rawWindowBounds.x,
+                  y: rawWindowBounds.y
+                })
+                const edge = screen.screenToDipPoint({
+                  x: rawWindowBounds.x + rawWindowBounds.width,
+                  y: rawWindowBounds.y + rawWindowBounds.height
+                })
+                return {
+                  x: origin.x,
+                  y: origin.y,
+                  width: Math.max(1, edge.x - origin.x),
+                  height: Math.max(1, edge.y - origin.y)
+                }
+              })()
+            : rawWindowBounds
+          : null
+      const targetPoint = windowBounds
+        ? {
+            x: Math.round(windowBounds.x + windowBounds.width / 2),
+            y: Math.round(windowBounds.y + windowBounds.height / 2)
+          }
+        : screen.getCursorScreenPoint()
+      const display = screen.getDisplayNearestPoint(targetPoint)
+      const { width, height } = display.size
+      // Native menus, pickers, sheets, and popovers are separate macOS windows.
+      // An exact target-window capture drops them even though they can receive
+      // the next click. Capture the target display so observation and actuation
+      // use the same visible surface.
+      const cropBounds = { x: 0, y: 0, width, height }
       const exposeSemanticElements =
-        settings.modelStrategy === 'text_plus_specialist' && settings.enabledRails.includes('ax')
+        (settings.modelStrategy === 'text_plus_specialist' ||
+          settings.modelStrategy === 'decision_plus_specialist') &&
+        settings.enabledRails.includes('ax')
       const captureSize = {
         width: Math.max(1, Math.round(width * display.scaleFactor)),
         height: Math.max(1, Math.round(height * display.scaleFactor))
@@ -166,7 +224,22 @@ function makeScreen(input: {
             displayId: Number(display.id),
             ...captureSize
           })
-          const sourceSize = { width: captured.width, height: captured.height }
+          const cropPixels = {
+            left: Math.max(0, Math.round((cropBounds.x * captured.width) / width)),
+            top: Math.max(0, Math.round((cropBounds.y * captured.height) / height)),
+            width: Math.max(1, Math.round((cropBounds.width * captured.width) / width)),
+            height: Math.max(1, Math.round((cropBounds.height * captured.height) / height))
+          }
+          cropPixels.width = Math.min(cropPixels.width, captured.width - cropPixels.left)
+          cropPixels.height = Math.min(cropPixels.height, captured.height - cropPixels.top)
+          const cropped =
+            cropPixels.left === 0 &&
+            cropPixels.top === 0 &&
+            cropPixels.width === captured.width &&
+            cropPixels.height === captured.height
+              ? captured.png
+              : await sharp(captured.png).extract(cropPixels).png().toBuffer()
+          const sourceSize = { width: cropPixels.width, height: cropPixels.height }
           const plannedTarget = planAspectPreservingResize(
             sourceSize,
             SCREENSHOT_MAX_EDGE[settings.screenshotSize]
@@ -176,8 +249,8 @@ function makeScreen(input: {
             : plannedTarget
           png =
             target.width === sourceSize.width && target.height === sourceSize.height
-              ? captured.png
-              : await sharp(captured.png)
+              ? cropped
+              : await sharp(cropped)
                   .resize({
                     ...target,
                     kernel: SCREENSHOT_RESIZE_KERNEL.efficient
@@ -201,9 +274,12 @@ function makeScreen(input: {
         throw new Error('screen capture returned invalid dimensions')
       }
       capturedGeometry = {
-        sourceBounds: { x: 0, y: 0, width, height },
+        sourceBounds: cropBounds,
         encodedSize,
-        scale: Math.min(encodedSize.width / width, encodedSize.height / height)
+        scale: Math.min(
+          encodedSize.width / cropBounds.width,
+          encodedSize.height / cropBounds.height
+        )
       }
       const visibleSemanticElements = (semanticSnapshot?.elements ?? [])
         .filter((element) => element.enabled && (element.name || element.value))
@@ -212,9 +288,10 @@ function makeScreen(input: {
             process.platform === 'win32'
               ? screen.screenToDipPoint({ x: element.cx, y: element.cy })
               : { x: element.cx, y: element.cy }
-          const localX = globalPoint.x - display.bounds.x
-          const localY = globalPoint.y - display.bounds.y
-          if (localX < 0 || localY < 0 || localX >= width || localY >= height) return []
+          const localX = globalPoint.x - display.bounds.x - cropBounds.x
+          const localY = globalPoint.y - display.bounds.y - cropBounds.y
+          if (localX < 0 || localY < 0 || localX >= cropBounds.width || localY >= cropBounds.height)
+            return []
           return [
             {
               semantic: {
@@ -222,14 +299,19 @@ function makeScreen(input: {
                 role: element.role,
                 name: element.name,
                 value: element.value,
+                actionable:
+                  element.actionable ||
+                  /(?:button|link|textfield|textarea|combobox|checkbox|radio|menuitem)/i.test(
+                    element.role
+                  ),
                 point: {
                   x: Math.min(
                     encodedSize.width - 1,
-                    Math.round((localX * encodedSize.width) / width)
+                    Math.round((localX * encodedSize.width) / cropBounds.width)
                   ),
                   y: Math.min(
                     encodedSize.height - 1,
-                    Math.round((localY * encodedSize.height) / height)
+                    Math.round((localY * encodedSize.height) / cropBounds.height)
                   )
                 }
               } satisfies VisionSemanticElement,
@@ -248,9 +330,13 @@ function makeScreen(input: {
         seenSemanticElements.add(key)
         return true
       })
-      const interactiveSemanticElements = uniqueSemanticElements
-        .filter((element) => element.interactive)
-        .slice(0, MAX_MODEL_INTERACTIVE_ELEMENTS)
+      const allInteractiveSemanticElements = uniqueSemanticElements.filter(
+        (element) => element.interactive
+      )
+      const interactiveSemanticElements = allInteractiveSemanticElements.slice(
+        0,
+        MAX_MODEL_INTERACTIVE_ELEMENTS
+      )
       const informationalSemanticElements = uniqueSemanticElements.filter(
         (element) => !element.interactive
       )
@@ -258,12 +344,12 @@ function makeScreen(input: {
         ...interactiveSemanticElements,
         ...informationalSemanticElements.slice(
           0,
-          MAX_MODEL_SEMANTIC_ELEMENTS - interactiveSemanticElements.length
+          Math.max(0, MAX_MODEL_SEMANTIC_ELEMENTS - interactiveSemanticElements.length)
         )
       ].map((element) => element.semantic)
-      const verificationSemanticElements = uniqueSemanticElements
-        .slice(0, MAX_VERIFICATION_SEMANTIC_ELEMENTS)
-        .map((element) => element.semantic)
+      const verificationSemanticElements = uniqueSemanticElements.map(
+        (element) => element.semantic
+      )
       if (uniqueSemanticElements.length > MAX_MODEL_SEMANTIC_ELEMENTS) {
         console.log(
           `[computer-task] accessibility raw=${semanticSnapshot?.elements.length ?? 0} visible=${visibleSemanticElements.length} unique=${uniqueSemanticElements.length} model=${semanticElements.length} verification=${verificationSemanticElements.length}`
@@ -288,12 +374,29 @@ function makeScreen(input: {
         metadata: {
           path: savedScreenshot,
           geometry: capturedGeometry,
+          ...(semanticSnapshot?.windowTitle
+            ? { windowTitle: semanticSnapshot.windowTitle }
+            : {}),
           ...(verificationSemanticElements.length ? { verificationSemanticElements } : {}),
           ...(exposeSemanticElements && semanticElements.length ? { semanticElements } : {})
         }
       }
     },
     async actuate(action: VisionAction) {
+      if (targetLabel) {
+        if (!(await activateAndConfirmTarget(targetLabel))) {
+          return { rejected: `The target app ${targetLabel} is not frontmost.` }
+        }
+        const fresh = await snapshotAccessibilityApp(targetLabel)
+        if (
+          !fresh ||
+          fresh.processId !== capturedProcessId ||
+          fresh.windowId !== capturedWindowId ||
+          (process.platform === 'darwin' && fresh.platformWindowId !== capturedPlatformWindowId)
+        ) {
+          return { rejected: `The target window for ${targetLabel} changed after capture.` }
+        }
+      }
       const mapped =
         capturedDisplay && capturedGeometry
           ? mapActionToScreen(action, {
@@ -416,6 +519,11 @@ class VisionHost {
             targetLabel: resolvedTargetLabel,
             sessionLimitMs
           })
+        },
+        undefined,
+        {
+          specialistOnly: continuation?.specialistOnly,
+          reasonerOnly: continuation?.reasonerOnly
         }
       )
     } catch (error) {
@@ -520,10 +628,25 @@ class VisionHost {
         plan,
         onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
         takeGuidance: () => queuedGuidance.splice(0),
+        onModelIdentity: (identity) => {
+          const current = getTaskRun(taskId)
+          emitVisionState({
+            taskId,
+            journeyId,
+            ...identity,
+            rail: 'vision',
+            goal,
+            status: 'running',
+            phase: current?.phase ?? 'thinking',
+            currentStep: current?.currentStep ?? 0,
+            currentAction: current?.currentAction ?? 'Selecting the next action'
+          })
+        },
         onProgress: (progress) => {
           emitVisionState({
             taskId,
             journeyId,
+            ...(continuation?.specialistOnly || continuation?.reasonerOnly ? modelIdentity : {}),
             goal,
             status:
               progress.phase === 'paused'
@@ -539,7 +662,9 @@ class VisionHost {
         contextTokens,
         checkpointInterval: settings.checkpointInterval,
         visualHistoryFrames: settings.visualHistoryFrames,
+        repeatUntilSessionLimit: Boolean(sessionLimitMs),
         returnAfterAction: continuation?.returnAfterAction,
+        resumedSteps: checkpoint?.steps,
         retrievedFacts,
         signal: request.signal,
         onCheckpoint: () => {
@@ -548,6 +673,13 @@ class VisionHost {
           recordTaskRun({ taskId, kind: 'computer_use', title: goal })
         },
         onObservation: (observation) => {
+          recordComputerUseMetric('visionSteps')
+          if (observation.result === 'actuated') {
+            recordComputerUseMetric(
+              'actions',
+              observation.mappedActions?.length ?? observation.parsedActions?.length ?? 1
+            )
+          }
           const geometry = observation.screenshot.metadata?.geometry
           appendComputerUseStepDetail(taskId, goal, {
             stepId: String(observation.step),

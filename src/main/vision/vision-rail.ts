@@ -14,6 +14,11 @@ import type { ActionRecord, ExecuteResult, HandlerRegistry } from '@offgrid/use'
 import type { VisionTaskResult } from './vision-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
 import type { VisionTaskContinuation } from './vision-agent'
+import type { VisionAction } from './vision-action'
+
+export interface VisionExecuteResult extends ExecuteResult {
+  performedActions?: readonly VisionAction[]
+}
 
 export interface VisionRailHost {
   runTask(
@@ -48,7 +53,7 @@ export function makeVisionRailExecutor(
   checkpoint?: TaskRetryCheckpoint,
   continuation?: VisionTaskContinuation,
   targetLabel?: string
-) => Promise<ExecuteResult> {
+) => Promise<VisionExecuteResult> {
   return async (action, checkpoint, continuation, targetLabel) => {
     const args = action.args as Record<string, unknown>
     const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
@@ -66,6 +71,10 @@ export function makeVisionRailExecutor(
     }
     // A GUI action has no generic undo, so it lands as a verified confirmation
     // without an Undo affordance; the action id is the effect handle.
-    return { ok: true, effectId: action.id }
+    return {
+      ok: true,
+      effectId: action.id,
+      ...(result.performedActions?.length ? { performedActions: result.performedActions } : {})
+    }
   }
 }

@@ -50,20 +50,15 @@ export interface NativeActionToolBoundary {
  * Computer Use return as soon as their durable task has started. */
 const OUTCOME_WAIT_MS = 30_000
 
-function taskGoalWithConversation(
-  goal: unknown,
-  context: ToolContext | undefined
-): string {
+function taskGoalWithConversation(goal: unknown, context: ToolContext | undefined): string {
   const summary = typeof goal === 'string' ? goal.trim() : ''
   const currentRequest = context?.userQuery?.trim() ?? ''
-  const priorTurns = (context?.history ?? [])
-    .filter((turn) => turn.content.trim())
-    .map(
-      (turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content.trim()}`
-    )
+  const completedPrerequisites = context?.completedPrerequisites?.filter(Boolean) ?? []
   const sections = [
-    priorTurns.length ? `Prior conversation:\n${priorTurns.join('\n')}` : '',
     currentRequest ? `Current user request (authoritative):\n${currentRequest}` : '',
+    completedPrerequisites.length
+      ? `Completed prerequisites (already done; continue from this state):\n${completedPrerequisites.map((item) => `- ${item}`).join('\n')}`
+      : '',
     summary && summary.toLowerCase() !== 'placeholder' && summary !== currentRequest
       ? `Structured task summary:\n${summary}`
       : ''
@@ -225,6 +220,12 @@ export class NativeActionToolExtension implements ToolExtension {
       const coordinates = currentCoordinates(res.result)
       if (coordinates) context.currentLocation = coordinates
       else context.currentLocationFailed = true
+    }
+    if (name === 'open_url' && context && typeof args.url === 'string' && args.url.trim()) {
+      context.completedPrerequisites = [
+        ...(context.completedPrerequisites ?? []),
+        `open_url opened ${args.url.trim()} in the user's default browser`
+      ]
     }
     return spec.formatResult(res.result)
   }

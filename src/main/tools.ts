@@ -65,6 +65,10 @@ export interface ToolContext {
    *  the device location request did not return usable coordinates. */
   currentLocation?: { latitude: number; longitude: number }
   currentLocationFailed?: boolean
+  /** Successful prerequisite actions completed earlier in this same tool turn.
+   * Task tools receive these facts so they continue from real state instead of
+   * planning the prerequisite again. */
+  completedPrerequisites?: string[]
 }
 
 export interface ToolConversationTurn {

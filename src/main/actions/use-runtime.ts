@@ -279,9 +279,9 @@ export function getActionsRuntime(): ActionsRuntime {
     continuation,
     targetLabel
   ) => visionExecute(action, checkpoint, continuation, targetLabel)
-  // Direct modes tier AX before vision. Reasoning + Specialist keeps one vision
-  // graph in charge and feeds it the aligned AX/UIA controls. The environment
-  // override still forces one rail for diagnostics.
+  // Direct modes tier AX before vision. The composed strategies keep one vision
+  // graph in charge and feed it aligned AX/UIA controls. The environment override
+  // still forces one rail for diagnostics.
   const computerTaskTiers: ComputerTaskTiers = {
     routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
     runAx: (goal, taskId, journeyId, app, request) =>
@@ -295,16 +295,16 @@ export function getActionsRuntime(): ActionsRuntime {
   const computerTaskExecute = withRemoteScreenGate('computer_use', (action) => {
     const settings = getComputerUseSettings()
     return makeComputerTaskExecutor(computerTaskTiers, {
-      // Model strategy selects which model handles a vision FALLBACK. It must
-      // never bypass verified native application controls. The environment
-      // override remains available only for explicit rail diagnostics.
+      // The composed strategies use one verified graph for native selection,
+      // reasoning recovery, visual grounding, actuation, and verification.
       forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL),
       enabledRails:
         settings.modelStrategy === 'decision_plus_specialist' ||
         settings.modelStrategy === 'decision_plus_reasoning'
           ? ['ax', ...settings.enabledRails.filter((rail) => rail !== 'ax')]
           : settings.enabledRails,
-      preferVisionGraph: settings.modelStrategy === 'text_plus_specialist'
+      preferVisionGraph:
+        settings.modelStrategy === 'text_plus_specialist'
     })(action)
   })
   const engine = new UseEngine({
