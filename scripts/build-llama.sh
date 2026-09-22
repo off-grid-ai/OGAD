@@ -121,6 +121,18 @@ find build \( -name 'libllama*.dylib' -o -name 'libggml*.dylib' -o -name 'libmtm
 chmod +x "$DEST/llama-server"
 echo "[build-llama] staged into $DEST:"; ls -1 "$DEST"
 
+# CMake gives build-tree binaries an LC_RPATH that points at its temporary
+# output directory. dyld can be helped with DYLD_LIBRARY_PATH at runtime, but
+# Apple's distribution policy still rejects that absolute load command before
+# the app opens. Make every staged Mach-O resolve its co-located libraries from
+# the final bundle, then fail below if any build-host rpath remains.
+for f in "$DEST"/llama-server "$DEST"/*.dylib; do
+  while IFS= read -r rpath; do
+    install_name_tool -delete_rpath "$rpath" "$f"
+  done < <(otool -l "$f" | awk '/cmd LC_RPATH/{found=1; next} found && $1 == "path" {print $2; found=0}')
+  install_name_tool -add_rpath @loader_path "$f"
+done
+
 # Gate: the engine + its dylibs must link ONLY @rpath (our co-located libs) and
 # system frameworks. Any /opt/homebrew or /usr/local path is a build-host leak
 # that won't exist on a user's Mac (e.g. brew OpenSSL) → fail the build now.
@@ -128,6 +140,19 @@ echo "[build-llama] dependency audit:"; otool -L "$DEST/llama-server" | sed -n '
 FOREIGN="$(for f in "$DEST"/llama-server "$DEST"/*.dylib; do otool -L "$f" 2>/dev/null | tail -n +2; done | grep -E '/opt/homebrew|/usr/local' || true)"
 if [ -n "$FOREIGN" ]; then
   echo "[build-llama] FATAL: engine links non-system libs that won't exist on users' Macs:"; echo "$FOREIGN"; exit 1
+fi
+
+BAD_RPATHS="$(for f in "$DEST"/llama-server "$DEST"/*.dylib; do
+  otool -l "$f" | awk -v file="$f" '
+    /cmd LC_RPATH/ { found=1; next }
+    found && $1 == "path" {
+      if ($2 != "@loader_path") print file ": " $2
+      found=0
+    }
+  '
+done)"
+if [ -n "$BAD_RPATHS" ]; then
+  echo "[build-llama] FATAL: engine contains runtime paths outside its bundled directory:"; echo "$BAD_RPATHS"; exit 1
 fi
 
 # Gate: EVERY @rpath dependency the binary/dylibs link must actually be present in
@@ -148,4 +173,4 @@ if [ -n "$MISSING" ]; then
   echo "[build-llama] FATAL: engine references @rpath libs missing or not staged as real files: $MISSING"; exit 1
 fi
 
-echo "[build-llama] done — $LLAMA_VARIANT engine, minos=$MINOS, no foreign deps, all @rpath libs present"
+echo "[build-llama] done — $LLAMA_VARIANT engine, minos=$MINOS, @loader_path only, no foreign deps, all @rpath libs present"

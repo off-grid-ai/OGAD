@@ -79,10 +79,12 @@ type LlamaFixtureMode =
 function runBuildLlama(mode: LlamaFixtureMode): ReturnType<typeof spawnSync> & {
   sandbox: string
   queryLog: string
+  rpathEditLog: string
 } {
   const sandbox = tempDir('offgrid-llama-build-')
   const fakeBin = path.join(sandbox, 'fake-bin')
   const queryLog = path.join(sandbox, 'otool-queries.log')
+  const rpathEditLog = path.join(sandbox, 'rpath-edits.log')
   fs.mkdirSync(fakeBin)
 
   writeExecutable(
@@ -124,6 +126,14 @@ fi
 `
   )
   writeExecutable(path.join(fakeBin, 'sysctl'), '#!/usr/bin/env bash\nprintf "4\\n"\n')
+  writeExecutable(path.join(fakeBin, 'lipo'), '#!/usr/bin/env bash\nprintf "arm64\\n"\n')
+  writeExecutable(
+    path.join(fakeBin, 'install_name_tool'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "${'$'}*" >> "${rpathEditLog}"
+`
+  )
   const minos = mode === 'newer-minos' ? '13.1' : '13.0'
   const foreignDependency =
     mode === 'foreign-homebrew'
@@ -136,7 +146,13 @@ fi
     `#!/usr/bin/env bash
 set -euo pipefail
 if [ "${'$'}1" = "-l" ]; then
-  printf 'Load command 1\\n      cmd LC_BUILD_VERSION\\n    minos ${minos}\\n'
+  file="${'$'}2"
+  if grep -Fq -- "-add_rpath @loader_path ${'$'}file" "${rpathEditLog}" 2>/dev/null; then
+    printf 'Load command 1\\n          cmd LC_RPATH\\n      cmdsize 32\\n         path @loader_path (offset 12)\\n'
+  else
+    printf 'Load command 1\\n          cmd LC_RPATH\\n      cmdsize 96\\n         path /var/folders/fixture/T/build/bin (offset 12)\\n'
+  fi
+  printf 'Load command 2\\n      cmd LC_BUILD_VERSION\\n    minos ${minos}\\n'
   exit 0
 fi
 file="${'$'}2"
@@ -174,7 +190,7 @@ printf '    /usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current ver
     },
     encoding: 'utf8'
   })
-  return Object.assign(result, { sandbox, queryLog })
+  return Object.assign(result, { sandbox, queryLog, rpathEditLog })
 }
 
 describe.sequential('release packaging integration', () => {
@@ -289,6 +305,7 @@ describe.sequential('release packaging integration', () => {
 
   it('stages exact dylib names as real files and accepts a closed llama dependency graph', () => {
     const result = runBuildLlama('healthy')
+    expect(result.status, `${result.stdout}\n${result.stderr}\n${result.error ?? ''}`).toBe(0)
     const llamaDir = path.join(result.sandbox, 'resources', 'bin', 'llama')
     const staged = fs.readdirSync(llamaDir)
     const audited = new Set(
@@ -299,9 +316,8 @@ describe.sequential('release packaging integration', () => {
         .map((file) => path.basename(file))
     )
 
-    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
     expect(result.stdout).toContain('built llama-server minos=13.0 (want <= 13.0)')
-    expect(result.stdout).toContain('no foreign deps, all @rpath libs present')
+    expect(result.stdout).toContain('@loader_path only, no foreign deps, all @rpath libs present')
     expect(fs.statSync(path.join(llamaDir, 'llama-server')).mode & 0o111).not.toBe(0)
     for (const name of [
       'libggml-base.0.dylib',
@@ -314,6 +330,12 @@ describe.sequential('release packaging integration', () => {
       expect(stat.isSymbolicLink(), name).toBe(false)
     }
     expect([...audited]).toEqual(expect.arrayContaining(staged))
+    const rpathEdits = fs.readFileSync(result.rpathEditLog, 'utf8')
+    for (const name of staged) {
+      const file = path.join(llamaDir, name)
+      expect(rpathEdits).toContain(`-delete_rpath /var/folders/fixture/T/build/bin ${file}`)
+      expect(rpathEdits).toContain(`-add_rpath @loader_path ${file}`)
+    }
   })
 
   it('blocks a llama build when an exact @rpath dependency is absent', () => {
