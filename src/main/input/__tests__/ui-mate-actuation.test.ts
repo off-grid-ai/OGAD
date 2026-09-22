@@ -56,6 +56,9 @@ describe('UI-Mate nut.js actuation contract', () => {
     await port.scrollBy('vertical', -240)
     await port.scrollBy('horizontal', 120)
 
+    const verticalMagnitude = process.platform === 'darwin' ? 240 : 2
+    const horizontalMagnitude = process.platform === 'darwin' ? 120 : 1
+
     expect(calls).toEqual([
       'click:[3]',
       'click:[1]',
@@ -68,8 +71,8 @@ describe('UI-Mate nut.js actuation contract', () => {
       'releaseKey:[12]',
       'pressKey:[13,11]',
       'releaseKey:[11,13]',
-      'scrollDown:[2]',
-      'scrollRight:[1]'
+      `scrollDown:[${verticalMagnitude}]`,
+      `scrollRight:[${horizontalMagnitude}]`
     ])
   })
 
@@ -90,6 +93,8 @@ describe('UI-Mate nut.js actuation contract', () => {
     await port.scrollBy('horizontal', -121)
     await port.scrollBy('vertical', 0)
 
+    const pixelMagnitude = process.platform === 'darwin' ? 121 : 2
+
     expect(calls).toEqual([
       'move:[{"x":320,"y":180}]',
       'click:[1]',
@@ -101,8 +106,8 @@ describe('UI-Mate nut.js actuation contract', () => {
       'scrollDown:[3]',
       'scrollLeft:[3]',
       'scrollRight:[3]',
-      'scrollUp:[2]',
-      'scrollLeft:[2]'
+      `scrollUp:[${pixelMagnitude}]`,
+      `scrollLeft:[${pixelMagnitude}]`
     ])
   })
 
