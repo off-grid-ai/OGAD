@@ -14,6 +14,7 @@
  * ends (see vision-controller). Native glue, excluded from coverage.
  */
 import { BrowserWindow, ipcMain, screen } from 'electron'
+import { getComputerUseSettings } from '../computer-use-settings'
 import { preloadPath } from '../preload-path'
 import { rendererHtmlPath } from '../renderer-path'
 
@@ -88,6 +89,10 @@ function create(): BrowserWindow {
 /** Show the supervisor window (creating it if needed) WITHOUT stealing focus
  *  from the app being driven. Idempotent. */
 export function showSupervisorWindow(): void {
+  if (!getComputerUseSettings().showPictureInPicture) {
+    dismissSupervisorWindow()
+    return
+  }
   if (closeTimer) {
     clearTimeout(closeTimer)
     closeTimer = null
