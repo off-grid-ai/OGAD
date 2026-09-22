@@ -722,7 +722,16 @@ class VisionTaskGraphRuntime {
       this.updateContinuation(decision)
     }
     if (this.pendingActionVerification) {
-      if (decision.kind === 'action_verified') {
+      if (decision.kind === 'phase_complete') {
+        const trajectoryStep = this.policyHistory.at(-1)
+        if (trajectoryStep) {
+          trajectoryStep.result = `Verified from the fresh screen: ${decision.summary}`
+        }
+        this.note(`action verified: ${decision.summary}`)
+        this.pendingActionVerification = false
+        this.activePhaseActed = true
+        this.previousActionEffect = 'confirmed'
+      } else if (decision.kind === 'action_verified') {
         const trajectoryStep = this.policyHistory.at(-1)
         if (trajectoryStep) {
           trajectoryStep.result = `Verified from the fresh screen: ${decision.summary}`
@@ -736,8 +745,7 @@ class VisionTaskGraphRuntime {
         this.progress('checking', 'Previous action verified; choosing the next task action')
         this.checkpoint()
         return { route: 'gate' }
-      }
-      if (decision.kind === 'action_rejected') {
+      } else if (decision.kind === 'action_rejected') {
         const trajectoryStep = this.policyHistory.at(-1)
         if (trajectoryStep) {
           trajectoryStep.result = `Rejected from the fresh screen: ${decision.summary}`
@@ -750,12 +758,14 @@ class VisionTaskGraphRuntime {
         this.progress('checking', 'Recovering from an unverified action')
         this.checkpoint()
         return { route: 'gate' }
+      } else {
+        this.discardPendingPolicyHistory()
+        const failure =
+          'The verification turn attempted a new action before resolving the previous action.'
+        this.note(failure)
+        this.finish(false, failure)
+        return { route: 'end' }
       }
-      this.discardPendingPolicyHistory()
-      const failure = 'The verification turn attempted a new action before resolving the previous action.'
-      this.note(failure)
-      this.finish(false, failure)
-      return { route: 'end' }
     }
     if (decision.kind === 'actions') {
       this.consecutiveRethinks = 0

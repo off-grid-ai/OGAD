@@ -334,7 +334,7 @@ describe('general vision native tool policy', () => {
       .mockResolvedValueOnce({ ...invalid, finishReason: 'stop' })
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [...complete().toolCalls],
+        toolCalls: [...perform().toolCalls],
         finishReason: 'tool_calls'
       })
       .mockResolvedValueOnce({
@@ -343,6 +343,7 @@ describe('general vision native tool policy', () => {
         finishReason: 'tool_calls'
       })
     let captures = 0
+    const actuated: unknown[] = []
 
     try {
       const result = await runVisionTaskGraph('Confirm the visible result.', {
@@ -351,8 +352,8 @@ describe('general vision native tool policy', () => {
             captures += 1
             return { image: imagePath, bounds }
           },
-          actuate: async () => {
-            throw new Error('invalid tool output must not actuate')
+          actuate: async (action) => {
+            actuated.push(action)
           }
         },
         guard: new VisionGuard({ taskId: 'operator-adapter-test', kind: 'computer_use' }),
@@ -365,6 +366,7 @@ describe('general vision native tool policy', () => {
       expect(result).toMatchObject({ ok: true, summary: 'The requested result is visible.' })
       expect(captures).toBe(3)
       expect(stream).toHaveBeenCalledTimes(4)
+      expect(actuated).toEqual([{ type: 'click', point: { x: 287, y: 227 } }])
       expect(result.steps).toContain(
         'the model returned 0 tool calls; exactly one is required; re-observing'
       )
