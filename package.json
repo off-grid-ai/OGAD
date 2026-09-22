@@ -11,6 +11,9 @@
   "main": "./out/main/index.js",
   "author": "Off Grid AI <hello@getoffgridai.co>",
   "homepage": "https://getoffgridai.co",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "prepare": "git config core.hooksPath scripts/hooks || true",
     "format": "prettier --write .",
