@@ -289,6 +289,7 @@ const GROUNDED_POINTER_ACTIONS = new Set<GroundedPointerAction>([
 ])
 
 const MAX_DECIDER_TARGETS = 9
+const MIN_STRUCTURED_ACTION_CONFIDENCE = 0.8
 
 interface StructuredSelectionLevel {
   options: string[]
@@ -302,6 +303,15 @@ interface StructuredSelectionResult {
   levels: StructuredSelectionLevel[]
   reason: 'selected' | 'abstained' | 'no_candidates'
   modelInput: string
+}
+
+function isConfidentStructuredSelection(
+  selection: StructuredSelectionResult | null
+): selection is StructuredSelectionResult & { element: VisionSemanticElement } {
+  return (
+    selection?.element !== null &&
+    (selection?.levels.at(-1)?.confidence ?? 0) >= MIN_STRUCTURED_ACTION_CONFIDENCE
+  )
 }
 
 function compactText(value: string, limit = 80): string {
@@ -399,6 +409,13 @@ async function selectStructuredTarget(
   requestedTarget?: string
 ): Promise<StructuredSelectionResult> {
   let candidates = (input.semanticElements ?? []).filter((element) => element.actionable === true)
+  if (input.previousActionEffect === 'suspected_noop' && input.previousClickMarker) {
+    const previous = input.previousClickMarker
+    candidates = candidates.filter(
+      (element) =>
+        Math.hypot(element.point.x - previous.x, element.point.y - previous.y) > 2
+    )
+  }
   const context = [
     selectorContext(input, guidance),
     requestedTarget ? `Reasoner-requested target: ${compactText(requestedTarget, 160)}` : ''
@@ -1007,6 +1024,46 @@ export function createHybridVisionGrounder(
     const prepared = await prepareVisionGrounding(input, environment)
     let structured: StructuredSelectionResult | null = null
     let structuredFailure = ''
+    if (
+      dependencies.selectStructuredAction &&
+      dependencies.activeSpecialistAdapter().id === 'ui-tars' &&
+      !input.pendingActionVerification &&
+      input.previousActionEffect !== 'confirmed'
+    ) {
+      try {
+        if (dependencies.decisionIdentity) {
+          input.reportModelIdentity?.(dependencies.decisionIdentity)
+        }
+        structured = await selectStructuredTarget(
+          prepared.policyInput,
+          input.guidance,
+          dependencies.selectStructuredAction,
+          input.signal
+        )
+      } catch (error) {
+        if (input.signal?.aborted) throw error
+        structuredFailure = `Decision selector unavailable: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+    if (isConfidentStructuredSelection(structured)) {
+      const target = compactText(
+        structured.element.name || structured.element.value || 'the selected control',
+        120
+      )
+      const milestone = compactText(input.currentMilestone ?? input.goal, 160)
+      return {
+        response: JSON.stringify({ structuredSelector: structured }),
+        decision: {
+          kind: 'actions',
+          actionText: `Activate ${target}.`,
+          actions: [{ type: 'click', point: structured.element.point }],
+          expectedEffect: `The selected control advances this milestone: ${milestone}`,
+          decisionRationale: `The native control ${JSON.stringify(target)} directly matches the current milestone.`
+        },
+        modelInput: `Structured action selector:\n${structured.modelInput}`,
+        screenshotDataUrl: prepared.screenshotDataUrl
+      }
+    }
     const runReasoningRecovery = async (): Promise<VisionGroundingResult> => {
       if (dependencies.reasonerIdentity) {
         input.reportModelIdentity?.(dependencies.reasonerIdentity)
@@ -1044,6 +1101,8 @@ export function createHybridVisionGrounder(
       }
 
       if (
+        structured === null &&
+        !structuredFailure &&
         dependencies.selectStructuredAction &&
         dependencies.activeSpecialistAdapter().id === 'ui-tars'
       ) {
@@ -1063,7 +1122,7 @@ export function createHybridVisionGrounder(
           structuredFailure = `Decision selector unavailable: ${error instanceof Error ? error.message : String(error)}`
         }
       }
-      if (structured?.element) {
+      if (isConfidentStructuredSelection(structured)) {
         return {
           response: JSON.stringify({
             structuredSelector: structured,
