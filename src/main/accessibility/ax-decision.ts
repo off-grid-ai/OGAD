@@ -41,6 +41,15 @@ export type ScoreOptions = (
   options: readonly string[]
 ) => Promise<OptionDecision>
 
+const DECISION_THRESHOLD: Readonly<Record<DecisionFamily, number>> = {
+  action_kind: 0.55,
+  target_group: 0.5,
+  target: 0.58,
+  completion: 0.85,
+  user_handoff: 0.6,
+  visual_recovery: 0.5
+}
+
 function isEditable(element: AxSnapshot['elements'][number]): boolean {
   return /TextField|TextArea|SearchField|Edit|Document|ComboBox/i.test(element.role)
 }
@@ -48,6 +57,33 @@ function isEditable(element: AxSnapshot['elements'][number]): boolean {
 function isActionTarget(element: AxSnapshot['elements'][number]): boolean {
   return !/(?:Dialog|Window|Group|List|Menu|TabList|TabPanel|Tree|Slider|Stepper|Incrementor|ValueIndicator)$/i.test(
     element.role
+  )
+}
+
+function currentIntent(context: string): string {
+  return (
+    /^Current milestone:\s*(.+)$/imu.exec(context)?.[1]?.trim() ??
+    context.split('\nCurrent observation items', 1)[0]!
+  )
+    .replace(/\s+/gu, ' ')
+    .trim()
+}
+
+function positiveTextIntent(context: string): boolean {
+  return /\b(?:enter|fill|type|write)\b|\b(?:find|locate|look|search)(?:\s+for)?\b|\b(?:open|navigate|go)\b[^.!?]{0,80}\b(?:https?:\/\/|www\.)/iu.test(
+    currentIntent(context)
+  )
+}
+
+function relationalTargetIntent(context: string): boolean {
+  const intent = currentIntent(context)
+  return (
+    /\b(?:\d+(?:st|nd|rd|th)|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b[^.!?]{0,80}\b(?:result|item|entry|row|column|option|link|button|checkbox|shape)\b/iu.test(
+      intent
+    ) ||
+    /\b(?:left|right|above|below|nearest|closest|farthest|matching|corresponding)\b[^.!?]{0,80}\b(?:item|entry|row|column|control|link|button|checkbox|shape)\b/iu.test(
+      intent
+    )
   )
 }
 
@@ -136,7 +172,7 @@ export function elementDecisionCandidates(snapshot: AxSnapshot): DecisionCandida
   return [
     ...elements.map((element) => {
       const label = compactCandidateText(element.name || element.value || 'unnamed', 72)
-      const description = `${element.hasPopup ? 'Open the application action named' : 'Perform the application action named'} ${JSON.stringify(label)} ${element.hasPopup ? 'from' : 'with'} control [${element.index}] ${element.role}${element.region ? ` in the ${element.region} region` : ''}${elementState(element) ? ` ${elementState(element)}` : ''}${nearbyVisibleContext(element, snapshot)}`
+      const description = `${element.hasPopup ? 'Open submenu from' : 'Activate'} control [${element.index}] ${element.role} ${JSON.stringify(label)}${element.region ? ` in the ${element.region} region` : ''}${elementState(element) ? ` ${elementState(element)}` : ''}${nearbyVisibleContext(element, snapshot)}`
       return {
         description: compactCandidateText(description, 160),
         coarseLabel: `${element.role.replace(/^AX/u, '')} ${JSON.stringify(label)}`,
@@ -178,13 +214,9 @@ function groupDescription(candidates: readonly DecisionCandidate[]): string {
   ]
     .filter(Boolean)
     .join(' ')
-  const examples = candidates
-    .slice(0, 3)
-    .map((candidate) => compactCandidateText(candidate.coarseLabel ?? candidate.description, 36))
-  return compactCandidateText(
-    `${heading || 'controls'} (${candidates.length}): ${examples.join(', ')}`,
-    140
-  )
+  return `${heading ? `${heading}: ` : ''}${candidates
+    .map((candidate) => candidate.coarseLabel ?? candidate.description)
+    .join('; ')}`
 }
 
 function partitionCandidates(
@@ -306,6 +338,7 @@ function scrollDecisionCandidates(snapshot: AxSnapshot): DecisionCandidate[] {
 
 function actionFamilyCandidates(
   snapshot: AxSnapshot,
+  context: string,
   allowCompletion = true,
   textEntryAvailable = false,
   excludedFamilies: ReadonlySet<ActionFamily> = new Set()
@@ -322,7 +355,13 @@ function actionFamilyCandidates(
       description: `Activate one visible non-editable control only if its current action advances rather than reverses the planned result. ${activatable.length} controls are available; the exact target is chosen next.`
     })
   }
-  if (scrollDecisionCandidates(snapshot).length > 0 && !excludedFamilies.has('scroll_view')) {
+  if (
+    scrollDecisionCandidates(snapshot).length > 0 &&
+    /\b(?:browse|clear|find|locate|remove|reveal|scroll|search|select|show)\b/iu.test(
+      currentIntent(context)
+    ) &&
+    !excludedFamilies.has('scroll_view')
+  ) {
     candidates.push({
       family: 'scroll_view',
       description: 'Scroll one visible region to reveal an off-screen control or item.'
@@ -340,14 +379,18 @@ function actionFamilyCandidates(
       description: 'Use a keyboard command whose focus or dialog precondition is visible.'
     })
   }
-  if (allowCompletion && !excludedFamilies.has('propose_completion')) {
+  if (
+    allowCompletion &&
+    /verification satisfied/iu.test(context) &&
+    !excludedFamilies.has('propose_completion')
+  ) {
     candidates.push({
       family: 'propose_completion',
       description:
         'Check whether current control state proves the planned result is already active, including when activation would reverse or undo that result.'
     })
   }
-  if (!excludedFamilies.has('no_structured_action')) {
+  if (candidates.length === 0 && !excludedFamilies.has('no_structured_action')) {
     candidates.push({
       family: 'no_structured_action',
       description: 'No listed structured action family can safely advance the current milestone.'
@@ -420,8 +463,50 @@ export async function chooseFactorizedElementStep(
   if (!snapshot.elements.some((element) => element.enabled && element.executable !== false)) {
     return noCandidateResult(startedAt, now)
   }
+  const emptyEditors = snapshot.elements.filter(
+    (element) =>
+      element.enabled &&
+      element.executable !== false &&
+      isEditable(element) &&
+      !element.value.trim()
+  )
+  if (emptyEditors.length === 1 && positiveTextIntent(context)) {
+    return {
+      step: { action: 'vision_required', why: 'A bounded free-text writer is required.' },
+      writerTargetIndex: emptyEditors[0]!.index,
+      result: {
+        family: 'action_kind',
+        distributions: [],
+        topProbability: 1,
+        probabilityMargin: 1,
+        entropy: 0,
+        combinedConfidence: 1,
+        backend: 'rules',
+        latencyMs: now() - startedAt
+      }
+    }
+  }
+  if (relationalTargetIntent(context)) {
+    return {
+      step: {
+        action: 'vision_required',
+        why: 'The target depends on a relative position or relationship.'
+      },
+      result: {
+        family: 'visual_recovery',
+        distributions: [],
+        topProbability: 1,
+        probabilityMargin: 1,
+        entropy: 0,
+        combinedConfidence: 1,
+        backend: 'rules',
+        latencyMs: now() - startedAt
+      }
+    }
+  }
   const families = actionFamilyCandidates(
     snapshot,
+    context,
     allowCompletion,
     phase?.operation === undefined || phase.operation.value !== undefined,
     excludedFamilies
@@ -487,7 +572,7 @@ export async function chooseFactorizedElementStep(
         const element = snapshot.elements.find((item) => item.index === step.index)
         return Boolean(element && !isEditable(element))
       }),
-      'Which structural group contains the control that best matches the planned operation target in Context?',
+      'Which target group contains the control that best matches the planned operation target in Context?',
       'Which single listed control performs the planned operation without reversing or undoing the planned result?'
     )
     selectedStep =
@@ -589,8 +674,6 @@ export async function chooseFactorizedElementStep(
       why: 'No safe structured action is available.'
     }
   }
-  // Confidence data is diagnostic only. It does not replace or veto the
-  // model's selected family, group, or target.
   combinedConfidence = Math.pow(combinedConfidence, 1 / Math.max(1, distributions.length))
   const levelMetrics = distributions.map((item) => metrics(item.probabilities))
   const summary = {
@@ -606,8 +689,15 @@ export async function chooseFactorizedElementStep(
         : selectedStep.action === 'vision_required'
           ? 'visual_recovery'
           : 'action_kind'
+  const threshold = DECISION_THRESHOLD[family]
+  const abstain = combinedConfidence < threshold
   return {
-    step: selectedStep,
+    step: abstain
+      ? {
+          action: 'vision_required',
+          why: `Decision confidence ${combinedConfidence.toFixed(3)} is below ${threshold.toFixed(3)}.`
+        }
+      : selectedStep,
     result: {
       family,
       distributions,
@@ -616,6 +706,7 @@ export async function chooseFactorizedElementStep(
       entropy: summary.entropy,
       combinedConfidence,
       backend: 'decider',
+      ...(abstain ? { abstentionReason: 'confidence_below_family_threshold' } : {}),
       latencyMs: now() - startedAt
     },
     ...(writerTargetIndex !== undefined ? { writerTargetIndex } : {})
