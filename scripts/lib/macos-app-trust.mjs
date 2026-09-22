@@ -152,6 +152,7 @@ export async function verifyReleaseAppTrust(bundle, expectedTeamId, boundary = s
     if (code === bundle) appDetails = details
   }
   await boundary.execFile('/usr/bin/xcrun', ['stapler', 'validate', bundle])
+  await boundary.execFile('/usr/bin/syspolicy_check', ['distribution', bundle])
   const gatekeeper = await boundary.execFile('/usr/sbin/spctl', [
     '--assess',
     '--type',

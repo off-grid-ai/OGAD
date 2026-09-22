@@ -133,7 +133,7 @@ describe('macOS application trust', () => {
     )
   })
 
-  it('runs strict signature, fuse, Developer ID, staple and Gatekeeper checks in one seam', async () => {
+  it('runs strict signature, fuse, Developer ID, staple, distribution and Gatekeeper checks in one seam', async () => {
     const { boundary, commands } = trustedBoundary()
     const bundle = '/tmp/Off Grid AI Desktop.app'
 
@@ -156,6 +156,10 @@ describe('macOS application trust', () => {
       {
         executable: '/usr/bin/xcrun',
         args: ['stapler', 'validate', bundle]
+      },
+      {
+        executable: '/usr/bin/syspolicy_check',
+        args: ['distribution', bundle]
       },
       {
         executable: '/usr/sbin/spctl',
