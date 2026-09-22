@@ -98,7 +98,7 @@ registerCoreShutdownOwners(applicationShutdown, {
 // FORCE UPDATE VERIFICATION: 3 - SHELL OVERWRITE
 console.log('MAIN PROCESS: LOADING CUSTOM ENTRY POINT (SHELL OVERWRITE)')
 
-function createWindow(): void {
+async function createWindow(): Promise<void> {
   // Open filling the screen, because this is a desktop-first, dense app: multi-column grids, master
   // detail lists and side panels. At 900x670 the Models grid collapsed to one card per row, the chat
   // history rail ate a third of the width, and every screen looked like a phone layout stretched.
@@ -235,7 +235,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  void loadRenderer()
+  await loadRenderer()
 }
 
 // The menu-bar (Tray) control surface for always-on capture (pause/resume +
@@ -511,7 +511,22 @@ app.whenReady().then(async () => {
     }
   ])
 
-  createWindow()
+  // Start optional Pro registration before the renderer loads. The activation
+  // code yields between feature groups, so the shell can load at the same time,
+  // while Pro IPC handlers still get a head start before the renderer mounts.
+  const proFeaturesStartup = runStartupStage({
+    name: 'pro.features.load',
+    deadlineMs: 30_000,
+    lateEffect: 'keep',
+    run: () => loadProFeaturesMain()
+  })
+
+  await createWindow()
+
+  // loadURL/loadFile resolves after the renderer finishes loading. Give Electron
+  // one more event-loop turn to present that frame before optional main-process
+  // imports and local-model startup begin competing for CPU and memory.
+  await new Promise<void>((resolve) => setImmediate(resolve))
 
   // Network checks, model work, and optional services now run beside the visible shell.
   void runIndependentStartupStages([
@@ -532,17 +547,6 @@ app.whenReady().then(async () => {
       deadlineMs: 10_000,
       lateEffect: 'keep',
       run: () => startMediaServer()
-    },
-    {
-      name: 'models.text.prepare',
-      deadlineMs: 180_000,
-      lateEffect: 'keep',
-      run: async () => {
-        const { llm } = await import('./llm')
-        registerRuntime(llm.runtime)
-        applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
-        if (llm.modelsExist()) await llm.init()
-      }
     },
     {
       name: 'modalities.runtime.register',
@@ -568,12 +572,6 @@ app.whenReady().then(async () => {
       run: () => import('./models-manager').then((module) => module.reconcileActiveModelProjector())
     },
     {
-      name: 'pro.features.load',
-      deadlineMs: 30_000,
-      lateEffect: 'keep',
-      run: () => loadProFeaturesMain()
-    },
-    {
       name: 'updater.ipc',
       deadlineMs: 15_000,
       lateEffect: 'guard',
@@ -587,6 +585,24 @@ app.whenReady().then(async () => {
     }
   ])
 
+  // Text-model preparation starts a memory-heavy native runtime. Do not start it
+  // until Pro activation has finished and the first renderer frame can present.
+  void (async () => {
+    await proFeaturesStartup
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await runStartupStage({
+      name: 'models.text.prepare',
+      deadlineMs: 180_000,
+      lateEffect: 'keep',
+      run: async () => {
+        const { llm } = await import('./llm')
+        registerRuntime(llm.runtime)
+        applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
+        if (llm.modelsExist()) await llm.init()
+      }
+    })
+  })()
+
   // Demo seeding already runs beside the shell. Keep its existing persistence semantics instead of
   // pretending an in-progress database write can be cancelled by a timer.
   if (process.env.OFFGRID_SEED) {
@@ -596,7 +612,7 @@ app.whenReady().then(async () => {
   }
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow()
   })
   app.on('browser-window-focus', () => {
     refreshCachedProEntitlement()
@@ -631,6 +647,12 @@ app.on('before-quit', (event) => {
     try {
       const { llm } = await import('./llm')
       await llm.unload()
+    } catch {
+      /* best-effort — quit regardless so the app never hangs on exit */
+    }
+    try {
+      const { grounderRuntime } = await import('./vision/grounder-runtime')
+      await grounderRuntime.shutdown()
     } catch {
       /* best-effort — quit regardless so the app never hangs on exit */
     }
