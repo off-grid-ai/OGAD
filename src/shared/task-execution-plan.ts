@@ -261,6 +261,7 @@ export function taskPlanPrompt(
     'Name the visible result that completes the final phase. Do not use a generic phase such as "Complete the requested work" or "Verify the result".',
     'Use short, specific titles such as "Clear the search field", "Type AAPL", "Select AAPL", or "Show the AAPL details".',
     'For each phase, provide the single operation intent. Use target for the visible object or control and value for exact text or a selected value. Use null when target or value is not known.',
+    "Use the exact visible label, or the common application-native action name when the control is not visible yet, in both the phase title and operation target. Use the application's action name even when the user described the same result with a different concept.",
     'Do not include individual click coordinates, hidden reasoning, or safety policy.',
     'Reply with only JSON: {"phases":[{"title":"Type AAPL in the search field","operation":{"kind":"type","target":"search field","value":"AAPL"}},{"title":"Select AAPL","operation":{"kind":"select","target":"AAPL","value":null}}]}'
   ]
