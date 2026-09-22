@@ -351,7 +351,6 @@ class VisionTaskGraphRuntime {
   private handoffs = 0
   private modelStep = 0
   private sessionCycle = 1
-  private activePhaseActed = false
   /**
    * The plan phase this run is working on.
    *
@@ -658,7 +657,6 @@ class VisionTaskGraphRuntime {
         this.policyHistory.length = 0
         this.pendingPolicyHistory = undefined
         this.phaseIndex = 0
-        this.activePhaseActed = false
         const next = this.deps.plan?.phases[0]
         this.continuation = boundedContinuationCapsule(
           {
@@ -690,7 +688,6 @@ class VisionTaskGraphRuntime {
     this.policyHistory.length = 0
     this.pendingPolicyHistory = undefined
     this.phaseIndex += 1
-    this.activePhaseActed = false
     const next = this.deps.plan?.phases[this.phaseIndex]
     this.continuation = boundedContinuationCapsule(
       {
@@ -729,7 +726,6 @@ class VisionTaskGraphRuntime {
         }
         this.note(`action verified: ${decision.summary}`)
         this.pendingActionVerification = false
-        this.activePhaseActed = true
         this.previousActionEffect = 'confirmed'
       } else if (decision.kind === 'action_verified') {
         const trajectoryStep = this.policyHistory.at(-1)
@@ -738,7 +734,6 @@ class VisionTaskGraphRuntime {
         }
         this.note(`action verified: ${decision.summary}`)
         this.pendingActionVerification = false
-        this.activePhaseActed = true
         this.previousActionEffect = 'confirmed'
         this.discardPendingPolicyHistory()
         this.observeDecision('reviewed')
@@ -802,6 +797,14 @@ class VisionTaskGraphRuntime {
         this.note(summary)
         this.note(recovery)
         this.checkpoint()
+        if (this.equivalentClickRecoveries > 1) {
+          const failure =
+            'Computer use could not focus the intended control after a fresh observation. Use Take Over to complete this step.'
+          this.progress('failed', 'The same click region did not accept focus')
+          this.note(failure)
+          this.finish(false, failure)
+          return { route: 'end' }
+        }
         this.progress('checking', 'Taking a fresh observation and changing the input strategy')
         return { route: 'gate' }
       }
@@ -811,18 +814,6 @@ class VisionTaskGraphRuntime {
       return { route: 'execute' }
     }
     if (decision.kind === 'phase_complete') {
-      if (!this.activePhaseActed) {
-        const summary = 'Milestone completion rejected because this phase has no verified action.'
-        this.taskBrief.accept([
-          `${summary} Perform the current milestone action and verify its visible result before completing it.`
-        ])
-        this.discardPendingPolicyHistory()
-        this.observeDecision('blocked', summary)
-        this.note(summary)
-        this.checkpoint()
-        this.progress('checking', 'Choosing the required milestone action')
-        return { route: 'gate' }
-      }
       this.consecutiveRethinks = 0
       this.discardPendingPolicyHistory()
       this.observeDecision('terminal')
@@ -904,18 +895,6 @@ class VisionTaskGraphRuntime {
       return { route: 'gate' }
     }
     if (decision.kind === 'done' && this.deps.plan?.phases.length) {
-      if (!this.activePhaseActed) {
-        const summary = 'Task completion rejected because this phase has no verified action.'
-        this.taskBrief.accept([
-          `${summary} Perform the current milestone action and verify its visible result before completing it.`
-        ])
-        this.discardPendingPolicyHistory()
-        this.observeDecision('blocked', summary)
-        this.note(summary)
-        this.checkpoint()
-        this.progress('checking', 'Choosing the required milestone action')
-        return { route: 'gate' }
-      }
       // The execution plan is the task lifecycle SSOT. A model-level `done`
       // verdict is stronger than completion of the current milestone, but it
       // must not skip the remaining visible checks or release the specialist.
