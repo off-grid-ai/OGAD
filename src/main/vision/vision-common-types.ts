@@ -5,6 +5,8 @@ export interface VisionSemanticElement {
   name: string
   value: string
   point: { x: number; y: number }
+  /** True only when this fresh native observation can execute the control. */
+  actionable?: boolean
 }
 
 export type VisionActionEffect = 'confirmed' | 'suspected_noop' | 'unverifiable'

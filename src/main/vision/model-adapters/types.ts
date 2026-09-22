@@ -12,6 +12,11 @@ export interface VisionModelArtifacts {
 export interface VisionPolicyHistoryStep {
   response: string
   actionText: string
+  /** Separated reasoning from the assistant turn. Qwen agent runs require this
+   * content to remain in the ordered trajectory instead of being discarded. */
+  reasoning?: string
+  /** Fresh-observation result for the action selected by this turn. */
+  result?: string
   /** Recent visual state. Older steps keep text only after the image window collapses. */
   screenshotDataUrl?: string
 }
@@ -40,6 +45,9 @@ export interface VisionPolicyInput {
   verifiedActions?: readonly string[]
   /** Observable effect of the last action. This does not imply milestone completion. */
   previousActionEffect?: VisionActionEffect
+  /** The last action has crossed the execution boundary and must be accepted or
+   * rejected from the fresh screen before another action can be selected. */
+  pendingActionVerification?: boolean
   /** Visible state the reasoner expected the previous action to produce. */
   previousExpectedEffect?: string
   /** OS accessibility controls aligned to the current screenshot. */
@@ -77,6 +85,9 @@ export interface VisionPolicyResponse {
 export interface VisionPolicyRequest {
   messages: VisionPolicyMessage[]
   maxAttempts: number
+  /** Per-decision output bound. A visual policy call owns one next action, not
+   * an unbounded task-level reasoning transcript. */
+  maxTokens?: number
   /** Optional structured-output grammar for specialist text protocols. */
   responseFormat?: unknown
   /** OpenAI-compatible native tools. General/remote operators use this path. */
@@ -84,6 +95,14 @@ export interface VisionPolicyRequest {
   toolChoice?: string
   temperature?: number
   topP?: number
+  topK?: number
+  minP?: number
+  presencePenalty?: number
+  repeatPenalty?: number
+  /** Recommended model fields that the active inference transport cannot send. */
+  unsupportedSamplingFields?: readonly string[]
+  /** Keep bounded ordered reasoning turns for model families whose tool policy depends on them. */
+  preserveThinking?: boolean
   /** Preserve the model's inline <think> protocol while explicitly enabling its template mode. */
   enableThinking?: boolean
   disableThinking?: boolean
@@ -105,6 +124,8 @@ export type VisionPolicyDecision = (
       expectedEffect?: string
     }
   | { kind: 'phase_complete'; actionText: string; summary: string }
+  | { kind: 'action_verified'; actionText: string; summary: string }
+  | { kind: 'action_rejected'; actionText: string; summary: string }
   | { kind: 'wait'; actionText: string; durationMs: number }
   | { kind: 'done'; actionText: string; summary: string }
   | { kind: 'failed'; actionText: string; summary: string }

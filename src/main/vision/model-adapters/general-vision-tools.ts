@@ -1,6 +1,11 @@
 import { denormalize, type Bounds, type Point, type VisionAction } from '../vision-action'
 import { CONTINUATION_CAPSULE_SCHEMA, parseContinuationCapsule } from './continuation-capsule'
-import type { VisionPolicyDecision, VisionPolicyResponse, VisionPolicyToolCall } from './types'
+import type {
+  VisionContinuationCapsule,
+  VisionPolicyDecision,
+  VisionPolicyResponse,
+  VisionPolicyToolCall
+} from './types'
 
 export const GENERAL_VISION_TOOL_NAMES = [
   'complete_milestone',
@@ -40,14 +45,11 @@ function normalizedText(value: unknown): string | null {
   return text || null
 }
 
-function fieldsWithContinuation(
-  value: ObjectValue,
-  fields: readonly string[]
-): readonly string[] {
+function fieldsWithContinuation(value: ObjectValue, fields: readonly string[]): readonly string[] {
   return Object.hasOwn(value, 'continuation') ? [...fields, 'continuation'] : fields
 }
 
-function optionalContinuation(value: ObjectValue) {
+function optionalContinuation(value: ObjectValue): VisionContinuationCapsule | null | undefined {
   return Object.hasOwn(value, 'continuation')
     ? parseContinuationCapsule(value.continuation)
     : undefined
@@ -160,10 +162,7 @@ function commonText(
 }
 
 function completeMilestone(value: ObjectValue): DecisionResult {
-  const common = commonText(
-    value,
-    fieldsWithContinuation(value, ['summary', 'visible_evidence'])
-  )
+  const common = commonText(value, fieldsWithContinuation(value, ['summary', 'visible_evidence']))
   if ('error' in common) return common
   const continuation = optionalContinuation(value)
   if (continuation === null) return { error: 'continuation was not a valid bounded capsule' }
@@ -216,13 +215,19 @@ function callUser(value: ObjectValue): DecisionResult {
 }
 
 function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
+  const hasExpectedState = Object.hasOwn(value, 'expected_state')
+  const hasIntent = Object.hasOwn(value, 'intent')
+  if (hasExpectedState !== hasIntent) {
+    return { error: 'intent and expected_state must be supplied together' }
+  }
   const common = commonText(value, [
     ...fieldsWithContinuation(value, [
       'direction',
       'summary',
       'visible_evidence',
       'action',
-      'action_reason'
+      'action_reason',
+      ...(hasIntent ? ['intent', 'expected_state'] : [])
     ])
   ])
   if ('error' in common) return common
@@ -233,9 +238,15 @@ function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
   }
   const action = structuredAction(value.action, bounds)
   const actionReason = normalizedText(value.action_reason)
+  const intent = hasIntent ? normalizedText(value.intent) : undefined
+  const expectedState = hasExpectedState ? normalizedText(value.expected_state) : undefined
   const continuation = optionalContinuation(value)
   if (!action) return { error: 'action was not one supported structured action' }
   if (!actionReason) return { error: 'action_reason was empty or was not text' }
+  if (hasIntent && !intent) return { error: 'intent was empty or was not text' }
+  if (hasExpectedState && !expectedState) {
+    return { error: 'expected_state was empty or was not text' }
+  }
   if (continuation === null) return { error: 'continuation was not a valid bounded capsule' }
   if (action.type === 'wait') {
     return {
@@ -253,7 +264,8 @@ function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
       kind: 'actions',
       actionText: common.summary,
       actions: [action],
-      decisionRationale: `${common.visibleEvidence} ${actionReason}`,
+      ...(expectedState ? { expectedEffect: expectedState } : {}),
+      decisionRationale: `${common.visibleEvidence} ${intent ? `${intent} ` : ''}${actionReason}`,
       ...(continuation ? { continuation } : {})
     }
   }
@@ -388,47 +400,54 @@ function nativeTool(input: NativeToolInput): unknown {
   }
 }
 
-export const GENERAL_VISION_TOOLS = [
-  nativeTool({
-    name: 'complete_milestone',
-    description: 'Report that the current milestone result is visibly complete.',
-    properties: {
-      summary: text,
-      visible_evidence: text,
-      continuation: CONTINUATION_CAPSULE_SCHEMA
-    },
-    required: ['summary', 'visible_evidence', 'continuation']
-  }),
-  nativeTool({
-    name: 'perform_action',
-    description: 'Perform exactly one verified action that advances the current milestone.',
-    properties: {
-      direction: directionSchema,
-      summary: text,
-      visible_evidence: text,
-      action: structuredActionSchema,
-      action_reason: text,
-      continuation: CONTINUATION_CAPSULE_SCHEMA
-    },
-    required: [
-      'direction',
-      'summary',
-      'visible_evidence',
-      'action',
-      'action_reason',
-      'continuation'
-    ]
-  }),
-  nativeTool({
-    name: 'rethink',
-    description: 'Request a fresh observation because no safe decision is visible.',
-    properties: { direction: directionSchema, summary: text, visible_evidence: text },
-    required: ['direction', 'summary', 'visible_evidence']
-  }),
-  nativeTool({
-    name: 'call_user',
-    description: 'Pause for the user to complete a private or credential step.',
-    properties: { reason: text, visible_evidence: text },
-    required: ['reason', 'visible_evidence']
-  })
-] as const
+function generalVisionTools(requireExpectedState: boolean): readonly unknown[] {
+  return [
+    nativeTool({
+      name: 'complete_milestone',
+      description: 'Report that the current milestone result is visibly complete.',
+      properties: {
+        summary: text,
+        visible_evidence: text,
+        continuation: CONTINUATION_CAPSULE_SCHEMA
+      },
+      required: ['summary', 'visible_evidence', 'continuation']
+    }),
+    nativeTool({
+      name: 'perform_action',
+      description: 'Perform exactly one verified action that advances the current milestone.',
+      properties: {
+        direction: directionSchema,
+        summary: text,
+        visible_evidence: text,
+        action: structuredActionSchema,
+        action_reason: text,
+        ...(requireExpectedState ? { intent: text, expected_state: text } : {}),
+        continuation: CONTINUATION_CAPSULE_SCHEMA
+      },
+      required: [
+        'direction',
+        'summary',
+        'visible_evidence',
+        'action',
+        'action_reason',
+        ...(requireExpectedState ? ['intent', 'expected_state'] : []),
+        'continuation'
+      ]
+    }),
+    nativeTool({
+      name: 'rethink',
+      description: 'Request a fresh observation because no safe decision is visible.',
+      properties: { direction: directionSchema, summary: text, visible_evidence: text },
+      required: ['direction', 'summary', 'visible_evidence']
+    }),
+    nativeTool({
+      name: 'call_user',
+      description: 'Pause for the user to complete a private or credential step.',
+      properties: { reason: text, visible_evidence: text },
+      required: ['reason', 'visible_evidence']
+    })
+  ] as const
+}
+
+export const GENERAL_VISION_TOOLS = generalVisionTools(false)
+export const BONSAI_VISION_TOOLS = generalVisionTools(true)

@@ -12,6 +12,14 @@ import type { VisionModelAdapter, VisionPolicyDecision } from './types'
 import { formatContinuationCapsule } from './continuation-capsule'
 
 const MAX_WAIT_MS = 30_000
+const UI_MATE_TASK_CONTEXT_CHARS = 1_000
+
+function boundedTaskContext(goal: string): string {
+  const compact = goal.trim()
+  return compact.length <= UI_MATE_TASK_CONTEXT_CHARS
+    ? compact
+    : `${compact.slice(0, UI_MATE_TASK_CONTEXT_CHARS - 1).trimEnd()}…`
+}
 
 /** UI-Mate commonly returns small signed wheel steps despite naming the field
  * `pixels`. Convert those native step values once at the model boundary so the
@@ -86,7 +94,7 @@ function policyInstruction(input: Parameters<VisionModelAdapter['buildRequest']>
     ? [
         `Only active instruction: ${input.currentMilestone}`,
         'If this result is already visible, return subtask_complete now. Do not perform any action for a later milestone.',
-        `Full task context for reference only: ${input.goal}`
+        `Bounded task context for constraints only: ${boundedTaskContext(input.goal)}`
       ].join('\n')
     : input.goal
   return [
@@ -182,7 +190,7 @@ function uiMateDecision(
   const actions =
     parsed.actions.length === 2 &&
     firstAction.type === 'mouse_move' &&
-    secondAction?.type === 'scroll_by'
+    (secondAction?.type === 'scroll_by' || secondAction?.type === 'drag_to')
       ? [firstAction, secondAction]
       : [firstAction]
   return {
@@ -203,7 +211,7 @@ export const uiMateAdapter: VisionModelAdapter = {
     return (
       UI_MATE_GGUF_REPOSITORIES.some(
         (repository) => model.id.toLowerCase() === repository.toLowerCase()
-      ) || /^tencent_UI-Mate-(?:9B|27B)-/i.test(model.primaryFile)
+      ) || /ui[-_ ]?mate/i.test(`${model.id} ${model.primaryFile}`)
     )
   },
   assertCapabilities(model) {
@@ -222,6 +230,7 @@ export const uiMateAdapter: VisionModelAdapter = {
         history: input.history
       }),
       maxAttempts: 2,
+      maxTokens: UI_MATE_GENERATION_CONFIG.maxTokens,
       temperature: UI_MATE_GENERATION_CONFIG.temperature,
       topP: UI_MATE_GENERATION_CONFIG.topP
     }

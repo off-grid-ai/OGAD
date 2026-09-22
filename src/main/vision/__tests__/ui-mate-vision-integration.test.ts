@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { generalVisionOperatorAdapter } from '../model-adapters/general-vision-operator'
 import { uiMateAdapter } from '../model-adapters/ui-mate'
 import { uiTarsAdapter } from '../model-adapters/ui-tars'
+import { remoteVisionModelId } from '../../../shared/remote-vision-server'
+import { matchSpecialistVisionModelAdapter } from '../vision-task-model-strategy'
 
 const bounds = { width: 960, height: 544 }
 
@@ -10,6 +12,39 @@ function uiMate(action: string, parameters = ''): string {
 }
 
 describe('specialist vision protocols', () => {
+  it('keeps remote GUI specialists on their native protocols', () => {
+    const serverId = 'openrouter-server'
+    const remoteUiTars = matchSpecialistVisionModelAdapter(
+      remoteVisionModelId(serverId, 'bytedance/ui-tars-1.5-7b')
+    )
+    const remoteUiMate = matchSpecialistVisionModelAdapter(
+      remoteVisionModelId(serverId, 'tencent/ui-mate-9b')
+    )
+
+    expect(remoteUiTars).toBe(uiTarsAdapter)
+    expect(remoteUiMate).toBe(uiMateAdapter)
+    expect(
+      remoteUiTars.buildRequest({
+        goal: 'Use the visible control.',
+        currentScreenshotDataUrl: 'data:image/png;base64,current',
+        coordinateFrame: { encoded: bounds, source: bounds },
+        history: [],
+        recentSteps: [],
+        olderVisualFacts: []
+      }).tools
+    ).toBeUndefined()
+    expect(
+      remoteUiMate.buildRequest({
+        goal: 'Use the visible control.',
+        currentScreenshotDataUrl: 'data:image/png;base64,current',
+        coordinateFrame: { encoded: bounds, source: bounds },
+        history: [],
+        recentSteps: [],
+        olderVisualFacts: []
+      }).tools
+    ).toBeUndefined()
+  })
+
   it('keeps UI-Mate on its native XML trajectory and execution-plan extension', () => {
     const request = uiMateAdapter.buildRequest({
       goal: 'Use the visible control.',
@@ -144,11 +179,18 @@ describe('specialist vision protocols', () => {
     expect(request.tools).toBeUndefined()
     expect(request.disableThinking).toBe(true)
     expect(JSON.stringify(request.messages)).toContain('Current milestone: Open the menu.')
+    expect(JSON.stringify(request.messages)).toContain('This screenshot is 960 by 544 pixels')
     expect(
       uiTarsAdapter.parseResponse("Action: click(point='<point>500 250</point>')", bounds)
     ).toMatchObject({
       kind: 'actions',
-      actions: [{ type: 'click', point: { x: 480, y: 136 } }]
+      actions: [{ type: 'click', point: { x: 500, y: 250 } }]
+    })
+    expect(
+      uiTarsAdapter.parseResponse("action effect: click(start_box='(500,250)')", bounds)
+    ).toMatchObject({
+      kind: 'actions',
+      actions: [{ type: 'click', point: { x: 500, y: 250 } }]
     })
     expect(uiTarsAdapter.parseResponse('Action: subtask_complete()', bounds)).toMatchObject({
       kind: 'phase_complete'
