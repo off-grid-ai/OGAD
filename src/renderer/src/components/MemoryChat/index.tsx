@@ -502,6 +502,7 @@ export function MemoryChat({
   // The image progress/warm-up UI shows only when the ACTIVE conversation is the one
   // generating an image — never a background conversation's gen (D9).
   const generatingImage = imageGenConv !== null && imageGenConv === activeConversationId
+  const qwenLatentPreview = /qwen[_-]?image[_-]?2[._-]?1/i.test(imgModel)
   const [projects, setProjects] = useState<ProjectLite[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   // Captured-memory context is a Pro ("remembers") feature; core chats are plain
@@ -726,19 +727,6 @@ export function MemoryChat({
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
   const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
-  // Esc closes the open overlay (attachment viewer / image lightbox).
-  useEffect(() => {
-    console.log('MemoryChat effect: overlay escape handler')
-    if (!viewer && !lightbox) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        setViewer(null)
-        setLightbox(null)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [viewer, lightbox])
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>()
@@ -1505,6 +1493,20 @@ export function MemoryChat({
       const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed
       try {
         await window.api.createRagConversation(convId, title, projectId)
+        const now = new Date().toISOString()
+        const createdConversation: RagConversationContract = {
+          id: convId,
+          title,
+          project_id: projectId,
+          created_at: now,
+          updated_at: now,
+          message_count: 0
+        }
+        setConversations((current) =>
+          current.some((conversation) => conversation.id === convId)
+            ? current
+            : [createdConversation, ...current]
+        )
         setActiveConversationId(convId)
         setOpenTabs((t) => (t.includes(convId!) ? t : [...t, convId!]))
       } catch (e) {
@@ -1630,12 +1632,17 @@ export function MemoryChat({
     // route is SUPPRESSED when the agentic tools/connectors path owns the turn:
     // there, image generation is a tool the model calls, so the renderer must not
     // pre-decide (that double decision hijacked "draw ..." away from the tool loop).
-    // Agentic tools run everywhere the user turns them on — including project chats.
-    // (Projects used to force the RAG-only path, which silently ignored Tools/Connectors
-    // and left the model to hallucinate "searches" instead of calling web_search etc.)
-    const agenticActive = isAgenticTurn({ toolsOn: assistantForTurn, connectorsOn })
-    const autoImage = shouldAutoRouteImage({ mode, imageAvailable, agenticActive, text: trimmed })
+    // All memory adds search_memory to the normal tool catalog. Assistant and
+    // Connectors keep their own opt-in state.
+    const explicitAgentic = isAgenticTurn({ toolsOn: assistantForTurn, connectorsOn })
+    const autoImage = shouldAutoRouteImage({
+      mode,
+      imageAvailable,
+      agenticActive: explicitAgentic,
+      text: trimmed
+    })
     if (opts?.imageRequest || mode === 'image' || autoImage) {
+      setShowImageOptions(false)
       setImgProgress(null)
       setImageGenConv(convId)
       const seedNum = imgSeed.trim() === '' ? -1 : parseInt(imgSeed, 10)
@@ -1653,6 +1660,7 @@ export function MemoryChat({
         cfgScale: imgCfgScale,
         seed: Number.isNaN(seedNum) ? -1 : seedNum,
         model: imgModel || undefined,
+        enhancePrompt: enhanceImg,
         // The kept copy, so the record of what this was made from cannot outlive the file it names.
         initImage: keptInit?.path ?? imgInit ?? undefined,
         strength: imgInit ? imgStrength : undefined
@@ -1753,20 +1761,6 @@ export function MemoryChat({
       // History is built from the TARGET conversation's own messages (never the
       // active tab's `messages`) — a drained-queue or background send is bound to
       // `convId`, so its history must come from that conversation (D8).
-      const contextWindowTokens =
-        typeof window.api.getLlmSettings === 'function'
-          ? await window.api
-            .getLlmSettings()
-            .then((settings) => settings?.ctxSize)
-            .catch(() => undefined)
-          : undefined
-      const history = buildSendHistory(
-        messagesByConv[convId] ?? EMPTY_MSGS,
-        !!regen,
-        trimmed,
-        20,
-        contextWindowTokens
-      )
       const fullHistory = buildSendHistory(
         messagesByConv[convId] ?? EMPTY_MSGS,
         !!regen,
@@ -1774,24 +1768,10 @@ export function MemoryChat({
         20,
         Number.MAX_SAFE_INTEGER
       )
-      if (!agenticActive && JSON.stringify(history) !== JSON.stringify(fullHistory)) {
-        try {
-          const stored = await window.api.addRagMessage(convId, 'assistant', '_Compacted_', {
-            notice: true
-          })
-          setConvMessages(convId, (previous) => [
-            ...previous,
-            { id: stored.uuid, role: 'assistant', content: '_Compacted_', notice: true }
-          ])
-        } catch (error) {
-          console.warn('Could not save the compaction notice', error)
-        }
-      }
-      // Agentic tools path (opt-in, non-project). The model calls built-in tools,
-      // plus (when Connectors is on) MCP connector tools. STREAMS like the RAG path:
+      // Main Chat path. The model calls built-in tools,
+      // plus (when Connectors is on) MCP connector tools. STREAMS the answer:
       // a streamId placeholder fills in live - thinking, then each tool-call activity
       // step, then the answer - and the stop button aborts it via rag:cancel.
-      if (agenticActive) {
         if (cancelledRef.current.has(convId)) return
         const toolStreamId = `a-${Date.now()}`
         activeStreamId = toolStreamId
@@ -1894,12 +1874,25 @@ export function MemoryChat({
           return
         }
         const answer = tr?.answer || 'No response returned.'
+        const priorVariants = pendingVariantsRef.current
+        pendingVariantsRef.current = null
+        const allVariants = priorVariants ? [...priorVariants, answer] : undefined
         let imageRequests = tr?.imageRequests ?? []
         if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
           imageRequests = [tr.imageRequest]
         }
-        const pureImageToolTurn =
-          toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.name === 'generate_image')
+        // Older local models can request an image with a fenced prompt instead
+        // of calling generate_image. Keep that request on this same Chat path.
+        const fencedImagePrompt = answer.match(/```image\s*\n([\s\S]*?)```/i)?.[1]?.trim()
+        let fencedImageRequest = false
+        if (imageRequests.length === 0 && fencedImagePrompt) {
+          imageRequests = [{ prompt: fencedImagePrompt }]
+          fencedImageRequest = true
+        }
+        // A normal image-tool answer is visible text and must survive the handoff
+        // to the deferred native job. A legacy fenced image prompt is transport
+        // markup, so keep only that one hidden.
+        const visibleToolAnswer = fencedImageRequest ? '' : answer
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -1920,13 +1913,16 @@ export function MemoryChat({
             message.id === toolStreamId
               ? {
                 ...message,
-                content: imageRequests.length > 0 ? '' : answer,
+                content: imageRequests.length > 0 ? visibleToolAnswer : answer,
                 context,
                 reasoning: toolReasoning,
                 toolCalls: pendingToolCalls,
                 timeline: toolTimeline,
                 toolsOffered: tr?.toolsOffered,
                 metrics: tr?.metrics,
+                cutoff: tr?.cutoff,
+                variants: allVariants,
+                variantIndex: allVariants ? allVariants.length - 1 : undefined,
                 activity: undefined,
                 streaming: false
               }
@@ -1936,8 +1932,20 @@ export function MemoryChat({
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
           timeline: toolTimeline,
-          metrics: tr?.metrics
+          metrics: tr?.metrics,
+          cutoff: tr?.cutoff
         })
+        const artifact = parseArtifact(answer)
+        if (artifact) {
+          void window.api.saveArtifact({
+            kind: artifact.kind,
+            code: artifact.code,
+            conversationId: convId,
+            projectId
+          }).catch(() => {
+            /* The answer remains available if artifact persistence fails. */
+          })
+        }
         // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
@@ -1991,7 +1999,14 @@ export function MemoryChat({
                   ...(imageRequest.enhancePrompt === undefined
                     ? {}
                     : { enhancePrompt: imageRequest.enhancePrompt }),
-                  ...(comicHeroPath ? { initImage: comicHeroPath, strength: 0.72 } : {}),
+                  ...(comicHeroPath
+                    ? { initImage: comicHeroPath, strength: 0.72 }
+                    : keptInit?.path || imagePaths[0] || imgInit
+                      ? {
+                        initImage: keptInit?.path ?? imagePaths[0] ?? imgInit ?? undefined,
+                        strength: imgStrength
+                      }
+                      : {}),
                   conversationId: convId,
                   projectId: projectId
                 })
@@ -2016,8 +2031,8 @@ export function MemoryChat({
                 if (!comicPageTotal) {
                   const ownsToolTurn = generatedImageCount === 0
                   const imageContent =
-                    ownsToolTurn && !pureImageToolTurn
-                      ? answer
+                    ownsToolTurn && visibleToolAnswer.trim()
+                      ? visibleToolAnswer
                       : `Generated for: ${imageRequest.prompt}`
                   const completedImage = completedImageMessage(
                     imageContent,
@@ -2139,10 +2154,12 @@ export function MemoryChat({
                 /* The live reader remains available if persistence fails. */
               }
             } else if (comicPageTotal) {
-              if (comicArtifactId) {
-                await window.api.deleteArtifact(comicArtifactId).catch(() => false)
+              // updateComicReader can set this through its async closure.
+              const savedComicArtifactId = comicArtifactId as string | null
+              if (savedComicArtifactId) {
+                await window.api.deleteArtifact(savedComicArtifactId).catch(() => false)
                 setArtifacts((current) =>
-                  current.filter((artifact) => artifact.id !== comicArtifactId)
+                  current.filter((artifact) => artifact.id !== savedComicArtifactId)
                 )
               }
               setConvMessages(convId, (previous) =>
@@ -2204,225 +2221,7 @@ export function MemoryChat({
           if (voiceMode) setAutoPlayId(toolStreamId)
         }
         return
-      }
 
-      // User stopped during the pre-stream window (persisting the turn, waiting for the
-      // model) — don't open a stream at all.
-      if (cancelledRef.current.has(convId)) return
-
-      // Placeholder message that fills in live as tokens/reasoning stream in
-      // (matched by streamId in the onRagStream subscription).
-      const streamId = `a-${Date.now()}`
-      activeStreamId = streamId // expose to finally for cleanup
-      streamConvRef.current.set(streamId, convId!)
-      const streamMessage: ChatMessage = {
-        id: streamId,
-        role: 'assistant',
-        content: '',
-        reasoning: '',
-        reasoningRequested: thinkingEnabled,
-        streaming: true
-      }
-      seedStreamViewMessage(streamMessage)
-      setConvMessages(convId, (prev) => [...prev, streamMessage])
-      const result = await window.api.ragChat(
-        modelQuery,
-        'All',
-        history,
-        projectId,
-        convId,
-        noMemory && !projectId,
-        streamId,
-        thinkingEnabled,
-        imagePaths
-      )
-      const resultContext = result.context as RagContext | undefined
-
-      // Stopped mid-stream — one owner decides what survives (finalizeStoppedTurn).
-      if (cancelledRef.current.has(convId)) {
-        await finalizeStoppedTurn(convId, streamId, {
-          answer: result.answer,
-          context: resultContext,
-          cutoff: result.cutoff
-        })
-        return
-      }
-      const assistantContent = result.answer || 'No response returned.'
-
-      // The model decided this is an image request — replace the streamed turn
-      // with on-device generation.
-      const imgMatch = assistantContent.match(/```image\s*\n([\s\S]*?)```/i)
-      if (imgMatch) {
-        const imgPrompt = imgMatch[1]!.trim()
-        setConvMessages(convId, (prev) =>
-          prev.map((m) =>
-            m.id === streamId
-              ? { ...m, content: 'Generating image…', reasoning: undefined, streaming: false }
-              : m
-          )
-        )
-        try {
-          const img = await window.api.generateImage({
-            prompt: imgPrompt,
-            conversationId: convId,
-            projectId: projectId
-          })
-          const imageMetadata: ImageGenerationMetadata | undefined =
-            typeof img.width === 'number' &&
-              typeof img.height === 'number' &&
-              typeof img.steps === 'number' &&
-              typeof img.cfgScale === 'number'
-              ? {
-                width: img.width,
-                height: img.height,
-                steps: img.steps,
-                cfgScale: img.cfgScale,
-                seed: img.seed,
-                model: img.model
-              }
-              : undefined
-          const imageMetrics: GenerationMetrics | undefined =
-            typeof img.durationMs === 'number'
-              ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
-              : undefined
-          const completedImage = completedImageMessage(
-            `Generated: ${imgPrompt.slice(0, 80)}`,
-            imgPrompt,
-            img.prompt
-          )
-          setConvMessages(convId, (prev) =>
-            prev.map((m) =>
-              m.id === streamId
-                ? {
-                  ...m,
-                  ...completedImage,
-                  image: img.dataUrl,
-                  imagePath: img.path,
-                  imageMetadata,
-                  ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
-                  ...(imageMetrics ? { metrics: imageMetrics } : {})
-                }
-                : m
-            )
-          )
-          if (voiceMode) setAutoPlayId(streamId)
-          try {
-            const stored = await window.api.addRagMessage(
-              convId,
-              'assistant',
-              completedImage.storedContent,
-              withGeneratedImageReference(
-                {
-                  ...(imageMetadata ? { imageMetadata } : {}),
-                  ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
-                  ...(imageMetrics ? { metrics: imageMetrics } : {})
-                },
-                { id: img.syncId, path: img.path }
-              )
-            )
-            await announceImageMessagePersisted(convId, stored.uuid)
-          } catch {
-            /* ignore */
-          }
-        } catch (err) {
-          const memoryGuard = parseImageMemoryGuardError(err)
-          const msg =
-            memoryGuard?.message ||
-            (err instanceof Error ? err.message : 'Image generation failed.')
-          if (!/cancel/i.test(msg))
-            setConvMessages(convId, (prev) =>
-              prev.map((m) =>
-                m.id === streamId
-                  ? {
-                    ...m,
-                    content: msg,
-                    streaming: false,
-                    imageMemoryRetry: memoryGuard
-                      ? {
-                        request: { prompt: imgPrompt },
-                        prompt: imgPrompt,
-                        conversationId: convId,
-                        projectId
-                      }
-                      : undefined
-                  }
-                  : m
-              )
-            )
-        }
-      } else {
-        // Finalize the streamed message — set authoritative text + context, clear streaming.
-        // If this was a regenerate, keep the prior answer(s) as navigable variants.
-        const priorVariants = pendingVariantsRef.current
-        pendingVariantsRef.current = null
-        const allVariants = priorVariants ? [...priorVariants, assistantContent] : undefined
-        // Reasoning from the ref (populated as it streamed) — deterministic read, not
-        // a setState-updater side effect. Rides the persisted context blob (T1f).
-        const ragReasoning = reasoningByStream.current[streamId]
-        const ragTimeline = timelineByStream.current[streamId]
-        const ragToolCalls = toolCallsByStream.current[streamId]
-        delete reasoningByStream.current[streamId] // done with this stream — free it
-        delete answerByStream.current[streamId]
-        setConvMessages(convId, (prev) =>
-          prev.map((m) =>
-            m.id === streamId
-              ? {
-                ...m,
-                content: assistantContent,
-                context: resultContext,
-                cutoff: result.cutoff,
-                // On the LIVE message too, not only in the persisted context: the numbers are
-                // about the turn that just finished, so waiting for a reload to show them defeats
-                // the point.
-                metrics: result.metrics,
-                reasoning: ragReasoning,
-                timeline: ragTimeline,
-                toolCalls: ragToolCalls,
-                streaming: false,
-                variants: allVariants,
-                variantIndex: allVariants ? allVariants.length - 1 : undefined
-              }
-              : m
-          )
-        )
-        const art = parseArtifact(assistantContent)
-        if (art) {
-          // Inline-first: don't force the canvas open — the user opens the live
-          // preview via the artifact card when they want it. Still save it, scoped
-          // to this chat + project so the gallery can filter.
-          void window.api
-            .saveArtifact({
-              kind: art.kind,
-              code: art.code,
-              conversationId: convId,
-              projectId: projectId
-            })
-            .catch(() => {
-              /* ignore */
-            })
-        }
-        try {
-          const stored = await window.api.addRagMessage(
-            convId,
-            'assistant',
-            assistantContent,
-            buildAssistantContext(resultContext, {
-              reasoning: ragReasoning,
-              cutoff: result.cutoff,
-              metrics: result.metrics
-            })
-          )
-          setConvMessages(convId, (previous) =>
-            previous.map((message) =>
-              message.id === streamId ? { ...message, id: stored.uuid } : message
-            )
-          )
-          if (voiceMode) setAutoPlayId(stored.uuid)
-        } catch (e) {
-          console.error('Failed to persist assistant message:', e)
-          if (voiceMode) setAutoPlayId(streamId)
-        }
-      }
     } catch (e) {
       // User stopped and the call REJECTED rather than returning, so there is no result to read.
       // This is the path that used to save nothing at all: the turn stayed on screen and was gone
@@ -2432,7 +2231,7 @@ export function MemoryChat({
         if (activeStreamId) await finalizeStoppedTurn(convId, activeStreamId)
         return
       }
-      console.error('RAG chat failed', e)
+      console.error('Chat failed', e)
       const errorContent = generationErrorContent(e)
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
@@ -3448,7 +3247,7 @@ export function MemoryChat({
         <img
           src={imgProgress.preview}
           alt="forming"
-          className="mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover"
+          className={`mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover ${qwenLatentPreview ? 'grayscale' : ''}`}
         />
       ) : (
         <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">
@@ -3457,7 +3256,7 @@ export function MemoryChat({
       )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
         <span>{imageProgressLabel(imageJobStage, imgProgress)}</span>
-        {imgProgress ? (
+        {imgProgress && imgProgress.step < imgProgress.total ? (
           <span className="text-neutral-600">
             · ~
             {Math.max(
@@ -5025,67 +4824,53 @@ export function MemoryChat({
           )}
         </AnimatePresence>
 
-        {/* Attachment viewer — same full-screen overlay layout as the image lightbox
-          (floating Download/Close top-right, content centered), for text/PDF/docs.
-          Backdrop fades + blurs in; the panel springs up (aceternity modal pattern). */}
+        {/* Attachment viewer — preserve chat context in the shared Desktop side panel. */}
         <AnimatePresence>
           {viewer && (
-            <motion.div
+            <SidePanel
               key="viewer"
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-10 font-mono"
-              role="dialog"
-              aria-modal="true"
-              aria-label={viewer.title}
-              tabIndex={-1}
-              initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-              animate={{ opacity: 1, backdropFilter: 'blur(8px)' }}
-              exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-              onClick={(event) => {
-                if (event.target === event.currentTarget) setViewer(null)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') setViewer(null)
-              }}
+              ariaLabel={viewer.title}
+              onClose={() => setViewer(null)}
+              className="w-[min(720px,92vw)] overflow-hidden text-white"
             >
-              <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-                <span className="mr-2 max-w-[40vw] truncate self-center text-xs text-neutral-400">
+              <header className="flex items-center justify-between gap-3 border-b border-neutral-900 px-4 py-3">
+                <h2 className="min-w-0 truncate text-sm font-normal text-neutral-200">
                   {viewer.title}
-                </span>
-                {viewer.path && (
+                </h2>
+                <div className="flex shrink-0 items-center gap-2">
+                  {viewer.path && (
+                    <button
+                      type="button"
+                      onClick={() => downloadImage(viewer.path, viewer.title)}
+                      className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                    >
+                      Download
+                    </button>
+                  )}
                   <button
-                    onClick={() => downloadImage(viewer.path, viewer.title)}
-                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                    type="button"
+                    onClick={() => setViewer(null)}
+                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
                   >
-                    Download
+                    Close
                   </button>
+                </div>
+              </header>
+              <div className="min-h-0 flex-1 overflow-auto p-4">
+                {viewer.renderer === 'audio' && viewer.path ? (
+                  <AudioPane path={viewer.path} title={viewer.title} />
+                ) : viewer.renderer === 'document' && viewer.path ? (
+                  // A document renders from its BYTES. main already serves them as a data URL for
+                  // exactly this - Chromium draws the PDF itself - and the old code path never called
+                  // it, so every PDF fell through to the text pane below and showed an empty page.
+                  <DocumentPane path={viewer.path} title={viewer.title} />
+                ) : (
+                  <pre className="min-h-full w-full whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200">
+                    {viewer.text}
+                  </pre>
                 )}
-                <button
-                  onClick={() => setViewer(null)}
-                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
-                >
-                  Close
-                </button>
               </div>
-              {viewer.renderer === 'audio' && viewer.path ? (
-                <AudioPane path={viewer.path} title={viewer.title} />
-              ) : viewer.renderer === 'document' && viewer.path ? (
-                // A document renders from its BYTES. main already serves them as a data URL for
-                // exactly this - Chromium draws the PDF itself - and the old code path never called
-                // it, so every PDF fell through to the text pane below and showed an empty page.
-                <DocumentPane path={viewer.path} title={viewer.title} />
-              ) : (
-                <motion.pre
-                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, y: 4 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                  className="max-h-full w-full max-w-3xl overflow-auto whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200"
-                >
-                  {viewer.text}
-                </motion.pre>
-              )}
-            </motion.div>
+            </SidePanel>
           )}
         </AnimatePresence>
 

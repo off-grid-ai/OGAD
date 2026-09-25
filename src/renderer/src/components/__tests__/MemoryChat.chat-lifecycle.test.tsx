@@ -48,6 +48,42 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     clearRegisteredSlots()
   })
 
+  it('routes Project, No memory, and All memory turns through tool chat', async () => {
+    const boundary = new ChatBoundary()
+    boundary.api.isPro = true
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('Find the project plan', user)
+    await waitFor(() => expect(boundary.toolQueries).toHaveLength(1))
+    expect(boundary.toolQueries[0]!.options).toMatchObject({
+      projectId: 'project-alpha', allMemory: false
+    })
+    boundary.resolve(0, 'Project answer')
+    await screen.findByText('Project answer')
+
+    const scopeButton = screen.getByTitle(/choose what this chat can draw on/i)
+    scopeButton.focus()
+    await user.keyboard('{Enter}')
+    await user.click(await screen.findByRole('menuitem', { name: /no memory/i }))
+    await send('Answer from general knowledge', user)
+    await waitFor(() => expect(boundary.toolQueries).toHaveLength(2))
+    expect(boundary.toolQueries[1]!.options).toMatchObject({ allMemory: false })
+    expect(boundary.toolQueries[1]!.options.projectId).toBeUndefined()
+    boundary.resolve(1, 'General answer')
+    await screen.findByText('General answer')
+
+    scopeButton.focus()
+    await user.keyboard('{Enter}')
+    await user.click(await screen.findByRole('menuitem', { name: /all memory/i }))
+    await send('Find a past discussion', user)
+    await waitFor(() => expect(boundary.toolQueries).toHaveLength(3))
+    expect(boundary.toolQueries[2]!.options).toMatchObject({ allMemory: true })
+    boundary.resolve(2, 'Memory answer')
+    expect(boundary.api.ragChat).not.toHaveBeenCalled()
+  })
+
   it('shows synced and local turns in the order returned by chat storage', async () => {
     const boundary = new ChatBoundary()
     boundary.messages['conversation-a'] = [
@@ -102,10 +138,16 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     ]
     installBoundary(boundary)
     renderChat({ conversationId: 'conversation-a' })
+    const user = userEvent.setup()
 
-    await send('670 Gateway Blvd, South San Francisco, CA 94080', userEvent.setup())
+    await user.click(await screen.findByRole('button', { name: /Pasted text/i }))
+    expect(screen.getByRole('dialog', { name: 'Pasted text' })).toBeTruthy()
+    expect(screen.getByTestId('side-panel-layer')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+
+    await send('670 Gateway Blvd, South San Francisco, CA 94080', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
-    const history = vi.mocked(boundary.api.ragChat).mock.calls[0]?.[2] as
+    const history = vi.mocked(boundary.api.toolChat).mock.calls[0]?.[1] as
       | { content: string }[]
       | undefined
     expect(history?.[0]?.content).toContain('Find nearby beef ribs under $100')
@@ -1129,7 +1171,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     )
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
     expect(boundary.stopComputerTask.mock.invocationCallOrder[0]).toBeLessThan(
-      boundary.api.ragChat.mock.invocationCallOrder[0]!
+      boundary.api.toolChat.mock.invocationCallOrder[0]!
     )
 
     openActionsFor('Find the lowest flight price')

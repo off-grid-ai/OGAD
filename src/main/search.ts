@@ -34,11 +34,11 @@ const SOURCES_SQL = `
   SELECT 'frame:'||id AS key, 'screen' AS kind, id AS refId, text AS text,
          COALESCE(surface,'') AS surface, COALESCE(url,'') AS url,
          ${epochMsSql('ts')} AS ts
-    FROM frames WHERE text IS NOT NULL AND length(text) > 20
+    FROM frames WHERE text IS NOT NULL
   UNION ALL
   SELECT 'obs:'||id, 'screen', id, summary, COALESCE(surface,''), COALESCE(url,''),
          ${epochMsSql('ts')}
-    FROM observations WHERE summary IS NOT NULL AND length(summary) > 0
+    FROM observations WHERE summary IS NOT NULL
   UNION ALL
   SELECT 'sum:'||rowid, 'meeting', rowid, summary, 'Meeting', '', 0
     FROM chat_summaries WHERE summary IS NOT NULL
@@ -95,7 +95,10 @@ async function indexBatch(limit = 48): Promise<{ indexed: number; remaining: num
   const chunks: VecChunk[] = []
   for (const r of rows) {
     const text = (r.text || '').trim().slice(0, 1000)
-    if (!text) continue
+    // Keep the frame noise threshold without asking SQLite to read every large OCR value just to
+    // calculate length(text). On a multi-gigabyte capture database that synchronous scan blocked
+    // Electron's main thread for seconds. Rows skipped here are still marked below, once only.
+    if (!text || (r.key.startsWith('frame:') && text.length <= 20)) continue
     const vector = await embeddings.generateEmbedding(text)
     chunks.push({
       key: r.key,

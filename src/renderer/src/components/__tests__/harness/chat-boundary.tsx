@@ -283,9 +283,19 @@ export class ChatBoundary {
       }
     ),
     toolChat: vi.fn(
-      async (_query: string, _history: unknown[], options: Record<string, unknown>) => {
-        this.toolQueries.push({ query: _query, options })
-        return { answer: 'Started the requested run.', unified: [], toolCalls: [] }
+      async (query: string, _history: unknown[], options: Record<string, unknown>) => {
+        const turn = deferred<RagResult>()
+        this.toolQueries.push({ query, options })
+        this.calls.push({
+          query,
+          projectId: typeof options.projectId === 'string' ? options.projectId : null,
+          conversationId: String(options.conversationId),
+          noMemory: !options.projectId && !options.allMemory,
+          streamId: String(options.streamId),
+          thinking: !!options.thinking,
+          turn
+        })
+        return turn.promise
       }
     )
   }

@@ -367,6 +367,18 @@ export async function downloadModel(
     if (!variant)
       return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
     const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
+    const catalogAuxFiles =
+      inCatalog?.files.filter((file) => file.role !== 'primary' && file.role !== 'mmproj') ?? []
+    const projectorFiles = variant.mmproj
+      ? [
+          {
+            name: variant.mmproj.fileName,
+            url: variant.mmproj.url,
+            sizeBytes: variant.mmproj.sizeBytes,
+            role: 'mmproj' as const
+          }
+        ]
+      : (inCatalog?.files.filter((file) => file.role === 'mmproj') ?? [])
     entry = {
       ...entry,
       files: [
@@ -377,16 +389,8 @@ export async function downloadModel(
           sha256: catalogFile?.sha256,
           role: 'primary'
         },
-        ...(variant.mmproj
-          ? [
-              {
-                name: variant.mmproj.fileName,
-                url: variant.mmproj.url,
-                sizeBytes: variant.mmproj.sizeBytes,
-                role: 'mmproj' as const
-              }
-            ]
-          : [])
+        ...projectorFiles,
+        ...catalogAuxFiles
       ]
     }
   }

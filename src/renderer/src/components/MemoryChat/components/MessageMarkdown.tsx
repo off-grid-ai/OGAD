@@ -11,6 +11,56 @@ import { openUnifiedContext } from './MessageContext'
 
 const markdownComponents = chatMarkdownComponents
 
+type MarkdownNode = {
+  type: string
+  value?: string
+  url?: string
+  children?: MarkdownNode[]
+}
+
+const BARE_DOMAIN =
+  /(?<![\w@/.-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:\/[^\s<>]*)?)/gi
+const TRAILING_LINK_PUNCTUATION = /[.,!?;:]+$/
+
+function splitBareDomains(value: string): MarkdownNode[] {
+  const nodes: MarkdownNode[] = []
+  let cursor = 0
+
+  for (const match of value.matchAll(BARE_DOMAIN)) {
+    const start = match.index
+    const matchedValue = match[1]!
+    let domain = matchedValue.replace(TRAILING_LINK_PUNCTUATION, '')
+    while (domain.endsWith(')') && domain.split(')').length - 1 > domain.split('(').length - 1) {
+      domain = domain.slice(0, -1)
+    }
+    if (!domain) continue
+    if (start > cursor) nodes.push({ type: 'text', value: value.slice(cursor, start) })
+    nodes.push({
+      type: 'link',
+      url: `https://${domain}`,
+      children: [{ type: 'text', value: domain }]
+    })
+    cursor = start + domain.length
+  }
+
+  if (cursor === 0) return [{ type: 'text', value }]
+  if (cursor < value.length) nodes.push({ type: 'text', value: value.slice(cursor) })
+  return nodes
+}
+
+function linkBareDomains(node: MarkdownNode): void {
+  if (!node.children || node.type === 'link' || node.type === 'linkReference') return
+  node.children = node.children.flatMap((child) => {
+    if (child.type === 'text' && child.value) return splitBareDomains(child.value)
+    linkBareDomains(child)
+    return [child]
+  })
+}
+
+function remarkBareDomains(): (tree: MarkdownNode) => void {
+  return linkBareDomains
+}
+
 function makeCiteComponents(
   unified: RagContext['unified'],
   navigation: ContextNavigation
@@ -125,12 +175,19 @@ function MessageMarkdownComponent({
   const content =
     message.role === 'user'
       ? renderUserSkillMention(
-        renderedMessageContent(message),
-        navigation.installedSkillNames ?? []
-      )
+          renderedMessageContent(message),
+          navigation.installedSkillNames ?? []
+        )
       : renderedMessageContent(message)
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
+    <ReactMarkdown
+      remarkPlugins={
+        message.role === 'user'
+          ? [remarkGfm, remarkBreaks, remarkBareDomains]
+          : [remarkGfm, remarkBreaks]
+      }
+      components={components}
+    >
       {content}
     </ReactMarkdown>
   )

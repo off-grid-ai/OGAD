@@ -5,9 +5,20 @@
  * call. Each case is a real shape a local model emits. Plain prose must yield [].
  */
 import { describe, it, expect } from 'vitest'
-import { parseToolCallsFromText } from '../tool-call-parse'
+import { parseToolCallsFromText, stripQwenToolCallMarkup } from '../tool-call-parse'
 
 describe('parseToolCallsFromText', () => {
+  it('recovers Qwen tool-call wrappers with JSON and named bodies', () => {
+    expect(parseToolCallsFromText('<|tool_call_start|>{"name":"web_search","arguments":{"query":"weather"}}<|tool_call_end|>'))
+      .toEqual([{ name: 'web_search', args: { query: 'weather' } }])
+    expect(parseToolCallsFromText('<|tool_call_start|>web_search({"query":"weather"})<|tool_call_end|>'))
+      .toEqual([{ name: 'web_search', args: { query: 'weather' } }])
+  })
+
+  it('removes Qwen tool-call wrappers from user-facing answer text', () => {
+    expect(stripQwenToolCallMarkup('Checking. <|tool_call_start|>web_search({"query":"x"})<|tool_call_end|> Done.'))
+      .toBe('Checking.  Done.')
+  })
   it('parses a <tool_call> block (qwen/hermes style)', () => {
     const out = parseToolCallsFromText(
       'Let me look that up.\n<tool_call>\n{"name": "web_search", "arguments": {"query": "tok/s gemma"}}\n</tool_call>'

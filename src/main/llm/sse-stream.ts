@@ -9,6 +9,7 @@
 //      and emits {text, kind} events, tracking the reasoning/answer channel.
 
 import { maxPartialTagSuffix, REASONING_DELIMITERS, TOOL_CALL_OPENERS } from '@offgrid/sync'
+import { QWEN_TOOL_CALL_START } from '../tools/tool-call-parse'
 
 type DeltaKind = 'content' | 'reasoning'
 
@@ -175,7 +176,7 @@ export function createToolMarkupFilter(emit: (text: string) => void): {
   push: (text: string) => void
   end: () => void
 } {
-  const suppressOpeners = [...TOOL_CALL_OPENERS, '<|tool_call|>', '<invoke'].map((value) =>
+  const suppressOpeners = [...TOOL_CALL_OPENERS, QWEN_TOOL_CALL_START, '<|tool_call|>', '<invoke'].map((value) =>
     value.toLowerCase()
   )
   const thinkDelimiter = REASONING_DELIMITERS.find((delimiter) => delimiter.open === '<think>')

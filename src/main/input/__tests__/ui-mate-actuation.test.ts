@@ -68,8 +68,8 @@ describe('UI-Mate nut.js actuation contract', () => {
       'releaseKey:[12]',
       'pressKey:[13,11]',
       'releaseKey:[11,13]',
-      'scrollDown:[2]',
-      'scrollRight:[1]'
+      `scrollDown:[${process.platform === 'darwin' ? 240 : 2}]`,
+      `scrollRight:[${process.platform === 'darwin' ? 120 : 1}]`
     ])
   })
 
@@ -101,8 +101,8 @@ describe('UI-Mate nut.js actuation contract', () => {
       'scrollDown:[3]',
       'scrollLeft:[3]',
       'scrollRight:[3]',
-      'scrollUp:[2]',
-      'scrollLeft:[2]'
+      `scrollUp:[${process.platform === 'darwin' ? 121 : 2}]`,
+      `scrollLeft:[${process.platform === 'darwin' ? 121 : 2}]`
     ])
   })
 

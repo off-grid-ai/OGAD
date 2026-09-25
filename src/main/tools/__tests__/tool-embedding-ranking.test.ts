@@ -7,7 +7,12 @@
  * (embeddings backend); the ranking, cache, and cosine math are production code.
  */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { rankConnectorToolsSemantic, _clearToolVecCache } from '../tool-embedding-ranking'
+import {
+  contextualToolRoutingText,
+  rankConnectorToolsSemantic,
+  selectRelevantToolsSemantic,
+  _clearToolVecCache
+} from '../tool-embedding-ranking'
 import { scoreTool, terms } from '../tool-ranking'
 
 const tool = (name: string, description: string): unknown => ({
@@ -43,11 +48,15 @@ const CONCEPTS: Record<string, number> = {
   code: 2,
   issue: 2,
   repository: 2,
-  github: 2
+  github: 2,
+  research: 3,
+  internet: 3,
+  web: 3,
+  search: 3
 }
 
 const fakeEmbed = async (text: string): Promise<number[]> => {
-  const v = [0, 0, 0]
+  const v = [0, 0, 0, 0]
   for (const w of terms(text)) {
     const dim = CONCEPTS[w]
     if (dim !== undefined) {
@@ -125,5 +134,42 @@ describe('rankConnectorToolsSemantic', () => {
     const names = ranked.map((t) => (t as { function: { name: string } }).function.name)
     expect(names[0]).toBe('web_search')
     expect(names[names.length - 1]).toBe('github_issue') // failed embed sinks to last
+  })
+})
+
+describe('contextual semantic tool selection', () => {
+  beforeEach(() => _clearToolVecCache())
+
+  it('carries a recent user goal into a referential follow-up without intent keywords', async () => {
+    const routingText = contextualToolRoutingText('please continue with more depth', [
+      {
+        role: 'user',
+        content: 'Research recent Off Grid AI activity on the internet.'
+      },
+      {
+        role: 'assistant',
+        content: 'I can search the web if you want me to.'
+      }
+    ])
+
+    expect(routingText).toContain('Research recent Off Grid AI activity on the internet.')
+    expect(routingText).not.toContain('I can search the web')
+    const selected = await selectRelevantToolsSemantic(routingText, [CALENDAR, BUILTIN], {
+      embed: fakeEmbed
+    })
+
+    expect(selected).toEqual([BUILTIN])
+  })
+
+  it('keeps the current request first and bounds old user context', () => {
+    const routingText = contextualToolRoutingText('continue', [
+      { role: 'user', content: 'oldest goal' },
+      { role: 'user', content: 'newer goal' },
+      { role: 'user', content: 'newest goal' }
+    ])
+
+    expect(routingText.startsWith('Current user request: continue')).toBe(true)
+    expect(routingText).not.toContain('oldest goal')
+    expect(routingText.indexOf('newest goal')).toBeLessThan(routingText.indexOf('newer goal'))
   })
 })

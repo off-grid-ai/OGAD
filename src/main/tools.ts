@@ -1,18 +1,18 @@
-// Agentic tool-calling loop for the Off Grid AI chat. Kept ISOLATED from the
-// default rag:chat path (opt-in) so a tool run can never break normal chat.
+// Tool-calling loop for Off Grid AI Chat. All main Chat memory scopes use this
+// path; memory scope changes which search tool is offered, not the chat engine.
 //
 // The local model (llama-server, OpenAI-compatible /v1/chat/completions) is given
-// tool schemas; we parse its tool_calls, run them on-device, feed results back,
-// and loop until it answers. Built-in tools only (no network) for now — web
-// search + MCP connectors plug in here later.
+// tool schemas; we parse its tool_calls, run them, feed results back, and loop
+// until it answers. Built-in tools and selected connector extensions share it.
 
 import { llm } from './llm'
 import type { GenerationMetrics } from '../shared/generation-metrics'
+import type { ResponseCutoffContract } from '../shared/ipc-contracts'
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
 import { stripChatControlTokens } from '@offgrid/sync'
 import { isMemoryToolAllowed } from './tools/memory-scope'
-import { parseToolCallsFromText } from './tools/tool-call-parse'
-import { getSetting, saveSetting } from './database'
+import { parseToolCallsFromText, stripQwenToolCallMarkup } from './tools/tool-call-parse'
+import { getSetting, saveSetting, searchProjectConversations } from './database'
 import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
@@ -26,9 +26,9 @@ import {
   callsWithinToolBudget,
   normalizeMaxToolCalls,
   toolLimitFinalAnswerInstruction,
-  toolPromptChars,
   toolResultCharBudget
 } from '@offgrid/models'
+import { toolPromptChars } from './tools/prompt-budget'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -367,10 +367,11 @@ const TOOLS: ToolDef[] = [
   },
   {
     // Only OFFERED in a project chat (gated in schemas() by projectId). Lets the model
-    // pull from the current project's uploaded docs + captured memory on demand — the
-    // general search_memory doesn't reach a project's separate RAG store.
+    // pull from the current project's documents, captured memory, and sibling
+    // conversations on demand. Global search_memory stays outside this scope.
     name: SEARCH_KB_TOOL.function.name,
-    description: SEARCH_KB_TOOL.function.description,
+    description:
+      "Search the current project's knowledge base and conversations for information relevant to the user's question.",
     parameters: SEARCH_KB_TOOL.function.parameters,
     run: async (a, ctx): Promise<ToolResult> => {
       if (!ctx.projectId) {
@@ -379,7 +380,18 @@ const TOOLS: ToolDef[] = [
       try {
         const { ragService } = await import('./rag')
         const handler = makeSearchKnowledgeBaseHandler(ragService)
-        return { text: await handler({ query: String(a.query ?? '') }, ctx.projectId) }
+        const query = String(a.query ?? '').trim()
+        const conversations = searchProjectConversations(ctx.projectId, query, ctx.conversationId)
+        const documents = await handler({ query }, ctx.projectId)
+        const chats = conversations.length
+          ? conversations
+              .map(
+                (message, index) =>
+                  `[C${index + 1}] ${message.title || 'Project conversation'} · ${message.role}: ${message.content.slice(0, 1500)}`
+              )
+              .join('\n\n')
+          : 'No matching project conversations found.'
+        return { text: `Project documents:\n${documents}\n\nProject conversations:\n${chats}` }
       } catch (e) {
         return { text: 'Error searching the knowledge base: ' + (e as Error).message }
       }
@@ -413,8 +425,7 @@ const TOOLS: ToolDef[] = [
     },
     run: (a): ToolResult => {
       const prompt = String(a.prompt ?? '').trim()
-      const enhancePrompt =
-        typeof a.enhance_prompt === 'boolean' ? a.enhance_prompt : undefined
+      const enhancePrompt = typeof a.enhance_prompt === 'boolean' ? a.enhance_prompt : undefined
       return prompt
         ? {
             text: 'Image generation started - it will appear in the chat.',
@@ -568,6 +579,7 @@ export async function toolChat(
   imageRequest?: { prompt: string; enhancePrompt?: boolean }
   toolsOffered?: string[]
   metrics?: GenerationMetrics
+  cutoff?: ResponseCutoffContract
 }> {
   if (opts.conversationId) {
     const decision = await callHookAsync<{ answer: string } | null>(
@@ -581,15 +593,6 @@ export async function toolChat(
         unified: [],
         imageRequests: []
       }
-    }
-  }
-  const plannerUnavailable = await llm.toolPlannerPreflight()
-  if (plannerUnavailable) {
-    return {
-      answer: plannerUnavailable,
-      toolCalls: [],
-      unified: [],
-      imageRequests: []
     }
   }
   // A selected remote model does not need the local server to be installed or warm.
@@ -685,20 +688,47 @@ export async function toolChat(
   // load, the lexical fallback fails closed to direct matches.
   let relevantTools: unknown[] = []
   if (rawTools.length > 0) {
-    try {
-      const { embeddings } = await import('./embeddings')
-      const { selectRelevantToolsSemantic } = await import('./tools/tool-embedding-ranking')
-      relevantTools = await selectRelevantToolsSemantic(query, rawTools, {
-        embed: (t) => embeddings.generateEmbedding(t)
-      })
-    } catch {
-      const { selectRelevantTools } = await import('./tools/tool-ranking')
-      relevantTools = selectRelevantTools(query, rawTools)
+    const { selectRelevantTools } = await import('./tools/tool-ranking')
+    const lexicalTools = selectRelevantTools(query, rawTools)
+    const namedTool = rawTools.some((schema) => {
+      const name = (schema as { function?: { name?: unknown } }).function?.name
+      return typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())
+    })
+    // An explicit tool name needs no semantic ranking. If image generation is unavailable,
+    // an explicit generate_image request cannot be routed to that missing tool.
+    const unavailableImageTool = !imageAvailable && /\bgenerate_image\b/i.test(query)
+    if (!namedTool && !unavailableImageTool) {
+      try {
+        const { embeddings } = await import('./embeddings')
+        const { contextualToolRoutingText, selectRelevantToolsSemantic } =
+          await import('./tools/tool-embedding-ranking')
+        const routingText = contextualToolRoutingText(query, history)
+        relevantTools = await selectRelevantToolsSemantic(routingText, rawTools, {
+          embed: (t) => embeddings.generateEmbedding(t)
+        })
+      } catch {
+        // The direct-match selection below remains available offline.
+      }
     }
+    // A semantic score must not hide a direct name or description match. This
+    // also keeps explicit tool requests available when a new embedding model
+    // ranks an unrelated schema first.
+    relevantTools = [
+      ...lexicalTools,
+      ...relevantTools.filter((tool) => !lexicalTools.includes(tool))
+    ]
   }
+  const scopeToolName = opts.projectId
+    ? 'search_knowledge_base'
+    : opts.allMemory
+      ? 'search_memory'
+      : null
   const explicitlyNamedTools = rawTools.filter((schema) => {
     const name = (schema as { function?: { name?: unknown } }).function?.name
-    return typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())
+    return (
+      typeof name === 'string' &&
+      (name === scopeToolName || query.toLowerCase().includes(name.toLowerCase()))
+    )
   })
   if (explicitlyNamedTools.length) {
     const explicitNames = new Set(explicitlyNamedTools)
@@ -749,8 +779,32 @@ export async function toolChat(
       )
   }
   const tools = budgeted.tools
+  if (tools.length) {
+    const plannerUnavailable = await llm.toolPlannerPreflight()
+    if (plannerUnavailable) {
+      return {
+        answer: plannerUnavailable,
+        toolCalls: [],
+        unified: [],
+        imageRequests: []
+      }
+    }
+  }
+  const projectPrompt = opts.projectId
+    ? (await import('./rag/store'))
+        .listProjects()
+        .find((project) => project.id === opts.projectId)
+        ?.systemPrompt.trim()
+    : undefined
   const sys =
-    'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
+    'You are Off Grid AI, a private on-device assistant. Answer general questions using your knowledge. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
+    (opts.allMemory
+      ? ' Use search_memory when the user asks about their memories, past conversations, people, or captured activity. Do not invent personal facts or claim to have searched when you have not. Cite retrieved sources accurately.'
+      : '') +
+    (opts.projectId
+      ? ' In this project, use search_knowledge_base for relevant project documents and conversations. Do not invent project facts or use information from other projects. Cite retrieved sources accurately.'
+      : '') +
+    (projectPrompt ? `\n\nProject instructions:\n${projectPrompt}` : '') +
     (opts.assistantOnly
       ? ' web_use and computer_use are available for website and desktop tasks.'
       : '') +
@@ -812,11 +866,13 @@ export async function toolChat(
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
     metrics?: GenerationMetrics
+    cutoff?: ResponseCutoffContract
   }): {
     answer: string
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
     metrics?: GenerationMetrics
+    cutoff?: ResponseCutoffContract
     imageRequests: { prompt: string; enhancePrompt?: boolean }[]
     imageRequest?: { prompt: string; enhancePrompt?: boolean }
     toolsOffered?: string[]
@@ -866,7 +922,7 @@ export async function toolChat(
   const replyReserve = Math.min(1024, Math.max(256, Math.floor(ctx * 0.1)))
   const maxPromptChars = Math.max(0, ctx - replyReserve) * 4
   const answerFrom = (content: string): string => {
-    return stripChatControlTokens(content)
+    return stripChatControlTokens(stripQwenToolCallMarkup(content))
   }
   let round = 0
   while (toolCalls.length < maxToolCalls) {
@@ -908,6 +964,7 @@ export async function toolChat(
       content,
       toolCalls: calls,
       reasoningDetails,
+      finishReason,
       metrics
     } = await llm.streamChat(messages, onDelta, {
       tools: roundTools,
@@ -949,17 +1006,24 @@ export async function toolChat(
             args: c.args,
             rawArgs: JSON.stringify(c.args)
           }))
+    // A text-form call is not permission to cross the selected memory scope.
+    const scopedEffective = effective.filter((call) =>
+      isMemoryToolAllowed(call.name, {
+        projectActive: !!opts.projectId,
+        allMemory: !!opts.allMemory
+      })
+    )
 
     // A long-running Web Use or Computer Use call owns the whole goal. Preserve
     // an explicit open_url prerequisite before Computer Use, then execute only
     // the first task call. The task runtime owns all later work and retries.
-    const taskCall = effective.find((call) => isTaskAction(call.name))
-    const taskIndex = taskCall ? effective.indexOf(taskCall) : -1
+    const taskCall = scopedEffective.find((call) => isTaskAction(call.name))
+    const taskIndex = taskCall ? scopedEffective.indexOf(taskCall) : -1
     const prerequisites =
       taskCall?.name === 'computer_use'
-        ? effective.slice(0, taskIndex).filter((call) => call.name === 'open_url')
+        ? scopedEffective.slice(0, taskIndex).filter((call) => call.name === 'open_url')
         : []
-    const permitted = taskCall ? [...prerequisites, taskCall] : effective
+    const permitted = taskCall ? [...prerequisites, taskCall] : scopedEffective
     if (permitted.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
@@ -1047,7 +1111,15 @@ export async function toolChat(
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: answerFrom(content), toolCalls, unified, metrics })
+    return resultWithImages({
+      answer: answerFrom(content),
+      toolCalls,
+      unified,
+      metrics,
+      ...(finishReason === 'length'
+        ? { cutoff: { reason: 'max_tokens' as const, maxTokens: roundMaxTokens } }
+        : {})
+    })
   }
   // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
   // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
@@ -1063,13 +1135,14 @@ export async function toolChat(
     return resultWithImages({ answer: answerFrom('') || 'Context is full.', toolCalls, unified })
   }
   const finalOutputRoom = Math.max(1, ctx - Math.ceil(toolPromptChars(finalMessages) / 4) - 32)
+  const finalMaxTokens =
+    typeof settings.maxTokens === 'number' && settings.maxTokens > 0
+      ? Math.min(settings.maxTokens, finalOutputRoom)
+      : finalOutputRoom
   const final = await llm.streamChat(finalMessages, onDelta, {
     temperature: 0.3,
     // Forced final answer obeys the same context-bound cap as every tool round.
-    maxTokens:
-      typeof settings.maxTokens === 'number' && settings.maxTokens > 0
-        ? Math.min(settings.maxTokens, finalOutputRoom)
-        : finalOutputRoom,
+    maxTokens: finalMaxTokens,
     thinking: false,
     signal: opts.signal
   })
@@ -1077,7 +1150,10 @@ export async function toolChat(
     answer: answerFrom(final.content) || 'Stopped after too many tool steps.',
     toolCalls,
     unified,
-    metrics: final.metrics
+    metrics: final.metrics,
+    ...(final.finishReason === 'length'
+      ? { cutoff: { reason: 'max_tokens' as const, maxTokens: finalMaxTokens } }
+      : {})
   })
 }
 

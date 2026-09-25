@@ -1193,6 +1193,40 @@ export function getProjectChatHistory(
   return rows.map(({ role, content, title }) => ({ role, content, title })).reverse()
 }
 
+/** Relevant messages from other conversations in one project. Never crosses projects. */
+export function searchProjectConversations(
+  projectId: string,
+  query: string,
+  excludeConversationId = '',
+  limit = 6
+): { role: string; content: string; title: string | null }[] {
+  const stopWords = new Set([
+    'about', 'and', 'are', 'did', 'for', 'from', 'how', 'our', 'project',
+    'the', 'this', 'was', 'what', 'when', 'where', 'who', 'with', 'you'
+  ])
+  const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])]
+    .filter((term) => term.length > 2 && !stopWords.has(term))
+    .slice(0, 6)
+  if (!terms.length) return []
+  const score = terms.map(() => '(CASE WHEN lower(rm.content) LIKE ? THEN 1 ELSE 0 END)').join(' + ')
+  const patterns = terms.map((term) => `%${term}%`)
+  return getDB()
+    .prepare(
+      `SELECT rm.role, rm.content, rc.title
+         FROM rag_messages rm
+         JOIN rag_conversations rc ON rc.id = rm.conversation_id
+        WHERE rc.project_id = ? AND rm.conversation_id != ?
+          AND (${score}) > 0
+        ORDER BY (${score}) DESC, rm.created_at DESC, rm.id DESC
+        LIMIT ?`
+    )
+    .all(projectId, excludeConversationId, ...patterns, ...patterns, Math.min(12, Math.max(1, limit))) as {
+    role: string
+    content: string
+    title: string | null
+  }[]
+}
+
 export function updateRagConversationTitle(id: string, title: string): RagConversation {
   const normalizedTitle = title.trim()
   if (!normalizedTitle) {

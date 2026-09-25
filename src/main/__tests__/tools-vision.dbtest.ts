@@ -26,6 +26,7 @@ import { modelsDir } from '../runtime-env'
 
 let fake: FakeLlamaServer
 let imgPath: string
+let largeImgPath: string
 let activeModelFile: string
 let mmprojFile: string
 
@@ -41,6 +42,11 @@ beforeAll(async () => {
   // A real (tiny) image file the guard reads + base64-embeds when vision is on.
   imgPath = path.join(TMP_DIR, 'shot.png')
   fs.writeFileSync(imgPath, Buffer.from([0x89, 0x50, 0x4e, 0x47])) // PNG magic bytes
+  largeImgPath = path.join(TMP_DIR, 'large-shot.png')
+  fs.writeFileSync(
+    largeImgPath,
+    Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(320_000)])
+  )
 })
 beforeEach(() => {
   fake.reset()
@@ -87,5 +93,20 @@ describe('vision guard (D16) — real hasVision() drives image embedding', () =>
     const body = JSON.stringify(fake.requests[0]?.messages ?? [])
     expect(body).toContain('data:image') // the attachment reached the vision model
     expect(r.answer).toBe('A cat.')
+  })
+
+  it('does not count base64 image bytes as text context', async () => {
+    fs.writeFileSync(mmprojFile, Buffer.from([0x67, 0x67, 0x75, 0x66]))
+    fs.writeFileSync(
+      activeModelFile,
+      JSON.stringify({ primary: 'vision-model.gguf', mmproj: 'mmproj.gguf' })
+    )
+    fake.enqueue({ content: 'A sequence diagram.' })
+
+    const result = await toolChat('describe this', [], { images: [largeImgPath] })
+
+    expect(fake.requests).toHaveLength(1)
+    expect(result.answer).toBe('A sequence diagram.')
+    expect(result.answer).not.toBe('Context is full.')
   })
 })

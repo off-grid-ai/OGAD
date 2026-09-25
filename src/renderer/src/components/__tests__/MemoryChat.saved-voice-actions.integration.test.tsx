@@ -138,7 +138,7 @@ function installSavedVoiceBoundary(): void {
     speak: async () => ({ dataUrl: 'data:audio/wav;base64,YXVkaW8=' }),
     transcribeAudio: async () => 'Corrected transcript',
     tasks: { list: async () => [], onChanged: () => () => { } },
-    ragChat: async () => ({ answer: 'Edited answer', unified: [] })
+    toolChat: async () => ({ answer: 'Edited answer', unified: [], toolCalls: [] })
   }
     ; (window as unknown as { api: unknown }).api = api
 }
