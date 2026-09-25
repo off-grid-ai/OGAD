@@ -4,10 +4,12 @@ import { initializeTaskHistory, listTaskRuns, removeTaskRuns } from './task-hist
 import { registerTaskRetryIpc } from './task-retry-ipc'
 import { registerTaskGuideIpc } from './task-guide-ipc'
 import { configureTaskRetryRunner } from './task-retry'
+import { hasActiveVisionSession } from '../vision/vision-controller'
 
 export function registerTaskHistoryIpc(): void {
   initializeTaskHistory()
   configureTaskRetryRunner({
+    isActive: hasActiveVisionSession,
     async web(task, taskId, checkpoint) {
       const { getBrowserRailHost } = await import('../browser/browser-host')
       return getBrowserRailHost().runTask({

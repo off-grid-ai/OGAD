@@ -42,6 +42,7 @@ export function retryPlanningGoal(goal: string, checkpoint?: TaskRetryCheckpoint
 }
 
 export interface TaskRetryRunner {
+  isActive?(taskId: string): boolean
   web(
     task: TaskRunSnapshot,
     taskId: string,
@@ -141,6 +142,7 @@ export function configureTaskRetryRunner(runner: TaskRetryRunner): void {
 }
 
 const liveRunner: TaskRetryRunner = {
+  isActive: (taskId) => configuredRunner?.isActive?.(taskId) ?? false,
   web: (task, taskId, checkpoint) => {
     if (!configuredRunner) throw new Error('Task retry runner is not configured.')
     return configuredRunner.web(task, taskId, checkpoint)
@@ -163,6 +165,9 @@ export class TaskRetryService {
   ) {}
 
   availability(taskId: string): TaskRetryAvailability {
+    if (this.runner.isActive?.(taskId)) {
+      return { available: false, reason: 'The earlier run is still stopping.' }
+    }
     return taskRetryAvailability(
       this.history.get(taskId),
       this.history.list(),
@@ -172,7 +177,7 @@ export class TaskRetryService {
 
   retry(taskId: string, phaseIndex?: number): TaskRetryResult {
     const task = this.history.get(taskId)
-    const availability = taskRetryAvailability(task, this.history.list(), this.options.device())
+    const availability = this.availability(taskId)
     if (!availability.available || !task) return availability
 
     const guidance = this.options.guidanceForTask?.(task) ?? []

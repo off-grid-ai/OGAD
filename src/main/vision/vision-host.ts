@@ -135,6 +135,7 @@ export function visionActuationAvailable(): boolean {
 
 function makeScreen(input: {
   actuation: ActuationPort
+  guard: VisionGuard
   taskId: string
   journeyId: string
   goal: string
@@ -142,7 +143,7 @@ function makeScreen(input: {
   screenshotResizeFactor?: number
   targetLabel?: string
 }): VisionScreen {
-  const { actuation, taskId, journeyId, goal, settings, screenshotResizeFactor, targetLabel } =
+  const { actuation, guard, taskId, journeyId, goal, settings, screenshotResizeFactor, targetLabel } =
     input
   // The display the last screenshot was taken from. Its scaleFactor + origin move
   // the grounder's DIP coordinates into the actuation space (physical px on
@@ -383,6 +384,8 @@ function makeScreen(input: {
       }
     },
     async actuate(action: VisionAction) {
+      const lease = guard.currentActionLease()
+      if (!guard.ownsActionLease(lease.epoch)) throw new Error('Computer Use input lease ended.')
       if (targetLabel) {
         if (!(await activateAndConfirmTarget(targetLabel))) {
           return { rejected: `The target app ${targetLabel} is not frontmost.` }
@@ -408,10 +411,12 @@ function makeScreen(input: {
       if (!mapped) {
         throw new Error('model returned a point outside the current screenshot')
       }
+      lease.signal.throwIfAborted()
       const result = await dispatchVisionAction({
         actuation,
         action: mapped,
         goal,
+        signal: lease.signal,
         navigate: (url) => shell.openExternal(url)
       })
       return result.handoff ? result : { mappedAction: mapped }
@@ -611,6 +616,7 @@ class VisionHost {
       const result = await runVisionTaskGraph(goal, {
         screen: makeScreen({
           actuation,
+          guard,
           taskId,
           journeyId,
           goal,

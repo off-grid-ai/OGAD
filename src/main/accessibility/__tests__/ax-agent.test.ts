@@ -139,6 +139,27 @@ describe('runElementTask', () => {
     expect(w.acted).toEqual(['type:focus:hi', 'keys:Enter'])
   })
 
+  it('tells the typed decision path when text is waiting for submission', async () => {
+    const w = world([])
+    const pendingSubmitStates: Array<boolean | undefined> = []
+    let decisionCount = 0
+    w.deps.decideElement = async (_prompt, _snapshot, _phase, _allowCompletion, pendingSubmit) => {
+      pendingSubmitStates.push(pendingSubmit)
+      decisionCount += 1
+      return decisionCount === 1
+        ? '{"action":"type","index":2,"text":"https://example.com"}'
+        : pendingSubmit
+          ? '{"action":"key","keys":"Enter"}'
+          : '{"action":"done","summary":"opened"}'
+    }
+
+    const result = await runElementTask('open example.com', w.deps)
+
+    expect(result).toMatchObject({ ok: true, summary: 'opened' })
+    expect(pendingSubmitStates).toEqual([false, true, false])
+    expect(w.acted).toEqual(['type:2:https://example.com', 'keys:Enter'])
+  })
+
   it('re-observes an unparsed reply and a missing element, acting on neither', async () => {
     const w = world([
       'click the send button',

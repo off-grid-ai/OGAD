@@ -118,6 +118,68 @@ describe('factorized AX decisions', () => {
     expect(decision.result.distributions[0]?.labels).toContain('press_key')
   })
 
+  it('offers Enter for text typed by the previous action when AX omits focus', async () => {
+    const current = snapshot(0)
+    current.elements.push({
+      ...element(1),
+      role: 'AXTextField',
+      name: 'Address and search bar',
+      value: 'https://www.instagram.com/explore/search/',
+      focused: false
+    })
+
+    const phase = {
+      id: 'phase-1',
+      title: 'Open the Instagram search page',
+      operation: {
+        kind: 'navigate' as const,
+        value: 'https://www.instagram.com/explore/search/'
+      }
+    }
+    const decision = await chooseFactorizedElementStep(
+      'Open the Instagram search page.',
+      current,
+      async () => {
+        throw new Error('The navigation submit rule must not call the decision model.')
+      },
+      phase,
+      true,
+      Date.now,
+      new Set(),
+      true
+    )
+
+    expect(decision.step).toEqual({ action: 'key', keys: 'Enter' })
+    expect(decision.result.backend).toBe('rules')
+  })
+
+  it('does not offer Enter for an unfocused field without a pending submission', async () => {
+    const current = snapshot(0)
+    current.elements.push({
+      ...element(1),
+      role: 'AXTextField',
+      name: 'Address and search bar',
+      value: 'https://www.instagram.com/explore/search/',
+      focused: false
+    })
+
+    const decision = await chooseFactorizedElementStep(
+      'Open the Instagram search page.',
+      current,
+      scorer([]),
+      {
+        id: 'phase-1',
+        title: 'Open the Instagram search page',
+        operation: {
+          kind: 'navigate',
+          value: 'https://www.instagram.com/explore/search/'
+        }
+      }
+    )
+
+    expect(decision.step).not.toEqual({ action: 'key', keys: 'Enter' })
+  })
+
   it('routes an unfocused editable field through the writer before submit controls', async () => {
     const current = snapshot(1)
     current.elements[0]!.name = 'Submit'

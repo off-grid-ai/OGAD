@@ -62,7 +62,8 @@ export interface ElementTaskDeps {
     prompt: string,
     snapshot: AxSnapshot,
     phase?: TaskExecutionPhase,
-    allowCompletion?: boolean
+    allowCompletion?: boolean,
+    pendingSubmit?: boolean
   ) => Promise<string>
   /** Re-read the bound window before mutation. False rejects a stale action. */
   validateAction?: (snapshot: AxSnapshot, step: ElementStep) => Promise<boolean>
@@ -731,11 +732,12 @@ export async function runElementTask(
       const decisionLeaseEpoch = deps.control?.snapshot().inputLease.epoch
       rawResponse = deps.decideElement
         ? await deps.decideElement(
-          decisionPrompt,
-          snapshot,
-          activePhase,
-          activePhaseActed
-        )
+            decisionPrompt,
+            snapshot,
+            activePhase,
+            activePhaseActed,
+            draftAwaitingSubmit
+          )
         : await decide(modelPrompt, deps.screenshotPath?.())
       const stoppedAfterDecision = await waitForControl()
       if (stoppedAfterDecision) return stoppedAfterDecision

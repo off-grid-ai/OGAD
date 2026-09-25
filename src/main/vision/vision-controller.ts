@@ -96,6 +96,11 @@ export class VisionController {
       previous.request.abort('replaced by a newer run for this task')
     }
     if (guard.taskId !== taskId) throw new Error('VisionGuard task identity does not match session')
+    // A Continue attempt reuses the task ID. Its live display state must not
+    // inherit the earlier attempt's terminal status.
+    if (['done', 'failed', 'stopped'].includes(this.runs.get(taskId)?.state.status ?? '')) {
+      this.runs.delete(taskId)
+    }
     const session = { guard, request, project } as {
       guard: VisionGuard
       request: AbortController
@@ -190,6 +195,10 @@ export class VisionController {
       state: current?.state ?? null,
       steps: [...(current?.steps ?? [])]
     }
+  }
+
+  hasActiveSession(taskId: string): boolean {
+    return this.sessions.has(taskId)
   }
 
   control(input: unknown, taskIdInput?: unknown): boolean {
@@ -337,6 +346,10 @@ export function emitVisionState(state: VisionTaskState): void {
 /** Native kill switches route through the same owner as the renderer Stop button. */
 export function stopVisionTask(taskId: string, reason: string, currentAction: string): boolean {
   return controller.stop(taskId, reason, currentAction)
+}
+
+export function hasActiveVisionSession(taskId: string): boolean {
+  return controller.hasActiveSession(taskId)
 }
 
 /** Agent-requested human handoff uses the same run owner as Pause, Take Over,

@@ -316,39 +316,45 @@ function makeElementActuator(
   appName: string,
   onAction: (action: string) => void
 ): ElementActuator {
-  const ensureLive = async (): Promise<void> => {
+  const ensureLive = async (): Promise<AbortSignal> => {
     if (guard.isPaused) await guard.waitUntilRunnable()
     if (!guard.canActuate()) {
       throw new HaltError(guard.snapshot().reason || 'stopped')
     }
     guard.countStep()
+    return guard.currentActionLease().signal
   }
-  const clickCenter = async (el: AxElement): Promise<void> => {
+  const clickCenter = async (el: AxElement, signal: AbortSignal): Promise<void> => {
+    signal.throwIfAborted()
     await actuation.moveMouse(el.cx, el.cy)
+    signal.throwIfAborted()
     await actuation.click('left', 1)
   }
   return {
     async click(el) {
-      await ensureLive()
+      const signal = await ensureLive()
       onAction(`Click ${el.name || el.role}`)
-      await clickCenter(el)
+      await clickCenter(el, signal)
     },
     async hover(el) {
-      await ensureLive()
+      const signal = await ensureLive()
       onAction(`Open ${el.name || el.role}`)
+      signal.throwIfAborted()
       await actuation.moveMouse(el.cx, el.cy)
     },
     async press(el) {
       // nut.js has no portable AXPress; a click at the element's center is the
       // reliable actuation and is what its coordinates are for.
-      await ensureLive()
+      const signal = await ensureLive()
       onAction(`Press ${el.name || el.role}`)
-      await clickCenter(el)
+      await clickCenter(el, signal)
     },
     async scroll(el, direction) {
-      await ensureLive()
+      const signal = await ensureLive()
       onAction(`Scroll ${direction} in ${el.name || el.role}`)
+      signal.throwIfAborted()
       await actuation.moveMouse(el.cx, el.cy)
+      signal.throwIfAborted()
       if (direction === 'up' || direction === 'down') {
         await actuation.scrollBy('vertical', direction === 'up' ? 240 : -240)
       } else {
@@ -356,33 +362,37 @@ function makeElementActuator(
       }
     },
     async setValue(el, value) {
-      await ensureLive()
+      const signal = await ensureLive()
       const helper = accessibilityHelperPath()
       if (!helper || process.platform !== 'darwin') {
         throw new Error('Native value control is unavailable.')
       }
       onAction(`Set ${el.name || el.role} to ${value}`)
+      signal.throwIfAborted()
       await execFileAsync(
         helper,
         ['--set-slider-value', appName, String(el.cx), String(el.cy), String(value)],
-        { timeout: 5_000, maxBuffer: 64 * 1024 }
+        { timeout: 5_000, maxBuffer: 64 * 1024, signal }
       )
     },
     async type(el, text) {
-      await ensureLive()
+      const signal = await ensureLive()
       onAction(el ? `Type in ${el.name || el.role}` : 'Type in the focused field')
       // With a target, focus it first; without one, type into the focused field.
       if (el) {
-        await clickCenter(el)
+        await clickCenter(el, signal)
         if (el.value.trim()) {
+          signal.throwIfAborted()
           await actuation.tapKeys(process.platform === 'darwin' ? 'command+a' : 'ctrl+a')
         }
       }
-      await actuation.typeText(text)
+      signal.throwIfAborted()
+      await actuation.typeText(text, signal)
     },
     async keys(combo) {
-      await ensureLive()
+      const signal = await ensureLive()
       onAction(`Press ${combo}`)
+      signal.throwIfAborted()
       await actuation.tapKeys(combo)
     }
   }
@@ -830,7 +840,8 @@ class AxRailHost {
                   prompt: string,
                   snapshot: AxSnapshot,
                   phase,
-                  allowCompletion
+                  allowCompletion,
+                  pendingSubmit
                 ) => {
                   liveStep += 1
                   useStateIdentity(decisionIdentity)
@@ -861,12 +872,16 @@ class AxRailHost {
                         decideWithDecisionModel(context, question, options, request.signal),
                       phase,
                       allowCompletion,
-                      Date.now
+                      Date.now,
+                      new Set(),
+                      pendingSubmit
                     )
                   } catch (error) {
                     if (request.signal.aborted) throw error
                     const message = error instanceof Error ? error.message : String(error)
-                    console.warn(`[ax-rail] decider unavailable; requesting visual recovery: ${message}`)
+                    console.warn(
+                      `[ax-rail] decider unavailable; requesting visual recovery: ${message}`
+                    )
                     useStateIdentity(specialistIdentity)
                     emitVisionState({
                       taskId,
@@ -1151,9 +1166,7 @@ class AxRailHost {
                           ? { stepDetails: currentTask.stepDetails }
                           : {}),
                         plan,
-                        ...(recovery.guidance.length
-                          ? { guidance: [...recovery.guidance] }
-                          : {}),
+                        ...(recovery.guidance.length ? { guidance: [...recovery.guidance] } : {}),
                         summary: result.detail ?? recovery.summary,
                         currentStep: recovery.currentStep,
                         currentAction: 'Resolving the action with the heavy reasoner'

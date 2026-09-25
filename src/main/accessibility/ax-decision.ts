@@ -270,22 +270,31 @@ function metrics(probabilities: readonly number[]): {
   return { top, margin, entropy }
 }
 
-function keyboardDecisionCandidates(snapshot: AxSnapshot): DecisionCandidate[] {
+function keyboardDecisionCandidates(
+  snapshot: AxSnapshot,
+  pendingSubmit = false
+): DecisionCandidate[] {
   const focusedEditable = snapshot.elements.some(
     (element) => element.enabled && element.focused === true && isEditable(element)
   )
   const dialogOpen = snapshot.elements.some((element) => /Dialog/i.test(element.role))
   return [
-    ...(focusedEditable
+    ...(focusedEditable || pendingSubmit
       ? [
           {
-            description: 'Press Enter to submit or confirm the focused value.',
+            description: pendingSubmit
+              ? 'Press Enter to submit the text entered by the previous action.'
+              : 'Press Enter to submit or confirm the focused value.',
             step: { action: 'key', keys: 'Enter' } as const
           },
-          {
-            description: 'Press Tab to move focus from the current editable field.',
-            step: { action: 'key', keys: 'Tab' } as const
-          }
+          ...(focusedEditable
+            ? [
+                {
+                  description: 'Press Tab to move focus from the current editable field.',
+                  step: { action: 'key', keys: 'Tab' } as const
+                }
+              ]
+            : [])
         ]
       : []),
     ...(dialogOpen
@@ -341,7 +350,8 @@ function actionFamilyCandidates(
   context: string,
   allowCompletion = true,
   textEntryAvailable = false,
-  excludedFamilies: ReadonlySet<ActionFamily> = new Set()
+  excludedFamilies: ReadonlySet<ActionFamily> = new Set(),
+  pendingSubmit = false
 ): Array<{ family: ActionFamily; description: string }> {
   const candidates: Array<{ family: ActionFamily; description: string }> = []
   const executable = snapshot.elements.filter(
@@ -373,7 +383,10 @@ function actionFamilyCandidates(
       description: `Write the exact value supplied by the active plan into one visible editable field. ${editable.length} fields are available; the exact field is chosen in the next decision.`
     })
   }
-  if (keyboardDecisionCandidates(snapshot).length > 0 && !excludedFamilies.has('press_key')) {
+  if (
+    keyboardDecisionCandidates(snapshot, pendingSubmit).length > 0 &&
+    !excludedFamilies.has('press_key')
+  ) {
     candidates.push({
       family: 'press_key',
       description: 'Use a keyboard command whose focus or dialog precondition is visible.'
@@ -438,7 +451,8 @@ export async function chooseFactorizedElementStep(
   phase?: TaskExecutionPhase,
   allowCompletion = true,
   now: () => number = Date.now,
-  excludedFamilies: ReadonlySet<ActionFamily> = new Set()
+  excludedFamilies: ReadonlySet<ActionFamily> = new Set(),
+  pendingSubmit = false
 ): Promise<FactorizedElementDecision> {
   const startedAt = now()
   const distributions: ProbabilityDistribution[] = []
@@ -450,6 +464,21 @@ export async function chooseFactorizedElementStep(
       },
       result: {
         family: 'completion',
+        distributions: [],
+        topProbability: 1,
+        probabilityMargin: 1,
+        entropy: 0,
+        combinedConfidence: 1,
+        backend: 'rules',
+        latencyMs: now() - startedAt
+      }
+    }
+  }
+  if (pendingSubmit && phase?.operation?.kind === 'navigate') {
+    return {
+      step: { action: 'key', keys: 'Enter' },
+      result: {
+        family: 'action_kind',
         distributions: [],
         topProbability: 1,
         probabilityMargin: 1,
@@ -509,7 +538,8 @@ export async function chooseFactorizedElementStep(
     context,
     allowCompletion,
     phase?.operation === undefined || phase.operation.value !== undefined,
-    excludedFamilies
+    excludedFamilies,
+    pendingSubmit
   )
   if (families.length === 0) return noCandidateResult(startedAt, now)
   const familyDecision =
@@ -611,7 +641,7 @@ export async function chooseFactorizedElementStep(
       ({ action: 'vision_required', why: 'No editable field was selected.' } as const)
   } else if (selectedFamily === 'press_key') {
     const selected = await chooseCandidate(
-      keyboardDecisionCandidates(snapshot),
+      keyboardDecisionCandidates(snapshot, pendingSubmit),
       'Which keyboard-command group contains the required command?',
       'Which single keyboard command is required next?'
     )
@@ -633,7 +663,8 @@ export async function chooseFactorizedElementStep(
         phase,
         false,
         now,
-        excludedFamilies
+        excludedFamilies,
+        pendingSubmit
       )
     }
     selectedStep = {
