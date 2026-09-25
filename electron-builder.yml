@@ -7,6 +7,10 @@ copyright: © Off Grid AI
 # This hook runs before electron-builder emits artifactCreated, which is the event
 # that schedules publishing. A truncated DMG therefore cannot reach GitHub.
 artifactBuildCompleted: scripts/verify-electron-builder-artifact.mjs
+# Electron-builder unpacks .node files, but not the libvips .so used by Sharp.
+# Keep the shared library beside its native addon in app.asar.unpacked.
+asarUnpack:
+  - 'node_modules/@img/sharp-libvips-linux-x64/lib/*.so*'
 directories:
   buildResources: build
 files:

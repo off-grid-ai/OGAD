@@ -59,6 +59,21 @@ export default async function verifyElectronBuilderArtifact(event) {
         throw new Error(`installer input is missing required runtime: ${relative}`)
       }
     }
+    if (artifact.endsWith('.appimage') || artifact.endsWith('.deb')) {
+      const libvips = path.join(
+        appOutDir,
+        'resources',
+        'app.asar.unpacked',
+        'node_modules',
+        '@img',
+        'sharp-libvips-linux-x64',
+        'lib',
+        'libvips-cpp.so.8.18.3'
+      )
+      if (!fs.existsSync(libvips) || !fs.statSync(libvips).isFile()) {
+        throw new Error('installer input is missing the unpacked Sharp libvips library')
+      }
+    }
     console.log('[artifact-integrity] installer input passed ASAR and native-runtime inventory')
     return
   }

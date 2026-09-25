@@ -367,6 +367,24 @@ describe('macOS artifact integrity', () => {
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
       'installer input is missing required runtime: speech-assets/index.json'
     )
+    const assetsIndex = path.join(resources, 'speech-assets', 'index.json')
+    fs.mkdirSync(path.dirname(assetsIndex), { recursive: true })
+    fs.writeFileSync(assetsIndex, '{}')
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing the unpacked Sharp libvips library'
+    )
+    const libvips = path.join(
+      resources,
+      'app.asar.unpacked',
+      'node_modules',
+      '@img',
+      'sharp-libvips-linux-x64',
+      'lib',
+      'libvips-cpp.so.8.18.3'
+    )
+    fs.mkdirSync(path.dirname(libvips), { recursive: true })
+    fs.writeFileSync(libvips, 'fixture')
+    await expect(verifyElectronBuilderArtifact(event)).resolves.toBeUndefined()
   })
 
   it.skipIf(process.platform !== 'darwin')(
