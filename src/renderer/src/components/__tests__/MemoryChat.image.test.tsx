@@ -48,6 +48,8 @@ function renderChat(openTarget?: {
 }
 
 const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+// Chat tabs persist across remounts; each journey needs a fresh synthetic profile.
+beforeEach(() => window.localStorage.clear())
 afterEach(() => {
   cleanup()
   if (originalOffsetHeight) {
@@ -703,7 +705,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
   it('shows a new image chat in the sidebar and tab before generation finishes', async () => {
     const turn = deferred<ImageResult>()
     const user = userEvent.setup()
-    installApi({
+    const { generateImage } = installApi({
       active: FULL,
       models: [FULL],
       generate: () => turn.promise
@@ -713,6 +715,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     await openImageComposer(user)
     const title = 'A lighthouse at night'
     await sendPrompt(user, title)
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
 
     await waitFor(
       () => {
