@@ -139,4 +139,38 @@ describe('image generation across feature navigation', () => {
     detachRefresh()
     detachReturned()
   }, 15_000)
+
+  it('edits with the complete Qwen-Image 2.1 stack on the local image runner', async () => {
+    const { generateImage } = await import('../imagegen')
+    const modelDir = path.join(fixture.dataDir, 'models')
+    const model = 'Qwen-Image-2-1-Q8_0.gguf'
+    const encoder = 'Qwen3VL-8B-Instruct-Q4_K_M.gguf'
+    const projector = 'mmproj-Qwen3VL-8B-Instruct-F16.gguf'
+    const vae = 'qwen_image_2.1_vae.safetensors'
+    const companions = [model, encoder, projector, vae].map((name) => path.join(modelDir, name))
+    const request = {
+      prompt: 'Keep the subject and make the background blue',
+      model,
+      initImage: INIT_IMAGE,
+      enhancePrompt: false,
+      width: 512,
+      height: 512,
+      steps: 4
+    }
+    fs.writeFileSync(companions[0]!, 'GGUF image fixture')
+
+    try {
+      await expect(generateImage(request)).rejects.toThrow('Qwen-Image 2.1 text encoder')
+      fs.writeFileSync(companions[1]!, 'GGUF text fixture')
+      fs.writeFileSync(companions[3]!, 'VAE fixture')
+      await expect(generateImage(request)).rejects.toThrow('Qwen-Image 2.1 vision projector')
+      fs.writeFileSync(companions[2]!, 'GGUF projector fixture')
+
+      const image = await generateImage(request)
+      expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+      expect(image.model).toBe(model)
+    } finally {
+      for (const companion of companions) fs.rmSync(companion, { force: true })
+    }
+  }, 15_000)
 })
