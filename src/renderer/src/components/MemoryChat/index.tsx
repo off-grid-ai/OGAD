@@ -726,19 +726,6 @@ export function MemoryChat({
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
   const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
-  // Esc closes the open overlay (attachment viewer / image lightbox).
-  useEffect(() => {
-    console.log('MemoryChat effect: overlay escape handler')
-    if (!viewer && !lightbox) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        setViewer(null)
-        setLightbox(null)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [viewer, lightbox])
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>()
@@ -4812,67 +4799,53 @@ export function MemoryChat({
           )}
         </AnimatePresence>
 
-        {/* Attachment viewer — same full-screen overlay layout as the image lightbox
-          (floating Download/Close top-right, content centered), for text/PDF/docs.
-          Backdrop fades + blurs in; the panel springs up (aceternity modal pattern). */}
+        {/* Attachment viewer — preserve chat context in the shared Desktop side panel. */}
         <AnimatePresence>
           {viewer && (
-            <motion.div
+            <SidePanel
               key="viewer"
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-10 font-mono"
-              role="dialog"
-              aria-modal="true"
-              aria-label={viewer.title}
-              tabIndex={-1}
-              initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-              animate={{ opacity: 1, backdropFilter: 'blur(8px)' }}
-              exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-              onClick={(event) => {
-                if (event.target === event.currentTarget) setViewer(null)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') setViewer(null)
-              }}
+              ariaLabel={viewer.title}
+              onClose={() => setViewer(null)}
+              className="w-[min(720px,92vw)] overflow-hidden text-white"
             >
-              <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-                <span className="mr-2 max-w-[40vw] truncate self-center text-xs text-neutral-400">
+              <header className="flex items-center justify-between gap-3 border-b border-neutral-900 px-4 py-3">
+                <h2 className="min-w-0 truncate text-sm font-normal text-neutral-200">
                   {viewer.title}
-                </span>
-                {viewer.path && (
+                </h2>
+                <div className="flex shrink-0 items-center gap-2">
+                  {viewer.path && (
+                    <button
+                      type="button"
+                      onClick={() => downloadImage(viewer.path, viewer.title)}
+                      className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                    >
+                      Download
+                    </button>
+                  )}
                   <button
-                    onClick={() => downloadImage(viewer.path, viewer.title)}
-                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                    type="button"
+                    onClick={() => setViewer(null)}
+                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
                   >
-                    Download
+                    Close
                   </button>
+                </div>
+              </header>
+              <div className="min-h-0 flex-1 overflow-auto p-4">
+                {viewer.renderer === 'audio' && viewer.path ? (
+                  <AudioPane path={viewer.path} title={viewer.title} />
+                ) : viewer.renderer === 'document' && viewer.path ? (
+                  // A document renders from its BYTES. main already serves them as a data URL for
+                  // exactly this - Chromium draws the PDF itself - and the old code path never called
+                  // it, so every PDF fell through to the text pane below and showed an empty page.
+                  <DocumentPane path={viewer.path} title={viewer.title} />
+                ) : (
+                  <pre className="min-h-full w-full whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200">
+                    {viewer.text}
+                  </pre>
                 )}
-                <button
-                  onClick={() => setViewer(null)}
-                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
-                >
-                  Close
-                </button>
               </div>
-              {viewer.renderer === 'audio' && viewer.path ? (
-                <AudioPane path={viewer.path} title={viewer.title} />
-              ) : viewer.renderer === 'document' && viewer.path ? (
-                // A document renders from its BYTES. main already serves them as a data URL for
-                // exactly this - Chromium draws the PDF itself - and the old code path never called
-                // it, so every PDF fell through to the text pane below and showed an empty page.
-                <DocumentPane path={viewer.path} title={viewer.title} />
-              ) : (
-                <motion.pre
-                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, y: 4 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                  className="max-h-full w-full max-w-3xl overflow-auto whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200"
-                >
-                  {viewer.text}
-                </motion.pre>
-              )}
-            </motion.div>
+            </SidePanel>
           )}
         </AnimatePresence>
 

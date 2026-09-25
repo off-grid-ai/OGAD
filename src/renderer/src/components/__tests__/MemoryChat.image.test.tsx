@@ -1218,6 +1218,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
 
     await user.click(generated)
     expect(screen.getByRole('dialog', { name: 'Generated image preview' })).toBeTruthy()
+    expect(screen.getByTestId('side-panel-layer')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Download' }))
     await waitFor(() =>
       expect(boundary.exportGeneratedImage).toHaveBeenCalledWith(
