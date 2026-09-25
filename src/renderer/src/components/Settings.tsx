@@ -160,7 +160,7 @@ export function Settings({
               <div className="mt-4">
                 <StoragePanel />
               </div>
-              {isPro && currentPlatform() === 'darwin' ? (
+              {currentPlatform() === 'darwin' ? (
                 <section id="settings-permissions" className="mt-6 scroll-mt-4">
                   <div className="mb-3 text-[10px] font-medium uppercase tracking-widest text-neutral-600">
                     System permissions

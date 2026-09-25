@@ -353,11 +353,11 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'computer_use'
 ])
 
-export const PRO_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_use'])
+export const TASK_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_use'])
 
 export function specsForPlatform(
   platform: NodeJS.Platform,
-  includeProUse = true
+  includeTaskUse = true
 ): NativeToolSpec[] {
   let specs: NativeToolSpec[]
   if (platform === 'darwin') {
@@ -367,20 +367,20 @@ export function specsForPlatform(
   } else {
     specs = []
   }
-  return includeProUse ? specs : specs.filter((spec) => !PRO_USE_TOOL_NAMES.has(spec.name))
+  return includeTaskUse ? specs : specs.filter((spec) => !TASK_USE_TOOL_NAMES.has(spec.name))
 }
 
 /** The model-facing capability hint, per platform - never promise a tool the
  *  platform does not expose. */
-export function systemHintForPlatform(platform: NodeJS.Platform, includeProUse = true): string {
+export function systemHintForPlatform(platform: NodeJS.Platform, includeTaskUse = true): string {
   if (platform === 'darwin') {
-    if (!includeProUse) {
+    if (!includeTaskUse) {
       return "You can act on the user's Mac: get their current location for nearby requests (get_current_location), manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
     }
     return "You can act on the user's Mac: get their current location for nearby requests (get_current_location), manage calendar events (calendar_create_event, calendar_list_events) and reminders (reminders_create, reminders_list), look up people (contacts_search), and send an iMessage (messages_send) or email (mail_send). Resolve a name to a handle with contacts_search before sending. Open a link or app scheme (like whatsapp://send) with open_url - it ONLY opens, no interaction. Use web_use for normal website tasks; it runs inside Off Grid AI's own built-in browser. When the user explicitly requires their existing default-browser login, cookies, history, cache, recommendations, or signed-in account, call open_url first and then use computer_use on the visible browser. The user watches Computer Use and can take over. Prefer direct tools when they fit. Use ISO 8601 for all times. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
   }
   if (platform === 'win32') {
-    if (!includeProUse) {
+    if (!includeTaskUse) {
       return "You can act on the user's PC: get their current location for nearby requests (get_current_location), and use Outlook to create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
     }
     return "You can act on the user's PC: get their current location for nearby requests (get_current_location), and use Outlook to create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. Use web_use for normal website tasks; it runs inside Off Grid AI's own built-in browser. When the user explicitly requires their existing default-browser login, cookies, history, cache, recommendations, or signed-in account, call open_url first and then use computer_use on the visible browser. The user watches Computer Use and can take over. Prefer direct tools when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."

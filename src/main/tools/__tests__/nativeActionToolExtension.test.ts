@@ -21,7 +21,7 @@ class FakeBoundary implements NativeActionToolBoundary {
   response: NativeActionResponse = { ok: true, result: { id: 'E1' } }
   proEntitled = true
 
-  isProEntitled(): boolean {
+  taskUseEnabled(): boolean {
     return this.proEntitled
   }
 
@@ -60,7 +60,7 @@ describe('NativeActionToolExtension', () => {
     expect(ext.canHandle('mcp__1__send')).toBe(false)
   })
 
-  it('hides and refuses Browser Use and Computer Use without Pro', async () => {
+  it('hides and refuses Browser Use and Computer Use when the host disables task tools', async () => {
     boundary.proEntitled = false
 
     expect(ext.canHandle('web_use')).toBe(false)
@@ -74,7 +74,7 @@ describe('NativeActionToolExtension', () => {
     // Authoritative, like every other task-action outcome: the refusal is the final word the
     // model reports, not a note it can paraphrase into "I ran it" or talk the user past.
     await expect(ext.execute('web_use', { goal: 'Buy something' })).resolves.toEqual({
-      text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
+      text: 'Error: Browser Use and Computer Use are not available in this build.',
       status: 'failed',
       authoritative: true
     })

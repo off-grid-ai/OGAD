@@ -41,7 +41,6 @@ import {
   type ComputerTaskTiers
 } from '../accessibility/ax-rail'
 import { getAxRailHost } from '../accessibility/ax-host'
-import { isProEntitled } from '../licensing/license-service'
 import { callConnectorTool } from '../mcp'
 import { makeConnectorRailExecutor } from './connector-rail'
 import { withRemoteScreenGate } from './remote-screen-gate'
@@ -319,9 +318,6 @@ export function getActionsRuntime(): ActionsRuntime {
           return semanticExecute(action)
         }
         if (rail === 'browser') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
-          }
           recordAuthenticatedTaskLaunch(action, 'web_use')
           return browserExecute(action)
         }
@@ -329,9 +325,6 @@ export function getActionsRuntime(): ActionsRuntime {
           return connectorExecute(action)
         }
         if (rail === 'vision') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
-          }
           recordAuthenticatedTaskLaunch(action, 'computer_use')
           // computer_use: accessibility-first, vision as the fallback tier.
           return computerTaskExecute(action)

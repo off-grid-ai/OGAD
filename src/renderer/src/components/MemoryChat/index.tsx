@@ -433,7 +433,7 @@ export function MemoryChat({
       // Chat still works when renderer storage is unavailable.
     }
   }, [activeConversationId])
-  const TaskWorkspace = isPro ? getSlot(SLOTS.taskWorkspace) : undefined
+  const TaskWorkspace = getSlot(SLOTS.taskWorkspace)
   const taskWorkspaceVisible = useTaskWorkspaceOpen() && Boolean(TaskWorkspace)
   const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
   const reduceWorkspaceMotion = useReducedMotion()
@@ -725,7 +725,7 @@ export function MemoryChat({
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
-  const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
+  const TaskSupervisorOverlay = getSlot(SLOTS.taskSupervisorOverlay)
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     console.log('MemoryChat effect: overlay escape handler')

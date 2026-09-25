@@ -34,9 +34,9 @@ export const SLOTS = {
   /** Rows appended after the message list of the open conversation (e.g. a reply
    *  streaming live on another device). Receives `{ conversationId }`. */
   chatMessagesFooter: 'chat.messagesFooter',
-  /** Licensed Browser Use and Computer Use task workspace. */
+  /** Browser Use and Computer Use task workspace. */
   taskWorkspace: 'tasks.workspace',
-  /** Licensed Web Use and Computer Use settings inside the shared Settings drawer. */
+  /** Web Use and Computer Use settings inside the shared Settings drawer. */
   taskSettings: 'tasks.settings',
   /** Optional task supervisor surface mounted above the chat composer. */
   taskSupervisorOverlay: 'tasks.supervisorOverlay',

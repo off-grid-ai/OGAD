@@ -181,7 +181,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
           command === 'contacts.search'
             ? { ok: true, result: [{ name: 'Ali', phone: '+15551111' }] }
             : { ok: false, error: `Unexpected inline command: ${command}` },
-        isProEntitled: () => true,
+        taskUseEnabled: () => true,
         actions
       },
       'darwin'
@@ -241,7 +241,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const extension = new NativeActionToolExtension(
       {
         run: async () => ({ ok: true, result: undefined }),
-        isProEntitled: () => true,
+        taskUseEnabled: () => true,
         actions
       },
       'darwin'
@@ -307,7 +307,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const extension = new NativeActionToolExtension(
       {
         run: async () => ({ ok: true, result: undefined }),
-        isProEntitled: () => true,
+        taskUseEnabled: () => true,
         actions
       },
       'darwin'
@@ -379,7 +379,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     const extension = new NativeActionToolExtension(
       {
         run: async () => ({ ok: true, result: undefined }),
-        isProEntitled: () => true,
+        taskUseEnabled: () => true,
         actions
       },
       'darwin'
