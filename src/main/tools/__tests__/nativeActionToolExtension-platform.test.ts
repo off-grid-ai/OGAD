@@ -1,6 +1,6 @@
 /**
  * Per-platform tool exposure (R2-A1): macOS ships the full set, Windows the
- * engine-routed Outlook subset, Linux web use and links - and the model-
+ * engine-routed Outlook subset, Linux links - and the model-
  * facing hint never promises a tool the platform does not expose.
  */
 import { describe, expect, it, vi } from 'vitest'
@@ -35,7 +35,7 @@ describe('specsForPlatform', () => {
     ).toEqual([...WINDOWS_TOOL_NAMES].sort())
   })
 
-  it('Linux exposes web use and links, but no unavailable native actions', () => {
+  it('Linux exposes links, but no task tools without the watched workspace', () => {
     expect(
       specsForPlatform('linux')
         .map((spec) => spec.name)
@@ -58,7 +58,8 @@ describe('systemHintForPlatform', () => {
     expect(hint).toMatch(/messages_send/)
     expect(hint).toMatch(/requested in this Chat run directly/)
     expect(hint).not.toMatch(/pending until.*approve/i)
-    expect(systemHintForPlatform('linux')).toMatch(/web_use.*open_url/)
+    expect(systemHintForPlatform('linux')).toMatch(/open_url/)
+    expect(systemHintForPlatform('linux')).not.toMatch(/web_use/)
     expect(systemHintForPlatform('linux')).not.toMatch(/computer_use|calendar_create_event/)
     expect(systemHintForPlatform('freebsd')).toBe('')
   })
@@ -88,9 +89,9 @@ describe('the extension on win32', () => {
 describe('the extension on Linux', () => {
   const extension = new NativeActionToolExtension(boundary, 'linux')
 
-  it('offers browser tasks and links without desktop actions', () => {
+  it('offers links without task or desktop actions', () => {
     expect(extension.schemas()).toHaveLength(LINUX_TOOL_NAMES.size)
-    expect(extension.canHandle('web_use')).toBe(true)
+    expect(extension.canHandle('web_use')).toBe(false)
     expect(extension.canHandle('open_url')).toBe(true)
     expect(extension.canHandle('computer_use')).toBe(false)
     expect(extension.canHandle('calendar_create_event')).toBe(false)
