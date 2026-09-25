@@ -11,6 +11,13 @@ export interface ParsedCall {
   args: Record<string, unknown>
 }
 
+/** Qwen's text-form wrapper is not part of the shared Gemma delimiter set. */
+export const QWEN_TOOL_CALL_START = '<|tool_call_start|>'
+
+export function stripQwenToolCallMarkup(text: string): string {
+  return text.replace(/<\|tool_call_start\|>[\s\S]*?(?:<\|tool_call_end\|>|$)/gi, '')
+}
+
 // Lenient JSON: tolerate the mistakes small models make — curly quotes, trailing
 // commas, and (as a last resort) unquoted object keys.
 function parseLenient(raw: string): unknown | null {
@@ -99,10 +106,36 @@ function balancedObjects(text: string): string[] {
 /** Recover tool calls from model text. Returns [] when the text is plain prose
  *  (no tool-call markup / no name-bearing JSON object). */
 export function parseToolCallsFromText(text: string): ParsedCall[] {
-  if (!text || !text.includes('{')) {
+  if (!text) {
     return []
   }
   const calls: ParsedCall[] = []
+
+  // Qwen can emit a complete call on the content channel instead of native
+  // tool_calls. Mobile's text parser accepts function-name + JSON bodies; accept
+  // those same bodies inside Qwen's start/end wrapper as well as standard JSON.
+  const qwenBlock = /<\|tool_call_start\|>([\s\S]*?)(?:<\|tool_call_end\|>|$)/gi
+  let qwenMatch: RegExpExecArray | null
+  while ((qwenMatch = qwenBlock.exec(text))) {
+    const body = (qwenMatch[1] ?? '').trim()
+    const jsonCalls = balancedObjects(body)
+      .map((object) => asCall(parseLenient(object)))
+      .filter((call): call is ParsedCall => call !== null)
+    if (jsonCalls.length) {
+      calls.push(...jsonCalls)
+      continue
+    }
+    const named = /^(?:call:)?([A-Za-z_]\w*)\s*(?:\(\s*(\{[\s\S]*\})\s*\)|(\{[\s\S]*\}))?$/.exec(body)
+    if (named) {
+      const args = parseLenient(named[2] ?? named[3] ?? '{}')
+      if (args && typeof args === 'object' && !Array.isArray(args)) {
+        calls.push({ name: named[1]!, args: args as Record<string, unknown> })
+      }
+    }
+  }
+  if (calls.length) return calls
+
+  if (!text.includes('{')) return []
 
   // 1. Explicit tool-call tags: <tool_call>…</tool_call>, <|tool_call|>…, <invoke …>.
   //    Grab everything after each opener; balancedObjects finds the JSON inside.

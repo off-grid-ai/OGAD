@@ -252,6 +252,14 @@ describe('createToolMarkupFilter - hide tool-call markup from the visible stream
     expect(f.out()).toBe('One moment ')
   })
 
+  it('suppresses a Qwen tool-call wrapper across chunks', () => {
+    const f = collect()
+    f.push('Searching <|tool_call_sta')
+    f.push('rt|>web_search({"query":"x"})<|tool_call_end|>')
+    f.end()
+    expect(f.out()).toBe('Searching ')
+  })
+
   it('suppresses the <|tool_call|> variant and <invoke>', () => {
     const a = collect()
     a.push('a<|tool_call|>{}')

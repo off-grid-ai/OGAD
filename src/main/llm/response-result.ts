@@ -1,5 +1,6 @@
 import type { ResponseCutoffContract } from '../../shared/ipc-contracts'
 import type { GenerationMetrics } from '../../shared/generation-metrics'
+import { stripQwenToolCallMarkup } from '../tools/tool-call-parse'
 
 export interface ResponseGenerationResult {
   answer: string
@@ -16,7 +17,7 @@ export function toResponseGenerationResult(result: {
   metrics?: GenerationMetrics
 }): ResponseGenerationResult {
   return {
-    answer: result.content.trim(),
+    answer: stripQwenToolCallMarkup(result.content).trim(),
     ...(result.metrics ? { metrics: result.metrics } : {}),
     ...(result.finishReason === 'length'
       ? { cutoff: { reason: 'max_tokens' as const, maxTokens: result.maxTokens } }
