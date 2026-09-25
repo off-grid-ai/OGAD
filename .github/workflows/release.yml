@@ -493,8 +493,17 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.version.outputs.sha }} # the exact bumped commit, same as build-mac
-          lfs: false # Windows runtimes come from fetch-win-binaries.ps1, not the LFS dylibs
+          lfs: false # Pull only the cross-platform Kev launcher below, not the macOS LFS binaries
           persist-credentials: false # don't leave the token in .git/config for npm postinstall scripts
+      - name: Pull the Kev server launcher from LFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs pull --include="resources/bin/kev-local-server.py" --exclude=""
+          if head -n 1 resources/bin/kev-local-server.py | grep -q '^version https://git-lfs.github.com/spec/'; then
+            echo "::error::Kev server launcher is still an LFS pointer"
+            exit 1
+          fi
       - name: Check out private pro source into pro/
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:

@@ -48,10 +48,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false # don't leave the token in .git/config for npm postinstall scripts
-          lfs:
-            false # the repo's LFS binaries are macOS-only; Windows runtimes
-            # come from fetch-win-binaries.ps1, so don't pull ~235MB of
-            # dylibs we won't ship.
+          lfs: false # pull only the cross-platform Kev launcher below, not ~235 MB of macOS binaries
+      - name: Pull the Kev server launcher from LFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs pull --include="resources/bin/kev-local-server.py" --exclude=""
+          if head -n 1 resources/bin/kev-local-server.py | grep -q '^version https://git-lfs.github.com/spec/'; then
+            echo "::error::Kev server launcher is still an LFS pointer"
+            exit 1
+          fi
 
       # Private pro source into pro/ → __OFFGRID_PRO__ true, so the exe bundles the
       # Pro layer (mirrors release.yml). Needed to exercise the Pro "coming soon"
