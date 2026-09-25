@@ -669,7 +669,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(setActiveModalModel).toBeTruthy()
   })
 
-  it('keeps an init-image edit exact and closes image options after send', async () => {
+  it('sends an init image for vision-aware enhancement and closes image options after send', async () => {
     const turn = deferred<ImageResult>()
     const user = userEvent.setup()
     const { generateImage } = installApi({
@@ -688,7 +688,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     const payload = generateImage.mock.calls[0]![0]
     expect(payload.initImage).toBe('/kept/reference.png')
     expect(payload.prompt).toBe('Replace the model names with generic labels')
-    expect(payload.enhancePrompt).toBe(false)
+    expect(payload.enhancePrompt).toBe(true)
     expect(screen.queryByLabelText('Steps')).toBeNull()
 
     turn.resolve({

@@ -1659,10 +1659,7 @@ export function MemoryChat({
         cfgScale: imgCfgScale,
         seed: Number.isNaN(seedNum) ? -1 : seedNum,
         model: imgModel || undefined,
-        // Editing instructions must reach the vision model unchanged. A text-only
-        // enhancer cannot see the reference image and can replace the requested edit
-        // with an unrelated scene.
-        enhancePrompt: imgInit ? false : enhanceImg,
+        enhancePrompt: enhanceImg,
         // The kept copy, so the record of what this was made from cannot outlive the file it names.
         initImage: keptInit?.path ?? imgInit ?? undefined,
         strength: imgInit ? imgStrength : undefined
