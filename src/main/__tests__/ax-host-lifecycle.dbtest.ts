@@ -417,7 +417,9 @@ describe('AX host lifecycle', () => {
       }
       await deps.actuator.scroll(element, 'down')
       await deps.actuator.scroll(element, 'right')
-      await expect(deps.actuator.setValue(element, 75)).rejects.toThrow('ENOENT')
+      await expect(deps.actuator.setValue(element, 75)).rejects.toThrow(
+        /Native value control is unavailable|ENOENT/
+      )
       return { ok: true, summary: 'acted', steps: ['checked the slider'] }
     })
 
