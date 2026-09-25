@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -15,11 +14,9 @@ from pathlib import Path
 from typing import Any
 
 
-PROMPT_PATTERN = re.compile(
-    r"^Context:\n(?P<context>.*?)\nQuestion: (?P<question>.*?)\nOptions:\n(?P<options>.*)$",
-    re.DOTALL,
-)
-OPTION_PATTERN = re.compile(r"^(?P<index>\d+): (?P<text>.*)$")
+CONTEXT_PREFIX = "Context:\n"
+QUESTION_MARKER = "\nQuestion: "
+OPTIONS_MARKER = "\nOptions:\n"
 
 
 def parse_decision_prompt(messages: list[dict[str, Any]]) -> tuple[str, str, list[str]]:
@@ -33,18 +30,27 @@ def parse_decision_prompt(messages: list[dict[str, Any]]) -> tuple[str, str, lis
     )
     if not isinstance(user_content, str):
         raise ValueError("A text user message is required.")
-    match = PROMPT_PATTERN.match(user_content)
-    if not match:
+    if not user_content.startswith(CONTEXT_PREFIX):
         raise ValueError("The request does not match the Desktop decision prompt.")
+    question_start = user_content.find(QUESTION_MARKER, len(CONTEXT_PREFIX))
+    options_start = user_content.find(
+        OPTIONS_MARKER,
+        question_start + len(QUESTION_MARKER),
+    )
+    if question_start < 0 or options_start < 0:
+        raise ValueError("The request does not match the Desktop decision prompt.")
+    context = user_content[len(CONTEXT_PREFIX) : question_start]
+    question = user_content[question_start + len(QUESTION_MARKER) : options_start]
+    options = user_content[options_start + len(OPTIONS_MARKER) :]
     indexed: list[tuple[int, str]] = []
-    for line in match.group("options").splitlines():
-        option = OPTION_PATTERN.match(line)
-        if option:
-            indexed.append((int(option.group("index")), option.group("text")))
+    for line in options.splitlines():
+        index, separator, text = line.partition(": ")
+        if separator and index.isdigit():
+            indexed.append((int(index), text))
     indexed.sort(key=lambda item: item[0])
     if not indexed or [index for index, _ in indexed] != list(range(len(indexed))):
         raise ValueError("Decision options must use contiguous zero-based indexes.")
-    return match.group("context"), match.group("question"), [text for _, text in indexed]
+    return context, question, [text for _, text in indexed]
 
 
 class LayaService:
