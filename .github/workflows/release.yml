@@ -319,6 +319,13 @@ jobs:
           OFFGRID_REQUIRE_RELEASE_TRUST: '1'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Signing walks the bundled Kev/PyTorch runtime in parallel. The macOS
+          # runner's default soft limit can make electron-builder fail with EMFILE.
+          HARD_OPEN_FILE_LIMIT=$(ulimit -Hn)
+          if [ "$HARD_OPEN_FILE_LIMIT" = "unlimited" ] || [ "$HARD_OPEN_FILE_LIMIT" -gt 65536 ]; then
+            HARD_OPEN_FILE_LIMIT=65536
+          fi
+          ulimit -n "$HARD_OPEN_FILE_LIMIT"
           # notarytool needs the API key as a file; write it from the secret.
           printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
