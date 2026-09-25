@@ -43,6 +43,12 @@ echo "$MLX_METAL_SHA256  $TMP/mlx_metal-0.31.2-py3-none-macosx_14_0_arm64.whl" |
   "$TMP/mlx-0.31.2-cp312-cp312-macosx_14_0_arm64.whl" \
   "$TMP/mlx_metal-0.31.2-py3-none-macosx_14_0_arm64.whl"
 
+# PyTorch wheels include C++ headers and CMake metadata for compiling extensions.
+# Kev only imports the packaged runtime, so these build-only files add no runtime
+# value and make codesign traverse tens of thousands of unnecessary files.
+SITE_PACKAGES="$($PYTHON -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+rm -rf "$SITE_PACKAGES/torch/include" "$SITE_PACKAGES/torch/share/cmake"
+
 find "$DEST" -type d \( -name __pycache__ -o -name tests -o -name test \) -prune -exec rm -rf {} + 2>/dev/null || true
 find "$DEST" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete 2>/dev/null || true
 "$PYTHON" -c 'import kev, mlx_lm, torch, uvicorn; print("Kev macOS runtime ready")'
