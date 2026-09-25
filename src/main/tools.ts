@@ -26,9 +26,9 @@ import {
   callsWithinToolBudget,
   normalizeMaxToolCalls,
   toolLimitFinalAnswerInstruction,
-  toolPromptChars,
   toolResultCharBudget
 } from '@offgrid/models'
+import { toolPromptChars } from './tools/prompt-budget'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
