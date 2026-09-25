@@ -28,6 +28,11 @@ const releases = [
         name: 'latest.yml',
         browser_download_url:
           'https://github.com/off-grid-ai/off-grid-ai-desktop/releases/download/v0.0.41-beta.71/latest.yml'
+      },
+      {
+        name: 'latest-linux.yml',
+        browser_download_url:
+          'https://github.com/off-grid-ai/off-grid-ai-desktop/releases/download/v0.0.41-beta.71/latest-linux.yml'
       }
     ]
   },
@@ -142,10 +147,26 @@ describe('previous signed releases through the GitHub catalogue service', () => 
     await expect(
       listPreviousUpdateReleases({
         currentVersion: '0.0.41-beta.72',
-        platform: 'linux',
+        platform: 'freebsd',
         fetchImpl: githubBoundary(releases)
       })
     ).resolves.toEqual([])
+  })
+
+  it('selects the Linux feed through the same service boundary', async () => {
+    await expect(
+      listPreviousUpdateReleases({
+        currentVersion: '0.0.41-beta.72',
+        platform: 'linux',
+        fetchImpl: githubBoundary(releases)
+      })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        version: '0.0.41-beta.71',
+        feedUrl:
+          'https://github.com/off-grid-ai/off-grid-ai-desktop/releases/download/v0.0.41-beta.71/'
+      })
+    ])
   })
 
   it('selects the Windows feed through the same service boundary', async () => {

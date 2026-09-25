@@ -130,10 +130,11 @@ export function buildRegistry(run: typeof runNativeAction): HandlerRegistry {
   return registry
 }
 
-/** The one place a platform picks an implementation - exported so both arms
- *  are testable without faking process.platform. */
-export function pickByPlatform<T>(platform: NodeJS.Platform, win: T, mac: T): T {
-  return platform === 'win32' ? win : mac
+/** Select only an implementation that exists on the target platform. */
+export function pickByPlatform<T>(platform: NodeJS.Platform, win: T, mac: T, unsupported: T): T {
+  if (platform === 'win32') return win
+  if (platform === 'darwin') return mac
+  return unsupported
 }
 
 function recordAuthenticatedTaskLaunch(
@@ -232,7 +233,12 @@ export function getActionsRuntime(): ActionsRuntime {
   // The platform decides which semantic rail implements the port - the one
   // concrete choice, made once here; nothing above it branches on an OS.
   const registry = buildRegistry(
-    pickByPlatform(process.platform, makeOutlookNativeReader(runPowerShell), runNativeAction)
+    pickByPlatform(
+      process.platform,
+      makeOutlookNativeReader(runPowerShell),
+      runNativeAction,
+      async () => ({ ok: false, error: 'native actions are not available on this platform' })
+    )
   )
   const semanticExecute = pickByPlatform(
     process.platform,
@@ -243,7 +249,8 @@ export function getActionsRuntime(): ActionsRuntime {
         return { ok: true as const, result: {} }
       }
     }),
-    makeSemanticRailExecutor(runNativeAction)
+    makeSemanticRailExecutor(runNativeAction),
+    async () => ({ ok: false, detail: 'native actions are not available on this platform' })
   )
   // The browser rail's live host (WebContentsView + CDP + model + watched
   // pane) is created lazily on first web_use so a session that never runs one

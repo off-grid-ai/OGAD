@@ -235,6 +235,132 @@ describe('macOS artifact integrity', () => {
     )
   })
 
+  it('blocks a Windows installer input without the shared CUDA runtime', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-windows-cuda-artifact-'))
+    tempRoots.push(root)
+    const appOutDir = path.join(root, 'win-unpacked')
+    writeAsarArchive(path.join(appOutDir, 'resources', 'app.asar'), ['out/main/index.js'])
+    const event = {
+      file: path.join(root, 'OffGrid-setup.exe'),
+      arch: 1,
+      target: { outDir: root },
+      packager: {
+        computeAppOutDir: (): string => appOutDir,
+        appInfo: { productFilename: 'Off Grid AI Desktop' }
+      }
+    }
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/llama-cuda/llama-server.exe'
+    )
+  })
+
+  it.each(['AppImage', 'deb'])('enforces ASAR inventory on Linux %s artifacts', async (ext) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-linux-artifact-'))
+    tempRoots.push(root)
+    const appOutDir = path.join(root, 'linux-unpacked')
+    writeAsarArchive(path.join(appOutDir, 'resources', 'app.asar'), [
+      'out/main/index.js',
+      'marketing/emails/do-not-ship.csv'
+    ])
+    const event = {
+      file: path.join(root, `off-grid-ai-0.0.49.${ext}`),
+      arch: 1,
+      target: { outDir: root },
+      packager: {
+        computeAppOutDir: (): string => appOutDir,
+        appInfo: { productFilename: 'Off Grid AI Desktop' }
+      }
+    }
+
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'app.asar contains unexpected application root: /marketing'
+    )
+  })
+
+  it('blocks a Linux package input without its CUDA server', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-linux-cuda-artifact-'))
+    tempRoots.push(root)
+    const appOutDir = path.join(root, 'linux-unpacked')
+    writeAsarArchive(path.join(appOutDir, 'resources', 'app.asar'), ['out/main/index.js'])
+    const event = {
+      file: path.join(root, 'off-grid-ai.AppImage'),
+      arch: 1,
+      target: { outDir: root },
+      packager: {
+        computeAppOutDir: (): string => appOutDir,
+        appInfo: { productFilename: 'Off Grid AI Desktop' }
+      }
+    }
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/llama-cuda/llama-server'
+    )
+  })
+
+  it('blocks a Linux package input without its voice helpers', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-linux-voice-artifact-'))
+    tempRoots.push(root)
+    const appOutDir = path.join(root, 'linux-unpacked')
+    const resources = path.join(appOutDir, 'resources')
+    writeAsarArchive(path.join(resources, 'app.asar'), ['out/main/index.js'])
+    for (const variant of [
+      'llama-cuda',
+      'llama',
+      'llama-cpu',
+      'llama-prism-cuda',
+      'llama-prism',
+      'llama-prism-cpu'
+    ]) {
+      const server = path.join(resources, 'bin', variant, 'llama-server')
+      fs.mkdirSync(path.dirname(server), { recursive: true })
+      fs.writeFileSync(server, 'fixture')
+    }
+    for (const library of ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12']) {
+      const destination = path.join(resources, 'bin', 'cuda-runtime', library)
+      fs.mkdirSync(path.dirname(destination), { recursive: true })
+      fs.writeFileSync(destination, 'fixture')
+    }
+    const event = {
+      file: path.join(root, 'off-grid-ai.AppImage'),
+      arch: 1,
+      target: { outDir: root },
+      packager: {
+        computeAppOutDir: (): string => appOutDir,
+        appInfo: { productFilename: 'Off Grid AI Desktop' }
+      }
+    }
+
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/whisper/whisper-cli'
+    )
+    const whisper = path.join(resources, 'bin', 'whisper', 'whisper-cli')
+    fs.mkdirSync(path.dirname(whisper), { recursive: true })
+    fs.writeFileSync(whisper, 'fixture')
+    fs.writeFileSync(path.join(resources, 'bin', 'whisper', 'LICENSE'), 'fixture')
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/ffmpeg'
+    )
+    for (const relative of ['bin/ffmpeg', 'bin/licenses/ffmpeg.txt']) {
+      const destination = path.join(resources, relative)
+      fs.mkdirSync(path.dirname(destination), { recursive: true })
+      fs.writeFileSync(destination, 'fixture')
+    }
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/sd/sd-cli'
+    )
+    for (const relative of ['bin/sd/sd-cli', 'bin/sd/sd-server']) {
+      const destination = path.join(resources, relative)
+      fs.mkdirSync(path.dirname(destination), { recursive: true })
+      fs.writeFileSync(destination, 'fixture')
+    }
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/executorch-speech'
+    )
+    fs.writeFileSync(path.join(resources, 'bin', 'executorch-speech'), 'fixture')
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: speech-assets/index.json'
+    )
+  })
+
   it.skipIf(process.platform !== 'darwin')(
     'enforces ASAR inventory through the real updater ZIP verification seam',
     async () => {

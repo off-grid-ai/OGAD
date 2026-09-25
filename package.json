@@ -40,7 +40,7 @@
     "build:unpack": "npm run build && npm run prepare:speech-defaults && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "node scripts/stage-native.mjs && electron-vite build && npm run prepare:speech-defaults && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
+    "build:linux": "LLAMA_ACCELERATOR=cuda bash scripts/build-llama-linux.sh && bash scripts/build-llama-linux.sh && LLAMA_ACCELERATOR=cpu bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism LLAMA_ACCELERATOR=cuda bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism LLAMA_ACCELERATOR=cpu bash scripts/build-llama-linux.sh && bash scripts/build-voice-linux.sh && bash scripts/fetch-image-linux.sh && npm run prepare:speech-defaults && node scripts/stage-native.mjs && electron-vite build && electron-builder --linux --x64 --publish never",
     "test:e2e": "electron-vite build && OFFGRID_E2E_HEADLESS=1 playwright test",
     "test:sync:physical": "node scripts/physical-sync/iosMacKnowledgeSync.mjs",
     "smoke": "bash scripts/smoke-api.sh",

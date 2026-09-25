@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import path from 'path'
 import { engineSpawnEnv, VULKAN_DISABLE_BFLOAT16 } from '../spawn-env'
 
 const BIN = '/opt/off-grid/bin/llama'
@@ -54,12 +53,21 @@ describe('engineSpawnEnv', () => {
         binDir: BIN,
         currentEnv: { PATH: 'C:\\Windows\\System32' }
       })
-      expect(env.PATH).toBe(`${BIN}${path.delimiter}C:\\Windows\\System32`)
+      expect(env.PATH).toBe(`${BIN};C:\\Windows\\System32`)
     })
 
     it('still prepends binDir when the inherited PATH is absent', () => {
       const env = engineSpawnEnv({ platform: 'win32', binDir: BIN, currentEnv: {} })
-      expect(env.PATH).toBe(`${BIN}${path.delimiter}`)
+      expect(env.PATH).toBe(`${BIN};`)
+    })
+
+    it('adds the shared CUDA runtime for a CUDA server', () => {
+      const env = engineSpawnEnv({
+        platform: 'win32',
+        binDir: 'C:\\OffGrid\\bin\\llama-cuda',
+        currentEnv: { PATH: 'C:\\Windows\\System32' }
+      })
+      expect(env.PATH).toBe('C:\\OffGrid\\bin\\llama-cuda;C:\\OffGrid\\bin\\cuda-runtime;C:\\Windows\\System32')
     })
 
     it('omits the override so an explicit inherited value survives', () => {
@@ -76,11 +84,28 @@ describe('engineSpawnEnv', () => {
   })
 
   describe('Linux', () => {
-    // We ship no Vulkan engine here, so the change stays as narrow as the evidence.
-    it('sets no Vulkan variable', () => {
-      const env = engineSpawnEnv({ platform: 'linux', binDir: BIN })
+    it('adds the shared CUDA runtime for a CUDA server', () => {
+      const env = engineSpawnEnv({
+        platform: 'linux',
+        binDir: '/opt/off-grid/bin/llama-prism-cuda',
+        currentEnv: { LD_LIBRARY_PATH: '/usr/local/lib' }
+      })
+      expect(env.LD_LIBRARY_PATH).toBe('/opt/off-grid/bin/llama-prism-cuda:/opt/off-grid/bin/cuda-runtime:/usr/local/lib')
+    })
+    it('finds co-located shared libraries without changing macOS or Windows settings', () => {
+      const env = engineSpawnEnv({
+        platform: 'linux',
+        binDir: BIN,
+        currentEnv: { LD_LIBRARY_PATH: '/usr/local/lib' }
+      })
+      expect(env.LD_LIBRARY_PATH).toBe(`${BIN}:/usr/local/lib`)
       expect(env[VULKAN_DISABLE_BFLOAT16]).toBeUndefined()
-      expect(env.DYLD_LIBRARY_PATH).toBe(BIN)
+      expect(env.DYLD_LIBRARY_PATH).toBeUndefined()
+    })
+
+    it('does not add the current directory when no library path is inherited', () => {
+      const env = engineSpawnEnv({ platform: 'linux', binDir: BIN, currentEnv: {} })
+      expect(env.LD_LIBRARY_PATH).toBe(BIN)
     })
   })
 })

@@ -29,6 +29,7 @@ interface GitHubRelease {
 function feedName(platform: NodeJS.Platform): string | null {
   if (platform === 'darwin') return 'latest-mac.yml'
   if (platform === 'win32') return 'latest.yml'
+  if (platform === 'linux') return 'latest-linux.yml'
   return null
 }
 

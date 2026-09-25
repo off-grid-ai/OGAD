@@ -21,6 +21,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { binRoots, isPackaged, exe } from '../runtime-env'
+import { nativeLibraryEnv } from '../native-library-env'
 import { existing } from './bin-resolution'
 import type { Transcript } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
@@ -193,10 +194,7 @@ export class WhisperServerService {
       // the ggml/whisper DLLs next to the exe resolve.
       env: {
         ...process.env,
-        DYLD_LIBRARY_PATH: binDir,
-        ...(process.platform === 'win32'
-          ? { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` }
-          : {})
+        ...nativeLibraryEnv(process.platform, binDir, process.env)
       }
     })
     this.server = proc

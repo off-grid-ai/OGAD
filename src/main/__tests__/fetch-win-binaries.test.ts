@@ -52,14 +52,29 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — stable-diffusion.cpp asset', (
 })
 
 describe.skipIf(!SRC)('fetch-win-binaries.ps1 — Bonsai runtime', () => {
-  it('stages the pinned Prism CPU runtime in the directory the model server resolves', () => {
+  it('stages pinned Prism CUDA, Vulkan, and CPU runtimes in the directories the model server resolves', () => {
     expect(SRC).toMatch(/offgrid\.prismLlamaRef/)
+    expect(SRC).toMatch(/PrismML-Eng\/llama\.cpp'\s+'\^llama-\.\+-bin-win-cuda-12\\\.4-x64\\\.zip\$'/)
+    expect(SRC).toMatch(/PrismML-Eng\/llama\.cpp'\s+'bin-win-vulkan-x64\\\.zip\$'/)
     expect(SRC).toMatch(/PrismML-Eng\/llama\.cpp'\s+'bin-win-cpu-x64\\\.zip\$'/)
+    expect(SRC).toMatch(/Copy-Runtime \$x 'llama-prism-cuda'/)
     expect(SRC).toMatch(/Copy-Runtime \$x 'llama-prism'/)
+    expect(SRC).toMatch(/Copy-Runtime \$x 'llama-prism-cpu'/)
   })
 
-  it('fails the Windows build when the Prism model server is absent', () => {
+  it('stages the shared CUDA runtime and checks it before packaging', () => {
+    expect(SRC).toMatch(/ggml-org\/llama\.cpp'\s+'\^llama-\.\+-bin-win-cuda-12\\\.4-x64\\\.zip\$'/)
+    expect(SRC).toMatch(/ggml-org\/llama\.cpp'\s+'\^cudart-llama-bin-win-cuda-12\\\.4-x64\\\.zip\$'/)
+    expect(SRC).toMatch(/Copy-Runtime \$x 'cuda-runtime'/)
+    expect(SRC).toMatch(/cuda-runtime\\cudart64_12\.dll/)
+    expect(SRC).toMatch(/cuda-runtime\\cublas64_12\.dll/)
+    expect(SRC).toMatch(/cuda-runtime\\cublasLt64_12\.dll/)
+  })
+
+  it('fails the Windows build when either Prism model server is absent', () => {
     expect(SRC).toMatch(/llama-prism\\llama-server\.exe/)
     expect(SRC).toMatch(/REQUIRED binary missing: \$prism/)
+    expect(SRC).toMatch(/llama-prism-cpu\\llama-server\.exe/)
+    expect(SRC).toMatch(/REQUIRED binary missing: \$prismCpu/)
   })
 })

@@ -8,10 +8,10 @@ import { runNativeAction } from '../native-helper'
 import { inlineRunnerForPlatform } from '../../tools/nativeActionToolExtension'
 
 describe('pickByPlatform', () => {
-  it('returns the win arm on win32 and the mac arm elsewhere', () => {
-    expect(pickByPlatform('win32', 'w', 'm')).toBe('w')
-    expect(pickByPlatform('darwin', 'w', 'm')).toBe('m')
-    expect(pickByPlatform('linux', 'w', 'm')).toBe('m')
+  it('does not send Linux through a macOS or Windows implementation', () => {
+    expect(pickByPlatform('win32', 'w', 'm', 'unsupported')).toBe('w')
+    expect(pickByPlatform('darwin', 'w', 'm', 'unsupported')).toBe('m')
+    expect(pickByPlatform('linux', 'w', 'm', 'unsupported')).toBe('unsupported')
   })
 })
 
@@ -32,5 +32,15 @@ describe('inlineRunnerForPlatform', () => {
     if (!opened.ok) {
       expect(opened.error).toMatch(/could not open the link/)
     }
+  })
+
+  it('Linux does not run the macOS helper', async () => {
+    const run = inlineRunnerForPlatform('linux')
+    expect(run).not.toBe(runNativeAction)
+    const result = await run({ command: 'reminders.list', args: {} })
+    expect(result).toEqual({
+      ok: false,
+      error: 'native actions are not available on this platform'
+    })
   })
 })

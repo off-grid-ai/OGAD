@@ -157,12 +157,23 @@ const macAxBackend: AxBackend = {
   snapshot: snapshotApp
 }
 
+const unsupportedAxBackend: AxBackend = {
+  available: () => false,
+  async listApps() {
+    return []
+  },
+  async snapshot() {
+    return null
+  }
+}
+
 /** The accessibility backend for this platform - the ONE place the OS is chosen.
- *  macOS uses the Swift AX helper; Windows uses PowerShell + UI Automation; any
- *  other platform gets the mac backend, whose available() is false, so the rail
- *  stays off and the caller falls to vision. */
+ *  macOS uses the Swift AX helper; Windows uses PowerShell + UI Automation.
+ *  Linux has no native accessibility backend in this release. */
 function axBackend(): AxBackend {
-  return process.platform === 'win32' ? windowsAxBackend : macAxBackend
+  if (process.platform === 'win32') return windowsAxBackend
+  if (process.platform === 'darwin') return macAxBackend
+  return unsupportedAxBackend
 }
 
 /** Capture one app's current AX/UIA controls for the unified vision graph. */

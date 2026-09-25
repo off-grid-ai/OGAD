@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type -- Electron-builder loads this hook directly as JavaScript. */
+import fs from 'node:fs'
 import path from 'node:path'
 import {
   assertAsarArchiveInventory,
@@ -11,14 +12,49 @@ import { releaseTeamIdForEnvironment } from './lib/macos-app-trust.mjs'
 
 export default async function verifyElectronBuilderArtifact(event) {
   const artifact = event.file.toLowerCase()
-  if (!artifact.endsWith('.dmg') && !artifact.endsWith('.zip') && !artifact.endsWith('.exe')) {
+  const asarOnlyArtifact =
+    artifact.endsWith('.exe') || artifact.endsWith('.appimage') || artifact.endsWith('.deb')
+  if (!artifact.endsWith('.dmg') && !artifact.endsWith('.zip') && !asarOnlyArtifact) {
     return
   }
 
   const appOutDir = event.packager.computeAppOutDir(event.target.outDir, event.arch)
-  if (artifact.endsWith('.exe')) {
+  if (asarOnlyArtifact) {
     assertAsarArchiveInventory(path.join(appOutDir, 'resources', 'app.asar'))
-    console.log('[artifact-integrity] Windows installer input passed ASAR inventory')
+    const executable = artifact.endsWith('.exe') ? 'llama-server.exe' : 'llama-server'
+    const required = [
+      ...[
+        'llama-cuda',
+        'llama',
+        'llama-cpu',
+        'llama-prism-cuda',
+        'llama-prism',
+        'llama-prism-cpu'
+      ].map((variant) => path.join('bin', variant, executable)),
+      ...(artifact.endsWith('.exe')
+        ? ['cudart64_12.dll', 'cublas64_12.dll', 'cublasLt64_12.dll']
+        : ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12']
+      ).map((library) => path.join('bin', 'cuda-runtime', library))
+    ]
+    if (artifact.endsWith('.appimage') || artifact.endsWith('.deb')) {
+      required.push(
+        path.join('bin', 'whisper', 'whisper-cli'),
+        path.join('bin', 'whisper', 'LICENSE'),
+        path.join('bin', 'ffmpeg'),
+        path.join('bin', 'licenses', 'ffmpeg.txt'),
+        path.join('bin', 'sd', 'sd-cli'),
+        path.join('bin', 'sd', 'sd-server'),
+        path.join('bin', 'executorch-speech'),
+        path.join('speech-assets', 'index.json')
+      )
+    }
+    for (const relative of required) {
+      const file = path.join(appOutDir, 'resources', relative)
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+        throw new Error(`installer input is missing required runtime: ${relative}`)
+      }
+    }
+    console.log('[artifact-integrity] installer input passed ASAR and native-runtime inventory')
     return
   }
 

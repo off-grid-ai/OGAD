@@ -23,6 +23,7 @@ import fs from 'fs'
 import os from 'os'
 import { binRoots, isPackaged, exe } from './runtime-env'
 import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
+import { nativeLibraryEnv } from './native-library-env'
 
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
  *  lingering LLM shouldn't block the image server's port either). */
@@ -257,10 +258,7 @@ class SdServerService {
       cwd: binDir,
       env: {
         ...process.env,
-        DYLD_LIBRARY_PATH: binDir,
-        ...(process.platform === 'win32'
-          ? { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` }
-          : {})
+        ...nativeLibraryEnv(process.platform, binDir, process.env)
       }
     })
     this.server = proc

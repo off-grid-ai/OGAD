@@ -98,11 +98,17 @@ files:
   - '!node_modules/**'
 mac:
   extraResources:
+    - from: ${yamlPath(path.join(root, 'resources', 'bin'))}
+      to: bin
     - from: ${yamlPath(path.join(root, '..', 'executorch-speech', 'native', 'bin', 'executorch-speech'))}
       to: bin/executorch-speech
   target:
     - dir
   notarize: false
+win:
+  extraResources:
+    - from: ${yamlPath(path.join(root, 'resources', 'bin'))}
+      to: bin
 `
     )
 

@@ -3,8 +3,10 @@
 # win64 equivalents from upstream official releases at build time — laid out to
 # match exactly what the app's resolvers expect:
 #
-#   resources/bin/llama/llama-server.exe   (+ ggml/llama DLLs)   <- src/main/llm.ts
-#   resources/bin/llama-prism/llama-server.exe (+ fork DLLs)      <- Bonsai 2
+#   resources/bin/llama-cuda/llama-server.exe (+ CUDA backend DLLs) <- NVIDIA
+#   resources/bin/llama/llama-server.exe      (+ Vulkan DLLs)       <- other GPUs
+#   resources/bin/llama-prism-cuda/llama-server.exe                <- Bonsai 2 NVIDIA
+#   resources/bin/cuda-runtime/*.dll                               <- shared CUDA runtime
 #   resources/bin/sd/sd-cli.exe            (+ DLLs)              <- src/main/imagegen.ts
 #   resources/bin/whisper/whisper-cli.exe  (+ DLLs)             <- src/main/rag/extractors.ts
 #   resources/bin/ffmpeg.exe                                     <- src/main/rag/extractors.ts
@@ -55,11 +57,14 @@ function Get-AssetUrl($repo, $pattern, $tag) {
 
 # Download + extract a zip asset, return the extraction dir. Optional $tag pins
 # to a specific release instead of latest.
-function Expand-Asset($repo, $pattern, $tag) {
+function Expand-Asset($repo, $pattern, $tag, $sha256 = $null) {
   $url = Get-AssetUrl $repo $pattern $tag
   $zip = Join-Path $tmp ([System.IO.Path]::GetRandomFileName() + '.zip')
   Write-Host "  downloading $url"
   Invoke-WebRequest -Headers $ghHeaders -Uri $url -OutFile $zip
+  if ($sha256 -and (Get-FileHash -Algorithm SHA256 -Path $zip).Hash -ne $sha256) {
+    throw "SHA256 mismatch for $url"
+  }
   $out = Join-Path $tmp ([System.IO.Path]::GetFileNameWithoutExtension($zip))
   Expand-Archive -Path $zip -DestinationPath $out -Force
   return $out
@@ -78,10 +83,9 @@ function Copy-Runtime($srcDir, $destName) {
 # PINNED to match the macOS engine (scripts/build-llama.sh). Overridable via env
 # for a coordinated cross-platform bump — keep it in lockstep with build-llama.sh.
 #
-# We ship TWO builds so Windows gets GPU speed without breaking GPU-less boxes:
-#   bin/llama      <- Vulkan (GPU) build, the app's PRIMARY. Offloads to any
-#                     Vulkan device (Intel/AMD/NVIDIA, incl. iGPUs like Radeon
-#                     740M) and still runs on CPU when no device is present.
+# We ship CUDA, Vulkan, and CPU builds in that order:
+#   bin/llama-cuda <- NVIDIA CUDA build with shared bin/cuda-runtime DLLs.
+#   bin/llama      <- Vulkan build for AMD/Intel and NVIDIA CUDA fallback.
 #                     Needs the system Vulkan loader (vulkan-1.dll, present with
 #                     any modern GPU driver).
 #   bin/llama-cpu  <- CPU-only build, the app's FALLBACK (llm.ts) for the rare
@@ -91,23 +95,27 @@ function Copy-Runtime($srcDir, $destName) {
 # both is how the macOS build and the Windows binaries drift apart within a single release.
 $PackageJson = Join-Path (Split-Path $PSScriptRoot -Parent) 'package.json'
 $LlamaRef = if ($env:LLAMA_REF) { $env:LLAMA_REF } else { (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.llamaRef }
-Write-Host "== llama.cpp (pinned $LlamaRef): vulkan primary + cpu fallback =="
-try {
-  $x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-vulkan-x64\.zip$' $LlamaRef
-  Copy-Runtime $x 'llama' | Out-Null
-} catch { Write-Warning "llama.cpp (vulkan) fetch failed: $_" }
-try {
-  $x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-cpu-x64\.zip$' $LlamaRef
-  Copy-Runtime $x 'llama-cpu' | Out-Null
-} catch { Write-Warning "llama.cpp (cpu fallback) fetch failed: $_" }
+Write-Host "== llama.cpp (pinned $LlamaRef): CUDA + Vulkan + CPU =="
+$x = Expand-Asset 'ggml-org/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $LlamaRef 'cb6e838cad17e9920b99ab8496ca9aa7cdc3d3c218128957179bb1fbe0772c4c'
+Copy-Runtime $x 'llama-cuda' | Out-Null
+$x = Expand-Asset 'ggml-org/llama.cpp' '^cudart-llama-bin-win-cuda-12\.4-x64\.zip$' $LlamaRef '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6'
+Copy-Runtime $x 'cuda-runtime' | Out-Null
+$x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-vulkan-x64\.zip$' $LlamaRef 'b7b5ef4a1f47542635a3a5e3e471cbfcbaee057aa0c962f9573329ddd9168c5a'
+Copy-Runtime $x 'llama' | Out-Null
+$x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-cpu-x64\.zip$' $LlamaRef 'a2668a200ca7271e66af0a54fd4376aaf8ae0b2a562cf7a63c41d8fd2a8245fa'
+Copy-Runtime $x 'llama-cpu' | Out-Null
 
 # Bonsai 2 uses packed ternary weights that require PrismML's llama.cpp fork.
-# Use its CPU build so the bundled engine starts even without a Vulkan driver.
+# Try CUDA on NVIDIA, Vulkan on other GPUs, then CPU.
 # Keep these DLLs separate from the standard llama.cpp DLLs.
 $PrismLlamaRef = (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.prismLlamaRef
-Write-Host "== Prism llama.cpp (pinned $PrismLlamaRef): cpu =="
-$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef
+Write-Host "== Prism llama.cpp (pinned $PrismLlamaRef): CUDA + Vulkan + CPU =="
+$x = Expand-Asset 'PrismML-Eng/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $PrismLlamaRef 'f565c8428c1f108311f65ed97f02425188b3aa3c745c2bc597521bbd24bcbbc9'
+Copy-Runtime $x 'llama-prism-cuda' | Out-Null
+$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-vulkan-x64\.zip$' $PrismLlamaRef 'fabef609b588cbbed85b5f10b45809c46088f0a63caca7976054034e24b40836'
 Copy-Runtime $x 'llama-prism' | Out-Null
+$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef '92cd4d1cee11107593ff87d77eb57b02d804c86dd4b13224e18ba963a4271ad8'
+Copy-Runtime $x 'llama-prism-cpu' | Out-Null
 
 # --- whisper.cpp (whisper-cli.exe + DLLs) ------------------------------------
 Write-Host '== whisper.cpp =='
@@ -177,6 +185,19 @@ $prism = Join-Path $bin 'llama-prism\llama-server.exe'
 if (-not (Test-Path -LiteralPath $prism)) {
   Write-Error "REQUIRED binary missing: $prism (the Prism llama.cpp fetch failed above). Cannot run Bonsai 2."
   exit 1
+}
+$prismCpu = Join-Path $bin 'llama-prism-cpu\llama-server.exe'
+if (-not (Test-Path -LiteralPath $prismCpu)) {
+  Write-Error "REQUIRED binary missing: $prismCpu (the Prism CPU fallback fetch failed above). Cannot run Bonsai 2 without Vulkan."
+  exit 1
+}
+foreach ($p in @(
+    (Join-Path $bin 'llama-cuda\llama-server.exe'),
+    (Join-Path $bin 'llama-prism-cuda\llama-server.exe'),
+    (Join-Path $bin 'cuda-runtime\cudart64_12.dll'),
+    (Join-Path $bin 'cuda-runtime\cublas64_12.dll'),
+    (Join-Path $bin 'cuda-runtime\cublasLt64_12.dll'))) {
+  if (-not (Test-Path -LiteralPath $p)) { throw "REQUIRED CUDA runtime missing: $p" }
 }
 foreach ($p in @(
     (Join-Path $bin 'llama-cpu\llama-server.exe'),

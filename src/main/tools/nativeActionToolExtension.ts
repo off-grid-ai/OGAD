@@ -77,8 +77,8 @@ function engineResult(
 }
 
 // The inline (non-engine) runner, picked by platform in exactly one place:
-// mac runs the Swift helper; Windows opens links through the shell and
-// refuses everything else honestly (reads are not exposed there yet).
+// mac runs the Swift helper; Windows opens links through the shell; Linux
+// refuses native actions until it has a platform implementation.
 // Exported so both arms are testable without faking process.platform.
 export function inlineRunnerForPlatform(
   platform: NodeJS.Platform
@@ -88,7 +88,8 @@ export function inlineRunnerForPlatform(
       await shell.openExternal(url)
     }, runPowerShell)
   }
-  return runNativeAction
+  if (platform === 'darwin') return runNativeAction
+  return async () => ({ ok: false, error: 'native actions are not available on this platform' })
 }
 
 const inlineRun = inlineRunnerForPlatform(process.platform)

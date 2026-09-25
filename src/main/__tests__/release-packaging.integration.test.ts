@@ -275,13 +275,30 @@ describe.sequential('release packaging integration', () => {
       null
     )) as {
       extraResources?: Array<{ from?: string; filter?: string[] }>
+      mac?: { extraResources?: Array<{ from?: string; to?: string }> }
+      win?: { extraResources?: Array<{ from?: string; to?: string }> }
+      linux?: { extraResources?: Array<{ from?: string; to?: string }> }
     }
     expect(effectiveConfig.extraResources).toEqual([
       {
         from: 'resources',
-        filter: ['**/*', '!models/**', '!tts-worker.mjs']
+        filter: ['**/*', '!models/**', '!bin/**', '!tts-worker.mjs']
       }
     ])
+    expect(effectiveConfig.mac?.extraResources).toContainEqual({ from: 'resources/bin', to: 'bin' })
+    expect(effectiveConfig.win?.extraResources).toContainEqual({ from: 'resources/bin', to: 'bin' })
+    expect(effectiveConfig.linux?.extraResources).toContainEqual({
+      from: 'build/linux-bin',
+      to: 'bin'
+    })
+    expect(effectiveConfig.linux?.extraResources).toContainEqual({
+      from: '../executorch-speech/native/bin/executorch-speech',
+      to: 'bin/executorch-speech'
+    })
+    expect(effectiveConfig.linux?.extraResources).toContainEqual({
+      from: '../executorch-speech/generated/default-assets',
+      to: 'speech-assets'
+    })
 
     const helpers = [
       'bin/llama/llama-server',

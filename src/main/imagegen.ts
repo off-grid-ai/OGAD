@@ -35,6 +35,7 @@ import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
 import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
 import { sdServer } from './sd-server'
+import { nativeLibraryEnv } from './native-library-env'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
 import {
@@ -1065,7 +1066,11 @@ async function runImageGen(
     await generationLifecycle.waitForMemoryReclaim()
     await new Promise<void>((resolve, reject) => {
       // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
-      const child = spawn(cli, args, { cwd: path.dirname(cli) })
+      const binDir = path.dirname(cli)
+      const child = spawn(cli, args, {
+        cwd: binDir,
+        env: { ...process.env, ...nativeLibraryEnv(process.platform, binDir, process.env) }
+      })
       currentChild = child
       let log = ''
       // Pure progress reducer owns the seed parse + the denoise->decode phase

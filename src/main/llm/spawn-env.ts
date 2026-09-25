@@ -54,6 +54,18 @@ export interface EngineSpawnEnvInput {
  * spawn can be asserted to carry no Vulkan variable at all.
  */
 export function engineSpawnEnv(i: EngineSpawnEnvInput): Record<string, string> {
+  const pathApi = i.platform === 'win32' ? path.win32 : path.posix
+  const cudaRuntimeDir = i.binDir.endsWith('-cuda')
+    ? pathApi.join(pathApi.dirname(i.binDir), 'cuda-runtime')
+    : null
+  if (i.platform === 'linux') {
+    const inherited = i.currentEnv ?? {}
+    const libraryDirs = cudaRuntimeDir ? [i.binDir, cudaRuntimeDir] : [i.binDir]
+    if (inherited.LD_LIBRARY_PATH) libraryDirs.push(inherited.LD_LIBRARY_PATH)
+    return {
+      LD_LIBRARY_PATH: libraryDirs.join(path.posix.delimiter)
+    }
+  }
   const env: Record<string, string> = {
     // macOS: rpath for the co-located dylibs. Harmless elsewhere.
     DYLD_LIBRARY_PATH: i.binDir
@@ -63,7 +75,7 @@ export function engineSpawnEnv(i: EngineSpawnEnvInput): Record<string, string> {
   // Windows: the loader already searches the exe's own dir for DLLs, but prepend
   // binDir to PATH so the ggml/llama DLLs resolve even if that is restricted.
   const inherited = i.currentEnv ?? {}
-  env.PATH = `${i.binDir}${path.delimiter}${inherited.PATH ?? ''}`
+  env.PATH = `${[i.binDir, ...(cudaRuntimeDir ? [cudaRuntimeDir] : []), inherited.PATH ?? ''].join(path.win32.delimiter)}`
   // Respect an explicit choice already in the environment (present-vs-absent is
   // the only override that works - see the TRAP note above).
   if (inherited[VULKAN_DISABLE_BFLOAT16] === undefined) {

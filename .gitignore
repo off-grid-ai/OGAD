@@ -17,6 +17,7 @@ resources/bin/kev-runtime/
 
 # Off Grid AI SD-GGUF conversion build dir
 build-sd-gguf/
+build/linux-bin/
 
 # Swift build artifacts (embedded repos)
 electron/coreml-sd/.build/

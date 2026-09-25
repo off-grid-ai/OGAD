@@ -35,6 +35,7 @@ import { dflashFileName, primaryFileName, type CatalogEntry } from './models/cat
 import { pickFreePort, isPortFree } from './free-port'
 import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
+import { gpuDeviceAvailable, offloadedGpuLayers } from './llm/gpu-device-probe'
 import { shouldAutoRecover } from './llm/crash-policy'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import {
@@ -213,6 +214,7 @@ export class LLMService {
   // ONLY through activeAccelerator(), which gates it on `initialized` — that flag stays the
   // single authority on whether an engine is up, rather than a second flag kept in step.
   private activeEnginePath = ''
+  private activeGpuLayers: number | null = 0
   // A model selection is durable as soon as the manager writes active-model.json, but
   // replacing llama-server while it is answering destroys the user's in-flight turn.
   // LLMService owns that process, so it also owns the handoff: admitted generations
@@ -428,7 +430,8 @@ export class LLMService {
     if (!this.initialized) return null
     return acceleratorForEngine({
       platform: process.platform,
-      serverPath: this.activeEnginePath
+      serverPath: this.activeEnginePath,
+      gpuLayers: this.activeGpuLayers
     })
   }
 
@@ -914,16 +917,19 @@ export class LLMService {
     const requiresPrism = /^Ternary-Bonsai-2-27B-(?!mmproj).+\.gguf$/i.test(
       path.basename(this.modelPath)
     )
-    // Engines to try, IN ORDER. On Windows we ship a Vulkan (GPU) build in
-    // bin/llama and a CPU-only fallback in bin/llama-cpu: if the Vulkan server
-    // can't start (e.g. no Vulkan loader on the box) we fall through to CPU. On
-    // macOS also ships a separate Prism build for Bonsai 2.
+    // Try CUDA on NVIDIA, Vulkan on other GPUs, then the CPU-only engine.
+    // macOS has its own Metal engines, so the absent CUDA/Vulkan paths are skipped.
     const roots = binRoots()
     const serverPaths = roots
       .flatMap((r) =>
         requiresPrism
-          ? [path.join(r, 'llama-prism', exe('llama-server'))]
+          ? [
+              path.join(r, 'llama-prism-cuda', exe('llama-server')),
+              path.join(r, 'llama-prism', exe('llama-server')),
+              path.join(r, 'llama-prism-cpu', exe('llama-server'))
+            ]
           : [
+              path.join(r, 'llama-cuda', exe('llama-server')),
               path.join(r, 'llama', exe('llama-server')),
               path.join(r, 'llama-cpu', exe('llama-server')),
               path.join(r, exe('llama-server'))
@@ -968,6 +974,21 @@ export class LLMService {
     const attempts = loadAttempts(this.ctxSize, this.gpuLayers)
     for (const serverPath of serverPaths) {
       if (!serverPath) continue
+      const engineDir = path.basename(path.dirname(serverPath))
+      const backend = engineDir.endsWith('-cuda')
+        ? 'CUDA'
+        : engineDir === 'llama' || engineDir === 'llama-prism'
+          ? 'Vulkan'
+          : null
+      if ((process.platform === 'win32' || process.platform === 'linux') && backend) {
+        if (this.gpuLayers === 0) continue
+        if (!(await gpuDeviceAvailable(serverPath, backend, process.platform))) {
+          console.warn(
+            `[LLMService] no usable ${backend} device for ${serverPath}; trying next engine`
+          )
+          continue
+        }
+      }
       for (let a = 0; a < attempts.length; a++) {
         const at = attempts[a]
         if (!at) continue
@@ -975,7 +996,7 @@ export class LLMService {
           console.warn(`[LLMService] out of memory — retrying load at ${at.reason}`)
         }
         const args = this.launchArgsFor(at.ctxSize, at.gpuLayers)
-        if (await this.launchServer(serverPath, args)) {
+        if (await this.launchServer(serverPath, args, at.gpuLayers)) {
           if (a > 0) {
             console.warn(`[LLMService] model loaded via fallback: ${at.reason}`)
           }
@@ -993,7 +1014,13 @@ export class LLMService {
             console.error('[LLMService] could not save the corrected speculative setting:', error)
           }
           await this.prepareModelPort()
-          if (await this.launchServer(serverPath, this.launchArgsFor(at.ctxSize, at.gpuLayers))) {
+          if (
+            await this.launchServer(
+              serverPath,
+              this.launchArgsFor(at.ctxSize, at.gpuLayers),
+              at.gpuLayers
+            )
+          ) {
             return true
           }
         }
@@ -1010,7 +1037,11 @@ export class LLMService {
    *  true when it's ready, false when it fails to start — so _doInit can fall
    *  through to the next engine (Windows Vulkan -> CPU). A failed process is torn
    *  down with its close handler neutralized so it can't trigger a crash-restart. */
-  private async launchServer(serverPath: string, args: string[]): Promise<boolean> {
+  private async launchServer(
+    serverPath: string,
+    args: string[],
+    gpuLayers: number
+  ): Promise<boolean> {
     const binDir = path.dirname(serverPath)
     console.log(`[LLMService] Starting llama-server from ${serverPath}`)
     // Strip macOS quarantine attributes on production builds (downloaded DMGs get quarantined)
@@ -1050,6 +1081,8 @@ export class LLMService {
     this.server = proc
     this.activeEnginePath = serverPath
     this.stderrTail = []
+    let confirmedOffload: number | null = null
+    let offloadLogTail = ''
     this.invalidateHealth()
     let abandoned = false // set when we give up on this proc so its close handler is inert
     // True until waitForReady() confirms THIS engine. A close while probing is a failed
@@ -1067,6 +1100,10 @@ export class LLMService {
     proc.stderr?.on('data', (data) => {
       const text = String(data)
       console.log(`[llama-server] ${text}`)
+      const offloadLog = offloadLogTail + text
+      const count = offloadedGpuLayers(offloadLog)
+      if (count !== null) confirmedOffload = count
+      offloadLogTail = offloadLog.slice(-128)
       // Keep a rolling tail so we can classify a load failure after it exits.
       for (const line of text.split(/\r?\n/)) if (line.trim()) this.stderrTail.push(line)
       if (this.stderrTail.length > 50) this.stderrTail = this.stderrTail.slice(-50)
@@ -1107,6 +1144,11 @@ export class LLMService {
       // Confirmed healthy: from here a close IS a crash worth recovering from.
       probing = false
       console.log('[LLMService] Vision server ready!')
+      const engineDir = path.basename(binDir)
+      const gpuEngine =
+        (process.platform === 'win32' || process.platform === 'linux') &&
+        (engineDir === 'llama' || engineDir === 'llama-prism' || engineDir.endsWith('-cuda'))
+      this.activeGpuLayers = gpuLayers === 0 ? 0 : gpuEngine ? confirmedOffload : gpuLayers
       this.initialized = true
       this.lastErrorMsg = null // healthy again — clear any prior failure reason
       this.invalidateHealth()
