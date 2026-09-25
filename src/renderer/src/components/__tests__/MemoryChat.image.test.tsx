@@ -1035,6 +1035,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
 
     await openImageComposer(user)
     await user.click(screen.getByRole('button', { name: /init image/i }))
+    await screen.findByText('reference.png')
     await user.click(screen.getByRole('button', { name: /^image$/i }))
     await user.click(screen.getByRole('button', { name: 'Assistant' }))
     await sendChat(user, 'Make the model labels generic')
