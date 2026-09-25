@@ -502,6 +502,7 @@ export function MemoryChat({
   // The image progress/warm-up UI shows only when the ACTIVE conversation is the one
   // generating an image — never a background conversation's gen (D9).
   const generatingImage = imageGenConv !== null && imageGenConv === activeConversationId
+  const qwenLatentPreview = /qwen[_-]?image[_-]?2[._-]?1/i.test(imgModel)
   const [projects, setProjects] = useState<ProjectLite[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   // Captured-memory context is a Pro ("remembers") feature; core chats are plain
@@ -1998,7 +1999,14 @@ export function MemoryChat({
                   ...(imageRequest.enhancePrompt === undefined
                     ? {}
                     : { enhancePrompt: imageRequest.enhancePrompt }),
-                  ...(comicHeroPath ? { initImage: comicHeroPath, strength: 0.72 } : {}),
+                  ...(comicHeroPath
+                    ? { initImage: comicHeroPath, strength: 0.72 }
+                    : keptInit?.path || imagePaths[0] || imgInit
+                      ? {
+                        initImage: keptInit?.path ?? imagePaths[0] ?? imgInit ?? undefined,
+                        strength: imgStrength
+                      }
+                      : {}),
                   conversationId: convId,
                   projectId: projectId
                 })
@@ -3239,7 +3247,7 @@ export function MemoryChat({
         <img
           src={imgProgress.preview}
           alt="forming"
-          className="mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover"
+          className={`mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover ${qwenLatentPreview ? 'grayscale' : ''}`}
         />
       ) : (
         <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">

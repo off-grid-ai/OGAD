@@ -57,6 +57,7 @@ afterEach(() => {
 
 const FEW_STEP = 'sdxl-lightning.gguf' // shared image-defaults: defaultSteps 10
 const FULL = 'dreamlike-photoreal-v2.gguf' // shared image-defaults: defaultSteps 28
+const QWEN = 'qwen_image_2.1-Q4_K.gguf'
 
 type GenPayload = {
   steps?: number
@@ -782,8 +783,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       message_count: 0
     }
     installApi({
-      active: FULL,
-      models: [FULL],
+      active: QWEN,
+      models: [QWEN],
       conversations: [conv],
       messages: {
         'c-finalizing': [{ id: 1, role: 'user', content: 'finish this image' }]
@@ -795,7 +796,12 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
         projectId: null,
         stage: 'generating',
         enhancedPrompt: 'finish this image',
-        progress: { step: 5, total: 5, secPerStep: 12 },
+        progress: {
+          step: 5,
+          total: 5,
+          secPerStep: 12,
+          preview: 'data:image/png;base64,LATENT'
+        },
         outputPath: null,
         error: null,
         startedAt: 1,
@@ -807,6 +813,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
     expect(await screen.findByText('Finalizing image…')).toBeTruthy()
     expect(screen.queryByText(/0s left/)).toBeNull()
+    expect(screen.getByAltText('forming').className).toContain('grayscale')
   })
 
   it('picking a different model in the dropdown routes through setActiveModalModel and reaches the payload', async () => {
@@ -1009,6 +1016,34 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(await screen.findByAltText('Generated')).toBeTruthy()
     await openLatestCompletedWork(user)
     expect(screen.getByRole('button', { name: 'Generated image, complete' })).toBeTruthy()
+  })
+
+  it('passes the selected init image through an Assistant image-tool turn', async () => {
+    const boundary = installApi({
+      active: QWEN,
+      models: [QWEN],
+      isPro: true,
+      toolResult: {
+        answer: 'The image has been edited.',
+        toolCalls: [{ name: 'generate_image', result: 'Image generation started' }],
+        unified: [],
+        imageRequests: [{ prompt: 'Keep the diagram and use generic labels' }]
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await openImageComposer(user)
+    await user.click(screen.getByRole('button', { name: /init image/i }))
+    await user.click(screen.getByRole('button', { name: /^image$/i }))
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    await sendChat(user, 'Make the model labels generic')
+
+    await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
+    expect(boundary.generateImage.mock.calls[0]![0]).toMatchObject({
+      initImage: '/kept/reference.png',
+      prompt: 'Keep the diagram and use generic labels'
+    })
   })
 
   it('opens the comic reader before its first page and keeps prompt enhancement disabled', async () => {
