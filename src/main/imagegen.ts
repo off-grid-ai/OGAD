@@ -558,6 +558,9 @@ export async function generateImage(
   const remote = getActiveRemoteVisionServerForModality('image')
   const remoteId = remote ? remoteVisionModelId(remote.id, remote.selectedModel) : null
   if (remote && (!params.model || params.model === remote.selectedModel || params.model === remoteId)) {
+    if (params.initImage) {
+      throw new Error('The selected remote image model does not support image editing. Select a local image model that supports an init image.')
+    }
     if (remoteAbort) throw new Error('An image is already generating — please wait for it to finish.')
     const controller = new AbortController()
     remoteAbort = controller
@@ -677,6 +680,9 @@ async function runImageGen(
   // queue (evicts: ['llm']) before we get here, then delegates the spawn to the mflux
   // module. Returns before the sd-cli path.
   if (isMfluxModelId(params.model)) {
+    if (params.initImage) {
+      throw new Error('The selected MLX image model does not support image editing. Select a local image model that supports an init image.')
+    }
     const def = getMfluxModel(params.model)!
     const outDir = path.join(dataDir(), 'generated-images')
     fs.mkdirSync(outDir, { recursive: true })
@@ -742,6 +748,11 @@ async function runImageGen(
   // Core ML models are directories of .mlmodelc resources → routed to the ANE
   // Swift helper; everything else (GGUF) runs on sd-cli.
   const coreml = isCoreMLModelDir(model)
+  if (params.initImage && (coreml || isZImageModel(path.basename(model)))) {
+    throw new Error(
+      `${coreml ? 'The selected Core ML image model' : 'The selected Z-Image model'} does not support image editing. Select a local image model that supports an init image.`
+    )
+  }
   const cli = coreml ? findCoreMLBin() : findSdCli()
   if (!cli) {
     throw new Error(
