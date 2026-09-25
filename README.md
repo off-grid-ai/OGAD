@@ -237,7 +237,9 @@ Grab the latest build from [Releases](https://github.com/off-grid-ai/OGAD/releas
 
 - **macOS** (Apple Silicon) - signed + notarized `.dmg`
 - **Windows** (x64) — NSIS installer (`.exe`)
-- **Linux** (x64, Ubuntu 24.04 or newer) - AppImage or `.deb`. This package contains the core app, including chat text, vision, image generation, voice input and output, and chat tools. Pro is not bundled.
+- **Linux** (x64, Ubuntu 24.04 or newer) - AppImage or `.deb`. This package
+  contains the core app, including chat text, vision, image generation, voice
+  input and output, and chat tools. Off Grid AI Pro is not bundled.
 
 ## Build from source
 
