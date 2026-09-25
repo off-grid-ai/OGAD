@@ -12,11 +12,14 @@ import {
   type RemoteVisionCatalogModel,
   type RemoteVisionModality,
   type RemoteVisionSelections,
+  type RemoteVisionRoleSelections,
+  type RemoteVisionTaskRole,
   type RemoteVisionProvider,
   type RemoteVisionSavedServer,
   type RemoteVisionServerSettings,
   type RemoteVisionServerUpdate
 } from '../../shared/remote-vision-server'
+import { parseRemoteVisionModelId } from '../../shared/remote-vision-server'
 
 const LEGACY_API_KEY_SECRET = 'remote-vision-server:api-key'
 const CONFIG_VERSION = 3
@@ -29,6 +32,7 @@ interface StoredRemoteVisionServer {
   model: string
   enabled?: boolean
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   screenFramesAllowed: boolean
 }
@@ -73,7 +77,13 @@ function normalizeServer(
 ): StoredRemoteVisionServer | null {
   if (!value.id || !value.endpoint || !validProvider(value.provider)) return null
   const selections = value.mediaModels ?? (value.model ? { text: value.model } : {})
-  if (!Object.values(selections).some((model) => typeof model === 'string' && model.trim())) return null
+  const roleModels = value.roleModels ?? {}
+  if (
+    ![...Object.values(selections), ...Object.values(roleModels)].some(
+      (model) => typeof model === 'string' && model.trim()
+    )
+  )
+    return null
   return {
     id: value.id,
     name: value.name?.trim() || defaultServerName(value.endpoint),
@@ -82,6 +92,7 @@ function normalizeServer(
     model: (selections.text ?? value.model ?? '').trim(),
     enabled: value.enabled !== false,
     mediaModels: selections,
+    roleModels,
     modelCatalog: Array.isArray(value.modelCatalog) ? value.modelCatalog : [],
     screenFramesAllowed: value.screenFramesAllowed === true
   }
@@ -156,7 +167,9 @@ function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer
 
 export function getRemoteVisionServerSettings(): RemoteVisionServerSettings {
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false)
+  const active = stored.servers.find(
+    (server) => server.id === stored.activeServerId && server.enabled !== false
+  )
   return {
     provider: active?.provider ?? 'local',
     endpoint: active?.endpoint ?? '',
@@ -172,8 +185,34 @@ export function getActiveRemoteVisionServer():
   | null {
   if (!remoteModelSelected('text')) return null
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false && !!server.model)
+  const active = stored.servers.find(
+    (server) => server.id === stored.activeServerId && server.enabled !== false && !!server.model
+  )
   return active ? { ...active, apiKey: serverApiKey(active.id) } : null
+}
+
+/** Resolve any saved text/vision model reference through its owning server.
+ * Task roles use this seam instead of depending on a provider or catalog kind. */
+export function getRemoteVisionServerForModel(
+  modelReference: string | null | undefined,
+  role?: RemoteVisionTaskRole
+): (StoredRemoteVisionServer & { apiKey: string }) | null {
+  if (!modelReference) return null
+  const reference = parseRemoteVisionModelId(modelReference)
+  if (!reference) return null
+  const stored = readStored()
+  const server = stored.servers.find(
+    (candidate) => candidate.id === reference.serverId && candidate.enabled !== false
+  )
+  if (!server) return null
+  if (role && server.roleModels?.[role] !== reference.modelId) return null
+  const catalogModel = server.modelCatalog?.find((model) => model.id === reference.modelId)
+  if (catalogModel && catalogModel.kind !== 'text') return null
+  return {
+    ...server,
+    model: reference.modelId,
+    apiKey: serverApiKey(server.id)
+  }
 }
 
 export function getActiveRemoteVisionServerForModality(
@@ -181,7 +220,9 @@ export function getActiveRemoteVisionServerForModality(
 ): (StoredRemoteVisionServer & { apiKey: string; selectedModel: string }) | null {
   if (!remoteModelSelected(modality)) return null
   const stored = readStored()
-  const active = stored.servers.find((server) => server.id === stored.activeServerId && server.enabled !== false)
+  const active = stored.servers.find(
+    (server) => server.id === stored.activeServerId && server.enabled !== false
+  )
   const selectedModel = active?.mediaModels?.[modality]
   return active && selectedModel
     ? { ...active, apiKey: serverApiKey(active.id), selectedModel }
@@ -191,7 +232,8 @@ export function getActiveRemoteVisionServerForModality(
 export function activateRemoteVisionModel(serverId: string, modelId: string): boolean {
   const stored = readStored()
   const server = stored.servers.find(
-    (candidate) => candidate.id === serverId && candidate.enabled !== false && candidate.model === modelId
+    (candidate) =>
+      candidate.id === serverId && candidate.enabled !== false && candidate.model === modelId
   )
   if (!server) return false
   writeStored({ ...stored, activeServerId: server.id })
@@ -211,8 +253,11 @@ export function activateRemoteVisionMediaModel(
   modelId: string
 ): boolean {
   const stored = readStored()
-  const server = stored.servers.find((candidate) =>
-    candidate.id === serverId && candidate.enabled !== false && candidate.mediaModels?.[modality] === modelId
+  const server = stored.servers.find(
+    (candidate) =>
+      candidate.id === serverId &&
+      candidate.enabled !== false &&
+      candidate.mediaModels?.[modality] === modelId
   )
   if (!server) return false
   writeStored({ ...stored, activeServerId: serverId })
@@ -220,7 +265,9 @@ export function activateRemoteVisionMediaModel(
   return true
 }
 
-export function deactivateRemoteVisionMediaModel(modality: Exclude<RemoteVisionModality, 'text'>): void {
+export function deactivateRemoteVisionMediaModel(
+  modality: Exclude<RemoteVisionModality, 'text'>
+): void {
   setRemoteModelSelected(modality, false)
 }
 
@@ -243,7 +290,13 @@ export function setRemoteVisionServerSettings(
   const endpoint = remoteVisionApiBase(remoteVisionEndpoint(update.provider, update.endpoint))
   const model = update.model.trim()
   const mediaModels = update.mediaModels ?? (model ? { text: model } : {})
-  if (!endpoint || !Object.values(mediaModels).some((selected) => !!selected.trim())) {
+  const roleModels = update.roleModels ?? {}
+  if (
+    !endpoint ||
+    ![...Object.values(mediaModels), ...Object.values(roleModels)].some((selected) =>
+      Boolean(selected?.trim())
+    )
+  ) {
     throw new Error('Remote model server and at least one model are required.')
   }
   const id = update.serverId || randomUUID()
@@ -256,7 +309,9 @@ export function setRemoteVisionServerSettings(
     model: mediaModels.text?.trim() ?? '',
     enabled: true,
     mediaModels,
-    modelCatalog: update.modelCatalog ?? stored.servers.find((server) => server.id === id)?.modelCatalog ?? [],
+    roleModels,
+    modelCatalog:
+      update.modelCatalog ?? stored.servers.find((server) => server.id === id)?.modelCatalog ?? [],
     screenFramesAllowed: update.screenFramesAllowed === true
   }
   const servers = stored.servers.some((server) => server.id === id)
@@ -299,43 +354,123 @@ export async function testRemoteVisionServer(
     if (update.provider === 'local') return { ok: true, latencyMs: 0 }
     if (!endpoint) throw new Error('Remote model server is required.')
     const key = update.apiKey?.trim() || (update.serverId ? serverApiKey(update.serverId) : '')
-    const response = await fetch(`${endpoint}/models${update.provider === 'openrouter' ? '?output_modalities=text,image,transcription,speech' : ''}`, {
-      headers: key ? { Authorization: `Bearer ${key}` } : undefined,
-      signal: AbortSignal.timeout(10_000)
-    })
+    const response = await fetch(
+      `${endpoint}/models${update.provider === 'openrouter' ? '?output_modalities=all' : ''}`,
+      {
+        headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+        signal: AbortSignal.timeout(10_000)
+      }
+    )
     if (!response.ok) {
       const body = await response.text().catch(() => '')
       let message = body.trim()
       try {
-        const parsed = JSON.parse(body) as { error?: { message?: string } | string; message?: string }
-        message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message ?? ''
-      } catch { /* plain text is already useful */ }
+        const parsed = JSON.parse(body) as {
+          error?: { message?: string } | string
+          message?: string
+        }
+        message =
+          typeof parsed.error === 'string'
+            ? parsed.error
+            : (parsed.error?.message ?? parsed.message ?? '')
+      } catch {
+        /* plain text is already useful */
+      }
       throw new Error((message || `Server returned HTTP ${response.status}.`).slice(0, 500))
     }
-    const body = (await response.json()) as {
-      data?: Array<{ id?: unknown; name?: unknown; kind?: unknown; architecture?: { input_modalities?: unknown; output_modalities?: unknown } }>
-      models?: Array<{ id?: unknown; name?: unknown; model?: unknown; kind?: unknown; architecture?: { input_modalities?: unknown; output_modalities?: unknown } }>
+    type ModelsBody = {
+      data?: Array<{
+        id?: unknown
+        name?: unknown
+        model?: unknown
+        kind?: unknown
+        supported_parameters?: unknown
+        reasoning?: unknown
+        architecture?: { input_modalities?: unknown; output_modalities?: unknown }
+      }>
+      models?: Array<{
+        id?: unknown
+        name?: unknown
+        model?: unknown
+        kind?: unknown
+        supported_parameters?: unknown
+        reasoning?: unknown
+        architecture?: { input_modalities?: unknown; output_modalities?: unknown }
+      }>
     }
-    const entries: Array<{ id?: unknown; name?: unknown; model?: unknown; kind?: unknown; architecture?: { input_modalities?: unknown; output_modalities?: unknown } }> =
-      body.data ?? body.models ?? []
+    const bodies: ModelsBody[] = [(await response.json()) as ModelsBody]
+    if (update.provider === 'openrouter') {
+      const decisionResponse = await fetch(`${endpoint}/models?output_modalities=decisions`, {
+        headers: key ? { Authorization: `Bearer ${key}` } : undefined,
+        signal: AbortSignal.timeout(10_000)
+      }).catch(() => null)
+      if (decisionResponse?.ok) bodies.push((await decisionResponse.json()) as ModelsBody)
+    }
+    const entries: Array<{
+      id?: unknown
+      name?: unknown
+      model?: unknown
+      kind?: unknown
+      supported_parameters?: unknown
+      reasoning?: unknown
+      architecture?: { input_modalities?: unknown; output_modalities?: unknown }
+    }> = [
+      ...new Map(
+        bodies
+          .flatMap((body) => body.data ?? body.models ?? [])
+          .map((entry) => [String(entry.id ?? entry.model ?? ''), entry] as const)
+      ).values()
+    ]
     const models = entries.flatMap((entry) => {
       const id =
         typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
       if (!id) return []
       const kind = entry.kind
-      const outputs = Array.isArray(entry.architecture?.output_modalities) ? entry.architecture.output_modalities : []
-      const inputs = Array.isArray(entry.architecture?.input_modalities) ? entry.architecture.input_modalities : []
-      const modality: RemoteVisionModality = kind === 'image' ? 'image'
-        : kind === 'transcription' ? 'transcription'
-        : kind === 'speech' ? 'voice'
-        : kind === 'chat' || kind === 'vision' || kind === 'text' ? 'text'
-        : outputs.includes('image') ? 'image'
-        : outputs.includes('transcription') ? 'transcription'
-        : outputs.includes('speech') ? 'voice'
-        : update.provider !== 'openrouter' && inputs.includes('audio') && outputs.includes('text') ? 'transcription'
-        : update.provider !== 'openrouter' && outputs.includes('audio') ? 'voice'
-        : 'text'
-      return [{ id, name: typeof entry.name === 'string' ? entry.name : id, kind: modality }]
+      const outputs = Array.isArray(entry.architecture?.output_modalities)
+        ? entry.architecture.output_modalities
+        : []
+      const inputs = Array.isArray(entry.architecture?.input_modalities)
+        ? entry.architecture.input_modalities
+        : []
+      const supportedParameters = Array.isArray(entry.supported_parameters)
+        ? entry.supported_parameters.filter((value): value is string => typeof value === 'string')
+        : []
+      const modality: RemoteVisionModality =
+        kind === 'image'
+          ? 'image'
+          : kind === 'transcription'
+            ? 'transcription'
+            : kind === 'speech'
+              ? 'voice'
+              : kind === 'chat' || kind === 'vision' || kind === 'text'
+                ? 'text'
+                : outputs.includes('image')
+                  ? 'image'
+                  : outputs.includes('transcription')
+                    ? 'transcription'
+                    : outputs.includes('speech') || outputs.includes('audio')
+                      ? 'voice'
+                      : update.provider !== 'openrouter' &&
+                          inputs.includes('audio') &&
+                          outputs.includes('text')
+                        ? 'transcription'
+                        : update.provider !== 'openrouter' && outputs.includes('audio')
+                          ? 'voice'
+                          : 'text'
+      return [
+        {
+          id,
+          name: typeof entry.name === 'string' ? entry.name : id,
+          kind: modality,
+          inputModalities: inputs.filter((value): value is string => typeof value === 'string'),
+          outputModalities: outputs.filter((value): value is string => typeof value === 'string'),
+          supportedParameters,
+          reasoning:
+            Boolean(entry.reasoning) ||
+            supportedParameters.includes('reasoning') ||
+            supportedParameters.includes('include_reasoning')
+        }
+      ]
     })
     return { ok: true, latencyMs: Date.now() - startedAt, models }
   } catch (error) {

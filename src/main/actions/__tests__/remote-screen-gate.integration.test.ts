@@ -6,7 +6,28 @@ import {
   runWithRemoteScreenTaskSession
 } from '../remote-screen-session'
 
-const action = { id: 'screen-task-1' } as ActionRecord
+vi.mock('electron', () => ({ app: { getPath: () => '/tmp/offgrid-remote-screen-gate' } }))
+vi.mock('node:fs/promises', () => ({
+  appendFile: vi.fn(async () => undefined),
+  mkdir: vi.fn(async () => undefined),
+  stat: vi.fn(async () => ({ size: 0 }))
+}))
+
+const action: ActionRecord = {
+  id: 'screen-task-1',
+  type: 'computer_use',
+  intent: 'Run the screen task',
+  args: { goal: 'Run the screen task' },
+  risk: 'navigate',
+  source: 'chat',
+  payloadHash: '0'.repeat(64),
+  idempotencyKey: 'screen-task-1',
+  attempts: 0,
+  attemptLog: [],
+  state: 'ready',
+  createdAt: 1,
+  updatedAt: 1
+}
 const remoteServer = {
   id: 'server-1',
   name: 'Remote vision',

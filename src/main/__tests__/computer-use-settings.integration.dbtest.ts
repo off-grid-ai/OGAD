@@ -42,7 +42,9 @@ describe('Computer Use settings persistence', () => {
 
     expect(getComputerUseSettings()).toEqual({
       modelStrategy: 'same_as_chat',
+      groundingModelId: null,
       decisionModelId: null,
+      showPictureInPicture: false,
       context: '32k',
       screenshotSize: 'large',
       screenshotQuality: 'detailed',

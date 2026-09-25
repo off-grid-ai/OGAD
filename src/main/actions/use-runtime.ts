@@ -41,7 +41,6 @@ import {
   type ComputerTaskTiers
 } from '../accessibility/ax-rail'
 import { getAxRailHost } from '../accessibility/ax-host'
-import { isProEntitled } from '../licensing/license-service'
 import { callConnectorTool } from '../mcp'
 import { makeConnectorRailExecutor } from './connector-rail'
 import { withRemoteScreenGate } from './remote-screen-gate'
@@ -279,9 +278,9 @@ export function getActionsRuntime(): ActionsRuntime {
     continuation,
     targetLabel
   ) => visionExecute(action, checkpoint, continuation, targetLabel)
-  // Direct modes tier AX before vision. Reasoning + Specialist keeps one vision
-  // graph in charge and feeds it the aligned AX/UIA controls. The environment
-  // override still forces one rail for diagnostics.
+  // Direct modes tier AX before vision. The composed strategies keep one vision
+  // graph in charge and feed it aligned AX/UIA controls. The environment override
+  // still forces one rail for diagnostics.
   const computerTaskTiers: ComputerTaskTiers = {
     routingSnapshot: (goal) => getAxRailHost().routingSnapshot(goal),
     runAx: (goal, taskId, journeyId, app, request) =>
@@ -295,16 +294,16 @@ export function getActionsRuntime(): ActionsRuntime {
   const computerTaskExecute = withRemoteScreenGate('computer_use', (action) => {
     const settings = getComputerUseSettings()
     return makeComputerTaskExecutor(computerTaskTiers, {
-      // Model strategy selects which model handles a vision FALLBACK. It must
-      // never bypass verified native application controls. The environment
-      // override remains available only for explicit rail diagnostics.
+      // The composed strategies use one verified graph for native selection,
+      // reasoning recovery, visual grounding, actuation, and verification.
       forcedRail: parseForcedRail(process.env.OFFGRID_COMPUTER_RAIL),
       enabledRails:
         settings.modelStrategy === 'decision_plus_specialist' ||
         settings.modelStrategy === 'decision_plus_reasoning'
           ? ['ax', ...settings.enabledRails.filter((rail) => rail !== 'ax')]
           : settings.enabledRails,
-      preferVisionGraph: settings.modelStrategy === 'text_plus_specialist'
+      preferVisionGraph:
+        settings.modelStrategy === 'text_plus_specialist'
     })(action)
   })
   const engine = new UseEngine({
@@ -319,9 +318,6 @@ export function getActionsRuntime(): ActionsRuntime {
           return semanticExecute(action)
         }
         if (rail === 'browser') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Browser Use requires Off Grid AI Pro.' }
-          }
           recordAuthenticatedTaskLaunch(action, 'web_use')
           return browserExecute(action)
         }
@@ -329,9 +325,6 @@ export function getActionsRuntime(): ActionsRuntime {
           return connectorExecute(action)
         }
         if (rail === 'vision') {
-          if (!isProEntitled()) {
-            return { ok: false, detail: 'Computer Use requires Off Grid AI Pro.' }
-          }
           recordAuthenticatedTaskLaunch(action, 'computer_use')
           // computer_use: accessibility-first, vision as the fallback tier.
           return computerTaskExecute(action)

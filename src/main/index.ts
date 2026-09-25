@@ -650,6 +650,12 @@ app.on('before-quit', (event) => {
     } catch {
       /* best-effort — quit regardless so the app never hangs on exit */
     }
+    try {
+      const { grounderRuntime } = await import('./vision/grounder-runtime')
+      await grounderRuntime.shutdown()
+    } catch {
+      /* best-effort — quit regardless so the app never hangs on exit */
+    }
     engineUnloaded = true
     commitApplicationRelaunch(app)
     app.quit()

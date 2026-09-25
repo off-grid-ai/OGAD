@@ -40,6 +40,21 @@ export type VisionAction =
   | { type: 'finished'; content: string }
   | { type: 'call_user'; content: string }
 
+/** True only when the executed key action structurally submits the current draft. */
+export function submitsDraft(action: VisionAction): boolean {
+  if (action.type === 'press') {
+    return action.keys.some((key) => {
+      const normalized = key.trim().toLowerCase()
+      return normalized === 'enter' || normalized === 'return'
+    })
+  }
+  if (action.type !== 'hotkey') return false
+  return action.keys
+    .toLowerCase()
+    .split(' ')
+    .some((key) => key === 'enter' || key === 'return')
+}
+
 export interface Bounds {
   width: number
   height: number
@@ -90,9 +105,11 @@ function parseVisionActionWithMapper(
   bounds: Bounds,
   map: CoordinateMapper
 ): VisionAction | null {
-  // The model may prefix a Thought:; the action is the last `Action:` line, or
-  // the whole string if it is bare.
-  const actionText = raw.includes('Action:') ? raw.slice(raw.lastIndexOf('Action:') + 7) : raw
+  // UI-TARS providers may prefix the native DSL with either `Action:` or
+  // `action effect:`. Strip only a line-leading protocol label so prose that
+  // happens to mention an action cannot become executable.
+  const prefixed = raw.match(/(?:^|\n)\s*action(?:\s+effect)?\s*:\s*([\s\S]*)$/i)
+  const actionText = prefixed?.[1] ?? raw
   const verb = actionText
     .trim()
     .match(/^([a-z_]+)/i)?.[1]

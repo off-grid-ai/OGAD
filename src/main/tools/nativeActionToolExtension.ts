@@ -12,7 +12,6 @@ import type { ToolCallStatus, ToolContext, ToolExtension, ToolResult } from '../
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 import { shouldGate } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
-import { isProEntitled } from '../licensing/license-service'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runPowerShell } from '../actions/win-powershell'
 import { runNativeAction } from '../actions/native-helper'
@@ -41,8 +40,8 @@ export interface ActionsPort {
 
 export interface NativeActionToolBoundary {
   run: (cmd: NativeActionCommand) => Promise<NativeActionResponse>
-  /** Browser Use and Computer Use are paid capabilities. */
-  isProEntitled: () => boolean
+  /** Allows a host or test boundary to disable long-running task tools. */
+  taskUseEnabled: () => boolean
   actions?: ActionsPort
 }
 
@@ -50,20 +49,15 @@ export interface NativeActionToolBoundary {
  * Computer Use return as soon as their durable task has started. */
 const OUTCOME_WAIT_MS = 30_000
 
-function taskGoalWithConversation(
-  goal: unknown,
-  context: ToolContext | undefined
-): string {
+function taskGoalWithConversation(goal: unknown, context: ToolContext | undefined): string {
   const summary = typeof goal === 'string' ? goal.trim() : ''
   const currentRequest = context?.userQuery?.trim() ?? ''
-  const priorTurns = (context?.history ?? [])
-    .filter((turn) => turn.content.trim())
-    .map(
-      (turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content.trim()}`
-    )
+  const completedPrerequisites = context?.completedPrerequisites?.filter(Boolean) ?? []
   const sections = [
-    priorTurns.length ? `Prior conversation:\n${priorTurns.join('\n')}` : '',
     currentRequest ? `Current user request (authoritative):\n${currentRequest}` : '',
+    completedPrerequisites.length
+      ? `Completed prerequisites (already done; continue from this state):\n${completedPrerequisites.map((item) => `- ${item}`).join('\n')}`
+      : '',
     summary && summary.toLowerCase() !== 'placeholder' && summary !== currentRequest
       ? `Structured task summary:\n${summary}`
       : ''
@@ -123,7 +117,7 @@ function needsCurrentLocation(args: Record<string, unknown>, context?: ToolConte
 
 const productionBoundary: NativeActionToolBoundary = {
   run: inlineRun,
-  isProEntitled,
+  taskUseEnabled: () => true,
   get actions(): ActionsPort {
     // The import is static (the main bundle is one CJS chunk); the runtime
     // itself builds lazily on first access, once the DB exists.
@@ -143,7 +137,7 @@ export class NativeActionToolExtension implements ToolExtension {
   ) {}
 
   schemas(): unknown[] {
-    return buildNativeToolSchemas(specsForPlatform(this.platform, this.boundary.isProEntitled()))
+    return buildNativeToolSchemas(specsForPlatform(this.platform, this.boundary.taskUseEnabled()))
   }
 
   /** What the Tools settings tab lists and toggles. A getter, not a field: the set depends on the
@@ -152,20 +146,20 @@ export class NativeActionToolExtension implements ToolExtension {
    *  which is why every native action - web_use and computer_use included - was invisible and
    *  untoggleable in Settings even while the model could call it. */
   get settings(): readonly { name: string; description: string }[] {
-    return specsForPlatform(this.platform, this.boundary.isProEntitled()).map((spec) => ({
+    return specsForPlatform(this.platform, this.boundary.taskUseEnabled()).map((spec) => ({
       name: spec.name,
       description: spec.description
     }))
   }
 
   canHandle(name: string): boolean {
-    return specsForPlatform(this.platform, this.boundary.isProEntitled()).some(
+    return specsForPlatform(this.platform, this.boundary.taskUseEnabled()).some(
       (spec) => spec.name === name
     )
   }
 
   systemHint(): string {
-    return systemHintForPlatform(this.platform, this.boundary.isProEntitled())
+    return systemHintForPlatform(this.platform, this.boundary.taskUseEnabled())
   }
 
   async execute(
@@ -173,9 +167,9 @@ export class NativeActionToolExtension implements ToolExtension {
     args: Record<string, unknown>,
     context?: ToolContext
   ): Promise<string | ToolResult> {
-    if (isTaskAction(name) && !this.boundary.isProEntitled()) {
+    if (isTaskAction(name) && !this.boundary.taskUseEnabled()) {
       return {
-        text: 'Error: Browser Use and Computer Use require Off Grid AI Pro.',
+        text: 'Error: Browser Use and Computer Use are not available in this build.',
         status: 'failed',
         authoritative: true
       }
@@ -225,6 +219,12 @@ export class NativeActionToolExtension implements ToolExtension {
       const coordinates = currentCoordinates(res.result)
       if (coordinates) context.currentLocation = coordinates
       else context.currentLocationFailed = true
+    }
+    if (name === 'open_url' && context && typeof args.url === 'string' && args.url.trim()) {
+      context.completedPrerequisites = [
+        ...(context.completedPrerequisites ?? []),
+        `open_url opened ${args.url.trim()} in the user's default browser`
+      ]
     }
     return spec.formatResult(res.result)
   }

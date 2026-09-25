@@ -433,7 +433,7 @@ export function MemoryChat({
       // Chat still works when renderer storage is unavailable.
     }
   }, [activeConversationId])
-  const TaskWorkspace = isPro ? getSlot(SLOTS.taskWorkspace) : undefined
+  const TaskWorkspace = getSlot(SLOTS.taskWorkspace)
   const taskWorkspaceVisible = useTaskWorkspaceOpen() && Boolean(TaskWorkspace)
   const [taskWorkspaceDragging, setTaskWorkspaceDragging] = useState(false)
   const reduceWorkspaceMotion = useReducedMotion()
@@ -727,6 +727,19 @@ export function MemoryChat({
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
   const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
+  // Esc closes the open overlay (attachment viewer / image lightbox).
+  useEffect(() => {
+    console.log('MemoryChat effect: overlay escape handler')
+    if (!viewer && !lightbox) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        setViewer(null)
+        setLightbox(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewer, lightbox])
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>()

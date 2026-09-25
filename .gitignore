@@ -13,6 +13,7 @@ component-library-animations/
 
 # Bundled MLX (mflux) Python env — large, rebuilt via scripts/build-mflux-env.sh
 resources/bin/mflux/
+resources/bin/kev-runtime/
 
 # Off Grid AI SD-GGUF conversion build dir
 build-sd-gguf/

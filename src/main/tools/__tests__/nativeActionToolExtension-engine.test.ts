@@ -48,7 +48,7 @@ const proEntitled = (): boolean => true
 // reads, etc.). Without it the extension defaults to process.platform, and on
 // a Linux CI runner specsForPlatform('linux') is empty - every tool unknown.
 const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
-  new NativeActionToolExtension({ run, isProEntitled: proEntitled, actions }, 'darwin')
+  new NativeActionToolExtension({ run, taskUseEnabled: proEntitled, actions }, 'darwin')
 
 describe('the tool-to-action-type map', () => {
   it('covers exactly the mutating tools', () => {
@@ -109,7 +109,7 @@ describe('the engine path', () => {
   it('starts the exact Web Use brief selected by the Chat model without a second gate', async () => {
     const port = makePort()
     const extension = new NativeActionToolExtension(
-      { run, isProEntitled: proEntitled, actions: port },
+      { run, taskUseEnabled: proEntitled, actions: port },
       'darwin'
     )
 
@@ -215,7 +215,7 @@ describe('the engine path', () => {
     const extension = new NativeActionToolExtension(
       {
         run: nativeRun,
-        isProEntitled: proEntitled,
+        taskUseEnabled: proEntitled,
         actions: port
       },
       'darwin'
@@ -361,7 +361,7 @@ describe('the engine path', () => {
 
   it('fails honestly without an engine', async () => {
     run.mockClear()
-    const extension = new NativeActionToolExtension({ run, isProEntitled: proEntitled }, 'darwin')
+    const extension = new NativeActionToolExtension({ run, taskUseEnabled: proEntitled }, 'darwin')
     const reply = await extension.execute('reminders_create', { title: 'x' })
     expect(reply).toMatch(/on-device action engine/)
     expect(run).not.toHaveBeenCalled()
@@ -413,7 +413,7 @@ describe('the engine path', () => {
   })
 
   it('web_use refuses cleanly when no engine is wired, rather than falling to a connector', async () => {
-    const extension = new NativeActionToolExtension({ run, isProEntitled: proEntitled }, 'darwin')
+    const extension = new NativeActionToolExtension({ run, taskUseEnabled: proEntitled }, 'darwin')
     const reply = await extension.execute('web_use', { goal: 'x' })
     expect(reply).toMatchObject({
       text: expect.stringMatching(/on-device action engine/),

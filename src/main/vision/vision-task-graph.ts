@@ -33,7 +33,10 @@ import type {
   VisionPolicyDecision,
   VisionPolicyHistoryStep
 } from './model-adapters/types'
-import { boundedContinuationCapsule } from './model-adapters/continuation-capsule'
+import {
+  boundedContinuationCapsule,
+  continuationFromTaskSteps
+} from './model-adapters/continuation-capsule'
 import { uiTarsAdapter } from './model-adapters/ui-tars'
 
 type WorkflowRoute =
@@ -343,11 +346,14 @@ class VisionTaskGraphRuntime {
   private consecutiveSuspectedNoops = 0
   private previousActionEffect?: VisionActionEffect
   private previousExpectedEffect?: string
+  private pendingActionVerification = false
   private pendingActionEvidence?: ScreenEvidence
   private pendingExpectedEffect?: string
+  private consecutiveCaptureFailures = 0
   private mustRethink = false
   private handoffs = 0
   private modelStep = 0
+  private sessionCycle = 1
   /**
    * The plan phase this run is working on.
    *
@@ -378,9 +384,21 @@ class VisionTaskGraphRuntime {
     this.parseResponse = deps.parseResponse ?? uiTarsAdapter.parseResponse
     this.phaseIndex = resumedPhaseIndex(deps.plan, deps.resumedSteps)
     this.reportPhase = createTaskPhaseReporter(deps.plan, deps.onPhase)
-    this.basePlanContext = deps.plan ? formatTaskExecutionPlanContext(deps.plan) : ''
+    this.basePlanContext = [
+      deps.plan ? formatTaskExecutionPlanContext(deps.plan) : '',
+      deps.repeatUntilSessionLimit
+        ? 'Timed session mode: repeat this plan until the external session deadline ends the run. Completing the final milestone completes one activity cycle, not the full task. For each new cycle, choose a different approved search term and a different relevant item. Do not repeat an earlier engagement.'
+        : ''
+    ]
+      .filter(Boolean)
+      .join('\n\n')
     this.checkpointInterval = Math.max(1, Math.floor(deps.checkpointInterval ?? 9))
     this.visualHistoryFrames = Math.max(0, Math.floor(deps.visualHistoryFrames ?? 2))
+    this.continuation = continuationFromTaskSteps(
+      deps.resumedSteps ?? [],
+      this.visualHistoryFrames,
+      deps.plan?.phases[this.phaseIndex]?.title ?? 'Choose the next safe action'
+    )
     this.maxPlanningSteps = Math.max(
       1,
       Math.floor(deps.maxPlanningSteps ?? DEFAULT_COMPUTER_USE_STEP_BUDGET)
@@ -394,6 +412,12 @@ class VisionTaskGraphRuntime {
   stopAfterAbort(): void {
     if (this.finalResult) return
     const summary = this.deps.guard.snapshot().reason || 'Stopped'
+    if (this.deps.guard.automationStatus === 'completed') {
+      this.progress('complete', summary)
+      this.note(`done: ${summary}`)
+      this.finish(true, summary)
+      return
+    }
     this.progress('stopped', summary)
     this.note(`stopped: ${summary}`)
     this.finish(false, summary)
@@ -471,6 +495,7 @@ class VisionTaskGraphRuntime {
       .join('\n\n')
     try {
       const shot = await this.deps.screen.capture()
+      this.consecutiveCaptureFailures = 0
       const evidence = await screenEvidence(shot)
       if (this.pendingActionEvidence) {
         const measurement = actionEffect(
@@ -480,6 +505,12 @@ class VisionTaskGraphRuntime {
         )
         this.previousActionEffect = measurement.effect
         this.previousExpectedEffect = this.pendingExpectedEffect
+        const trajectoryStep = this.policyHistory.at(-1)
+        if (trajectoryStep) {
+          trajectoryStep.result = this.previousExpectedEffect
+            ? `Fresh observation captured. Expected state: ${this.previousExpectedEffect}. Mechanical change check: ${measurement.effect}. The model must verify whether the expected state is visible; unrelated change is inconclusive.`
+            : `Fresh observation captured. Mechanical change check: ${measurement.effect}.`
+        }
         this.note(`action effect: ${this.previousActionEffect}`)
         console.log('[vision][verification] action effect', {
           action: this.previousVerifiedAction?.action.type,
@@ -524,7 +555,14 @@ class VisionTaskGraphRuntime {
         error: message
       })
       if (error instanceof RecoverableVisionError) {
+        this.consecutiveCaptureFailures += 1
         this.note(`rejected observation: ${message}`)
+        if (this.consecutiveCaptureFailures >= MAX_CONSECUTIVE_RETHINKS) {
+          const failure = `Computer use could not refresh the target after ${MAX_CONSECUTIVE_RETHINKS} attempts: ${message}`
+          this.progress('failed', failure)
+          this.finish(false, failure)
+          return { route: 'end' }
+        }
         this.progress('checking', 'Refreshing the browser observation')
         this.checkpoint()
         return { route: 'gate' }
@@ -574,6 +612,7 @@ class VisionTaskGraphRuntime {
       this.pendingPolicyHistory = {
         response: grounding.response,
         actionText: this.decision.actionText,
+        ...(this.currentReasoning ? { reasoning: this.currentReasoning } : {}),
         ...(grounding.screenshotDataUrl ? { screenshotDataUrl: grounding.screenshotDataUrl } : {})
       }
       return { route: 'handle_decision' }
@@ -619,6 +658,26 @@ class VisionTaskGraphRuntime {
       this.deps.plan && this.phaseIndex < this.deps.plan.phases.length - 1
     )
     if (!hasNextPhase) {
+      if (this.deps.repeatUntilSessionLimit && !this.deps.guard.isHalted) {
+        const completed = this.deps.plan?.phases[this.phaseIndex]
+        this.note(`cycle ${this.sessionCycle} complete: ${completed?.title ?? this.decision.summary}`)
+        this.sessionCycle += 1
+        this.policyHistory.length = 0
+        this.pendingPolicyHistory = undefined
+        this.phaseIndex = 0
+        const next = this.deps.plan?.phases[0]
+        this.continuation = boundedContinuationCapsule(
+          {
+            done: [`Activity cycle ${this.sessionCycle - 1} completed`],
+            next: next?.title ?? 'Start the next activity cycle',
+            remember: `Start activity cycle ${this.sessionCycle}. Use a different approved search term and a different relevant item. Do not repeat an earlier engagement.`
+          },
+          this.visualHistoryFrames
+        )
+        this.reportPhase(this.phaseIndex)
+        this.progress('checking', `Starting activity cycle ${this.sessionCycle}`)
+        return { route: 'gate' }
+      }
       if (!this.deps.guard.isVerifying) {
         this.deps.guard.beginVerification()
         this.progress('checking', 'Verifying the result on a fresh screen')
@@ -667,6 +726,50 @@ class VisionTaskGraphRuntime {
     if (decision.kind === 'actions' || decision.kind === 'phase_complete') {
       this.updateContinuation(decision)
     }
+    if (this.pendingActionVerification) {
+      if (decision.kind === 'phase_complete') {
+        const trajectoryStep = this.policyHistory.at(-1)
+        if (trajectoryStep) {
+          trajectoryStep.result = `Verified from the fresh screen: ${decision.summary}`
+        }
+        this.note(`action verified: ${decision.summary}`)
+        this.pendingActionVerification = false
+        this.previousActionEffect = 'confirmed'
+      } else if (decision.kind === 'action_verified') {
+        const trajectoryStep = this.policyHistory.at(-1)
+        if (trajectoryStep) {
+          trajectoryStep.result = `Verified from the fresh screen: ${decision.summary}`
+        }
+        this.note(`action verified: ${decision.summary}`)
+        this.pendingActionVerification = false
+        this.previousActionEffect = 'confirmed'
+        this.discardPendingPolicyHistory()
+        this.observeDecision('reviewed')
+        this.progress('checking', 'Previous action verified; choosing the next task action')
+        this.checkpoint()
+        return { route: 'gate' }
+      } else if (decision.kind === 'action_rejected') {
+        const trajectoryStep = this.policyHistory.at(-1)
+        if (trajectoryStep) {
+          trajectoryStep.result = `Rejected from the fresh screen: ${decision.summary}`
+        }
+        this.note(`action not verified: ${decision.summary}`)
+        this.pendingActionVerification = false
+        this.previousActionEffect = 'suspected_noop'
+        this.discardPendingPolicyHistory()
+        this.observeDecision('blocked', decision.summary)
+        this.progress('checking', 'Recovering from an unverified action')
+        this.checkpoint()
+        return { route: 'gate' }
+      } else {
+        this.discardPendingPolicyHistory()
+        const failure =
+          'The verification turn attempted a new action before resolving the previous action.'
+        this.note(failure)
+        this.finish(false, failure)
+        return { route: 'end' }
+      }
+    }
     if (decision.kind === 'actions') {
       this.consecutiveRethinks = 0
       const repeatedType = decision.actions.find((action) =>
@@ -679,28 +782,24 @@ class VisionTaskGraphRuntime {
         this.observeDecision('blocked', summary)
         this.note(summary)
         this.checkpoint()
-        if (this.duplicateTypeRecoveries > 1) {
-          const failure = 'Computer use repeated the same text without making progress.'
-          this.progress('failed', failure)
-          this.note(failure)
-          this.finish(false, failure)
-          return { route: 'end' }
-        }
         this.progress('checking', 'Taking a fresh observation and choosing a different action')
         return { route: 'gate' }
       }
-      const repeatedClick = decision.actions.find((action) =>
-        isEquivalentClickTarget(
-          action,
-          coordinateFrame(this.requireCaptured().shot),
-          this.previousVerifiedAction
-        )
-      )
+      const repeatedClick =
+        this.previousActionEffect === 'confirmed'
+          ? undefined
+          : decision.actions.find((action) =>
+              isEquivalentClickTarget(
+                action,
+                coordinateFrame(this.requireCaptured().shot),
+                this.previousVerifiedAction
+              )
+            )
       if (repeatedClick) {
         this.equivalentClickRecoveries += 1
         const summary = `Repeated click region blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where the earlier attempt landed.`
         const recovery =
-          'Do not guess another control from its appearance or position. Use a visibly identified control, or use the operating system launcher or search when the target application is not visible.'
+          'Do not target the same region again. Prefer the exact supplied accessibility control. If no exact control is available, change the visible state before asking the grounding specialist for a new coordinate.'
         this.discardPendingPolicyHistory()
         this.observeDecision('blocked', summary)
         this.note(summary)
@@ -734,13 +833,20 @@ class VisionTaskGraphRuntime {
       this.discardPendingPolicyHistory()
       this.observeDecision('blocked', decision.summary)
       this.note(`${decision.direction}: ${decision.summary}`)
-      if (this.consecutiveRethinks >= MAX_CONSECUTIVE_RETHINKS) {
+      if (
+        this.consecutiveRethinks >= MAX_CONSECUTIVE_RETHINKS &&
+        !this.deps.repeatUntilSessionLimit
+      ) {
         const failure = `Computer use could not make progress after ${MAX_CONSECUTIVE_RETHINKS} fresh observations: ${decision.summary}`
         this.progress('failed', 'The visual strategy did not make progress')
         this.note(failure)
         this.checkpoint()
         this.finish(false, failure)
         return { route: 'end' }
+      }
+      if (this.consecutiveRethinks >= MAX_CONSECUTIVE_RETHINKS) {
+        this.note('Timed session recovery continues until the session deadline.')
+        this.consecutiveRethinks = 0
       }
       this.progress('checking', 'Taking a fresh observation after rethinking the action')
       this.checkpoint()
@@ -776,6 +882,16 @@ class VisionTaskGraphRuntime {
       return { route: 'end' }
     }
     if (decision.kind === 'handoff') {
+      if (this.deps.returnAfterAction) {
+        const summary =
+          'Recovery did not find an executable action. No structurally verified user-only input is required.'
+        this.discardPendingPolicyHistory()
+        this.observeDecision('blocked', summary)
+        this.note(`handoff rejected: ${summary}`)
+        this.checkpoint()
+        this.finish(false, summary)
+        return { route: 'end' }
+      }
       this.discardPendingPolicyHistory()
       this.progress('waiting', 'Waiting for you to finish this step')
       this.observeDecision('handoff')
@@ -910,6 +1026,7 @@ class VisionTaskGraphRuntime {
     else {
       this.pendingActionEvidence = captured.evidence
       this.pendingExpectedEffect = decision.expectedEffect
+      this.pendingActionVerification = true
       this.commitPendingPolicyHistory()
     }
     const blockedPhase: ComputerUsePhase = this.deps.guard.isHalted ? 'stopped' : 'paused'
@@ -943,7 +1060,8 @@ class VisionTaskGraphRuntime {
         ok: true,
         summary,
         steps: [...this.steps],
-        handoffs: this.handoffs
+        handoffs: this.handoffs,
+        performedActions: mappedActions
       }
       return { route: 'end' }
     }
@@ -963,12 +1081,14 @@ class VisionTaskGraphRuntime {
       currentMilestone: captured.currentMilestone,
       verifiedActions: [...this.verifiedActions],
       previousActionEffect: this.previousActionEffect,
+      pendingActionVerification: this.pendingActionVerification,
       previousExpectedEffect: this.previousExpectedEffect,
       semanticElements: captured.shot.metadata?.semanticElements,
       previousVerifiedAction: this.previousVerifiedAction,
       coordinateFrame: coordinateFrame(captured.shot),
       signal,
       reportProgress: (action) => this.progress('thinking', action),
+      reportModelIdentity: (identity) => this.deps.onModelIdentity?.(identity),
       reportReasoning: (text) => this.appendReasoning(text)
     }
   }
@@ -980,8 +1100,15 @@ class VisionTaskGraphRuntime {
 
   private updateContinuation(decision: VisionPolicyDecision): void {
     if (decision.continuation) {
+      const done = [...(this.continuation?.done ?? []), ...decision.continuation.done].filter(
+        (item, index, all) => all.indexOf(item) === index
+      )
       this.continuation = boundedContinuationCapsule(
-        decision.continuation,
+        {
+          done,
+          next: decision.continuation.next,
+          remember: decision.continuation.remember || this.continuation?.remember || ''
+        },
         this.visualHistoryFrames
       )
       return
@@ -1098,7 +1225,9 @@ class VisionTaskGraphRuntime {
 
   private finish(ok: boolean, summary: string): void {
     if (ok) this.deps.guard.complete()
-    else if (!this.deps.guard.isHalted) this.deps.guard.fail(summary)
+    else if (!this.deps.returnAfterAction && !this.deps.guard.isHalted) {
+      this.deps.guard.fail(summary)
+    }
     this.finalResult = {
       ok,
       summary,

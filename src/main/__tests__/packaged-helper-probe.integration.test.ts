@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
   if (strcmp(name, "llama-server") == 0) puts("----- common params -----\n-h, --help, --usage    print usage and exit\n-t, --threads N    number of CPU threads (env: LLAMA_ARG_THREADS)");
   else if (strcmp(name, "ffmpeg") == 0) puts("ffmpeg version 6.0-fixture");
   else if (strcmp(name, "whisper-cli") == 0) puts("usage: whisper-cli [options] file\noptions:");
-  else if (strcmp(name, "computer-use-capture") == 0) puts("usage: computer-use-capture <output.png> <display-id> <excluded-window-id> <width> <height>");
+  else if (strcmp(name, "computer-use-capture") == 0) puts("usage: computer-use-capture <output.png> <display-id> <width> <height>");
   else if (strcmp(name, "sd-server") == 0) puts("stable-diffusion.cpp version fixture\nUsage: sd-server [options]");
   else if (strcmp(name, "sd-cli") == 0) puts("stable-diffusion.cpp version fixture\nUsage: sd-cli [options]");
   else return 64;

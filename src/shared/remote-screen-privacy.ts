@@ -38,14 +38,22 @@ export function remoteScreenDecision(input: {
     RemoteVisionSavedServer,
     'name' | 'provider' | 'endpoint' | 'screenFramesAllowed'
   > | null
+  activeServers?: Array<
+    Pick<RemoteVisionSavedServer, 'name' | 'provider' | 'endpoint' | 'screenFramesAllowed'>
+  >
 }): RemoteScreenDecision {
-  const { activeServer } = input
-  if (
-    input.modelStrategy === 'separate_specialist' ||
+  const legacyServer = input.activeServer
+  const activeServers =
+    input.activeServers ??
+    (input.modelStrategy === 'separate_specialist' ||
     input.modelStrategy === 'decision_plus_specialist' ||
-    !activeServer ||
-    !providerNeedsScreenDisclosure(activeServer.provider)
-  ) {
+    !legacyServer
+      ? []
+      : [legacyServer])
+  const activeServer = activeServers.find((server) =>
+    providerNeedsScreenDisclosure(server.provider)
+  )
+  if (!activeServer || !providerNeedsScreenDisclosure(activeServer.provider)) {
     return { allowed: true, remote: false }
   }
 

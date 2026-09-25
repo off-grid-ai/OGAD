@@ -39,7 +39,7 @@ describe('UI-Mate official response fixtures', () => {
 
 describe('UI-Mate policy', () => {
   it('uses the official base action schema', () => {
-    expect(UI_MATE_GENERATION_CONFIG).toEqual({ temperature: 1, topP: 0.95 })
+    expect(UI_MATE_GENERATION_CONFIG).toEqual({ maxTokens: 512, temperature: 1, topP: 0.95 })
     expect(UI_MATE_TOOL_SCHEMA.function.parameters.properties.action.enum).toEqual([
       'left_click',
       'right_click',

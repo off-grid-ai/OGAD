@@ -12,37 +12,46 @@ export async function dispatchVisionAction(input: {
   actuation: ActuationPort
   action: VisionAction
   goal: string
+  signal?: AbortSignal
   inspectFocused?: () => Promise<FocusedInputTarget>
   navigate?: (url: string) => Promise<void>
 }): Promise<VisionDispatchResult> {
   const { actuation, action, goal } = input
+  const ensureLive = (): void => input.signal?.throwIfAborted()
+  ensureLive()
   if (action.type === 'type') {
     const target = await (input.inspectFocused ?? inspectFocusedInput)()
+    ensureLive()
     const decision = secureInputDecision({ content: action.content, goal, target })
     if (decision.kind === 'handoff') return { handoff: decision.reason }
-    await actuation.typeText(action.content)
+    await actuation.typeText(action.content, input.signal)
     return {}
   }
 
   switch (action.type) {
     case 'click':
       await actuation.moveMouse(action.point.x, action.point.y)
+      ensureLive()
       await actuation.click('left', 1)
       return {}
     case 'double_click':
       await actuation.moveMouse(action.point.x, action.point.y)
+      ensureLive()
       await actuation.click('left', 2)
       return {}
     case 'right_click':
       await actuation.moveMouse(action.point.x, action.point.y)
+      ensureLive()
       await actuation.click('right', 1)
       return {}
     case 'middle_click':
       await actuation.moveMouse(action.point.x, action.point.y)
+      ensureLive()
       await actuation.click('middle', 1)
       return {}
     case 'triple_click':
       await actuation.moveMouse(action.point.x, action.point.y)
+      ensureLive()
       await actuation.click('left', 3)
       return {}
     case 'drag':
@@ -69,6 +78,7 @@ export async function dispatchVisionAction(input: {
       return {}
     case 'scroll':
       await actuation.moveMouse(action.point.x, action.point.y)
+      ensureLive()
       await actuation.scroll(action.direction)
       return {}
     case 'scroll_by':

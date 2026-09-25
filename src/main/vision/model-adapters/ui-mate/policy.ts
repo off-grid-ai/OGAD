@@ -32,10 +32,11 @@ export type UIMateControl = 'WAIT' | 'USER' | 'DONE' | 'FAIL'
 
 export const UI_MATE_GENERATION_CONFIG = {
   temperature: 1,
-  topP: 0.95
+  topP: 0.95,
+  maxTokens: 512
 } as const
 
-export const UI_MATE_MAX_HISTORY_STEPS = 4
+export const UI_MATE_MAX_HISTORY_STEPS = 2
 
 export interface UIMateAction {
   action: UIMateActionName
@@ -210,6 +211,8 @@ Response format for every step:
 
 Rules:
 - Output exactly in the order: <think>...</think>, <action>...</action>, <tool_call>...</tool_call>.
+- Choose only the single next UI action. Do not solve or explain the full task in this response.
+- Keep the <think> block below 80 words and return exactly one tool call.
 - From a first-person perspective, systematically assess progress and errors, evaluate potential next steps, and precisely plan text inputs (cursor position and expected outcomes)
 - Be brief for Action: one sentence for action description.
 - Do not output anything else outside those parts.
@@ -308,6 +311,10 @@ export function compactUIMateResponse(response: string, includeThinking = false)
 
 function actionText(response: string): string {
   return response.match(/<action>\s*([\s\S]*?)\s*<\/action>/i)?.[1]?.trim() ?? ''
+}
+
+function invokedActionText(response: string): string {
+  return response.match(/<invoke\b[^>]*\bname=["']([^"']+)["'][^>]*>/i)?.[1]?.trim() ?? ''
 }
 
 const MAX_DECISION_RATIONALE_LENGTH = 320
@@ -477,12 +484,15 @@ export function parseUIMateResponse(
   response: string,
   viewport: { width: number; height: number }
 ): UIMateParsedResponse {
-  const summary = actionText(response)
+  const rawCalls = toolCalls(response)
+  const summary =
+    actionText(response) ||
+    invokedActionText(response) ||
+    (typeof rawCalls[0]?.action === 'string' ? rawCalls[0].action.replaceAll('_', ' ') : '')
   const decisionRationale = summarizeUIMateThinking(response)
   if (!summary) {
     return { actionText: '', actions: [], control: 'FAIL', decisionRationale }
   }
-  const rawCalls = toolCalls(response)
   if (rawCalls.length === 0) {
     return {
       actionText: summary,

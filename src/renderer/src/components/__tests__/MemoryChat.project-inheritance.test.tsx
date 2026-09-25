@@ -77,10 +77,10 @@ function installApi(
     saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => (Array.isArray(project) ? project : [project])),
     styleThumbs: vi.fn(async () => ({})),
-    listSkills: vi.fn(async () => []),
-    toolChat
-  }
-  ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
+      listSkills: vi.fn(async () => []),
+      toolChat
+    }
+   ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
   return { createRagConversation, toolChat }
 }
 

@@ -98,6 +98,11 @@ export interface OptionDecision {
 }
 
 const DECISION_LABELS = 'ABCDEFGHIJ'
+// llama.cpp's top-probability list also contains punctuation and alternate
+// token forms. Asking only for the option count can omit a valid A-J token and
+// silently turn a full distribution into zeros. Keep this bounded, but large
+// enough to retain every grammar-valid option before normalization.
+const DECISION_PROBABILITY_SLOTS = 64
 
 export function buildDecisionPrompt(
   context: string,
@@ -158,7 +163,7 @@ export function buildDecisionRequest(
       ? { prompt_string: `${mediaMarker}\n${prompt}`, multimodal_data: [imageBase64] }
       : prompt,
     n_predict: 1,
-    n_probs: optionCount,
+    n_probs: DECISION_PROBABILITY_SLOTS,
     post_sampling_probs: true,
     temperature: 1.3,
     top_k: 0,
@@ -1294,7 +1299,7 @@ export class LLMService {
         const body = JSON.stringify(
           buildDecisionRequest(prompt, options.length, image?.base64, this.mediaMarker ?? undefined)
         )
-        const raw = await postCompletionOnce(this.port, body, 60_000, signal, '/completion')
+        const raw = await postCompletionOnce(this.port, body, undefined, signal, '/completion')
         return parseOptionDecision(raw, options.length)
       })
     } finally {
@@ -1328,6 +1333,10 @@ export class LLMService {
       maxTokens?: number
       temperature?: number
       topP?: number
+      topK?: number
+      minP?: number
+      presencePenalty?: number
+      repeatPenalty?: number
       thinking?: boolean
       signal?: AbortSignal
       responseFormat?: unknown
@@ -1343,6 +1352,10 @@ export class LLMService {
         maxTokens: maxTokensForWire(resolveMaxTokens(options.maxTokens, this.maxTokens)),
         temperature: options.temperature ?? this.temperature,
         topP: options.topP ?? this.topP,
+        topK: options.topK ?? this.topK,
+        minP: options.minP ?? this.minP,
+        presencePenalty: options.presencePenalty,
+        repeatPenalty: options.repeatPenalty ?? this.repeatPenalty,
         thinking: options.thinking,
         // Same setting the local engine gets — one remote seam, so every remote caller
         // (chat, Web Use, Computer Use) honours the configured thinking cap.
@@ -1406,6 +1419,10 @@ export class LLMService {
       responseFormat?: unknown
       temperature?: number
       topP?: number
+      topK?: number
+      minP?: number
+      presencePenalty?: number
+      repeatPenalty?: number
       enableThinking?: boolean
       disableThinking?: boolean
       separateReasoning?: boolean
@@ -1448,6 +1465,10 @@ export class LLMService {
       responseFormat?: unknown
       temperature?: number
       topP?: number
+      topK?: number
+      minP?: number
+      presencePenalty?: number
+      repeatPenalty?: number
       enableThinking?: boolean
       disableThinking?: boolean
       separateReasoning?: boolean
@@ -1461,8 +1482,13 @@ export class LLMService {
           messages: messages,
           max_tokens: maxTokensForWire(resolveMaxTokens(maxTokens, this.maxTokens)),
           temperature: opts.temperature ?? this.temperature,
-          ...this.samplingPayload(),
-          ...(opts.topP === undefined ? {} : { top_p: opts.topP })
+          ...samplingPayload({
+            topP: opts.topP ?? this.topP,
+            topK: opts.topK ?? this.topK,
+            minP: opts.minP ?? this.minP,
+            repeatPenalty: opts.repeatPenalty ?? this.repeatPenalty
+          }),
+          ...(opts.presencePenalty === undefined ? {} : { presence_penalty: opts.presencePenalty })
         }
         // Grammar-constrained output: llama.cpp converts the JSON schema to a
         // GBNF grammar so the model can ONLY emit valid matching JSON.
@@ -1471,12 +1497,12 @@ export class LLMService {
         // their official protocol. General models use the separated reasoning
         // channel so a long thought does not hide the final policy answer.
         if (opts.enableThinking !== undefined) {
+          Object.assign(
+            payload,
+            reasoningBudgetPayload(opts.enableThinking, this.reasoningBudget)
+          )
           if (opts.separateReasoning) {
-            Object.assign(
-              payload,
-              thinkingPayload(opts.enableThinking, this.thinkingDialect),
-              reasoningBudgetPayload(opts.enableThinking, this.reasoningBudget)
-            )
+            Object.assign(payload, thinkingPayload(opts.enableThinking, this.thinkingDialect))
           } else {
             payload.chat_template_kwargs = { enable_thinking: opts.enableThinking }
           }
@@ -1602,6 +1628,10 @@ export class LLMService {
     opts: {
       temperature?: number
       topP?: number
+      topK?: number
+      minP?: number
+      presencePenalty?: number
+      repeatPenalty?: number
       thinking?: boolean
       signal?: AbortSignal
       tools?: unknown[]
@@ -1619,6 +1649,10 @@ export class LLMService {
         maxTokens: opts.maxTokens,
         temperature: opts.temperature,
         topP: opts.topP,
+        topK: opts.topK,
+        minP: opts.minP,
+        presencePenalty: opts.presencePenalty,
+        repeatPenalty: opts.repeatPenalty,
         thinking: opts.thinking,
         signal: opts.signal,
         responseFormat: opts.responseFormat,
@@ -1638,8 +1672,13 @@ export class LLMService {
         messages,
         max_tokens: maxTokensForWire(resolveMaxTokens(opts.maxTokens, this.maxTokens)),
         temperature: opts.temperature ?? this.temperature,
-        ...this.samplingPayload(),
-        ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
+        ...samplingPayload({
+          topP: opts.topP ?? this.topP,
+          topK: opts.topK ?? this.topK,
+          minP: opts.minP ?? this.minP,
+          repeatPenalty: opts.repeatPenalty ?? this.repeatPenalty
+        }),
+        ...(opts.presencePenalty === undefined ? {} : { presence_penalty: opts.presencePenalty }),
         stream: true,
         // Ask for the token counts. Without this the final chunk carries no usage, so the app can
         // report how long a generation took but never how many tokens it produced.

@@ -67,6 +67,7 @@ import {
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
 import { getComputerUseSettings, setComputerUseSettings } from './computer-use-settings'
+import { binRoots } from './runtime-env'
 
 // Desktop ships the Prism llama.cpp engine required by these packed weights.
 // Keep this entry here: the shared catalog also feeds Mobile, whose llama.rn
@@ -119,10 +120,10 @@ export const DECIDER_2B: ModelEntry = {
   releaseDate: '2026-09-19',
   files: [
     {
-      name: 'decider-2b-q8_0.gguf',
-      url: 'https://huggingface.co/cosetoenor/decider-2b-GGUF/resolve/a087dd15c820ce3a5a7c8c8fbee949019e944155/decider-2b-q8_0.gguf',
-      sizeBytes: 2012012544,
-      sha256: 'cac2782be4136164e0594bd67b4128e86cb2838c309a0e6f7465d6f7e268483f',
+      name: 'decider-2b-v10-q8_0.gguf',
+      url: 'https://huggingface.co/cosetoenor/decider-2b-GGUF/resolve/dcc6e5537f922266d1126c15682ac0929517ee33/decider-2b-q8_0.gguf',
+      sizeBytes: 2012012576,
+      sha256: 'cc136df323a0d10745447c3cb429a5978a3aa24bd261c00b85bdcba92b859184',
       role: 'primary'
     }
   ]
@@ -160,14 +161,161 @@ export const DECIDER_2B_VISION: ModelEntry = {
   ]
 }
 
+export const KEV_4B_ID = 'jaredpalmer/kev-4b'
+
+const KEV_4B: ModelEntry = {
+  id: KEV_4B_ID,
+  name: 'Kev 4B',
+  kind: 'computer_use',
+  org: 'Jared Palmer',
+  description: 'Local pointer-head model for typed Computer Use decisions.',
+  params: 4,
+  minRamGb: 16,
+  tags: ['Decision', 'Decider', 'Fast'],
+  grounder: false,
+  isNew: true,
+  releaseDate: '2026-09-21',
+  files: [
+    {
+      name: 'kev-4b/checkpoint/head.pt',
+      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/485ace8703592fcf405488b262449990824cfed1/head.pt',
+      sizeBytes: 5248767,
+      sha256: 'd8f796da36ff7bd7c0fb9496b452139bb7851af4fc82b07b500b682d3f721d6a',
+      role: 'primary'
+    },
+    {
+      name: 'kev-4b/checkpoint/adapter_config.json',
+      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/485ace8703592fcf405488b262449990824cfed1/adapter_config.json',
+      sizeBytes: 1271,
+      sha256: '8a05dfd6c5e7f61a62e6db5d8de8093a8dbbd105aa7ee7b5e7b73f6249f45617',
+      role: 'aux'
+    },
+    {
+      name: 'kev-4b/checkpoint/adapter_model.safetensors',
+      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/485ace8703592fcf405488b262449990824cfed1/adapter_model.safetensors',
+      sizeBytes: 129924032,
+      sha256: '9797de69a42188e411b17b7b4fcb66a23374dcebc21d71a7a66f836b5d34df2b',
+      role: 'aux'
+    },
+    {
+      name: 'kev-4b/base/config.json',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/config.json',
+      sizeBytes: 3161,
+      sha256: 'ddc63e1c717afa86c865bb5e01313d89d72bb53b97ad4a8a03ba8510c0621670',
+      role: 'aux'
+    },
+    {
+      name: 'kev-4b/base/merges.txt',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/merges.txt',
+      sizeBytes: 3353259,
+      sha256: 'a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d',
+      role: 'tokenizer'
+    },
+    {
+      name: 'kev-4b/base/model.safetensors-00001-of-00002.safetensors',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/model.safetensors-00001-of-00002.safetensors',
+      sizeBytes: 5329398712,
+      sha256: 'df547074dce70532a0493e5433152bd17a65efb89088cfabc2e7e2371a93d712',
+      role: 'aux'
+    },
+    {
+      name: 'kev-4b/base/model.safetensors-00002-of-00002.safetensors',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/model.safetensors-00002-of-00002.safetensors',
+      sizeBytes: 3990429344,
+      sha256: '590fbaac095dd31db886c322d9d2f7df47777966391acf306ddddc3e4e3a15ef',
+      role: 'aux'
+    },
+    {
+      name: 'kev-4b/base/model.safetensors.index.json',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/model.safetensors.index.json',
+      sizeBytes: 76196,
+      sha256: 'eae340074abb0a5f31a6621f7ae8e8248a7c1790df04a722c4e4b70c2a6d1dbb',
+      role: 'aux'
+    },
+    {
+      name: 'kev-4b/base/tokenizer.json',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/tokenizer.json',
+      sizeBytes: 12807196,
+      sha256: 'fe000e3ed39ed12b8d2481d527d44f93c65d37e87645d2dcc80d1bf9d50d2927',
+      role: 'tokenizer'
+    },
+    {
+      name: 'kev-4b/base/tokenizer_config.json',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/tokenizer_config.json',
+      sizeBytes: 16713,
+      sha256: '3891e840d7dc5fca0af33d3a25083a735e36fe06214e3f707024820cb6b9f89c',
+      role: 'tokenizer'
+    },
+    {
+      name: 'kev-4b/base/vocab.json',
+      url: 'https://huggingface.co/Qwen/Qwen3.5-4B-Base/resolve/1001bb4d826a52d1f399e183466143f4da7b741b/vocab.json',
+      sizeBytes: 6722759,
+      sha256: 'ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003',
+      role: 'tokenizer'
+    }
+  ]
+}
+
+export interface KevRuntimeArtifact {
+  checkpoint: string
+  base: string
+  python: string
+  script: string
+}
+
+/** Resolve the packaged server runtime and the model downloaded from the Models screen. */
+export function resolveKevRuntimeArtifact(): KevRuntimeArtifact | null {
+  if (
+    !((process.platform === 'darwin' && process.arch === 'arm64') || process.platform === 'win32')
+  ) {
+    return null
+  }
+  const modelRoot = path.join(llm.getModelsDir(), 'kev-4b')
+  const checkpoint =
+    reusableKevCheckpointDir(llm.getModelsDir()) ?? path.join(modelRoot, 'checkpoint')
+  const base = reusableKevBaseDir(llm.getModelsDir()) ?? path.join(modelRoot, 'base')
+  const pythonRelative =
+    process.platform === 'win32'
+      ? path.join('kev-runtime', 'python', 'python.exe')
+      : path.join('kev-runtime', 'python', 'bin', 'python3')
+  const packagedPython = binRoots()
+    .map((directory) => path.join(directory, pythonRelative))
+    .find((candidate) => fs.existsSync(candidate))
+  const legacyPython = path.join(
+    path.dirname(llm.getModelsDir()),
+    'decision-models',
+    'kev-source',
+    '.venv',
+    'bin',
+    'python'
+  )
+  const python = packagedPython ?? (fs.existsSync(legacyPython) ? legacyPython : undefined)
+  const script = binRoots()
+    .map((directory) => path.join(directory, 'kev-local-server.py'))
+    .find((candidate) => fs.existsSync(candidate))
+  const required = [
+    path.join(checkpoint, 'head.pt'),
+    path.join(checkpoint, 'adapter_model.safetensors'),
+    path.join(base, 'config.json'),
+    path.join(base, 'model.safetensors.index.json'),
+    path.join(base, 'model.safetensors-00001-of-00002.safetensors'),
+    path.join(base, 'model.safetensors-00002-of-00002.safetensors'),
+    path.join(base, 'tokenizer.json'),
+    path.join(base, 'tokenizer_config.json')
+  ]
+  return python &&
+    script &&
+    required.every((file) => fileSizeOf(path.dirname(file), path.basename(file)) > 0)
+    ? { checkpoint, base, python, script }
+    : null
+}
+
 export async function desktopCatalog(): Promise<ModelEntry[]> {
   const { CATALOG } = await import('@offgrid/models')
   const catalog = CATALOG.map((model) =>
-    model.grounder
-      ? { ...model, tags: [...new Set(['Specialist', ...(model.tags ?? [])])] }
-      : model
+    model.grounder ? { ...model, tags: [...new Set(['Specialist', ...(model.tags ?? [])])] } : model
   )
-  return [BONSAI_2, DECIDER_2B, DECIDER_2B_VISION, ...catalog]
+  return [BONSAI_2, DECIDER_2B, DECIDER_2B_VISION, KEV_4B, ...catalog]
 }
 
 export interface DownloadProgress {
@@ -197,11 +345,65 @@ function activeModelFile(): string {
   return path.join(llm.getModelsDir(), 'active-model.json')
 }
 
+const KEV_BASE_PREFIX = 'kev-4b/base/'
+const KEV_CHECKPOINT_PREFIX = 'kev-4b/checkpoint/'
+const KEV_BASE_FILE_SIZES = new Map(
+  KEV_4B.files
+    .filter((file) => file.name.startsWith(KEV_BASE_PREFIX))
+    .map((file) => [file.name.slice(KEV_BASE_PREFIX.length), file.sizeBytes ?? 0])
+)
+const KEV_CHECKPOINT_FILE_SIZES = new Map(
+  KEV_4B.files
+    .filter((file) => file.name.startsWith(KEV_CHECKPOINT_PREFIX))
+    .map((file) => [file.name.slice(KEV_CHECKPOINT_PREFIX.length), file.sizeBytes ?? 0])
+)
+
+function directoryHasExpectedFiles(directory: string, files: ReadonlyMap<string, number>): boolean {
+  for (const [name, size] of files) {
+    try {
+      if (fs.statSync(path.join(directory, name)).size !== size) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
+/** A pre-catalog Kev install used this directory. Reuse its Qwen base instead of
+ * downloading a second 9.34 GB copy. GGUF chat weights are not compatible: Kev
+ * needs the original SafeTensors tensors for its LoRA merge. */
+function reusableKevBaseDir(modelsDirectory: string): string | null {
+  const candidate = path.join(path.dirname(modelsDirectory), 'decision-models', 'qwen3.5-4b-base')
+  return directoryHasExpectedFiles(candidate, KEV_BASE_FILE_SIZES) ? candidate : null
+}
+
+/** Preserve installs made before Kev moved into the Models catalog. */
+function reusableKevCheckpointDir(modelsDirectory: string): string | null {
+  const candidate = path.join(path.dirname(modelsDirectory), 'decision-models', 'kev-4b-qwen3.5')
+  return directoryHasExpectedFiles(candidate, KEV_CHECKPOINT_FILE_SIZES) ? candidate : null
+}
+
+function modelFilePath(dir: string, name: string): string {
+  const managed = path.join(dir, name)
+  if (fs.existsSync(managed)) return managed
+  if (name.startsWith(KEV_BASE_PREFIX)) {
+    const reusableBase = reusableKevBaseDir(dir)
+    if (reusableBase) return path.join(reusableBase, name.slice(KEV_BASE_PREFIX.length))
+  }
+  if (name.startsWith(KEV_CHECKPOINT_PREFIX)) {
+    const reusableCheckpoint = reusableKevCheckpointDir(dir)
+    if (reusableCheckpoint) {
+      return path.join(reusableCheckpoint, name.slice(KEV_CHECKPOINT_PREFIX.length))
+    }
+  }
+  return managed
+}
+
 /** Size (bytes) of a file in the models dir; 0 when absent/unreadable. The single
  *  FS probe injected into the pure catalog logic. */
 function fileSizeOf(dir: string, name: string): number {
   try {
-    return fs.statSync(path.join(dir, name)).size
+    return fs.statSync(modelFilePath(dir, name)).size
   } catch {
     return 0
   }
@@ -242,7 +444,10 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     sizeOf: (name) => fileSizeOf(dir, name)
   })
   const remoteModels = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers)
-  return { kinds: MODEL_KINDS, models: [...models, ...remoteModels] }
+  return {
+    kinds: MODEL_KINDS,
+    models: [...models, ...remoteModels]
+  }
 }
 
 export interface ModelIdentity {
@@ -253,6 +458,18 @@ export interface ModelIdentity {
 /** Resolve a captured model ID to its display name without consulting which
  * model is active now. Task runs use this once, then persist the result. */
 export async function resolveModelIdentity(modelId: string): Promise<ModelIdentity> {
+  const remoteReference = parseRemoteVisionModelId(modelId)
+  if (remoteReference) {
+    const server = getRemoteVisionServerSettings().servers.find(
+      (candidate) => candidate.id === remoteReference.serverId
+    )
+    const model = server?.modelCatalog?.find(
+      (candidate) => candidate.id === remoteReference.modelId
+    )
+    if (server && model) {
+      return { modelId, modelName: `${model.name} - ${server.name}` }
+    }
+  }
   try {
     const catalog = (await getCatalog()).models as Array<{ id: string; name?: string }>
     return {
@@ -306,6 +523,51 @@ export async function listInstalled(): Promise<string[]> {
     (model) => model.id
   )
   return [...localInstalled, ...remoteInstalled]
+}
+
+export interface ComputerUseModelArtifact {
+  id: string
+  primaryPath: string
+  projectorPath?: string
+}
+
+/** Resolve one installed Decision artifact without changing active-model.json or the Chat runtime. */
+export async function resolveComputerUseModelArtifact(
+  modelId: string
+): Promise<ComputerUseModelArtifact | null> {
+  const catalog = (await desktopCatalog()) as unknown as CatalogEntry[]
+  const directory = llm.getModelsDir()
+  const entry = catalog.find((candidate) => candidate.id === modelId)
+  if (entry && entry.kind === 'computer_use') {
+    const primary = primaryFileName(entry)
+    const projector = entry.files.find((file) => file.role === 'mmproj')?.name
+    if (
+      primary &&
+      fileSizeOf(directory, primary) > 0 &&
+      (!projector || fileSizeOf(directory, projector) > 0)
+    ) {
+      return {
+        id: modelId,
+        primaryPath: path.join(directory, primary),
+        ...(projector ? { projectorPath: path.join(directory, projector) } : {})
+      }
+    }
+  }
+  const downloaded = downloadedVariant(
+    reconcileDownloadedModelRegistry(directory, catalog),
+    modelId
+  )
+  if (!downloaded || downloaded.kind !== 'computer_use') return null
+  const primary = downloadedPrimary(downloaded)
+  const projector = downloadedProjector(downloaded)
+  if (!primary || fileSizeOf(directory, primary) <= 0) return null
+  return {
+    id: downloaded.id,
+    primaryPath: path.join(directory, primary),
+    ...(projector && fileSizeOf(directory, projector) > 0
+      ? { projectorPath: path.join(directory, projector) }
+      : {})
+  }
 }
 
 export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
@@ -481,8 +743,7 @@ export async function downloadModel(
         // is the set of files this run must actually fetch (a file already on disk is not work),
         // and one percent measures the whole of it.
         const pending = entry.files.filter((file) => {
-          const dest = path.join(dir, file.name)
-          const present = fs.existsSync(dest) && fs.statSync(dest).size > 0
+          const present = fileSizeOf(dir, file.name) > 0
           if (present) {
             writeDiagnosticLog('models.download', 'file.skipped', {
               modelId,
@@ -501,6 +762,7 @@ export async function downloadModel(
         let rateSample: ProgressRateSample | undefined
         for (const [fileIndex, file] of pending.entries()) {
           const dest = path.join(dir, file.name)
+          fs.mkdirSync(path.dirname(dest), { recursive: true })
           const partPath = `${dest}.part`
           activePartPath = partPath
           activePartRecoverable = true
@@ -999,7 +1261,9 @@ export async function getActiveModelIds(): Promise<string[]> {
       ? DECIDER_2B.id
       : null)
   const withDecision =
-    decisionModelId && info.models.some((model) => model.id === decisionModelId)
+    decisionModelId &&
+    (info.models.some((model) => model.id === decisionModelId) ||
+      (decisionModelId === KEV_4B_ID && Boolean(resolveKevRuntimeArtifact())))
       ? [...new Set([...localIds, decisionModelId])]
       : localIds
   return remote && remote.enabled !== false
@@ -1510,7 +1774,20 @@ export async function getStorageInfo(): Promise<StorageInfo> {
       return null
     }
   }
-  const { totalBytes, orphans } = scanModelDir({ entries, known, statFile })
+  const scanned = scanModelDir({ entries, known, statFile })
+  // The generic scanner predates directory-backed packages and scans root GGUF
+  // files. Count managed Kev files here. A reused legacy base is outside this
+  // models directory and is not app-managed storage.
+  const nestedModelBytes = KEV_4B.files.reduce((sum, file) => {
+    if (!file.name.includes('/')) return sum
+    try {
+      return sum + fs.statSync(path.join(dir, file.name)).size
+    } catch {
+      return sum
+    }
+  }, 0)
+  const totalBytes = scanned.totalBytes + nestedModelBytes
+  const { orphans } = scanned
 
   let freeBytes = 0
   try {

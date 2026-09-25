@@ -2,7 +2,11 @@ import { getRagMessages, type RagMessage } from '../database'
 import { getTaskExecutionDevice, getTaskRun, listTaskRuns, recordTaskRun } from './task-history'
 import type { TaskRunSnapshot } from './task-history-store'
 import type { ComputerUseStepDetail } from './task-step-details'
-import { decodeTaskExecutionPlan, type TaskExecutionPlan } from '../../shared/task-execution-plan'
+import {
+  encodeTaskPhaseResume,
+  taskExecutionPlanProgress,
+  type TaskExecutionPlan
+} from '../../shared/task-execution-plan'
 
 const LIVE_STATUSES = new Set(['running', 'paused', 'waiting', 'reconnecting'])
 
@@ -11,6 +15,8 @@ export interface TaskRetryAvailability {
   reason?: string
   executionDeviceId?: string
   executionDeviceName?: string
+  phases?: ReadonlyArray<{ index: number; title: string }>
+  activePhaseIndex?: number
 }
 
 export interface TaskRetryResult extends TaskRetryAvailability {
@@ -36,6 +42,7 @@ export function retryPlanningGoal(goal: string, checkpoint?: TaskRetryCheckpoint
 }
 
 export interface TaskRetryRunner {
+  isActive?(taskId: string): boolean
   web(
     task: TaskRunSnapshot,
     taskId: string,
@@ -59,14 +66,7 @@ interface TaskRetryServiceOptions {
 }
 
 export const TASK_RETRY_TRACE = 'RETRY · Resumed from the failed checkpoint.'
-
-function taskPlan(steps: readonly string[]): TaskExecutionPlan | undefined {
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    const plan = decodeTaskExecutionPlan(steps[index] ?? '')
-    if (plan) return plan
-  }
-  return undefined
-}
+export const TASK_CONTINUE_TRACE = 'CONTINUE · Resumed from the saved checkpoint.'
 
 function taskGuidanceId(context: string | null): string | undefined {
   if (!context) return undefined
@@ -106,8 +106,8 @@ export function taskRetryAvailability(
   device: Readonly<{ id: string; name: string }>
 ): TaskRetryAvailability {
   if (!task) return { available: false, reason: 'This task is no longer in history.' }
-  if (task.status !== 'failed') {
-    return { available: false, reason: 'Only failed tasks can be retried.' }
+  if (task.status !== 'failed' && task.status !== 'stopped') {
+    return { available: false, reason: 'Only failed or stopped tasks can continue.' }
   }
   if (sameJourneyAttemptRunning(task, all)) {
     return { available: false, reason: 'Another attempt is already running.' }
@@ -120,10 +120,17 @@ export function taskRetryAvailability(
       executionDeviceName: task.executionDeviceName
     }
   }
+  const progress = taskExecutionPlanProgress(task.steps)
   return {
     available: true,
     executionDeviceId: device.id,
-    executionDeviceName: device.name
+    executionDeviceName: device.name,
+    ...(progress
+      ? {
+          phases: progress.plan.phases.map((phase, index) => ({ index, title: phase.title })),
+          activePhaseIndex: progress.activePhaseIndex
+        }
+      : {})
   }
 }
 
@@ -135,6 +142,7 @@ export function configureTaskRetryRunner(runner: TaskRetryRunner): void {
 }
 
 const liveRunner: TaskRetryRunner = {
+  isActive: (taskId) => configuredRunner?.isActive?.(taskId) ?? false,
   web: (task, taskId, checkpoint) => {
     if (!configuredRunner) throw new Error('Task retry runner is not configured.')
     return configuredRunner.web(task, taskId, checkpoint)
@@ -157,6 +165,9 @@ export class TaskRetryService {
   ) {}
 
   availability(taskId: string): TaskRetryAvailability {
+    if (this.runner.isActive?.(taskId)) {
+      return { available: false, reason: 'The earlier run is still stopping.' }
+    }
     return taskRetryAvailability(
       this.history.get(taskId),
       this.history.list(),
@@ -164,16 +175,24 @@ export class TaskRetryService {
     )
   }
 
-  retry(taskId: string): TaskRetryResult {
+  retry(taskId: string, phaseIndex?: number): TaskRetryResult {
     const task = this.history.get(taskId)
-    const availability = taskRetryAvailability(task, this.history.list(), this.options.device())
+    const availability = this.availability(taskId)
     if (!availability.available || !task) return availability
 
     const guidance = this.options.guidanceForTask?.(task) ?? []
-    const plan = taskPlan(task.steps)
+    const progress = taskExecutionPlanProgress(task.steps)
+    const plan = progress?.plan
+    if (phaseIndex !== undefined && (!Number.isInteger(phaseIndex) || !plan?.phases[phaseIndex])) {
+      return { available: false, reason: 'That saved plan step is not available.' }
+    }
+    const resumedSteps =
+      phaseIndex === undefined || !plan
+        ? [...task.steps]
+        : [...task.steps, encodeTaskPhaseResume(plan.phases[phaseIndex]!.id)]
     const checkpoint: TaskRetryCheckpoint = {
       taskId: task.taskId,
-      steps: [...task.steps],
+      steps: resumedSteps,
       ...(task.stepDetails?.length ? { stepDetails: [...task.stepDetails] } : {}),
       ...(plan ? { plan } : {}),
       ...(guidance.length ? { guidance } : {}),
@@ -182,14 +201,15 @@ export class TaskRetryService {
       ...(task.currentAction ? { currentAction: task.currentAction } : {})
     }
     const device = this.options.device()
+    const resumeTrace = task.status === 'stopped' ? TASK_CONTINUE_TRACE : TASK_RETRY_TRACE
     this.history.record({
       taskId: task.taskId,
       journeyId: task.journeyId,
       kind: task.kind,
       title: task.title,
       status: 'running',
-      summary: 'Resuming from the failed checkpoint.',
-      steps: [...task.steps, TASK_RETRY_TRACE],
+      summary: 'Resuming from the saved checkpoint.',
+      steps: [...resumedSteps, resumeTrace],
       executionDeviceId: device.id,
       executionDeviceName: device.name,
       currentStep: task.currentStep,
@@ -243,6 +263,6 @@ export function getTaskRetryAvailability(taskId: string): TaskRetryAvailability 
   return retryService.availability(taskId)
 }
 
-export function retryTask(taskId: string): TaskRetryResult {
-  return retryService.retry(taskId)
+export function retryTask(taskId: string, phaseIndex?: number): TaskRetryResult {
+  return retryService.retry(taskId, phaseIndex)
 }

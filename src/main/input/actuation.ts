@@ -15,7 +15,7 @@ export interface ActuationPort {
   moveMouse(x: number, y: number): Promise<void>
   click(button: 'left' | 'right' | 'middle', count: 1 | 2 | 3): Promise<void>
   dragTo(x: number, y: number): Promise<void>
-  typeText(text: string): Promise<void>
+  typeText(text: string, signal?: AbortSignal): Promise<void>
   tapKeys(keys: string): Promise<void>
   pressKeys(keys: readonly string[]): Promise<void>
   keyDown(keys: readonly string[]): Promise<void>
@@ -90,8 +90,18 @@ export function adaptNutActuation(nut: NutApi): ActuationPort {
     async dragTo(x, y) {
       await mouse.drag([new Point(x, y)])
     },
-    async typeText(text) {
-      await keyboard.type(text)
+    async typeText(text, signal) {
+      if (!signal) {
+        await keyboard.type(text)
+        return
+      }
+      // nut.js cannot cancel a queued type call. Keep each native call to one
+      // character so Stop can prevent the rest of an in-flight text action.
+      for (const character of text) {
+        signal.throwIfAborted()
+        await keyboard.type(character)
+      }
+      signal.throwIfAborted()
     },
     async tapKeys(keys) {
       const names = hotkeyToKeyNames(keys)

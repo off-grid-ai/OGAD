@@ -377,7 +377,7 @@ describe('<ChatToolRows/> work timeline', () => {
     expect(screen.getAllByText('The traveler control could not be completed.')).toHaveLength(2)
     const retry = await screen.findByRole('button', { name: 'Retry' })
     await userEvent.click(retry)
-    expect(window.api.tasks!.retry).toHaveBeenCalledWith('web-flight')
+    expect(window.api.tasks!.retry).toHaveBeenCalledWith('web-flight', undefined)
 
     act(() => {
       changed?.({
@@ -450,7 +450,7 @@ describe('<ChatToolRows/> work timeline', () => {
 
     await openCompletedWork()
     await userEvent.click(screen.getByRole('button', { name: 'Computer Use, failed' }))
-    const retry = await screen.findByRole('button', { name: 'Retry on Studio Mac' })
+    const retry = await screen.findByRole('button', { name: 'Continue on Studio Mac' })
     expect((retry as HTMLButtonElement).disabled).toBe(true)
   })
 })

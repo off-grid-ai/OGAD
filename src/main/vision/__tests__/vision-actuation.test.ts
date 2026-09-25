@@ -86,7 +86,7 @@ describe('vision secure-input actuation boundary', () => {
       inspectFocused: async () => ({ state: 'safe' })
     })
 
-    expect(port.typeText).toHaveBeenCalledWith('Quarterly planning notes')
+    expect(port.typeText).toHaveBeenCalledWith('Quarterly planning notes', undefined)
   })
 
   it('parses only the native safety state and returns unknown for invalid output', async () => {

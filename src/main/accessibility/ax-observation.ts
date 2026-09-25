@@ -64,6 +64,41 @@ function mappedAction(
   return JSON.stringify({ ...action, point: { x, y } })
 }
 
+function replayEvidence(observation: AxObservationInput): string | undefined {
+  const snapshot = observation.frame?.snapshot
+  if (!snapshot && !observation.verification) return undefined
+  return JSON.stringify({
+    ...(snapshot
+      ? {
+          observation: {
+            window: [
+              snapshot.processId ?? 0,
+              snapshot.processName ?? '',
+              snapshot.windowId ?? snapshot.windowTitle,
+              snapshot.windowTitle
+            ],
+            revision: snapshot.revision ?? 0,
+            candidates: snapshot.elements.map((element) => [
+                element.stableId ?? '',
+                element.index,
+                element.source ?? 'ax',
+                element.role,
+                element.name,
+                element.x ?? element.cx,
+                element.y ?? element.cy,
+                element.width ?? 0,
+                element.height ?? 0,
+                element.enabled,
+                element.executable !== false,
+                element.region ?? ''
+              ])
+          }
+        }
+      : {}),
+    ...(observation.verification ? { verification: observation.verification } : {})
+  })
+}
+
 /** Persist AX planning evidence through the same bounded, redacted task-history
  * adapter as vision Computer Use. The frame is also available to a
  * vision-capable AX planner. */
@@ -84,6 +119,7 @@ export function persistAxObservation(
         ? observation.result
         : JSON.stringify(observation.parsedAction),
     rawResponse: observation.rawResponse,
+    decisionRationale: replayEvidence(observation),
     ...(frame && executionDevice
       ? {
           screenshot: {

@@ -162,8 +162,13 @@ interface RendererAPIOverrides {
       reason?: string
       executionDeviceId?: string
       executionDeviceName?: string
+      phases?: ReadonlyArray<{ index: number; title: string }>
+      activePhaseIndex?: number
     }>
-    retry: (taskId: string) => Promise<{
+    retry: (
+      taskId: string,
+      phaseIndex?: number
+    ) => Promise<{
       available: boolean
       reason?: string
       taskId?: string
@@ -228,6 +233,7 @@ interface RendererAPIOverrides {
     ) => Promise<boolean>
     showSupervisor: () => Promise<boolean>
     dismissSupervisor: () => Promise<boolean>
+    setSupervisorExpanded: (expanded: boolean) => Promise<boolean>
     getCurrent: () => Promise<{ state: unknown; steps: string[] } | null>
     onStep: (cb: (step: unknown) => void) => () => void
     onTaskState: (cb: (state: unknown) => void) => () => void

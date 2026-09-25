@@ -23,6 +23,8 @@ export type { VisionActionEffect, VisionSemanticElement } from './vision-common-
 export interface VisionCaptureMetadata {
   path?: string
   geometry?: ScreenshotGeometry
+  /** Native title of the captured target window, when accessibility provides it. */
+  windowTitle?: string
   /** CSS-pixel bounds used by browser input for this captured frame. */
   viewport?: Bounds
   /** Optional OS accessibility controls captured with this same frame. */
@@ -46,6 +48,10 @@ export interface VisionTaskContinuation {
   queuedGuidance: string[]
   /** Return to the owning accessibility loop after one successful visual action. */
   returnAfterAction?: boolean
+  /** Run the selected grounding specialist directly for an AX recovery action. */
+  specialistOnly?: boolean
+  /** Run the heavy reasoning model only after the grounding specialist fails. */
+  reasonerOnly?: boolean
 }
 
 /** A screen can request a fresh observation when its capture boundary changed
@@ -67,6 +73,8 @@ export interface VisionGroundingInput {
   verifiedActions?: readonly string[]
   /** Result of comparing the last action's before/after screen and semantic state. */
   previousActionEffect?: VisionActionEffect
+  /** Enforce a verification-only model turn before any further actuation. */
+  pendingActionVerification?: boolean
   previousExpectedEffect?: string
   semanticElements?: readonly VisionSemanticElement[]
   /** Last action that crossed the execution boundary, in the pixel frame used
@@ -79,6 +87,8 @@ export interface VisionGroundingInput {
   coordinateFrame?: VisionPolicyCoordinateFrame
   /** Audit-safe stage updates only. Never send hidden reasoning through this callback. */
   reportProgress?: (action: string) => void
+  /** Report the model that owns the current inference call. */
+  reportModelIdentity?: (identity: { modelId: string; modelName: string }) => void
   /** Separated reasoning-channel deltas from the active model request. */
   reportReasoning?: (text: string) => void
   /** One run-wide cancellation signal shared by the graph and model boundary. */
@@ -170,6 +180,7 @@ export interface VisionTaskDeps {
   waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
   onStep?: (note: string) => void
   onProgress?: (progress: VisionTaskProgress) => void
+  onModelIdentity?: (identity: { modelId: string; modelName: string }) => void
   onReasoning?: (reasoning: VisionTaskReasoning) => void
   onObservation?: (observation: VisionStepObservation) => void
   onCheckpoint?: (step: number, steps: readonly string[]) => void
@@ -181,6 +192,8 @@ export interface VisionTaskDeps {
   maxPlanningSteps?: number
   /** Recovery mode: stop after one successful action without completing the shared task. */
   returnAfterAction?: boolean
+  /** A timed activity repeats its plan until the session owner ends it. */
+  repeatUntilSessionLimit?: boolean
   plan?: TaskExecutionPlan
   onPhase?: (phaseId: string) => void
   /** The trace this run is resuming from, so a retry restarts at the phase it reached instead of
@@ -195,4 +208,6 @@ export interface VisionTaskResult {
   summary: string
   steps: string[]
   handoffs: number
+  /** Actions that crossed the execution boundary in a one-action recovery. */
+  performedActions?: readonly VisionAction[]
 }

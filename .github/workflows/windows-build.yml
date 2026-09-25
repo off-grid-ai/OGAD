@@ -167,6 +167,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # raises the GitHub API rate limit
         run: ./scripts/fetch-win-binaries.ps1
 
+      - name: Build Kev server runtime (model weights excluded)
+        shell: pwsh
+        run: ./scripts/build-kev-runtime.ps1
+
       - name: Build (typecheck + bundle)
         run: npm run build
 

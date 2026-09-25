@@ -22,6 +22,10 @@ export interface RemoteChatRequest {
   maxTokens: number
   temperature: number
   topP?: number
+  topK?: number
+  minP?: number
+  presencePenalty?: number
+  repeatPenalty?: number
   thinking?: boolean
   /** The user's thinking cap in tokens (REASONING_BUDGET_AUTO for unrestricted). */
   reasoningBudget?: number
@@ -245,6 +249,12 @@ function completionRequestBody(
     max_tokens: request.maxTokens,
     temperature: request.temperature,
     ...(request.topP === undefined ? {} : { top_p: request.topP }),
+    ...(request.topK === undefined ? {} : { top_k: request.topK }),
+    ...(request.minP === undefined ? {} : { min_p: request.minP }),
+    ...(request.presencePenalty === undefined ? {} : { presence_penalty: request.presencePenalty }),
+    ...(request.repeatPenalty === undefined
+      ? {}
+      : { repeat_penalty: request.repeatPenalty, repetition_penalty: request.repeatPenalty }),
     ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
     ...(request.tools?.length
       ? { tools: request.tools, tool_choice: request.toolChoice ?? 'auto' }

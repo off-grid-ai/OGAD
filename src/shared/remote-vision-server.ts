@@ -11,10 +11,16 @@ export type RemoteVisionProvider = (typeof REMOTE_VISION_PROVIDERS)[number]
 
 export type RemoteVisionModality = 'text' | 'image' | 'transcription' | 'voice'
 export type RemoteVisionSelections = Partial<Record<RemoteVisionModality, string>>
+export type RemoteVisionTaskRole = 'grounding' | 'decision'
+export type RemoteVisionRoleSelections = Partial<Record<RemoteVisionTaskRole, string>>
 export interface RemoteVisionCatalogModel {
   id: string
   name: string
   kind: RemoteVisionModality
+  inputModalities?: string[]
+  outputModalities?: string[]
+  supportedParameters?: string[]
+  reasoning?: boolean
 }
 
 export interface RemoteVisionSavedServer {
@@ -25,6 +31,7 @@ export interface RemoteVisionSavedServer {
   model: string
   enabled?: boolean
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   /** The user has confirmed that this remote server can receive screen images. */
@@ -79,17 +86,26 @@ export function remoteVisionInventoryModels(
     return (['text', 'image', 'transcription', 'voice'] as const).flatMap((modality) => {
       const modelId = selections[modality]
       if (!modelId) return []
-      return [{
-        id: remoteVisionModelId(server.id, modelId),
-        name: server.modelCatalog?.find((model) => model.id === modelId && model.kind === modality)?.name ?? modelId,
-        kind: modality === 'text' ? 'vision' as const : modality === 'voice' ? 'speech' as const : modality,
-        org: server.name,
-        description: `Runs through ${server.name}.`,
-        files: [] as [],
-        tags: ['Remote'] as ['Remote'],
-        remoteServerId: server.id,
-        remoteModelId: modelId
-      }]
+      return [
+        {
+          id: remoteVisionModelId(server.id, modelId),
+          name:
+            server.modelCatalog?.find((model) => model.id === modelId && model.kind === modality)
+              ?.name ?? modelId,
+          kind:
+            modality === 'text'
+              ? ('vision' as const)
+              : modality === 'voice'
+                ? ('speech' as const)
+                : modality,
+          org: server.name,
+          description: `Runs through ${server.name}.`,
+          files: [] as [],
+          tags: ['Remote'] as ['Remote'],
+          remoteServerId: server.id,
+          remoteModelId: modelId
+        }
+      ]
     })
   })
 }
@@ -99,6 +115,7 @@ export interface RemoteVisionServerSettings {
   endpoint: string
   model: string
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   hasApiKey: boolean
   activeServerId: string | null
@@ -110,6 +127,7 @@ export interface RemoteVisionServerUpdate {
   endpoint: string
   model: string
   mediaModels?: RemoteVisionSelections
+  roleModels?: RemoteVisionRoleSelections
   modelCatalog?: RemoteVisionCatalogModel[]
   serverId?: string
   name?: string

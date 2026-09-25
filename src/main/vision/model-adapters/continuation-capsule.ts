@@ -1,6 +1,6 @@
 import type { VisionContinuationCapsule } from './types'
 
-export const MAX_CONTINUATION_DONE_ITEMS = 5
+export const MAX_CONTINUATION_DONE_ITEMS = 10
 const MAX_DONE_CHARS = 96
 const MAX_FIELD_CHARS = 160
 
@@ -64,4 +64,36 @@ export function boundedContinuationCapsule(
   maxDoneItems = MAX_CONTINUATION_DONE_ITEMS
 ): VisionContinuationCapsule {
   return parseContinuationCapsule(capsule, maxDoneItems) ?? { done: [], next: '', remember: '' }
+}
+
+const APPROVED_ACTION_PREFIX = 'action approved: '
+
+/** Rebuild the compact semantic action ledger when a fresh Vision runtime
+ * resumes an Accessibility task. Task history is durable across one-action
+ * recoveries; model-local trajectory state is not. */
+export function continuationFromTaskSteps(
+  steps: readonly string[],
+  maxDoneItems: number,
+  next: string
+): VisionContinuationCapsule | undefined {
+  if (maxDoneItems <= 0) return undefined
+  const done = steps
+    .map((step) => {
+      if (step.startsWith(APPROVED_ACTION_PREFIX)) {
+        return `Attempted: ${step.slice(APPROVED_ACTION_PREFIX.length)}`
+      }
+      return /^(?:pressed|clicked|hovered|scrolled|typed into|typed text|key |set \[)/i.test(step)
+        ? `Attempted: ${step}`
+        : null
+    })
+    .filter((step): step is string => step !== null)
+  if (done.length === 0) return undefined
+  return boundedContinuationCapsule(
+    {
+      done,
+      next,
+      remember: 'Do not repeat an earlier attempted action or content target.'
+    },
+    maxDoneItems
+  )
 }

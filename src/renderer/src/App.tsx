@@ -293,10 +293,10 @@ function AppContent() {
     setProActivation(activation)
     setProReady(true)
   }, [])
-  const TaskWorkspace = isPro && proReady ? getSlot(SLOTS.taskWorkspace) : undefined
+  const TaskWorkspace = proReady ? getSlot(SLOTS.taskWorkspace) : undefined
   // Rendered at the app root, NOT inside the route switch: a running task follows the user across
   // navigation, so a route-scoped mount would unmount it exactly when it is wanted.
-  const TaskFloatingView = isPro && proReady ? getSlot(SLOTS.taskFloatingView) : undefined
+  const TaskFloatingView = proReady ? getSlot(SLOTS.taskFloatingView) : undefined
   const [externalUnreadCount, setExternalUnreadCount] = useState(0)
   useEffect(() => {
     void activateRendererFeatures()
@@ -422,7 +422,8 @@ function AppContent() {
     proActivationRevision.current += 1
     setIsPro(false)
     setProActivation('none')
-    setProReady(true)
+    setProReady(false)
+    void activateRendererFeatures()
 
     navigationHistory.current = []
     forwardHistory.current = []
@@ -450,7 +451,7 @@ function AppContent() {
     setActionsEntity(null)
     setChatTarget(null)
     commitViewMode('day')
-  }, [setIsPro])
+  }, [activateRendererFeatures, setIsPro])
 
   useEffect(() => {
     const license = window.api.license
@@ -941,7 +942,10 @@ function AppContent() {
       label: f.label,
       icon: <f.icon className="h-5 w-5 shrink-0 text-neutral-400" weight="regular" />,
       view: f.route as ViewMode,
-      locked: !isPro && !(route === 'devices' && proActivation === 'entitlement-bootstrap')
+      locked:
+        !isPro &&
+        !(route === 'tasks' && TaskWorkspace) &&
+        !(route === 'devices' && proActivation === 'entitlement-bootstrap')
     }
   }
   // Icons take no color — the nav button drives it (emerald when active).

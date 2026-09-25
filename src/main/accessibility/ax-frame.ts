@@ -1,4 +1,6 @@
 import { taskScreenshotPath } from '../tasks/task-history'
+import fs from 'node:fs'
+import sharp from 'sharp'
 import { emitVisionState, emitVisionStep } from '../vision/vision-controller'
 import type { AxSnapshot } from './ax-elements'
 import type { AxObservationFrame } from './ax-observation'
@@ -28,16 +30,33 @@ interface AxFrameCaptureInput {
 function snapshotBounds(
   snapshot: AxSnapshot
 ): { x: number; y: number; width: number; height: number } | undefined {
+  if (
+    snapshot.windowBounds &&
+    snapshot.windowBounds.width > 0 &&
+    snapshot.windowBounds.height > 0
+  ) {
+    return snapshot.windowBounds
+  }
   if (!snapshot.elements.length) return undefined
-  const xs = snapshot.elements.map((element) => element.cx)
-  const ys = snapshot.elements.map((element) => element.cy)
+  const xs = snapshot.elements.map((element) => element.x ?? element.cx)
+  const ys = snapshot.elements.map((element) => element.y ?? element.cy)
   const left = Math.min(...xs)
   const top = Math.min(...ys)
+  const right = Math.max(
+    ...snapshot.elements.map((element) =>
+      element.x === undefined ? element.cx : element.x + (element.width ?? 0)
+    )
+  )
+  const bottom = Math.max(
+    ...snapshot.elements.map((element) =>
+      element.y === undefined ? element.cy : element.y + (element.height ?? 0)
+    )
+  )
   return {
     x: left,
     y: top,
-    width: Math.max(1, Math.max(...xs) - left),
-    height: Math.max(1, Math.max(...ys) - top)
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top)
   }
 }
 
@@ -105,11 +124,41 @@ export async function captureAxObservationFrame({
       vision.captureDisplayFrame(
         snapshotBounds(snapshot),
         taskScreenshotPath(taskId, `ax-${captureNumber}-${attempt}`),
-        { excludeComputerUseSupervisor: true }
+        { forComputerUse: true }
       ),
       signal
     ).catch(() => null)
     if (capture) {
+      const target = snapshotBounds(snapshot)
+      if (target) {
+        const display = capture.displayBounds
+        const left = Math.max(
+          0,
+          Math.round(((target.x - display.x) * capture.width) / display.width)
+        )
+        const top = Math.max(
+          0,
+          Math.round(((target.y - display.y) * capture.height) / display.height)
+        )
+        const width = Math.min(
+          capture.width - left,
+          Math.max(1, Math.round((target.width * capture.width) / display.width))
+        )
+        const height = Math.min(
+          capture.height - top,
+          Math.max(1, Math.round((target.height * capture.height) / display.height))
+        )
+        if (width > 0 && height > 0) {
+          const cropped = await sharp(capture.path)
+            .extract({ left, top, width, height })
+            .png()
+            .toBuffer()
+          await fs.promises.writeFile(capture.path, cropped)
+          capture.width = width
+          capture.height = height
+          capture.displayBounds = target
+        }
+      }
       if (attempt > 1) {
         emitVisionStep(
           taskId,

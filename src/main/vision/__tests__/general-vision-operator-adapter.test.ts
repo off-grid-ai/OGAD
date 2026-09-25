@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
 import { llm } from '../../llm'
 import {
+  bonsaiVisionOperatorAdapter,
   generalVisionOperatorAdapter,
   generalVisionPolicyFailure
 } from '../model-adapters/general-vision-operator'
@@ -109,6 +110,102 @@ describe('general vision native tool policy', () => {
     expect(serialized).toContain('structured navigate action')
     expect(serialized).not.toContain("click(point='")
     expect(serialized).not.toContain('json_schema')
+  })
+
+  it('uses the Bonsai Qwen3.8 operator profile without changing other general models', () => {
+    const bonsai = {
+      id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
+      primaryFile: 'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      projectorFile: 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf',
+      availableFiles: ['Ternary-Bonsai-2-27B-PQ2_0.gguf', 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf']
+    }
+    const adapter = resolveVisionModelAdapter(bonsai)
+    const request = adapter.buildRequest({
+      goal: 'Open the visible result.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [],
+      recentSteps: [],
+      olderVisualFacts: []
+    })
+
+    expect(adapter).toBe(bonsaiVisionOperatorAdapter)
+    expect(request).toMatchObject({
+      temperature: 1,
+      topP: 0.95,
+      topK: 20,
+      minP: 0,
+      presencePenalty: 0,
+      repeatPenalty: 1,
+      preserveThinking: true,
+      enableThinking: true,
+      separateReasoning: true
+    })
+    const performTool = request.tools?.find(
+      (tool) => (tool as { function: { name: string } }).function.name === 'perform_action'
+    ) as { function: { parameters: { required: string[] } } }
+    expect(performTool.function.parameters.required).toEqual(
+      expect.arrayContaining(['intent', 'expected_state'])
+    )
+
+    expect(resolveVisionModelAdapter(model)).toBe(generalVisionOperatorAdapter)
+    expect(
+      resolveVisionModelAdapter({
+        id: 'unsloth/Qwen3.8-27B-GGUF',
+        primaryFile: 'Qwen3.8-27B-UD-Q4_K_M.gguf',
+        projectorFile: 'mmproj-F16.gguf',
+        availableFiles: ['Qwen3.8-27B-UD-Q4_K_M.gguf', 'mmproj-F16.gguf']
+      })
+    ).toBe(bonsaiVisionOperatorAdapter)
+  })
+
+  it('replays a bounded ordered trajectory with reasoning and tool results', () => {
+    const request = bonsaiVisionOperatorAdapter.buildRequest({
+      goal: 'Continue the task.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: Array.from({ length: 6 }, (_, index) => ({
+        response: `tool-call-${index + 1}`,
+        actionText: `action-${index + 1}`,
+        reasoning: `reasoning-${index + 1}`,
+        result: `result-${index + 1}`
+      })),
+      recentSteps: [],
+      olderVisualFacts: [],
+      continuation: {
+        done: ['Attempted: Click reel A.'],
+        next: 'Open a different relevant reel.',
+        remember: 'Do not repeat an earlier target.'
+      }
+    })
+    const transcript = request.messages.map((message) => JSON.stringify(message.content)).join('\n')
+
+    expect(transcript).toContain('<think>reasoning-1</think>')
+    expect(transcript).toContain('tool-call-6')
+    expect(transcript).toContain('Tool result: result-6')
+    expect(transcript.indexOf('tool-call-1')).toBeLessThan(transcript.indexOf('tool-call-6'))
+    expect(transcript).toContain('Attempted: Click reel A.')
+    expect(transcript).toContain('Open a different relevant reel.')
+  })
+
+  it('returns Bonsai intent and expected state through the direct action contract', () => {
+    const decision = parseGeneralVisionToolResponse(
+      response('perform_action', {
+        direction: 'aligned',
+        summary: 'Open the visible result.',
+        visible_evidence: 'The result control is visible.',
+        action: { type: 'click', point: { x: 280, y: 355 } },
+        action_reason: 'The point is inside the control.',
+        intent: 'Open the result panel.',
+        expected_state: 'The result panel is visible.'
+      }),
+      bounds
+    )
+
+    expect(decision).toMatchObject({
+      kind: 'actions',
+      expectedEffect: 'The result panel is visible.'
+    })
   })
 
   it('maps a typed normalized point to encoded pixels without an action-text parser', () => {
@@ -244,7 +341,7 @@ describe('general vision native tool policy', () => {
       .mockResolvedValueOnce({ ...invalid, finishReason: 'stop' })
       .mockResolvedValueOnce({
         content: '',
-        toolCalls: [...complete().toolCalls],
+        toolCalls: [...perform().toolCalls],
         finishReason: 'tool_calls'
       })
       .mockResolvedValueOnce({
@@ -253,6 +350,7 @@ describe('general vision native tool policy', () => {
         finishReason: 'tool_calls'
       })
     let captures = 0
+    const actuated: unknown[] = []
 
     try {
       const result = await runVisionTaskGraph('Confirm the visible result.', {
@@ -261,8 +359,8 @@ describe('general vision native tool policy', () => {
             captures += 1
             return { image: imagePath, bounds }
           },
-          actuate: async () => {
-            throw new Error('invalid tool output must not actuate')
+          actuate: async (action) => {
+            actuated.push(action)
           }
         },
         guard: new VisionGuard({ taskId: 'operator-adapter-test', kind: 'computer_use' }),
@@ -275,6 +373,7 @@ describe('general vision native tool policy', () => {
       expect(result).toMatchObject({ ok: true, summary: 'The requested result is visible.' })
       expect(captures).toBe(3)
       expect(stream).toHaveBeenCalledTimes(4)
+      expect(actuated).toEqual([{ type: 'click', point: { x: 287, y: 227 } }])
       expect(result.steps).toContain(
         'the model returned 0 tool calls; exactly one is required; re-observing'
       )

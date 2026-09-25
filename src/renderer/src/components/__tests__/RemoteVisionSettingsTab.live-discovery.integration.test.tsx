@@ -3,7 +3,7 @@
 import { createServer, type Server } from 'node:http'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { testRemoteVisionServer } from '../../../../main/vision/remote-vision-server'
 import { RemoteVisionSettingsTab } from '../RemoteVisionSettingsTab'
 
@@ -11,6 +11,7 @@ let server: Server | undefined
 
 afterEach(async () => {
   cleanup()
+  vi.restoreAllMocks()
   await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve())
   server = undefined
 })
@@ -22,12 +23,18 @@ async function showServer(response: { status: number; body: unknown }): Promise<
   })
   await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve))
   const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Test server has no port')
+  if (!address || typeof address === 'string')
+    throw new Error('Test server has no port')
 
-  // Electron IPC is the external boundary. Discovery uses the real main-process owner.
+    // Electron IPC is the external boundary. Discovery uses the real main-process owner.
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getRemoteVisionServer: async () => ({
-      provider: 'local', endpoint: '', model: '', hasApiKey: false, activeServerId: null, servers: []
+      provider: 'local',
+      endpoint: '',
+      model: '',
+      hasApiKey: false,
+      activeServerId: null,
+      servers: []
     }),
     testRemoteVisionServer
   }
@@ -41,6 +48,47 @@ async function showServer(response: { status: number; body: unknown }): Promise<
 }
 
 describe('remote model discovery from Settings', () => {
+  it('merges OpenRouter Decision-output models into the shared text catalog', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      const data = url.includes('output_modalities=decisions')
+        ? [
+            {
+              id: 'typesafe/jev-1.13',
+              name: 'TypeSafe: Jev 1.13',
+              architecture: {
+                input_modalities: ['text'],
+                output_modalities: ['decisions']
+              }
+            }
+          ]
+        : [{ id: 'chat-model', name: 'Chat model', kind: 'text' }]
+      return new Response(JSON.stringify({ data }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    })
+
+    const result = await testRemoteVisionServer({
+      provider: 'openrouter',
+      endpoint: 'https://openrouter.ai/api/v1',
+      model: 'chat-model'
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/models?output_modalities=decisions',
+      expect.any(Object)
+    )
+    expect(result.models).toContainEqual(
+      expect.objectContaining({
+        id: 'typesafe/jev-1.13',
+        name: 'TypeSafe: Jev 1.13',
+        kind: 'text',
+        outputModalities: ['decisions']
+      })
+    )
+  })
+
   it('shows each model type returned by a reachable server', async () => {
     await showServer({
       status: 200,
@@ -51,7 +99,10 @@ describe('remote model discovery from Settings', () => {
           { id: 'listener', kind: 'transcription' },
           { id: 'speaker', kind: 'speech' },
           { id: 'inferred-picture', architecture: { output_modalities: ['image'] } },
-          { id: 'inferred-listener', architecture: { input_modalities: ['audio'], output_modalities: ['text'] } },
+          {
+            id: 'inferred-listener',
+            architecture: { input_modalities: ['audio'], output_modalities: ['text'] }
+          },
           { id: 'inferred-speaker', architecture: { output_modalities: ['audio'] } }
         ]
       }
@@ -73,7 +124,10 @@ describe('remote model discovery from Settings', () => {
   })
 
   it('shows a reachable server’s rejection reason', async () => {
-    await showServer({ status: 403, body: { error: { message: 'This account cannot list models.' } } })
+    await showServer({
+      status: 403,
+      body: { error: { message: 'This account cannot list models.' } }
+    })
     expect(await screen.findByText('This account cannot list models.')).toBeTruthy()
   })
 })

@@ -16,12 +16,16 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
   globalShortcut: { register: () => false, unregister: () => undefined },
   ipcMain: { handle: () => undefined },
+  screen: { getAllDisplays: () => [{}] },
   safeStorage: {
     isEncryptionAvailable: () => false,
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
   },
-  systemPreferences: { isTrustedAccessibilityClient: () => false }
+  systemPreferences: {
+    getMediaAccessStatus: () => 'granted',
+    isTrustedAccessibilityClient: () => false
+  }
 }))
 
 afterAll(() => {
