@@ -23,9 +23,17 @@ vi.mock('electron', () => ({
 }))
 
 import * as store from '../rag/store'
-import { getDB } from '../database'
+import {
+  addRagMessage,
+  createRagConversation,
+  getDB,
+  searchProjectConversations
+} from '../database'
 import { desktopExtraction } from '../rag/extractors'
 import { RagService, type EmbeddingProvider } from '@offgrid/rag'
+import { configureRuntime } from '../runtime-env'
+
+configureRuntime({ dataDir: TMP_DIR })
 
 function keywordEmbeddings(...keywords: string[]): EmbeddingProvider {
   return {
@@ -46,6 +54,31 @@ afterAll(() => {
 })
 
 describe('rag/store.ts - projects CRUD', () => {
+  it('searches sibling conversations only inside the selected project', async () => {
+    store.createProject({ id: 'p-chat-search', name: 'Chat search' })
+    store.createProject({ id: 'p-chat-private', name: 'Other project' })
+    createRagConversation('chat-current', 'Current', 'p-chat-search')
+    createRagConversation('chat-sibling', 'Sibling', 'p-chat-search')
+    createRagConversation('chat-other', 'Other', 'p-chat-private')
+    addRagMessage('chat-current', 'user', 'Quartz budget is 200')
+    addRagMessage('chat-sibling', 'user', 'Quartz budget is 300')
+    addRagMessage('chat-other', 'user', 'Quartz budget is 400')
+
+    expect(searchProjectConversations('p-chat-search', 'Quartz budget', 'chat-current')).toEqual([
+      { role: 'user', content: 'Quartz budget is 300', title: 'Sibling' }
+    ])
+    const { runTool } = await import('../tools')
+    const result = await runTool(
+      'search_knowledge_base',
+      { query: 'Quartz budget' },
+      { projectId: 'p-chat-search', conversationId: 'chat-current' },
+      []
+    )
+    expect(result.text).toContain('Quartz budget is 300')
+    expect(result.text).not.toContain('Quartz budget is 200')
+    expect(result.text).not.toContain('Quartz budget is 400')
+  })
+
   it('createProject + listProjects round-trips fields and includeMemory default (on)', () => {
     store.createProject({ id: 'p1', name: 'Alpha', description: 'first', systemPrompt: 'be terse' })
     const projects = store.listProjects()
