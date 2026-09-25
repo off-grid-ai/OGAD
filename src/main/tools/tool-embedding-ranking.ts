@@ -12,15 +12,27 @@ export interface EmbedDeps {
 }
 
 const MAX_RELEVANT_TOOLS = 6
-const STRONG_RELEVANCE = 0.24
-const INTENT_RELEVANCE = 0.16
+const RELEVANCE_FLOOR = 0.24
 const SCORE_WINDOW = 0.1
+const ROUTING_USER_TURNS = 2
+const ROUTING_CHARS_PER_TURN = 400
 
-const TOOL_INTENT =
-  /\b(search|find|look up|latest|current|today|tomorrow|meeting|calendar|schedule|remind|tell|send|email|message|open|browse|website|web|screen|memory|remember|calculate|math|time|date|image|picture|photo|draw|generate|location|weather)\b|\d\s*[+*/-]\s*\d/i
+/** Build a compact semantic routing query from the current request and recent user goals.
+ *  Current text comes first because MiniLM has a bounded input window. Assistant replies are
+ *  excluded: their offers and narration must not create tool intent that the user did not express. */
+export function contextualToolRoutingText(
+  query: string,
+  history: readonly { role: string; content: string }[]
+): string {
+  const priorGoals = history
+    .filter((turn) => turn.role === 'user' && turn.content.trim())
+    .slice(-ROUTING_USER_TURNS)
+    .reverse()
+    .map((turn) => `Prior user goal: ${turn.content.slice(0, ROUTING_CHARS_PER_TURN)}`)
 
-export function hasToolIntent(query: string): boolean {
-  return TOOL_INTENT.test(query)
+  return [`Current user request: ${query.slice(0, ROUTING_CHARS_PER_TURN)}`, ...priorGoals].join(
+    '\n'
+  )
 }
 
 // Process-lifetime cache of tool embeddings, keyed by a hash of the tool text.
@@ -99,11 +111,9 @@ export async function rankConnectorToolsSemantic(
   return [...builtins, ...scored.map((s) => s.tool)]
 }
 
-/** Select the small set of tools that is pertinent to this message. Unlike the
+/** Select the small set of tools that is pertinent to this conversation context. Unlike the
  *  older rank-only path, this scores built-ins and connector tools together, so
- *  an unrelated schema is never sent merely because there is room for it. A
- *  clear tool-intent phrase permits a lower score for short requests such as
- *  "tell Ali"; ordinary chat needs stronger semantic evidence. */
+ *  an unrelated schema is never sent merely because there is room for it. */
 export async function selectRelevantToolsSemantic(
   query: string,
   tools: unknown[],
@@ -123,11 +133,12 @@ export async function selectRelevantToolsSemantic(
   )
   scored.sort((a, b) => b.score - a.score || a.index - b.index)
   const best = scored[0]?.score ?? -1
-  const floor = hasToolIntent(query) ? INTENT_RELEVANCE : STRONG_RELEVANCE
-  if (best < floor) return []
+  if (best < RELEVANCE_FLOOR) return []
 
   return scored
-    .filter((candidate) => candidate.score >= floor && candidate.score >= best - SCORE_WINDOW)
+    .filter(
+      (candidate) => candidate.score >= RELEVANCE_FLOOR && candidate.score >= best - SCORE_WINDOW
+    )
     .slice(0, MAX_RELEVANT_TOOLS)
     .map((candidate) => candidate.tool)
 }

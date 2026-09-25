@@ -690,21 +690,20 @@ export async function toolChat(
   if (rawTools.length > 0) {
     const { selectRelevantTools } = await import('./tools/tool-ranking')
     const lexicalTools = selectRelevantTools(query, rawTools)
-    const { hasToolIntent } = await import('./tools/tool-embedding-ranking')
     const namedTool = rawTools.some((schema) => {
       const name = (schema as { function?: { name?: unknown } }).function?.name
       return typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())
     })
-    // A greeting or plain statement with no direct tool match does not need
-    // MiniLM to load before the assistant can answer. An explicit tool name
-    // also needs no semantic ranking. If image generation is unavailable, an
-    // explicit generate_image request cannot be routed to that missing tool.
+    // An explicit tool name needs no semantic ranking. If image generation is unavailable,
+    // an explicit generate_image request cannot be routed to that missing tool.
     const unavailableImageTool = !imageAvailable && /\bgenerate_image\b/i.test(query)
-    if (!namedTool && !unavailableImageTool && (lexicalTools.length || hasToolIntent(query))) {
+    if (!namedTool && !unavailableImageTool) {
       try {
         const { embeddings } = await import('./embeddings')
-        const { selectRelevantToolsSemantic } = await import('./tools/tool-embedding-ranking')
-        relevantTools = await selectRelevantToolsSemantic(query, rawTools, {
+        const { contextualToolRoutingText, selectRelevantToolsSemantic } =
+          await import('./tools/tool-embedding-ranking')
+        const routingText = contextualToolRoutingText(query, history)
+        relevantTools = await selectRelevantToolsSemantic(routingText, rawTools, {
           embed: (t) => embeddings.generateEmbedding(t)
         })
       } catch {
