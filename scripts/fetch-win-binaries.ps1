@@ -4,6 +4,7 @@
 # match exactly what the app's resolvers expect:
 #
 #   resources/bin/llama/llama-server.exe   (+ ggml/llama DLLs)   <- src/main/llm.ts
+#   resources/bin/llama-prism/llama-server.exe (+ fork DLLs)      <- Bonsai 2
 #   resources/bin/sd/sd-cli.exe            (+ DLLs)              <- src/main/imagegen.ts
 #   resources/bin/whisper/whisper-cli.exe  (+ DLLs)             <- src/main/rag/extractors.ts
 #   resources/bin/ffmpeg.exe                                     <- src/main/rag/extractors.ts
@@ -99,6 +100,14 @@ try {
   $x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-cpu-x64\.zip$' $LlamaRef
   Copy-Runtime $x 'llama-cpu' | Out-Null
 } catch { Write-Warning "llama.cpp (cpu fallback) fetch failed: $_" }
+
+# Bonsai 2 uses packed ternary weights that require PrismML's llama.cpp fork.
+# Use its CPU build so the bundled engine starts even without a Vulkan driver.
+# Keep these DLLs separate from the standard llama.cpp DLLs.
+$PrismLlamaRef = (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.prismLlamaRef
+Write-Host "== Prism llama.cpp (pinned $PrismLlamaRef): cpu =="
+$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef
+Copy-Runtime $x 'llama-prism' | Out-Null
 
 # --- whisper.cpp (whisper-cli.exe + DLLs) ------------------------------------
 Write-Host '== whisper.cpp =='
