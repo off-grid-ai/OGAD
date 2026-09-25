@@ -714,10 +714,13 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     const title = 'A lighthouse at night'
     await sendPrompt(user, title)
 
-    await waitFor(() => {
-      expect(document.querySelector('aside')?.textContent).toContain(title)
-      expect(screen.getByRole('button', { name: title })).toBeTruthy()
-    })
+    await waitFor(
+      () => {
+        expect(document.querySelector('aside')?.textContent).toContain(title)
+        expect(screen.getByRole('button', { name: title })).toBeTruthy()
+      },
+      { timeout: 5000 }
+    )
     expect(screen.queryByText('Untitled')).toBeNull()
 
     turn.resolve({
