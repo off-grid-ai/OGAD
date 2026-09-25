@@ -119,6 +119,12 @@ export interface QwenImage21ArgsInput {
 /** Qwen-Image 2.1 uses a standalone DiT, Qwen3-VL encoder, vision projector,
  * and its own VAE. Reference images use sd.cpp's `-r` edit path. */
 export function buildQwenImage21Args(i: QwenImage21ArgsInput): string[] {
+  // Qwen's latent channels do not map cleanly through the fast RGB projection
+  // and produce a pale yellow frame. Its installed VAE uses the same color space
+  // as the final result, so use it for each requested Qwen preview.
+  const previewArgs = i.previewArgs.map((arg, index, all) =>
+    index > 0 && all[index - 1] === '--preview' ? 'vae' : arg
+  )
   const args = [
     '-M',
     'img_gen',
@@ -148,7 +154,7 @@ export function buildQwenImage21Args(i: QwenImage21ArgsInput): string[] {
     i.threads,
     '-s',
     String(i.seed),
-    ...i.previewArgs
+    ...previewArgs
   ]
   if (i.initImage) args.push('--llm_vision', i.llmVision, '-r', i.initImage)
   return args
