@@ -1630,11 +1630,15 @@ export function MemoryChat({
     // route is SUPPRESSED when the agentic tools/connectors path owns the turn:
     // there, image generation is a tool the model calls, so the renderer must not
     // pre-decide (that double decision hijacked "draw ..." away from the tool loop).
-    // Agentic tools run everywhere the user turns them on — including project chats.
-    // (Projects used to force the RAG-only path, which silently ignored Tools/Connectors
-    // and left the model to hallucinate "searches" instead of calling web_search etc.)
-    const agenticActive = isAgenticTurn({ toolsOn: assistantForTurn, connectorsOn })
-    const autoImage = shouldAutoRouteImage({ mode, imageAvailable, agenticActive, text: trimmed })
+    // All memory adds search_memory to the normal tool catalog. Assistant and
+    // Connectors keep their own opt-in state.
+    const explicitAgentic = isAgenticTurn({ toolsOn: assistantForTurn, connectorsOn })
+    const autoImage = shouldAutoRouteImage({
+      mode,
+      imageAvailable,
+      agenticActive: explicitAgentic,
+      text: trimmed
+    })
     if (opts?.imageRequest || mode === 'image' || autoImage) {
       setImgProgress(null)
       setImageGenConv(convId)
@@ -1753,20 +1757,6 @@ export function MemoryChat({
       // History is built from the TARGET conversation's own messages (never the
       // active tab's `messages`) — a drained-queue or background send is bound to
       // `convId`, so its history must come from that conversation (D8).
-      const contextWindowTokens =
-        typeof window.api.getLlmSettings === 'function'
-          ? await window.api
-            .getLlmSettings()
-            .then((settings) => settings?.ctxSize)
-            .catch(() => undefined)
-          : undefined
-      const history = buildSendHistory(
-        messagesByConv[convId] ?? EMPTY_MSGS,
-        !!regen,
-        trimmed,
-        20,
-        contextWindowTokens
-      )
       const fullHistory = buildSendHistory(
         messagesByConv[convId] ?? EMPTY_MSGS,
         !!regen,
@@ -1774,24 +1764,10 @@ export function MemoryChat({
         20,
         Number.MAX_SAFE_INTEGER
       )
-      if (!agenticActive && JSON.stringify(history) !== JSON.stringify(fullHistory)) {
-        try {
-          const stored = await window.api.addRagMessage(convId, 'assistant', '_Compacted_', {
-            notice: true
-          })
-          setConvMessages(convId, (previous) => [
-            ...previous,
-            { id: stored.uuid, role: 'assistant', content: '_Compacted_', notice: true }
-          ])
-        } catch (error) {
-          console.warn('Could not save the compaction notice', error)
-        }
-      }
-      // Agentic tools path (opt-in, non-project). The model calls built-in tools,
-      // plus (when Connectors is on) MCP connector tools. STREAMS like the RAG path:
+      // Main Chat path. The model calls built-in tools,
+      // plus (when Connectors is on) MCP connector tools. STREAMS the answer:
       // a streamId placeholder fills in live - thinking, then each tool-call activity
       // step, then the answer - and the stop button aborts it via rag:cancel.
-      if (agenticActive) {
         if (cancelledRef.current.has(convId)) return
         const toolStreamId = `a-${Date.now()}`
         activeStreamId = toolStreamId
@@ -1894,12 +1870,24 @@ export function MemoryChat({
           return
         }
         const answer = tr?.answer || 'No response returned.'
+        const priorVariants = pendingVariantsRef.current
+        pendingVariantsRef.current = null
+        const allVariants = priorVariants ? [...priorVariants, answer] : undefined
         let imageRequests = tr?.imageRequests ?? []
         if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
           imageRequests = [tr.imageRequest]
         }
+        // Older local models can request an image with a fenced prompt instead
+        // of calling generate_image. Keep that request on this same Chat path.
+        const fencedImagePrompt = answer.match(/```image\s*\n([\s\S]*?)```/i)?.[1]?.trim()
+        let fencedImageRequest = false
+        if (imageRequests.length === 0 && fencedImagePrompt) {
+          imageRequests = [{ prompt: fencedImagePrompt }]
+          fencedImageRequest = true
+        }
         const pureImageToolTurn =
-          toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.name === 'generate_image')
+          fencedImageRequest ||
+          (toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.name === 'generate_image'))
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -1927,6 +1915,9 @@ export function MemoryChat({
                 timeline: toolTimeline,
                 toolsOffered: tr?.toolsOffered,
                 metrics: tr?.metrics,
+                cutoff: tr?.cutoff,
+                variants: allVariants,
+                variantIndex: allVariants ? allVariants.length - 1 : undefined,
                 activity: undefined,
                 streaming: false
               }
@@ -1936,8 +1927,20 @@ export function MemoryChat({
         const toolCtxWithReasoning = buildAssistantContext(toolCtx, {
           reasoning: toolReasoning,
           timeline: toolTimeline,
-          metrics: tr?.metrics
+          metrics: tr?.metrics,
+          cutoff: tr?.cutoff
         })
+        const artifact = parseArtifact(answer)
+        if (artifact) {
+          void window.api.saveArtifact({
+            kind: artifact.kind,
+            code: artifact.code,
+            conversationId: convId,
+            projectId
+          }).catch(() => {
+            /* The answer remains available if artifact persistence fails. */
+          })
+        }
         // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
         // which would evict the LLM). Each completed request gets one generated file and one durable
         // assistant image message. A message context has one imageRef by design; putting two results
@@ -2139,10 +2142,12 @@ export function MemoryChat({
                 /* The live reader remains available if persistence fails. */
               }
             } else if (comicPageTotal) {
-              if (comicArtifactId) {
-                await window.api.deleteArtifact(comicArtifactId).catch(() => false)
+              // updateComicReader can set this through its async closure.
+              const savedComicArtifactId = comicArtifactId as string | null
+              if (savedComicArtifactId) {
+                await window.api.deleteArtifact(savedComicArtifactId).catch(() => false)
                 setArtifacts((current) =>
-                  current.filter((artifact) => artifact.id !== comicArtifactId)
+                  current.filter((artifact) => artifact.id !== savedComicArtifactId)
                 )
               }
               setConvMessages(convId, (previous) =>
@@ -2204,225 +2209,7 @@ export function MemoryChat({
           if (voiceMode) setAutoPlayId(toolStreamId)
         }
         return
-      }
 
-      // User stopped during the pre-stream window (persisting the turn, waiting for the
-      // model) — don't open a stream at all.
-      if (cancelledRef.current.has(convId)) return
-
-      // Placeholder message that fills in live as tokens/reasoning stream in
-      // (matched by streamId in the onRagStream subscription).
-      const streamId = `a-${Date.now()}`
-      activeStreamId = streamId // expose to finally for cleanup
-      streamConvRef.current.set(streamId, convId!)
-      const streamMessage: ChatMessage = {
-        id: streamId,
-        role: 'assistant',
-        content: '',
-        reasoning: '',
-        reasoningRequested: thinkingEnabled,
-        streaming: true
-      }
-      seedStreamViewMessage(streamMessage)
-      setConvMessages(convId, (prev) => [...prev, streamMessage])
-      const result = await window.api.ragChat(
-        modelQuery,
-        'All',
-        history,
-        projectId,
-        convId,
-        noMemory && !projectId,
-        streamId,
-        thinkingEnabled,
-        imagePaths
-      )
-      const resultContext = result.context as RagContext | undefined
-
-      // Stopped mid-stream — one owner decides what survives (finalizeStoppedTurn).
-      if (cancelledRef.current.has(convId)) {
-        await finalizeStoppedTurn(convId, streamId, {
-          answer: result.answer,
-          context: resultContext,
-          cutoff: result.cutoff
-        })
-        return
-      }
-      const assistantContent = result.answer || 'No response returned.'
-
-      // The model decided this is an image request — replace the streamed turn
-      // with on-device generation.
-      const imgMatch = assistantContent.match(/```image\s*\n([\s\S]*?)```/i)
-      if (imgMatch) {
-        const imgPrompt = imgMatch[1]!.trim()
-        setConvMessages(convId, (prev) =>
-          prev.map((m) =>
-            m.id === streamId
-              ? { ...m, content: 'Generating image…', reasoning: undefined, streaming: false }
-              : m
-          )
-        )
-        try {
-          const img = await window.api.generateImage({
-            prompt: imgPrompt,
-            conversationId: convId,
-            projectId: projectId
-          })
-          const imageMetadata: ImageGenerationMetadata | undefined =
-            typeof img.width === 'number' &&
-              typeof img.height === 'number' &&
-              typeof img.steps === 'number' &&
-              typeof img.cfgScale === 'number'
-              ? {
-                width: img.width,
-                height: img.height,
-                steps: img.steps,
-                cfgScale: img.cfgScale,
-                seed: img.seed,
-                model: img.model
-              }
-              : undefined
-          const imageMetrics: GenerationMetrics | undefined =
-            typeof img.durationMs === 'number'
-              ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
-              : undefined
-          const completedImage = completedImageMessage(
-            `Generated: ${imgPrompt.slice(0, 80)}`,
-            imgPrompt,
-            img.prompt
-          )
-          setConvMessages(convId, (prev) =>
-            prev.map((m) =>
-              m.id === streamId
-                ? {
-                  ...m,
-                  ...completedImage,
-                  image: img.dataUrl,
-                  imagePath: img.path,
-                  imageMetadata,
-                  ...(img.durationMs === undefined ? {} : { generationTimeMs: img.durationMs }),
-                  ...(imageMetrics ? { metrics: imageMetrics } : {})
-                }
-                : m
-            )
-          )
-          if (voiceMode) setAutoPlayId(streamId)
-          try {
-            const stored = await window.api.addRagMessage(
-              convId,
-              'assistant',
-              completedImage.storedContent,
-              withGeneratedImageReference(
-                {
-                  ...(imageMetadata ? { imageMetadata } : {}),
-                  ...(img.durationMs === undefined ? {} : { durationMs: img.durationMs }),
-                  ...(imageMetrics ? { metrics: imageMetrics } : {})
-                },
-                { id: img.syncId, path: img.path }
-              )
-            )
-            await announceImageMessagePersisted(convId, stored.uuid)
-          } catch {
-            /* ignore */
-          }
-        } catch (err) {
-          const memoryGuard = parseImageMemoryGuardError(err)
-          const msg =
-            memoryGuard?.message ||
-            (err instanceof Error ? err.message : 'Image generation failed.')
-          if (!/cancel/i.test(msg))
-            setConvMessages(convId, (prev) =>
-              prev.map((m) =>
-                m.id === streamId
-                  ? {
-                    ...m,
-                    content: msg,
-                    streaming: false,
-                    imageMemoryRetry: memoryGuard
-                      ? {
-                        request: { prompt: imgPrompt },
-                        prompt: imgPrompt,
-                        conversationId: convId,
-                        projectId
-                      }
-                      : undefined
-                  }
-                  : m
-              )
-            )
-        }
-      } else {
-        // Finalize the streamed message — set authoritative text + context, clear streaming.
-        // If this was a regenerate, keep the prior answer(s) as navigable variants.
-        const priorVariants = pendingVariantsRef.current
-        pendingVariantsRef.current = null
-        const allVariants = priorVariants ? [...priorVariants, assistantContent] : undefined
-        // Reasoning from the ref (populated as it streamed) — deterministic read, not
-        // a setState-updater side effect. Rides the persisted context blob (T1f).
-        const ragReasoning = reasoningByStream.current[streamId]
-        const ragTimeline = timelineByStream.current[streamId]
-        const ragToolCalls = toolCallsByStream.current[streamId]
-        delete reasoningByStream.current[streamId] // done with this stream — free it
-        delete answerByStream.current[streamId]
-        setConvMessages(convId, (prev) =>
-          prev.map((m) =>
-            m.id === streamId
-              ? {
-                ...m,
-                content: assistantContent,
-                context: resultContext,
-                cutoff: result.cutoff,
-                // On the LIVE message too, not only in the persisted context: the numbers are
-                // about the turn that just finished, so waiting for a reload to show them defeats
-                // the point.
-                metrics: result.metrics,
-                reasoning: ragReasoning,
-                timeline: ragTimeline,
-                toolCalls: ragToolCalls,
-                streaming: false,
-                variants: allVariants,
-                variantIndex: allVariants ? allVariants.length - 1 : undefined
-              }
-              : m
-          )
-        )
-        const art = parseArtifact(assistantContent)
-        if (art) {
-          // Inline-first: don't force the canvas open — the user opens the live
-          // preview via the artifact card when they want it. Still save it, scoped
-          // to this chat + project so the gallery can filter.
-          void window.api
-            .saveArtifact({
-              kind: art.kind,
-              code: art.code,
-              conversationId: convId,
-              projectId: projectId
-            })
-            .catch(() => {
-              /* ignore */
-            })
-        }
-        try {
-          const stored = await window.api.addRagMessage(
-            convId,
-            'assistant',
-            assistantContent,
-            buildAssistantContext(resultContext, {
-              reasoning: ragReasoning,
-              cutoff: result.cutoff,
-              metrics: result.metrics
-            })
-          )
-          setConvMessages(convId, (previous) =>
-            previous.map((message) =>
-              message.id === streamId ? { ...message, id: stored.uuid } : message
-            )
-          )
-          if (voiceMode) setAutoPlayId(stored.uuid)
-        } catch (e) {
-          console.error('Failed to persist assistant message:', e)
-          if (voiceMode) setAutoPlayId(streamId)
-        }
-      }
     } catch (e) {
       // User stopped and the call REJECTED rather than returning, so there is no result to read.
       // This is the path that used to save nothing at all: the turn stayed on screen and was gone
@@ -2432,7 +2219,7 @@ export function MemoryChat({
         if (activeStreamId) await finalizeStoppedTurn(convId, activeStreamId)
         return
       }
-      console.error('RAG chat failed', e)
+      console.error('Chat failed', e)
       const errorContent = generationErrorContent(e)
       // Update the streaming placeholder to show the error — never append a second bubble.
       const sid = activeStreamId
