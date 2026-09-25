@@ -46,6 +46,11 @@ afterAll(() => {
 describe('Kev runtime compatibility', () => {
   it('keeps a pre-catalog Kev install available without a second model download', async () => {
     expect(await listInstalled()).toContain(KEV_4B_ID)
+  })
+
+  it.runIf(
+    (process.platform === 'darwin' && process.arch === 'arm64') || process.platform === 'win32'
+  )('resolves the pre-catalog model through the supported packaged runtime', () => {
     expect(resolveKevRuntimeArtifact()).toMatchObject({ checkpoint, base })
   })
 })
