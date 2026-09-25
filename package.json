@@ -115,6 +115,8 @@
     "remark-gfm": "^4.0.0",
     "remark-parse": "^11.0.0",
     "sharp": "^0.35.2",
+    "sherpa-onnx-darwin-arm64": "^1.13.8",
+    "sherpa-onnx-node": "^1.13.8",
     "tailwind-merge": "^3.4.0",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",

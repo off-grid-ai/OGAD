@@ -1494,6 +1494,26 @@ export function setupIPC(): void {
   ipcMain.handle('models:vision-status', () =>
     import('./models-manager').then((m) => m.getVisionStatuses())
   )
+
+  // Voice recognition (speaker diarization + voiceprint) — native sherpa-onnx, models managed here.
+  ipcMain.handle('models:voice-status', () =>
+    import('./audio/diarization-native').then((m) => m.diarizationStatus())
+  )
+  ipcMain.handle('models:voice-install', (event, modelId?: string) =>
+    import('./audio/diarization-install').then((m) =>
+      m.installVoiceModels((fraction, label) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('models:voice-progress', { fraction, label })
+        }
+      }, modelId)
+    )
+  )
+  ipcMain.handle('models:voice-select', (_event, modelId: string) =>
+    import('./audio/diarization-install').then((m) => m.selectVoiceModel(modelId))
+  )
+  ipcMain.handle('models:voice-remove', (_event, modelId?: string) =>
+    import('./audio/diarization-install').then((m) => m.removeVoiceModels(modelId))
+  )
   ipcMain.handle('models:search', (_, query: string, kind?: string) =>
     import('./models-manager').then((m) => m.searchModels(query, kind))
   )

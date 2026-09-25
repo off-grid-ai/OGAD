@@ -30,6 +30,16 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,tsconfig.web.tsbuildinfo}'
   - '!**/*.tsbuildinfo'
+# The native voice-recognition runtime (sherpa-onnx-node) loads a .node addon that in turn dlopen's
+# sibling dylibs (onnxruntime + sherpa c-api) via @loader_path. electron-builder auto-unpacks *.node
+# but NOT the dylibs, which would split them from the addon inside app.asar and break the load. Keep
+# the whole wrapper + platform package unpacked together. The glob covers the win/linux platform
+# packages too, for when Windows/Linux parity lands.
+asarUnpack:
+  - '**/node_modules/sherpa-onnx-node/**'
+  - '**/node_modules/sherpa-onnx-darwin-*/**'
+  - '**/node_modules/sherpa-onnx-win-*/**'
+  - '**/node_modules/sherpa-onnx-linux-*/**'
 win:
   executableName: off-grid-ai
   # Without this, electron-builder ships the default Electron icon on Windows (the

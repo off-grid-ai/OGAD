@@ -52,6 +52,7 @@ import {
 import { getActiveTranscription } from './transcription/select'
 import { attachStreamingTranscription } from './transcription/streaming-transcription'
 import { diarizeRecording, embedClip } from './audio/diarization-offload'
+import { ensureFingerprint } from './audio/diarization-install'
 import * as tts from './tts'
 import { generateImage, imageGenStatus, type ImageGenParams } from './imagegen'
 import { whisperModel } from './rag/extractors'
@@ -630,18 +631,20 @@ async function handleDiarize(
     json(res, 413, errBody('Audio too large.'))
     return
   }
-  const { files } = parseMultipart(body, ct)
+  const { files, fields } = parseMultipart(body, ct)
   const file = files.file || Object.values(files)[0]
   if (!file || !file.data.length) {
     json(res, 400, errBody('No audio file in "file" field.'))
     return
   }
   const ext = path.extname(file.filename) || '.wav'
+  const embeddingModel = typeof fields.embeddingModel === 'string' ? fields.embeddingModel : undefined
   const tmp = path.join(os.tmpdir(), `offgrid-diar-${process.pid}-${body.length}${ext}`)
   const run = async (): Promise<unknown> => {
     try {
       await fs.promises.writeFile(tmp, file.data)
-      return await diarizeRecording(tmp)
+      await ensureFingerprint(embeddingModel)
+      return await diarizeRecording(tmp, embeddingModel)
     } finally {
       fs.promises.unlink(tmp).catch(() => {})
     }
@@ -668,11 +671,13 @@ async function handleVoiceEmbed(
     json(res, 400, errBody('Field "audio" (base64 WAV) is required.'))
     return
   }
+  const embeddingModel = typeof payload.embeddingModel === 'string' ? payload.embeddingModel : undefined
   const tmp = path.join(os.tmpdir(), `offgrid-embed-${process.pid}-${audio.length}.wav`)
   const run = async (): Promise<unknown> => {
     try {
       await fs.promises.writeFile(tmp, Buffer.from(audio, 'base64'))
-      return await embedClip(tmp)
+      await ensureFingerprint(embeddingModel)
+      return await embedClip(tmp, embeddingModel)
     } finally {
       fs.promises.unlink(tmp).catch(() => {})
     }

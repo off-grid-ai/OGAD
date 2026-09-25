@@ -9,6 +9,25 @@ import type {
 } from '@offgrid/application'
 import type { GuidedSetupResult, HFSearchResult, VisionStatus } from '@offgrid/models'
 
+/** One fingerprint (speaker-embedding) bundle and its state. */
+export interface VoiceModelInfo {
+  id: string
+  name: string
+  embeddingDim: number
+  recommended: boolean
+  installed: boolean
+  active: boolean
+}
+/** State of the Mac's voice-recognition models: shared segmentation + the fingerprint bundles. */
+export interface VoiceModelStatus {
+  ready: boolean
+  segmentation: boolean
+  activeModelId: string
+  models: VoiceModelInfo[]
+  segPath: string | null
+  embPath: string | null
+}
+
 type PublicDownloadEvent = Extract<ModelsEvent, { type: 'download' }>['event']
 import {
   CACHE_CLEANUP_CHANNEL,
@@ -520,6 +539,22 @@ const offGridApi = {
   searchModels: (query: string, kind?: string): Promise<HFSearchResult[]> =>
     ipcRenderer.invoke('models:search', query, kind),
   getComputerUseActiveModels: () => ipcRenderer.invoke('models:computer-use-active'),
+
+  // Voice recognition (speaker diarization + voiceprint) model management.
+  getVoiceModelStatus: (): Promise<VoiceModelStatus> => ipcRenderer.invoke('models:voice-status'),
+  installVoiceModels: (modelId?: string): Promise<VoiceModelStatus> =>
+    ipcRenderer.invoke('models:voice-install', modelId),
+  selectVoiceModel: (modelId: string): Promise<VoiceModelStatus> =>
+    ipcRenderer.invoke('models:voice-select', modelId),
+  removeVoiceModels: (modelId?: string): Promise<VoiceModelStatus> =>
+    ipcRenderer.invoke('models:voice-remove', modelId),
+  onVoiceModelProgress: (callback: (data: { fraction: number; label: string }) => void) => {
+    const subscription = (_event: unknown, data: { fraction: number; label: string }): void =>
+      callback(data)
+    ipcRenderer.on('models:voice-progress', subscription)
+    return unsubscribe('models:voice-progress', subscription)
+  },
+
   onModelProgress: (callback: (data: PublicDownloadEvent) => void) => {
     const subscription = (_event: unknown, data: PublicDownloadEvent): void => callback(data)
     ipcRenderer.on('model:download-progress', subscription)

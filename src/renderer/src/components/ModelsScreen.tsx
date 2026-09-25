@@ -62,6 +62,7 @@ import {
   withoutProgressEntry
 } from './model-card-types'
 import { DownloadSummary, ModelCatalogCard } from './ModelCatalogCard'
+import { VoiceRecognitionCard } from './VoiceRecognitionCard'
 import { ModelDownloadActions } from './ModelDownloadActions'
 
 function Sel({
@@ -1037,6 +1038,7 @@ export function ModelsScreen({
 
           {/* Model grid */}
           <div className="flex-1 overflow-y-auto">
+            {activeKind === 'transcription' && <VoiceRecognitionCard />}
             {searchingMode ? (
               <>
                 {displayed.length === 0 && !searching && (
