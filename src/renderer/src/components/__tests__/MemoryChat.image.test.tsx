@@ -68,6 +68,9 @@ type GenPayload = {
   negativePrompt?: string
   seed?: number
   cfgScale?: number
+  enhancePrompt?: boolean
+  initImage?: string
+  strength?: number
   allowUnsafeMemoryOverride?: boolean
   conversationId?: string
 }
@@ -318,6 +321,8 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     }),
     addRagMessage,
     imageGenConversationPersisted,
+    pickImageForGen: vi.fn(async () => '/uploads/reference.png'),
+    keepInitImage: vi.fn(async () => ({ id: 'kept-init', path: '/kept/reference.png' })),
     saveArtifact: vi.fn(async () => { }),
     exportGeneratedImage,
     // --- settings round-trip (per-model override persistence) ---
@@ -663,6 +668,36 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     // Bug (b): the composer binds to the shared owner. On mount it reads active; a
     // dropdown change writes through setActiveModalModel (asserted in the next test).
     expect(setActiveModalModel).toBeTruthy()
+  })
+
+  it('keeps an init-image edit exact and closes image options after send', async () => {
+    const turn = deferred<ImageResult>()
+    const user = userEvent.setup()
+    const { generateImage } = installApi({
+      active: 'qwen_image_2.1-Q4_K.gguf',
+      models: ['qwen_image_2.1-Q4_K.gguf'],
+      generate: () => turn.promise
+    })
+    renderChat()
+
+    await openImageComposer(user)
+    expect(screen.getByLabelText('Steps')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: /init image/i }))
+    await sendPrompt(user, 'Replace the model names with generic labels')
+
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
+    const payload = generateImage.mock.calls[0]![0]
+    expect(payload.initImage).toBe('/kept/reference.png')
+    expect(payload.prompt).toBe('Replace the model names with generic labels')
+    expect(payload.enhancePrompt).toBe(false)
+    expect(screen.queryByLabelText('Steps')).toBeNull()
+
+    turn.resolve({
+      dataUrl: 'data:image/png;base64,AAAA',
+      path: '/generated/edited.png',
+      prompt: payload.prompt
+    })
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
   })
 
   it('reattaches an in-flight image job on remount and shows the progress panel (survives navigation)', async () => {
