@@ -8,7 +8,7 @@ import { ComputerUseStepDetails } from '../ComputerUseStepDetails'
 afterEach(cleanup)
 
 describe('<ComputerUseStepDetails/>', () => {
-  it('opens a local step screenshot in the shared full-screen viewer', async () => {
+  it('opens a local step screenshot in the shared side panel', async () => {
     const user = userEvent.setup()
     render(
       <ComputerUseStepDetails
@@ -34,11 +34,12 @@ describe('<ComputerUseStepDetails/>', () => {
     await user.click(screen.getByRole('button', { name: /Computer Use step 1/ }))
     await user.click(
       screen.getByRole('button', {
-        name: 'Open full-screen screenshot for Computer Use step 1'
+        name: 'Open screenshot for Computer Use step 1'
       })
     )
 
     expect(screen.getByRole('dialog', { name: 'Task screenshot preview' })).toBeTruthy()
+    expect(screen.getByTestId('side-panel-layer')).toBeTruthy()
     expect(screen.getAllByAltText('Computer Use step 1')).toHaveLength(2)
     expect(nativeSurfaceIsOccluded()).toBe(true)
 

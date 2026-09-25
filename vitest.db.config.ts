@@ -14,6 +14,9 @@ export default defineConfig({
     }
   },
   test: {
+    // The first tool turn can load the real local embedding backend. Give that
+    // integration path the same headroom as the product suite.
+    testTimeout: 15000,
     include: [
       'integration-tests/*.dbtest.ts',
       'integration-tests/*.dbtest.tsx',

@@ -502,6 +502,7 @@ export function MemoryChat({
   // The image progress/warm-up UI shows only when the ACTIVE conversation is the one
   // generating an image — never a background conversation's gen (D9).
   const generatingImage = imageGenConv !== null && imageGenConv === activeConversationId
+  const qwenLatentPreview = /qwen[_-]?image[_-]?2[._-]?1/i.test(imgModel)
   const [projects, setProjects] = useState<ProjectLite[]>([])
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   // Captured-memory context is a Pro ("remembers") feature; core chats are plain
@@ -725,7 +726,7 @@ export function MemoryChat({
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
-  const TaskSupervisorOverlay = getSlot(SLOTS.taskSupervisorOverlay)
+  const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     console.log('MemoryChat effect: overlay escape handler')
@@ -1505,6 +1506,20 @@ export function MemoryChat({
       const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed
       try {
         await window.api.createRagConversation(convId, title, projectId)
+        const now = new Date().toISOString()
+        const createdConversation: RagConversationContract = {
+          id: convId,
+          title,
+          project_id: projectId,
+          created_at: now,
+          updated_at: now,
+          message_count: 0
+        }
+        setConversations((current) =>
+          current.some((conversation) => conversation.id === convId)
+            ? current
+            : [createdConversation, ...current]
+        )
         setActiveConversationId(convId)
         setOpenTabs((t) => (t.includes(convId!) ? t : [...t, convId!]))
       } catch (e) {
@@ -1640,6 +1655,7 @@ export function MemoryChat({
       text: trimmed
     })
     if (opts?.imageRequest || mode === 'image' || autoImage) {
+      setShowImageOptions(false)
       setImgProgress(null)
       setImageGenConv(convId)
       const seedNum = imgSeed.trim() === '' ? -1 : parseInt(imgSeed, 10)
@@ -1657,6 +1673,7 @@ export function MemoryChat({
         cfgScale: imgCfgScale,
         seed: Number.isNaN(seedNum) ? -1 : seedNum,
         model: imgModel || undefined,
+        enhancePrompt: enhanceImg,
         // The kept copy, so the record of what this was made from cannot outlive the file it names.
         initImage: keptInit?.path ?? imgInit ?? undefined,
         strength: imgInit ? imgStrength : undefined
@@ -1885,9 +1902,10 @@ export function MemoryChat({
           imageRequests = [{ prompt: fencedImagePrompt }]
           fencedImageRequest = true
         }
-        const pureImageToolTurn =
-          fencedImageRequest ||
-          (toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.name === 'generate_image'))
+        // A normal image-tool answer is visible text and must survive the handoff
+        // to the deferred native job. A legacy fenced image prompt is transport
+        // markup, so keep only that one hidden.
+        const visibleToolAnswer = fencedImageRequest ? '' : answer
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -1908,7 +1926,7 @@ export function MemoryChat({
             message.id === toolStreamId
               ? {
                 ...message,
-                content: imageRequests.length > 0 ? '' : answer,
+                content: imageRequests.length > 0 ? visibleToolAnswer : answer,
                 context,
                 reasoning: toolReasoning,
                 toolCalls: pendingToolCalls,
@@ -1994,7 +2012,14 @@ export function MemoryChat({
                   ...(imageRequest.enhancePrompt === undefined
                     ? {}
                     : { enhancePrompt: imageRequest.enhancePrompt }),
-                  ...(comicHeroPath ? { initImage: comicHeroPath, strength: 0.72 } : {}),
+                  ...(comicHeroPath
+                    ? { initImage: comicHeroPath, strength: 0.72 }
+                    : keptInit?.path || imagePaths[0] || imgInit
+                      ? {
+                        initImage: keptInit?.path ?? imagePaths[0] ?? imgInit ?? undefined,
+                        strength: imgStrength
+                      }
+                      : {}),
                   conversationId: convId,
                   projectId: projectId
                 })
@@ -2019,8 +2044,8 @@ export function MemoryChat({
                 if (!comicPageTotal) {
                   const ownsToolTurn = generatedImageCount === 0
                   const imageContent =
-                    ownsToolTurn && !pureImageToolTurn
-                      ? answer
+                    ownsToolTurn && visibleToolAnswer.trim()
+                      ? visibleToolAnswer
                       : `Generated for: ${imageRequest.prompt}`
                   const completedImage = completedImageMessage(
                     imageContent,
@@ -3235,7 +3260,7 @@ export function MemoryChat({
         <img
           src={imgProgress.preview}
           alt="forming"
-          className="mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover"
+          className={`mb-2 aspect-square w-full rounded-md border border-neutral-800 object-cover ${qwenLatentPreview ? 'grayscale' : ''}`}
         />
       ) : (
         <div className="mb-2 flex aspect-square w-full items-center justify-center rounded-md border border-neutral-800 text-[11px] text-neutral-600">
@@ -3244,7 +3269,7 @@ export function MemoryChat({
       )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
         <span>{imageProgressLabel(imageJobStage, imgProgress)}</span>
-        {imgProgress ? (
+        {imgProgress && imgProgress.step < imgProgress.total ? (
           <span className="text-neutral-600">
             · ~
             {Math.max(
@@ -4812,67 +4837,53 @@ export function MemoryChat({
           )}
         </AnimatePresence>
 
-        {/* Attachment viewer — same full-screen overlay layout as the image lightbox
-          (floating Download/Close top-right, content centered), for text/PDF/docs.
-          Backdrop fades + blurs in; the panel springs up (aceternity modal pattern). */}
+        {/* Attachment viewer — preserve chat context in the shared Desktop side panel. */}
         <AnimatePresence>
           {viewer && (
-            <motion.div
+            <SidePanel
               key="viewer"
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-10 font-mono"
-              role="dialog"
-              aria-modal="true"
-              aria-label={viewer.title}
-              tabIndex={-1}
-              initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-              animate={{ opacity: 1, backdropFilter: 'blur(8px)' }}
-              exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-              transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-              onClick={(event) => {
-                if (event.target === event.currentTarget) setViewer(null)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') setViewer(null)
-              }}
+              ariaLabel={viewer.title}
+              onClose={() => setViewer(null)}
+              className="w-[min(720px,92vw)] overflow-hidden text-white"
             >
-              <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-                <span className="mr-2 max-w-[40vw] truncate self-center text-xs text-neutral-400">
+              <header className="flex items-center justify-between gap-3 border-b border-neutral-900 px-4 py-3">
+                <h2 className="min-w-0 truncate text-sm font-normal text-neutral-200">
                   {viewer.title}
-                </span>
-                {viewer.path && (
+                </h2>
+                <div className="flex shrink-0 items-center gap-2">
+                  {viewer.path && (
+                    <button
+                      type="button"
+                      onClick={() => downloadImage(viewer.path, viewer.title)}
+                      className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                    >
+                      Download
+                    </button>
+                  )}
                   <button
-                    onClick={() => downloadImage(viewer.path, viewer.title)}
-                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:border-green-500 hover:text-green-500"
+                    type="button"
+                    onClick={() => setViewer(null)}
+                    className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
                   >
-                    Download
+                    Close
                   </button>
+                </div>
+              </header>
+              <div className="min-h-0 flex-1 overflow-auto p-4">
+                {viewer.renderer === 'audio' && viewer.path ? (
+                  <AudioPane path={viewer.path} title={viewer.title} />
+                ) : viewer.renderer === 'document' && viewer.path ? (
+                  // A document renders from its BYTES. main already serves them as a data URL for
+                  // exactly this - Chromium draws the PDF itself - and the old code path never called
+                  // it, so every PDF fell through to the text pane below and showed an empty page.
+                  <DocumentPane path={viewer.path} title={viewer.title} />
+                ) : (
+                  <pre className="min-h-full w-full whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200">
+                    {viewer.text}
+                  </pre>
                 )}
-                <button
-                  onClick={() => setViewer(null)}
-                  className="rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition-colors hover:text-white"
-                >
-                  Close
-                </button>
               </div>
-              {viewer.renderer === 'audio' && viewer.path ? (
-                <AudioPane path={viewer.path} title={viewer.title} />
-              ) : viewer.renderer === 'document' && viewer.path ? (
-                // A document renders from its BYTES. main already serves them as a data URL for
-                // exactly this - Chromium draws the PDF itself - and the old code path never called
-                // it, so every PDF fell through to the text pane below and showed an empty page.
-                <DocumentPane path={viewer.path} title={viewer.title} />
-              ) : (
-                <motion.pre
-                  initial={{ opacity: 0, scale: 0.96, y: 8 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, y: 4 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-                  className="max-h-full w-full max-w-3xl overflow-auto whitespace-pre-wrap break-words rounded-md border border-neutral-800 bg-neutral-950 p-5 text-sm leading-relaxed text-neutral-200"
-                >
-                  {viewer.text}
-                </motion.pre>
-              )}
-            </motion.div>
+            </SidePanel>
           )}
         </AnimatePresence>
 

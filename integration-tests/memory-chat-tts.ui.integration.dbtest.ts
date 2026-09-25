@@ -165,6 +165,7 @@ function installProductionVoiceBridge(boundary: ChatBoundary): void {
       invoke('voice:transcribe', audio, ext, requestId),
     cancelTranscription: (requestId: string) => invoke('voice:cancel-transcription', requestId),
     ragChat: (...args: unknown[]) => invoke('rag:chat', ...args),
+    toolChat: (...args: unknown[]) => invoke('tools:chat', ...args),
     speak: (text: string, voice?: string) => invoke('tts:speak', text, voice)
   })
   installBoundary(boundary)
@@ -229,6 +230,8 @@ beforeEach(() => {
   // before every journey so another file's teardown cannot leave a closed database with no parent.
   fs.mkdirSync(dataDir, { recursive: true })
   saveSetting('ttsVoice', 'af_bella')
+  // This journey covers voice, persistence, and speech; no tool catalog is needed.
+  saveSetting('toolsEnabled', false)
   audios.length = 0
   RecorderBoundary.instances = []
   fs.rmSync(failureMarker, { force: true })
@@ -353,10 +356,7 @@ describe('assistant reply speech integration (#105)', () => {
     database.createRagConversation(conversationId, 'Voice lifecycle')
     fs.writeFileSync(failureMarker, 'fail')
     fakeLlama.reset()
-    fakeLlama.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The release review is scheduled locally.', finishReason: 'stop' }
-    )
+    fakeLlama.enqueue({ content: 'The release review is scheduled locally.', finishReason: 'stop' })
 
     const trackStop = vi.fn()
     const stream = { getTracks: () => [{ stop: trackStop }] } as unknown as MediaStream

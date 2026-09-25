@@ -48,6 +48,8 @@ function renderChat(openTarget?: {
 }
 
 const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+// Chat tabs persist across remounts; each journey needs a fresh synthetic profile.
+beforeEach(() => window.localStorage.clear())
 afterEach(() => {
   cleanup()
   if (originalOffsetHeight) {
@@ -57,6 +59,7 @@ afterEach(() => {
 
 const FEW_STEP = 'sdxl-lightning.gguf' // shared image-defaults: defaultSteps 10
 const FULL = 'dreamlike-photoreal-v2.gguf' // shared image-defaults: defaultSteps 28
+const QWEN = 'qwen_image_2.1-Q4_K.gguf'
 
 type GenPayload = {
   steps?: number
@@ -68,6 +71,8 @@ type GenPayload = {
   negativePrompt?: string
   seed?: number
   cfgScale?: number
+  initImage?: string
+  strength?: number
   allowUnsafeMemoryOverride?: boolean
   conversationId?: string
 }
@@ -318,6 +323,8 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     }),
     addRagMessage,
     imageGenConversationPersisted,
+    pickImageForGen: vi.fn(async () => '/uploads/reference.png'),
+    keepInitImage: vi.fn(async () => ({ id: 'kept-init', path: '/kept/reference.png' })),
     saveArtifact: vi.fn(async () => { }),
     exportGeneratedImage,
     // --- settings round-trip (per-model override persistence) ---
@@ -665,6 +672,68 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(setActiveModalModel).toBeTruthy()
   })
 
+  it('sends an init image for vision-aware enhancement and closes image options after send', async () => {
+    const turn = deferred<ImageResult>()
+    const user = userEvent.setup()
+    const { generateImage } = installApi({
+      active: 'qwen_image_2.1-Q4_K.gguf',
+      models: ['qwen_image_2.1-Q4_K.gguf'],
+      generate: () => turn.promise
+    })
+    renderChat()
+
+    await openImageComposer(user)
+    expect(screen.getByLabelText('Steps')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: /init image/i }))
+    await sendPrompt(user, 'Replace the model names with generic labels')
+
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
+    const payload = generateImage.mock.calls[0]![0]
+    expect(payload.initImage).toBe('/kept/reference.png')
+    expect(payload.prompt).toBe('Replace the model names with generic labels')
+    expect(payload.enhancePrompt).toBe(true)
+    expect(screen.queryByLabelText('Steps')).toBeNull()
+
+    turn.resolve({
+      dataUrl: 'data:image/png;base64,AAAA',
+      path: '/generated/edited.png',
+      prompt: payload.prompt
+    })
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+  })
+
+  it('shows a new image chat in the sidebar and tab before generation finishes', async () => {
+    const turn = deferred<ImageResult>()
+    const user = userEvent.setup()
+    const { generateImage } = installApi({
+      active: FULL,
+      models: [FULL],
+      generate: () => turn.promise
+    })
+    renderChat()
+
+    await openImageComposer(user)
+    const title = 'A lighthouse at night'
+    await sendPrompt(user, title)
+    await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
+
+    await waitFor(
+      () => {
+        expect(document.querySelector('aside')?.textContent).toContain(title)
+        expect(screen.getByRole('button', { name: title })).toBeTruthy()
+      },
+      { timeout: 5000 }
+    )
+    expect(screen.queryByText('Untitled')).toBeNull()
+
+    turn.resolve({
+      dataUrl: 'data:image/png;base64,AAAA',
+      path: '/generated/lighthouse.png',
+      prompt: title
+    })
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+  })
+
   it('reattaches an in-flight image job on remount and shows the progress panel (survives navigation)', async () => {
     // A job was started, then the user left the Chat screen and came back → MemoryChat remounts.
     // Main still reports the job running for this conversation; the fresh mount must re-derive the
@@ -708,6 +777,49 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     // Delete the markGenerating(...) call in the reattach observe() → generatingConvs stays empty
     // → this panel never renders → the test goes red (the "generated but UI didn't show it" bug).
     expect(await screen.findByText('Generating image · Step 3 of 20')).toBeTruthy()
+  })
+
+  it('shows finalization instead of a zero-second estimate after the last sampling step', async () => {
+    const conv: TestConversation = {
+      id: 'c-finalizing',
+      title: 'Final image',
+      project_id: null,
+      created_at: '2026-07-17T00:00:00.000Z',
+      updated_at: '2026-07-17T00:00:00.000Z',
+      message_count: 0
+    }
+    installApi({
+      active: QWEN,
+      models: [QWEN],
+      conversations: [conv],
+      messages: {
+        'c-finalizing': [{ id: 1, role: 'user', content: 'finish this image' }]
+      },
+      jobStatus: {
+        id: 'job-finalizing',
+        phase: 'running',
+        conversationId: 'c-finalizing',
+        projectId: null,
+        stage: 'generating',
+        enhancedPrompt: 'finish this image',
+        progress: {
+          step: 5,
+          total: 5,
+          secPerStep: 12,
+          preview: 'data:image/png;base64,LATENT'
+        },
+        outputPath: null,
+        error: null,
+        startedAt: 1,
+        finishedAt: null
+      }
+    })
+
+    renderChat({ conversationId: 'c-finalizing' })
+
+    expect(await screen.findByText('Finalizing image…')).toBeTruthy()
+    expect(screen.queryByText(/0s left/)).toBeNull()
+    expect(screen.getByAltText('forming').className).toContain('grayscale')
   })
 
   it('picking a different model in the dropdown routes through setActiveModalModel and reaches the payload', async () => {
@@ -900,6 +1012,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
 
     expect(await screen.findByRole('button', { name: 'Generated image, running' })).toBeTruthy()
     expect(screen.getByText('Preparing image…')).toBeTruthy()
+    expect(screen.getByText('Image generation started.')).toBeTruthy()
 
     image.resolve({
       dataUrl: 'data:image/png;base64,FERRARI',
@@ -909,6 +1022,35 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(await screen.findByAltText('Generated')).toBeTruthy()
     await openLatestCompletedWork(user)
     expect(screen.getByRole('button', { name: 'Generated image, complete' })).toBeTruthy()
+  })
+
+  it('passes the selected init image through an Assistant image-tool turn', async () => {
+    const boundary = installApi({
+      active: QWEN,
+      models: [QWEN],
+      isPro: true,
+      toolResult: {
+        answer: 'The image has been edited.',
+        toolCalls: [{ name: 'generate_image', result: 'Image generation started' }],
+        unified: [],
+        imageRequests: [{ prompt: 'Keep the diagram and use generic labels' }]
+      }
+    })
+    const user = userEvent.setup()
+    renderChat()
+
+    await openImageComposer(user)
+    await user.click(screen.getByRole('button', { name: /init image/i }))
+    await screen.findByText('reference.png')
+    await user.click(screen.getByRole('button', { name: /^image$/i }))
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    await sendChat(user, 'Make the model labels generic')
+
+    await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
+    expect(boundary.generateImage.mock.calls[0]![0]).toMatchObject({
+      initImage: '/kept/reference.png',
+      prompt: 'Keep the diagram and use generic labels'
+    })
   })
 
   it('opens the comic reader before its first page and keeps prompt enhancement disabled', async () => {
@@ -1036,7 +1178,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       `768 × 768 · 17 steps · CFG 5.5 · seed 101 · ${FULL}`,
       `768 × 768 · 17 steps · CFG 5.5 · seed 202 · ${FULL}`
     ])
-    expect(screen.queryByText('चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।')).toBeNull()
+    expect(screen.getByText('चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।')).toBeTruthy()
     const generationDetails = screen.getAllByRole('button', { name: 'Generation details' })
     expect(generationDetails).toHaveLength(1)
     await user.click(generationDetails[0]!)
@@ -1218,6 +1360,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
 
     await user.click(generated)
     expect(screen.getByRole('dialog', { name: 'Generated image preview' })).toBeTruthy()
+    expect(screen.getByTestId('side-panel-layer')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Download' }))
     await waitFor(() =>
       expect(boundary.exportGeneratedImage).toHaveBeenCalledWith(

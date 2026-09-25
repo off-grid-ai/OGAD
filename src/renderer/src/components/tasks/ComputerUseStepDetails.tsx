@@ -97,7 +97,7 @@ export function ComputerUseStepDetails({
                   <button
                     type="button"
                     className="block w-full cursor-zoom-in focus:outline-none focus:ring-1 focus:ring-green-500"
-                    aria-label={`Open full-screen screenshot for Computer Use step ${index + 1}`}
+                    aria-label={`Open screenshot for Computer Use step ${index + 1}`}
                     onClick={() =>
                       setSelectedScreenshot({
                         url: captureUrlForPath(detail.screenshot!.path!),

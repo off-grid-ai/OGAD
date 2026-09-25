@@ -109,6 +109,7 @@ describe('buildQwenImage21Args', () => {
     expect(flagVal(args, '--diffusion-model')).toBe(base.model)
     expect(flagVal(args, '--llm')).toBe(base.llm)
     expect(flagVal(args, '--vae')).toBe(base.vae)
+    expect(flagVal(args, '--preview')).toBe('proj')
     expect(flagVal(args, '-W')).toBe('1024')
     expect(flagVal(args, '-H')).toBe('1024')
     expect(flagVal(args, '--steps')).toBe('40')

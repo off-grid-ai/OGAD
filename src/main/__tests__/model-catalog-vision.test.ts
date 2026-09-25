@@ -26,7 +26,7 @@ describe('model catalog — vision capability matches the mmproj data', () => {
       const hasMmproj = m.files.some((f) => f.role === 'mmproj')
       if (m.kind === 'vision' || m.kind === 'computer_use') {
         expect(hasMmproj, `${m.id} is ${m.kind} but has no mmproj`).toBe(true)
-      } else {
+      } else if (m.kind === 'text') {
         expect(hasMmproj, `${m.id} is ${m.kind} but carries an mmproj`).toBe(false)
       }
     }

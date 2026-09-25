@@ -32,7 +32,7 @@ type ConversationRecord = {
 }
 
 function installApi(
-  project: { id: string; name: string },
+  project: { id: string; name: string } | { id: string; name: string }[],
   existingConversation?: ConversationRecord
 ): {
   createRagConversation: ReturnType<typeof vi.fn>
@@ -47,9 +47,9 @@ function installApi(
   const api = {
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
-    onImageGenProgress: vi.fn(() => () => { }),
-    onImageGenJobState: vi.fn(() => () => { }),
-    onImageGenConversationUpdated: vi.fn(() => () => { }),
+    onImageGenProgress: vi.fn(() => () => {}),
+    onImageGenJobState: vi.fn(() => () => {}),
+    onImageGenConversationUpdated: vi.fn(() => () => {}),
     imageGenJobStatus: vi.fn(async () => ({
       id: null,
       phase: 'idle' as const,
@@ -63,7 +63,7 @@ function installApi(
       startedAt: null,
       finishedAt: null
     })),
-    onRagStream: vi.fn(() => () => { }),
+    onRagStream: vi.fn(() => () => {}),
     getRagConversations: vi.fn(async () => (existingConversation ? [existingConversation] : [])),
     getRagConversation: vi.fn(async (id: string) =>
       existingConversation?.id === id ? existingConversation : null
@@ -74,13 +74,13 @@ function installApi(
     saveArtifact: vi.fn(async () => ''),
     getSettings: vi.fn(async () => ({})),
     getLlmSettings: vi.fn(async () => ({})),
-    saveSetting: vi.fn(async () => { }),
-    listProjects: vi.fn(async () => [project]),
+    saveSetting: vi.fn(async () => {}),
+    listProjects: vi.fn(async () => (Array.isArray(project) ? project : [project])),
     styleThumbs: vi.fn(async () => ({})),
-    listSkills: vi.fn(async () => []),
-    toolChat
-  }
-    ; (globalThis as unknown as { window: { api: unknown } }).window.api = api
+      listSkills: vi.fn(async () => []),
+      toolChat
+    }
+   ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
   return { createRagConversation, toolChat }
 }
 
@@ -88,7 +88,7 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
   })
 
   it('uses the project target for both conversation persistence and RAG scope', async () => {
@@ -162,5 +162,42 @@ describe('<MemoryChat/> - new chat inherits its project (#54)', () => {
       conversationId: conversation.id,
       allMemory: false
     })
+  })
+
+  it('keeps the send in its starting project when the selection changes during conversation creation', async () => {
+    const startingProject = { id: 'project-launch', name: 'Launch plan' }
+    const nextProject = { id: 'project-support', name: 'Support plan' }
+    const { createRagConversation, toolChat } = installApi([startingProject, nextProject])
+    let finishCreation: (() => void) | undefined
+    createRagConversation.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          finishCreation = () => resolve('')
+        })
+    )
+    const user = userEvent.setup()
+
+    render(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ projectId: startingProject.id }} />
+      </TooltipProvider>
+    )
+
+    const textarea = await screen.findByPlaceholderText(/ask about .*launch plan/i)
+    fireEvent.change(textarea, { target: { value: 'What is the launch date?' } })
+    await user.click(screen.getByRole('button', { name: /^send$/i }))
+    await waitFor(() => expect(createRagConversation).toHaveBeenCalledTimes(1))
+
+    const scopeButton = screen.getByTitle(/choose what this chat can draw on/i)
+    scopeButton.focus()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(scopeButton.getAttribute('data-state')).toBe('open'))
+    await user.click(await screen.findByRole('menuitem', { name: nextProject.name }))
+    expect(await screen.findByPlaceholderText(/ask about .*support plan/i)).toBeTruthy()
+
+    finishCreation?.()
+    await waitFor(() => expect(toolChat).toHaveBeenCalledTimes(1))
+    expect(createRagConversation.mock.calls[0]?.[2]).toBe(startingProject.id)
+    expect(toolChat.mock.calls[0]?.[2].projectId).toBe(startingProject.id)
   })
 })

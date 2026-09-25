@@ -142,7 +142,9 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   it('executes a tool call, fires onStep before running it, feeds the result back, then answers', async () => {
     fake.enqueue({ toolCalls: [{ name: 'get_datetime', args: {} }] }, { content: 'It is now.' })
     const steps: string[] = []
-    const r = await toolChat('what time is it', [], { onStep: (c) => steps.push(c.name) })
+    const r = await toolChat('get_datetime: what time is it', [], {
+      onStep: (c) => steps.push(c.name)
+    })
 
     expect(steps).toEqual(['get_datetime']) // step surfaced BEFORE execution
     expect(r.toolCalls.map((c) => c.name)).toEqual(['get_datetime'])
@@ -196,10 +198,13 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     )
 
     try {
-      const result = await toolChat('Tell Ali I am on my way', [], {
+      const result = await toolChat('contacts_search Ali, then messages_send I am on my way', [], {
         conversationId: 'chat-ali'
       })
 
+      expect(result.toolsOffered).toEqual(
+        expect.arrayContaining(['contacts_search', 'messages_send'])
+      )
       expect(result.toolCalls.map(({ name }) => name)).toEqual(['contacts_search', 'messages_send'])
       expect(result.toolCalls.at(-1)?.result).toBe('Sent the message.')
       expect(result.answer).toBe('Your message was sent.')
@@ -222,7 +227,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
   it('proposes the explicit Skyscanner Web Use tool call selected by the model', async () => {
     const query =
-      'Go to skyscanner.com and help me find the cheapest flight to book for a one way trip from San Francisco 2026 to Pune on 1st September 2026 with a budget range of $500 - $3000'
+      'Use web_use to go to skyscanner.com and help me find the cheapest flight to book for a one way trip from San Francisco 2026 to Pune on 1st September 2026 with a budget range of $500 - $3000'
     const proposals: Array<{ input: unknown; meta: unknown }> = []
     const actions: ActionsPort = {
       propose: async (input, meta) => {
@@ -272,7 +277,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
           input: {
             type: 'web_use',
             intent: query,
-            args: { goal: query, url: 'https://skyscanner.com' },
+            args: { goal: expect.stringContaining(query), url: 'https://skyscanner.com' },
             risk: 'mutate'
           },
           meta: { source: 'chat', sourceRef: 'chat-skyscanner' }
@@ -286,7 +291,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   it('starts the complete Web Use goal selected from the full conversation', async () => {
     const originalRequest =
       'Go to skyscanner.com and help me find the cheapest flight to book for a one way trip from San Francisco 2026 to Pune on 1st September 2026 with a budget range of $500 - $3000'
-    const followUp = '1. SFO 2. Nothing really 3. 1 stop'
+    const followUp = 'web_use: 1. SFO 2. Nothing really 3. 1 stop'
     const completeGoal =
       'Find the cheapest one-way flight from SFO to Pune on September 1, 2026, within $500-$3,000, with at most one stop and no airline or cabin preference.'
     const proposals: Array<{ input: unknown; meta: unknown }> = []
@@ -343,18 +348,23 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       expect(second.toolCalls).toEqual([
         expect.objectContaining({ name: 'web_use', status: 'pending' })
       ])
-      expect(activities).toEqual([])
+      expect(activities).toEqual(['Preparing actions…'])
       expect(proposals).toEqual([
         {
           input: {
             type: 'web_use',
             intent: completeGoal,
-            args: { goal: completeGoal, url: 'https://skyscanner.com' },
+            args: { goal: expect.stringContaining(completeGoal), url: 'https://skyscanner.com' },
             risk: 'mutate'
           },
           meta: { source: 'chat', sourceRef: 'chat-flight-follow-up' }
         }
       ])
+      const submittedGoal = String(
+        (proposals[0]?.input as { args?: { goal?: string } }).args?.goal ?? ''
+      )
+      expect(submittedGoal).toContain(originalRequest)
+      expect(submittedGoal).toContain(followUp)
     } finally {
       unregisterToolExtension(extension.id, extension)
     }
@@ -398,7 +408,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     )
 
     try {
-      const result = await toolChat('do it', [], { conversationId: 'chat-reactive-intake' })
+      const result = await toolChat('web_use do it', [], { conversationId: 'chat-reactive-intake' })
       expect(result.answer).toBe(
         'Task reference: reactive-web-task. Web Use started. Live progress and the final result will appear in this chat. Do not call web_use again for this goal.'
       )
@@ -412,7 +422,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
 
   it('passes the tool schemas + tool_choice to the model on the first round', async () => {
     enqueueReactiveAfterEmptyPlan({ content: 'ok' })
-    await toolChat('hi', [])
+    await toolChat('get_datetime: what time is it', [])
     const round1 = fake.requests[0] as { tools?: unknown[]; tool_choice?: string }
     expect(Array.isArray(round1.tools)).toBe(true)
     expect((round1.tools ?? []).length).toBeGreaterThan(0)
@@ -428,7 +438,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         })),
         { content: 'Finished after seven tool calls.' }
       )
-      const r = await toolChat('keep going', [])
+      const r = await toolChat('get_datetime keep going', [])
 
       expect(r.toolCalls).toHaveLength(7)
       expect(r.answer).toBe('Finished after seven tool calls.')
@@ -443,7 +453,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       { toolCalls: [{ name: 'calculator', args: { expression: '(3+4)*2' } }] },
       { content: 'The answer is 14.' }
     )
-    const r = await toolChat('what is (3+4)*2', [])
+    const r = await toolChat('calculator: what is (3+4)*2', [])
     expect(r.toolCalls.map((c) => ({ name: c.name, result: c.result }))).toContainEqual({
       name: 'calculator',
       result: '14'
@@ -467,7 +477,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       { content: 'It is 4.' }
     )
     const steps: string[] = []
-    const r = await toolChat('what is 2+2', [], { onStep: (c) => steps.push(c.name) })
+    const r = await toolChat('calculator: what is 2+2', [], { onStep: (c) => steps.push(c.name) })
 
     expect(steps).toEqual(['calculator']) // recovered from text + surfaced before running
     expect(r.toolCalls.map((c) => ({ name: c.name, result: c.result }))).toContainEqual({
@@ -489,7 +499,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         })),
         { content: 'Based on the tools, here is your answer.' }
       )
-      const r = await toolChat('keep going', [])
+      const r = await toolChat('get_datetime keep going', [])
       expect(r.toolCalls).toHaveLength(3)
       expect(r.answer).toBe('Based on the tools, here is your answer.')
       expect(r.answer).not.toMatch(/too many tool steps/i)
@@ -511,7 +521,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       )
       const deltas: string[] = []
 
-      const result = await toolChat('calculate 2+2, then search for Off Grid AI', [], {
+      const result = await toolChat('calculator: calculate 2+2, then search for Off Grid AI', [], {
         onDelta: (text, kind) => {
           if (kind === 'content') deltas.push(text)
         }
@@ -540,7 +550,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         { content: 'Stopped after the configured two calls.' }
       )
 
-      const r = await toolChat('use only the allowed calls', [])
+      const r = await toolChat('get_datetime use only the allowed calls', [])
 
       expect(r.toolCalls).toHaveLength(2)
       expect(r.answer).toBe('Stopped after the configured two calls.')
@@ -558,7 +568,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     )
     const deltas: string[] = []
 
-    const result = await toolChat('what is 2+2', [], {
+    const result = await toolChat('calculator: what is 2+2', [], {
       onDelta: (text, kind) => {
         if (kind === 'content') deltas.push(text)
       }
@@ -595,7 +605,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         { content: 'Used the bounded result.' }
       )
 
-      const result = await toolChat('read it', [], { connectors: true })
+      const result = await toolChat('large_result: read it', [], { connectors: true })
 
       expect(result.toolCalls[0]!.result.length).toBeLessThan(raw.length)
       expect(result.toolCalls[0]!.result).toMatch(
@@ -614,7 +624,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       { toolCalls: [{ name: 'calculator', args: { expression: 'process.exit(1)' } }] },
       { content: 'Cannot compute that.' }
     )
-    const r = await toolChat('evil', [])
+    const r = await toolChat('calculator evil', [])
     expect(r.toolCalls[0]!.result).toMatch(/only basic arithmetic/i)
   })
 
@@ -624,7 +634,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       { toolCalls: [{ name: 'get_datetime', argsRaw: 'not-json' }] },
       { content: 'done' }
     )
-    const r = await toolChat('time', [])
+    const r = await toolChat('get_datetime time', [])
     expect(r.toolCalls[0]!.name).toBe('get_datetime')
     expect(r.answer).toBe('done')
   })
@@ -642,15 +652,15 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   // --- generate_image (gated + deferred side-channel) ---------------------------
   it('offers generate_image only when an image model is available', async () => {
     enqueueReactiveAfterEmptyPlan({ content: 'ok' })
-    await toolChat('draw a cat', [], { imageAvailable: true })
+    await toolChat('generate_image draw a cat', [], { imageAvailable: true })
     const withImg = fake.requests[0] as { tools: { function: { name: string } }[] }
     expect(withImg.tools.map((t) => t.function.name)).toContain('generate_image')
 
     fake.reset()
     enqueueReactiveAfterEmptyPlan({ content: 'ok' })
-    await toolChat('draw a cat', [], { imageAvailable: false })
-    const withoutImg = fake.requests[0] as { tools: { function: { name: string } }[] }
-    expect(withoutImg.tools.map((t) => t.function.name)).not.toContain('generate_image')
+    await toolChat('generate_image draw a cat', [], { imageAvailable: false })
+    const withoutImg = fake.requests[0] as { tools?: { function: { name: string } }[] }
+    expect((withoutImg.tools ?? []).map((t) => t.function.name)).not.toContain('generate_image')
   })
 
   it('records the requested prompt as imageRequest, fires onStep, and still returns the answer', async () => {
@@ -666,7 +676,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       { content: 'Here is your image.' }
     )
     const steps: string[] = []
-    const r = await toolChat('make a picture of a red bicycle', [], {
+    const r = await toolChat('generate_image a picture of a red bicycle', [], {
       imageAvailable: true,
       onStep: (c) => steps.push(c.name)
     })
@@ -689,7 +699,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       },
       { content: 'done' }
     )
-    const r = await toolChat('two pictures', [], { imageAvailable: true })
+    const r = await toolChat('generate_image two pictures', [], { imageAvailable: true })
     expect(r.imageRequests).toEqual([{ prompt: 'first' }, { prompt: 'second' }])
   })
 
@@ -698,7 +708,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       { toolCalls: [{ name: 'generate_image', args: { prompt: '   ' } }] },
       { content: 'I could not tell what to draw.' }
     )
-    const r = await toolChat('draw', [], { imageAvailable: true })
+    const r = await toolChat('generate_image draw', [], { imageAvailable: true })
     expect(r.imageRequest).toBeUndefined()
     expect(r.toolCalls[0]!.result).toMatch(/no image prompt/i)
   })
@@ -723,7 +733,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     })
     expect(getToolExtensions().some((e) => e.id === 'test-ext')).toBe(true)
     fake.enqueue({ toolCalls: [{ name: 'ext_tool', args: {} }] }, { content: 'used the connector' })
-    const r = await toolChat('do it', [], { connectors: true })
+    const r = await toolChat('ext_tool do it', [], { connectors: true })
     // Terminal artifact: the extension actually ran and its result flowed back into the loop.
     expect(r.toolCalls[0]).toMatchObject({ name: 'ext_tool', result: 'ext-result' })
     expect(r.answer).toBe('used the connector')
@@ -835,7 +845,8 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
       {
         ok: true,
         status: 202,
-        text: async () => '<html><div class="anomaly-modal__title">Unfortunately, bots.</div></html>'
+        text: async () =>
+          '<html><div class="anomaly-modal__title">Unfortunately, bots.</div></html>'
       },
       {
         ok: true,
@@ -847,7 +858,10 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
         </item></channel></rss>`
       }
     ]
-    vi.stubGlobal('fetch', vi.fn(async () => fetchResponses.shift()!))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => fetchResponses.shift()!)
+    )
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'web_search', args: { query: 'Wednesday Solutions' } }] },
       { content: 'Here is what I found.' }
@@ -870,7 +884,7 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
       { content: 'It is 42.' }
     )
     const contentDeltas: string[] = []
-    const r = await toolChat('what is 6*7', [], {
+    const r = await toolChat('calculator: what is 6*7', [], {
       onDelta: (t, k) => {
         if (k === 'content') contentDeltas.push(t)
       }

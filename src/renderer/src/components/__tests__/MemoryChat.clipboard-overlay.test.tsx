@@ -148,7 +148,7 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
     expect(screen.queryByRole('menuitem', { name: 'Copied' })).toBeNull()
   })
 
-  it('exposes the image preview as a dialog and dismisses it from the keyboard or backdrop', async () => {
+  it('exposes the image preview as a dialog and dismisses it from the keyboard or Close button', async () => {
     installApi()
     const user = userEvent.setup()
     renderConversation()
@@ -160,7 +160,7 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
 
     await user.click(screen.getByAltText('Generated'))
     const dialog = screen.getByRole('dialog', { name: 'Generated image preview' })
-    fireEvent.click(dialog)
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog', { name: 'Generated image preview' })).toBeNull()
   })
 })

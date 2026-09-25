@@ -57,7 +57,11 @@ import {
   buildStandardArgs,
   DEFAULT_NEGATIVE
 } from './imagegen/args'
-import { initialProgressState, reduceProgress } from './imagegen/progress'
+import {
+  initialProgressState,
+  reduceProgress,
+  type ProgressEvent
+} from './imagegen/progress'
 import {
   resolveExistingOwnedEntry,
   resolveExistingOwnedPath,
@@ -545,10 +549,18 @@ export async function generateImage(
   // Prompt enhancement runs FIRST, while the chat model is still resident — the
   // image job below evicts the LLM, so the text pass must precede it. Gated by a
   // setting; failure/timeout silently keeps the original prompt.
-  const enhanced = await maybeEnhancePrompt(params.prompt, onUpdate, params.enhancePrompt)
+  const enhanced = await maybeEnhancePrompt(
+    params.prompt,
+    onUpdate,
+    params.enhancePrompt,
+    params.initImage ? [params.initImage] : []
+  )
   const remote = getActiveRemoteVisionServerForModality('image')
   const remoteId = remote ? remoteVisionModelId(remote.id, remote.selectedModel) : null
   if (remote && (!params.model || params.model === remote.selectedModel || params.model === remoteId)) {
+    if (params.initImage) {
+      throw new Error('The selected remote image model does not support image editing. Select a local image model that supports an init image.')
+    }
     if (remoteAbort) throw new Error('An image is already generating — please wait for it to finish.')
     const controller = new AbortController()
     remoteAbort = controller
@@ -619,13 +631,15 @@ export async function generateImage(
 async function maybeEnhancePrompt(
   prompt: string,
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
-  requestOverride?: boolean
+  requestOverride?: boolean,
+  referenceImages: string[] = []
 ): Promise<string> {
   const enabled = requestOverride ?? getSetting('enhanceImagePrompts', true)
   if (enabled) onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
   let streamed = ''
   return enhancePrompt(prompt, {
     enabled,
+    hasReferenceImage: referenceImages.length > 0,
     onText: (text) => {
       streamed += text
       onUpdate?.({ stage: 'enhancing', enhancedPrompt: streamed })
@@ -637,7 +651,7 @@ async function maybeEnhancePrompt(
         llm
           .chatStream(
             instruction,
-            [],
+            referenceImages,
             (text, kind) => {
               if (kind === 'content') onText(text)
             },
@@ -666,6 +680,9 @@ async function runImageGen(
   // queue (evicts: ['llm']) before we get here, then delegates the spawn to the mflux
   // module. Returns before the sd-cli path.
   if (isMfluxModelId(params.model)) {
+    if (params.initImage) {
+      throw new Error('The selected MLX image model does not support image editing. Select a local image model that supports an init image.')
+    }
     const def = getMfluxModel(params.model)!
     const outDir = path.join(dataDir(), 'generated-images')
     fs.mkdirSync(outDir, { recursive: true })
@@ -731,6 +748,11 @@ async function runImageGen(
   // Core ML models are directories of .mlmodelc resources → routed to the ANE
   // Swift helper; everything else (GGUF) runs on sd-cli.
   const coreml = isCoreMLModelDir(model)
+  if (params.initImage && (coreml || isZImageModel(path.basename(model)))) {
+    throw new Error(
+      `${coreml ? 'The selected Core ML image model' : 'The selected Z-Image model'} does not support image editing. Select a local image model that supports an init image.`
+    )
+  }
   const cli = coreml ? findCoreMLBin() : findSdCli()
   if (!cli) {
     throw new Error(
@@ -808,11 +830,11 @@ async function runImageGen(
   const seed = params.seed ?? -1
   const stamp = String(Date.now())
   const outPath = path.join(outDir, `img-${stamp}.png`)
-  const previewPath = path.join(outDir, `preview-${stamp}.png`)
 
   const base = path.basename(model)
   const isZImage = isZImageModel(base)
   const isQwenImage21 = isQwenImage21Model(base)
+  const previewPath = path.join(outDir, `preview-${stamp}.png`)
 
   // --- RESIDENT fast path (opt-in) --------------------------------------------
   // When the user sets image residency to 'resident', a plain full-checkpoint
@@ -1050,6 +1072,28 @@ async function runImageGen(
       // transition; the shell only handles the preview PNG read + the callback.
       let progress = initialProgressState(seed)
       let progressBuffer = ''
+      let latestProgressEvent: ProgressEvent | undefined
+      let previewVersion = ''
+      const readPreview = (): string | undefined => {
+        try {
+          if (!fs.existsSync(previewPath)) return undefined
+          const stat = fs.statSync(previewPath)
+          const version = `${stat.mtimeMs}:${stat.size}`
+          if (version === previewVersion) return undefined
+          previewVersion = version
+          return `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
+        } catch {
+          return undefined
+        }
+      }
+      // sd-cli prints a step before its preview PNG has finished writing. Poll
+      // the file independently so the final step cannot leave the previous
+      // preview on screen while the final VAE decode is still running.
+      const previewPoll = setInterval(() => {
+        if (!onProgress || !latestProgressEvent) return
+        const preview = readPreview()
+        if (preview) onProgress({ ...latestProgressEvent, preview })
+      }, 250)
       const capture = (d: Buffer): void => {
         const s = d.toString()
         log += s
@@ -1059,20 +1103,23 @@ async function runImageGen(
         const { state, event } = reduceProgress(progress, progressBuffer, params.steps)
         progress = state
         if (onProgress && event) {
-          let preview: string | undefined
-          try {
-            if (fs.existsSync(previewPath))
-              preview = `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
-          } catch {
-            /* preview not ready */
-          }
+          latestProgressEvent = event
+          const preview = readPreview()
           onProgress({ ...event, preview })
         }
       }
       child.stdout.on('data', capture)
       child.stderr.on('data', capture)
-      child.on('error', reject)
+      child.on('error', (error) => {
+        clearInterval(previewPoll)
+        reject(error)
+      })
       child.on('close', (code) => {
+        const preview = readPreview()
+        if (onProgress && latestProgressEvent && preview) {
+          onProgress({ ...latestProgressEvent, preview })
+        }
+        clearInterval(previewPoll)
         if (generationLifecycle.isCancelled()) {
           reject(new Error(IMAGE_CANCELLED_MESSAGE))
         } else if (code === 0) {

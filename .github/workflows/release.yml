@@ -342,6 +342,9 @@ jobs:
           spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
           # Stapling changes the DMG bytes. Refresh the blockmap and update feed before upload.
           node scripts/refresh-mac-dmg-update-info.mjs "$DMG" dist/latest-mac.yml
+          APP="$(find dist -maxdepth 2 -type d -name 'Off Grid AI Desktop.app' -print -quit)"
+          test -n "$APP"
+          node scripts/probe-packaged-tts.mjs "$APP" --synthesize
       # Internal demo build: hand the signed+notarized DMG back as a run artifact and stop
       # (the publish steps below are all skipped). Repo-scoped, auto-expiring, no Release.
       - name: Upload signed DMG as a build artifact

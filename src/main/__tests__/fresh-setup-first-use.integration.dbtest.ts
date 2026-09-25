@@ -124,22 +124,19 @@ function installRuntimeBoundaries(): void {
       `fs.writeFileSync(args[outputIndex + 1], Buffer.from('${PNG_BASE64}', 'base64'))`
     ].join('\n')
   )
-  fs.mkdirSync(resourceDir, { recursive: true })
-  fs.writeFileSync(
-    path.join(resourceDir, 'tts-worker.mjs'),
+  executable(
+    path.join(resourceDir, 'bin', 'executorch-speech'),
     [
-      "import fs from 'node:fs'",
-      'const [, , command, output] = process.argv',
-      "if (command === 'speak' && output) {",
-      "  let input = ''",
-      "  process.stdin.setEncoding('utf8')",
-      "  process.stdin.on('data', chunk => { input += chunk })",
-      "  process.stdin.on('end', () => {",
-      "    fs.writeFileSync(output, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))",
-      '  })',
-      '}'
-    ].join('\n'),
-    { mode: 0o755 }
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs')",
+      'const args = process.argv.slice(2)',
+      "const output = args[args.indexOf('--output') + 1]",
+      "process.stdin.setEncoding('utf8')",
+      "process.stdin.on('data', () => {})",
+      "process.stdin.on('end', () => {",
+      "  fs.writeFileSync(output, Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(60, 1)]))",
+      '})'
+    ].join('\n')
   )
 }
 

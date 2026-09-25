@@ -19,6 +19,7 @@ const installHelperFixtures = (app: string): void => {
 set -euo pipefail
 case "$(basename "$0")" in
   llama-server) printf 'usage: llama-server [options]\\n' ;;
+  computer-use-capture) printf 'usage: computer-use-capture <output.png> <display-id> <excluded-window-id> <width> <height>\\n' ;;
   ffmpeg) printf 'ffmpeg version 6.0-fixture\\n' ;;
   whisper-cli) printf 'usage: whisper-cli [options] file\\noptions:\\n' ;;
   sd-server) printf 'stable-diffusion.cpp version fixture\\nUsage: sd-server [options]\\n' ;;
@@ -28,6 +29,8 @@ esac
 `
   for (const relative of [
     'bin/llama/llama-server',
+    'bin/llama-prism/llama-server',
+    'bin/computer-use-capture',
     'bin/ffmpeg',
     'bin/whisper/whisper-cli',
     'bin/sd/sd-server',
@@ -148,6 +151,8 @@ const makeReleaseShapedBundle = (root: string): string => {
 int main(int argc, char **argv) {
   if (argc > 0 && strstr(argv[0], "llama-server")) {
     puts("usage: llama-server [options]");
+  } else if (argc > 0 && strstr(argv[0], "computer-use-capture")) {
+    puts("usage: computer-use-capture <output.png> <display-id> <excluded-window-id> <width> <height>");
   }
   return 0;
 }
