@@ -812,11 +812,7 @@ async function runImageGen(
   const base = path.basename(model)
   const isZImage = isZImageModel(base)
   const isQwenImage21 = isQwenImage21Model(base)
-  // Qwen emits three preview layers per step. sd-cli writes multi-frame
-  // previews as animations, so use WebP for Qwen and PNG for single-frame models.
-  const previewExtension = isQwenImage21 ? 'webp' : 'png'
-  const previewMime = isQwenImage21 ? 'image/webp' : 'image/png'
-  const previewPath = path.join(outDir, `preview-${stamp}.${previewExtension}`)
+  const previewPath = path.join(outDir, `preview-${stamp}.png`)
 
   // --- RESIDENT fast path (opt-in) --------------------------------------------
   // When the user sets image residency to 'resident', a plain full-checkpoint
@@ -1066,7 +1062,7 @@ async function runImageGen(
           let preview: string | undefined
           try {
             if (fs.existsSync(previewPath))
-              preview = `data:${previewMime};base64,${fs.readFileSync(previewPath).toString('base64')}`
+              preview = `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
           } catch {
             /* preview not ready */
           }
