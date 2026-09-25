@@ -385,8 +385,9 @@ const TOOLS: ToolDef[] = [
         const documents = await handler({ query }, ctx.projectId)
         const chats = conversations.length
           ? conversations
-              .map((message, index) =>
-                `[C${index + 1}] ${message.title || 'Project conversation'} · ${message.role}: ${message.content.slice(0, 1500)}`
+              .map(
+                (message, index) =>
+                  `[C${index + 1}] ${message.title || 'Project conversation'} · ${message.role}: ${message.content.slice(0, 1500)}`
               )
               .join('\n\n')
           : 'No matching project conversations found.'
@@ -424,8 +425,7 @@ const TOOLS: ToolDef[] = [
     },
     run: (a): ToolResult => {
       const prompt = String(a.prompt ?? '').trim()
-      const enhancePrompt =
-        typeof a.enhance_prompt === 'boolean' ? a.enhance_prompt : undefined
+      const enhancePrompt = typeof a.enhance_prompt === 'boolean' ? a.enhance_prompt : undefined
       return prompt
         ? {
             text: 'Image generation started - it will appear in the chat.',
@@ -688,16 +688,36 @@ export async function toolChat(
   // load, the lexical fallback fails closed to direct matches.
   let relevantTools: unknown[] = []
   if (rawTools.length > 0) {
-    try {
-      const { embeddings } = await import('./embeddings')
-      const { selectRelevantToolsSemantic } = await import('./tools/tool-embedding-ranking')
-      relevantTools = await selectRelevantToolsSemantic(query, rawTools, {
-        embed: (t) => embeddings.generateEmbedding(t)
-      })
-    } catch {
-      const { selectRelevantTools } = await import('./tools/tool-ranking')
-      relevantTools = selectRelevantTools(query, rawTools)
+    const { selectRelevantTools } = await import('./tools/tool-ranking')
+    const lexicalTools = selectRelevantTools(query, rawTools)
+    const { hasToolIntent } = await import('./tools/tool-embedding-ranking')
+    const namedTool = rawTools.some((schema) => {
+      const name = (schema as { function?: { name?: unknown } }).function?.name
+      return typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())
+    })
+    // A greeting or plain statement with no direct tool match does not need
+    // MiniLM to load before the assistant can answer. An explicit tool name
+    // also needs no semantic ranking. If image generation is unavailable, an
+    // explicit generate_image request cannot be routed to that missing tool.
+    const unavailableImageTool = !imageAvailable && /\bgenerate_image\b/i.test(query)
+    if (!namedTool && !unavailableImageTool && (lexicalTools.length || hasToolIntent(query))) {
+      try {
+        const { embeddings } = await import('./embeddings')
+        const { selectRelevantToolsSemantic } = await import('./tools/tool-embedding-ranking')
+        relevantTools = await selectRelevantToolsSemantic(query, rawTools, {
+          embed: (t) => embeddings.generateEmbedding(t)
+        })
+      } catch {
+        // The direct-match selection below remains available offline.
+      }
     }
+    // A semantic score must not hide a direct name or description match. This
+    // also keeps explicit tool requests available when a new embedding model
+    // ranks an unrelated schema first.
+    relevantTools = [
+      ...lexicalTools,
+      ...relevantTools.filter((tool) => !lexicalTools.includes(tool))
+    ]
   }
   const scopeToolName = opts.projectId
     ? 'search_knowledge_base'

@@ -214,10 +214,7 @@ async function inTranscript(text: string | RegExp): Promise<HTMLElement> {
 
 describe('production workspace bridge', () => {
   it('sends a rendered chat turn through preload, IPC, the model socket, and SQLite', async () => {
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The production bridge persisted this answer.' }
-    )
+    fake.enqueue({ content: 'The production bridge persisted this answer.' })
     const user = userEvent.setup()
     renderChat()
 
@@ -237,7 +234,7 @@ describe('production workspace bridge', () => {
         ['assistant', 'The production bridge persisted this answer.']
       ])
     })
-    expect(fake.requests).toHaveLength(2)
+    expect(fake.requests).toHaveLength(1)
   })
 
   it('reads model-written web URLs with wrappers and rejects an unsupported scheme', async () => {
@@ -322,13 +319,10 @@ describe('production workspace bridge', () => {
   }, 15_000)
 
   it('shows the real memory-chat failure instead of a fabricated answer', async () => {
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      {
-        errorStatus: 503,
-        errorBody: JSON.stringify({ error: { message: 'Memory model is unavailable.' } })
-      }
-    )
+    fake.enqueue({
+      errorStatus: 503,
+      errorBody: JSON.stringify({ error: { message: 'Memory model is unavailable.' } })
+    })
     const user = userEvent.setup()
     renderChat()
 
@@ -342,10 +336,7 @@ describe('production workspace bridge', () => {
   })
 
   it('keeps a slow reply active past the former deadline until the user stops it', async () => {
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'This reply is still in progress.', hold: true }
-    )
+    fake.enqueue({ content: 'This reply is still in progress.', hold: true })
     const user = userEvent.setup()
     renderChat()
 
@@ -376,12 +367,7 @@ describe('production workspace bridge', () => {
 
   it('shows and saves a compaction notice when the chat reaches 80% of its context', async () => {
     const longAnswer = `Stored answer ${'A'.repeat(54_000)}`
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: longAnswer },
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The next answer still works.' }
-    )
+    fake.enqueue({ content: longAnswer }, { content: 'The next answer still works.' })
     const user = userEvent.setup()
     renderChat()
 
@@ -419,9 +405,7 @@ describe('production workspace bridge', () => {
         fake.reset()
         await window.api.setRemoteVisionServer({ provider, endpoint, model: 'integration-model' })
         fake.enqueue(
-          { content: '{"intent":"chat","urls":[]}' },
           { content: `${provider} answered with Thinking on.` },
-          { content: '{"intent":"chat","urls":[]}' },
           { content: `${provider} answered with Thinking off.` }
         )
         const user = userEvent.setup()
@@ -506,7 +490,9 @@ describe('production workspace bridge', () => {
         await user.click(screen.getByRole('menuitem', { name: 'ConnectorsOff' }))
       }
       await user.keyboard('{Escape}')
-      fireEvent.change(composer, { target: { value: 'Calculate six times seven' } })
+      fireEvent.change(composer, {
+        target: { value: 'Use calculator to multiply six times seven' }
+      })
       await user.click(screen.getByRole('button', { name: /^send$/i }))
 
       expect(await inTranscript('Gemini used the calculator and returned 42.')).toBeTruthy()

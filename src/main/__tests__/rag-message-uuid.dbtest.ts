@@ -20,6 +20,8 @@ const h = vi.hoisted(() => ({
 }))
 
 fs.mkdirSync(h.tmpDir, { recursive: true })
+const previousDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = h.tmpDir
 
 vi.mock('electron', () => ({
   app: { getPath: () => h.tmpDir, getAppPath: () => process.cwd(), isPackaged: false },
@@ -67,6 +69,8 @@ beforeAll(() => {
 })
 
 afterAll(() => {
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
   fs.rmSync(h.tmpDir, { recursive: true, force: true })
 })
 

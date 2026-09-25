@@ -19,6 +19,10 @@ const SCORE_WINDOW = 0.1
 const TOOL_INTENT =
   /\b(search|find|look up|latest|current|today|tomorrow|meeting|calendar|schedule|remind|tell|send|email|message|open|browse|website|web|screen|memory|remember|calculate|math|time|date|image|picture|photo|draw|generate|location|weather)\b|\d\s*[+*/-]\s*\d/i
 
+export function hasToolIntent(query: string): boolean {
+  return TOOL_INTENT.test(query)
+}
+
 // Process-lifetime cache of tool embeddings, keyed by a hash of the tool text.
 const toolVecCache = new Map<string, number[]>()
 
@@ -119,7 +123,7 @@ export async function selectRelevantToolsSemantic(
   )
   scored.sort((a, b) => b.score - a.score || a.index - b.index)
   const best = scored[0]?.score ?? -1
-  const floor = TOOL_INTENT.test(query) ? INTENT_RELEVANCE : STRONG_RELEVANCE
+  const floor = hasToolIntent(query) ? INTENT_RELEVANCE : STRONG_RELEVANCE
   if (best < floor) return []
 
   return scored
