@@ -378,7 +378,7 @@ function AppContent() {
     commitViewMode(destination)
   }, [])
   useEffect(() => {
-    return window.api.godTwin?.onWake(() => {
+    return window.api.godTwin?.onWake?.(() => {
       navigateTo('memory-chat')
       setGodTwinWakeRequest((request) => request + 1)
     })

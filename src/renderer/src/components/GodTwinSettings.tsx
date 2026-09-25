@@ -5,7 +5,7 @@ export function GodTwinSettings(): React.ReactElement {
   const [enabled, setEnabled] = useState(true)
 
   useEffect(() => {
-    void window.api.godTwin?.getEnabled().then(setEnabled)
+    void window.api.godTwin?.getEnabled?.().then(setEnabled)
   }, [])
 
   return (
@@ -23,7 +23,7 @@ export function GodTwinSettings(): React.ReactElement {
         onClick={() => {
           const next = !enabled
           void persistToggle(next, enabled, setEnabled, () =>
-            window.api.godTwin?.setEnabled(next) ?? Promise.resolve(next)
+            window.api.godTwin?.setEnabled?.(next) ?? Promise.resolve(next)
           )
         }}
         className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-all duration-150 active:scale-95 ${enabled ? 'bg-emerald-500' : 'bg-neutral-700'}`}

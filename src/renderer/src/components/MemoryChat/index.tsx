@@ -778,10 +778,10 @@ export function MemoryChat({
   const godTwinRestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const markGenerating = useCallback((cid: string, on: boolean): void => {
     if (godTwinRestTimerRef.current) clearTimeout(godTwinRestTimerRef.current)
-    if (on) window.api.godTwin?.setState('running')
+    if (on) window.api.godTwin?.setState?.('running')
     else {
-      window.api.godTwin?.setState('resting')
-      godTwinRestTimerRef.current = setTimeout(() => window.api.godTwin?.setState('idle'), 900)
+      window.api.godTwin?.setState?.('resting')
+      godTwinRestTimerRef.current = setTimeout(() => window.api.godTwin?.setState?.('idle'), 900)
     }
     if (on) generatingRef.current.add(cid)
     else generatingRef.current.delete(cid)
@@ -2362,8 +2362,8 @@ export function MemoryChat({
       voiceTurns.phase === 'starting' ||
       voiceTurns.phase === 'listening' ||
       voiceTurns.phase === 'recording'
-    window.api.godTwin?.setListening(listening)
-    return () => window.api.godTwin?.setListening(false)
+    window.api.godTwin?.setListening?.(listening)
+    return () => window.api.godTwin?.setListening?.(false)
   }, [voiceTurns.phase])
 
   // Stop the in-flight generation for a conversation: abort the model stream (main
@@ -2782,9 +2782,9 @@ export function MemoryChat({
       }
       if (data.type === 'step') {
         const step = data.step as { kind?: unknown } | undefined
-        if (step?.kind === 'running_tool') window.api.godTwin?.setState('fighting')
+        if (step?.kind === 'running_tool') window.api.godTwin?.setState?.('fighting')
       } else if (data.type === 'tool_result') {
-        window.api.godTwin?.setState('running')
+        window.api.godTwin?.setState?.('running')
       }
       // Mirror reasoning into a ref as it streams, so persistence can read it
       // deterministically (not via a state-updater side effect). Rendering still

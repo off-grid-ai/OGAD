@@ -71,7 +71,7 @@ export function GodTwinCompanion(): React.ReactElement {
       }
     }
     const pointerUp = (): void => {
-      if (pointerStart && !pointerMoved) void window.api.godTwin?.wake()
+      if (pointerStart && !pointerMoved) void window.api.godTwin?.wake?.()
       pointerStart = null
     }
     const pointerCancel = (): void => {
@@ -137,9 +137,9 @@ export function GodTwinCompanion(): React.ReactElement {
       currentAction = next
     }
     playStateRef.current = playState
-    const offState = window.api.godTwin?.onState(playState)
-    const offListening = window.api.godTwin?.onListening(setListening)
-    void window.api.godTwin?.getPreferences().then((saved) => {
+    const offState = window.api.godTwin?.onState?.(playState)
+    const offListening = window.api.godTwin?.onListening?.(setListening)
+    void window.api.godTwin?.getPreferences?.().then((saved) => {
       if (disposed) return
       spinRef.current = saved.spinning
       setSpinning(saved.spinning)
@@ -274,7 +274,7 @@ export function GodTwinCompanion(): React.ReactElement {
     let lastY = event.screenY
     target.setPointerCapture(event.pointerId)
     const move = (next: PointerEvent): void => {
-      window.api.godTwin?.resize(edge, next.screenX - lastX, next.screenY - lastY)
+      window.api.godTwin?.resize?.(edge, next.screenX - lastX, next.screenY - lastY)
       lastX = next.screenX
       lastY = next.screenY
     }
@@ -306,7 +306,7 @@ export function GodTwinCompanion(): React.ReactElement {
           title={listening ? 'Listening' : 'Listen'}
           aria-label={listening ? 'Listening' : 'Listen'}
           aria-pressed={listening}
-          onClick={() => void window.api.godTwin?.wake()}
+          onClick={() => void window.api.godTwin?.wake?.()}
         >
           {listening ? '◉' : '●'}
         </button>
@@ -315,7 +315,7 @@ export function GodTwinCompanion(): React.ReactElement {
           className="god-twin-no-drag flex h-6 min-w-0 flex-1 items-center justify-center rounded text-[11px] text-neutral-700 hover:bg-black/5"
           title="Hide Ares"
           aria-label="Hide Ares"
-          onClick={() => void window.api.godTwin?.setEnabled(false)}
+          onClick={() => void window.api.godTwin?.setEnabled?.(false)}
         >
           ◒
         </button>
@@ -329,7 +329,7 @@ export function GodTwinCompanion(): React.ReactElement {
             onClick={() => {
               setSelectedState(state)
               playStateRef.current?.(state)
-              void window.api.godTwin?.setPreferences({ state })
+              void window.api.godTwin?.setPreferences?.({ state })
             }}
           >
             {symbol}
@@ -346,7 +346,7 @@ export function GodTwinCompanion(): React.ReactElement {
             onChange={(event) => {
               spinRef.current = event.target.checked
               setSpinning(event.target.checked)
-              void window.api.godTwin?.setPreferences({ spinning: event.target.checked })
+              void window.api.godTwin?.setPreferences?.({ spinning: event.target.checked })
             }}
           />
           ↻
