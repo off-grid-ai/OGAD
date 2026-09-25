@@ -372,7 +372,9 @@ describe('multimodal runtime reliability', () => {
       const image = await generateImage(request)
       expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
       expect(lineCount(fixture.imageLog)).toBe(runsBefore + 1)
-      const args = JSON.parse(fs.readFileSync(fixture.imageLog, 'utf8').trim().split(/\r?\n/).at(-1)!) as string[]
+      const args = JSON.parse(
+        fs.readFileSync(fixture.imageLog, 'utf8').trim().split(/\r?\n/).at(-1)!
+      ) as string[]
       expect(args).toContainEqual(expect.stringContaining(encoder))
       expect(args).toContainEqual(expect.stringContaining(projector))
       expect(args).toContainEqual(expect.stringContaining(vae))
