@@ -9,10 +9,12 @@ struct napi_env__;
 struct napi_value__;
 struct napi_deferred__;
 struct napi_callback_info__;
+struct napi_handle_scope__;
 using napi_env = napi_env__*;
 using napi_value = napi_value__*;
 using napi_deferred = napi_deferred__*;
 using napi_callback_info = napi_callback_info__*;
+using napi_handle_scope = napi_handle_scope__*;
 using napi_status = int32_t;
 using napi_callback = napi_value (*)(napi_env, napi_callback_info);
 extern "C" napi_status napi_create_function(napi_env, const char*, size_t, napi_callback, void*, napi_value*);
@@ -23,6 +25,8 @@ extern "C" napi_status napi_create_object(napi_env, napi_value*);
 extern "C" napi_status napi_get_boolean(napi_env, bool, napi_value*);
 extern "C" napi_status napi_create_double(napi_env, double, napi_value*);
 extern "C" napi_status napi_create_string_utf8(napi_env, const char*, size_t, napi_value*);
+extern "C" napi_status napi_open_handle_scope(napi_env, napi_handle_scope*);
+extern "C" napi_status napi_close_handle_scope(napi_env, napi_handle_scope);
 
 @class LocationRequest;
 static NSMutableSet<LocationRequest*>* activeRequests;
@@ -61,6 +65,11 @@ static void setString(napi_env env, napi_value object, const char* key, NSString
     if (!_deferred) return;
     [_timer invalidate];
     _manager.delegate = nil;
+    // Core Location enters this delegate from the Cocoa run loop, not through a
+    // Node callback. Establish the V8 handle scope that N-API normally supplies
+    // before creating values or resolving the JavaScript promise.
+    napi_handle_scope scope = nullptr;
+    if (napi_open_handle_scope(_env, &scope) != 0) return;
     napi_value response = nullptr;
     napi_create_object(_env, &response);
     setBoolean(_env, response, "ok", location != nil);
@@ -79,6 +88,7 @@ static void setString(napi_env env, napi_value object, const char* key, NSString
     napi_deferred deferred = _deferred;
     _deferred = nullptr;
     napi_resolve_deferred(_env, deferred, response);
+    napi_close_handle_scope(_env, scope);
     [activeRequests removeObject:self];
 }
 
