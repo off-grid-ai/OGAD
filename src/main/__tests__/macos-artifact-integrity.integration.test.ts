@@ -387,6 +387,21 @@ describe('macOS artifact integrity', () => {
     await expect(verifyElectronBuilderArtifact(event)).resolves.toBeUndefined()
   })
 
+  it('uses Ubuntu 24.04 package names for Linux deb dependencies', async () => {
+    const loaded = await getConfig(
+      {
+        packageKey: 'build',
+        configFilename: 'electron-builder',
+        projectDir: REPO_ROOT,
+        packageMetadata: null
+      },
+      path.join(REPO_ROOT, 'electron-builder.yml')
+    )
+    expect(loaded.result.deb?.depends).toEqual(
+      expect.arrayContaining(['libgtk-3-0t64', 'libatspi2.0-0t64', 'libasound2t64', 'libgbm1'])
+    )
+  })
+
   it.skipIf(process.platform !== 'darwin')(
     'enforces ASAR inventory through the real updater ZIP verification seam',
     async () => {

@@ -816,6 +816,9 @@ jobs:
           deb="$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
           test -x "$appimage"
           dpkg-deb --info "$deb" >/dev/null
+          dependencies="$(dpkg-deb --field "$deb" Depends)"
+          grep -q 'libgtk-3-0t64' <<< "$dependencies"
+          grep -q 'libatspi2.0-0t64' <<< "$dependencies"
           extraction="$(mktemp -d)"
           trap 'rm -rf -- "$extraction"' EXIT
           (cd "$extraction" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
