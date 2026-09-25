@@ -64,6 +64,10 @@ function installNativeBoundary(): string {
 const fs = require('node:fs')
 const http = require('node:http')
 const args = process.argv.slice(2)
+if (args.includes('--list-devices')) {
+  console.log('Available devices:\\n  (none)')
+  process.exit(0)
+}
 const port = Number(args[args.indexOf('--port') + 1])
 const server = http.createServer((req, res) => {
   res.setHeader('Content-Type', 'application/json')
@@ -88,6 +92,12 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)))
 `
   )
   fs.chmodSync(executable, 0o755)
+  // This fixture is a CPU-only server. Linux and Windows now probe the GPU
+  // variants before launch, so give the contender the CPU fallback path.
+  const cpuExecutable = path.join(fixture.binDir, 'llama-cpu', 'llama-server')
+  fs.mkdirSync(path.dirname(cpuExecutable), { recursive: true })
+  fs.copyFileSync(executable, cpuExecutable)
+  fs.chmodSync(cpuExecutable, 0o755)
   return executable
 }
 
