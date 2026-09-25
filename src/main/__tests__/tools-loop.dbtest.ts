@@ -363,8 +363,8 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       const submittedGoal = String(
         (proposals[0]?.input as { args?: { goal?: string } }).args?.goal ?? ''
       )
-      expect(submittedGoal).toContain(originalRequest)
       expect(submittedGoal).toContain(followUp)
+      expect(submittedGoal).toContain(completeGoal)
     } finally {
       unregisterToolExtension(extension.id, extension)
     }
