@@ -90,6 +90,7 @@ const offGridApi = {
   // One durable projection for Web Use and Computer Use tabs/history.
   tasks: {
     list: (limit?: number): Promise<TaskRunSnapshot[]> => ipcRenderer.invoke('tasks:list', limit),
+    remove: (taskIds: string[]): Promise<string[]> => ipcRenderer.invoke('tasks:remove', taskIds),
     retryAvailability: (taskId: string) => ipcRenderer.invoke('tasks:retry-availability', taskId),
     retry: (taskId: string) => ipcRenderer.invoke('tasks:retry', taskId),
     guideAvailability: (taskId: string) => ipcRenderer.invoke('tasks:guide-availability', taskId),
@@ -99,6 +100,11 @@ const offGridApi = {
       const sub = (_e: unknown, task: TaskRunSnapshot): void => cb(task)
       ipcRenderer.on('tasks:changed', sub)
       return unsubscribe('tasks:changed', sub)
+    },
+    onRemoved: (cb: (taskIds: string[]) => void) => {
+      const sub = (_e: unknown, taskIds: string[]): void => cb(taskIds)
+      ipcRenderer.on('tasks:removed', sub)
+      return unsubscribe('tasks:removed', sub)
     }
   },
   // Browser rail: one watched page and its task feed.
@@ -521,7 +527,8 @@ const offGridApi = {
   getInstalledModels: () => ipcRenderer.invoke('models:installed'),
   getModelVisionStatus: () => ipcRenderer.invoke('models:vision-status'),
   searchModels: (query: string, kind?: string) => ipcRenderer.invoke('models:search', query, kind),
-  downloadModel: (modelId: string) => ipcRenderer.invoke('models:download', modelId),
+  getModelFiles: (modelId: string) => ipcRenderer.invoke('models:files', modelId),
+  downloadModel: (modelId: string, fileName?: string) => ipcRenderer.invoke('models:download', modelId, fileName),
   cancelModelDownload: (modelId: string) => ipcRenderer.invoke('models:cancel-download', modelId),
   deleteModel: (modelId: string) => ipcRenderer.invoke('models:delete', modelId),
   setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),
@@ -628,6 +635,7 @@ const offGridApi = {
     query: string,
     history?: { role: string; content: string }[],
     opts?: {
+      assistantOnly?: boolean
       connectors?: boolean
       conversationId?: string
       projectId?: string

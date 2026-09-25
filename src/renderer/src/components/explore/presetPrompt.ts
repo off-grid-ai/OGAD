@@ -23,7 +23,11 @@ export function hasRequiredPresetAnswers(preset: DemoPreset, answers: PresetAnsw
  */
 export function buildPresetPrompt(preset: DemoPreset, answers: PresetAnswers): string {
   const approvedInputs = preset.intake.fields.flatMap((field) => {
-    const value = (answers[field.id] ?? '').trim() || 'Not provided'
+    const answer = (answers[field.id] ?? '').trim() || 'Not provided'
+    const value =
+      answer === 'Not provided'
+        ? answer
+        : `${answer}${field.promptSuffix ? ` ${field.promptSuffix}` : ''}`
     return [`Q: ${field.label}`, `A: ${value}`, '']
   })
 

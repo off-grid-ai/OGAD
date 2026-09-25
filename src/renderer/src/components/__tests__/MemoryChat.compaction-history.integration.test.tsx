@@ -17,7 +17,7 @@ it('keeps the active turn and a short earlier excerpt after a saved compaction n
   await boundary.addRagMessage('conversation-a', 'assistant', '_Compacted_', { notice: true })
   await boundary.addRagMessage('conversation-a', 'assistant', 'Hello!')
   Object.assign(boundary.api, {
-    getSettings: async () => ({ composerToolsOn: true }),
+    getSettings: async () => ({ composerConnectorsOn: true }),
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     toolChat: async (_query: string, history: Array<{ role: string; content: string }>) => ({
       answer:

@@ -23,12 +23,14 @@ function runBuild(mode: FixtureMode): ReturnType<typeof spawnSync> & {
   sandbox: string
   cmakeLog: string
   otoolLog: string
+  rpathEditLog: string
 } {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-whisper-cli-build-'))
   tempRoots.push(sandbox)
   const fakeBin = path.join(sandbox, 'fake-bin')
   const cmakeLog = path.join(sandbox, 'cmake.log')
   const otoolLog = path.join(sandbox, 'otool.log')
+  const rpathEditLog = path.join(sandbox, 'rpath-edits.log')
   fs.mkdirSync(fakeBin)
 
   writeExecutable(
@@ -73,18 +75,26 @@ fi
 `
   )
   writeExecutable(path.join(fakeBin, 'sysctl'), '#!/usr/bin/env bash\nprintf "4\\n"\n')
+  writeExecutable(
+    path.join(fakeBin, 'install_name_tool'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${'$'}*" >> "${rpathEditLog}"
+`
+  )
   const minos = mode === 'newer-minos' ? '13.1' : '13.0'
   writeExecutable(
     path.join(fakeBin, 'otool'),
     `#!/usr/bin/env bash
 set -euo pipefail
 if [ "${'$'}1" = "-l" ]; then
-  printf 'Load command 1\n      cmd LC_BUILD_VERSION\n    minos ${minos}\n'
-  # The staged binary carries the @loader_path rpath install_name_tool adds, because the script
-  # GATES on it: without one the dylibs sitting right beside whisper-cli are unreachable to dyld,
-  # which is the "nothing happened" voice-note bug. A fake that never reports a load command the
-  # script checks makes the script fail for a reason the test is not about.
-  printf 'Load command 2\n          cmd LC_RPATH\n      cmdsize 32\n         path @loader_path (offset 12)\n'
+  file="${'$'}2"
+  if grep -Fq -- "-add_rpath @loader_path ${'$'}file" "${rpathEditLog}" 2>/dev/null; then
+    printf 'Load command 1\n          cmd LC_RPATH\n      cmdsize 32\n         path @loader_path (offset 12)\n'
+  else
+    printf 'Load command 1\n          cmd LC_RPATH\n      cmdsize 96\n         path /var/folders/fixture/T/build/bin (offset 12)\n'
+  fi
+  printf 'Load command 2\n      cmd LC_BUILD_VERSION\n    minos ${minos}\n'
   exit 0
 fi
 file="${'$'}2"
@@ -125,7 +135,7 @@ printf '    /usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current ver
     },
     encoding: 'utf8'
   })
-  return Object.assign(result, { sandbox, cmakeLog, otoolLog })
+  return Object.assign(result, { sandbox, cmakeLog, otoolLog, rpathEditLog })
 }
 
 describe('pinned Whisper CLI build and staging', () => {
@@ -150,7 +160,7 @@ describe('pinned Whisper CLI build and staging', () => {
     expect(cmake).toContain('-DBUILD_SHARED_LIBS=ON')
     expect(cmake).toContain('--target whisper-cli')
     expect(result.stdout).toContain('built whisper-cli minos=13.0 (want <= 13.0)')
-    expect(result.stdout).toContain('no foreign deps, all @rpath libs present')
+    expect(result.stdout).toContain('@loader_path only, no foreign deps, all @rpath libs present')
     expect(fs.statSync(path.join(destination, 'whisper-cli')).mode & 0o111).not.toBe(0)
     for (const name of ['libwhisper.1.dylib', 'libggml.0.dylib', 'libggml-base.0.dylib']) {
       const stat = fs.lstatSync(path.join(destination, name))
@@ -158,6 +168,12 @@ describe('pinned Whisper CLI build and staging', () => {
       expect(stat.isSymbolicLink(), name).toBe(false)
     }
     expect(audited).toEqual(expect.arrayContaining(staged))
+    const rpathEdits = fs.readFileSync(result.rpathEditLog, 'utf8')
+    for (const name of staged) {
+      const file = path.join(destination, name)
+      expect(rpathEdits).toContain(`-delete_rpath /var/folders/fixture/T/build/bin ${file}`)
+      expect(rpathEdits).toContain(`-add_rpath @loader_path ${file}`)
+    }
   })
 
   it('rejects a Homebrew OpenMP dependency', () => {

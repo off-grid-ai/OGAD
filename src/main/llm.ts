@@ -91,6 +91,83 @@ export interface ChatStreamResult extends StreamResult {
   maxTokens: number
 }
 
+export interface OptionDecision {
+  choice: number
+  confidence: number
+  probabilities: number[]
+}
+
+const DECISION_LABELS = 'ABCDEFGHIJ'
+
+export function buildDecisionPrompt(
+  context: string,
+  question: string,
+  options: readonly string[]
+): string {
+  if (options.length < 2 || options.length > DECISION_LABELS.length) {
+    throw new Error('A decision needs between 2 and 10 options.')
+  }
+  return [
+    `Context:\n${context}`,
+    `Question: ${question}`,
+    'Options:',
+    ...options.map((option, index) => `(${DECISION_LABELS[index]}) ${option}`),
+    'Answer: ('
+  ].join('\n')
+}
+
+export function parseOptionDecision(raw: string, optionCount: number): OptionDecision {
+  const data = JSON.parse(raw) as {
+    completion_probabilities?: Array<{
+      top_logprobs?: Array<{ token?: string; prob?: number }>
+      top_probs?: Array<{ token?: string; prob?: number }>
+    }>
+  }
+  const first = data.completion_probabilities?.[0]
+  const top = first?.top_probs ?? first?.top_logprobs ?? []
+  const probabilities = Array.from({ length: optionCount }, () => 0)
+  for (const item of top) {
+    const label = item.token?.trim()
+    const index = label ? DECISION_LABELS.indexOf(label) : -1
+    if (index >= 0 && index < optionCount && typeof item.prob === 'number') {
+      probabilities[index] = item.prob
+    }
+  }
+  const total = probabilities.reduce((sum, value) => sum + value, 0)
+  if (!(total > 0)) throw new Error('The Decision model returned no option probabilities.')
+  const normalized = probabilities.map((value) => value / total)
+  const choice = normalized.reduce(
+    (best, value, index) => (value > normalized[best]! ? index : best),
+    0
+  )
+  return { choice, confidence: normalized[choice]!, probabilities: normalized }
+}
+
+export function buildDecisionRequest(
+  prompt: string,
+  optionCount: number,
+  imageBase64?: string,
+  mediaMarker?: string
+): Record<string, unknown> {
+  if (imageBase64 && !mediaMarker) {
+    throw new Error('The local model server did not publish its media marker.')
+  }
+  const labels = DECISION_LABELS.slice(0, optionCount)
+  return {
+    prompt: imageBase64
+      ? { prompt_string: `${mediaMarker}\n${prompt}`, multimodal_data: [imageBase64] }
+      : prompt,
+    n_predict: 1,
+    n_probs: optionCount,
+    post_sampling_probs: true,
+    temperature: 1.3,
+    top_k: 0,
+    top_p: 1,
+    min_p: 0,
+    grammar: `root ::= [${labels}]`
+  }
+}
+
 function withContextMetrics(
   result: StreamResult,
   messages: unknown[],
@@ -322,9 +399,8 @@ export class LLMService {
     const candidate = path.basename(draftModel)
     if (!candidate || candidate !== draftModel) return false
     const capabilities = this.speculativeModelCapabilities()
-    return (mode === 'dflash'
-      ? capabilities.compatibleDflashModels
-      : capabilities.compatibleDraftModels
+    return (
+      mode === 'dflash' ? capabilities.compatibleDflashModels : capabilities.compatibleDraftModels
     ).includes(candidate)
   }
 
@@ -827,25 +903,34 @@ export class LLMService {
       this.mmProjPath = ''
     }
 
-    // ONE engine: bin/llama/llama-server, built in CI from source with a pinned
-    // macOS deployment target (scripts/build-llama.sh) so it both supports the
-    // newest model archs (gemma4/qwen35) AND runs on macOS 13+. The old dual-
-    // engine setup shipped a second, older binary as a "fallback" that silently
-    // couldn't load those models — removed.
+    // Bonsai 2's packed ternary weights require PrismML's llama.cpp fork. Never
+    // fall through to the stock server: it may accept a Q2_0 pack but produce
+    // incorrect output without the fork's Hadamard activation runtime.
+    const requiresPrism = /^Ternary-Bonsai-2-27B-(?!mmproj).+\.gguf$/i.test(
+      path.basename(this.modelPath)
+    )
     // Engines to try, IN ORDER. On Windows we ship a Vulkan (GPU) build in
     // bin/llama and a CPU-only fallback in bin/llama-cpu: if the Vulkan server
     // can't start (e.g. no Vulkan loader on the box) we fall through to CPU. On
-    // macOS/Linux only bin/llama exists, so this is a single-entry list and the
-    // behaviour is unchanged.
+    // macOS also ships a separate Prism build for Bonsai 2.
     const roots = binRoots()
     const serverPaths = roots
-      .flatMap((r) => [
-        path.join(r, 'llama', exe('llama-server')),
-        path.join(r, 'llama-cpu', exe('llama-server')),
-        path.join(r, exe('llama-server'))
-      ])
+      .flatMap((r) =>
+        requiresPrism
+          ? [path.join(r, 'llama-prism', exe('llama-server'))]
+          : [
+              path.join(r, 'llama', exe('llama-server')),
+              path.join(r, 'llama-cpu', exe('llama-server')),
+              path.join(r, exe('llama-server'))
+            ]
+      )
       .filter((p) => fs.existsSync(p))
     if (!serverPaths.length) {
+      if (requiresPrism) {
+        throw new Error(
+          'Bonsai 2 requires the bundled Prism llama.cpp engine, which is missing from this build.'
+        )
+      }
       console.error(`[LLMService] llama-server binary not found under: ${roots.join(', ')}`)
       return
     }
@@ -1122,20 +1207,26 @@ export class LLMService {
    *  template llama-server publishes at /props; 'enable-thinking' until then, which is the
    *  behaviour every model got before this was resolved at all. */
   private thinkingDialect: ThinkingDialect = 'enable-thinking'
+  private mediaMarker: string | null = null
 
-  /** Read the loaded model's chat template and remember which thinking dialect it speaks.
+  /** Read the loaded model's properties and remember its request dialects.
    *  Best-effort: a server that will not answer /props keeps the safe default rather than
-   *  retaining the dialect of the model that was loaded before it. */
-  private async resolveThinkingDialect(): Promise<void> {
+   *  retaining values from the model that was loaded before it. */
+  private async resolveServerProperties(): Promise<void> {
     this.thinkingDialect = 'enable-thinking'
+    this.mediaMarker = null
     try {
       const res = await fetch(`http://127.0.0.1:${this.port}/props`)
       if (!res.ok) return
-      const body = (await res.json()) as { chat_template?: string }
+      const body = (await res.json()) as { chat_template?: string; media_marker?: unknown }
       this.thinkingDialect = detectThinkingDialect(body.chat_template)
+      this.mediaMarker =
+        typeof body.media_marker === 'string' && body.media_marker.length > 0
+          ? body.media_marker
+          : null
       console.log(`[LLMService] thinking dialect: ${this.thinkingDialect}`)
     } catch (e) {
-      console.warn('[LLMService] could not read /props for the thinking dialect:', e)
+      console.warn('[LLMService] could not read /props:', e)
     }
   }
 
@@ -1155,7 +1246,7 @@ export class LLMService {
           if (res.ok) {
             const body = await res.json().catch(() => null)
             if (Array.isArray(body?.data) && body.data.length > 0) {
-              await this.resolveThinkingDialect()
+              await this.resolveServerProperties()
               return
             }
           }
@@ -1178,6 +1269,37 @@ export class LLMService {
     signal?: AbortSignal
   ): Promise<string> {
     return postCompletionOnce(this.port, body, timeoutMs, signal)
+  }
+
+  /** Score one typed decision with the resident Decision model. The raw completion
+   * endpoint preserves the model's trained answer-slot prompt and returns the
+   * grammar-restricted option distribution without free-text generation. */
+  async decideOptions(
+    context: string,
+    question: string,
+    options: readonly string[],
+    signal?: AbortSignal,
+    screenshotPath?: string
+  ): Promise<OptionDecision> {
+    const prompt = buildDecisionPrompt(context, question, options)
+    await this.beginGeneration()
+    try {
+      this.assertImageInputSupported(screenshotPath ? [screenshotPath] : [])
+      await this.ensureReady()
+      return await this.chatMutex.runExclusive(async () => {
+        const image = screenshotPath ? readImages([screenshotPath])[0] : undefined
+        if (screenshotPath && !image) {
+          throw new Error('The Decision model screenshot could not be read.')
+        }
+        const body = JSON.stringify(
+          buildDecisionRequest(prompt, options.length, image?.base64, this.mediaMarker ?? undefined)
+        )
+        const raw = await postCompletionOnce(this.port, body, 60_000, signal, '/completion')
+        return parseOptionDecision(raw, options.length)
+      })
+    } finally {
+      this.finishGeneration()
+    }
   }
 
   /** Resolve the selected text model once at request admission. Every text
@@ -1211,6 +1333,7 @@ export class LLMService {
       responseFormat?: unknown
       tools?: unknown[]
       toolChoice?: string
+      onToolCallStart?: (name?: string) => void
     }
   ): Promise<StreamResult> {
     return streamRemoteChatCompletion({
@@ -1229,7 +1352,11 @@ export class LLMService {
         toolChoice: options.toolChoice
       },
       onDelta,
-      options: { signal: options.signal, timeoutMs: options.timeoutMs }
+      options: {
+        signal: options.signal,
+        timeoutMs: options.timeoutMs,
+        onToolCallStart: options.onToolCallStart
+      }
     })
   }
 
@@ -1481,6 +1608,7 @@ export class LLMService {
       toolChoice?: string
       maxTokens?: number
       responseFormat?: unknown
+      onToolCallStart?: (name?: string) => void
     } = {},
     timeoutMs?: number
   ): Promise<StreamResult> {
@@ -1495,7 +1623,8 @@ export class LLMService {
         signal: opts.signal,
         responseFormat: opts.responseFormat,
         tools: opts.tools,
-        toolChoice: opts.toolChoice
+        toolChoice: opts.toolChoice,
+        onToolCallStart: opts.onToolCallStart
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),
@@ -1529,7 +1658,8 @@ export class LLMService {
       // assembled tool calls are surfaced too (this powers the agentic loop).
       const result = await streamCompletion(this.port, body, onDelta, {
         signal: opts.signal,
-        timeoutMs
+        timeoutMs,
+        onToolCallStart: opts.onToolCallStart
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),

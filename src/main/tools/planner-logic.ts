@@ -254,7 +254,7 @@ const GOAL_TOOLS = new Set(['web_use', 'computer_use'])
  *  a web task onto the native app. Deliberately excludes app-ambiguous words
  *  (maps, mail, tv, spotify): only clear web markers count. */
 const WEBSITE_HINTS =
-  /(https?:\/\/|www\.|\.(com|org|net|io|co)\b|\byoutube\b|\byoutu\.be\b|\bgoogle\b|\bgmail\b|\bin the browser\b|\bon the web\b|\bwebsite\b|\bonline\b)/i
+  /(https?:\/\/|www\.|\.(com|org|net|io|co)\b|\byoutube\b|\byoutu\.be\b|\bgoogle\b|\bgmail\b|\bin the browser\b|\bdefault[- ]browser\b|\bon the web\b|\bweb[ -]?site\b|\bsite\b|\bonline\b)/i
 
 /** Does the request clearly name a website (a URL, youtube, google, ...)? */
 export function namesWebsite(text: string): boolean {

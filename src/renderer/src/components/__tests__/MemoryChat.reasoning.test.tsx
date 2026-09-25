@@ -9,8 +9,8 @@
 // streamed reasoning into a ref and reads it deterministically.
 //
 // This drives the REAL seam: mount <MemoryChat/>, send a plain chat turn, let the fake
-// ragChat fire a REAL onRagStream 'reasoning' event (via the captured callback, keyed by the
-// streamId ragChat receives), then resolve. The terminal artifact is the `context` handed to
+// toolChat fires a REAL onRagStream 'reasoning' event (via the captured callback, keyed by the
+// streamId toolChat receives), then resolves. The terminal artifact is the `context` handed to
 // window.api.addRagMessage — asserted through the REAL readReasoning reader (the exact path a
 // reload uses to restore the block), not an intermediate field.
 
@@ -26,7 +26,7 @@ type AddRagArgs = [convId: string, role: string, content: string, context?: unkn
 type AddedRagMessage = { id: number; uuid: string }
 type AddRagMessageBoundary = Mock<(...args: AddRagArgs) => Promise<AddedRagMessage>>
 
-/** window.api where ragChat streams a reasoning event through the REAL onRagStream
+/** window.api where toolChat streams a reasoning event through the REAL onRagStream
  *  callback (keyed by the streamId it is handed), then resolves. addRagMessage is the
  *  assertion subject — its context arg is what persists / reloads. */
 function installApi(): { addRagMessage: AddRagMessageBoundary } {
@@ -41,6 +41,21 @@ function installApi(): { addRagMessage: AddRagMessageBoundary } {
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     cancelImageGen: vi.fn(),
     onImageGenProgress: vi.fn(() => () => { }),
+    onImageGenJobState: vi.fn(() => () => { }),
+    onImageGenConversationUpdated: vi.fn(() => () => { }),
+    imageGenJobStatus: vi.fn(async () => ({
+      id: null,
+      phase: 'idle' as const,
+      conversationId: null,
+      projectId: null,
+      stage: null,
+      enhancedPrompt: '',
+      progress: null,
+      outputPath: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null
+    })),
     getRagConversations: vi.fn(async () => []),
     getRagMessages: vi.fn(async () => []),
     createRagConversation: vi.fn(async () => { }),
@@ -55,13 +70,13 @@ function installApi(): { addRagMessage: AddRagMessageBoundary } {
       streamCb = cb
       return () => { }
     }),
-    // ragChat: 7th arg is the streamId. Stream a reasoning delta on it (the real handler
-    // routes it), then return the final answer + a context object.
-    ragChat: vi.fn(async (..._args: unknown[]) => {
-      const streamId = _args[6] as string
+    // toolChat carries the streamId in its third argument. Stream a reasoning
+    // delta on it, then return the final answer and tool results.
+    toolChat: vi.fn(async (..._args: unknown[]) => {
+      const streamId = (_args[2] as { streamId: string }).streamId
       streamCb?.({ streamId, type: 'reasoning', text: 'weighing the options' })
       streamCb?.({ streamId, type: 'content', text: 'Here is the answer.' })
-      return { answer: 'Here is the answer.', context: { unified: [] } }
+      return { answer: 'Here is the answer.', unified: [], toolCalls: [] }
     })
   }
     ; (globalThis as unknown as { window: { api: unknown } }).window.api = api

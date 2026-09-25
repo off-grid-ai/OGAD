@@ -53,11 +53,13 @@ stage_native_helpers() {
     exit 1
   }
   MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
+  LLAMA_VARIANT=prism MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
   MACOS_DEPLOYMENT_TARGET=13.0 WHISPER_REF=v1.7.4 bash scripts/build-whisper-cli.sh
   bash scripts/build-meeting-recorder.sh
   MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-computer-use-capture.sh resources/bin
   bash scripts/build-dictation-hotkey.sh
   bash scripts/build-actions-helper.sh
+  bash scripts/build-location.sh resources/bin
   mkdir -p resources/bin
   cp scripts/meeting-recorder/meeting-recorder resources/bin/meeting-recorder
   cp scripts/dictation-hotkey/dictation-hotkey resources/bin/dictation-hotkey

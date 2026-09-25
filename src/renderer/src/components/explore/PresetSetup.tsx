@@ -1,15 +1,25 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { ArrowLeft, CheckCircle, FolderOpen, PlugsConnected, Sparkle } from '@phosphor-icons/react'
+import {
+  ArrowLeft,
+  CheckCircle,
+  FolderOpen,
+  ImageSquare,
+  PlugsConnected,
+  Sparkle
+} from '@phosphor-icons/react'
 import { Button } from '@/components/ui/button'
 import { LoadingDots } from '@/components/ui/loading-dots'
+import { captureUrlForPath } from '../../../../shared/ogcapture-url'
 import type { DemoPreset, PresetIntakeField } from './presetCatalog'
 import { buildPresetPrompt, hasRequiredPresetAnswers, initialPresetAnswers } from './presetPrompt'
+import { StylePresetPicker } from '../MemoryChat/components/StylePresetPicker'
 
 interface PresetSetupProps {
   preset: DemoPreset
   onSubmit: (prompt: string) => void
   onCancel: () => void
   onOpenConnectors?: () => void
+  styleThumbs?: Record<string, string>
 }
 
 interface ConnectorSummary {
@@ -24,6 +34,7 @@ interface IntakeFieldProps {
   onEnhance?: () => void
   enhancing?: boolean
   enhancementError?: string
+  styleThumbs: Record<string, string>
 }
 
 const inputClass =
@@ -35,7 +46,8 @@ function IntakeField({
   onChange,
   onEnhance,
   enhancing = false,
-  enhancementError
+  enhancementError,
+  styleThumbs
 }: IntakeFieldProps): React.ReactElement {
   const controlId = `preset-field-${field.id}`
   const labelId = `${controlId}-label`
@@ -46,6 +58,29 @@ function IntakeField({
       ...(value ? { defaultPath: value } : {})
     })
     if (selected) onChange(selected)
+  }
+  const chooseImage = async (): Promise<void> => {
+    const selected = await window.api.pickImageForGen()
+    if (!selected) return
+    const kept = await window.api.keepInitImage(selected)
+    if (kept?.path) onChange(kept.path)
+  }
+
+  if (field.kind === 'style') {
+    const presets = (field.options ?? []).map((option) => ({ name: option.value, prompt: '' }))
+    return (
+      <div className="@3xl:col-span-2">
+        <StylePresetPicker
+          activeStyle={value || null}
+          presets={presets}
+          styleThumbs={styleThumbs}
+          onChange={(style) => onChange(style ?? '')}
+        />
+        <p id={helpId} className="mt-1 text-[10px] leading-4 text-muted-foreground">
+          {field.help}
+        </p>
+      </div>
+    )
   }
 
   const control = (() => {
@@ -167,6 +202,45 @@ function IntakeField({
         </div>
       )
     }
+    if (field.kind === 'image') {
+      return (
+        <div className="mt-1 flex gap-2">
+          {value ? (
+            <img
+              src={captureUrlForPath(value)}
+              alt="Selected hero reference"
+              className="h-16 w-16 shrink-0 rounded-md border border-border object-cover"
+            />
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <input
+              id={controlId}
+              value={value}
+              readOnly
+              placeholder="No reference image selected"
+              aria-describedby={helpId}
+              className={`${inputClass} mt-0 min-w-0`}
+            />
+            <div className="mt-2 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void chooseImage()}
+              >
+                <ImageSquare />
+                Choose image
+              </Button>
+              {value ? (
+                <Button type="button" size="sm" variant="ghost" onClick={() => onChange('')}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )
+    }
     if (onEnhance) {
       return (
         <div className="relative">
@@ -203,10 +277,14 @@ function IntakeField({
     return (
       <input
         id={controlId}
+        type={field.kind === 'number' ? 'number' : 'text'}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={field.placeholder}
         required={field.required}
+        min={field.min}
+        max={field.max}
+        step={field.kind === 'number' ? 1 : undefined}
         aria-describedby={helpId}
         className={inputClass}
       />
@@ -249,7 +327,8 @@ export function PresetSetup({
   preset,
   onSubmit,
   onCancel,
-  onOpenConnectors
+  onOpenConnectors,
+  styleThumbs = {}
 }: PresetSetupProps): React.ReactElement {
   const [answers, setAnswers] = useState<Record<string, string>>(() => initialPresetAnswers(preset))
   const [enhancingFieldId, setEnhancingFieldId] = useState<string | null>(null)
@@ -278,15 +357,22 @@ export function PresetSetup({
           : field.id === 'avoid'
             ? 'Write a concise comma-separated list of low-signal topics, formats, or source traits to exclude. Do not invent named creators.'
             : `Rewrite the value so it is clear, specific, concise, and suitable for "${field.label}". Follow this field guidance: ${field.help}`
-    const prompt = `Edit this short form answer for clarity.
+    const prompt = `${currentValue ? 'Edit this short form answer for clarity.' : 'Create a useful surprise answer for this empty form field.'}
 
+Assistant action: ${preset.title}
+Form purpose: ${preset.intake.title}
 Form question: ${field.label}
 Answer to edit: ${currentValue || '(empty)'}
 Other form answers for context:
 ${context || '(none)'}
 
 ${format}
-Preserve the original meaning. Do not invent missing facts. Keep the result under 240 characters. Return only the edited answer.`
+${
+  currentValue
+    ? 'Preserve the original meaning. Do not invent missing facts.'
+    : 'Invent plausible, concrete details that fit this assistant action, the field guidance, and the other answers. Make a clear choice instead of listing options.'
+}
+Keep the result under 240 characters. Return only the answer.`
     try {
       const result = await window.api.ragChat(
         prompt,
@@ -423,6 +509,7 @@ Preserve the original meaning. Do not invent missing facts. Keep the result unde
             enhancementError={
               enhancementError?.fieldId === field.id ? enhancementError.message : undefined
             }
+            styleThumbs={styleThumbs}
           />
         ))}
       </div>

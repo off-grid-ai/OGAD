@@ -79,6 +79,39 @@ describe('<PresetSetup/> AI enhancement', () => {
     expect(submissions[0]).toContain('A: Quiet Japanese restaurant with strong recent reviews')
   })
 
+  it('creates a pertinent surprise answer when an open-ended field is empty', async () => {
+    const requests: string[] = []
+    window.api = {
+      mcpList: async () => [],
+      ragChat: async (query: string) => {
+        requests.push(query)
+        return {
+          answer:
+            'A retired lunar courier crosses a flooded moon city to deliver one last letter.'
+        }
+      }
+    } as unknown as Window['api']
+
+    const preset = ALL_PRESETS.find((item) => item.id === 'comic-book')
+    if (!preset) throw new Error('Comic-book preset is missing')
+    render(<PresetSetup preset={preset} onSubmit={() => undefined} onCancel={() => undefined} />)
+
+    const field = screen.getByLabelText(/Story brief/) as HTMLTextAreaElement
+    expect(field.value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: 'Enhance story brief with AI' }))
+
+    await waitFor(() =>
+      expect(field.value).toBe(
+        'A retired lunar courier crosses a flooded moon city to deliver one last letter.'
+      )
+    )
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toContain('Create a useful surprise answer for this empty form field.')
+    expect(requests[0]).toContain('Assistant action: Create a comic book')
+    expect(requests[0]).toContain('Form purpose: Plan the comic book')
+    expect(requests[0]).toContain('Invent plausible, concrete details')
+  })
+
   it('enhances a Train My Feed field and submits the improved value', async () => {
     const requests: string[] = []
     const submissions: string[] = []

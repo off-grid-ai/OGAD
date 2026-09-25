@@ -2,10 +2,24 @@
 
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it } from 'vitest'
 import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-boundary'
 
-afterEach(cleanup)
+const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
+beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get() {
+      return this.classList.contains('overflow-y-auto') ? 600 : 0
+    }
+  })
+})
+afterEach(() => {
+  cleanup()
+  if (originalOffsetHeight) {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)
+  }
+})
 
 it('keeps a message edit in its editor and sends the saved text', async () => {
   const boundary = new ChatBoundary()
@@ -36,6 +50,39 @@ it('keeps a message edit in its editor and sends the saved text', async () => {
   await act(async () => boundary.resolve(0, 'Updated answer'))
   expect(await screen.findByText('Updated question')).toBeTruthy()
   expect(await screen.findByText('Updated answer')).toBeTruthy()
+})
+
+it('shows a completed artifact card without its raw HTML', async () => {
+  const boundary = new ChatBoundary()
+  await boundary.addRagMessage(
+    'conversation-a',
+    'assistant',
+    '```html\n<!doctype html><html><body>ARTIFACT_ONLY_MARKER</body></html>\n```'
+  )
+  installBoundary(boundary)
+  renderChat({ conversationId: 'conversation-a' })
+
+  expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
+  expect(screen.queryByText(/ARTIFACT_ONLY_MARKER/)).toBeNull()
+})
+
+it('restores completed work with a saved artifact', async () => {
+  const boundary = new ChatBoundary()
+  await boundary.addRagMessage(
+    'conversation-a',
+    'assistant',
+    '```html\n<!doctype html><html><body>COMIC</body></html>\n```',
+    {
+      toolCalls: [
+        { name: 'generate_image', result: 'Created comic page 1.', status: 'completed' }
+      ]
+    }
+  )
+  installBoundary(boundary)
+  renderChat({ conversationId: 'conversation-a' })
+
+  expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Work done' })).toBeTruthy()
 })
 
 it('completes a skill in the draft and sends it from a populated chat', async () => {

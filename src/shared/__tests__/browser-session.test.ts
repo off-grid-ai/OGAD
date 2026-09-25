@@ -31,10 +31,11 @@ describe('Web Use desktop surface', () => {
   })
 
   it('keeps the full-size desktop viewport at 100 percent', () => {
+    expect(WEB_USE_DESKTOP_VIEWPORT).toEqual({ width: 1440, height: 900 })
     expect(webUseDesktopZoomFactor(WEB_USE_DESKTOP_VIEWPORT)).toBe(1)
   })
 
   it('scales the same desktop viewport into a smaller 16:10 panel', () => {
-    expect(webUseDesktopZoomFactor({ width: 960, height: 600 })).toBe(0.5)
+    expect(webUseDesktopZoomFactor({ width: 720, height: 450 })).toBe(0.5)
   })
 })

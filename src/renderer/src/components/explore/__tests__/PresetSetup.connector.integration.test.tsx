@@ -6,6 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PresetSetup } from '../PresetSetup'
 import { presetById } from '../presetCatalog'
 
+// Only three assistant examples are exposed in Explore today. Exercise the
+// connector recommendation on an exposed preset without resurrecting a hidden one.
+const gmailPreset = () => {
+  const preset = presetById('best-nearby')!
+  return { ...preset, intake: { ...preset.intake, recommendedConnector: 'Gmail' } }
+}
+
 describe('<PresetSetup/> connector recommendation', () => {
   afterEach(() => cleanup())
 
@@ -13,11 +20,9 @@ describe('<PresetSetup/> connector recommendation', () => {
     ;(window as unknown as { api: unknown }).api = {
       mcpList: vi.fn(async () => [{ name: 'Gmail', enabled: 0, status: 'ok' }])
     }
-    const preset = presetById('draft-reply')
-    expect(preset).toBeTruthy()
     render(
       <PresetSetup
-        preset={preset!}
+        preset={gmailPreset()}
         onSubmit={vi.fn()}
         onCancel={vi.fn()}
         onOpenConnectors={vi.fn()}
@@ -34,11 +39,9 @@ describe('<PresetSetup/> connector recommendation', () => {
     ;(window as unknown as { api: unknown }).api = {
       mcpList: vi.fn(async () => [{ name: 'Gmail', enabled: 1, status: 'error' }])
     }
-    const preset = presetById('draft-reply')
-    expect(preset).toBeTruthy()
     render(
       <PresetSetup
-        preset={preset!}
+        preset={gmailPreset()}
         onSubmit={vi.fn()}
         onCancel={vi.fn()}
         onOpenConnectors={onOpenConnectors}

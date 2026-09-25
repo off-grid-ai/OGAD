@@ -1,6 +1,7 @@
 import { buildVisionPrompt, VISION_SYSTEM_PROMPT } from '../vision-prompt'
 import { parseVisionAction } from '../vision-action'
 import type { VisionModelAdapter, VisionPolicyDecision } from './types'
+import { formatContinuationCapsule } from './continuation-capsule'
 
 /** UI-TARS remains on its native single action-text protocol. */
 export function parseUiTarsPolicyResponse(
@@ -46,7 +47,8 @@ export const uiTarsAdapter: VisionModelAdapter = {
   buildRequest(input) {
     const objective = [
       input.goal,
-      input.currentMilestone ? `Current milestone: ${input.currentMilestone}` : ''
+      input.currentMilestone ? `Current milestone: ${input.currentMilestone}` : '',
+      formatContinuationCapsule(input.continuation)
     ]
       .filter(Boolean)
       .join('\n\n')

@@ -47,6 +47,12 @@ export type RagContext = {
     state: 'accepted' | 'applied'
     attachmentNames?: string[]
   }
+  taskResult?: {
+    taskId: string
+    kind: 'web_use' | 'computer_use'
+    status: string
+    url?: string
+  }
   executionApproval?: {
     approvalId: number
     actionId?: string | null

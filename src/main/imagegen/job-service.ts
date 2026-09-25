@@ -144,7 +144,20 @@ export class ImageGenerationJobService {
     )
 
     try {
-      const result = await this.runtime.generate(request, (update) => this.update(id, update))
+      // Own the source before the native process starts, then use that exact copy
+      // for both generation and provenance. This prevents a temporary upload from
+      // disappearing between prompt enhancement, Qwen's `-r` edit input, and the
+      // sidecar write after a long generation.
+      const keptSource = request.initImage
+        ? this.runtime.preserveSource(id, request.initImage)
+        : null
+      if (request.initImage && !keptSource) {
+        throw new Error('The init image could not be prepared for image-to-image generation.')
+      }
+      const generationRequest = keptSource ? { ...request, initImage: keptSource } : request
+      const result = await this.runtime.generate(generationRequest, (update) =>
+        this.update(id, update)
+      )
       // Always, not only inside a chat. The syncId is what this image is called on the mesh, so an
       // image made from the tool loop or the gateway needs one exactly as much as one made in a
       // conversation; without it the gallery and the file record name the same picture differently.
@@ -155,9 +168,6 @@ export class ImageGenerationJobService {
           cause: new Error('The native image runtime did not return an owned output path.')
         })
       }
-      const keptSource = request.initImage
-        ? this.runtime.preserveSource(id, request.initImage)
-        : null
       try {
         this.runtime.saveScope(result.path, {
           syncId: id,

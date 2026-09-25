@@ -15,6 +15,7 @@ afterEach(() => cleanup())
 describe('<MemoryChat/> with a remote image provider', () => {
   it('shows the provider memory refusal and generates after Run anyway', async () => {
     const requests: boolean[] = []
+    const requestPaths: string[] = []
     const provider = createServer(async (request, response) => {
       if (request.method === 'GET') {
         response.writeHead(200, { 'Content-Type': 'image/png' })
@@ -25,6 +26,7 @@ describe('<MemoryChat/> with a remote image provider', () => {
       for await (const chunk of request) chunks.push(Buffer.from(chunk))
       const body = JSON.parse(Buffer.concat(chunks).toString()) as { prompt: string; allow_unsafe_memory_override?: boolean }
       requests.push(body.allow_unsafe_memory_override === true)
+      requestPaths.push(request.url ?? '')
       response.setHeader('Content-Type', 'application/json')
       if (!body.allow_unsafe_memory_override && body.prompt === 'A green coast') {
         response.writeHead(409)
@@ -89,6 +91,11 @@ describe('<MemoryChat/> with a remote image provider', () => {
       await user.type(next, 'A blue coast', { skipClick: true })
       await user.click(screen.getByRole('button', { name: 'Send' }))
       await waitFor(() => expect(screen.getAllByAltText('Generated')).toHaveLength(2))
+      expect(requestPaths).toEqual([
+        '/v1/images/generations',
+        '/v1/images/generations',
+        '/v1/images/generations'
+      ])
     } finally {
       await new Promise<void>((resolve) => provider.close(() => resolve()))
     }

@@ -8,6 +8,7 @@ import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
 import type { VisionPolicyRequest, VisionPolicyResponse } from '../model-adapters/types'
 import { VisionGuard } from '../vision-guard'
 import { runVisionTaskGraph } from '../vision-task-graph'
+import { createHybridVisionGrounder } from '../hybrid-vision-grounder'
 import {
   getComputerUseActiveModelProjection,
   withVisionTaskModelStrategy,
@@ -39,6 +40,51 @@ function imageFrom(request: VisionPolicyRequest): string {
 }
 
 describe('Text + Specialist visual task journey', () => {
+  it('turns one public URL decision into one deterministic navigation action', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-hybrid-navigation-'))
+    tempDirs.push(directory)
+    const framePath = path.join(directory, 'frame.png')
+    await sharp({
+      create: { width: 320, height: 200, channels: 4, background: '#ffffff' }
+    })
+      .png()
+      .toFile(framePath)
+
+    const ground = createHybridVisionGrounder('desktop', {
+      runReasoner: async () =>
+        toolResponse('navigate_to_url', {
+          url: 'https://example.com/path',
+          summary: 'Open the supplied website.',
+          visible_evidence: 'The task brief supplies the destination URL.',
+          expected_effect: 'The website opens in the default browser.'
+        }),
+      withSpecialist: async () => {
+        throw new Error('Navigation must not load the grounding specialist.')
+      },
+      activeSpecialistAdapter: () => {
+        throw new Error('Navigation must not request the grounding specialist adapter.')
+      }
+    })
+
+    const result = await ground({
+      goal: 'Open https://example.com/path in the default browser.',
+      image: framePath,
+      history: [],
+      retrievedFacts: [],
+      policyHistory: [],
+      guidance: [],
+      coordinateFrame: {
+        encoded: { width: 320, height: 200 },
+        source: { width: 320, height: 200 }
+      }
+    })
+
+    expect(result.decision).toMatchObject({
+      kind: 'actions',
+      actions: [{ type: 'navigate', url: 'https://example.com/path' }]
+    })
+  })
+
   it.each([
     ['Computer Use', 'desktop'],
     ['Web Use', 'embedded_browser']
@@ -80,10 +126,12 @@ describe('Text + Specialist visual task journey', () => {
       const specialistScreens: string[] = []
       const swapEvents: string[] = []
       const reasonerResponses = [
-        toolResponse('delegate_grounded_action', {
-          instruction: 'Click the visible Continue button.',
+        toolResponse('ground_pointer_target', {
+          action: 'click',
+          target: 'Continue button',
           summary: 'Continue to the next screen.',
-          visible_evidence: 'A Continue button is visible in the center.'
+          visible_evidence: 'A Continue button is visible in the center.',
+          expected_effect: 'The next screen opens.'
         }),
         toolResponse('complete_milestone', {
           summary: 'The next screen is open.',
@@ -165,7 +213,7 @@ describe('Text + Specialist visual task journey', () => {
       })
       expect(projection).toEqual({
         strategy: 'text_plus_specialist',
-        strategyLabel: 'Text + Specialist',
+        strategyLabel: 'Reasoning + Specialist',
         models: [
           {
             role: 'reasoner',

@@ -184,6 +184,7 @@ interface RendererAPIOverrides {
         stepDetails?: import('./lib/task-session-store').ComputerUseStepDetail[]
       }>
     >
+    remove?: (taskIds: string[]) => Promise<string[]>
     retryAvailability: (taskId: string) => Promise<{
       available: boolean
       reason?: string
@@ -204,6 +205,7 @@ interface RendererAPIOverrides {
       input: import('../../shared/task-guidance').TaskGuideInput
     ) => Promise<{ available: boolean; accepted?: boolean; reason?: string }>
     onChanged: (cb: (task: import('./lib/task-session-store').TaskSession) => void) => () => void
+    onRemoved?: (cb: (taskIds: string[]) => void) => () => void
   }
   browser?: {
     /** Report where one surface can host the live page. Main paints the highest-priority owner. */

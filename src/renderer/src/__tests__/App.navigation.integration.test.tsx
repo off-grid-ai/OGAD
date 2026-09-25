@@ -433,6 +433,7 @@ describe('<App/> desktop navigation integration', () => {
       getInstalledModels: async () => ['local/qwen'],
       getActiveModelIds: async () => ['local/qwen'],
       getActiveModel: async () => 'local/qwen',
+      getModelVisionStatus: async () => ({}),
       getLlmSettings: async () => llmSettings,
       setLlmSettings
     })

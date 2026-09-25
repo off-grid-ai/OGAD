@@ -1,4 +1,13 @@
 import { afterAll } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+// runtime-env falls back to <cwd>/.offgrid when Electron is not loaded. Each
+// journey needs its own default profile so serial files cannot share SQLite data.
+const previousDataDir = process.env.OFFGRID_DATA_DIR
+const defaultDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-db-journey-'))
+if (!previousDataDir) process.env.OFFGRID_DATA_DIR = defaultDataDir
 
 /**
  * Leave the model port free for the next file.
@@ -23,4 +32,7 @@ afterAll(async () => {
     // The file never loaded the engine, or the module graph is already torn down. Either way there is
     // nothing holding the port on this file's behalf.
   }
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
+  fs.rmSync(defaultDataDir, { recursive: true, force: true })
 })

@@ -6,6 +6,7 @@ import type {
   VisionPolicyResponse,
   VisionPolicyToolCall
 } from './types'
+import { formatContinuationCapsule } from './continuation-capsule'
 
 const FARA_SYSTEM_PROMPT = `You are Fara, a computer use agent (CUA) specialized for web browsers. You are developed by Microsoft AI Frontiers. You assist users with completing and automating tasks that require the use of a web browser.
 
@@ -229,6 +230,7 @@ function taskContext(input: VisionPolicyInput): string {
   return [
     input.goal,
     input.currentMilestone ? `Current milestone: ${input.currentMilestone}` : '',
+    formatContinuationCapsule(input.continuation),
     input.history.length
       ? `Prior thoughts and actions:\n${input.history
           .slice(-12)

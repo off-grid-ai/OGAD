@@ -46,6 +46,9 @@ export interface ElementTaskDeps {
   actuator: ElementActuator
   /** Goal + numbered elements + the current frame in, one step decision out. */
   decide: (prompt: string, screenshotPath?: string) => Promise<string>
+  /** Optional typed-decision path. It receives the exact observation so it
+   * does not need to parse the rendered element list back into controls. */
+  decideElement?: (prompt: string, snapshot: AxSnapshot) => Promise<string>
   screenshotPath?: () => string | undefined
   onStep?: (note: string) => void
   onObservation?: (observation: ElementStepObservation) => void
@@ -61,6 +64,13 @@ export interface ElementTaskDeps {
   /** Park this same task when a private step needs the user. Continue returns
    * the loop to a fresh Accessibility observation. */
   waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
+  /** Use vision for one recovery action, then continue this same AX loop. */
+  recoverWithVision?: (recovery: {
+    summary: string
+    steps: readonly string[]
+    guidance: readonly string[]
+    currentStep: number
+  }) => Promise<{ ok: boolean; detail?: string }>
   signal?: AbortSignal
   /** The Computer Use task owner. The loop checks it after every external wait,
    *  so Pause parks before another action and Stop cannot be overwritten by a
@@ -95,6 +105,7 @@ export type ElementStep =
   | { action: 'type'; index?: number; text: string; submitKeys?: string }
   | { action: 'key'; keys: string }
   | { action: 'human_required'; why: string }
+  | { action: 'vision_required'; why: string }
   | { action: 'done'; summary: string }
   | { action: 'give_up'; why: string }
 
@@ -128,7 +139,16 @@ export const ELEMENT_STEP_FORMAT = {
       properties: {
         action: {
           type: 'string',
-          enum: ['click', 'press', 'type', 'key', 'human_required', 'done', 'give_up']
+          enum: [
+            'click',
+            'press',
+            'type',
+            'key',
+            'human_required',
+            'vision_required',
+            'done',
+            'give_up'
+          ]
         },
         index: { type: 'integer' },
         text: { type: 'string' },
@@ -192,6 +212,8 @@ export function parseElementStep(raw: string): ElementStep | null {
       return { action: 'done', summary: str('summary') ?? 'done' }
     case 'human_required':
       return { action: 'human_required', why: str('why') ?? 'Complete this step' }
+    case 'vision_required':
+      return { action: 'vision_required', why: str('why') ?? 'Visual grounding is required' }
     case 'give_up':
       return { action: 'give_up', why: str('why') ?? 'could not finish' }
     default:
@@ -234,6 +256,7 @@ export function buildElementPrompt(input: {
     '- Enter text: {"action":"type","index":N,"text":"..."}. Omit index only when the correct field is already focused. Add "keys":"Enter" to submit.',
     '- Send keys: {"action":"key","keys":"Enter"}.',
     '- Use human_required for sign-in, passwords, one-time codes, or payment.',
+    '- Use vision_required when the next safe step needs visual grounding or free-form text entry.',
     '- Use done only when the goal is visibly complete. Use give_up only when it cannot be completed.',
     '- For an edit, change, or replacement, verify that the original item changed. A new copy elsewhere is not completion.',
     'Match the exact target and intended control. Navigation fields are not content fields.',
@@ -312,6 +335,38 @@ export async function runElementTask(
   const taskBrief = new CurrentTaskBrief(goal)
   let consecutiveParseFailures = 0
   let consecutiveNoProgress = 0
+  const recoverWithVision = async (
+    summary: string,
+    currentStep: number
+  ): Promise<ElementTaskResult | null> => {
+    if (!deps.recoverWithVision) {
+      return {
+        ok: false,
+        summary,
+        steps,
+        recovery: 'vision',
+        guidance: [...taskBrief.guidance]
+      }
+    }
+    const recovery = await deps.recoverWithVision({
+      summary,
+      steps,
+      guidance: [...taskBrief.guidance],
+      currentStep
+    })
+    if (!recovery.ok) {
+      return {
+        ok: false,
+        summary: `Computer Use could not make progress. Vision recovery could not continue${recovery.detail ? `: ${recovery.detail}` : '.'}`,
+        steps
+      }
+    }
+    note('Vision recovery completed one action. Returning to accessibility control.')
+    consecutiveParseFailures = 0
+    consecutiveNoProgress = 0
+    lastActionSig = null
+    return null
+  }
   const requireFreshVerification = (): void => {
     if (deps.control && !deps.control.isVerifying) deps.control.beginVerification()
   }
@@ -375,7 +430,9 @@ export async function runElementTask(
         modelPrompt
       )
       const decisionLeaseEpoch = deps.control?.snapshot().inputLease.epoch
-      rawResponse = await decide(modelPrompt, deps.screenshotPath?.())
+      rawResponse = deps.decideElement
+        ? await deps.decideElement(modelPrompt, snapshot)
+        : await decide(modelPrompt, deps.screenshotPath?.())
       const stoppedAfterDecision = await waitForControl()
       if (stoppedAfterDecision) return stoppedAfterDecision
       const controlAfterDecision = deps.control?.snapshot()
@@ -400,13 +457,9 @@ export async function runElementTask(
         if (consecutiveParseFailures >= MAX_CONSECUTIVE_PARSE_FAILURES) {
           const summary = AX_INVALID_REPLY_SUMMARY
           note(summary)
-          return {
-            ok: false,
-            summary,
-            steps,
-            recovery: 'vision',
-            guidance: [...taskBrief.guidance]
-          }
+          const failedRecovery = await recoverWithVision(summary, planningStep)
+          if (failedRecovery) return failedRecovery
+          continue
         }
         continue
       }
@@ -441,6 +494,14 @@ export async function runElementTask(
         checkpoint()
         return { ok: false, summary: action.why, steps }
       }
+      if (action.action === 'vision_required') {
+        observe('handoff')
+        note(`vision required: ${action.why}`)
+        checkpoint()
+        const failedRecovery = await recoverWithVision(action.why, planningStep)
+        if (failedRecovery) return failedRecovery
+        continue
+      }
       if (action.action === 'human_required') {
         observe('handoff')
         note(`handoff: ${action.why}`)
@@ -469,13 +530,9 @@ export async function runElementTask(
         consecutiveNoProgress += 1
         if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
           note(AX_NO_PROGRESS_SUMMARY)
-          return {
-            ok: false,
-            summary: AX_NO_PROGRESS_SUMMARY,
-            steps,
-            recovery: 'vision',
-            guidance: [...taskBrief.guidance]
-          }
+          const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, planningStep)
+          if (failedRecovery) return failedRecovery
+          continue
         }
         continue
       }
@@ -504,13 +561,9 @@ export async function runElementTask(
           consecutiveNoProgress += 1
           if (consecutiveNoProgress >= MAX_CONSECUTIVE_NO_PROGRESS) {
             note(AX_NO_PROGRESS_SUMMARY)
-            return {
-              ok: false,
-              summary: AX_NO_PROGRESS_SUMMARY,
-              steps,
-              recovery: 'vision',
-              guidance: [...taskBrief.guidance]
-            }
+            const failedRecovery = await recoverWithVision(AX_NO_PROGRESS_SUMMARY, planningStep)
+            if (failedRecovery) return failedRecovery
+            continue
           }
           continue
         }
@@ -535,13 +588,9 @@ export async function runElementTask(
             observe('invalid_target', summary)
             note(summary)
             checkpoint()
-            return {
-              ok: false,
-              summary,
-              steps,
-              recovery: 'vision',
-              guidance: [...taskBrief.guidance]
-            }
+            const failedRecovery = await recoverWithVision(summary, planningStep)
+            if (failedRecovery) return failedRecovery
+            continue
           }
         }
         await actuator.type(target, action.text)

@@ -24,6 +24,7 @@ import {
   isTaskAction,
   specsForPlatform,
   systemHintForPlatform,
+  taskSessionLimitMinutes,
   type NativeToolSpec
 } from './nativeActionToolExtension-logic'
 import { createHash } from 'node:crypto'
@@ -48,6 +49,27 @@ export interface NativeActionToolBoundary {
 /** How long a short native action may keep the model turn open. Web Use and
  * Computer Use return as soon as their durable task has started. */
 const OUTCOME_WAIT_MS = 30_000
+
+function taskGoalWithConversation(
+  goal: unknown,
+  context: ToolContext | undefined
+): string {
+  const summary = typeof goal === 'string' ? goal.trim() : ''
+  const currentRequest = context?.userQuery?.trim() ?? ''
+  const priorTurns = (context?.history ?? [])
+    .filter((turn) => turn.content.trim())
+    .map(
+      (turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.content.trim()}`
+    )
+  const sections = [
+    priorTurns.length ? `Prior conversation:\n${priorTurns.join('\n')}` : '',
+    currentRequest ? `Current user request (authoritative):\n${currentRequest}` : '',
+    summary && summary.toLowerCase() !== 'placeholder' && summary !== currentRequest
+      ? `Structured task summary:\n${summary}`
+      : ''
+  ].filter(Boolean)
+  return sections.join('\n\n') || summary
+}
 
 function engineResult(
   actionType: string,
@@ -90,14 +112,9 @@ function currentCoordinates(result: unknown): { latitude: number; longitude: num
 }
 
 function needsCurrentLocation(args: Record<string, unknown>, context?: ToolContext): boolean {
-  const text = [
-    typeof args.goal === 'string' ? args.goal : '',
-    context?.userQuery ?? ''
-  ].join('\n')
+  const text = [typeof args.goal === 'string' ? args.goal : '', context?.userQuery ?? ''].join('\n')
   if (
-    /\blatitude\s*[:=]?\s*-?\d+(?:\.\d+)?[^\n]*\blongitude\s*[:=]?\s*-?\d+(?:\.\d+)?/i.test(
-      text
-    )
+    /\blatitude\s*[:=]?\s*-?\d+(?:\.\d+)?[^\n]*\blongitude\s*[:=]?\s*-?\d+(?:\.\d+)?/i.test(text)
   ) {
     return false
   }
@@ -167,6 +184,10 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!spec) {
       return `Error: unknown action ${name}`
     }
+    if (name === 'computer_use' && args.sessionLimitMinutes === undefined) {
+      const sessionLimitMinutes = taskSessionLimitMinutes(context?.userQuery)
+      if (sessionLimitMinutes) args = { ...args, sessionLimitMinutes }
+    }
     if (isTaskAction(name) && needsCurrentLocation(args, context)) {
       const location = context?.currentLocation
       if (!location) {
@@ -222,7 +243,10 @@ export class NativeActionToolExtension implements ToolExtension {
       status?: ToolCallStatus,
       authoritative = true
     ): string | ToolResult => engineResult(actionType, text, status, authoritative)
-    const cleanArgs = spec.buildArgs(args)
+    const builtArgs = spec.buildArgs(args)
+    const cleanArgs = isTaskAction(actionType)
+      ? { ...builtArgs, goal: taskGoalWithConversation(builtArgs.goal, context) }
+      : builtArgs
     const proposed = await actions.propose(
       {
         type: actionType,

@@ -255,7 +255,7 @@ describe('active text model transport', () => {
     })
 
     try {
-      const result = await toolChat('Send a message to Ali.', [])
+      const result = await toolChat('web_search for Ali.', [])
       expect(result).toMatchObject({
         answer: expect.stringContaining('UI-TARS 1.5 7B cannot act as the Chat tool planner'),
         toolCalls: []

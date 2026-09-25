@@ -46,6 +46,22 @@ export function listTaskRuns(limit?: number): TaskRunSnapshot[] {
   return taskHistoryStore().list(limit)
 }
 
+export function removeTaskRuns(taskIds: readonly string[]): string[] {
+  const removed = taskHistoryStore().remove(taskIds)
+  for (const task of removed) {
+    live.delete(task.taskId)
+    latest.delete(task.taskId)
+  }
+  if (removed.length) {
+    pruneSnapshots()
+    const removedIds = removed.map((task) => task.taskId)
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('tasks:removed', removedIds)
+    }
+  }
+  return removed.map((task) => task.taskId)
+}
+
 /** Stop one persisted local Web Use task when its in-memory browser owner is
  * absent, such as after a process restart. Returns false for remote, terminal,
  * native, and unknown tasks. */

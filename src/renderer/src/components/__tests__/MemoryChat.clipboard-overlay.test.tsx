@@ -30,6 +30,21 @@ function installApi(): {
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     onImageGenProgress: vi.fn(() => () => { }),
+    onImageGenJobState: vi.fn(() => () => { }),
+    onImageGenConversationUpdated: vi.fn(() => () => { }),
+    imageGenJobStatus: vi.fn(async () => ({
+      id: null,
+      phase: 'idle' as const,
+      conversationId: null,
+      projectId: null,
+      stage: null,
+      enhancedPrompt: '',
+      progress: null,
+      outputPath: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null
+    })),
     onRagStream: vi.fn(() => () => { }),
     getRagConversations: vi.fn(async () => [conversation]),
     getRagConversation: vi.fn(async () => conversation),
@@ -133,7 +148,7 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
     expect(screen.queryByRole('menuitem', { name: 'Copied' })).toBeNull()
   })
 
-  it('exposes the image preview as a dialog and dismisses it from the keyboard or backdrop', async () => {
+  it('exposes the image preview as a dialog and dismisses it from the keyboard or Close button', async () => {
     installApi()
     const user = userEvent.setup()
     renderConversation()
@@ -145,7 +160,7 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
 
     await user.click(screen.getByAltText('Generated'))
     const dialog = screen.getByRole('dialog', { name: 'Generated image preview' })
-    fireEvent.click(dialog)
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog', { name: 'Generated image preview' })).toBeNull()
   })
 })

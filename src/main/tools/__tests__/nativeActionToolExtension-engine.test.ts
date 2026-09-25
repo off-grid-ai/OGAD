@@ -125,7 +125,7 @@ describe('the engine path', () => {
     expect(port.proposed[0]).toMatchObject({
       intent: 'Open the release page and stop when version 4.2 is visible.',
       args: {
-        goal: 'Open the release page and stop when version 4.2 is visible.',
+        goal: 'Current user request (authoritative):\nShow me version 4.2 on the release page\n\nStructured task summary:\nOpen the release page and stop when version 4.2 is visible.',
         url: 'https://example.test/releases'
       }
     })
@@ -378,7 +378,10 @@ describe('the engine path', () => {
     expect(port.proposed[0]).toMatchObject({
       type: 'web_use',
       intent: 'check in for my flight',
-      args: { goal: 'check in for my flight', url: 'https://air.test' },
+      args: {
+        goal: 'Structured task summary:\ncheck in for my flight',
+        url: 'https://air.test'
+      },
       risk: 'mutate'
     })
     expect(run).not.toHaveBeenCalled()
@@ -426,7 +429,7 @@ describe('the engine path', () => {
     expect(port.proposed[0]).toMatchObject({
       type: 'computer_use',
       intent: 'share the deck in WhatsApp',
-      args: { goal: 'share the deck in WhatsApp' },
+      args: { goal: 'Structured task summary:\nshare the deck in WhatsApp' },
       risk: 'mutate'
     })
     expect(run).not.toHaveBeenCalled()

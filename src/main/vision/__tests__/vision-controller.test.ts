@@ -190,9 +190,9 @@ describe('registerVisionIpc', () => {
     owner.registerSession('pause-task', guard, new AbortController())
     owner.emitState({ taskId: 'pause-task', goal: 'Pause this task', status: 'running' })
     const handler = world.handlers.get('vision:control')
-    await handler?.({}, 'pause')
+    await handler?.({}, 'pause', 'pause-task')
     expect(guard.isPaused).toBe(true)
-    await handler?.({}, 'resume')
+    await handler?.({}, 'resume', 'pause-task')
     expect(guard.canCapture).toBe(true)
     expect(guard.canActuate()).toBe(false)
     expect(guard.markObservationReady()).toBe(true)
@@ -209,7 +209,7 @@ describe('registerVisionIpc', () => {
     })
     const handler = world.handlers.get('vision:control')
 
-    expect(await handler?.({}, 'takeover')).toBe(true)
+    expect(await handler?.({}, 'takeover', 'takeover-task')).toBe(true)
     expect(guard.isPaused).toBe(true)
     expect(records.at(-1)).toMatchObject({
       taskId: 'takeover-task',
@@ -333,7 +333,7 @@ describe('registerVisionIpc', () => {
     const dispose = owner.registerSession('stale-task', guard, new AbortController())
     dispose()
     const handler = world.handlers.get('vision:control')
-    expect(await handler?.({}, 'stop', 'stale-task')).toBe(true)
+    expect(await handler?.({}, 'stop', 'stale-task')).toBe(false)
     expect(await handler?.({}, 'pause', 'stale-task')).toBe(false)
     expect(guard.isHalted).toBe(false)
   })

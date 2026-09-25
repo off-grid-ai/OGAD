@@ -23,7 +23,7 @@ import { axRailViable } from './ax-router'
 import type { AxRouting } from './ax-host'
 import type { ElementTaskResult } from './ax-agent'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
-import type { VisionTaskContinuation } from '../vision/vision-host'
+import type { VisionTaskContinuation } from '../vision/vision-agent'
 import type { ComputerUseRail } from '../../shared/computer-use-settings'
 
 export interface ComputerTaskTiers {
@@ -37,6 +37,7 @@ export interface ComputerTaskTiers {
     app: string,
     request: {
       initial: AxRouting['snapshot']
+      sessionLimitMs?: number
       recoverWithVision?: (
         checkpoint: TaskRetryCheckpoint,
         continuation: VisionTaskContinuation
@@ -91,6 +92,11 @@ export function makeComputerTaskExecutor(
   const now = opts.now ?? Date.now
   return async (action) => {
     const goal = goalOf(action)
+    const args = action.args as Record<string, unknown>
+    const sessionLimitMs =
+      typeof args.sessionLimitMs === 'number' && Number.isFinite(args.sessionLimitMs)
+        ? args.sessionLimitMs
+        : undefined
     const forceAx = forced === 'ax'
     const forceVision = forced === 'vision'
     const axEnabled = forceAx || (forced === 'auto' && isRailEnabled(enabledRails, 'ax'))
@@ -120,6 +126,7 @@ export function makeComputerTaskExecutor(
         routing.app,
         {
           initial: routing.snapshot,
+          ...(sessionLimitMs ? { sessionLimitMs } : {}),
           ...(!visionEnabled || forceAx
             ? {}
             : {

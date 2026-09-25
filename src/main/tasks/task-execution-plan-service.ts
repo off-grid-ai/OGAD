@@ -22,6 +22,7 @@ export interface TaskExecutionPlanRequest {
 export async function createTaskExecutionPlan(
   request: TaskExecutionPlanRequest
 ): Promise<TaskExecutionPlan> {
+  const startedAt = Date.now()
   const prompt = taskPlanPrompt(request.goal, request.targetLabel, request.surface)
   const generate =
     request.generate ??
@@ -35,7 +36,11 @@ export async function createTaskExecutionPlan(
     const raw = await generate(prompt, request.signal)
     const json = extractJsonObject(raw)
     const plan = json ? normalizeTaskExecutionPlan(JSON.parse(json)) : null
-    return plan ?? fallbackTaskExecutionPlan(request.targetLabel, request.surface)
+    const resolved = plan ?? fallbackTaskExecutionPlan(request.targetLabel, request.surface)
+    console.log(
+      `[${request.surface}-task] inference=task-plan durationMs=${Date.now() - startedAt} inputChars=${prompt.length} phases=${resolved.phases.length}`
+    )
+    return resolved
   } catch (error) {
     if (request.signal?.aborted) throw request.signal.reason ?? error
     console.warn(`[${request.surface}-task] plan generation used fallback:`, error)

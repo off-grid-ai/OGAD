@@ -50,7 +50,8 @@ const byKind = (kind: CatalogModel['kind'], fileCount?: number): CatalogModel =>
 // model ships an mmproj so it's classified 'vision', and the vision model IS the
 // chat model (activates into the `.text` chat slot). Single-file download
 // mechanics are exercised with any single-file model (image/voice exist).
-const singleFileModels = CATALOG.filter((m) => m.files.length === 1)
+// Synthetic HTTP fixtures cannot satisfy immutable catalog checksums.
+const singleFileModels = CATALOG.filter((m) => m.files.length === 1 && !m.files[0]?.sha256)
 const chatModel = byKind('vision', 2)
 const visionModel = byKind('vision', 2)
 const holoGrounder = CATALOG.find((candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF')
@@ -194,6 +195,48 @@ afterAll(() => {
 })
 
 describe('model download release matrix', () => {
+  it('downloads the GGUF selected in the file picker even when the repo is cataloged', async () => {
+    const repoId = 'prism-ml/Ternary-Bonsai-2-27B-gguf'
+    const selected = 'Ternary-Bonsai-2-27B-PTQ1_0.gguf'
+    const projector = 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf'
+    const requested: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      requested.push(url)
+      if (url.includes('/api/models/')) {
+        return new Response(JSON.stringify({ siblings: [
+          { rfilename: selected, size: 2048 },
+          { rfilename: projector, size: 2048 }
+        ] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url.endsWith(selected) || url.endsWith(projector)) {
+        return new Response(new Uint8Array(Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(2044)])), {
+          status: 200,
+          headers: { 'content-length': '2048' }
+        })
+      }
+      throw new Error(`Unexpected download: ${url}`)
+    }))
+
+    try {
+      expect(await manager.downloadModel(repoId, undefined, selected)).toEqual({ success: true })
+      expect(requested.some((url) => url.endsWith(selected))).toBe(true)
+      expect(requested.some((url) => url.endsWith('Ternary-Bonsai-2-27B-PQ2_0.gguf'))).toBe(false)
+      expect(fs.existsSync(path.join(dataDir, 'models', selected))).toBe(true)
+      expect((await manager.getStorageInfo()).models.find((model) => model.name === 'Bonsai 2 27B')?.kind).toBe('vision')
+      const catalogPrimary = 'Ternary-Bonsai-2-27B-PQ2_0.gguf'
+      fs.writeFileSync(path.join(dataDir, 'models', catalogPrimary), 'GGUF')
+      expect(await manager.setActiveModel(repoId)).toEqual({ success: true })
+      const active = JSON.parse(fs.readFileSync(path.join(dataDir, 'models', 'active-model.json'), 'utf8'))
+      expect(active.primary).toBe(catalogPrimary)
+    } finally {
+      fs.rmSync(path.join(dataDir, 'models', selected), { force: true })
+      fs.rmSync(path.join(dataDir, 'models', projector), { force: true })
+      fs.rmSync(path.join(dataDir, 'models', 'Ternary-Bonsai-2-27B-PQ2_0.gguf'), { force: true })
+      await manager.clearDownload(repoId)
+    }
+  })
+
   it('downloads the chat (vision) model with observable progress and makes it activatable (#17)', async () => {
     const { progress } = await downloadEveryRequiredFile(chatModel)
 

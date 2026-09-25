@@ -18,13 +18,16 @@
  * Accessibility grant), which no headless runner has.
  */
 import fs from 'fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import sharp from 'sharp'
-import { globalShortcut, screen } from 'electron'
+import { screen, shell } from 'electron'
 import { llm } from '../llm'
 import type { VisionAction, Bounds } from './vision-action'
 import {
   type VisionScreen,
   type VisionSemanticElement,
+  type VisionTaskContinuation,
   type VisionTaskResult
 } from './vision-agent'
 import { VisionGuard } from './vision-guard'
@@ -33,7 +36,6 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask,
   waitForVisionUser
 } from './vision-controller'
 import { hideSupervisorWindow, showSupervisorWindow } from './supervisor-window'
@@ -71,6 +73,42 @@ import { computerUsePermissionBlock } from './computer-use-permissions'
 import { runVisionTaskGraph } from './vision-task-graph'
 import { captureComputerUseDisplay } from './computer-use-display-capture'
 import { snapshotAccessibilityApp } from '../accessibility/ax-host'
+import { accessibilityHelperPath } from '../accessibility/ax-helper'
+
+const execFileAsync = promisify(execFile)
+const MAX_MODEL_SEMANTIC_ELEMENTS = 100
+const MAX_VERIFICATION_SEMANTIC_ELEMENTS = 240
+const MAX_MODEL_INTERACTIVE_ELEMENTS = 60
+
+function semanticElementKey(element: VisionSemanticElement): string {
+  return [
+    element.role,
+    element.name,
+    element.value,
+    Math.round(element.point.x / 4),
+    Math.round(element.point.y / 4)
+  ].join('\n')
+}
+
+async function activateDefaultBrowser(): Promise<string | null> {
+  const helper = accessibilityHelperPath()
+  if (!helper) return null
+  try {
+    const { stdout } = await execFileAsync(helper, ['--default-browser'], { timeout: 4_000 })
+    const browser = JSON.parse(stdout) as { name?: unknown; path?: unknown }
+    if (
+      typeof browser.name !== 'string' ||
+      !browser.name.trim() ||
+      typeof browser.path !== 'string' ||
+      !browser.path.endsWith('.app')
+    )
+      return null
+    await execFileAsync('/usr/bin/open', ['-a', browser.path], { timeout: 5_000 })
+    return browser.name
+  } catch {
+    return null
+  }
+}
 
 export type { ActuationPort }
 
@@ -167,7 +205,7 @@ function makeScreen(input: {
         encodedSize,
         scale: Math.min(encodedSize.width / width, encodedSize.height / height)
       }
-      const semanticElements: VisionSemanticElement[] = (semanticSnapshot?.elements ?? [])
+      const visibleSemanticElements = (semanticSnapshot?.elements ?? [])
         .filter((element) => element.enabled && (element.name || element.value))
         .flatMap((element) => {
           const globalPoint =
@@ -179,23 +217,58 @@ function makeScreen(input: {
           if (localX < 0 || localY < 0 || localX >= width || localY >= height) return []
           return [
             {
-              index: element.index,
-              role: element.role,
-              name: element.name,
-              value: element.value,
-              point: {
-                x: Math.min(
-                  encodedSize.width - 1,
-                  Math.round((localX * encodedSize.width) / width)
-                ),
-                y: Math.min(
-                  encodedSize.height - 1,
-                  Math.round((localY * encodedSize.height) / height)
+              semantic: {
+                index: element.index,
+                role: element.role,
+                name: element.name,
+                value: element.value,
+                point: {
+                  x: Math.min(
+                    encodedSize.width - 1,
+                    Math.round((localX * encodedSize.width) / width)
+                  ),
+                  y: Math.min(
+                    encodedSize.height - 1,
+                    Math.round((localY * encodedSize.height) / height)
+                  )
+                }
+              } satisfies VisionSemanticElement,
+              interactive:
+                element.actionable ||
+                /(?:button|link|textfield|textarea|combobox|checkbox|radio|menuitem)/i.test(
+                  element.role
                 )
-              }
             }
           ]
         })
+      const seenSemanticElements = new Set<string>()
+      const uniqueSemanticElements = visibleSemanticElements.filter(({ semantic }) => {
+        const key = semanticElementKey(semantic)
+        if (seenSemanticElements.has(key)) return false
+        seenSemanticElements.add(key)
+        return true
+      })
+      const interactiveSemanticElements = uniqueSemanticElements
+        .filter((element) => element.interactive)
+        .slice(0, MAX_MODEL_INTERACTIVE_ELEMENTS)
+      const informationalSemanticElements = uniqueSemanticElements.filter(
+        (element) => !element.interactive
+      )
+      const semanticElements = [
+        ...interactiveSemanticElements,
+        ...informationalSemanticElements.slice(
+          0,
+          MAX_MODEL_SEMANTIC_ELEMENTS - interactiveSemanticElements.length
+        )
+      ].map((element) => element.semantic)
+      const verificationSemanticElements = uniqueSemanticElements
+        .slice(0, MAX_VERIFICATION_SEMANTIC_ELEMENTS)
+        .map((element) => element.semantic)
+      if (uniqueSemanticElements.length > MAX_MODEL_SEMANTIC_ELEMENTS) {
+        console.log(
+          `[computer-task] accessibility raw=${semanticSnapshot?.elements.length ?? 0} visible=${visibleSemanticElements.length} unique=${uniqueSemanticElements.length} model=${semanticElements.length} verification=${verificationSemanticElements.length}`
+        )
+      }
       captureNumber += 1
       const savedScreenshot = taskScreenshotPath(taskId, captureNumber)
       fs.writeFileSync(savedScreenshot, png)
@@ -215,7 +288,7 @@ function makeScreen(input: {
         metadata: {
           path: savedScreenshot,
           geometry: capturedGeometry,
-          ...(semanticElements.length ? { verificationSemanticElements: semanticElements } : {}),
+          ...(verificationSemanticElements.length ? { verificationSemanticElements } : {}),
           ...(exposeSemanticElements && semanticElements.length ? { semanticElements } : {})
         }
       }
@@ -232,7 +305,12 @@ function makeScreen(input: {
       if (!mapped) {
         throw new Error('model returned a point outside the current screenshot')
       }
-      const result = await dispatchVisionAction({ actuation, action: mapped, goal })
+      const result = await dispatchVisionAction({
+        actuation,
+        action: mapped,
+        goal,
+        navigate: (url) => shell.openExternal(url)
+      })
       return result.handoff ? result : { mappedAction: mapped }
     }
   }
@@ -262,7 +340,8 @@ class VisionHost {
     journeyId = taskId,
     checkpoint?: TaskRetryCheckpoint,
     continuation?: VisionTaskContinuation,
-    targetLabel?: string
+    targetLabel?: string,
+    sessionLimitMs?: number
   ): Promise<VisionTaskResult> {
     const actuation = loadActuation()
     if (!actuation) {
@@ -280,6 +359,20 @@ class VisionHost {
     const guard = continuation?.guard ?? new VisionGuard({ taskId, kind: 'computer_use' })
     const request = continuation?.request ?? new AbortController()
     const settings = getComputerUseSettings()
+    const defaultBrowser =
+      process.platform === 'darwin' && /default browser/i.test(goal)
+        ? await activateDefaultBrowser()
+        : null
+    if (process.platform === 'darwin' && /default browser/i.test(goal) && !defaultBrowser) {
+      return {
+        ok: false,
+        summary:
+          'Computer Use could not identify and focus the macOS default browser. Check the default browser setting and retry.',
+        steps: [],
+        handoffs: 0
+      }
+    }
+    const resolvedTargetLabel = targetLabel ?? defaultBrowser ?? undefined
     try {
       return await withVisionTaskModelStrategy(
         'desktop',
@@ -289,6 +382,11 @@ class VisionHost {
             llm.effectiveContextSize()
           )
           const retrievedFacts = [
+            ...(defaultBrowser
+              ? [
+                  `macOS default browser: ${defaultBrowser}. It is now frontmost; use this browser for the task.`
+                ]
+              : []),
             ...(checkpoint
               ? [
                   `Resume checkpoint for task ${checkpoint.taskId}: ${checkpoint.steps.join('; ')}`,
@@ -315,7 +413,8 @@ class VisionHost {
             contextTokens,
             retrievedFacts,
             continuation,
-            targetLabel
+            targetLabel: resolvedTargetLabel,
+            sessionLimitMs
           })
         }
       )
@@ -345,6 +444,7 @@ class VisionHost {
     retrievedFacts: string[]
     continuation?: VisionTaskContinuation
     targetLabel?: string
+    sessionLimitMs?: number
   }): Promise<VisionTaskResult> {
     const {
       goal,
@@ -361,27 +461,14 @@ class VisionHost {
       contextTokens,
       retrievedFacts,
       continuation,
-      targetLabel
+      targetLabel,
+      sessionLimitMs
     } = input
-    // The kill switch: Esc halts the run and consumes the keypress. The supervisor's
-    // Stop routes to the SAME guard via the controller session.
     const ownsControls = !continuation
-    const escapeRegistered = ownsControls
-      ? globalShortcut.register('Escape', () => {
-          stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
-        })
-      : true
     const releaseSession = ownsControls
-      ? registerVisionSession(taskId, guard, request)
+      ? registerVisionSession(taskId, guard, request, undefined, sessionLimitMs)
       : () => undefined
     if (ownsControls) showSupervisorWindow()
-    // The only run-level notice is an unavailable emergency shortcut. Model
-    // selection guidance belongs in settings, not in a live task.
-    const notice = [
-      escapeRegistered ? null : 'Esc is unavailable. Use Stop or Take Over in the task controls.'
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join(' ')
     emitVisionState({
       taskId,
       journeyId,
@@ -390,8 +477,7 @@ class VisionHost {
       status: 'running',
       phase: 'preparing',
       currentStep: 0,
-      currentAction: 'Preparing local screen control',
-      ...(notice ? { notice } : {})
+      currentAction: 'Preparing local screen control'
     })
     const queuedGuidance = continuation?.queuedGuidance ?? [...(checkpoint?.guidance ?? [])]
     const releaseGuidance = ownsControls
@@ -446,13 +532,13 @@ class VisionHost {
                   : 'running',
             phase: progress.phase,
             currentStep: progress.step,
-            currentAction: progress.action,
-            ...(notice ? { notice } : {})
+            currentAction: progress.action
           })
         },
         contextTokens,
         checkpointInterval: settings.checkpointInterval,
         visualHistoryFrames: settings.visualHistoryFrames,
+        returnAfterAction: continuation?.returnAfterAction,
         retrievedFacts,
         signal: request.signal,
         onCheckpoint: () => {
@@ -509,6 +595,17 @@ class VisionHost {
           })
         }
       })
+      if (continuation?.returnAfterAction && result.ok) {
+        emitVisionState({
+          taskId,
+          journeyId,
+          goal,
+          status: 'running',
+          phase: 'checking',
+          currentAction: result.summary
+        })
+        return result
+      }
       const finalStatus = automationTaskReadStatus(guard.automationStatus)
       emitVisionState({
         taskId,
@@ -534,26 +631,22 @@ class VisionHost {
         journeyId,
         goal,
         status: finalStatus,
-        phase: finalStatus === 'failed' ? 'failed' : 'stopped',
+        phase:
+          finalStatus === 'done' ? 'complete' : finalStatus === 'failed' ? 'failed' : 'stopped',
         currentAction: summary,
         summary
       })
-      return { ok: false, summary, steps: [], handoffs: 0 }
+      return finalStatus === 'done'
+        ? { ok: true, summary, steps: [], handoffs: 0 }
+        : { ok: false, summary, steps: [], handoffs: 0 }
     } finally {
       releaseGuidance()
-      if (ownsControls && escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       if (ownsControls) {
         hideSupervisorWindow()
       }
     }
   }
-}
-
-export interface VisionTaskContinuation {
-  guard: VisionGuard
-  request: AbortController
-  queuedGuidance: string[]
 }
 
 let host: VisionHost | null = null

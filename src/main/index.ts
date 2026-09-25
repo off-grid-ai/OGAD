@@ -99,7 +99,7 @@ registerCoreShutdownOwners(applicationShutdown, {
 // FORCE UPDATE VERIFICATION: 3 - SHELL OVERWRITE
 console.log('MAIN PROCESS: LOADING CUSTOM ENTRY POINT (SHELL OVERWRITE)')
 
-function createWindow(): void {
+async function createWindow(): Promise<void> {
   // Open filling the screen, because this is a desktop-first, dense app: multi-column grids, master
   // detail lists and side panels. At 900x670 the Models grid collapsed to one card per row, the chat
   // history rail ate a third of the width, and every screen looked like a phone layout stretched.
@@ -148,6 +148,57 @@ function createWindow(): void {
     if (windowPresentation.showWindow) mainWindow.show()
   })
 
+  const rendererTarget =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? process.env['ELECTRON_RENDERER_URL']
+      : rendererHtmlPath()
+  let rendererLoadAttempt = 0
+  let rendererLoadRetry: NodeJS.Timeout | undefined
+
+  const loadRenderer = async (): Promise<void> => {
+    rendererLoadAttempt += 1
+    try {
+      if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+        await mainWindow.loadURL(rendererTarget)
+      } else {
+        await mainWindow.loadFile(rendererTarget)
+      }
+      writeDiagnosticLog('renderer', 'load.completed', {
+        attempt: rendererLoadAttempt,
+        target: rendererTarget
+      })
+    } catch (error) {
+      writeDiagnosticLog(
+        'renderer',
+        'load.rejected',
+        {
+          attempt: rendererLoadAttempt,
+          target: rendererTarget,
+          error: error instanceof Error ? error.message : String(error)
+        },
+        'error'
+      )
+      if (rendererLoadAttempt >= 3 || mainWindow.isDestroyed()) return
+      rendererLoadRetry = setTimeout(() => void loadRenderer(), 1_000)
+    }
+  }
+
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, code, description, validatedURL, isMainFrame) => {
+      if (!isMainFrame) return
+      writeDiagnosticLog(
+        'renderer',
+        'load.failed',
+        { code, description, url: validatedURL },
+        'error'
+      )
+    }
+  )
+  mainWindow.on('closed', () => {
+    if (rendererLoadRetry) clearTimeout(rendererLoadRetry)
+  })
+
   // Restore the user's page zoom after each load and keep pinch zoom disabled.
   mainWindow.webContents.on('did-finish-load', () => {
     const savedZoomLevel = getSetting('windowZoomLevel', 0)
@@ -185,11 +236,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(rendererHtmlPath())
-  }
+  await loadRenderer()
 }
 
 // The menu-bar (Tray) control surface for always-on capture (pause/resume +
@@ -466,7 +513,24 @@ app.whenReady().then(async () => {
   ])
 
   registerGodTwinWindowIpc()
-  createWindow()
+
+  // Start optional Pro registration before the renderer loads. The activation
+  // code yields between feature groups, so the shell can load at the same time,
+  // while Pro IPC handlers still get a head start before the renderer mounts.
+  const proFeaturesStartup = runStartupStage({
+    name: 'pro.features.load',
+    deadlineMs: 30_000,
+    lateEffect: 'keep',
+    run: () => loadProFeaturesMain()
+  })
+
+  await createWindow()
+
+  // loadURL/loadFile resolves after the renderer finishes loading. Give Electron
+  // one more event-loop turn to present that frame before optional main-process
+  // imports and local-model startup begin competing for CPU and memory.
+  await new Promise<void>((resolve) => setImmediate(resolve))
+
   if (windowPresentation.showWindow) showGodTwinWindow()
 
   // Network checks, model work, and optional services now run beside the visible shell.
@@ -488,17 +552,6 @@ app.whenReady().then(async () => {
       deadlineMs: 10_000,
       lateEffect: 'keep',
       run: () => startMediaServer()
-    },
-    {
-      name: 'models.text.prepare',
-      deadlineMs: 180_000,
-      lateEffect: 'keep',
-      run: async () => {
-        const { llm } = await import('./llm')
-        registerRuntime(llm.runtime)
-        applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
-        if (llm.modelsExist()) await llm.init()
-      }
     },
     {
       name: 'modalities.runtime.register',
@@ -524,12 +577,6 @@ app.whenReady().then(async () => {
       run: () => import('./models-manager').then((module) => module.reconcileActiveModelProjector())
     },
     {
-      name: 'pro.features.load',
-      deadlineMs: 30_000,
-      lateEffect: 'keep',
-      run: () => loadProFeaturesMain()
-    },
-    {
       name: 'updater.ipc',
       deadlineMs: 15_000,
       lateEffect: 'guard',
@@ -543,6 +590,24 @@ app.whenReady().then(async () => {
     }
   ])
 
+  // Text-model preparation starts a memory-heavy native runtime. Do not start it
+  // until Pro activation has finished and the first renderer frame can present.
+  void (async () => {
+    await proFeaturesStartup
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    await runStartupStage({
+      name: 'models.text.prepare',
+      deadlineMs: 180_000,
+      lateEffect: 'keep',
+      run: async () => {
+        const { llm } = await import('./llm')
+        registerRuntime(llm.runtime)
+        applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
+        if (llm.modelsExist()) await llm.init()
+      }
+    })
+  })()
+
   // Demo seeding already runs beside the shell. Keep its existing persistence semantics instead of
   // pretending an in-progress database write can be cancelled by a timer.
   if (process.env.OFFGRID_SEED) {
@@ -552,7 +617,7 @@ app.whenReady().then(async () => {
   }
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow()
   })
   app.on('browser-window-focus', () => {
     refreshCachedProEntitlement()

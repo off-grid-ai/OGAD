@@ -28,6 +28,9 @@ export function imageProgressLabel(
   if (stage === 'enhancing') return 'Preparing image…'
   if (stage === 'preparing') return 'Preparing image…'
   if (!progress) return stage === 'decoding' ? 'Decoding image…' : 'Generating image…'
+  if (progress.phase !== 'decoding' && progress.step >= progress.total) {
+    return 'Finalizing image…'
+  }
   const phase = progress.phase === 'decoding' ? 'Decoding' : 'Step'
   return progress.phase === 'decoding'
     ? `${phase} ${progress.step} of ${progress.total}`
@@ -84,6 +87,8 @@ export function activityLabel(activity?: {
 }): string {
   if (!activity) return ''
   if (activity.kind === 'planning') return 'Planning next action…'
+  if (activity.kind === 'preparing_tool_calls')
+    return activity.name === 'generate_image' ? 'Preparing image requests…' : 'Preparing actions…'
   if (activity.kind === 'running_tool') return runningToolLabel(activity.name)
   if (activity.kind === 'reading')
     return `Reading the page${(activity.counts?.urls ?? 0) > 1 ? 's' : ''}…`

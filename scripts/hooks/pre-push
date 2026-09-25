@@ -41,19 +41,70 @@ collect_changed_files() {
 CHANGED_FILES=$(collect_changed_files)
 CHANGED_CODE=$(printf '%s\n' "$CHANGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)
 
-if [ -z "$CHANGED_CODE" ]; then
-  echo "[pre-push] no JavaScript or TypeScript changes — fast gate passed."
+project_node() {
+  required_major=$(sed -E 's/^v?([0-9]+).*/\1/' .nvmrc)
+  current_major=$(node -p 'process.versions.node.split(".")[0]')
+  if [ "$current_major" = "$required_major" ]; then
+    command -v node
+    return
+  fi
+
+  for candidate in \
+    "$HOME/.nvm/versions/node"/v"$required_major".*/bin/node \
+    "/opt/homebrew/opt/node@$required_major/bin/node" \
+    "/usr/local/opt/node@$required_major/bin/node"; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+
+  echo "[pre-push] Node $required_major is required by .nvmrc and package.json. Install it before pushing." >&2
+  exit 1
+}
+
+if [ -z "$CHANGED_CODE" ] && ! printf '%s\n' "$CHANGED_FILES" | grep -qx 'pro'; then
+  echo "[pre-push] no JavaScript or TypeScript or Pro changes — fast gate passed."
   exit 0
 fi
 
-echo "[pre-push] typecheck"
-npm run --silent typecheck
+if [ -n "$CHANGED_CODE" ]; then
+  echo "[pre-push] typecheck"
+  npm run --silent typecheck
+fi
 
-echo "[pre-push] tests related to pushed files"
-OFFGRID_HOOK_DATA_DIR=$(mktemp -d)
-trap 'rm -rf -- "$OFFGRID_HOOK_DATA_DIR"' EXIT
-export OFFGRID_DATA_DIR="$OFFGRID_HOOK_DATA_DIR"
-printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
-  xargs -0 npx vitest related --run --project product-integration --passWithNoTests --bail=1
+echo "[pre-push] Pro typecheck"
+(cd pro && npx tsc --noEmit -p tsconfig.json)
+
+if [ -n "$CHANGED_CODE" ]; then
+  echo "[pre-push] tests related to pushed files"
+  PROJECT_NODE=$(project_node)
+  PROJECT_NODE_PATH=$(dirname "$PROJECT_NODE")
+  PROJECT_PATH="$PROJECT_NODE_PATH:$PATH"
+  OFFGRID_HOOK_DATA_DIR=$(mktemp -d)
+  restore_hook_state() {
+    if [ "${OFFGRID_NODE_NATIVE_REBUILT:-0}" = 1 ]; then
+      echo "[pre-push] restoring Electron native dependencies"
+      PATH="$PROJECT_PATH" ./node_modules/.bin/electron-rebuild \
+        -f -w better-sqlite3-multiple-ciphers >/dev/null 2>&1 \
+        || PATH="$PROJECT_PATH" ./node_modules/.bin/electron-builder \
+          install-app-deps >/dev/null 2>&1 \
+        || true
+      ./scripts/probe-electron-sqlite.sh '[pre-push]'
+    fi
+    rm -rf -- "$OFFGRID_HOOK_DATA_DIR"
+  }
+  trap restore_hook_state EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  export OFFGRID_DATA_DIR="$OFFGRID_HOOK_DATA_DIR"
+  echo "[pre-push] preparing native dependencies for $($PROJECT_NODE -v)"
+  OFFGRID_NODE_NATIVE_REBUILT=1
+  PATH="$PROJECT_PATH" npm explore better-sqlite3-multiple-ciphers -- \
+    npm run build-release >/dev/null 2>&1
+  printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
+    xargs -0 env PATH="$PROJECT_PATH" "$PROJECT_NODE" ./node_modules/vitest/vitest.mjs \
+      related --run --project product-integration --passWithNoTests --bail=1
+fi
 
 echo "[pre-push] fast gate passed. CI runs full coverage, DB, heavy integration, and E2E."

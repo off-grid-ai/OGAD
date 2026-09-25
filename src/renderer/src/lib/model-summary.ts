@@ -2,6 +2,8 @@
 // without the app: format the running context window and resolve a model id to its
 // display name. The hook (useActiveModelSummary) does the IPC and delegates here.
 
+import { parseRemoteVisionModelId } from '../../../shared/remote-vision-server'
+
 /** Format a context window in tokens as a compact label, e.g. 8192 -> "8K",
  *  131072 -> "128K". Local model contexts are powers of two, so divide by 1024.
  *  Returns null when unknown/zero so the UI can omit it. */
@@ -24,7 +26,7 @@ export function resolveModelName(
   if (!id) {
     return null
   }
-  return models.find((m) => m.id === id)?.name ?? id
+  return models.find((m) => m.id === id)?.name ?? parseRemoteVisionModelId(id)?.modelId ?? id
 }
 
 interface TextModelSummaryEntry {

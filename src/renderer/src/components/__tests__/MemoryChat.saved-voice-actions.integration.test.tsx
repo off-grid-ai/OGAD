@@ -61,6 +61,21 @@ function installSavedVoiceBoundary(): void {
     isPro: false,
     imageGenStatus: async () => ({ available: false, models: [], active: '' }),
     onImageGenProgress: () => () => { },
+    onImageGenJobState: () => () => { },
+    onImageGenConversationUpdated: () => () => { },
+    imageGenJobStatus: async () => ({
+      id: null,
+      phase: 'idle' as const,
+      conversationId: null,
+      projectId: null,
+      stage: null,
+      enhancedPrompt: '',
+      progress: null,
+      outputPath: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null
+    }),
     getRagConversations: async () => [{ ...conversation }],
     getRagConversation: async () => ({ ...conversation }),
     getRagMessages: async () => messages.map((message) => ({ ...message })),
@@ -123,7 +138,7 @@ function installSavedVoiceBoundary(): void {
     speak: async () => ({ dataUrl: 'data:audio/wav;base64,YXVkaW8=' }),
     transcribeAudio: async () => 'Corrected transcript',
     tasks: { list: async () => [], onChanged: () => () => { } },
-    ragChat: async () => ({ answer: 'Edited answer', unified: [] })
+    toolChat: async () => ({ answer: 'Edited answer', unified: [], toolCalls: [] })
   }
     ; (window as unknown as { api: unknown }).api = api
 }

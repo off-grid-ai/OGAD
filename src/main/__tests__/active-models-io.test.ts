@@ -17,6 +17,8 @@ import {
   ActiveModalityStore,
   getActiveModal,
   getAllActiveModals,
+  remoteModelSelected,
+  setRemoteModelSelected,
   setActiveModal
 } from '../active-models'
 
@@ -152,5 +154,20 @@ describe('production active-model functions', () => {
       image: 'image-model',
       speech: 'speech-model'
     })
+  })
+
+  it('persists an independent remote choice for each user-facing modality', () => {
+    expect(remoteModelSelected('text')).toBe(true)
+    expect(remoteModelSelected('image')).toBe(false)
+    expect(remoteModelSelected('voice')).toBe(false)
+    expect(remoteModelSelected('transcription')).toBe(false)
+
+    setRemoteModelSelected('text', false)
+    setRemoteModelSelected('voice', true)
+
+    expect(remoteModelSelected('text')).toBe(false)
+    expect(remoteModelSelected('image')).toBe(false)
+    expect(remoteModelSelected('voice')).toBe(true)
+    expect(remoteModelSelected('transcription')).toBe(false)
   })
 })

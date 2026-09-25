@@ -113,7 +113,7 @@ function installFakeImageBoundary(): void {
 const fs = require('node:fs')
 const args = process.argv.slice(2)
 const value = (flag) => args[args.indexOf(flag) + 1]
-fs.appendFileSync(process.env.OFFGRID_TEST_IMAGE_LOG, 'run\\n')
+fs.appendFileSync(process.env.OFFGRID_TEST_IMAGE_LOG, JSON.stringify(args) + '\\n')
 fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
 `
   )
@@ -339,6 +339,50 @@ describe('multimodal runtime reliability', () => {
     }
 
     expect(await llm.chat('after guarded refusal and explicit override')).toBe('chat recovered')
+  }, 20_000)
+
+  it('runs Qwen-Image 2.1 edits only with the complete local image stack', async () => {
+    const modelDir = path.join(fixture.dataDir, 'models')
+    const model = 'Qwen-Image-2-1-Q8_0.gguf'
+    const encoder = 'Qwen3VL-8B-Instruct-Q4_K_M.gguf'
+    const projector = 'mmproj-Qwen3VL-8B-Instruct-F16.gguf'
+    const vae = 'qwen_image_2.1_vae.safetensors'
+    const source = path.join(fixture.root, 'edit-source.png')
+    const companions = [model, encoder, projector, vae].map((name) => path.join(modelDir, name))
+    const request = {
+      prompt: 'Keep the subject and change the background to blue',
+      model,
+      initImage: source,
+      enhancePrompt: false,
+      width: 512,
+      height: 512,
+      steps: 4
+    }
+    fs.writeFileSync(source, Buffer.from(PNG_BASE64, 'base64'))
+    createValidGguf(companions[0]!)
+    const runsBefore = lineCount(fixture.imageLog)
+
+    try {
+      await expect(generateImage(request)).rejects.toThrow('Qwen-Image 2.1 text encoder')
+      createValidGguf(companions[1]!)
+      fs.writeFileSync(companions[3]!, 'vae fixture')
+      await expect(generateImage(request)).rejects.toThrow('Qwen-Image 2.1 vision projector')
+      createValidGguf(companions[2]!)
+
+      const image = await generateImage(request)
+      expect(image.dataUrl).toBe(`data:image/png;base64,${PNG_BASE64}`)
+      expect(lineCount(fixture.imageLog)).toBe(runsBefore + 1)
+      const args = JSON.parse(
+        fs.readFileSync(fixture.imageLog, 'utf8').trim().split(/\r?\n/).at(-1)!
+      ) as string[]
+      expect(args).toContainEqual(expect.stringContaining(encoder))
+      expect(args).toContainEqual(expect.stringContaining(projector))
+      expect(args).toContainEqual(expect.stringContaining(vae))
+      expect(args).toContain(source)
+    } finally {
+      for (const companion of companions) fs.rmSync(companion, { force: true })
+      fs.rmSync(source, { force: true })
+    }
   }, 20_000)
 
   it('keeps local chat usable when external network reachability is unavailable', async () => {

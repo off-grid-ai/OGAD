@@ -53,7 +53,8 @@ describe('buildPlannerPrompt', () => {
     // in Off Grid AI's built-in browser; open_url only opens a link.
     expect(p).toMatch(/is web_use/i)
     expect(p).toMatch(/built-in browser/i)
-    expect(p).toMatch(/NOT open_url/i)
+    expect(p).toMatch(/open_url ONLY opens a link/i)
+    expect(p).toMatch(/explicitly requires their existing default-browser login/i)
     expect(p).toMatch(/Fill EVERY required argument/i)
     expect(p).toMatch(/\{"steps":\[\]\}/) // the conversational escape hatch
   })

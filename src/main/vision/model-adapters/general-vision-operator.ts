@@ -5,6 +5,7 @@ import {
   generalVisionPolicyFailure,
   parseGeneralVisionToolResponse
 } from './general-vision-tools'
+import { formatContinuationCapsule } from './continuation-capsule'
 import type { VisionModelAdapter, VisionPolicyInput } from './types'
 
 export { generalVisionPolicyFailure } from './general-vision-tools'
@@ -37,11 +38,11 @@ function taskContext(input: VisionPolicyInput): string {
     browserControlContext(input),
     desktopLaunchContext(input),
     input.currentMilestone ? `Current milestone:\n${input.currentMilestone}` : '',
+    formatContinuationCapsule(input.continuation),
+    `Keep continuation.done to at most ${Math.max(0, input.continuationCapacity ?? 0)} recent confirmed outcomes. Replace the capsule; do not append a transcript.`,
     previousActionContext(input),
     recentOutcomes.length ? `Recent outcomes:\n${recentOutcomes.join('\n')}` : '',
-    input.olderVisualFacts.length
-      ? `Past task facts:\n${input.olderVisualFacts.join('\n')}`
-      : '',
+    input.olderVisualFacts.length ? `Past task facts:\n${input.olderVisualFacts.join('\n')}` : '',
     encoded
       ? `Screenshot: ${encoded.width} pixels wide and ${encoded.height} pixels high. Points use a 0-1000 coordinate frame.`
       : '',

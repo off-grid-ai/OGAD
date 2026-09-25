@@ -58,6 +58,19 @@ describe('applyStreamEvent', () => {
     expect(r.toolCalls).toEqual([])
   })
 
+  it('shows tool-call preparation without creating a tool row', () => {
+    const r = applyStreamEvent<StreamedMessage>(
+      { toolCalls: [] },
+      {
+        type: 'step',
+        step: { kind: 'preparing_tool_calls', name: 'generate_image' }
+      }
+    )
+
+    expect(r.activity).toEqual({ kind: 'preparing_tool_calls', name: 'generate_image' })
+    expect(r.toolCalls).toEqual([])
+  })
+
   it('completes the running tool row instead of adding a duplicate', () => {
     const running = applyStreamEvent<StreamedMessage>(
       { toolCalls: [] },

@@ -201,20 +201,20 @@ afterAll(async () => {
  * The rail is the <aside> (role complementary), so anything outside it is transcript.
  */
 async function inTranscript(text: string | RegExp): Promise<HTMLElement> {
-  return waitFor(() => {
-    const rail = screen.queryByRole('complementary')
-    const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
-    expect(shown.length).toBeGreaterThan(0)
-    return shown[0]!
-  })
+  return waitFor(
+    () => {
+      const rail = screen.queryByRole('complementary')
+      const shown = screen.getAllByText(text).filter((node) => !rail?.contains(node))
+      expect(shown.length).toBeGreaterThan(0)
+      return shown[0]!
+    },
+    { timeout: 5_000 }
+  )
 }
 
 describe('production workspace bridge', () => {
   it('sends a rendered chat turn through preload, IPC, the model socket, and SQLite', async () => {
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The production bridge persisted this answer.' }
-    )
+    fake.enqueue({ content: 'The production bridge persisted this answer.' })
     const user = userEvent.setup()
     renderChat()
 
@@ -234,7 +234,7 @@ describe('production workspace bridge', () => {
         ['assistant', 'The production bridge persisted this answer.']
       ])
     })
-    expect(fake.requests).toHaveLength(2)
+    expect(fake.requests).toHaveLength(1)
   })
 
   it('reads model-written web URLs with wrappers and rejects an unsupported scheme', async () => {
@@ -272,7 +272,9 @@ describe('production workspace bridge', () => {
         button: 0,
         ctrlKey: false
       })
-      await user.click(await screen.findByRole('menuitem', { name: /Tools/ }))
+      if (screen.queryByRole('menuitem', { name: 'ConnectorsOff' })) {
+        await user.click(screen.getByRole('menuitem', { name: 'ConnectorsOff' }))
+      }
       await user.keyboard('{Escape}')
       fireEvent.change(composer, {
         target: { value: 'Read the supplied web addresses and reject unsupported URL schemes' }
@@ -281,7 +283,7 @@ describe('production workspace bridge', () => {
       expect(
         await inTranscript('The supported pages were read and the unsupported URL was rejected.')
       ).toBeTruthy()
-      await user.click(await screen.findByRole('button', { name: 'Work done' }))
+      await user.click(await screen.findByRole('button', { name: 'Work done' }, { timeout: 5_000 }))
 
       const toolResults = await waitFor(() => {
         const results = screen.getAllByRole('button', {
@@ -306,8 +308,8 @@ describe('production workspace bridge', () => {
       const composerOptions = screen.queryByRole('button', { name: 'Composer options' })
       if (composerOptions) {
         fireEvent.pointerDown(composerOptions, { button: 0, ctrlKey: false })
-        const enabledTools = screen.queryByRole('menuitem', { name: 'ToolsOn' })
-        if (enabledTools) await user.click(enabledTools)
+        const enabledConnectors = screen.queryByRole('menuitem', { name: 'ConnectorsOn' })
+        if (enabledConnectors) await user.click(enabledConnectors)
         await user.keyboard('{Escape}')
       }
       await new Promise<void>((resolve, reject) =>
@@ -317,13 +319,10 @@ describe('production workspace bridge', () => {
   }, 15_000)
 
   it('shows the real memory-chat failure instead of a fabricated answer', async () => {
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      {
-        errorStatus: 503,
-        errorBody: JSON.stringify({ error: { message: 'Memory model is unavailable.' } })
-      }
-    )
+    fake.enqueue({
+      errorStatus: 503,
+      errorBody: JSON.stringify({ error: { message: 'Memory model is unavailable.' } })
+    })
     const user = userEvent.setup()
     renderChat()
 
@@ -337,10 +336,7 @@ describe('production workspace bridge', () => {
   })
 
   it('keeps a slow reply active past the former deadline until the user stops it', async () => {
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'This reply is still in progress.', hold: true }
-    )
+    fake.enqueue({ content: 'This reply is still in progress.', hold: true })
     const user = userEvent.setup()
     renderChat()
 
@@ -371,12 +367,7 @@ describe('production workspace bridge', () => {
 
   it('shows and saves a compaction notice when the chat reaches 80% of its context', async () => {
     const longAnswer = `Stored answer ${'A'.repeat(54_000)}`
-    fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: longAnswer },
-      { content: '{"intent":"chat","urls":[]}' },
-      { content: 'The next answer still works.' }
-    )
+    fake.enqueue({ content: longAnswer }, { content: 'The next answer still works.' })
     const user = userEvent.setup()
     renderChat()
 
@@ -414,9 +405,7 @@ describe('production workspace bridge', () => {
         fake.reset()
         await window.api.setRemoteVisionServer({ provider, endpoint, model: 'integration-model' })
         fake.enqueue(
-          { content: '{"intent":"chat","urls":[]}' },
           { content: `${provider} answered with Thinking on.` },
-          { content: '{"intent":"chat","urls":[]}' },
           { content: `${provider} answered with Thinking off.` }
         )
         const user = userEvent.setup()
@@ -497,13 +486,17 @@ describe('production workspace bridge', () => {
         button: 0,
         ctrlKey: false
       })
-      await user.click(await screen.findByRole('menuitem', { name: /Tools/ }))
+      if (screen.queryByRole('menuitem', { name: 'ConnectorsOff' })) {
+        await user.click(screen.getByRole('menuitem', { name: 'ConnectorsOff' }))
+      }
       await user.keyboard('{Escape}')
-      fireEvent.change(composer, { target: { value: 'Calculate six times seven' } })
+      fireEvent.change(composer, {
+        target: { value: 'Use calculator to multiply six times seven' }
+      })
       await user.click(screen.getByRole('button', { name: /^send$/i }))
 
       expect(await inTranscript('Gemini used the calculator and returned 42.')).toBeTruthy()
-      await user.click(await screen.findByRole('button', { name: 'Work done' }))
+      await user.click(await screen.findByRole('button', { name: 'Work done' }, { timeout: 5_000 }))
       await user.click(await screen.findByRole('button', { name: 'Thought process' }))
       expect(await screen.findByText('I will calculate this value.')).toBeTruthy()
       expect(await screen.findByRole('button', { name: 'Calculator, complete' })).toBeTruthy()
@@ -516,8 +509,8 @@ describe('production workspace bridge', () => {
       const composerOptions = screen.queryByRole('button', { name: 'Composer options' })
       if (composerOptions) {
         fireEvent.pointerDown(composerOptions, { button: 0, ctrlKey: false })
-        const enabledTools = screen.queryByRole('menuitem', { name: 'ToolsOn' })
-        if (enabledTools) await user.click(enabledTools)
+        const enabledConnectors = screen.queryByRole('menuitem', { name: 'ConnectorsOn' })
+        if (enabledConnectors) await user.click(enabledConnectors)
         await user.keyboard('{Escape}')
       }
     }

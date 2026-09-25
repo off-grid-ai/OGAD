@@ -11,6 +11,30 @@ export interface EmbedDeps {
   embed: (text: string) => Promise<number[]>
 }
 
+const MAX_RELEVANT_TOOLS = 6
+const RELEVANCE_FLOOR = 0.24
+const SCORE_WINDOW = 0.1
+const ROUTING_USER_TURNS = 2
+const ROUTING_CHARS_PER_TURN = 400
+
+/** Build a compact semantic routing query from the current request and recent user goals.
+ *  Current text comes first because MiniLM has a bounded input window. Assistant replies are
+ *  excluded: their offers and narration must not create tool intent that the user did not express. */
+export function contextualToolRoutingText(
+  query: string,
+  history: readonly { role: string; content: string }[]
+): string {
+  const priorGoals = history
+    .filter((turn) => turn.role === 'user' && turn.content.trim())
+    .slice(-ROUTING_USER_TURNS)
+    .reverse()
+    .map((turn) => `Prior user goal: ${turn.content.slice(0, ROUTING_CHARS_PER_TURN)}`)
+
+  return [`Current user request: ${query.slice(0, ROUTING_CHARS_PER_TURN)}`, ...priorGoals].join(
+    '\n'
+  )
+}
+
 // Process-lifetime cache of tool embeddings, keyed by a hash of the tool text.
 const toolVecCache = new Map<string, number[]>()
 
@@ -85,6 +109,38 @@ export async function rankConnectorToolsSemantic(
   )
   scored.sort((a, b) => b.score - a.score || a.i - b.i)
   return [...builtins, ...scored.map((s) => s.tool)]
+}
+
+/** Select the small set of tools that is pertinent to this conversation context. Unlike the
+ *  older rank-only path, this scores built-ins and connector tools together, so
+ *  an unrelated schema is never sent merely because there is room for it. */
+export async function selectRelevantToolsSemantic(
+  query: string,
+  tools: unknown[],
+  deps: EmbedDeps
+): Promise<unknown[]> {
+  if (!query.trim() || tools.length === 0) return []
+
+  const qv = await deps.embed(query)
+  const scored = await Promise.all(
+    tools.map(async (tool, index) => {
+      try {
+        return { tool, index, score: dot(qv, await embedTool(toolText(tool), deps.embed)) }
+      } catch {
+        return { tool, index, score: -1 }
+      }
+    })
+  )
+  scored.sort((a, b) => b.score - a.score || a.index - b.index)
+  const best = scored[0]?.score ?? -1
+  if (best < RELEVANCE_FLOOR) return []
+
+  return scored
+    .filter(
+      (candidate) => candidate.score >= RELEVANCE_FLOOR && candidate.score >= best - SCORE_WINDOW
+    )
+    .slice(0, MAX_RELEVANT_TOOLS)
+    .map((candidate) => candidate.tool)
 }
 
 /** Test-only: clear the tool-embedding cache between cases. */

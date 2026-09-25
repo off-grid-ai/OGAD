@@ -104,6 +104,21 @@ function workflow(decisions: VisionPolicyDecision[]): {
 }
 
 describe('runVisionTaskGraph', () => {
+  it('returns to the owning rail after one successful recovery action', async () => {
+    const w = workflow([action(), action({ x: 300, y: 295 })])
+    w.deps.returnAfterAction = true
+
+    const result = await runVisionTaskGraph('Recover the blocked step.', w.deps)
+
+    expect(result).toMatchObject({
+      ok: true,
+      summary: 'Vision completed one recovery action. Returning to accessibility control.'
+    })
+    expect(w.actuated).toEqual(['click:100,295'])
+    expect(w.decisionCalls).toBe(1)
+    expect(w.deps.guard.automationStatus).toBe('verifying')
+  })
+
   it('records and advances every completed milestone exactly once without an action request', async () => {
     const w = workflow([
       complete('Site visible.'),
@@ -200,7 +215,7 @@ describe('runVisionTaskGraph', () => {
       'Repeated click region blocked at (118, 304). The previous click marker shows where the earlier attempt landed.'
     )
     expect(result.steps).toContain(
-      'Do not guess another Dock or taskbar icon from its color or position. If the target application is not visibly identified, use the operating system application launcher or search.'
+      'Do not guess another control from its appearance or position. Use a visibly identified control, or use the operating system launcher or search when the target application is not visible.'
     )
     expect(w.observations.map((item) => item.result)).toEqual([
       'reviewed',
@@ -721,6 +736,30 @@ describe('runVisionTaskGraph with a scripted action model', () => {
     expect(result.handoffs).toBe(1)
     expect(result.steps.join('\n')).not.toContain(secret)
     expect(JSON.stringify(durableProjection)).not.toContain(secret)
+  })
+
+  it('types a public navigation URL when the goal also mentions sign-in checks', async () => {
+    const url = 'https://www.instagram.com/explore/search/keyword/?q=local%20AI'
+    const w = scripted([`type(content='${url}')`, "finished(content='opened')"])
+    const typed: string[] = []
+    w.deps.screen.actuate = (nextAction) =>
+      dispatchVisionAction({
+        actuation: {
+          typeText: async (text: string) => void typed.push(text)
+        } as ActuationPort,
+        action: nextAction,
+        goal: 'Open Instagram and verify the signed-in account',
+        inspectFocused: async () => ({ state: 'unknown' })
+      })
+
+    const result = await runVisionTaskGraph(
+      'Open Instagram and verify the signed-in account',
+      w.deps
+    )
+
+    expect(result.ok).toBe(true)
+    expect(typed).toEqual([url])
+    expect(w.userWaits).toEqual([])
   })
 
   it('records completed actions and the failing action when an ordered response fails', async () => {

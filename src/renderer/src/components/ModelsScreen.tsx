@@ -131,6 +131,12 @@ interface ModelFile {
   sizeBytes?: number
   role?: string
 }
+interface DownloadableModelFile {
+  fileName: string
+  quant: string
+  sizeBytes: number
+  mmproj?: { fileName: string }
+}
 interface ModelEntry {
   id: string
   sourceModelId?: string
@@ -206,13 +212,17 @@ function fmtReleaseDate(iso?: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
+const BONSAI_2_ID = 'prism-ml/Ternary-Bonsai-2-27B-gguf'
+
 function featureRank(
-  m: { id?: string; credibility?: string; tags?: string[] },
-  recommendedId?: string | null
+  m: { id?: string; sourceModelId?: string; credibility?: string; tags?: string[] },
+  recommendedId?: string | null,
+  bonsaiRecommended = false
 ): number {
   // The model recommended for THIS machine's RAM sorts to the very top (above a
   // plain 'Fast' pick). Then distilled few-step models (tagged "Fast") render in
   // ~30s vs ~100s, so surface them next. Then our own org's models, then the rest.
+  if (bonsaiRecommended && (m.sourceModelId ?? m.id) === BONSAI_2_ID) return -2
   if (recommendedId && m.id === recommendedId) return -1
   if (m.tags?.some((t) => /^fast/i.test(t))) return 0
   if (m.credibility !== 'offgrid') return 2
@@ -379,17 +389,47 @@ export function ModelsScreen({
     }[]
   >([])
   const [searching, setSearching] = useState(false)
+  const [variantModel, setVariantModel] = useState<ModelEntry | null>(null)
+  const [variants, setVariants] = useState<DownloadableModelFile[]>([])
+  const [variantLoading, setVariantLoading] = useState(false)
+  const [variantError, setVariantError] = useState<string | null>(null)
+  const [detailFiles, setDetailFiles] = useState<DownloadableModelFile[]>([])
+  const [detailFilesLoading, setDetailFilesLoading] = useState(false)
+  const [detailFilesError, setDetailFilesError] = useState<string | null>(null)
+  const [chosenVariants, setChosenVariants] = useState<Record<string, string>>({})
   const [filterState, setFilterState] = useState<FilterState>(initialFilterState)
   const [sizeBucket, setSizeBucket] = useState<number | null>(null)
   const SIZE_BUCKETS = [2, 4, 6, 8, 16] as const
 
   const openDetail = useCallback((m: ModelEntry) => {
+    setDetailFiles([])
+    setDetailFilesError(null)
+    setDetailFilesLoading(true)
     setDetail(m)
   }, [])
 
   const closeDetail = useCallback(() => {
     setDetail(null)
   }, [])
+
+  useEffect(() => {
+    if (!detail || detail.id.startsWith('local:') || !['text', 'vision', 'computer_use'].includes(detail.kind)) return
+    let cancelled = false
+    setDetailFiles([])
+    setDetailFilesError(null)
+    setDetailFilesLoading(true)
+    void Promise.resolve(api.getModelFiles?.(detail.id))
+      .then((files: DownloadableModelFile[] | undefined) => {
+        if (!cancelled) setDetailFiles(files ?? [])
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setDetailFilesError(error instanceof Error ? error.message : 'Could not load model files.')
+      })
+      .finally(() => {
+        if (!cancelled) setDetailFilesLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [detail])
 
   const importModel = async (): Promise<void> => {
     if (importing) return
@@ -462,12 +502,12 @@ export function ModelsScreen({
     void api.cancelModelDownload?.(id)
     setProgress((p) => withoutProgressEntry(p, id))
   }
-  const download = (id: string): void => {
+  const download = (id: string, fileName?: string): void => {
     // 'queued', not 'downloading': nothing has been downloaded yet, and claiming otherwise is what
     // left a refused request showing a spinner at 0% forever. The main process moves it to
     // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
     setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
-    void Promise.resolve(api.downloadModel?.(id)).then(
+    void Promise.resolve(api.downloadModel?.(id, fileName)).then(
       (r?: { success: boolean; error?: string }) => {
         if (!r || r.success) return
         // You cancelled it, so there is nothing to report: the download resolves unsuccessfully by
@@ -485,7 +525,22 @@ export function ModelsScreen({
   }
   const retryDownload = (id: string): void => {
     setProgress((p) => withoutProgressEntry(p, id))
-    download(id)
+    download(id, chosenVariants[id])
+  }
+  const chooseVariant = async (model: ModelEntry): Promise<void> => {
+    setVariantModel(model)
+    setVariantLoading(true)
+    setVariantError(null)
+    setVariants([])
+    try {
+      const files = await api.getModelFiles?.(model.id)
+      if (!files?.length) throw new Error('No GGUF files found in this repository.')
+      setVariants(files)
+    } catch (error) {
+      setVariantError(error instanceof Error ? error.message : 'Could not load model files.')
+    } finally {
+      setVariantLoading(false)
+    }
   }
   const removeModel = async (id: string, label: string): Promise<void> => {
     if (!window.confirm(`Delete "${label}"? This removes its files from disk.`)) return
@@ -557,6 +612,11 @@ export function ModelsScreen({
   // The image model recommended for this machine's RAM (Light Q4 on <=16GB, full
   // Q8 above) — one pure rule, reused for both the badge and the top-of-list sort.
   const recommendedImageId = recommendedImageModelId(models, ramGb)
+  const bonsaiFits = (m: ModelEntry): boolean =>
+    (m.sourceModelId ?? m.id) === BONSAI_2_ID &&
+    ramGb !== null &&
+    ramGb >= (m.minRamGb ?? 0) &&
+    ['easy', 'fits'].includes(fitTier(totalBytes(m) / 1e9, ramGb))
 
   const displayed = filterAndSort(
     hfResults.map((r) => ({
@@ -594,7 +654,9 @@ export function ModelsScreen({
       const rank = (x: { id: string }): number =>
         isActive(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
       return (
-        rank(a) - rank(b) || featureRank(a, recommendedImageId) - featureRank(b, recommendedImageId)
+        rank(a) - rank(b) ||
+        featureRank(a, recommendedImageId, bonsaiFits(a)) -
+          featureRank(b, recommendedImageId, bonsaiFits(b))
       )
     })
 
@@ -645,10 +707,10 @@ export function ModelsScreen({
     const tier: FitTier = isHf ? 'easy' : ramTier(m)
     const tags = (m.tags ?? []).filter((t) => !/tight|risky|fit/i.test(t))
     const comingSoon = m.availability === 'coming_soon'
-    const worksBest = /(?:^|[\s/_-])UI[\s_-]?Mate(?:[\s/_-]|$)/i.test(`${m.id} ${m.name}`)
+    const worksBest = bonsaiFits(m) || /(?:^|[\s/_-])UI[\s_-]?Mate(?:[\s/_-]|$)/i.test(`${m.id} ${m.name}`)
     // The single image pick best-suited to THIS machine's RAM (Light on <=16GB,
     // full above) — a prominent filled-emerald badge, distinct from the outlined tags.
-    const recommended = !isHf && !!recommendedImageId && m.id === recommendedImageId
+    const recommended = !isHf && (bonsaiFits(m) || (!!recommendedImageId && m.id === recommendedImageId))
 
     return (
       <div
@@ -854,7 +916,7 @@ export function ModelsScreen({
             </>
           ) : (
             <button
-              onClick={() => download(m.id)}
+              onClick={() => isHf ? void chooseVariant(m) : download(m.id)}
               className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
             >
               <IconDownload className="h-3 w-3" /> Download
@@ -1319,6 +1381,39 @@ export function ModelsScreen({
                       <IconExternalLink className="h-3 w-3" /> View on Hugging Face
                     </button>
                   )}
+                  {hfUrl && ['text', 'vision', 'computer_use'].includes(m.kind) && (
+                    <section aria-label="Available model files" className="mt-5 border-t border-neutral-800 pt-4">
+                      <h3 className="mb-2 text-[10px] uppercase tracking-wide text-neutral-400">
+                        Available GGUF files{detailFiles.length > 0 ? ` · ${detailFiles.length}` : ''}
+                      </h3>
+                      {detailFilesLoading && <p className="text-xs text-neutral-500">Loading available files…</p>}
+                      {detailFilesError && <p role="alert" className="text-xs text-red-400">{detailFilesError}</p>}
+                      {!detailFilesLoading && !detailFilesError && detailFiles.length === 0 && (
+                        <p className="text-xs text-neutral-500">No GGUF files found in this repository.</p>
+                      )}
+                      <div className="space-y-2">
+                        {detailFiles.map((file) => (
+                          <div key={file.fileName} className="flex items-start justify-between gap-2 rounded border border-neutral-800 px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="break-all text-[11px] text-neutral-200">{file.fileName}</p>
+                              <p className="mt-1 text-[10px] text-neutral-500">
+                                {file.quant} · {formatSize(file.sizeBytes)}
+                                {file.mmproj ? ` · includes ${file.mmproj.fileName}` : ''}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => download(m.id, file.fileName)}
+                              disabled={comingSoon || !!downloading}
+                              aria-label={`Download ${file.fileName}`}
+                              className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              Download
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 border-t border-neutral-800 px-5 py-3">
@@ -1367,7 +1462,11 @@ export function ModelsScreen({
                   ) : (
                     <button
                       onClick={() => {
-                        download(m.id)
+                        if (hfUrl && !models.some((catalogModel) => catalogModel.id === m.id)) {
+                          void chooseVariant(m)
+                        } else {
+                          download(m.id)
+                        }
                         closeDetail()
                       }}
                       className="flex items-center gap-1 rounded border border-neutral-700 px-3 py-1.5 text-xs text-white transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
@@ -1379,6 +1478,45 @@ export function ModelsScreen({
               </SidePanel>
             )
           })()}
+      </AnimatePresence>
+      <AnimatePresence>
+        {variantModel && (
+          <SidePanel
+            key="model-file-picker"
+            ariaLabel={`Choose a file for ${variantModel.name}`}
+            onClose={() => setVariantModel(null)}
+            className="w-[26vw] min-w-[380px]"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
+              <div>
+                <h2 className="text-sm font-medium text-white">Choose a model file</h2>
+                <p className="mt-1 text-[10px] text-neutral-500">{variantModel.name}</p>
+              </div>
+              <button onClick={() => setVariantModel(null)} aria-label="Close file picker" className="text-neutral-500 hover:text-white"><IconX className="h-4 w-4" /></button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              {variantLoading && <p className="text-xs text-neutral-400">Loading available files…</p>}
+              {variantError && <p className="text-xs text-red-400" role="alert">{variantError}</p>}
+              <div className="space-y-2">
+                {variants.map((variant) => (
+                  <button
+                    key={variant.fileName}
+                    onClick={() => {
+                      setChosenVariants((current) => ({ ...current, [variantModel.id]: variant.fileName }))
+                      download(variantModel.id, variant.fileName)
+                      setVariantModel(null)
+                    }}
+                    className="flex w-full flex-col gap-1 rounded border border-neutral-800 px-3 py-2 text-left transition-colors hover:border-green-500 hover:bg-green-500/5"
+                  >
+                    <span className="break-all text-[11px] text-neutral-200">{variant.fileName}</span>
+                    <span className="text-[10px] text-neutral-400">{formatSize(variant.sizeBytes)}</span>
+                    {variant.mmproj && <span className="break-all text-[9px] text-neutral-500">Includes {variant.mmproj.fileName}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </SidePanel>
+        )}
       </AnimatePresence>
     </div>
   )

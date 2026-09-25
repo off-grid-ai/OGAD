@@ -36,6 +36,24 @@ function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
 
+const MAX_TASK_SESSION_MINUTES = 60
+
+export function taskSessionLimitMinutes(value: unknown): number | undefined {
+  const minutes =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(
+            /\b(?:session length|session limit)\b[\s:]*(?:A:\s*)?(\d{1,3})\s*minutes?\b/i.exec(
+              value
+            )?.[1]
+          )
+        : Number.NaN
+  return Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_TASK_SESSION_MINUTES
+    ? minutes
+    : undefined
+}
+
 /** Shared "Created the <label> (id …)" formatter for the create tools, so each new
  *  create row reuses one confirmation shape instead of re-encoding it. */
 function formatCreated(label: string): (result: unknown) => string {
@@ -241,13 +259,25 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
         goal: {
           type: 'string',
           description: 'The task to complete, in one sentence (e.g. "share the deck in WhatsApp")'
+        },
+        sessionLimitMinutes: {
+          type: 'number',
+          description:
+            'Optional approved session limit in whole minutes. Use the value from the user brief.'
         }
       },
       required: ['goal']
     },
     risk: 'mutate',
     kind: 'task',
-    buildArgs: (a) => ({ goal: asString(a.goal) }),
+    buildArgs: (a) => {
+      const sessionLimitMinutes =
+        taskSessionLimitMinutes(a.sessionLimitMinutes) ?? taskSessionLimitMinutes(a.goal)
+      return {
+        goal: asString(a.goal),
+        ...(sessionLimitMinutes ? { sessionLimitMs: sessionLimitMinutes * 60_000 } : {})
+      }
+    },
     title: (a) => asString(a.goal, 'Run a computer-use task'),
     formatResult: (result) => (typeof result === 'string' && result ? result : 'Done.')
   }

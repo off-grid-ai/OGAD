@@ -28,7 +28,12 @@ import {
   type VisionTaskDeps,
   type VisionTaskResult
 } from './vision-agent'
-import type { VisionPolicyDecision, VisionPolicyHistoryStep } from './model-adapters/types'
+import type {
+  VisionContinuationCapsule,
+  VisionPolicyDecision,
+  VisionPolicyHistoryStep
+} from './model-adapters/types'
+import { boundedContinuationCapsule } from './model-adapters/continuation-capsule'
 import { uiTarsAdapter } from './model-adapters/ui-tars'
 
 type WorkflowRoute =
@@ -157,9 +162,7 @@ function actionEffect(
     semanticChanged,
     visualComparable: true,
     globalMeanDelta: meanDelta,
-    ...(local
-      ? { localMeanDelta: local.meanDelta, localStrongPixels: local.strongPixels }
-      : {})
+    ...(local ? { localMeanDelta: local.meanDelta, localStrongPixels: local.strongPixels } : {})
   }
 }
 
@@ -329,6 +332,7 @@ class VisionTaskGraphRuntime {
   private readonly steps: string[] = []
   private readonly policyHistory: VisionPolicyHistoryStep[] = []
   private readonly verifiedActions: string[] = []
+  private continuation?: VisionContinuationCapsule
   private previousVerifiedAction?: {
     action: VisionAction
     coordinateFrame: ReturnType<typeof coordinateFrame>
@@ -555,11 +559,15 @@ class VisionTaskGraphRuntime {
       const grounding = await this.deps.decide(this.groundingInput(captured, modelSignal))
       if (!this.deps.guard.ownsActionLease(modelLease.epoch)) {
         this.discardPendingPolicyHistory()
+        if (this.deps.guard.isHalted) this.stopAfterAbort()
         return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
       }
       captured.decisionMs = this.now() - decisionStartedAt
       this.actionResponse = grounding.response
       this.actionModelInput = grounding.modelInput
+      console.log(
+        `[computer-task] inference=${this.previousActionEffect ? 'task-verification' : 'task-action'} durationMs=${captured.decisionMs} inputChars=${grounding.modelInput.length} accessibilityElements=${captured.shot.metadata?.semanticElements?.length ?? 0}`
+      )
       this.decision =
         grounding.decision ??
         this.parseResponse(grounding.response, captured.shot.bounds, coordinateFrame(captured.shot))
@@ -576,6 +584,7 @@ class VisionTaskGraphRuntime {
       }
       if (modelLease.signal.aborted) {
         this.discardPendingPolicyHistory()
+        if (this.deps.guard.isHalted) this.stopAfterAbort()
         return { route: this.deps.guard.isHalted ? 'end' : 'pause' }
       }
       const message = errorMessage(error, 'visual decision failed')
@@ -628,6 +637,15 @@ class VisionTaskGraphRuntime {
     this.policyHistory.length = 0
     this.pendingPolicyHistory = undefined
     this.phaseIndex += 1
+    const next = this.deps.plan?.phases[this.phaseIndex]
+    this.continuation = boundedContinuationCapsule(
+      {
+        done: [completed?.title ?? this.decision.summary],
+        next: next?.title ?? 'Continue with the next milestone',
+        remember: this.continuation?.remember ?? ''
+      },
+      this.visualHistoryFrames
+    )
     this.reportPhase(this.phaseIndex)
     return { route: 'gate' }
   }
@@ -645,6 +663,9 @@ class VisionTaskGraphRuntime {
     if (!decision) {
       this.finish(false, 'The action model returned no decision.')
       return { route: 'end' }
+    }
+    if (decision.kind === 'actions' || decision.kind === 'phase_complete') {
+      this.updateContinuation(decision)
     }
     if (decision.kind === 'actions') {
       this.consecutiveRethinks = 0
@@ -916,6 +937,16 @@ class VisionTaskGraphRuntime {
       blocked ? 'Action paused' : 'Checking the result'
     )
     this.checkpoint()
+    if (!blocked && this.deps.returnAfterAction) {
+      const summary = 'Vision completed one recovery action. Returning to accessibility control.'
+      this.finalResult = {
+        ok: true,
+        summary,
+        steps: [...this.steps],
+        handoffs: this.handoffs
+      }
+      return { route: 'end' }
+    }
     return { route: 'gate' }
   }
 
@@ -925,6 +956,8 @@ class VisionTaskGraphRuntime {
       image: captured.shot.image,
       history: captured.history,
       retrievedFacts: this.retrievedFacts,
+      continuation: this.continuation,
+      continuationCapacity: this.visualHistoryFrames,
       policyHistory: this.policyHistory,
       guidance: captured.guidance,
       currentMilestone: captured.currentMilestone,
@@ -943,6 +976,29 @@ class VisionTaskGraphRuntime {
   private beginReasoning(): void {
     this.currentReasoning = ''
     this.deps.onReasoning?.({ step: this.modelStep, content: '', live: true })
+  }
+
+  private updateContinuation(decision: VisionPolicyDecision): void {
+    if (decision.continuation) {
+      this.continuation = boundedContinuationCapsule(
+        decision.continuation,
+        this.visualHistoryFrames
+      )
+      return
+    }
+    const done = [...(this.continuation?.done ?? [])]
+    if (this.previousActionEffect === 'confirmed') {
+      const completed = this.policyHistory.at(-1)?.actionText
+      if (completed && !done.includes(completed)) done.push(completed)
+    }
+    this.continuation = boundedContinuationCapsule(
+      {
+        done,
+        next: decision.actionText,
+        remember: this.continuation?.remember ?? ''
+      },
+      this.visualHistoryFrames
+    )
   }
 
   private appendReasoning(text: string): void {

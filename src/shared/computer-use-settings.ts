@@ -2,15 +2,18 @@ export type ComputerUseContext = 'auto' | '16k' | '32k'
 export type ComputerUseScreenshotSize = 'compact' | 'balanced' | 'large'
 export type ComputerUseScreenshotQuality = 'efficient' | 'balanced' | 'detailed'
 export type ComputerUseCheckpointInterval = 8 | 9 | 10
-export type ComputerUseVisualHistoryFrames = 0 | 1 | 2 | 5
+export type ComputerUseVisualHistoryFrames = 0 | 1 | 2 | 5 | 10
 export type ComputerUseRail = 'ax' | 'vision'
 export type ComputerUseModelStrategy =
   | 'same_as_chat'
   | 'separate_specialist'
   | 'text_plus_specialist'
+  | 'decision_plus_specialist'
+  | 'decision_plus_reasoning'
 
 export interface ComputerUseSettings {
   modelStrategy: ComputerUseModelStrategy
+  decisionModelId: string | null
   context: ComputerUseContext
   screenshotSize: ComputerUseScreenshotSize
   screenshotQuality: ComputerUseScreenshotQuality
@@ -21,7 +24,7 @@ export interface ComputerUseSettings {
 }
 
 export interface ComputerUseActiveModel {
-  role: 'reasoner' | 'grounding_specialist'
+  role: 'reasoner' | 'decision' | 'grounding_specialist'
   modelId: string
   modelName: string
   remote: boolean
@@ -39,6 +42,7 @@ export const COMPUTER_USE_SETTINGS_KEY = 'computerUseSettings'
 
 export const DEFAULT_COMPUTER_USE_SETTINGS: Readonly<ComputerUseSettings> = {
   modelStrategy: 'text_plus_specialist',
+  decisionModelId: null,
   context: 'auto',
   screenshotSize: 'large',
   screenshotQuality: 'balanced',
@@ -109,7 +113,8 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
     input.visualHistoryFrames === 0 ||
     input.visualHistoryFrames === 1 ||
     input.visualHistoryFrames === 2 ||
-    input.visualHistoryFrames === 5
+    input.visualHistoryFrames === 5 ||
+    input.visualHistoryFrames === 10
       ? input.visualHistoryFrames
       : DEFAULT_COMPUTER_USE_SETTINGS.visualHistoryFrames
   const enabledRails = (['ax', 'vision'] as const).filter(
@@ -120,9 +125,15 @@ export function normalizeComputerUseSettings(value: unknown): ComputerUseSetting
     modelStrategy:
       input.modelStrategy === 'same_as_chat' ||
       input.modelStrategy === 'separate_specialist' ||
-      input.modelStrategy === 'text_plus_specialist'
+      input.modelStrategy === 'text_plus_specialist' ||
+      input.modelStrategy === 'decision_plus_specialist' ||
+      input.modelStrategy === 'decision_plus_reasoning'
         ? input.modelStrategy
         : DEFAULT_COMPUTER_USE_SETTINGS.modelStrategy,
+    decisionModelId:
+      typeof input.decisionModelId === 'string' && input.decisionModelId.length > 0
+        ? input.decisionModelId
+        : null,
     context,
     screenshotSize,
     screenshotQuality,

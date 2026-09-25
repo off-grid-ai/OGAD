@@ -19,6 +19,14 @@ describe('buildEnhancePrompt', () => {
     expect(p).toContain('x'.repeat(2000))
     expect(p).not.toContain('x'.repeat(2001)) // capped, not the full 5000
   })
+
+  it('builds a reference-aware edit instruction that preserves unrequested details', () => {
+    const p = buildEnhancePrompt('Replace product names with generic labels', true)
+    expect(p).toContain('Replace product names with generic labels')
+    expect(p).toMatch(/inspect the attached reference image/i)
+    expect(p).toMatch(/preserve all other visible details/i)
+    expect(p).toMatch(/do not invent a different subject or scene/i)
+  })
 })
 
 describe('cleanEnhancedPrompt', () => {
@@ -64,6 +72,20 @@ describe('enhancePrompt - gate → run → clean → fallback (injected model)',
     // The model was asked to expand the user's request.
     expect(chat).toHaveBeenCalledTimes(1)
     expect(chat.mock.calls[0]![0]).toContain('a red bicycle')
+  })
+
+  it('uses the image-edit instruction when a reference image is attached', async () => {
+    const chat = vi.fn(
+      async (_instruction: string) =>
+        'Keep the diagram layout; replace model names with role labels'
+    )
+    const out = await enhancePrompt('Make the labels generic', {
+      enabled: true,
+      hasReferenceImage: true,
+      chat
+    })
+    expect(out).toBe('Keep the diagram layout; replace model names with role labels')
+    expect(chat.mock.calls[0]![0]).toMatch(/inspect the attached reference image/i)
   })
 
   it('does NOT call the model and returns the original when disabled', async () => {

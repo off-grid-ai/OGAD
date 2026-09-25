@@ -10,11 +10,15 @@ import type { VisionGuard } from './vision-guard'
 import type { ScreenshotGeometry } from './screenshot-geometry'
 import type {
   VisionPolicyCoordinateFrame,
+  VisionContinuationCapsule,
   VisionPolicyDecision,
   VisionPolicyHistoryStep
 } from './model-adapters/types'
 import type { ComputerUsePhase } from '../tasks/task-step-details'
 import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
+import type { VisionActionEffect, VisionSemanticElement } from './vision-common-types'
+
+export type { VisionActionEffect, VisionSemanticElement } from './vision-common-types'
 
 export interface VisionCaptureMetadata {
   path?: string
@@ -28,14 +32,6 @@ export interface VisionCaptureMetadata {
   verificationSemanticElements?: readonly VisionSemanticElement[]
 }
 
-export interface VisionSemanticElement {
-  index: number
-  role: string
-  name: string
-  value: string
-  point: { x: number; y: number }
-}
-
 export interface VisionActuationResult {
   mappedAction?: VisionAction
   /** Execution-boundary handoff. The private value is intentionally absent. */
@@ -44,7 +40,13 @@ export interface VisionActuationResult {
   rejected?: string
 }
 
-export type VisionActionEffect = 'confirmed' | 'suspected_noop' | 'unverifiable'
+export interface VisionTaskContinuation {
+  guard: VisionGuard
+  request: AbortController
+  queuedGuidance: string[]
+  /** Return to the owning accessibility loop after one successful visual action. */
+  returnAfterAction?: boolean
+}
 
 /** A screen can request a fresh observation when its capture boundary changed
  * underneath it. The owning screen must bound retries before using this. */
@@ -57,6 +59,8 @@ export interface VisionGroundingInput {
   image: string
   history: string[]
   retrievedFacts: string[]
+  continuation?: VisionContinuationCapsule
+  continuationCapacity?: number
   policyHistory: readonly VisionPolicyHistoryStep[]
   guidance: readonly string[]
   currentMilestone?: string
@@ -175,6 +179,8 @@ export interface VisionTaskDeps {
   retrievedFacts?: string[]
   now?: () => number
   maxPlanningSteps?: number
+  /** Recovery mode: stop after one successful action without completing the shared task. */
+  returnAfterAction?: boolean
   plan?: TaskExecutionPlan
   onPhase?: (phaseId: string) => void
   /** The trace this run is resuming from, so a retry restarts at the phase it reached instead of

@@ -68,6 +68,7 @@ export class VisionController {
         status: AutomationTaskReadStatus,
         currentAction: string
       ) => void
+      deadline?: ReturnType<typeof setTimeout>
     }
   >()
   private readonly runs = new Map<string, { state: VisionTaskState; steps: string[] }>()
@@ -83,18 +84,40 @@ export class VisionController {
       snapshot: AutomationTaskSnapshot,
       status: AutomationTaskReadStatus,
       currentAction: string
-    ) => void
+    ) => void,
+    sessionLimitMs?: number
   ): () => void {
     const previous = this.sessions.get(taskId)
     if (previous) {
+      if (previous.deadline) clearTimeout(previous.deadline)
       previous.guard.halt('replaced by a newer run for this task')
       previous.request.abort('replaced by a newer run for this task')
     }
     if (guard.taskId !== taskId) throw new Error('VisionGuard task identity does not match session')
-    const session = { guard, request, project }
+    const session = { guard, request, project } as {
+      guard: VisionGuard
+      request: AbortController
+      project?: (
+        snapshot: AutomationTaskSnapshot,
+        status: AutomationTaskReadStatus,
+        currentAction: string
+      ) => void
+      deadline?: ReturnType<typeof setTimeout>
+    }
+    if (sessionLimitMs && Number.isFinite(sessionLimitMs) && sessionLimitMs > 0) {
+      session.deadline = setTimeout(() => {
+        if (this.sessions.get(taskId) !== session) return
+        const minutes = Math.round(sessionLimitMs / 60_000)
+        const reason = `Session limit reached after ${minutes} minute${minutes === 1 ? '' : 's'}.`
+        this.completeSession(taskId, reason)
+      }, sessionLimitMs)
+      session.deadline.unref?.()
+    }
     this.sessions.set(taskId, session)
     return () => {
-      if (this.sessions.get(taskId) === session) this.sessions.delete(taskId)
+      if (this.sessions.get(taskId) !== session) return
+      if (session.deadline) clearTimeout(session.deadline)
+      this.sessions.delete(taskId)
     }
   }
 
@@ -115,6 +138,13 @@ export class VisionController {
     if (ownerProjection && ownerProjection !== state.status) return
     const current = this.runs.get(state.taskId)
     const previous = current?.state
+    if (
+      previous &&
+      ['done', 'failed', 'stopped'].includes(previous.status) &&
+      !['done', 'failed', 'stopped'].includes(state.status)
+    ) {
+      return
+    }
     const steps = current?.steps ?? []
     const device = this.persistence.executionDevice()
     const next: VisionTaskState = {
@@ -166,7 +196,7 @@ export class VisionController {
     if (command === 'stop') {
       return session
         ? this.stop(taskId, 'stopped from the supervisor', 'Stopped from the supervisor')
-        : false
+        : this.stopOrphanedRun(taskId)
     }
     if (!session) return false
     const { guard } = session
@@ -211,6 +241,28 @@ export class VisionController {
     return true
   }
 
+  private stopOrphanedRun(taskId: string): boolean {
+    const current = this.runs.get(taskId)?.state
+    if (!current || ['done', 'failed', 'stopped'].includes(current.status)) return false
+    this.emitState({
+      ...current,
+      status: 'stopped',
+      phase: 'stopped',
+      currentAction: 'Stopped from the supervisor',
+      summary: 'Stopped from the supervisor'
+    })
+    return true
+  }
+
+  private completeSession(taskId: string, reason: string): boolean {
+    const session = this.sessions.get(taskId)
+    if (!session || session.guard.isHalted) return false
+    if (!session.guard.completeForSessionLimit(reason)) return false
+    this.projectSession(taskId, reason)
+    session.request.abort(reason)
+    return true
+  }
+
   private projectSession(taskId: string, currentAction: string): void {
     const session = this.sessions.get(taskId)
     if (!session) return
@@ -229,7 +281,11 @@ export class VisionController {
           ? 'paused'
           : status === 'stopped'
             ? 'stopped'
-            : 'observing',
+            : status === 'done'
+              ? 'complete'
+              : status === 'failed'
+                ? 'failed'
+                : 'observing',
       currentAction
     )
   }
@@ -256,9 +312,10 @@ export function registerVisionSession(
     snapshot: AutomationTaskSnapshot,
     status: AutomationTaskReadStatus,
     currentAction: string
-  ) => void
+  ) => void,
+  sessionLimitMs?: number
 ): () => void {
-  return controller.registerSession(taskId, guard, request, project)
+  return controller.registerSession(taskId, guard, request, project, sessionLimitMs)
 }
 
 export function emitVisionStep(taskId: string, note: string): void {

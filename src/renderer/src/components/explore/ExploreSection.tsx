@@ -1,4 +1,4 @@
-import { Globe, Desktop, Brain, DeviceMobile, ArrowRight } from '@phosphor-icons/react'
+import { Globe, Desktop, Brain, DeviceMobile, ArrowRight, Palette } from '@phosphor-icons/react'
 import {
   PRESET_SECTIONS,
   type DemoPreset,
@@ -21,14 +21,16 @@ const CAPABILITY_ICON: Record<PresetCapability, typeof Globe> = {
   browser: Globe,
   'computer-use': Desktop,
   memory: Brain,
-  phone: DeviceMobile
+  phone: DeviceMobile,
+  creation: Palette
 }
 
 /** Why a preset can't just run yet, said plainly so the card never dead-ends silently. */
 const REQUIREMENT_LABEL: Record<PresetRequirement, string> = {
   pro: 'Pro',
   'phone-paired': 'Needs a paired phone',
-  'capture-history': 'Needs some capture history'
+  'capture-history': 'Needs some capture history',
+  'image-model': 'Needs an image model'
 }
 
 interface ExploreSectionProps {

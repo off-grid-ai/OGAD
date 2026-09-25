@@ -314,8 +314,8 @@ describe('general vision native tool policy', () => {
     })
     const userText = JSON.stringify(request.messages[1]?.content)
 
-    expect(userText).toContain('Do not identify an application from icon color or position alone')
-    expect(userText).toContain('operating system application launcher or search')
+    expect(userText).toContain('click an app only when its identity is visible')
+    expect(userText).toContain('operating-system launcher or search')
   })
 
   it('keeps native calls in audit history without using the serialization for routing', () => {
@@ -399,7 +399,7 @@ describe('general vision native tool policy', () => {
     fs.unlinkSync(file)
   })
 
-  it('persists the exact normalized grid image used by every Web Use model', async () => {
+  it('persists the exact unmarked image used by every Web Use model', async () => {
     const file = path.join(os.tmpdir(), `offgrid-model-grid-${Date.now()}.png`)
     const original = await sharp({
       create: { width: 1000, height: 600, channels: 4, background: '#ffffff' }
@@ -422,16 +422,9 @@ describe('general vision native tool policy', () => {
     })
 
     const persisted = fs.readFileSync(file)
-    expect(persisted.equals(original)).toBe(false)
+    expect(persisted.equals(original)).toBe(true)
     expect(prepared.dataUrl).toBe(`data:image/png;base64,${persisted.toString('base64')}`)
     expect(await sharp(persisted).metadata()).toMatchObject({ width: 1000, height: 600 })
-    const raw = await sharp(persisted).removeAlpha().raw().toBuffer()
-    const rgbAt = (x: number, y: number): number[] => {
-      const offset = (y * 1000 + x) * 3
-      return [raw[offset]!, raw[offset + 1]!, raw[offset + 2]!]
-    }
-    expect(rgbAt(20, 200)).not.toEqual([255, 255, 255])
-    expect(rgbAt(10, 200)).toEqual([255, 255, 255])
     fs.unlinkSync(file)
   })
 

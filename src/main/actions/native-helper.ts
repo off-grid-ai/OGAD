@@ -1,8 +1,8 @@
 // Electron-bound invoker for the native actions helper (macOS). Resolves the compiled
 // helper binary and runs it as a one-shot child process, handing it one JSON command
-// and parsing the one JSON line it prints back. This is the single seam every semantic
-// native capability (calendar, reminders, contacts, photos) goes through, so the
-// process/permission handling lives in one place. Mirrors ocr.ts.
+// and parsing the one JSON line it prints back. Location runs inside Electron so
+// macOS attributes its permission request to the foreground app. Other native
+// capabilities (calendar, reminders, contacts, photos) use the helper process.
 
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -15,6 +15,7 @@ import {
   type NativeActionCommand,
   type NativeActionResponse
 } from './native-helper-logic'
+import { currentMacLocation } from './native-location'
 
 const execFileAsync = promisify(execFile)
 
@@ -41,6 +42,9 @@ function helperBin(): string | null {
  *  or a handled in-band error all resolve to an { ok: false } response so callers
  *  (tools, the approval executor) have a single shape to report. */
 export async function runNativeAction(cmd: NativeActionCommand): Promise<NativeActionResponse> {
+  if (process.platform === 'darwin' && cmd.command === 'location.current') {
+    return currentMacLocation()
+  }
   const bin = helperBin()
   if (!bin) {
     return { ok: false, error: 'the native actions helper is not available in this build' }

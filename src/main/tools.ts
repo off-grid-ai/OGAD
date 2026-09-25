@@ -1,33 +1,34 @@
-// Agentic tool-calling loop for the Off Grid AI chat. Kept ISOLATED from the
-// default rag:chat path (opt-in) so a tool run can never break normal chat.
+// Tool-calling loop for Off Grid AI Chat. All main Chat memory scopes use this
+// path; memory scope changes which search tool is offered, not the chat engine.
 //
 // The local model (llama-server, OpenAI-compatible /v1/chat/completions) is given
-// tool schemas; we parse its tool_calls, run them on-device, feed results back,
-// and loop until it answers. Built-in tools only (no network) for now — web
-// search + MCP connectors plug in here later.
+// tool schemas; we parse its tool_calls, run them, feed results back, and loop
+// until it answers. Built-in tools and selected connector extensions share it.
 
 import { llm } from './llm'
 import type { GenerationMetrics } from '../shared/generation-metrics'
+import type { ResponseCutoffContract } from '../shared/ipc-contracts'
 import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
 import { stripChatControlTokens } from '@offgrid/sync'
 import { isMemoryToolAllowed } from './tools/memory-scope'
-import { parseToolCallsFromText } from './tools/tool-call-parse'
-import { getSetting, saveSetting } from './database'
+import { parseToolCallsFromText, stripQwenToolCallMarkup } from './tools/tool-call-parse'
+import { getSetting, saveSetting, searchProjectConversations } from './database'
 import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
 import { evaluateArithmetic } from './calculator'
 import type { SearchKind, SearchResult } from '../shared/search-contract'
 import { selectToolExtensions } from './tools/extension-select'
+import { isTaskAction } from './tools/nativeActionToolExtension-logic'
 import { callHookAsync, HOOKS } from './bootstrap/hookRegistry'
 import {
   boundToolResult,
   callsWithinToolBudget,
   normalizeMaxToolCalls,
   toolLimitFinalAnswerInstruction,
-  toolPromptChars,
   toolResultCharBudget
 } from '@offgrid/models'
+import { toolPromptChars } from './tools/prompt-budget'
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -75,6 +76,7 @@ export type ToolCallStatus = 'completed' | 'failed' | 'pending'
 
 export type ToolActivity =
   | { kind: 'planning'; label: 'Planning next action…' }
+  | { kind: 'preparing_tool_calls'; label: 'Preparing actions…'; name?: string }
   | { kind: 'compacted'; label: 'Compacted' }
 
 // A tool's structured result. Most tools just return text (a bare string, which the
@@ -89,8 +91,8 @@ export interface ToolResult {
   /** When true, `text` is the final user-facing answer and no model may rewrite it. */
   authoritative?: boolean
   sources?: UnifiedSource[]
-  imageRequest?: { prompt: string }
-  imageRequests?: { prompt: string }[]
+  imageRequest?: { prompt: string; enhancePrompt?: boolean }
+  imageRequests?: { prompt: string; enhancePrompt?: boolean }[]
 }
 
 type ToolDef = {
@@ -365,10 +367,11 @@ const TOOLS: ToolDef[] = [
   },
   {
     // Only OFFERED in a project chat (gated in schemas() by projectId). Lets the model
-    // pull from the current project's uploaded docs + captured memory on demand — the
-    // general search_memory doesn't reach a project's separate RAG store.
+    // pull from the current project's documents, captured memory, and sibling
+    // conversations on demand. Global search_memory stays outside this scope.
     name: SEARCH_KB_TOOL.function.name,
-    description: SEARCH_KB_TOOL.function.description,
+    description:
+      "Search the current project's knowledge base and conversations for information relevant to the user's question.",
     parameters: SEARCH_KB_TOOL.function.parameters,
     run: async (a, ctx): Promise<ToolResult> => {
       if (!ctx.projectId) {
@@ -377,7 +380,18 @@ const TOOLS: ToolDef[] = [
       try {
         const { ragService } = await import('./rag')
         const handler = makeSearchKnowledgeBaseHandler(ragService)
-        return { text: await handler({ query: String(a.query ?? '') }, ctx.projectId) }
+        const query = String(a.query ?? '').trim()
+        const conversations = searchProjectConversations(ctx.projectId, query, ctx.conversationId)
+        const documents = await handler({ query }, ctx.projectId)
+        const chats = conversations.length
+          ? conversations
+              .map(
+                (message, index) =>
+                  `[C${index + 1}] ${message.title || 'Project conversation'} · ${message.role}: ${message.content.slice(0, 1500)}`
+              )
+              .join('\n\n')
+          : 'No matching project conversations found.'
+        return { text: `Project documents:\n${documents}\n\nProject conversations:\n${chats}` }
       } catch (e) {
         return { text: 'Error searching the knowledge base: ' + (e as Error).message }
       }
@@ -400,16 +414,22 @@ const TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'a detailed description of the image to create' }
+        prompt: { type: 'string', description: 'a detailed description of the image to create' },
+        enhance_prompt: {
+          type: 'boolean',
+          description:
+            'whether to rewrite the prompt before generation; set false when the prompt is already detailed and final'
+        }
       },
       required: ['prompt']
     },
     run: (a): ToolResult => {
       const prompt = String(a.prompt ?? '').trim()
+      const enhancePrompt = typeof a.enhance_prompt === 'boolean' ? a.enhance_prompt : undefined
       return prompt
         ? {
             text: 'Image generation started - it will appear in the chat.',
-            imageRequest: { prompt }
+            imageRequest: { prompt, ...(enhancePrompt === undefined ? {} : { enhancePrompt }) }
           }
         : { text: 'Error: no image prompt provided.' }
     }
@@ -531,6 +551,8 @@ export async function toolChat(
   query: string,
   history: { role: string; content: string }[] = [],
   opts: {
+    /** Assistant is selected for this turn; always include its browser and desktop tools. */
+    assistantOnly?: boolean
     connectors?: boolean
     conversationId?: string
     /** Active project — offers search_knowledge_base + scopes it to this project. */
@@ -552,11 +574,12 @@ export async function toolChat(
   answer: string
   toolCalls: ToolCall[]
   unified: UnifiedSource[]
-  imageRequests: { prompt: string }[]
+  imageRequests: { prompt: string; enhancePrompt?: boolean }[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
-  imageRequest?: { prompt: string }
+  imageRequest?: { prompt: string; enhancePrompt?: boolean }
   toolsOffered?: string[]
   metrics?: GenerationMetrics
+  cutoff?: ResponseCutoffContract
 }> {
   if (opts.conversationId) {
     const decision = await callHookAsync<{ answer: string } | null>(
@@ -570,15 +593,6 @@ export async function toolChat(
         unified: [],
         imageRequests: []
       }
-    }
-  }
-  const plannerUnavailable = await llm.toolPlannerPreflight()
-  if (plannerUnavailable) {
-    return {
-      answer: plannerUnavailable,
-      toolCalls: [],
-      unified: [],
-      imageRequests: []
     }
   }
   // A selected remote model does not need the local server to be installed or warm.
@@ -597,8 +611,9 @@ export async function toolChat(
   // Offer generate_image only when an image model is available. The renderer passes
   // this; fall back to the main-process check so a caller that omits it still gates
   // correctly (single source of truth for "can we make an image right now").
+  const toolsEnabled = getSetting<boolean>('toolsEnabled', true) !== false
   let imageAvailable = opts.imageAvailable ?? false
-  if (opts.imageAvailable === undefined) {
+  if ((!opts.assistantOnly || toolsEnabled) && opts.imageAvailable === undefined) {
     try {
       const { activeImageModel } = await import('./imagegen')
       imageAvailable = !!activeImageModel()
@@ -611,54 +626,139 @@ export async function toolChat(
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
   // no extensions, so this is just the built-ins.
-  const exts = selectToolExtensions(getToolExtensions(), { connectors: !!opts.connectors })
+  const exts =
+    toolsEnabled || opts.assistantOnly
+      ? selectToolExtensions(getToolExtensions(), { connectors: toolsEnabled && !!opts.connectors })
+      : []
   const extSchemas: unknown[] = []
   const hints: string[] = []
+  const extensionHints: { names: Set<string>; text: string }[] = []
   const disabled = disabledSet()
   for (const e of exts) {
     try {
       const s = await e.schemas()
       const enabledSchemas = s.filter((schema) => {
         const name = (schema as { function?: { name?: unknown } }).function?.name
-        return typeof name !== 'string' || !disabled.has(name)
+        if (opts.assistantOnly && (name === 'web_use' || name === 'computer_use')) return true
+        return toolsEnabled && (typeof name !== 'string' || !disabled.has(name))
       })
       if (enabledSchemas.length) {
         extSchemas.push(...enabledSchemas)
-        if (e.systemHint) hints.push(e.systemHint())
+        if (e.systemHint && toolsEnabled) {
+          extensionHints.push({
+            names: new Set(
+              enabledSchemas.flatMap((schema) => {
+                const name = (schema as { function?: { name?: unknown } }).function?.name
+                return typeof name === 'string' ? [name] : []
+              })
+            ),
+            text: e.systemHint()
+          })
+        }
       }
     } catch (err) {
       console.error('[tools] extension schemas', e.id, err)
     }
   }
-  const builtins = schemas(imageAvailable, {
-    projectActive: !!opts.projectId,
-    allMemory: !!opts.allMemory
-  })
-  const rawTools = extSchemas.length ? [...builtins, ...extSchemas] : builtins
+  const builtins = toolsEnabled
+    ? schemas(imageAvailable, {
+        projectActive: !!opts.projectId,
+        allMemory: !!opts.allMemory
+      })
+    : []
+  const assistantRequiredTools = opts.assistantOnly
+    ? extSchemas.filter((schema) => {
+        const name = (schema as { function?: { name?: unknown } }).function?.name
+        return name === 'web_use' || name === 'computer_use'
+      })
+    : []
+  const otherExtSchemas = opts.assistantOnly
+    ? extSchemas.filter((schema) => !assistantRequiredTools.includes(schema))
+    : extSchemas
+  const rawTools = [...assistantRequiredTools, ...builtins, ...otherExtSchemas]
   // Keep the tool payload within the model's context. llama-server inlines every
   // tool schema into the prompt AND compiles it to a grammar, so a big connector
   // set can blow past the context window and 400 the whole turn. Budget to a
   // fraction of the effective context (leaving room for system + history +
   // answer); prune verbose schemas first, drop connector tools only if needed.
-  // Smart routing: rank connector tools by relevance to this turn's message BEFORE
-  // budgeting, so the budgeter (which drops from the end) keeps the tools that
-  // actually match the request rather than whichever were last. Built-ins keep
-  // their position. Prefer SEMANTIC ranking (embedding similarity — matches on
-  // meaning, e.g. "meetings" → a calendar tool); fall back to lexical term-overlap
-  // if the embeddings backend isn't ready. No-op with 0-1 connector tools.
-  let rankedTools = rawTools
-  if (rawTools.length - builtins.length > 1) {
-    try {
-      const { embeddings } = await import('./embeddings')
-      const { rankConnectorToolsSemantic } = await import('./tools/tool-embedding-ranking')
-      rankedTools = await rankConnectorToolsSemantic(query, rawTools, builtins.length, {
-        embed: (t) => embeddings.generateEmbedding(t)
-      })
-    } catch {
-      const { rankConnectorTools } = await import('./tools/tool-ranking')
-      rankedTools = rankConnectorTools(query, rawTools, builtins.length)
+  // Route every enabled built-in and connector through local MiniLM. The older
+  // path ranked connectors only, and only when there were at least two of them;
+  // all built-ins were sent on every turn. Selection now runs for any non-empty
+  // catalog and sends only the tools pertinent to this message. If MiniLM cannot
+  // load, the lexical fallback fails closed to direct matches.
+  let relevantTools: unknown[] = []
+  if (rawTools.length > 0) {
+    const { selectRelevantTools } = await import('./tools/tool-ranking')
+    const lexicalTools = selectRelevantTools(query, rawTools)
+    const namedTool = rawTools.some((schema) => {
+      const name = (schema as { function?: { name?: unknown } }).function?.name
+      return typeof name === 'string' && query.toLowerCase().includes(name.toLowerCase())
+    })
+    // An explicit tool name needs no semantic ranking. If image generation is unavailable,
+    // an explicit generate_image request cannot be routed to that missing tool.
+    const unavailableImageTool = !imageAvailable && /\bgenerate_image\b/i.test(query)
+    if (!namedTool && !unavailableImageTool) {
+      try {
+        const { embeddings } = await import('./embeddings')
+        const { contextualToolRoutingText, selectRelevantToolsSemantic } =
+          await import('./tools/tool-embedding-ranking')
+        const routingText = contextualToolRoutingText(query, history)
+        relevantTools = await selectRelevantToolsSemantic(routingText, rawTools, {
+          embed: (t) => embeddings.generateEmbedding(t)
+        })
+      } catch {
+        // The direct-match selection below remains available offline.
+      }
+    }
+    // A semantic score must not hide a direct name or description match. This
+    // also keeps explicit tool requests available when a new embedding model
+    // ranks an unrelated schema first.
+    relevantTools = [
+      ...lexicalTools,
+      ...relevantTools.filter((tool) => !lexicalTools.includes(tool))
+    ]
+  }
+  const scopeToolName = opts.projectId
+    ? 'search_knowledge_base'
+    : opts.allMemory
+      ? 'search_memory'
+      : null
+  const explicitlyNamedTools = rawTools.filter((schema) => {
+    const name = (schema as { function?: { name?: unknown } }).function?.name
+    return (
+      typeof name === 'string' &&
+      (name === scopeToolName || query.toLowerCase().includes(name.toLowerCase()))
+    )
+  })
+  if (explicitlyNamedTools.length) {
+    const explicitNames = new Set(explicitlyNamedTools)
+    relevantTools = [
+      ...explicitlyNamedTools,
+      ...relevantTools.filter((schema) => !explicitNames.has(schema))
+    ]
+  }
+  if (!/\bbrave\b/i.test(query)) {
+    const hasPrimarySearch = relevantTools.some(
+      (schema) => (schema as { function?: { name?: unknown } }).function?.name === 'web_search'
+    )
+    if (hasPrimarySearch) {
+      relevantTools = relevantTools.filter(
+        (schema) => (schema as { function?: { name?: unknown } }).function?.name !== 'brave_search'
+      )
     }
   }
+  const relevantNames = new Set(
+    relevantTools.flatMap((schema) => {
+      const name = (schema as { function?: { name?: unknown } }).function?.name
+      return typeof name === 'string' ? [name] : []
+    })
+  )
+  hints.push(
+    ...extensionHints
+      .filter((hint) => [...hint.names].some((name) => relevantNames.has(name)))
+      .map((hint) => hint.text)
+  )
+  const protectedToolCount = explicitlyNamedTools.length
   const { budgetTools } = await import('./tools/tool-budget')
   const ctx = llm.effectiveContextSize()
   // Cap tool tokens in ABSOLUTE terms too, not just as a fraction of context:
@@ -668,7 +768,7 @@ export async function toolChat(
   // roughly halving per-round prompt cost vs the old 45%-of-a-big-context budget.
   const MAX_TOOL_TOKENS = 4000
   const toolBudget = Math.max(1024, Math.min(Math.floor(ctx * 0.4), MAX_TOOL_TOKENS))
-  const budgeted = budgetTools(rankedTools, toolBudget, builtins.length)
+  const budgeted = budgetTools(relevantTools, toolBudget, protectedToolCount)
   if (budgeted.pruned || budgeted.droppedCount) {
     console.warn(
       `[tools] context budget ${toolBudget} tok: pruned schemas${budgeted.droppedCount ? `, dropped ${budgeted.droppedCount} connector tool(s)` : ''} to fit (final ~${budgeted.estTokens} tok)`
@@ -679,8 +779,35 @@ export async function toolChat(
       )
   }
   const tools = budgeted.tools
+  if (tools.length) {
+    const plannerUnavailable = await llm.toolPlannerPreflight()
+    if (plannerUnavailable) {
+      return {
+        answer: plannerUnavailable,
+        toolCalls: [],
+        unified: [],
+        imageRequests: []
+      }
+    }
+  }
+  const projectPrompt = opts.projectId
+    ? (await import('./rag/store'))
+        .listProjects()
+        .find((project) => project.id === opts.projectId)
+        ?.systemPrompt.trim()
+    : undefined
   const sys =
-    'You are Off Grid AI, a private on-device assistant. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
+    'You are Off Grid AI, a private on-device assistant. Answer general questions using your knowledge. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. If the task is actionable, call web_use immediately. Keep answers concise.' +
+    (opts.allMemory
+      ? ' Use search_memory when the user asks about their memories, past conversations, people, or captured activity. Do not invent personal facts or claim to have searched when you have not. Cite retrieved sources accurately.'
+      : '') +
+    (opts.projectId
+      ? ' In this project, use search_knowledge_base for relevant project documents and conversations. Do not invent project facts or use information from other projects. Cite retrieved sources accurately.'
+      : '') +
+    (projectPrompt ? `\n\nProject instructions:\n${projectPrompt}` : '') +
+    (opts.assistantOnly
+      ? ' web_use and computer_use are available for website and desktop tasks.'
+      : '') +
     (hints.length ? ' ' + hints.join(' ') : '')
 
   // Attached images ride on the current user turn so the vision model can read
@@ -732,20 +859,22 @@ export async function toolChat(
   // Deferred image generation: keep EVERY request in tool-call order. The renderer generates after
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
-  const imageRequests: { prompt: string }[] = []
+  const imageRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   let finishAfterDeferredImages = false
   const resultWithImages = (result: {
     answer: string
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
     metrics?: GenerationMetrics
+    cutoff?: ResponseCutoffContract
   }): {
     answer: string
     toolCalls: ToolCall[]
     unified: UnifiedSource[]
     metrics?: GenerationMetrics
-    imageRequests: { prompt: string }[]
-    imageRequest?: { prompt: string }
+    cutoff?: ResponseCutoffContract
+    imageRequests: { prompt: string; enhancePrompt?: boolean }[]
+    imageRequest?: { prompt: string; enhancePrompt?: boolean }
     toolsOffered?: string[]
   } => {
     const finalImageRequest = imageRequests.at(-1)
@@ -793,7 +922,7 @@ export async function toolChat(
   const replyReserve = Math.min(1024, Math.max(256, Math.floor(ctx * 0.1)))
   const maxPromptChars = Math.max(0, ctx - replyReserve) * 4
   const answerFrom = (content: string): string => {
-    return stripChatControlTokens(content)
+    return stripChatControlTokens(stripQwenToolCallMarkup(content))
   }
   let round = 0
   while (toolCalls.length < maxToolCalls) {
@@ -804,7 +933,10 @@ export async function toolChat(
       0,
       Math.floor((maxPromptChars - toolPromptChars(messages)) / 4)
     )
-    const fittedTools = budgetTools(tools, availableToolTokens, builtins.length)
+    const fittedTools = budgetTools(tools, availableToolTokens, protectedToolCount)
+    if (opts.assistantOnly && fittedTools.estTokens > availableToolTokens) {
+      return resultWithImages({ answer: 'Context is full.', toolCalls, unified })
+    }
     const roundTools =
       !finishAfterDeferredImages && fittedTools.estTokens <= availableToolTokens
         ? fittedTools.tools
@@ -832,6 +964,7 @@ export async function toolChat(
       content,
       toolCalls: calls,
       reasoningDetails,
+      finishReason,
       metrics
     } = await llm.streamChat(messages, onDelta, {
       tools: roundTools,
@@ -841,7 +974,9 @@ export async function toolChat(
       // this round has room to generate inside the configured context window.
       maxTokens: roundMaxTokens,
       thinking: opts.thinking,
-      signal: opts.signal
+      signal: opts.signal,
+      onToolCallStart: (name) =>
+        opts.onActivity?.({ kind: 'preparing_tool_calls', label: 'Preparing actions…', name })
     })
 
     // Stop pressed during the round: streamCompletion resolves with the partial
@@ -871,12 +1006,29 @@ export async function toolChat(
             args: c.args,
             rawArgs: JSON.stringify(c.args)
           }))
+    // A text-form call is not permission to cross the selected memory scope.
+    const scopedEffective = effective.filter((call) =>
+      isMemoryToolAllowed(call.name, {
+        projectActive: !!opts.projectId,
+        allMemory: !!opts.allMemory
+      })
+    )
 
-    if (effective.length) {
+    // A long-running Web Use or Computer Use call owns the whole goal. Preserve
+    // an explicit open_url prerequisite before Computer Use, then execute only
+    // the first task call. The task runtime owns all later work and retries.
+    const taskCall = scopedEffective.find((call) => isTaskAction(call.name))
+    const taskIndex = taskCall ? scopedEffective.indexOf(taskCall) : -1
+    const prerequisites =
+      taskCall?.name === 'computer_use'
+        ? scopedEffective.slice(0, taskIndex).filter((call) => call.name === 'open_url')
+        : []
+    const permitted = taskCall ? [...prerequisites, taskCall] : scopedEffective
+    if (permitted.length) {
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
       let remainingImageRequests = requestedImageCount - imageRequests.length
-      const callsToRun = callsWithinToolBudget(effective, toolCalls.length, maxToolCalls).filter(
+      const callsToRun = callsWithinToolBudget(permitted, toolCalls.length, maxToolCalls).filter(
         (call) => call.name !== 'generate_image' || remainingImageRequests-- > 0
       )
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
@@ -947,7 +1099,10 @@ export async function toolChat(
         // tool call + result as it lands, not only in the final batch.
         opts.onToolResult?.({ name: c.name, result: res.text, status })
         messages.push({ role: 'tool', tool_call_id: c.id, content: res.text })
-        if (res.authoritative) {
+        // Long-running tasks are always terminal for this outer Chat turn. Keep
+        // this boundary independent of extension result flags so a regression or
+        // a model retry cannot start a second task for the same user request.
+        if (isTaskAction(c.name) || res.authoritative) {
           onDelta(res.text, 'content')
           return resultWithImages({ answer: res.text, toolCalls, unified, metrics })
         }
@@ -956,7 +1111,15 @@ export async function toolChat(
       continue // let the model use the results
     }
     // No tool calls this round: `content` is the final answer (already streamed via onDelta).
-    return resultWithImages({ answer: answerFrom(content), toolCalls, unified, metrics })
+    return resultWithImages({
+      answer: answerFrom(content),
+      toolCalls,
+      unified,
+      metrics,
+      ...(finishReason === 'length'
+        ? { cutoff: { reason: 'max_tokens' as const, maxTokens: roundMaxTokens } }
+        : {})
+    })
   }
   // The configured emergency cap was reached with the model still calling tools. Instead of dead-ending
   // with a canned "stopped" message, FORCE one final answer WITHOUT tools, so the
@@ -972,13 +1135,14 @@ export async function toolChat(
     return resultWithImages({ answer: answerFrom('') || 'Context is full.', toolCalls, unified })
   }
   const finalOutputRoom = Math.max(1, ctx - Math.ceil(toolPromptChars(finalMessages) / 4) - 32)
+  const finalMaxTokens =
+    typeof settings.maxTokens === 'number' && settings.maxTokens > 0
+      ? Math.min(settings.maxTokens, finalOutputRoom)
+      : finalOutputRoom
   const final = await llm.streamChat(finalMessages, onDelta, {
     temperature: 0.3,
     // Forced final answer obeys the same context-bound cap as every tool round.
-    maxTokens:
-      typeof settings.maxTokens === 'number' && settings.maxTokens > 0
-        ? Math.min(settings.maxTokens, finalOutputRoom)
-        : finalOutputRoom,
+    maxTokens: finalMaxTokens,
     thinking: false,
     signal: opts.signal
   })
@@ -986,7 +1150,10 @@ export async function toolChat(
     answer: answerFrom(final.content) || 'Stopped after too many tool steps.',
     toolCalls,
     unified,
-    metrics: final.metrics
+    metrics: final.metrics,
+    ...(final.finishReason === 'length'
+      ? { cutoff: { reason: 'max_tokens' as const, maxTokens: finalMaxTokens } }
+      : {})
   })
 }
 

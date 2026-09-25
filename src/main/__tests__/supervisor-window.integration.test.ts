@@ -1,6 +1,6 @@
 /**
  * The Computer Use supervisor boundary configured against an Electron window boundary.
- * The separate PiP is disabled, while its hidden capture-exclusion window remains available.
+ * The compact PiP stays visible without taking focus and remains excluded from capture.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -76,14 +76,15 @@ describe('Computer Use supervisor window', () => {
     electron.handlers.clear()
   })
 
-  it('keeps a show request inert while the separate PiP is disabled', async () => {
+  it('shows a compact protected PiP without taking focus', async () => {
     const { showSupervisorWindow } = await import('../vision/supervisor-window')
 
     showSupervisorWindow()
 
-    expect(electron.options).toHaveLength(0)
-    expect(electron.protected).toEqual([])
-    expect(electron.shown).toBe(0)
+    expect(electron.options).toHaveLength(1)
+    expect(electron.options[0]).toMatchObject({ width: 360, height: 480, show: false })
+    expect(electron.protected).toEqual([true])
+    expect(electron.shown).toBe(1)
   })
 
   it('creates the protected capture exclusion without showing the PiP', async () => {
@@ -95,16 +96,16 @@ describe('Computer Use supervisor window', () => {
     expect(electron.shown).toBe(0)
   })
 
-  it('keeps the legacy supervisor IPC inert without issuing a task command', async () => {
+  it('lets supervisor IPC show and dismiss the PiP without issuing a task command', async () => {
     const { registerSupervisorWindowIpc, showSupervisorWindow } =
       await import('../vision/supervisor-window')
     registerSupervisorWindowIpc()
     showSupervisorWindow()
 
     expect(electron.handlers.get('vision:supervisor:dismiss')?.()).toBe(true)
-    expect(electron.hidden).toBe(0)
+    expect(electron.hidden).toBe(1)
     expect(electron.handlers.get('vision:supervisor:show')?.()).toBe(true)
-    expect(electron.options).toHaveLength(0)
-    expect(electron.shown).toBe(0)
+    expect(electron.options).toHaveLength(1)
+    expect(electron.shown).toBe(2)
   })
 })

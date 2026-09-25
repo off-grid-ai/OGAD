@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { buildCoreMLArgs, buildZImageArgs, buildStandardArgs, DEFAULT_NEGATIVE } from '../args'
+import {
+  buildCoreMLArgs,
+  buildQwenImage21Args,
+  buildZImageArgs,
+  buildStandardArgs,
+  DEFAULT_NEGATIVE
+} from '../args'
 import { standardModelDefaults } from '../../../shared/image-defaults'
 
 // A helper: value that follows a flag in the argv (or undefined if the flag is absent).
@@ -82,6 +88,42 @@ describe('buildZImageArgs', () => {
     expect(flagVal(args, '-H')).toBe('512')
     expect(flagVal(args, '--steps')).toBe('12')
     expect(flagVal(args, '--cfg-scale')).toBe('3')
+  })
+})
+
+describe('buildQwenImage21Args', () => {
+  const base = {
+    model: '/m/qwen-image.gguf',
+    llm: '/m/qwen3-vl.gguf',
+    llmVision: '/m/mmproj.gguf',
+    vae: '/m/qwen-vae.safetensors',
+    prompt: 'lettering on a sign',
+    outPath: '/o.png',
+    seed: 11,
+    threads: '6',
+    previewArgs: ['--preview', 'proj']
+  }
+
+  it('builds text-to-image with the Qwen-Image 2.1 stack and defaults', () => {
+    const args = buildQwenImage21Args(base)
+    expect(flagVal(args, '--diffusion-model')).toBe(base.model)
+    expect(flagVal(args, '--llm')).toBe(base.llm)
+    expect(flagVal(args, '--vae')).toBe(base.vae)
+    expect(flagVal(args, '--preview')).toBe('proj')
+    expect(flagVal(args, '-W')).toBe('1024')
+    expect(flagVal(args, '-H')).toBe('1024')
+    expect(flagVal(args, '--steps')).toBe('40')
+    expect(flagVal(args, '--cfg-scale')).toBe('6')
+    expect(flagVal(args, '--sampling-method')).toBe('euler')
+    expect(args).toContain('--offload-to-cpu')
+    expect(args).not.toContain('--llm_vision')
+    expect(args).not.toContain('-r')
+  })
+
+  it('adds the vision projector and reference image for editing', () => {
+    const args = buildQwenImage21Args({ ...base, initImage: '/in.png' })
+    expect(flagVal(args, '--llm_vision')).toBe(base.llmVision)
+    expect(flagVal(args, '-r')).toBe('/in.png')
   })
 })
 

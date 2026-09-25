@@ -3,6 +3,11 @@ import { IconLoader2, IconCheck, IconCpu, IconPower } from '@tabler/icons-react'
 import { X } from '@phosphor-icons/react'
 import { SidePanel } from './SidePanel'
 import type { ComputerUseActiveModelProjection } from '../../../shared/computer-use-settings'
+import {
+  COMPUTER_USE_SETTINGS_KEY,
+  normalizeComputerUseSettings
+} from '../../../shared/computer-use-settings'
+import { WEB_USE_SETTINGS_KEY, normalizeWebUseSettings } from '../../../shared/web-use-settings'
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 import { SettingsSelect } from './SettingsSelect'
 
@@ -20,6 +25,7 @@ interface ModelEntry {
   files?: ModelFile[]
   remoteServerId?: string
   grounder?: boolean
+  tags?: string[]
   availability?: 'ready' | 'coming_soon'
 }
 
@@ -52,6 +58,20 @@ type UnloadStatus = 'unloading' | 'unloaded' | 'error'
 
 function primaryFile(m: ModelEntry): string {
   return m.files?.find((f) => f.role === 'primary')?.name ?? m.files?.[0]?.name ?? m.id
+}
+
+function primaryVariant(m: ModelEntry): string | null {
+  const file = primaryFile(m)
+  if (!file.toLowerCase().endsWith('.gguf')) return null
+  return file.slice(0, -'.gguf'.length).split('-').at(-1) ?? null
+}
+
+function isGroundingSpecialist(model: ModelEntry): boolean {
+  return model.grounder === true || (model.kind === 'computer_use' && !model.tags?.includes('Decision'))
+}
+
+function isDecisionModel(model: ModelEntry): boolean {
+  return model.kind === 'computer_use' && Boolean(model.tags?.includes('Decision'))
 }
 
 function openSettings(onClose: () => void): void {
@@ -150,6 +170,26 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     }
   }
 
+  const chooseDecisionModel = async (
+    task: 'computer_use' | 'web_use',
+    modelId: string
+  ): Promise<void> => {
+    if (!modelId) return
+    setBusy(modelId)
+    try {
+      const stored = ((await api().getSettings?.()) ?? {}) as Record<string, unknown>
+      const key = task === 'computer_use' ? COMPUTER_USE_SETTINGS_KEY : WEB_USE_SETTINGS_KEY
+      const current =
+        task === 'computer_use'
+          ? normalizeComputerUseSettings(stored[key])
+          : normalizeWebUseSettings(stored[key])
+      await api().saveSetting?.(key, { ...current, decisionModelId: modelId })
+      await load()
+    } finally {
+      setBusy(null)
+    }
+  }
+
   // Unload one modality's model from memory now (frees RAM; reloads on next use).
   // Independent per modality — writes only this mode's status.
   const unloadModel = async (mode: PickerMode): Promise<void> => {
@@ -216,22 +256,36 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
-                      {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
+                      {model.role === 'reasoner'
+                        ? 'Reasoner'
+                        : model.role === 'decision'
+                          ? 'Decision model'
+                          : 'Grounding specialist'}
                     </span>
-                    {model.role === 'grounding_specialist' ? (
+                    {model.role === 'grounding_specialist' || model.role === 'decision' ? (
                       <SettingsSelect<string>
-                        id="active-computer-use-model"
-                        label="Active Computer Use model"
+                        id={`active-computer-use-${model.role}-model`}
+                        label={
+                          model.role === 'decision'
+                            ? 'Active Computer Use Decision model'
+                            : 'Active Computer Use model'
+                        }
                         value={model.modelId}
                         disabled={busy !== null}
-                        onValueChange={(modelId) => void chooseComputerUse(modelId)}
+                        onValueChange={(modelId) =>
+                          void (model.role === 'decision'
+                            ? chooseDecisionModel('computer_use', modelId)
+                            : chooseComputerUse(modelId))
+                        }
                         options={[
                           ...models
                             .filter(
                               (candidate) =>
                                 installed.includes(candidate.id) &&
                                 candidate.availability !== 'coming_soon' &&
-                                (candidate.kind === 'computer_use' || candidate.grounder === true)
+                                (model.role === 'decision'
+                                  ? isDecisionModel(candidate)
+                                  : isGroundingSpecialist(candidate))
                             )
                             .map((candidate) => ({ value: candidate.id, label: candidate.name })),
                           ...(models.some((candidate) => candidate.id === model.modelId)
@@ -277,22 +331,36 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                 >
                   <span className="min-w-0 flex-1">
                     <span className="block text-[9px] uppercase tracking-wide text-neutral-600">
-                      {model.role === 'reasoner' ? 'Reasoner' : 'Grounding specialist'}
+                      {model.role === 'reasoner'
+                        ? 'Reasoner'
+                        : model.role === 'decision'
+                          ? 'Decision model'
+                          : 'Grounding specialist'}
                     </span>
-                    {model.role === 'grounding_specialist' ? (
+                    {model.role === 'grounding_specialist' || model.role === 'decision' ? (
                       <SettingsSelect<string>
-                        id="active-web-use-model"
-                        label="Active Web Use grounding model"
+                        id={`active-web-use-${model.role}-model`}
+                        label={
+                          model.role === 'decision'
+                            ? 'Active Web Use Decision model'
+                            : 'Active Web Use grounding model'
+                        }
                         value={model.modelId}
                         disabled={busy !== null}
-                        onValueChange={(modelId) => void chooseComputerUse(modelId)}
+                        onValueChange={(modelId) =>
+                          void (model.role === 'decision'
+                            ? chooseDecisionModel('web_use', modelId)
+                            : chooseComputerUse(modelId))
+                        }
                         options={[
                           ...models
                             .filter(
                               (candidate) =>
                                 installed.includes(candidate.id) &&
                                 candidate.availability !== 'coming_soon' &&
-                                (candidate.kind === 'computer_use' || candidate.grounder === true)
+                                (model.role === 'decision'
+                                  ? isDecisionModel(candidate)
+                                  : isGroundingSpecialist(candidate))
                             )
                             .map((candidate) => ({ value: candidate.id, label: candidate.name })),
                           ...(models.some((candidate) => candidate.id === model.modelId)
@@ -322,6 +390,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         </section>
         {MODALITIES.map(({ label, kinds, mode }) => {
           const list = models.filter((m) => kinds.includes(m.kind) && installed.includes(m.id))
+          const duplicateNames = new Set(
+            list
+              .filter((m, index) =>
+                list.some((other, otherIndex) => otherIndex !== index && other.name === m.name)
+              )
+              .map((m) => m.name)
+          )
           const cur = active[mode]
           const status = unload[mode]
           const isActive = (m: ModelEntry): boolean =>
@@ -379,6 +454,14 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="truncate">{m.name}</span>
+                        {duplicateNames.has(m.name) && primaryVariant(m) ? (
+                          <span
+                            className="shrink-0 text-[10px] text-neutral-500"
+                            title={primaryFile(m)}
+                          >
+                            {primaryVariant(m)}
+                          </span>
+                        ) : null}
                         {m.remoteServerId ? (
                           <span className="shrink-0 rounded-sm border border-green-500/50 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
                             Remote

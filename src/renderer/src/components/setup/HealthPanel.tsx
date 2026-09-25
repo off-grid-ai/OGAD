@@ -7,6 +7,7 @@ import {
   ArrowsClockwise
 } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
+import { resolveModelName } from '@renderer/lib/model-summary'
 import {
   SYSTEM_HEALTH_STATUS_LABELS,
   type SystemHealthComponentStatusContract,
@@ -201,7 +202,7 @@ export function HealthPanel(): React.ReactElement {
 
       {health && (
         <div className="border-t border-neutral-800/60 px-4 py-2 text-[10px] text-neutral-600">
-          {health.ramGb} GB RAM{health.activeModel ? ` · active: ${health.activeModel}` : ''}
+          {health.ramGb} GB RAM{health.activeModel ? ` · active: ${resolveModelName([], health.activeModel)}` : ''}
         </div>
       )}
     </div>

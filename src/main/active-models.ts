@@ -24,11 +24,11 @@ export class ActiveModalityStore {
     }
   }
 
-  get(kind: Modality | 'remote_voice'): string | null {
+  get(kind: Modality | `remote_${RemoteModelModality}`): string | null {
     return this.readAll()[kind] ?? null
   }
 
-  set(kind: Modality | 'remote_voice', id: string | null): void {
+  set(kind: Modality | `remote_${RemoteModelModality}`, id: string | null): void {
     const cur = this.readAll()
     cur[kind] = id
     try {
@@ -51,6 +51,12 @@ export class ActiveModalityStore {
 }
 
 const activeModalStore = new ActiveModalityStore()
+
+export type RemoteModelModality = 'text' | 'image' | 'voice' | 'transcription'
+
+function remoteSelectionKey(modality: RemoteModelModality): `remote_${RemoteModelModality}` {
+  return `remote_${modality}`
+}
 
 /** The chosen model id for a modality, or null to use the runtime's default. */
 export function getActiveModal(kind: Modality): string | null {
@@ -77,11 +83,20 @@ export function getAllActiveModals(): Record<Modality, string | null> {
   return activeModalStore.all()
 }
 
-/** An unset value keeps the remote choice active for profiles saved before this setting existed. */
+/** Text remains remote for existing remote profiles; added media choices start local. */
+export function remoteModelSelected(modality: RemoteModelModality): boolean {
+  const selected = activeModalStore.get(remoteSelectionKey(modality))
+  return selected === null ? modality === 'text' : selected === 'true'
+}
+
+export function setRemoteModelSelected(modality: RemoteModelModality, selected: boolean): void {
+  activeModalStore.set(remoteSelectionKey(modality), selected ? 'true' : 'false')
+}
+
 export function remoteVoiceSelected(): boolean {
-  return activeModalStore.get('remote_voice') !== 'false'
+  return remoteModelSelected('voice')
 }
 
 export function setRemoteVoiceSelected(selected: boolean): void {
-  activeModalStore.set('remote_voice', selected ? 'true' : 'false')
+  setRemoteModelSelected('voice', selected)
 }

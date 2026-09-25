@@ -17,7 +17,7 @@
  */
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { globalShortcut, systemPreferences } from 'electron'
+import { systemPreferences } from 'electron'
 import { llm } from '../llm'
 import { loadActuation, type ActuationPort } from '../input/actuation'
 import { parseAxElements, type AxElement, type AxSnapshot } from './ax-elements'
@@ -35,7 +35,6 @@ import {
   emitVisionState,
   emitVisionStep,
   registerVisionSession,
-  stopVisionTask,
   waitForVisionUser
 } from '../vision/vision-controller'
 import { hideSupervisorWindow } from '../vision/supervisor-window'
@@ -51,14 +50,16 @@ import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
 import { registerTaskGuideHandler } from '../tasks/task-guide'
 import { resolveModelIdentity } from '../models-manager'
 import { NativeAppTargeter } from './native-app-target'
-import { createMacNativeAppPlatform } from './native-app-macos'
-import { windowsNativeAppPlatform } from './native-app-windows'
+import { createMacNativeAppPlatform, resolveMacDefaultBrowser } from './native-app-macos'
+import { resolveWindowsDefaultBrowser, windowsNativeAppPlatform } from './native-app-windows'
 import { automationTaskReadStatus } from '@offgrid/automation'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
-import type { VisionTaskContinuation } from '../vision/vision-host'
+import type { VisionTaskContinuation } from '../vision/vision-agent'
 import type { ExecuteResult } from '@offgrid/use'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { remoteVisionModelId } from '../../shared/remote-vision-server'
+import { chooseElementStep, serializeElementStep } from './ax-decision'
+import { withDecisionModel, withReasoningModel } from './decision-model-loader'
 
 const execFileAsync = promisify(execFile)
 
@@ -66,7 +67,7 @@ const execFileAsync = promisify(execFile)
  *  the user approves the task). */
 const SELF_APP_NAME = 'Off Grid AI Desktop'
 
-/** Thrown when the kill switch (Esc / overlay Stop) halts a run mid-action so
+/** Thrown when Stop or Take Over halts a run mid-action so
  *  the loop unwinds instead of actuating again. */
 class HaltError extends Error {}
 
@@ -105,6 +106,15 @@ function nativeAppTargeter(): NativeAppTargeter | null {
     return helper
       ? new NativeAppTargeter(createMacNativeAppPlatform(helper), { selfName: SELF_APP_NAME })
       : null
+  }
+  return null
+}
+
+async function defaultBrowserTarget() {
+  if (process.platform === 'win32') return resolveWindowsDefaultBrowser()
+  if (process.platform === 'darwin') {
+    const helper = accessibilityHelperPath()
+    return helper ? resolveMacDefaultBrowser(helper) : null
   }
   return null
 }
@@ -192,13 +202,15 @@ class AxRailHost {
     if (!backend.available()) {
       return null
     }
-    // A web goal must never drive a native app (a word like 'music' matching the
-    // Music app is a false target) - the browser rail handles websites.
-    if (namesWebsite(goal)) {
-      return null
-    }
     const targeter = nativeAppTargeter()
-    const target = targeter ? await targeter.resolve(goal) : null
+    // Website tasks normally enter Web Use before this point. When Computer Use
+    // receives one, it means the visible OS browser is required. Resolve that
+    // browser directly so website words cannot falsely match another native app.
+    const target = targeter
+      ? namesWebsite(goal)
+        ? await defaultBrowserTarget()
+        : await targeter.resolve(goal)
+      : null
     if (!target) {
       return null
     }
@@ -218,6 +230,7 @@ class AxRailHost {
     initial?: AxSnapshot,
     options: {
       journeyId?: string
+      sessionLimitMs?: number
       recoverWithVision?: (
         checkpoint: TaskRetryCheckpoint,
         continuation: VisionTaskContinuation
@@ -265,12 +278,13 @@ class AxRailHost {
       llm.effectiveContextSize()
     )
     const retrievedFacts = settings.retrieveOlderVisuals ? recentVisualFacts(taskId) : []
-    // The kill switch: Esc halts for good. The overlay's Stop routes to the SAME
-    // guard through the controller session, so both paths end one run.
-    const escapeRegistered = globalShortcut.register('Escape', () => {
-      stopVisionTask(taskId, 'stopped with Esc', 'Stopped with Esc')
-    })
-    const releaseSession = registerVisionSession(taskId, guard, request)
+    const releaseSession = registerVisionSession(
+      taskId,
+      guard,
+      request,
+      undefined,
+      options.sessionLimitMs
+    )
     // The AX rail is model-agnostic and needs no grounding-model notice.
     emitVisionState({
       taskId,
@@ -280,10 +294,7 @@ class AxRailHost {
       status: 'running',
       phase: 'preparing',
       currentStep: 0,
-      currentAction: `Preparing to control ${app}`,
-      ...(escapeRegistered
-        ? {}
-        : { notice: 'Esc is unavailable. Use Stop or Take Over in the task controls.' })
+      currentAction: `Preparing to control ${app}`
     })
     let usedInitial = false
     let liveStep = 0
@@ -300,169 +311,201 @@ class AxRailHost {
         { goal, surface: 'computer', targetLabel: app, signal: request.signal },
         (marker) => emitVisionStep(taskId, marker)
       )
-      let result = await runElementTask(goal, {
-        read: async () => {
-          emitVisionState({
-            taskId,
-            journeyId,
-            goal,
-            status: 'running',
-            phase: 'observing',
-            currentStep: liveStep + 1,
-            currentAction: `Reading ${app}`
-          })
-          let snapshot: AxSnapshot
-          if (!usedInitial && initial) {
-            usedInitial = true
-            snapshot = initial
-          } else {
-            // Read the target app BY NAME each step - stable even though Off Grid AI
-            // (or the overlay) may hold system focus.
-            snapshot = (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
-          }
-          captureNumber += 1
-          observationFrame = await captureAxObservationFrame({
-            taskId,
-            journeyId,
-            goal,
-            currentStep: liveStep + 1,
-            captureNumber,
-            snapshot,
-            signal: request.signal
-          })
-          // The next model/progress update prunes unreferenced task images.
-          // Reference this frame first so the live view can load it while the
-          // model decides and after the task completes.
-          persistAxFrame({ taskId, journeyId, title: goal, frame: observationFrame })
-          return snapshot
-        },
-        actuator: makeElementActuator(actuation, guard, (action) => {
-          emitVisionState({
-            taskId,
-            journeyId,
-            goal,
-            status: 'running',
-            phase: 'acting',
-            currentStep: liveStep,
-            currentAction: action
-          })
-        }),
-        screenshotPath: () =>
-          remoteModel || activeModel?.vision ? observationFrame?.capture.path : undefined,
-        decide: async (prompt, screenshotPath) => {
-          liveStep += 1
-          console.log(`[ax-rail] decision input: image=${Boolean(screenshotPath)}`)
-          emitVisionState({
-            taskId,
-            journeyId,
-            goal,
-            status: 'running',
-            phase: 'thinking',
-            currentStep: liveStep,
-            currentAction: 'Choosing the next action'
-          })
-          const response = await llm.chat(
-            prompt,
-            screenshotPath ? [screenshotPath] : [],
-            60_000,
-            900,
-            {
-              responseFormat: ELEMENT_STEP_FORMAT,
-              enableThinking: true,
-              separateReasoning: true,
+      const runLoop = (): Promise<ElementTaskResult> =>
+        runElementTask(goal, {
+          read: async () => {
+            emitVisionState({
+              taskId,
+              journeyId,
+              goal,
+              status: 'running',
+              phase: 'observing',
+              currentStep: liveStep + 1,
+              currentAction: `Reading ${app}`
+            })
+            let snapshot: AxSnapshot
+            if (!usedInitial && initial) {
+              usedInitial = true
+              snapshot = initial
+            } else {
+              // Read the target app BY NAME each step - stable even though Off Grid AI
+              // (or the overlay) may hold system focus.
+              snapshot = (await axBackend().snapshot(app)) ?? { windowTitle: '', elements: [] }
+            }
+            captureNumber += 1
+            observationFrame = await captureAxObservationFrame({
+              taskId,
+              journeyId,
+              goal,
+              currentStep: liveStep + 1,
+              captureNumber,
+              snapshot,
               signal: request.signal
-            }
-          )
-          const raw = response.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim()
-          console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)
-          return raw
-        },
-        onStep: (note) => {
-          console.log(`[ax-rail] step: ${note}`)
-          emitVisionStep(taskId, note)
-          emitVisionState({
-            taskId,
-            journeyId,
-            goal,
-            status: 'running',
-            phase: 'checking',
-            currentStep: liveStep,
-            currentAction: note
-          })
-        },
-        plan,
-        onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
-        takeGuidance: () => queuedGuidance.splice(0),
-        waitForUser: (why, signal) => waitForVisionUser(taskId, why, signal),
-        signal: request.signal,
-        control: guard,
-        contextTokens,
-        checkpointInterval: settings.checkpointInterval,
-        retrievedFacts,
-        onCheckpoint: () => {
-          // Action-loop checkpoints do not include plan and phase markers.
-          // Keep the canonical trace already stored by emitVisionStep.
-          recordTaskRun({ taskId, kind: 'computer_use', title: goal })
-        },
-        onObservation: (observation) => {
-          persistAxObservation(taskId, goal, { ...observation, frame: observationFrame })
-        }
-      })
-      if (result.recovery === 'vision') {
-        emitVisionStep(taskId, 'Accessibility control stalled. Switching to vision grounding.')
-        emitVisionState({
-          taskId,
-          journeyId,
-          goal,
-          status: 'running',
-          phase: 'observing',
-          currentStep: liveStep,
-          currentAction: 'Capturing the current screen for vision grounding'
-        })
-        if (result.guidance?.length) queuedGuidance.unshift(...result.guidance)
-        if (recoverWithVision) {
-          const task = getTaskRun(taskId)
-          try {
-            const outcome = await recoverWithVision(
+            })
+            // The next model/progress update prunes unreferenced task images.
+            // Reference this frame first so the live view can load it while the
+            // model decides and after the task completes.
+            persistAxFrame({ taskId, journeyId, title: goal, frame: observationFrame })
+            return snapshot
+          },
+          actuator: makeElementActuator(actuation, guard, (action) => {
+            emitVisionState({
+              taskId,
+              journeyId,
+              goal,
+              status: 'running',
+              phase: 'acting',
+              currentStep: liveStep,
+              currentAction: action
+            })
+          }),
+          screenshotPath: () =>
+            remoteModel || activeModel?.vision ? observationFrame?.capture.path : undefined,
+          decide: async (prompt, screenshotPath) => {
+            liveStep += 1
+            console.log(`[ax-rail] decision input: image=${Boolean(screenshotPath)}`)
+            emitVisionState({
+              taskId,
+              journeyId,
+              goal,
+              status: 'running',
+              phase: 'thinking',
+              currentStep: liveStep,
+              currentAction: 'Choosing the next action'
+            })
+            const response = await llm.chat(
+              prompt,
+              screenshotPath ? [screenshotPath] : [],
+              60_000,
+              900,
               {
-                taskId,
-                steps: task?.steps ?? result.steps,
-                ...(task?.stepDetails?.length ? { stepDetails: task.stepDetails } : {}),
-                plan,
-                ...(result.guidance?.length ? { guidance: result.guidance } : {}),
-                summary: result.summary,
-                currentStep: liveStep,
-                currentAction: result.summary
-              },
-              { guard, request, queuedGuidance }
+                responseFormat: ELEMENT_STEP_FORMAT,
+                enableThinking: true,
+                separateReasoning: true,
+                signal: request.signal
+              }
             )
-            const visionSummary = getTaskRun(taskId)?.summary
-            result = outcome.ok
-              ? {
-                  ok: true,
-                  summary: visionSummary || 'Vision grounding completed the task.',
-                  steps: result.steps
+            const raw = response.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim()
+            console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)
+            return raw
+          },
+          ...(settings.modelStrategy === 'decision_plus_specialist' ||
+          settings.modelStrategy === 'decision_plus_reasoning'
+            ? {
+                decideElement: async (prompt: string, snapshot: AxSnapshot) => {
+                  liveStep += 1
+                  emitVisionState({
+                    taskId,
+                    journeyId,
+                    goal,
+                    status: 'running',
+                    phase: 'thinking',
+                    currentStep: liveStep,
+                    currentAction: 'Scoring the next action'
+                  })
+                  const decision = await chooseElementStep(
+                    prompt,
+                    snapshot,
+                    (context, question, options) =>
+                      llm.decideOptions(
+                        context,
+                        question,
+                        options,
+                        request.signal,
+                        llm.activeModelInfo()?.vision
+                          ? observationFrame?.capture.path
+                          : undefined
+                      )
+                  )
+                  console.log(
+                    `[ax-rail] decision confidence=${decision.confidence.toFixed(3)} action=${decision.step.action}`
+                  )
+                  return serializeElementStep(decision.step)
                 }
-              : {
-                  ok: false,
-                  summary: `Computer Use could not make progress. Vision recovery could not continue${outcome.detail ? `: ${outcome.detail}` : '.'}`,
-                  steps: result.steps
-                }
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : 'the vision model failed'
-            result = {
-              ok: false,
-              summary: `Computer Use could not make progress. Vision recovery could not continue: ${reason}`,
-              steps: result.steps
-            }
+              }
+            : {}),
+          onStep: (note) => {
+            console.log(`[ax-rail] step: ${note}`)
+            emitVisionStep(taskId, note)
+            emitVisionState({
+              taskId,
+              journeyId,
+              goal,
+              status: 'running',
+              phase: 'checking',
+              currentStep: liveStep,
+              currentAction: note
+            })
+          },
+          plan,
+          onPhase: (phaseId) => emitVisionStep(taskId, encodeTaskPhase(phaseId)),
+          takeGuidance: () => queuedGuidance.splice(0),
+          waitForUser: (why, signal) => waitForVisionUser(taskId, why, signal),
+          ...(recoverWithVision
+            ? {
+                recoverWithVision: async (recovery: {
+                  summary: string
+                  steps: readonly string[]
+                  guidance: readonly string[]
+                  currentStep: number
+                }) =>
+                  withReasoningModel(async () => {
+                    emitVisionStep(
+                      taskId,
+                      'Accessibility control stalled. Switching to vision for one recovery action.'
+                    )
+                    emitVisionState({
+                      taskId,
+                      journeyId,
+                      goal,
+                      status: 'running',
+                      phase: 'observing',
+                      currentStep: recovery.currentStep,
+                      currentAction: 'Capturing the current screen for vision grounding'
+                    })
+                    if (recovery.guidance.length) queuedGuidance.unshift(...recovery.guidance)
+                    const task = getTaskRun(taskId)
+                    return recoverWithVision(
+                      {
+                        taskId,
+                        steps: task?.steps ?? [...recovery.steps],
+                        ...(task?.stepDetails?.length ? { stepDetails: task.stepDetails } : {}),
+                        plan,
+                        ...(recovery.guidance.length ? { guidance: [...recovery.guidance] } : {}),
+                        summary: recovery.summary,
+                        currentStep: recovery.currentStep,
+                        currentAction: recovery.summary
+                      },
+                      { guard, request, queuedGuidance, returnAfterAction: true }
+                    )
+                  })
+              }
+            : {}),
+          signal: request.signal,
+          control: guard,
+          contextTokens,
+          checkpointInterval: settings.checkpointInterval,
+          retrievedFacts,
+          onCheckpoint: () => {
+            // Action-loop checkpoints do not include plan and phase markers.
+            // Keep the canonical trace already stored by emitVisionStep.
+            recordTaskRun({ taskId, kind: 'computer_use', title: goal })
+          },
+          onObservation: (observation) => {
+            persistAxObservation(taskId, goal, { ...observation, frame: observationFrame })
           }
-        } else {
-          result = {
-            ok: false,
-            summary:
-              'Computer Use could not make progress. Vision recovery is unavailable. Check that a vision model is installed, then retry Computer Use.',
-            steps: result.steps
-          }
+        })
+      let result =
+        settings.modelStrategy === 'decision_plus_specialist' ||
+        settings.modelStrategy === 'decision_plus_reasoning'
+          ? await withDecisionModel(runLoop)
+          : await runLoop()
+      if (result.recovery === 'vision') {
+        result = {
+          ok: false,
+          summary:
+            'Computer Use could not make progress. Vision recovery is unavailable. Check that a vision model is installed, then retry Computer Use.',
+          steps: result.steps
         }
       }
       if (!result.ok && !guard.isHalted) guard.fail(result.summary)
@@ -497,15 +540,17 @@ class AxRailHost {
         journeyId,
         goal,
         status: finalStatus,
-        phase: finalStatus === 'failed' ? 'failed' : 'stopped',
+        phase:
+          finalStatus === 'done' ? 'complete' : finalStatus === 'failed' ? 'failed' : 'stopped',
         currentStep: liveStep,
         currentAction: summary,
         summary
       })
-      return { ok: false, summary, steps: [] }
+      return finalStatus === 'done'
+        ? { ok: true, summary, steps: [] }
+        : { ok: false, summary, steps: [] }
     } finally {
       releaseGuidance()
-      if (escapeRegistered) globalShortcut.unregister('Escape')
       releaseSession()
       hideSupervisorWindow()
     }

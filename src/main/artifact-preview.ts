@@ -9,7 +9,7 @@ export const ARTIFACT_CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
   "script-src 'unsafe-inline' 'unsafe-eval' blob: https://esm.sh",
   "style-src 'unsafe-inline'",
-  'img-src data: blob:',
+  'img-src data: blob: ogcapture:',
   'font-src data:',
   'connect-src https://esm.sh'
 ].join('; ')

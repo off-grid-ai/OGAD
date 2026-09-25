@@ -12,10 +12,16 @@ export interface MemoryGuardInput {
   coreml: boolean
   /** Whether this is the Z-Image 3-model stack. */
   zImageStack: boolean
+  /** Whether this is the Qwen-Image 2.1 multi-file stack. */
+  qwenImageStack?: boolean
   /** Z-Image Qwen3-4B text-encoder size in GB (0 when not a Z-Image stack). */
   zEncoderGb?: number
   /** Z-Image FLUX VAE size in GB (0 when not a Z-Image stack). */
   zVaeGb?: number
+  /** Qwen-Image 2.1 companion file sizes. */
+  qwenEncoderGb?: number
+  qwenVisionGb?: number
+  qwenVaeGb?: number
 }
 
 export interface MemoryGuardResult {
@@ -40,11 +46,16 @@ export function reserveForRam(totalGb: number): number {
  *  footprint (encoder + VAE are all resident at once), so they're counted too;
  *  the whole stack is scaled by 1.4 to cover runtime overhead. */
 export function evaluateMemoryGuard(input: MemoryGuardInput): MemoryGuardResult {
-  const { totalGb, modelSizeGb, coreml, zImageStack } = input
+  const { totalGb, modelSizeGb, coreml, zImageStack, qwenImageStack = false } = input
   const reserveGb = reserveForRam(totalGb)
   const zEncoderGb = zImageStack ? (input.zEncoderGb ?? 0) : 0
   const zVaeGb = zImageStack ? (input.zVaeGb ?? 0) : 0
-  const modelGb = coreml ? 0 : (modelSizeGb + zEncoderGb + zVaeGb) * 1.4
+  const qwenEncoderGb = qwenImageStack ? (input.qwenEncoderGb ?? 0) : 0
+  const qwenVisionGb = qwenImageStack ? (input.qwenVisionGb ?? 0) : 0
+  const qwenVaeGb = qwenImageStack ? (input.qwenVaeGb ?? 0) : 0
+  const modelGb = coreml
+    ? 0
+    : (modelSizeGb + zEncoderGb + zVaeGb + qwenEncoderGb + qwenVisionGb + qwenVaeGb) * 1.4
   const budgetGb = totalGb - reserveGb
   return { modelGb, budgetGb, reserveGb, overBudget: modelGb > budgetGb }
 }

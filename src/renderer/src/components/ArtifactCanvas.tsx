@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
+import { resolveModelName } from '@renderer/lib/model-summary'
+import { capturePathFromUrl } from '../../../shared/ogcapture-url'
 import { SidePanel } from './SidePanel'
 
 // Renders a model-generated artifact (HTML / SVG / Mermaid / React) in a SANDBOXED
@@ -21,6 +23,30 @@ function escapeForHtml(s: string): string {
 
 function revokePreview(url: string): void {
   void window.api.revokeArtifactPreview(url).catch(() => {})
+}
+
+interface ArtifactModelLabel {
+  id?: string
+  name?: string
+  kind?: string
+  primary?: string
+  files?: { name?: string; role?: string }[]
+  remoteServerId?: string
+}
+
+export function artifactSpeechModelName(
+  activeModel: string | null | undefined,
+  models: readonly ArtifactModelLabel[]
+): string {
+  if (!activeModel) return 'Default'
+  const catalogModel = models.find(
+    (model) =>
+      model.id === activeModel ||
+      model.primary === activeModel ||
+      model.files?.some((file) => file.name === activeModel)
+  )
+  if (catalogModel?.name) return catalogModel.name
+  return resolveModelName([], activeModel) ?? activeModel
 }
 
 // npm packages a React artifact imports beyond react/react-dom (loaded from esm.sh).
@@ -53,6 +79,8 @@ export function ArtifactCanvas({
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const [resizing, setResizing] = useState(false)
   const [previewUrl, setPreviewUrl] = useState('')
+  const previewFrameRef = useRef<HTMLIFrameElement | null>(null)
+  const artifactAudioRef = useRef<HTMLAudioElement | null>(null)
   // Holds the active drag's teardown so we can force it on unmount — otherwise
   // closing the canvas mid-drag (e.g. switching chats) leaks the window listeners
   // and keeps firing onResize on a stale setter.
@@ -214,6 +242,138 @@ else { __ogShow('No React component found — define a component named App or a 
     }
   }, [documentHtml])
 
+  useEffect(() => {
+    if (artifact.kind !== 'html' || !artifact.code.includes('__ogComicTts')) return
+    let active = true
+    const sendStatus = (payload: Record<string, unknown>): void => {
+      previewFrameRef.current?.contentWindow?.postMessage(
+        { __ogComicTts: 'status', ...payload },
+        '*'
+      )
+    }
+    const stop = (): void => {
+      artifactAudioRef.current?.pause()
+      artifactAudioRef.current = null
+      sendStatus({ state: 'idle', reason: 'stopped' })
+    }
+    const sendCatalog = async (): Promise<void> => {
+      const [voices, modalities, catalog, installed] = await Promise.all([
+        window.api.ttsVoices(),
+        window.api.getActiveModalities(),
+        window.api.getModelCatalog(),
+        window.api.getInstalledModels()
+      ])
+      const availableModels = (catalog.models as ArtifactModelLabel[])
+        .filter((model) => model.kind === 'voice' || model.kind === 'speech')
+        .filter(
+          (model) =>
+            Boolean(model.remoteServerId) ||
+            (typeof model.id === 'string' && installed.includes(model.id)) ||
+            model.id === modalities.speech ||
+            model.primary === modalities.speech ||
+            model.files?.some((file) => file.name === modalities.speech)
+        )
+        .filter((model): model is ArtifactModelLabel & { id: string } => Boolean(model.id))
+      const activeCatalogModel = availableModels.find(
+        (model) =>
+          model.id === modalities.speech ||
+          model.primary === modalities.speech ||
+          model.files?.some((file) => file.name === modalities.speech)
+      )
+      const models = availableModels.map((model) => ({
+        id: model.id,
+        label: model.name ?? model.id
+      }))
+      if (active) {
+        sendStatus({
+          voices,
+          models,
+          activeModel: activeCatalogModel?.id ?? modalities.speech,
+          model: artifactSpeechModelName(
+            modalities.speech,
+            catalog.models as ArtifactModelLabel[]
+          )
+        })
+      }
+    }
+    const onMessage = (event: MessageEvent): void => {
+      if (event.source !== previewFrameRef.current?.contentWindow) return
+      const message = event.data as
+        | { __ogComicTts?: string; text?: unknown; voice?: unknown; model?: unknown }
+        | undefined
+      if (!message?.__ogComicTts) return
+      if (message.__ogComicTts === 'catalog') {
+        void sendCatalog()
+          .catch(() => {
+            if (active) sendStatus({ state: 'error', message: 'SPEECH IS NOT AVAILABLE' })
+          })
+        return
+      }
+      if (message.__ogComicTts === 'model' && typeof message.model === 'string') {
+        sendStatus({ state: 'model-loading', message: 'SWITCHING MODEL' })
+        void window.api
+          .getModelCatalog()
+          .then((catalog) => {
+            const selected = (catalog.models as ArtifactModelLabel[]).find(
+              (model) => model.id === message.model
+            )
+            if (!selected?.id) throw new Error('Speech model not found')
+            if (selected.remoteServerId) {
+              return window.api.activateModel(selected.id, 'speech')
+            }
+            const primary =
+              selected.primary ??
+              selected.files?.find((file) => file.role === 'primary')?.name ??
+              selected.files?.[0]?.name ??
+              selected.id
+            return window.api.setActiveModalModel('speech', primary)
+          })
+          .then(() => sendCatalog())
+          .then(() => {
+            if (active) sendStatus({ state: 'idle' })
+          })
+          .catch(() => {
+            if (active) sendStatus({ state: 'error', message: 'MODEL SWITCH FAILED' })
+          })
+        return
+      }
+      if (message.__ogComicTts === 'stop') {
+        stop()
+        return
+      }
+      if (message.__ogComicTts !== 'speak' || typeof message.text !== 'string') return
+      stop()
+      sendStatus({ state: 'loading' })
+      void window.api
+        .speak(
+          message.text,
+          typeof message.voice === 'string' ? message.voice : undefined
+        )
+        .then(({ dataUrl }) => {
+          if (!active) return
+          const audio = new Audio(dataUrl)
+          artifactAudioRef.current = audio
+          audio.onended = () => {
+            if (artifactAudioRef.current === audio) artifactAudioRef.current = null
+            sendStatus({ state: 'idle', reason: 'ended' })
+          }
+          audio.onerror = () => sendStatus({ state: 'error', message: 'SPEECH FAILED' })
+          sendStatus({ state: 'playing' })
+          return audio.play()
+        })
+        .catch(() => {
+          if (active) sendStatus({ state: 'error', message: 'SPEECH FAILED' })
+        })
+    }
+    window.addEventListener('message', onMessage)
+    return () => {
+      active = false
+      window.removeEventListener('message', onMessage)
+      artifactAudioRef.current?.pause()
+      artifactAudioRef.current = null
+    }
+  }, [artifact.code, artifact.kind])
+
   const saveBlob = (blob: Blob, filename: string): void => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -272,8 +432,27 @@ else { __ogShow('No React component found — define a component named App or a 
       saveBlob(await zip.generateAsync({ type: 'blob' }), `${slug}.zip`)
       return
     }
-    // html/svg/mermaid → single runnable file.
-    saveBlob(new Blob([documentHtml], { type: 'text/html' }), `${slug}.html`)
+    // html/svg/mermaid → single runnable file. The app-only ogcapture: protocol cannot work in a
+    // normal browser, so embed each allowed local image only in the downloaded copy.
+    let downloadableDocument = documentHtml
+    if (artifact.kind === 'html') {
+      const localUrls = [
+        ...new Set(
+          [...documentHtml.matchAll(/\bsrc=(['"])(ogcapture:\/\/[^'"]+)\1/gi)].map(
+            (match) => match[2]!
+          )
+        )
+      ]
+      const embedded = new Map<string, string>()
+      for (const url of localUrls) {
+        const dataUrl = await window.api.fileDataUrl(capturePathFromUrl(url))
+        if (dataUrl) embedded.set(url, dataUrl)
+      }
+      downloadableDocument = documentHtml.replace(/ogcapture:\/\/[^'"\s<]+/gi, (url) =>
+        embedded.get(url) ?? url
+      )
+    }
+    saveBlob(new Blob([downloadableDocument], { type: 'text/html' }), `${slug}.html`)
   }
 
   return (
@@ -339,6 +518,7 @@ else { __ogShow('No React component found — define a component named App or a 
           </div>
         ) : previewUrl ? (
           <iframe
+            ref={previewFrameRef}
             key={artifact.code.length}
             title="artifact"
             sandbox="allow-scripts"

@@ -8,11 +8,17 @@ import type { Point, VisionAction } from './vision-action'
 import { visionKeysSupported } from './vision-keys'
 import type {
   VisionModelAdapter,
+  VisionContinuationCapsule,
   VisionPolicyDecision,
   VisionPolicyInput,
   VisionPolicyRequest,
   VisionPolicyResponse
 } from './model-adapters/types'
+import {
+  CONTINUATION_CAPSULE_SCHEMA,
+  formatContinuationCapsule,
+  parseContinuationCapsule
+} from './model-adapters/continuation-capsule'
 import { serializeVisionPolicyMessages } from './model-adapters/model-input'
 import {
   prepareVisionGrounding,
@@ -54,12 +60,26 @@ const ACCESSIBILITY_CLICK_TOOL = nativeTool({
     index: { type: 'integer' },
     summary: text,
     visible_evidence: text,
-    expected_effect: text
+    expected_effect: text,
+    continuation: CONTINUATION_CAPSULE_SCHEMA
   },
-  required: ['index', 'summary', 'visible_evidence', 'expected_effect']
+  required: ['index', 'summary', 'visible_evidence', 'expected_effect', 'continuation']
 })
 
 const HYBRID_REASONER_TOOLS = [
+  nativeTool({
+    name: 'navigate_to_url',
+    description:
+      'Open one explicit public HTTP or HTTPS URL directly. Prefer this when the task already supplies the destination URL.',
+    properties: {
+      url: text,
+      summary: text,
+      visible_evidence: text,
+      expected_effect: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
+    },
+    required: ['url', 'summary', 'visible_evidence', 'expected_effect', 'continuation']
+  }),
   nativeTool({
     name: 'ground_pointer_target',
     description:
@@ -80,9 +100,10 @@ const HYBRID_REASONER_TOOLS = [
       target: text,
       summary: text,
       visible_evidence: text,
-      expected_effect: text
+      expected_effect: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
     },
-    required: ['action', 'target', 'summary', 'visible_evidence', 'expected_effect']
+    required: ['action', 'target', 'summary', 'visible_evidence', 'expected_effect', 'continuation']
   }),
   nativeTool({
     name: 'type_text',
@@ -92,9 +113,10 @@ const HYBRID_REASONER_TOOLS = [
       content: text,
       summary: text,
       visible_evidence: text,
-      expected_effect: text
+      expected_effect: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
     },
-    required: ['content', 'summary', 'visible_evidence', 'expected_effect']
+    required: ['content', 'summary', 'visible_evidence', 'expected_effect', 'continuation']
   }),
   nativeTool({
     name: 'press_keys',
@@ -103,9 +125,10 @@ const HYBRID_REASONER_TOOLS = [
       keys: { type: 'array', items: text, minItems: 1 },
       summary: text,
       visible_evidence: text,
-      expected_effect: text
+      expected_effect: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
     },
-    required: ['keys', 'summary', 'visible_evidence', 'expected_effect']
+    required: ['keys', 'summary', 'visible_evidence', 'expected_effect', 'continuation']
   }),
   nativeTool({
     name: 'scroll_screen',
@@ -116,9 +139,10 @@ const HYBRID_REASONER_TOOLS = [
       amount: { type: 'number', minimum: -3000, maximum: 3000 },
       summary: text,
       visible_evidence: text,
-      expected_effect: text
+      expected_effect: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
     },
-    required: ['axis', 'amount', 'summary', 'visible_evidence', 'expected_effect']
+    required: ['axis', 'amount', 'summary', 'visible_evidence', 'expected_effect', 'continuation']
   }),
   nativeTool({
     name: 'wait_for_screen',
@@ -133,8 +157,12 @@ const HYBRID_REASONER_TOOLS = [
   nativeTool({
     name: 'complete_milestone',
     description: 'Report that the current milestone result is visibly complete.',
-    properties: { summary: text, visible_evidence: text },
-    required: ['summary', 'visible_evidence']
+    properties: {
+      summary: text,
+      visible_evidence: text,
+      continuation: CONTINUATION_CAPSULE_SCHEMA
+    },
+    required: ['summary', 'visible_evidence', 'continuation']
   }),
   nativeTool({
     name: 'rethink',
@@ -159,6 +187,7 @@ const HYBRID_REASONER_SYSTEM_PROMPT = [
   'Inspect the supplied screen and choose exactly one task transition.',
   'You own task direction, milestone completion, replanning, and user handoff.',
   'Choose the action verb, visible target, and expected effect. Do not choose coordinates.',
+  'When the task supplies a public HTTP or HTTPS URL, use navigate_to_url instead of clicking the address bar, typing the URL, and pressing Return.',
   'Use click_accessibility_element only when its label and listed position identify the exact target.',
   'For a pointer action, call ground_pointer_target. The grounding specialist returns only its point.',
   'Type, key, scroll, and wait actions bypass the grounding specialist.',
@@ -197,6 +226,7 @@ interface ReasonerDelegation {
   summary: string
   visibleEvidence: string
   expectedEffect: string
+  continuation?: VisionContinuationCapsule
 }
 
 type ReasonerOutcome =
@@ -214,6 +244,19 @@ function normalizedText(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const textValue = value.replace(/\s+/g, ' ').trim()
   return textValue || null
+}
+
+function fieldsWithContinuation(
+  value: Record<string, unknown>,
+  fields: readonly string[]
+): readonly string[] {
+  return Object.hasOwn(value, 'continuation') ? [...fields, 'continuation'] : fields
+}
+
+function optionalContinuation(value: Record<string, unknown>) {
+  return Object.hasOwn(value, 'continuation')
+    ? parseContinuationCapsule(value.continuation)
+    : undefined
 }
 
 function parseArguments(value: string): Record<string, unknown> | null {
@@ -242,7 +285,8 @@ function commonEvidence(
 function actionDecision(
   action: VisionAction,
   common: { summary: string; visibleEvidence: string },
-  expectedEffect: string
+  expectedEffect: string,
+  continuation?: VisionContinuationCapsule
 ): ReasonerOutcome {
   return {
     decision: {
@@ -250,7 +294,8 @@ function actionDecision(
       actionText: common.summary,
       actions: [action],
       expectedEffect,
-      decisionRationale: common.visibleEvidence
+      decisionRationale: common.visibleEvidence,
+      ...(continuation ? { continuation } : {})
     }
   }
 }
@@ -268,102 +313,147 @@ function reasonerOutcome(
   const value = parseArguments(call.arguments)
   if (!value) return { error: `${call.name} arguments were not a JSON object` }
   if (call.name === 'click_accessibility_element') {
-    const common = commonEvidence(value, [
-      'index',
-      'summary',
-      'visible_evidence',
-      'expected_effect'
-    ])
+    const common = commonEvidence(
+      value,
+      fieldsWithContinuation(value, ['index', 'summary', 'visible_evidence', 'expected_effect'])
+    )
     const index = value.index
     const expectedEffect = normalizedText(value.expected_effect)
+    const continuation = optionalContinuation(value)
     const element =
       typeof index === 'number' && Number.isInteger(index)
         ? semanticElements.find((candidate) => candidate.index === index)
         : undefined
-    return common && element && expectedEffect
+    return common && element && expectedEffect && continuation !== null
       ? {
           decision: {
             kind: 'actions',
             actionText: common.summary,
             actions: [{ type: 'click', point: element.point }],
             expectedEffect,
-            decisionRationale: common.visibleEvidence
+            decisionRationale: common.visibleEvidence,
+            ...(continuation ? { continuation } : {})
           }
         }
       : { error: 'click_accessibility_element arguments were invalid' }
   }
+  if (call.name === 'navigate_to_url') {
+    const common = commonEvidence(
+      value,
+      fieldsWithContinuation(value, ['url', 'summary', 'visible_evidence', 'expected_effect'])
+    )
+    const rawUrl = normalizedText(value.url)
+    const expectedEffect = normalizedText(value.expected_effect)
+    const continuation = optionalContinuation(value)
+    if (!common || !rawUrl || !expectedEffect || continuation === null) {
+      return { error: 'navigate_to_url arguments were invalid' }
+    }
+    try {
+      const url = new URL(rawUrl)
+      return url.protocol === 'http:' || url.protocol === 'https:'
+        ? actionDecision(
+            { type: 'navigate', url: url.toString() },
+            common,
+            expectedEffect,
+            continuation
+          )
+        : { error: 'navigate_to_url requires an HTTP or HTTPS URL' }
+    } catch {
+      return { error: 'navigate_to_url requires a valid URL' }
+    }
+  }
   if (call.name === 'ground_pointer_target') {
-    const common = commonEvidence(value, [
-      'action',
-      'target',
-      'summary',
-      'visible_evidence',
-      'expected_effect'
-    ])
+    const common = commonEvidence(
+      value,
+      fieldsWithContinuation(value, [
+        'action',
+        'target',
+        'summary',
+        'visible_evidence',
+        'expected_effect'
+      ])
+    )
     const action = value.action
     const target = normalizedText(value.target)
     const expectedEffect = normalizedText(value.expected_effect)
+    const continuation = optionalContinuation(value)
     return common &&
       typeof action === 'string' &&
       GROUNDED_POINTER_ACTIONS.has(action as GroundedPointerAction) &&
       target &&
-      expectedEffect
+      expectedEffect &&
+      continuation !== null
       ? {
           delegation: {
             action: action as GroundedPointerAction,
             target,
             summary: common.summary,
             visibleEvidence: common.visibleEvidence,
-            expectedEffect
+            expectedEffect,
+            ...(continuation ? { continuation } : {})
           }
         }
       : { error: 'ground_pointer_target arguments were invalid' }
   }
   if (call.name === 'type_text') {
-    const common = commonEvidence(value, [
-      'content',
-      'summary',
-      'visible_evidence',
-      'expected_effect'
-    ])
+    const common = commonEvidence(
+      value,
+      fieldsWithContinuation(value, ['content', 'summary', 'visible_evidence', 'expected_effect'])
+    )
     const content = typeof value.content === 'string' && value.content.trim() ? value.content : null
     const expectedEffect = normalizedText(value.expected_effect)
-    return common && content && expectedEffect
-      ? actionDecision({ type: 'type', content }, common, expectedEffect)
+    const continuation = optionalContinuation(value)
+    return common && content && expectedEffect && continuation !== null
+      ? actionDecision({ type: 'type', content }, common, expectedEffect, continuation)
       : { error: 'type_text arguments were invalid' }
   }
   if (call.name === 'press_keys') {
-    const common = commonEvidence(value, ['keys', 'summary', 'visible_evidence', 'expected_effect'])
+    const common = commonEvidence(
+      value,
+      fieldsWithContinuation(value, ['keys', 'summary', 'visible_evidence', 'expected_effect'])
+    )
     const keys = Array.isArray(value.keys)
       ? value.keys.map(normalizedText).filter((key): key is string => key !== null)
       : []
     const expectedEffect = normalizedText(value.expected_effect)
+    const continuation = optionalContinuation(value)
     return common &&
       keys.length === (Array.isArray(value.keys) ? value.keys.length : -1) &&
       visionKeysSupported(keys) &&
-      expectedEffect
-      ? actionDecision({ type: 'hotkey', keys: keys.join(' ') }, common, expectedEffect)
+      expectedEffect &&
+      continuation !== null
+      ? actionDecision(
+          { type: 'hotkey', keys: keys.join(' ') },
+          common,
+          expectedEffect,
+          continuation
+        )
       : { error: 'press_keys arguments were invalid' }
   }
   if (call.name === 'scroll_screen') {
-    const common = commonEvidence(value, [
-      'axis',
-      'amount',
-      'summary',
-      'visible_evidence',
-      'expected_effect'
-    ])
+    const common = commonEvidence(
+      value,
+      fieldsWithContinuation(value, [
+        'axis',
+        'amount',
+        'summary',
+        'visible_evidence',
+        'expected_effect'
+      ])
+    )
     const axis = value.axis
     const amount = value.amount
     const expectedEffect = normalizedText(value.expected_effect)
+    const continuation = optionalContinuation(value)
     return common &&
       (axis === 'vertical' || axis === 'horizontal') &&
       typeof amount === 'number' &&
       Number.isFinite(amount) &&
       amount !== 0 &&
       Math.abs(amount) <= 3000 &&
-      expectedEffect
-      ? actionDecision({ type: 'scroll_by', axis, amount }, common, expectedEffect)
+      expectedEffect &&
+      continuation !== null
+      ? actionDecision({ type: 'scroll_by', axis, amount }, common, expectedEffect, continuation)
       : { error: 'scroll_screen arguments were invalid' }
   }
   if (call.name === 'wait_for_screen') {
@@ -385,14 +475,19 @@ function reasonerOutcome(
       : { error: 'wait_for_screen arguments were invalid' }
   }
   if (call.name === 'complete_milestone') {
-    const common = commonEvidence(value, ['summary', 'visible_evidence'])
-    return common
+    const common = commonEvidence(
+      value,
+      fieldsWithContinuation(value, ['summary', 'visible_evidence'])
+    )
+    const continuation = optionalContinuation(value)
+    return common && continuation !== null
       ? {
           decision: {
             kind: 'phase_complete',
             actionText: 'Milestone complete',
             summary: common.summary,
-            decisionRationale: common.visibleEvidence
+            decisionRationale: common.visibleEvidence,
+            ...(continuation ? { continuation } : {})
           }
         }
       : { error: 'complete_milestone arguments were invalid' }
@@ -436,6 +531,8 @@ function taskContext(input: VisionPolicyInput, guidance: readonly string[]): str
   return [
     `Task brief:\n${input.goal}`,
     input.currentMilestone ? `Current milestone:\n${input.currentMilestone}` : '',
+    formatContinuationCapsule(input.continuation),
+    `Keep continuation.done to at most ${Math.max(0, input.continuationCapacity ?? 0)} recent confirmed outcomes. Replace the capsule; do not append a transcript.`,
     input.verifiedActions?.length
       ? `Actions sent to the screen. Confirm results from the current screenshot:\n${input.verifiedActions.slice(-12).join('\n')}`
       : 'Actions sent to the screen:\nNone yet.',
@@ -615,7 +712,8 @@ export function createHybridVisionGrounder(
           actionText: outcome.delegation.summary,
           actions: [pointerAction(outcome.delegation.action, point)],
           expectedEffect: outcome.delegation.expectedEffect,
-          decisionRationale: outcome.delegation.visibleEvidence
+          decisionRationale: outcome.delegation.visibleEvidence,
+          continuation: outcome.delegation.continuation
         }
       }
     })

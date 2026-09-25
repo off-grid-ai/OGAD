@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-const src = readFileSync(join(__dirname, '../MemoryChat.tsx'), 'utf8')
+const src = readFileSync(join(__dirname, '../MemoryChat/index.tsx'), 'utf8')
 const paddingBlock = src.slice(
   src.indexOf('paddingRight: canvasArtifact'),
   src.indexOf('paddingRight: canvasArtifact') + 300

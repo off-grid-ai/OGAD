@@ -1656,11 +1656,16 @@ export function setupIPC() {
   ipcMain.handle('models:search', (_, query: string, kind?: string) =>
     import('./models-manager').then((m) => m.searchModels(query, kind))
   )
+  ipcMain.handle('models:files', (_, modelId: string) =>
+    import('@offgrid/models').then((m) => m.getModelFiles(modelId))
+  )
 
-  ipcMain.handle('models:download', async (_, modelId: string) => {
+  ipcMain.handle('models:download', async (_, modelId: string, fileName?: string) => {
     const { downloadModel } = await import('./models-manager')
-    return downloadModel(modelId, (p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p))
+    return downloadModel(
+      modelId,
+      (p) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('model:download-progress', p)),
+      fileName
     )
   })
   ipcMain.handle('models:cancel-download', (_evt, modelId: string) =>
@@ -1977,6 +1982,7 @@ export function setupIPC() {
       query: string,
       history?: { role: string; content: string }[],
       opts?: {
+        assistantOnly?: boolean
         connectors?: boolean
         conversationId?: string
         projectId?: string
@@ -2167,29 +2173,22 @@ export function setupIPC() {
     const { processUpload } = await import('./files')
     return processUpload(name, bytes)
   })
-  // An on-disk uploaded file as a data URL, so the chat viewer can render a PDF
-  // natively (Chromium's built-in viewer) instead of dumping parsed text.
+  // An allowed local media file as a data URL. The chat viewer uses this for uploaded PDFs, and
+  // artifact download uses it to make exported HTML images work outside the app. Admission matches
+  // ogcapture: so this renderer-reachable handler cannot read arbitrary local files.
   ipcMain.handle('files:data-url', async (_e, p?: string) => {
     try {
       const fs = await import('fs')
       const path = await import('path')
       const { app } = await import('electron')
-      // Only ever serve files inside the app's uploads dir — this handler is
-      // renderer-reachable, so reading an arbitrary path would be a file-read /
-      // exfiltration primitive. Resolve + boundary-check before touching disk.
-      const root = path.resolve(app.getPath('userData'), 'uploads')
+      const { localMediaRoots } = await import('./media-roots')
+      const { isPathAllowed } = await import('./media-range')
+      const { mimeForExt } = await import('./mime')
       const resolved = path.resolve(p ?? '')
-      if (resolved !== root && !resolved.startsWith(root + path.sep)) return null
+      if (!isPathAllowed(resolved, localMediaRoots(app.getPath('userData')))) return null
       const buf = await fs.promises.readFile(resolved)
       const ext = (resolved.split('.').pop() || '').toLowerCase()
-      const mime =
-        ext === 'pdf'
-          ? 'application/pdf'
-          : ext === 'png'
-            ? 'image/png'
-            : /^jpe?g$/.test(ext)
-              ? 'image/jpeg'
-              : 'application/octet-stream'
+      const mime = mimeForExt(ext)
       return `data:${mime};base64,${buf.toString('base64')}`
     } catch {
       return null

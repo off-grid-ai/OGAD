@@ -104,8 +104,8 @@ func capture() async throws -> CGImage {
             userInfo: [NSLocalizedDescriptionKey: "display \(displayID) is not available"]
         )
     }
-    // Hidden windows are not present in `onScreenWindowsOnly`. Exclude every visible Off Grid AI
-    // window so a task never treats its own task view as the application it should control.
+    // Exclude only the supervisor window requested by the caller. Other visible
+    // windows must remain in the frame because they can intercept a click.
     let excludedWindows = content.windows.filter { excludedWindowIDs.contains($0.windowID) }
     let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
     let configuration = SCStreamConfiguration()

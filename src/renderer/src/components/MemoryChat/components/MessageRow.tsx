@@ -18,6 +18,7 @@ import type {
   StoredMessageAttachment
 } from '../types'
 import {
+  activityLabel,
   assistantWorkIsSettled,
   isPromptEnhancementMessage,
   isSupportingMessage,
@@ -223,6 +224,7 @@ function VoiceMessageRow({
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
+          thinkingHasContent={Boolean(message.reasoning?.trim())}
           footer={
             workFooter ??
             (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
@@ -273,6 +275,7 @@ function VoiceMessageRow({
         <ChatToolRows
           tools={message.toolCalls}
           thinking={thinking}
+          thinkingHasContent={Boolean(message.reasoning?.trim())}
           footer={
             workFooter ??
             (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
@@ -415,7 +418,7 @@ function MessageBubble({
           onCancel={actions.cancelEdit}
           onSave={actions.saveEdit}
         />
-      ) : (
+      ) : artifact ? null : (
         <MessageMarkdown message={message} navigation={navigation} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
@@ -458,6 +461,9 @@ function StandardMessageRow({
   const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const speechState = speechControlState(message.id, state.speakingId, state.speakLoadingId)
   const speechError = state.speakError?.id === message.id ? state.speakError.message : undefined
+  const preparingToolCalls =
+    (message.activity as { kind?: unknown } | undefined)?.kind === 'preparing_tool_calls'
+  const liveActivity = activityLabel(message.activity)
   const hasTimelineThinking = message.timeline?.some((entry) => entry.kind === 'thinking') ?? false
   const shouldShowThinking =
     message.role === 'assistant' &&
@@ -484,12 +490,26 @@ function StandardMessageRow({
       <ChatToolRows
         tools={message.toolCalls}
         thinking={thinking}
+        thinkingHasContent={Boolean(message.reasoning?.trim())}
         footer={
           workFooter ??
-          (message.streaming && hasLiveStreamActivity(message) ? <LoadingDots /> : undefined)
+          (message.streaming && hasLiveStreamActivity(message) ? (
+            liveActivity ? (
+              message.toolCalls?.length ? (
+                <LoadingDots size="small" />
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] text-neutral-500">
+                  {liveActivity}
+                  <LoadingDots size="small" />
+                </span>
+              )
+            ) : (
+              <LoadingDots />
+            )
+          ) : undefined)
         }
         timeline={message.timeline}
-        thinkingLive={Boolean(message.streaming && !message.content)}
+        thinkingLive={Boolean(message.streaming && !message.content && !preparingToolCalls)}
         memorySources={memorySources}
         liveTask={liveTask}
         live={Boolean(message.streaming || continuation)}

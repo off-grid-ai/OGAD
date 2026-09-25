@@ -123,8 +123,8 @@ jobs:
         # as-is, so they MUST be real files — a pointer stub spawns as ENOEXEC at runtime.
         # llama/ + whisper/ are excluded because build-llama.sh / build-whisper-cli.sh
         # recompile them from source in place later in this job, so pulling the committed
-        # copies is wasted bandwidth. The packaged-helper probe (ffmpeg/sd/whisper/llama)
-        # fails the release if any shipped binary is missing, so a bad exclude can't ship.
+        # copies is wasted bandwidth. Artifact verification still checks the signed
+        # package before publication.
         run: git lfs pull --exclude="resources/bin/llama,resources/bin/whisper"
       # Rebuild the chat engine from source with a PINNED macOS deployment target.
       # The committed/LFS llama-server is minos 26 (built on a macOS-26 toolchain),
@@ -136,7 +136,9 @@ jobs:
         run: |
           command -v cmake >/dev/null || brew install cmake
           MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
+          LLAMA_VARIANT=prism MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
           otool -l resources/bin/llama/llama-server | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled engine minos="$2; exit}'
+          otool -l resources/bin/llama-prism/llama-server | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled Prism engine minos="$2; exit}'
       # Rebuild the one-shot Whisper CLI instead of trusting the committed LFS
       # payload. The production script disables OpenMP/BLAS auto-discovery and
       # rejects Homebrew paths, missing @rpath names, symlinks, and a newer minos.
@@ -218,7 +220,7 @@ jobs:
           cache: 'npm'
       # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
       # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
-      # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
+      # bundle then fails on imports from it. `ci.yml` has done this since
       # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
       #
       # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
@@ -257,7 +259,7 @@ jobs:
           npm --prefix ../shared/packages/sync run build
           # @offgrid/use (the durable action engine) is consumed the same way as sync
           # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ types before the typecheck runs.
+          # its dist/ output before the app bundle runs.
           npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
@@ -287,8 +289,8 @@ jobs:
       # latest-mac.yml (electron-builder emits no beta-mac.yml without publish.channel).
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
-      - name: Build (typecheck + bundle)
-        run: npm run build
+      - name: Stage native files and bundle
+        run: node scripts/stage-native.mjs && npx electron-vite build
       # Same approach as mobile (.github/workflows/release.yml): collect the commits
       # since the previous release tag into release-notes.md. Generated BEFORE publish
       # so the tag electron-builder is about to create (v$VERSION) is not yet the
@@ -311,6 +313,7 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ needs.version.outputs.version }}
           OFFGRID_REQUIRE_RELEASE_TRUST: '1'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -323,9 +326,21 @@ jobs:
           npx electron-builder --mac \
             -c.dmg.artifactName='OffGrid-${version}.${ext}' \
             --publish never
-      - name: Prove packaged TTS resolves and synthesizes headlessly
-        run: |
-          APP="$(find dist -mindepth 2 -maxdepth 2 -type d -name 'Off Grid AI Desktop.app' -print -quit)"
+          # electron-builder notarizes the app before it creates the DMG. Submit the
+          # completed, signed DMG too, then staple its ticket for offline Gatekeeper.
+          DMG="dist/OffGrid-$VERSION.dmg"
+          xcrun notarytool submit "$DMG" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple -v "$DMG"
+          codesign --verify --strict --verbose=4 "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
+          # Stapling changes the DMG bytes. Refresh the blockmap and update feed before upload.
+          node scripts/refresh-mac-dmg-update-info.mjs "$DMG" dist/latest-mac.yml
+          APP="$(find dist -maxdepth 2 -type d -name 'Off Grid AI Desktop.app' -print -quit)"
           test -n "$APP"
           node scripts/probe-packaged-tts.mjs "$APP" --synthesize
       # Internal demo build: hand the signed+notarized DMG back as a run artifact and stop
@@ -493,7 +508,7 @@ jobs:
           python-version: '3.12'
       # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
       # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
-      # typecheck inside `npm run build` then fails on every import of it. `ci.yml` has done this since
+      # bundle then fails on imports from it. `ci.yml` has done this since
       # the sync work landed; this workflow did not, which is why no release has built since 2026-07-30.
       #
       # The release ref decides the shared ref: a release from `main` takes shared `main`, and a release
@@ -535,7 +550,7 @@ jobs:
           npm --prefix ../shared/packages/sync run build
           # @offgrid/use (the durable action engine) is consumed the same way as sync
           # and needs the same explicit build - file-dep prepare alone does not emit
-          # its dist/ types before the typecheck runs.
+          # its dist/ output before the app bundle runs.
           npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
@@ -566,8 +581,8 @@ jobs:
         run: ./scripts/fetch-win-binaries.ps1
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
-      - name: Build (typecheck + bundle)
-        run: npm run build
+      - name: Stage native files and bundle
+        run: node scripts/stage-native.mjs && npx electron-vite build
       - name: Package & publish (NSIS installer + auto-update metadata)
         shell: bash
         env:

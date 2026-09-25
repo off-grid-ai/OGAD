@@ -5,6 +5,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from '@renderer/components/ui/collapsible'
+import { resolveModelName } from '@renderer/lib/model-summary'
 import { formatGenerationMetrics, type GenerationMetrics } from '../../../../../shared/generation-metrics'
 import type { ResponseCutoffContract } from '../../../../../shared/ipc-contracts'
 
@@ -18,7 +19,10 @@ function GenerationMetricsRowComponent({
   onOpenChange: (open: boolean) => void
 }>): React.JSX.Element | null {
   console.log('MemoryChat GenerationMetricsRow rendered')
-  const parts = metrics ? formatGenerationMetrics(metrics) : []
+  const displayMetrics = metrics?.modelName
+    ? { ...metrics, modelName: resolveModelName([], metrics.modelName) ?? metrics.modelName }
+    : metrics
+  const parts = displayMetrics ? formatGenerationMetrics(displayMetrics) : []
   const contextWindowTokens = metrics?.contextWindowTokens
   const promptTokens = metrics?.promptTokens ?? metrics?.estimatedPromptTokens
   const estimated =

@@ -144,10 +144,15 @@ describe('streamCompletion', () => {
       res.write(sse({ tool_calls: [{ index: 0, function: { arguments: '"fox"}' } }] }))
       res.end()
     })
-    const out = await streamCompletion(port, '{}', () => {}, { timeoutMs: 5000 })
+    const starts: Array<string | undefined> = []
+    const out = await streamCompletion(port, '{}', () => {}, {
+      timeoutMs: 5000,
+      onToolCallStart: (name) => starts.push(name)
+    })
     expect(out.toolCalls).toHaveLength(1)
     expect(out.toolCalls[0]!.name).toBe('search_memory')
     expect(out.toolCalls[0]!.arguments).toBe('{"q":"fox"}') // reassembled across deltas
+    expect(starts).toEqual(['search_memory'])
   })
 
   it('rejects on a non-200 status', async () => {

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
-import type { NativeImage, WebContentsView } from 'electron'
+import type { WebContentsView } from 'electron'
 import {
   SCREENSHOT_MAX_EDGE,
   SCREENSHOT_RESIZE_KERNEL,
@@ -79,7 +79,7 @@ export async function normalizeBrowserModelFrame(
  * Keep that transient wait inside the capture boundary so it does not spend
  * model steps or create false rejected observations. */
 interface CapturedBrowserFrame {
-  image: NativeImage
+  sourceSize: { width: number; height: number }
   /** The frame encoded once; capture() must reuse it instead of re-encoding. */
   png: Buffer
   viewport: { width: number; height: number }
@@ -134,12 +134,23 @@ async function capturePaintedBrowserFrame(
       continue
     }
     view.webContents.invalidate()
-    const image = await view.webContents.capturePage(undefined, {
-      stayHidden: true,
-      stayAwake: true
-    })
+    let png: Buffer
+    let sourceSize: { width: number; height: number }
+    try {
+      const image = await view.webContents.capturePage(undefined, {
+        stayHidden: true,
+        stayAwake: true
+      })
+      png = image.toPNG()
+      sourceSize = image.getSize()
+    } catch (error) {
+      if (!/current display surface not available for capture/i.test(String(error))) throw error
+      png = await driver.captureScreenshot()
+      const metadata = await sharp(png).metadata()
+      sourceSize = { width: metadata.width, height: metadata.height }
+    }
     const viewportAfter = await driver.viewportSize()
-    if (image.isEmpty()) {
+    if (!png.length) {
       blocker = 'capturePage returned no pixels at all (the native view is hidden or has no bounds)'
     } else if (!stableWebUseViewport(viewportBefore, viewportAfter)) {
       blocker =
@@ -147,9 +158,8 @@ async function capturePaintedBrowserFrame(
         `then ${viewportAfter.width}x${viewportAfter.height}`
     } else {
       sawPixels = true
-      const png = image.toPNG()
       if (await browserPageHasVisualContent(png)) {
-        return { image, png, viewport: viewportBefore }
+        return { sourceSize, png, viewport: viewportBefore }
       }
       blocker = 'the captured frame had pixels but no visual content (the page had not painted)'
     }
@@ -291,9 +301,9 @@ export function createBrowserVisionScreen(input: BrowserVisionScreenInput): Visi
             path: savedPath,
             viewport,
             geometry: {
-              sourceBounds: { x: 0, y: 0, ...captured.image.getSize() },
+              sourceBounds: { x: 0, y: 0, ...captured.sourceSize },
               encodedSize: modelViewport,
-              scale: modelViewport.width / captured.image.getSize().width
+              scale: modelViewport.width / captured.sourceSize.width
             }
           }
         }

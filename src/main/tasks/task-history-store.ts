@@ -525,6 +525,22 @@ export class TaskHistoryStore {
     })
   }
 
+  remove(taskIds: readonly string[]): TaskRunSnapshot[] {
+    const ids = [...new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean))]
+    if (!ids.length) return []
+    const placeholders = ids.map(() => '?').join(',')
+    const removed = (
+      this.db
+        .prepare(`SELECT * FROM task_run_history WHERE task_id IN (${placeholders})`)
+        .all(...ids) as TaskRunRow[]
+    ).flatMap((row) => {
+      const snapshot = rowToSnapshot(row)
+      return snapshot ? [snapshot] : []
+    })
+    this.db.prepare(`DELETE FROM task_run_history WHERE task_id IN (${placeholders})`).run(...ids)
+    return removed
+  }
+
   /** Add one remote visual audit step without changing the execution owner's task timestamps. */
   materializeVisualStep(
     taskId: string,

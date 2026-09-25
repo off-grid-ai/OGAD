@@ -14,6 +14,8 @@ import path from 'path'
 // getDB() opens memories.db inside it. safeStorage is reported unavailable so the
 // DB is created as plaintext (no Keychain in CI) - the code path we can exercise.
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-db-it-'))
+const previousDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = TMP_DIR
 
 vi.mock('electron', () => ({
   app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },
@@ -36,6 +38,8 @@ function resolveEntity(name: string, type?: string): number {
 }
 
 afterAll(() => {
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
   try {
     fs.rmSync(TMP_DIR, { recursive: true, force: true })
   } catch {

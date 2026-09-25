@@ -191,6 +191,9 @@ export class ChatBoundary {
     },
     vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => { }),
+    onImageGenJobState: vi.fn(() => () => { }),
+    onImageGenConversationUpdated: vi.fn(() => () => { }),
+    imageGenJobStatus: vi.fn(async () => ({ id: null, phase: 'idle' as const, conversationId: null, projectId: null, stage: null, enhancedPrompt: '', progress: null, outputPath: null, error: null, startedAt: null, finishedAt: null })),
     onRagConversationsChanged: vi.fn(
       (callback: (change: { conversationId: string; projectId?: string | null }) => void) => {
         this.conversationChangedCallback = callback
@@ -280,9 +283,19 @@ export class ChatBoundary {
       }
     ),
     toolChat: vi.fn(
-      async (_query: string, _history: unknown[], options: Record<string, unknown>) => {
-        this.toolQueries.push({ query: _query, options })
-        return { answer: 'Started the requested run.', unified: [], toolCalls: [] }
+      async (query: string, _history: unknown[], options: Record<string, unknown>) => {
+        const turn = deferred<RagResult>()
+        this.toolQueries.push({ query, options })
+        this.calls.push({
+          query,
+          projectId: typeof options.projectId === 'string' ? options.projectId : null,
+          conversationId: String(options.conversationId),
+          noMemory: !options.projectId && !options.allMemory,
+          streamId: String(options.streamId),
+          thinking: !!options.thinking,
+          turn
+        })
+        return turn.promise
       }
     )
   }
@@ -320,6 +333,15 @@ export class ChatBoundary {
       streamId: call.streamId,
       type: 'step',
       step: { kind: 'running_tool', name }
+    })
+  }
+
+  emitPreparingToolCalls(callIndex: number, name: string): void {
+    const call = this.calls[callIndex]!
+    this.streamCallback?.({
+      streamId: call.streamId,
+      type: 'step',
+      step: { kind: 'preparing_tool_calls', name }
     })
   }
 

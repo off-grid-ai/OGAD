@@ -98,3 +98,17 @@ export function rankConnectorTools(query: string, tools: unknown[], keepFirst: n
   scored.sort((a, b) => b.score - a.score || a.i - b.i)
   return [...builtins, ...scored.map((s) => s.tool)]
 }
+
+/** Offline fallback for semantic selection. Keep only tools with a direct term
+ *  match. This fails closed instead of sending the full catalog when MiniLM is
+ *  unavailable. */
+export function selectRelevantTools(query: string, tools: unknown[]): unknown[] {
+  const qt = terms(query)
+  if (!qt.length) return []
+  return tools
+    .map((tool, index) => ({ tool, index, score: scoreTool(qt, tool) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 6)
+    .map((candidate) => candidate.tool)
+}

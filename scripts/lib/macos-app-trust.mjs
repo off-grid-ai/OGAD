@@ -14,6 +14,7 @@ export const OFFGRID_APPLE_TEAM_ID = '84V6KCAC49'
 export const CRITICAL_SIGNED_CODE = Object.freeze([
   'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework',
   'Contents/Resources/bin/llama/llama-server',
+  'Contents/Resources/bin/llama-prism/llama-server',
   'Contents/Resources/bin/meeting-recorder',
   'Contents/Resources/bin/computer-use-capture',
   'Contents/Resources/bin/dictation-hotkey'
@@ -151,6 +152,7 @@ export async function verifyReleaseAppTrust(bundle, expectedTeamId, boundary = s
     if (code === bundle) appDetails = details
   }
   await boundary.execFile('/usr/bin/xcrun', ['stapler', 'validate', bundle])
+  await boundary.execFile('/usr/bin/syspolicy_check', ['distribution', bundle])
   const gatekeeper = await boundary.execFile('/usr/sbin/spctl', [
     '--assess',
     '--type',

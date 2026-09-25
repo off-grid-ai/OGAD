@@ -54,7 +54,7 @@ import { VisionGuard } from '../vision/vision-guard'
 
 type RendererBridge = {
   vision: {
-    control(command: 'stop', taskId: string): Promise<boolean>
+    control(command: 'stop' | 'resume', taskId: string): Promise<boolean>
   }
 }
 
@@ -163,5 +163,78 @@ describe('Computer Use supervisor control journey', () => {
       channel: 'vision:task-state',
       payload: { taskId, status: 'stopped' }
     })
+  })
+
+  it('completes successfully when the enforced session limit expires', async () => {
+    vi.useFakeTimers()
+    try {
+      const records: Parameters<VisionControllerPersistence['record']>[0][] = []
+      const owner = new VisionController({
+        appendStep: () => undefined,
+        record: (update) => records.push(update),
+        executionDevice: () => ({ id: 'studio-mac', name: 'Studio Mac' })
+      })
+      const taskId = 'computer-use-session-limit'
+      const guard = new VisionGuard({ taskId, kind: 'computer_use' })
+      const request = new AbortController()
+      owner.registerSession(taskId, guard, request, undefined, 60_000)
+      owner.emitState({
+        taskId,
+        goal: 'Train the feed for one minute',
+        status: 'running',
+        phase: 'acting',
+        currentAction: 'Reviewing relevant posts'
+      })
+
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(request.signal.aborted).toBe(true)
+      expect(owner.current().state).toMatchObject({
+        taskId,
+        status: 'done',
+        phase: 'complete',
+        currentAction: 'Session limit reached after 1 minute.'
+      })
+      expect(records.at(-1)).toMatchObject({ taskId, status: 'done', phase: 'complete' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops a live local projection after its controller session has ended', async () => {
+    const records: Parameters<VisionControllerPersistence['record']>[0][] = []
+    const owner = new VisionController({
+      appendStep: () => undefined,
+      record: (update) => records.push(update),
+      executionDevice: () => ({ id: 'studio-mac', name: 'Studio Mac' })
+    })
+    registerVisionIpc(owner)
+    const control = electron.handlers.get('vision:control')
+    const taskId = 'orphaned-live-computer-use'
+    owner.emitState({
+      taskId,
+      goal: 'Train the feed',
+      status: 'running',
+      phase: 'checking',
+      currentAction: 'Checking the result'
+    })
+
+    expect(await control?.({}, 'stop', taskId)).toBe(true)
+    expect(owner.current().state).toMatchObject({
+      taskId,
+      status: 'stopped',
+      phase: 'stopped',
+      currentAction: 'Stopped from the supervisor'
+    })
+    expect(records.at(-1)).toMatchObject({ taskId, status: 'stopped', phase: 'stopped' })
+
+    owner.emitState({
+      taskId,
+      goal: 'Train the feed',
+      status: 'running',
+      phase: 'acting',
+      currentAction: 'Late action'
+    })
+    expect(owner.current().state?.status).toBe('stopped')
   })
 })

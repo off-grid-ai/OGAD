@@ -1,15 +1,19 @@
 {
   "name": "off-grid-ai",
   "productName": "Off Grid AI Desktop",
-  "version": "0.0.44",
+  "version": "0.0.50",
   "offgrid": {
-    "llamaRef": "b10369"
+    "llamaRef": "b11056",
+    "prismLlamaRef": "prism-b10709-9a9394a"
   },
   "description": "Off Grid AI — a private, local-first AI that runs open models (text, vision, image, voice) entirely on your device. No cloud, no accounts.",
   "license": "AGPL-3.0-only",
   "main": "./out/main/index.js",
   "author": "Off Grid AI <hello@getoffgridai.co>",
   "homepage": "https://getoffgridai.co",
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "prepare": "git config core.hooksPath scripts/hooks || true",
     "format": "prettier --write .",
@@ -135,7 +139,7 @@
     "autoprefixer": "^10.4.23",
     "dependency-cruiser": "^18.0.0",
     "electron": "^39.2.6",
-    "electron-builder": "26.15.3",
+    "electron-builder": "26.16.1",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react": "^7.37.5",
