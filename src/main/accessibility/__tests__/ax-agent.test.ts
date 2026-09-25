@@ -6,7 +6,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  actionSignature,
+  buildElementDecisionContext,
   buildElementPrompt,
+  observationStateSignature,
   parseElementStep,
   runElementTask,
   type ElementActuator,
@@ -56,6 +59,124 @@ const world = (
 }
 
 describe('runElementTask', () => {
+  it('runs hover, scroll, slider, and bounded wait actions', async () => {
+    const slider = el(3, {
+      role: 'AXSlider',
+      name: 'Volume',
+      valueSettable: true,
+      minValue: 0,
+      maxValue: 10
+    })
+    const w = world(
+      [
+        '{"action":"hover","index":1}',
+        '{"action":"scroll","index":1,"direction":"down"}',
+        '{"action":"set_value","index":3,"value":7}',
+        '{"action":"wait","durationMs":0}',
+        '{"action":"done","summary":"adjusted"}'
+      ],
+      [el(1), slider]
+    )
+    w.deps.actuator.hover = async (element) => void w.acted.push(`hover:${element.index}`)
+    w.deps.actuator.scroll = async (element, direction) =>
+      void w.acted.push(`scroll:${element.index}:${direction}`)
+    w.deps.actuator.setValue = async (element, value) =>
+      void w.acted.push(`value:${element.index}:${value}`)
+
+    await expect(runElementTask('adjust volume', w.deps)).resolves.toMatchObject({
+      ok: true,
+      summary: 'adjusted'
+    })
+    expect(w.acted).toEqual(['hover:1', 'scroll:1:down', 'value:3:7'])
+  })
+
+  it('rejects unsafe typed and slider targets before actuation', async () => {
+    const w = world(
+      [
+        '{"action":"type","index":1,"text":"secret"}',
+        '{"action":"set_value","index":2,"value":99}',
+        '{"action":"done","summary":"stopped safely"}'
+      ],
+      [el(1), el(2, { role: 'AXSlider', minValue: 0, maxValue: 10, valueSettable: true })]
+    )
+    let observation = 0
+    w.deps.read = async () => ({
+      windowTitle: `Controls ${observation++}`,
+      elements: [el(1), el(2, { role: 'AXSlider', minValue: 0, maxValue: 10, valueSettable: true })]
+    })
+
+    const result = await runElementTask('change controls', {
+      ...w.deps,
+      recoverWithVision: async () => ({ ok: true })
+    })
+    expect(result.ok).toBe(true)
+    expect(w.acted).toEqual([])
+    expect(result.steps.join('\n')).toContain('non-editable element')
+    expect(result.steps.join('\n')).toContain('value 99 is not valid')
+  })
+
+  it('uses deterministic verification and vision recovery results', async () => {
+    const w = world([
+      '{"action":"key","keys":"cmd 1"}',
+      '{"action":"key","keys":"cmd 2"}',
+      '{"action":"key","keys":"cmd 3"}'
+    ])
+    const verification = [
+      { status: 'satisfied' as const, latencyMs: 1, samples: 1 },
+      { status: 'timeout' as const, latencyMs: 2, samples: 2 },
+      { status: 'unsatisfied' as const, latencyMs: 3, samples: 3 }
+    ]
+    const recoveries: string[] = []
+    const result = await runElementTask('complete the task', {
+      ...w.deps,
+      verifyAction: async () => verification.shift()!,
+      recoverWithVision: async ({ summary }) => {
+        recoveries.push(summary)
+        return { ok: true, completed: true, summary: 'visible result confirmed' }
+      }
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'visible result confirmed' })
+    expect(recoveries).toEqual(['The action did not produce its required result.'])
+    expect(result.steps.join('\n')).toContain('verification timeout')
+  })
+
+  it('advances planned milestones only after independent review', async () => {
+    const w = world([])
+    const replies = [
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"milestone_complete","summary":"opened"}',
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"milestone_complete","summary":"finished"}'
+    ]
+    w.deps.decideElement = async () => replies.shift()!
+    w.deps.decide = async () => '{"action":"milestone_complete","summary":"verified"}'
+    let observation = 0
+    w.deps.read = async () => ({ windowTitle: `Milestone ${observation++}`, elements: [el(1)] })
+    const result = await runElementTask('finish two milestones', {
+      ...w.deps,
+      plan: {
+        version: 1,
+        phases: [
+          { id: 'phase-1', title: 'Open item' },
+          { id: 'phase-2', title: 'Finish item' }
+        ]
+      }
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'finished' })
+    expect(result.steps.join('\n')).toContain('milestone complete: Open item')
+  })
+
+  it('accepts a completed vision recovery after repeated invalid decisions', async () => {
+    const w = world(['bad', 'bad', 'bad'])
+    const result = await runElementTask('find a visual control', {
+      ...w.deps,
+      recoverWithVision: async () => ({ ok: true, completed: true, summary: 'control opened' })
+    })
+    expect(result).toMatchObject({ ok: true, summary: 'control opened' })
+  })
+
   it('keeps the active phase until completion and keeps private guidance out of evidence', async () => {
     const w = world(['{"action":"press","index":1}', '{"action":"done","summary":"sent"}'])
     const plan = {
@@ -272,6 +393,198 @@ describe('runElementTask', () => {
     expect(result.steps).toContain(
       'Vision recovery completed one action. Returning to accessibility control.'
     )
+  })
+
+  it('stops when vision recovery fails or repeats against unchanged state', async () => {
+    const failed = world(['{"action":"vision_required","why":"Need pixels"}'])
+    await expect(
+      runElementTask('open the image', {
+        ...failed.deps,
+        recoverWithVision: async () => ({ ok: false, detail: 'grounder unavailable' })
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      summary: expect.stringContaining('grounder unavailable')
+    })
+
+    const repeated = world([
+      '{"action":"vision_required","why":"Need pixels"}',
+      '{"action":"vision_required","why":"Still need pixels"}'
+    ])
+    await expect(
+      runElementTask('open the image', {
+        ...repeated.deps,
+        recoverWithVision: async () => ({ ok: true })
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      summary: expect.stringContaining('recovery already ran')
+    })
+  })
+
+  it('advances the plan when vision recovery confirms a later phase', async () => {
+    const w = world([
+      '{"action":"vision_required","why":"Need pixels"}',
+      '{"action":"press","index":1}',
+      '{"action":"done","summary":"finished"}'
+    ])
+    const phases: string[] = []
+    const result = await runElementTask('finish the task', {
+      ...w.deps,
+      plan: {
+        version: 1,
+        phases: [
+          { id: 'phase-1', title: 'Open item' },
+          { id: 'phase-2', title: 'Finish item' }
+        ]
+      },
+      onPhase: (phase) => phases.push(phase),
+      recoverWithVision: async () => ({ ok: true, activePhaseIndex: 1, submittedDraft: true })
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'finished' })
+    expect(phases).toContain('phase-2')
+  })
+
+  it('rejects milestone completion while text remains an unsent draft', async () => {
+    const w = world([
+      '{"action":"type","index":2,"text":"draft"}',
+      '{"action":"milestone_complete","summary":"sent"}',
+      '{"action":"milestone_complete","summary":"sent"}',
+      '{"action":"milestone_complete","summary":"sent"}'
+    ])
+    const result = await runElementTask('send a draft', {
+      ...w.deps,
+      plan: { version: 1, phases: [{ id: 'phase-1', title: 'Send the draft' }] },
+      recoverWithVision: async () => ({ ok: true, completed: true, summary: 'sent safely' })
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'sent safely' })
+    expect(result.steps.join('\n')).toContain('milestone completion rejected')
+  })
+
+  it('keeps working when the heavy reasoner rejects a milestone', async () => {
+    const w = world([])
+    const decisions = [
+      '{"action":"press","index":1}',
+      '{"action":"milestone_complete","summary":"opened"}',
+      '{"action":"press","index":1}',
+      '{"action":"milestone_complete","summary":"opened"}'
+    ]
+    const reviews = [
+      '{"action":"vision_required","why":"result is not visible"}',
+      '{"action":"milestone_complete","summary":"verified"}'
+    ]
+    w.deps.decideElement = async () => decisions.shift()!
+    w.deps.decide = async () => reviews.shift()!
+
+    const result = await runElementTask('open the item', {
+      ...w.deps,
+      plan: { version: 1, phases: [{ id: 'phase-1', title: 'Open the item' }] }
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'opened' })
+    expect(result.steps.join('\n')).toContain(
+      'milestone completion rejected by the heavy reasoner: result is not visible'
+    )
+  })
+
+  it('defers final milestone completion until the session limit allows it', async () => {
+    const w = world([
+      '{"action":"press","index":1}',
+      '{"action":"milestone_complete","summary":"first pass"}',
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"milestone_complete","summary":"finished"}'
+    ])
+    let completionChecks = 0
+    const result = await runElementTask('keep working', {
+      ...w.deps,
+      plan: { version: 1, phases: [{ id: 'phase-1', title: 'Work until time expires' }] },
+      completionAllowed: () => ++completionChecks > 1
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'finished' })
+    expect(result.steps.join('\n')).toContain('completion deferred until the session limit')
+  })
+
+  it('requires a fresh observation before a controlled milestone completes', async () => {
+    const w = world([])
+    const guard = new VisionGuard({ taskId: 'ax-milestone-verification', kind: 'computer_use' })
+    const decisions = [
+      '{"action":"milestone_complete","summary":"opened"}',
+      '{"action":"milestone_complete","summary":"opened"}'
+    ]
+    w.deps.decideElement = async () => decisions.shift()!
+    w.deps.decide = async () => '{"action":"milestone_complete","summary":"verified"}'
+
+    const result = await runElementTask('open item', {
+      ...w.deps,
+      control: guard,
+      plan: { version: 1, phases: [{ id: 'phase-1', title: 'Open item' }] }
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'opened' })
+    expect(result.steps.join('\n')).toContain('verification requested: opened')
+  })
+
+  it('rejects done before a planned phase acts and defers it at a session limit', async () => {
+    const w = world([
+      '{"action":"done","summary":"too early"}',
+      '{"action":"key","keys":"Enter"}',
+      '{"action":"done","summary":"first pass"}',
+      '{"action":"key","keys":"Tab"}',
+      '{"action":"done","summary":"finished"}'
+    ])
+    let checks = 0
+    const result = await runElementTask('work for the session', {
+      ...w.deps,
+      plan: { version: 1, phases: [{ id: 'phase-1', title: 'Do the work' }] },
+      completionAllowed: () => ++checks > 1
+    })
+
+    expect(result).toMatchObject({ ok: true, summary: 'finished' })
+    expect(result.steps.join('\n')).toContain(
+      'completion rejected: the current phase has not executed an action'
+    )
+    expect(result.steps.join('\n')).toContain('completion deferred until the session limit')
+  })
+
+  it('refuses stale and repeated mutations without replaying them', async () => {
+    const stale = world(['{"action":"press","index":1}', '{"action":"done","summary":"safe"}'])
+    const staleResult = await runElementTask('press safely', {
+      ...stale.deps,
+      validateAction: async () => false
+    })
+    expect(staleResult.steps.join('\n')).toContain('stale action refused')
+    expect(stale.acted).toEqual([])
+
+    const repeated = world([
+      '{"action":"key","keys":"cmd 1"}',
+      '{"action":"key","keys":"cmd 2"}',
+      '{"action":"key","keys":"cmd 1"}'
+    ])
+    const repeatedResult = await runElementTask('repeat safely', {
+      ...repeated.deps,
+      recoverWithVision: async () => ({ ok: true, completed: true, summary: 'recovered' })
+    })
+    expect(repeatedResult).toMatchObject({ ok: true, summary: 'recovered' })
+    expect(repeated.acted).toEqual(['keys:cmd 1', 'keys:cmd 2'])
+  })
+
+  it('reports missing slider targets and unavailable pointer operations', async () => {
+    const missing = world([
+      '{"action":"set_value","index":99,"value":5}',
+      '{"action":"done","summary":"safe"}'
+    ])
+    const missingResult = await runElementTask('set value', missing.deps)
+    expect(missingResult.steps.join('\n')).toContain('no element [99]')
+
+    const hover = world(['{"action":"hover","index":1}'])
+    await expect(runElementTask('hover', hover.deps)).rejects.toThrow(
+      'Pointer hover is unavailable'
+    )
+    const scroll = world(['{"action":"scroll","index":1,"direction":"down"}'])
+    await expect(runElementTask('scroll', scroll.deps)).rejects.toThrow('Scrolling is unavailable')
   })
 
   it('hands a private step to the user and re-observes after Continue', async () => {
@@ -559,6 +872,79 @@ describe('parseElementStep', () => {
     expect(
       parseElementStep('Sure - here is the next step: {"action":"type","index":2,"text":"hi"} done')
     ).toEqual({ action: 'type', index: 2, text: 'hi' })
+  })
+
+  it('parses the extended action vocabulary and validates its bounds', () => {
+    expect(parseElementStep('{"action":"hover","index":2}')).toEqual({
+      action: 'hover',
+      index: 2
+    })
+    expect(parseElementStep('{"action":"scroll","index":2,"direction":"left"}')).toEqual({
+      action: 'scroll',
+      index: 2,
+      direction: 'left'
+    })
+    expect(parseElementStep('{"action":"set_value","index":2,"value":3.5}')).toEqual({
+      action: 'set_value',
+      index: 2,
+      value: 3.5
+    })
+    expect(parseElementStep('{"action":"wait","durationMs":5000}')).toEqual({
+      action: 'wait',
+      durationMs: 5000
+    })
+    expect(parseElementStep('{"action":"wait","durationMs":5001}')).toBeNull()
+    expect(parseElementStep('{"action":"milestone_complete"}')).toEqual({
+      action: 'milestone_complete',
+      summary: 'milestone complete'
+    })
+    expect(parseElementStep('{"action":"human_required"}')).toEqual({
+      action: 'human_required',
+      why: 'Complete this step'
+    })
+    expect(parseElementStep('{"action":"vision_required"}')).toEqual({
+      action: 'vision_required',
+      why: 'Visual grounding is required'
+    })
+  })
+})
+
+describe('decision context signatures', () => {
+  it('builds bounded state and stable action signatures', () => {
+    const snapshot: AxSnapshot = {
+      processId: 9,
+      windowId: '4',
+      processName: 'Settings',
+      windowTitle: 'Sound',
+      elements: [
+        el(2, {
+          stableId: 'volume',
+          role: 'AXSlider',
+          name: 'Volume',
+          value: '7',
+          focused: true,
+          selected: true,
+          checked: true
+        }),
+        el(1, { stableId: 'mute', name: 'Mute' })
+      ]
+    }
+    const context = buildElementDecisionContext({
+      goal: 'Prefix\nStructured task summary:\nAdjust the volume',
+      milestone: 'Set volume',
+      operation: { kind: 'set_value', target: 'Volume', value: '7' },
+      snapshot,
+      history: ['opened settings', 'selected sound'],
+      guidance: ['Use the main output']
+    })
+    expect(context).toContain('Current milestone: Set volume')
+    expect(context).toContain('Planned operation: kind=set_value')
+    expect(context).toContain('Current structured state:')
+    expect(context).toContain('Current authoritative guidance:')
+    expect(observationStateSignature(snapshot)).toContain('"id":"volume"')
+    expect(actionSignature({ action: 'scroll', index: 2, direction: 'up' })).toBe('scroll:2:up')
+    expect(actionSignature({ action: 'set_value', index: 2, value: 7 })).toBe('set_value:2:7')
+    expect(actionSignature({ action: 'done', summary: 'done' })).toBeNull()
   })
 })
 

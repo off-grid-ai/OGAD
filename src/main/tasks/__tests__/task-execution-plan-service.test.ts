@@ -1,4 +1,23 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({
+  chat: vi.fn(),
+  metric: vi.fn(),
+  modelCall: vi.fn(),
+  session: vi.fn()
+}))
+
+vi.mock('../../llm', () => ({
+  llm: {
+    activeModelInfo: () => ({ id: 'offgrid/reasoner' }),
+    chat: mocks.chat
+  }
+}))
+vi.mock('../../actions/remote-screen-session', () => ({
+  currentRemoteScreenTaskSession: mocks.session,
+  recordComputerUseMetric: mocks.metric,
+  recordComputerUseModelCall: mocks.modelCall
+}))
 import { decodeTaskExecutionPlan } from '../../../shared/task-execution-plan'
 import {
   createTaskExecutionPlan,
@@ -7,6 +26,11 @@ import {
 } from '../task-execution-plan-service'
 
 describe('task execution plan service', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.session.mockReturnValue(null)
+  })
+
   it('asks for distinct web phases with visible, non-repeated outcomes', async () => {
     const plan = await createTaskExecutionPlan({
       goal: 'Find round-trip flights from Seattle to London for September 1 to 8, 2027',
@@ -99,5 +123,40 @@ describe('task execution plan service', () => {
     })
 
     await expect(planning).rejects.toThrow('stopped from Chat')
+  })
+
+  it('uses the active reasoner and records successful default generation', async () => {
+    mocks.chat.mockResolvedValue('{"phases":["Open Notes","Write the note"]}')
+
+    const plan = await createTaskExecutionPlan({
+      goal: 'Write a note',
+      surface: 'computer',
+      targetLabel: 'Notes'
+    })
+
+    expect(plan.phases).toHaveLength(2)
+    expect(mocks.metric).toHaveBeenCalledWith('reasoningCalls')
+    expect(mocks.modelCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: 'reasoning',
+        stage: 'task_plan',
+        rail: 'ax',
+        model: 'offgrid/reasoner',
+        response: expect.any(String)
+      })
+    )
+  })
+
+  it('records a reasoner error and returns the safe fallback plan', async () => {
+    const failure = new Error('model unavailable')
+    mocks.chat.mockRejectedValue(failure)
+    mocks.session.mockReturnValue({ activeServer: { id: 'remote' } })
+
+    const plan = await createTaskExecutionPlan({ goal: 'Open settings', surface: 'web' })
+
+    expect(plan.phases.length).toBeGreaterThan(0)
+    expect(mocks.modelCall).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'task_plan', rail: 'vision', error: failure })
+    )
   })
 })
