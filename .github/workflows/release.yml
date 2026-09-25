@@ -696,6 +696,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: e3b471e6ea8504f3877cd9f27a11bfe98ce3b3b5
           path: _executorch_speech
           lfs: false # Build the Linux executable from the pinned source.
           submodules: recursive
