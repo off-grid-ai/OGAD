@@ -160,14 +160,11 @@ export class DecisionRuntime {
       artifact.python,
       [artifact.script, '--run', artifact.checkpoint, '--port', String(port)],
       {
-        cwd: artifact.source,
+        cwd: artifact.checkpoint,
         env: {
           ...globalThis.process.env,
           KEV_LOCAL_BASE: artifact.base,
-          KEV_BACKEND: 'mlx',
-          PYTHONPATH: [artifact.source, globalThis.process.env.PYTHONPATH]
-            .filter(Boolean)
-            .join(path.delimiter),
+          KEV_BACKEND: globalThis.process.platform === 'darwin' ? 'auto' : 'torch',
           HF_HUB_OFFLINE: '1',
           TRANSFORMERS_OFFLINE: '1',
           PYTHONUNBUFFERED: '1'

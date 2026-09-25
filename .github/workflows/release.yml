@@ -189,6 +189,8 @@ jobs:
           mkdir -p resources/bin
           cp scripts/actions-helper/actions-helper resources/bin/actions-helper
           chmod +x resources/bin/actions-helper
+      - name: Build Kev server runtime (model weights excluded)
+        run: bash scripts/build-kev-runtime.sh
       # Stage the Parakeet STT runtime (sherpa-onnx CLI + ONNX model) into
       # resources/bin/parakeet. Additive: with SHERPA_ONNX_URL / PARAKEET_MODEL_URL
       # unset this is a no-op and transcription stays on whisper, so it can't break a
@@ -576,6 +578,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # raises the GitHub API rate limit
         run: ./scripts/fetch-win-binaries.ps1
+      - name: Build Kev server runtime (model weights excluded)
+        shell: pwsh
+        run: ./scripts/build-kev-runtime.ps1
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Stage native files and bundle

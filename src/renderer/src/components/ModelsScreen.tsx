@@ -213,6 +213,7 @@ function fmtReleaseDate(iso?: string): string {
 }
 
 const BONSAI_2_ID = 'prism-ml/Ternary-Bonsai-2-27B-gguf'
+const KEV_4B_ID = 'jaredpalmer/kev-4b'
 
 function featureRank(
   m: { id?: string; sourceModelId?: string; credibility?: string; tags?: string[] },
@@ -413,7 +414,15 @@ export function ModelsScreen({
   }, [])
 
   useEffect(() => {
-    if (!detail || detail.id.startsWith('local:') || !['text', 'vision', 'computer_use'].includes(detail.kind)) return
+    if (
+      !detail ||
+      detail.id === KEV_4B_ID ||
+      detail.id.startsWith('local:') ||
+      !['text', 'vision', 'computer_use'].includes(detail.kind)
+    ) {
+      setDetailFilesLoading(false)
+      return
+    }
     let cancelled = false
     setDetailFiles([])
     setDetailFilesError(null)
@@ -1381,39 +1390,78 @@ export function ModelsScreen({
                       <IconExternalLink className="h-3 w-3" /> View on Hugging Face
                     </button>
                   )}
-                  {hfUrl && ['text', 'vision', 'computer_use'].includes(m.kind) && (
-                    <section aria-label="Available model files" className="mt-5 border-t border-neutral-800 pt-4">
-                      <h3 className="mb-2 text-[10px] uppercase tracking-wide text-neutral-400">
-                        Available GGUF files{detailFiles.length > 0 ? ` · ${detailFiles.length}` : ''}
+                  {m.id === KEV_4B_ID && (
+                    <section
+                      aria-label="Kev model format"
+                      className="mt-5 border-t border-neutral-800 pt-4"
+                    >
+                      <h3 className="text-[10px] uppercase tracking-wide text-neutral-400">
+                        Model format
                       </h3>
-                      {detailFilesLoading && <p className="text-xs text-neutral-500">Loading available files…</p>}
-                      {detailFilesError && <p role="alert" className="text-xs text-red-400">{detailFilesError}</p>}
-                      {!detailFilesLoading && !detailFilesError && detailFiles.length === 0 && (
-                        <p className="text-xs text-neutral-500">No GGUF files found in this repository.</p>
-                      )}
-                      <div className="space-y-2">
-                        {detailFiles.map((file) => (
-                          <div key={file.fileName} className="flex items-start justify-between gap-2 rounded border border-neutral-800 px-3 py-2">
-                            <div className="min-w-0">
-                              <p className="break-all text-[11px] text-neutral-200">{file.fileName}</p>
-                              <p className="mt-1 text-[10px] text-neutral-500">
-                                {file.quant} · {formatSize(file.sizeBytes)}
-                                {file.mmproj ? ` · includes ${file.mmproj.fileName}` : ''}
-                              </p>
-                            </div>
-                            <button
-                              onClick={() => download(m.id, file.fileName)}
-                              disabled={comingSoon || !!downloading}
-                              aria-label={`Download ${file.fileName}`}
-                              className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              Download
-                            </button>
-                          </div>
-                        ))}
-                      </div>
+                      <p className="mt-2 text-[10px] leading-relaxed text-neutral-400">
+                        Kev uses the original Qwen3.5-4B-Base SafeTensors weights. The Qwen 3.5 4B
+                        GGUF chat model cannot be reused. GGUF contains quantized weights for
+                        llama.cpp, while Kev loads SafeTensors through MLX or Torch.
+                      </p>
+                      <p className="mt-2 text-[10px] leading-relaxed text-neutral-500">
+                        One Qwen base: 9.34 GB across two SafeTensors files, plus a 135 MB Kev
+                        adapter. If the compatible SafeTensors base is already on this device, Off
+                        Grid AI reuses it.
+                      </p>
                     </section>
                   )}
+                  {hfUrl &&
+                    m.id !== KEV_4B_ID &&
+                    ['text', 'vision', 'computer_use'].includes(m.kind) && (
+                      <section
+                        aria-label="Available model files"
+                        className="mt-5 border-t border-neutral-800 pt-4"
+                      >
+                        <h3 className="mb-2 text-[10px] uppercase tracking-wide text-neutral-400">
+                          Available GGUF files
+                          {detailFiles.length > 0 ? ` · ${detailFiles.length}` : ''}
+                        </h3>
+                        {detailFilesLoading && (
+                          <p className="text-xs text-neutral-500">Loading available files…</p>
+                        )}
+                        {detailFilesError && (
+                          <p role="alert" className="text-xs text-red-400">
+                            {detailFilesError}
+                          </p>
+                        )}
+                        {!detailFilesLoading && !detailFilesError && detailFiles.length === 0 && (
+                          <p className="text-xs text-neutral-500">
+                            No GGUF files found in this repository.
+                          </p>
+                        )}
+                        <div className="space-y-2">
+                          {detailFiles.map((file) => (
+                            <div
+                              key={file.fileName}
+                              className="flex items-start justify-between gap-2 rounded border border-neutral-800 px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="break-all text-[11px] text-neutral-200">
+                                  {file.fileName}
+                                </p>
+                                <p className="mt-1 text-[10px] text-neutral-500">
+                                  {file.quant} · {formatSize(file.sizeBytes)}
+                                  {file.mmproj ? ` · includes ${file.mmproj.fileName}` : ''}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => download(m.id, file.fileName)}
+                                disabled={comingSoon || !!downloading}
+                                aria-label={`Download ${file.fileName}`}
+                                className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                Download
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-2 border-t border-neutral-800 px-5 py-3">
