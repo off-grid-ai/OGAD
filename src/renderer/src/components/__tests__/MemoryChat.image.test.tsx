@@ -772,6 +772,43 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(await screen.findByText('Generating image · Step 3 of 20')).toBeTruthy()
   })
 
+  it('shows finalization instead of a zero-second estimate after the last sampling step', async () => {
+    const conv: TestConversation = {
+      id: 'c-finalizing',
+      title: 'Final image',
+      project_id: null,
+      created_at: '2026-07-17T00:00:00.000Z',
+      updated_at: '2026-07-17T00:00:00.000Z',
+      message_count: 0
+    }
+    installApi({
+      active: FULL,
+      models: [FULL],
+      conversations: [conv],
+      messages: {
+        'c-finalizing': [{ id: 1, role: 'user', content: 'finish this image' }]
+      },
+      jobStatus: {
+        id: 'job-finalizing',
+        phase: 'running',
+        conversationId: 'c-finalizing',
+        projectId: null,
+        stage: 'generating',
+        enhancedPrompt: 'finish this image',
+        progress: { step: 5, total: 5, secPerStep: 12 },
+        outputPath: null,
+        error: null,
+        startedAt: 1,
+        finishedAt: null
+      }
+    })
+
+    renderChat({ conversationId: 'c-finalizing' })
+
+    expect(await screen.findByText('Finalizing image…')).toBeTruthy()
+    expect(screen.queryByText(/0s left/)).toBeNull()
+  })
+
   it('picking a different model in the dropdown routes through setActiveModalModel and reaches the payload', async () => {
     const user = userEvent.setup()
     const { generateImage, setActiveModalModel } = installApi({

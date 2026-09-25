@@ -28,6 +28,9 @@ export function imageProgressLabel(
   if (stage === 'enhancing') return 'Preparing image…'
   if (stage === 'preparing') return 'Preparing image…'
   if (!progress) return stage === 'decoding' ? 'Decoding image…' : 'Generating image…'
+  if (progress.phase !== 'decoding' && progress.step >= progress.total) {
+    return 'Finalizing image…'
+  }
   const phase = progress.phase === 'decoding' ? 'Decoding' : 'Step'
   return progress.phase === 'decoding'
     ? `${phase} ${progress.step} of ${progress.total}`

@@ -57,7 +57,11 @@ import {
   buildStandardArgs,
   DEFAULT_NEGATIVE
 } from './imagegen/args'
-import { initialProgressState, reduceProgress } from './imagegen/progress'
+import {
+  initialProgressState,
+  reduceProgress,
+  type ProgressEvent
+} from './imagegen/progress'
 import {
   resolveExistingOwnedEntry,
   resolveExistingOwnedPath,
@@ -1057,6 +1061,28 @@ async function runImageGen(
       // transition; the shell only handles the preview PNG read + the callback.
       let progress = initialProgressState(seed)
       let progressBuffer = ''
+      let latestProgressEvent: ProgressEvent | undefined
+      let previewVersion = ''
+      const readPreview = (): string | undefined => {
+        try {
+          if (!fs.existsSync(previewPath)) return undefined
+          const stat = fs.statSync(previewPath)
+          const version = `${stat.mtimeMs}:${stat.size}`
+          if (version === previewVersion) return undefined
+          previewVersion = version
+          return `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
+        } catch {
+          return undefined
+        }
+      }
+      // sd-cli prints a step before its preview PNG has finished writing. Poll
+      // the file independently so the final step cannot leave the previous
+      // preview on screen while the final VAE decode is still running.
+      const previewPoll = setInterval(() => {
+        if (!onProgress || !latestProgressEvent) return
+        const preview = readPreview()
+        if (preview) onProgress({ ...latestProgressEvent, preview })
+      }, 250)
       const capture = (d: Buffer): void => {
         const s = d.toString()
         log += s
@@ -1066,20 +1092,23 @@ async function runImageGen(
         const { state, event } = reduceProgress(progress, progressBuffer, params.steps)
         progress = state
         if (onProgress && event) {
-          let preview: string | undefined
-          try {
-            if (fs.existsSync(previewPath))
-              preview = `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
-          } catch {
-            /* preview not ready */
-          }
+          latestProgressEvent = event
+          const preview = readPreview()
           onProgress({ ...event, preview })
         }
       }
       child.stdout.on('data', capture)
       child.stderr.on('data', capture)
-      child.on('error', reject)
+      child.on('error', (error) => {
+        clearInterval(previewPoll)
+        reject(error)
+      })
       child.on('close', (code) => {
+        const preview = readPreview()
+        if (onProgress && latestProgressEvent && preview) {
+          onProgress({ ...latestProgressEvent, preview })
+        }
+        clearInterval(previewPoll)
         if (generationLifecycle.isCancelled()) {
           reject(new Error(IMAGE_CANCELLED_MESSAGE))
         } else if (code === 0) {

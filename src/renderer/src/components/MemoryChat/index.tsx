@@ -3248,7 +3248,7 @@ export function MemoryChat({
       )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
         <span>{imageProgressLabel(imageJobStage, imgProgress)}</span>
-        {imgProgress ? (
+        {imgProgress && imgProgress.step < imgProgress.total ? (
           <span className="text-neutral-600">
             · ~
             {Math.max(
