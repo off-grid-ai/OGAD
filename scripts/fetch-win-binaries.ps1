@@ -4,6 +4,7 @@
 # match exactly what the app's resolvers expect:
 #
 #   resources/bin/llama/llama-server.exe   (+ ggml/llama DLLs)   <- src/main/llm.ts
+#   resources/bin/llama-prism/llama-server.exe (+ fork DLLs)      <- Bonsai 2
 #   resources/bin/sd/sd-cli.exe            (+ DLLs)              <- src/main/imagegen.ts
 #   resources/bin/whisper/whisper-cli.exe  (+ DLLs)             <- src/main/rag/extractors.ts
 #   resources/bin/ffmpeg.exe                                     <- src/main/rag/extractors.ts
@@ -100,6 +101,14 @@ try {
   Copy-Runtime $x 'llama-cpu' | Out-Null
 } catch { Write-Warning "llama.cpp (cpu fallback) fetch failed: $_" }
 
+# Bonsai 2 uses packed ternary weights that require PrismML's llama.cpp fork.
+# Use its CPU build so the bundled engine starts even without a Vulkan driver.
+# Keep these DLLs separate from the standard llama.cpp DLLs.
+$PrismLlamaRef = (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.prismLlamaRef
+Write-Host "== Prism llama.cpp (pinned $PrismLlamaRef): cpu =="
+$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef
+Copy-Runtime $x 'llama-prism' | Out-Null
+
 # --- whisper.cpp (whisper-cli.exe + DLLs) ------------------------------------
 Write-Host '== whisper.cpp =='
 try {
@@ -164,6 +173,11 @@ if (-not (Test-Path -LiteralPath $llama)) {
   Write-Error "REQUIRED binary missing: $llama (the llama.cpp fetch failed above). Cannot run the model server."
   exit 1
 }
+$prism = Join-Path $bin 'llama-prism\llama-server.exe'
+if (-not (Test-Path -LiteralPath $prism)) {
+  Write-Error "REQUIRED binary missing: $prism (the Prism llama.cpp fetch failed above). Cannot run Bonsai 2."
+  exit 1
+}
 foreach ($p in @(
     (Join-Path $bin 'llama-cpu\llama-server.exe'),
     (Join-Path $bin 'whisper\whisper-cli.exe'),
@@ -173,3 +187,4 @@ foreach ($p in @(
 }
 Write-Host ''
 Write-Host "OK: llama-server.exe present at $llama"
+Write-Host "OK: Prism llama-server.exe present at $prism"

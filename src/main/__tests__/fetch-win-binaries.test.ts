@@ -50,3 +50,16 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — stable-diffusion.cpp asset', (
     expect(SRC).toMatch(/'sd\\sd-cli\.exe'/)
   })
 })
+
+describe.skipIf(!SRC)('fetch-win-binaries.ps1 — Bonsai runtime', () => {
+  it('stages the pinned Prism CPU runtime in the directory the model server resolves', () => {
+    expect(SRC).toMatch(/offgrid\.prismLlamaRef/)
+    expect(SRC).toMatch(/PrismML-Eng\/llama\.cpp'\s+'bin-win-cpu-x64\\\.zip\$'/)
+    expect(SRC).toMatch(/Copy-Runtime \$x 'llama-prism'/)
+  })
+
+  it('fails the Windows build when the Prism model server is absent', () => {
+    expect(SRC).toMatch(/llama-prism\\llama-server\.exe/)
+    expect(SRC).toMatch(/REQUIRED binary missing: \$prism/)
+  })
+})
