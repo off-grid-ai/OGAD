@@ -58,6 +58,7 @@ function controlledRuntime(
   sharedPaths: string[]
   notedMessages: { path: string; shownIn: ChatHome }[]
   preservedSources: { syncId: string; sourcePath: string }[]
+  generatedRequests: ImageGenerationJobRequest[]
 } {
   let resolveGeneration: ((output: ImageGenOutput) => void) | null = null
   let rejectGeneration: ((error: unknown) => void) | null = null
@@ -66,10 +67,12 @@ function controlledRuntime(
   const sharedPaths: string[] = []
   const notedMessages: { path: string; shownIn: ChatHome }[] = []
   const preservedSources: { syncId: string; sourcePath: string }[] = []
+  const generatedRequests: ImageGenerationJobRequest[] = []
 
   return {
     runtime: {
-      generate: (_request, onUpdate) => {
+      generate: (request, onUpdate) => {
+        generatedRequests.push(request)
         reportUpdate = onUpdate
         return new Promise<ImageGenOutput>((resolve, reject) => {
           resolveGeneration = resolve
@@ -109,7 +112,8 @@ function controlledRuntime(
     savedScopes,
     sharedPaths,
     notedMessages,
-    preservedSources
+    preservedSources,
+    generatedRequests
   }
 }
 
@@ -126,6 +130,29 @@ const request: ImageGenerationJobRequest = {
 }
 
 describe('main-owned image generation job journeys', () => {
+  it('uses one owned init image for the native edit and its saved provenance', async () => {
+    const boundary = controlledRuntime()
+    const jobs = new ImageGenerationJobService(boundary.runtime)
+    const sourcePath = generatedFile('reference.png')
+    const generation = jobs.start({ ...request, initImage: sourcePath })
+    const keptPath = `${sourcePath}.kept`
+
+    expect(boundary.preservedSources).toEqual([{ syncId: jobs.status().id, sourcePath }])
+    expect(boundary.generatedRequests).toEqual([expect.objectContaining({ initImage: keptPath })])
+
+    const output: ImageGenOutput = {
+      dataUrl: 'data:image/png;base64,aW1hZ2U=',
+      path: generatedFile('edited.png'),
+      seed: 91,
+      model: 'Local image model',
+      prompt: 'Edit only the requested labels'
+    }
+    boundary.generation().succeed(output)
+    await generation
+
+    expect(boundary.savedScopes[0]?.scope.initImage).toBe(keptPath)
+  })
+
   it('keeps one job observable while the user navigates away and returns', async () => {
     const boundary = controlledRuntime()
     const jobs = new ImageGenerationJobService(boundary.runtime)
