@@ -223,7 +223,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
   const toolChat = vi.fn(async () =>
     opts.toolResult
       ? structuredClone(opts.toolResult)
-      : { answer: 'done', toolCalls: [], unified: [] }
+      : { answer: opts.ragAnswer ?? 'A red fox is standing in snow.', toolCalls: [], unified: [] }
   )
   const cancelImageGen = vi.fn<() => void>()
   const exportGeneratedImage = vi.fn<(...args: unknown[]) => Promise<void>>(async () => { })
@@ -1337,9 +1337,9 @@ describe('<MemoryChat/> image and vision release journeys', () => {
       await screen.findByText('The image contains a red bicycle beside a stone wall.')
     ).toBeTruthy()
     expect(screen.getAllByText('What is in this image?').length).toBeGreaterThan(0)
-    const ragArgs = boundary.ragChat.mock.calls[0]!
-    expect(ragArgs[0]).toBe('What is in this image?')
-    expect(ragArgs[8]).toEqual(['/uploads/bicycle.png'])
+    const toolArgs = boundary.toolChat.mock.calls[0]!
+    expect(toolArgs[0]).toBe('What is in this image?')
+    expect((toolArgs[2] as { images: string[] }).images).toEqual(['/uploads/bicycle.png'])
   })
 
   it('keeps an idle Chat event-driven and does not write hydrated preferences back', async () => {
@@ -1403,7 +1403,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
 
     await sendChat(user, 'Continue with text only')
     expect(await screen.findByText('A red fox is standing in snow.')).toBeTruthy()
-    expect(boundary.ragChat.mock.calls[0]![8]).toEqual([])
+    expect((boundary.toolChat.mock.calls[0]![2] as { images: string[] }).images).toEqual([])
   })
 
   it('shows a damaged-image error and keeps the conversation usable (#70)', async () => {
@@ -1422,7 +1422,7 @@ describe('<MemoryChat/> image and vision release journeys', () => {
 
     await sendChat(user, 'The conversation should still work')
     expect(await screen.findByText('A red fox is standing in snow.')).toBeTruthy()
-    expect(boundary.ragChat).toHaveBeenCalledTimes(1)
-    expect(boundary.ragChat.mock.calls[0]![8]).toEqual([])
+    expect(boundary.toolChat).toHaveBeenCalledTimes(1)
+    expect((boundary.toolChat.mock.calls[0]![2] as { images: string[] }).images).toEqual([])
   })
 })
