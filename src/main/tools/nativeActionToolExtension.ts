@@ -77,8 +77,8 @@ function engineResult(
 }
 
 // The inline (non-engine) runner, picked by platform in exactly one place:
-// mac runs the Swift helper; Windows opens links through the shell; Linux
-// refuses native actions until it has a platform implementation.
+// mac runs the Swift helper; Windows and Linux open links through the shell.
+// Linux still refuses native actions that have no platform implementation.
 // Exported so both arms are testable without faking process.platform.
 export function inlineRunnerForPlatform(
   platform: NodeJS.Platform
@@ -87,6 +87,19 @@ export function inlineRunnerForPlatform(
     return makeWinInlineRunner(async (url) => {
       await shell.openExternal(url)
     }, runPowerShell)
+  }
+  if (platform === 'linux') {
+    return async (cmd) => {
+      if (cmd.command !== 'system.openURL') {
+        return { ok: false, error: 'native actions are not available on this platform' }
+      }
+      try {
+        await shell.openExternal(String(cmd.args.url ?? ''))
+        return { ok: true, result: {} }
+      } catch (error) {
+        return { ok: false, error: `could not open the link: ${(error as Error).message}` }
+      }
+    }
   }
   if (platform === 'darwin') return runNativeAction
   return async () => ({ ok: false, error: 'native actions are not available on this platform' })
@@ -335,10 +348,7 @@ export class NativeActionToolExtension implements ToolExtension {
 
 export const nativeActionToolExtension = new NativeActionToolExtension()
 
-/** Register the native-action tools where the platform exposes any: macOS (the
- *  Swift helper, the full set) and Windows (the Outlook rail's engine-routed
- *  subset). Elsewhere the spec list is empty, so registration is skipped and
- *  the tools stay out of the grammar budget where they cannot work. */
+/** Register only the tools that have a working platform path. */
 export function registerNativeActionTools(
   register: (ext: ToolExtension) => void,
   platform: NodeJS.Platform = process.platform

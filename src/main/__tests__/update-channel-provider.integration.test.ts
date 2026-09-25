@@ -11,12 +11,12 @@ const RELEASE_FEED = `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
     <title>Off Grid AI Desktop 0.0.41-beta.72</title>
-    <link href="https://github.com/off-grid-ai/off-grid-ai-desktop/releases/tag/v0.0.41-beta.72" />
+    <link href="https://github.com/off-grid-ai/OGAD/releases/tag/v0.0.41-beta.72" />
     <content>Nightly release</content>
   </entry>
   <entry>
     <title>Off Grid AI Desktop 0.0.38</title>
-    <link href="https://github.com/off-grid-ai/off-grid-ai-desktop/releases/tag/v0.0.38" />
+    <link href="https://github.com/off-grid-ai/OGAD/releases/tag/v0.0.38" />
     <content>Stable release</content>
   </entry>
 </feed>`
@@ -63,7 +63,7 @@ function providerFor(config: ProviderConfig): ProviderFixture {
   } as unknown as ProviderRuntimeOptions
   return {
     provider: new GitHubProvider(
-      { provider: 'github', owner: 'off-grid-ai', repo: 'off-grid-ai-desktop' },
+      { provider: 'github', owner: 'off-grid-ai', repo: 'OGAD' },
       updater,
       runtime
     ),
@@ -94,9 +94,9 @@ describe('nightly discovery through electron-updater GitHubProvider', () => {
       version: '0.0.41-beta.72'
     })
     expect(requests).toEqual([
-      'github.com/off-grid-ai/off-grid-ai-desktop/releases.atom',
-      'github.com/off-grid-ai/off-grid-ai-desktop/releases/download/v0.0.41-beta.72/beta-mac.yml',
-      'github.com/off-grid-ai/off-grid-ai-desktop/releases/download/v0.0.41-beta.72/latest-mac.yml'
+      'github.com/off-grid-ai/OGAD/releases.atom',
+      'github.com/off-grid-ai/OGAD/releases/download/v0.0.41-beta.72/beta-mac.yml',
+      'github.com/off-grid-ai/OGAD/releases/download/v0.0.41-beta.72/latest-mac.yml'
     ])
   })
 })

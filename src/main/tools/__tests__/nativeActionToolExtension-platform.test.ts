@@ -1,6 +1,6 @@
 /**
  * Per-platform tool exposure (R2-A1): macOS ships the full set, Windows the
- * engine-routed Outlook subset, everywhere else nothing - and the model-
+ * engine-routed Outlook subset, Linux web use and links - and the model-
  * facing hint never promises a tool the platform does not expose.
  */
 import { describe, expect, it, vi } from 'vitest'
@@ -8,7 +8,8 @@ import {
   NATIVE_TOOL_SPECS,
   specsForPlatform,
   systemHintForPlatform,
-  WINDOWS_TOOL_NAMES
+  WINDOWS_TOOL_NAMES,
+  LINUX_TOOL_NAMES
 } from '../nativeActionToolExtension-logic'
 import {
   NativeActionToolExtension,
@@ -34,8 +35,14 @@ describe('specsForPlatform', () => {
     ).toEqual([...WINDOWS_TOOL_NAMES].sort())
   })
 
-  it('any other platform exposes nothing', () => {
-    expect(specsForPlatform('linux')).toEqual([])
+  it('Linux exposes web use and links, but no unavailable native actions', () => {
+    expect(
+      specsForPlatform('linux')
+        .map((spec) => spec.name)
+        .sort()
+    ).toEqual([...LINUX_TOOL_NAMES].sort())
+    expect(specsForPlatform('linux', false).map((spec) => spec.name)).toEqual(['open_url'])
+    expect(specsForPlatform('freebsd')).toEqual([])
   })
 })
 
@@ -46,12 +53,14 @@ describe('systemHintForPlatform', () => {
     expect(hint).not.toMatch(/iMessage|messages_send|contacts_search|calendar_list_events/)
   })
 
-  it('the mac hint keeps the full vocabulary; unknown platforms get none', () => {
+  it('the mac hint keeps the full vocabulary; Linux names only its tools', () => {
     const hint = systemHintForPlatform('darwin')
     expect(hint).toMatch(/messages_send/)
     expect(hint).toMatch(/requested in this Chat run directly/)
     expect(hint).not.toMatch(/pending until.*approve/i)
-    expect(systemHintForPlatform('linux')).toBe('')
+    expect(systemHintForPlatform('linux')).toMatch(/web_use.*open_url/)
+    expect(systemHintForPlatform('linux')).not.toMatch(/computer_use|calendar_create_event/)
+    expect(systemHintForPlatform('freebsd')).toBe('')
   })
 })
 
@@ -76,12 +85,26 @@ describe('the extension on win32', () => {
   })
 })
 
+describe('the extension on Linux', () => {
+  const extension = new NativeActionToolExtension(boundary, 'linux')
+
+  it('offers browser tasks and links without desktop actions', () => {
+    expect(extension.schemas()).toHaveLength(LINUX_TOOL_NAMES.size)
+    expect(extension.canHandle('web_use')).toBe(true)
+    expect(extension.canHandle('open_url')).toBe(true)
+    expect(extension.canHandle('computer_use')).toBe(false)
+    expect(extension.canHandle('calendar_create_event')).toBe(false)
+    expect(JSON.stringify(extension.schemas())).not.toContain('computer_use')
+  })
+})
+
 describe('registerNativeActionTools', () => {
-  it('registers on darwin and win32, skips elsewhere', () => {
+  it('registers on supported platforms only', () => {
     for (const [platform, expected] of [
       ['darwin', 1],
       ['win32', 1],
-      ['linux', 0]
+      ['linux', 1],
+      ['freebsd', 0]
     ] as const) {
       const register = vi.fn()
       registerNativeActionTools(register, platform)

@@ -304,7 +304,7 @@ describe('manual update check', () => {
     expect(setFeedURL).toHaveBeenLastCalledWith({
       provider: 'github',
       owner: 'off-grid-ai',
-      repo: 'off-grid-ai-desktop'
+      repo: 'OGAD'
     })
     await expect(handler<{ auto: boolean }>('update:get-prefs')()).resolves.toMatchObject({
       auto: false

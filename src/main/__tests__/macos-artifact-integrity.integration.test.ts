@@ -347,7 +347,15 @@ describe('macOS artifact integrity', () => {
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
       'installer input is missing required runtime: bin/sd/sd-cli'
     )
-    for (const relative of ['bin/sd/sd-cli', 'bin/sd/sd-server']) {
+    for (const relative of [
+      'bin/sd/sd-cli',
+      'bin/sd/sd-server',
+      'bin/sd/libggml-vulkan.so',
+      'bin/sd/libgomp.so.1',
+      'bin/sd/libvulkan.so.1',
+      'bin/licenses/libgomp1.txt',
+      'bin/licenses/libvulkan1.txt'
+    ]) {
       const destination = path.join(resources, relative)
       fs.mkdirSync(path.dirname(destination), { recursive: true })
       fs.writeFileSync(destination, 'fixture')

@@ -418,7 +418,7 @@ jobs:
       # Stable "always latest" download link. The versioned DMG (OffGrid-<v>.dmg)
       # changes name every release, so /releases/latest/download/<name> can't target
       # it. Upload a constant-named COPY so this URL is permanent across releases:
-      #   https://github.com/off-grid-ai/off-grid-ai-desktop/releases/latest/download/OffGrid-latest.dmg
+      #   https://github.com/off-grid-ai/OGAD/releases/latest/download/OffGrid-latest.dmg
       # --clobber replaces the copy from the prior run. The versioned DMG + updater
       # feed (latest-mac.yml) are untouched, so auto-update is unaffected.
       - name: Publish stable latest.dmg alias
@@ -434,7 +434,7 @@ jobs:
       # safe). Nightly therefore gets its own fixed-tag 'nightly' release whose dmg is
       # force-replaced every beta build — a permanent, SEPARATE URL that never touches
       # /releases/latest or the stable OffGrid-latest.dmg:
-      #   https://github.com/off-grid-ai/off-grid-ai-desktop/releases/download/nightly/OffGrid-nightly.dmg
+      #   https://github.com/off-grid-ai/OGAD/releases/download/nightly/OffGrid-nightly.dmg
       - name: Publish constant nightly.dmg link
         if: ${{ !inputs.artifact_only && needs.version.outputs.channel == 'beta' }}
         env:
@@ -447,7 +447,7 @@ jobs:
           # then clobber its dmg so the link always serves the freshest nightly.
           gh release view nightly >/dev/null 2>&1 || \
             gh release create nightly --prerelease --title "Nightly (rolling)" \
-              --notes "Rolling nightly build, auto-updated on every change. Pre-release — expect rough edges. Stable: https://github.com/off-grid-ai/off-grid-ai-desktop/releases/latest"
+              --notes "Rolling nightly build, auto-updated on every change. Pre-release — expect rough edges. Stable: https://github.com/off-grid-ai/OGAD/releases/latest"
           gh release upload nightly dist/OffGrid-nightly.dmg --clobber
       # electron-builder creates the GitHub release with empty notes; attach the notes
       # generated above. Runs for BOTH channels (beta + stable) — the notes file and the
@@ -472,7 +472,7 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
           CHANNEL_LABEL: ${{ needs.version.outputs.channel }}
           NOTES_FILE: release-notes.md
-          RELEASE_URL: https://github.com/off-grid-ai/off-grid-ai-desktop/releases/tag/v${{ needs.version.outputs.version }}
+          RELEASE_URL: https://github.com/off-grid-ai/OGAD/releases/tag/v${{ needs.version.outputs.version }}
         run: node scripts/notify-slack-release.mjs
 
   # Windows release build. Mirrors build-mac: it consumes the SAME resolved version
@@ -618,7 +618,7 @@ jobs:
       # OffGrid-latest.dmg alias. The versioned installer (off-grid-ai-<v>-setup.exe)
       # changes name every release, so /releases/latest/download/<name> can't target
       # it; upload a constant-named copy for a stable URL:
-      #   https://github.com/off-grid-ai/off-grid-ai-desktop/releases/latest/download/OffGrid-latest-setup.exe
+      #   https://github.com/off-grid-ai/OGAD/releases/latest/download/OffGrid-latest-setup.exe
       # The versioned installer + latest.yml updater feed are untouched, so auto-update
       # is unaffected. --clobber replaces the copy from the prior run.
       - name: Publish stable latest-setup.exe alias
@@ -698,7 +698,7 @@ jobs:
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           path: _executorch_speech
           lfs: false # Build the Linux executable from the pinned source.
-          submodules: true
+          submodules: recursive
           persist-credentials: false
       - name: Put the speech package beside this checkout
         run: |
@@ -706,21 +706,14 @@ jobs:
           mv _executorch_speech ../executorch-speech
       - name: Install dependencies
         run: npm ci
-      - name: Build Linux local voice output
+      - name: Install Linux local voice build dependency
         run: |
           # ExecuTorch 1.2 code generation imports torchgen from its matching
           # PyTorch release. The CPU wheel is a build tool, not an app payload.
-          python -m pip install 'torch==2.11.0' PyYAML Jinja2 \
+          python3 -m pip install --no-cache-dir 'torch==2.11.0+cpu' PyYAML Jinja2 \
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple
-          python -c 'import torchgen, yaml, jinja2'
-          npm --prefix ../executorch-speech ci
-          cmake -S ../executorch-speech/native -B ../executorch-speech/native/build \
-            -DCMAKE_BUILD_TYPE=Release -DFLATCC_ALLOW_WERROR=OFF \
-            -DPYTHON_EXECUTABLE="$(command -v python)"
-          cmake --build ../executorch-speech/native/build --parallel 4 --target executorch-speech
-          file ../executorch-speech/native/bin/executorch-speech | grep -q 'ELF 64-bit.*x86-64'
-          ../executorch-speech/native/bin/executorch-speech --probe
+          python3 -c 'import torchgen, yaml, jinja2'
       - name: Install Linux image runtime dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 unzip
       - name: Typecheck core Linux main process
@@ -830,7 +823,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in whisper/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/squashfs-root" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
@@ -851,7 +844,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in whisper/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/deb" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"

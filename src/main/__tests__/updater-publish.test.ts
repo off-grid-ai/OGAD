@@ -1,9 +1,7 @@
 /**
  * Regression guard for the auto-updater publish target. The repo was renamed from
- * `desktop` to `off-grid-ai-desktop`; the old name only works via GitHub's 301
- * rename-redirect, and depending on that silently breaks every client's update
- * check the day a new `off-grid-ai/desktop` repo is created. Assert the publish
- * config points at the real repo name — read from source, like the prompt guards.
+ * `desktop` to `off-grid-ai-desktop` to `OGAD`. Old names use redirects, which
+ * can stop working if one of those names is reused. Pin the real repo name.
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -16,7 +14,7 @@ describe('electron-builder publish target', () => {
   })
 
   it('uses the current repo name, not the redirect-only old name', () => {
-    expect(yml).toMatch(/repo:\s*off-grid-ai-desktop\b/)
+    expect(yml).toMatch(/repo:\s*OGAD\b/)
     // The bare old name (`repo: desktop`) must not come back.
     expect(yml).not.toMatch(/^\s*repo:\s*desktop\s*$/m)
   })

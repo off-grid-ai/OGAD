@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/off-grid-ai/desktop/releases/latest">Download (macOS · Windows)</a> ·
+  <a href="https://github.com/off-grid-ai/OGAD/releases/latest">Download (macOS · Windows · Linux)</a> ·
   <a href="docs/FEATURES.md">Features</a> ·
   <a href="https://getoffgridai.co">getoffgridai.co</a> ·
   <a href="https://getoffgridai.co/pro/#buy">Get Pro</a>
@@ -24,6 +24,7 @@
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/macOS-Apple%20Silicon-black" />
   <img alt="platform" src="https://img.shields.io/badge/Windows-x64-black" />
+  <img alt="platform" src="https://img.shields.io/badge/Linux-x64-black" />
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue" />
   <img alt="local" src="https://img.shields.io/badge/100%25-on--device-34D399" />
 </p>
@@ -232,15 +233,16 @@ locked until a valid key is activated.
 
 ## Install
 
-Grab the latest build from [Releases](https://github.com/off-grid-ai/desktop/releases/latest):
+Grab the latest build from [Releases](https://github.com/off-grid-ai/OGAD/releases/latest):
 
 - **macOS** (Apple Silicon) - signed + notarized `.dmg`
 - **Windows** (x64) — NSIS installer (`.exe`)
+- **Linux** (x64, Ubuntu 24.04 or newer) - AppImage or `.deb`. This package contains the core app, including chat text, vision, image generation, voice input and output, and chat tools. Pro is not bundled.
 
 ## Build from source
 
 ```bash
-git clone https://github.com/off-grid-ai/desktop.git
+git clone https://github.com/off-grid-ai/OGAD.git
 cd desktop
 git lfs install && git lfs pull   # pull the bundled native binaries (LFS) - REQUIRED
 npm install
@@ -260,7 +262,7 @@ upstream releases at build time. **Build on a Windows machine** (native modules
 must compile there - cross-building from macOS is not supported):
 
 ```powershell
-git clone https://github.com/off-grid-ai/desktop.git
+git clone https://github.com/off-grid-ai/OGAD.git
 cd desktop
 npm install
 ./scripts/fetch-win-binaries.ps1   # pull win64 llama/whisper/sd/ffmpeg into resources/bin

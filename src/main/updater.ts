@@ -17,7 +17,7 @@ import { listPreviousUpdateReleases } from './update-release-history'
 const GITHUB_UPDATE_PROVIDER = {
   provider: 'github' as const,
   owner: 'off-grid-ai',
-  repo: 'off-grid-ai-desktop'
+  repo: 'OGAD'
 }
 
 // Version of an update that finished downloading and is staged for install

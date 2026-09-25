@@ -108,6 +108,7 @@ linux:
     - AppImage
     - deb
   executableName: off-grid-ai
+  syncDesktopName: true
   icon: resources/icon.png
   extraResources:
     - from: build/linux-bin
@@ -131,9 +132,8 @@ electronFuses:
 publish:
   provider: github
   owner: off-grid-ai
-  # Current repo name. It was renamed from `desktop`; the old name still 301-redirects,
-  # but the updater must not depend on that redirect (a new `off-grid-ai/desktop` repo
-  # would silently break every client's update check). Point straight at the real repo.
-  repo: off-grid-ai-desktop
+  # Use the current repo name. The former off-grid-ai-desktop path redirects,
+  # but a release updater must not depend on that redirect.
+  repo: OGAD
   # Publish (not draft) so electron-updater on installed apps sees the release.
   releaseType: release

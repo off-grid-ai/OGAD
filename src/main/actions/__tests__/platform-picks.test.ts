@@ -34,7 +34,7 @@ describe('inlineRunnerForPlatform', () => {
     }
   })
 
-  it('Linux does not run the macOS helper', async () => {
+  it('Linux opens links but refuses unsupported native actions', async () => {
     const run = inlineRunnerForPlatform('linux')
     expect(run).not.toBe(runNativeAction)
     const result = await run({ command: 'reminders.list', args: {} })
@@ -42,5 +42,8 @@ describe('inlineRunnerForPlatform', () => {
       ok: false,
       error: 'native actions are not available on this platform'
     })
+    const opened = await run({ command: 'system.openURL', args: {} })
+    expect(opened.ok).toBe(false)
+    if (!opened.ok) expect(opened.error).toMatch(/could not open the link/)
   })
 })

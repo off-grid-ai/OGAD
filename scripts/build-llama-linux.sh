@@ -108,8 +108,8 @@ cp "$SOURCE/llama-server" "$DEST/"
 cp -a "$SOURCE"/lib*.so* "$DEST/"
 cp "$SOURCE/LICENSE" "$DEST/"
 
-# Upstream Ubuntu servers need libgomp. Put the Ubuntu 22.04 runtime next to
-# each server so an AppImage does not depend on the user's distro installing it.
+# Upstream Ubuntu servers need libgomp. Put the release runner's runtime next
+# to each server so an AppImage does not depend on the user's distro installing it.
 GOMP="$(ldconfig -p | awk '/libgomp\.so\.1 / && !found { found=$NF } END { print found }')"
 test -n "$GOMP"
 cp -L "$GOMP" "$DEST/libgomp.so.1"
@@ -119,10 +119,9 @@ file "$DEST/llama-server" | grep -q 'ELF 64-bit.*x86-64'
 LIBRARY_PATH="$DEST"
 if [ "$ACCELERATOR" = cuda ]; then LIBRARY_PATH="$DEST:$CUDA_DEST"; fi
 if [ "$ACCELERATOR" = cuda ]; then
-  # The pinned standard CUDA build requires GLIBC 2.38 (Ubuntu 24.04). This
-  # release runner is Ubuntu 22.04 to keep CPU/Vulkan usable there. CI executes
-  # both staged CUDA servers in an Ubuntu 24.04 container after packaging.
-  echo '[build-llama-linux] staged CUDA engine; Ubuntu 24.04 load check runs in release CI'
+  # CUDA requires the host NVIDIA driver; CI checks bundled dependencies after
+  # packaging, and a physical NVIDIA machine must confirm device enumeration.
+  echo '[build-llama-linux] staged CUDA engine; packaged dependencies checked in release CI'
   exit 0
 fi
 DEPS="$(LD_LIBRARY_PATH="$LIBRARY_PATH" ldd "$DEST/llama-server")"

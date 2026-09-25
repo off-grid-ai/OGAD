@@ -44,6 +44,11 @@ export default async function verifyElectronBuilderArtifact(event) {
         path.join('bin', 'licenses', 'ffmpeg.txt'),
         path.join('bin', 'sd', 'sd-cli'),
         path.join('bin', 'sd', 'sd-server'),
+        path.join('bin', 'sd', 'libggml-vulkan.so'),
+        path.join('bin', 'sd', 'libgomp.so.1'),
+        path.join('bin', 'sd', 'libvulkan.so.1'),
+        path.join('bin', 'licenses', 'libgomp1.txt'),
+        path.join('bin', 'licenses', 'libvulkan1.txt'),
         path.join('bin', 'executorch-speech'),
         path.join('speech-assets', 'index.json')
       )

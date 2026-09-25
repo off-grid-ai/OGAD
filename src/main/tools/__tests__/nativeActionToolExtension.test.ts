@@ -42,8 +42,7 @@ let ext: NativeActionToolExtension
 beforeEach(() => {
   boundary = new FakeBoundary()
   // Pin darwin: these assert the full macOS tool set. Defaulting to
-  // process.platform makes specsForPlatform('linux') empty on CI, so every
-  // tool reads as unknown and the whole file fails.
+  // The full macOS tool set is needed here, including calendar and mail.
   ext = new NativeActionToolExtension(boundary, 'darwin')
 })
 
@@ -153,14 +152,12 @@ describe('registerNativeActionTools', () => {
     expect(registered.map((e) => e.id)).toEqual(['native-actions'])
   })
 
-  it('registers on Windows too (the Outlook subset) and nothing on other platforms', () => {
-    // R2-A1: win32 exposes the engine-routed Outlook set; platforms with an
-    // empty spec list stay unregistered so the grammar budget is untouched.
+  it('registers on Windows and Linux with their platform tool subsets', () => {
     const registered: ToolExtension[] = []
     registerNativeActionTools((e) => registered.push(e), 'win32')
     expect(registered.map((e) => e.id)).toEqual(['native-actions'])
     const elsewhere: ToolExtension[] = []
     registerNativeActionTools((e) => elsewhere.push(e), 'linux')
-    expect(elsewhere).toEqual([])
+    expect(elsewhere.map((e) => e.id)).toEqual(['native-actions'])
   })
 })

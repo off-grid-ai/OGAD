@@ -88,7 +88,7 @@ describe('previous signed releases through the GitHub catalogue service', () => 
       }
     ])
     expect(requests).toEqual([
-      'https://api.github.com/repos/off-grid-ai/off-grid-ai-desktop/releases?per_page=50'
+      'https://api.github.com/repos/off-grid-ai/OGAD/releases?per_page=50'
     ])
   })
 
