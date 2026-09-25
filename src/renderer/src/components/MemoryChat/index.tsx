@@ -1492,6 +1492,20 @@ export function MemoryChat({
       const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed
       try {
         await window.api.createRagConversation(convId, title, projectId)
+        const now = new Date().toISOString()
+        const createdConversation: RagConversationContract = {
+          id: convId,
+          title,
+          project_id: projectId,
+          created_at: now,
+          updated_at: now,
+          message_count: 0
+        }
+        setConversations((current) =>
+          current.some((conversation) => conversation.id === convId)
+            ? current
+            : [createdConversation, ...current]
+        )
         setActiveConversationId(convId)
         setOpenTabs((t) => (t.includes(convId!) ? t : [...t, convId!]))
       } catch (e) {

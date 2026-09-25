@@ -68,7 +68,6 @@ type GenPayload = {
   negativePrompt?: string
   seed?: number
   cfgScale?: number
-  enhancePrompt?: boolean
   initImage?: string
   strength?: number
   allowUnsafeMemoryOverride?: boolean
@@ -696,6 +695,34 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       dataUrl: 'data:image/png;base64,AAAA',
       path: '/generated/edited.png',
       prompt: payload.prompt
+    })
+    expect(await screen.findByAltText('Generated')).toBeTruthy()
+  })
+
+  it('shows a new image chat in the sidebar and tab before generation finishes', async () => {
+    const turn = deferred<ImageResult>()
+    const user = userEvent.setup()
+    installApi({
+      active: FULL,
+      models: [FULL],
+      generate: () => turn.promise
+    })
+    renderChat()
+
+    await openImageComposer(user)
+    const title = 'A lighthouse at night'
+    await sendPrompt(user, title)
+
+    await waitFor(() => {
+      expect(document.querySelector('aside')?.textContent).toContain(title)
+      expect(screen.getByRole('button', { name: title })).toBeTruthy()
+    })
+    expect(screen.queryByText('Untitled')).toBeNull()
+
+    turn.resolve({
+      dataUrl: 'data:image/png;base64,AAAA',
+      path: '/generated/lighthouse.png',
+      prompt: title
     })
     expect(await screen.findByAltText('Generated')).toBeTruthy()
   })
