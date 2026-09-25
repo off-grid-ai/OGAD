@@ -962,6 +962,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
 
     expect(await screen.findByRole('button', { name: 'Generated image, running' })).toBeTruthy()
     expect(screen.getByText('Preparing image…')).toBeTruthy()
+    expect(screen.getByText('Image generation started.')).toBeTruthy()
 
     image.resolve({
       dataUrl: 'data:image/png;base64,FERRARI',
@@ -1098,7 +1099,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
       `768 × 768 · 17 steps · CFG 5.5 · seed 101 · ${FULL}`,
       `768 × 768 · 17 steps · CFG 5.5 · seed 202 · ${FULL}`
     ])
-    expect(screen.queryByText('चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।')).toBeNull()
+    expect(screen.getByText('चित्रण प्रक्रिया शुरू हो गई है – यह चैट में दिखाई देगा।')).toBeTruthy()
     const generationDetails = screen.getAllByRole('button', { name: 'Generation details' })
     expect(generationDetails).toHaveLength(1)
     await user.click(generationDetails[0]!)

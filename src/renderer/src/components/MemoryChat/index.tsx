@@ -1888,9 +1888,10 @@ export function MemoryChat({
           imageRequests = [{ prompt: fencedImagePrompt }]
           fencedImageRequest = true
         }
-        const pureImageToolTurn =
-          fencedImageRequest ||
-          (toolCalls.length > 0 && toolCalls.every((toolCall) => toolCall.name === 'generate_image'))
+        // A normal image-tool answer is visible text and must survive the handoff
+        // to the deferred native job. A legacy fenced image prompt is transport
+        // markup, so keep only that one hidden.
+        const visibleToolAnswer = fencedImageRequest ? '' : answer
         // Reasoning read from the ref (populated as it streamed) — deterministic,
         // unlike reading it out of the setConvMessages updater. Rides the persisted
         // context blob so the 'Thinking' block survives reload (T1f).
@@ -1911,7 +1912,7 @@ export function MemoryChat({
             message.id === toolStreamId
               ? {
                 ...message,
-                content: imageRequests.length > 0 ? '' : answer,
+                content: imageRequests.length > 0 ? visibleToolAnswer : answer,
                 context,
                 reasoning: toolReasoning,
                 toolCalls: pendingToolCalls,
@@ -2022,8 +2023,8 @@ export function MemoryChat({
                 if (!comicPageTotal) {
                   const ownsToolTurn = generatedImageCount === 0
                   const imageContent =
-                    ownsToolTurn && !pureImageToolTurn
-                      ? answer
+                    ownsToolTurn && visibleToolAnswer.trim()
+                      ? visibleToolAnswer
                       : `Generated for: ${imageRequest.prompt}`
                   const completedImage = completedImageMessage(
                     imageContent,
