@@ -29,6 +29,12 @@ try {
   & $Python -m pip install --disable-pip-version-check "kev[serve] @ git+https://github.com/jaredpalmer/kev.git@$KevRef"
   if ($LASTEXITCODE -ne 0) { throw "Could not install the Kev server" }
 
+  # The Torch wheel carries extension-build headers and CMake metadata. Kev only
+  # needs the runtime, and packaging these files makes signing needlessly expensive.
+  $SitePackages = (& $Python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])').Trim()
+  Remove-Item -Recurse -Force (Join-Path $SitePackages "torch/include") -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force (Join-Path $SitePackages "torch/share/cmake") -ErrorAction SilentlyContinue
+
   Get-ChildItem $Dest -Directory -Recurse -Force |
     Where-Object { $_.Name -in @("__pycache__", "tests", "test") } |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
