@@ -1,5 +1,5 @@
 import path from 'path'
-import { env } from '@xenova/transformers'
+import { env } from '@huggingface/transformers'
 
 /**
  * Point transformers.js at a WRITABLE model + cache directory. One function, called by whoever

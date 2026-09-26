@@ -3,7 +3,7 @@
 // (core database.ts + pro's migrateCrm, which creates observations/observation_fts and
 // the entities.hidden column universalSearch filters on) + real keyword FTS. The ONLY
 // things faked are true external boundaries: the native engine (fake socket), Electron's
-// dir, and the two native/heavy libs behind semantic search — @xenova/transformers (the
+// dir, and the two native/heavy libs behind semantic search — @huggingface/transformers (the
 // embedding model, which would download) and @lancedb/lancedb (native vector store).
 // universalSearch already catches a failed semantic pass and falls back to keyword, so
 // the search is deterministic on real FTS with zero mocks of OUR code.
@@ -24,7 +24,7 @@ vi.mock('electron', () => ({
 }))
 // The embedding model — faked to throw so the semantic pass is skipped (universalSearch
 // catches it) and search runs on the real keyword FTS. THE external boundary.
-vi.mock('@xenova/transformers', () => ({
+vi.mock('@huggingface/transformers', () => ({
   pipeline: async () => {
     throw new Error('no embedding model in test')
   },

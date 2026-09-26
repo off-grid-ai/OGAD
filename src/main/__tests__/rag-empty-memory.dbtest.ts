@@ -45,7 +45,7 @@ vi.mock('electron', () => ({
   dialog: {}
 }))
 
-vi.mock('@xenova/transformers', () => ({
+vi.mock('@huggingface/transformers', () => ({
   env: {},
   pipeline: async () => async () => ({ data: new Float32Array(384).fill(0.01) })
 }))

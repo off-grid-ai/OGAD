@@ -27,14 +27,14 @@ describe('embeddings on-disk cache is a writable dir (not inside app.asar / the 
     const dataDir = path.join(os.tmpdir(), 'offgrid-embed-cachedir-test')
     const modelsDir = path.join(dataDir, 'models')
 
-    const { env } = await import('@xenova/transformers')
+    const { env } = await import('@huggingface/transformers')
     const { configureTransformersEnv } = await import('../embeddings-env')
     configureTransformersEnv(modelsDir)
     expect(env.cacheDir).toBe(path.join(modelsDir, '.cache'))
     // The download target and the local-model lookup must share the writable dir.
     expect(env.localModelPath).toBe(modelsDir)
     // Must NOT be the library default, which lives inside the (read-only-when-packaged)
-    // @xenova/transformers package folder.
+    // @huggingface/transformers package folder.
     expect(env.cacheDir).not.toMatch(/@xenova[\\/]transformers/)
     // Still allow the first-run download (offline bundling is a separate decision).
     expect(env.allowRemoteModels).toBe(true)

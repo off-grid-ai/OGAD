@@ -5,7 +5,7 @@
 // to do with the file in front of it. sharp ships libvips as `libvips-42.dll`, and
 // Windows resolves a DLL by NAME across the whole process: the first copy loaded
 // wins every later binding. A second sharp version anywhere in the tree therefore
-// broke ours with ERR_DLOPEN_FAILED — `embeddings.ts` loads @xenova/transformers
+// broke ours with ERR_DLOPEN_FAILED — `embeddings.ts` loads @huggingface/transformers
 // (sharp 0.32 / libvips 8.14.5) at startup, so our sharp 0.35 asked that older DLL
 // for symbols it does not export. macOS binds by path and never showed it.
 //
