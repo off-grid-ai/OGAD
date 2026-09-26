@@ -7,8 +7,7 @@
 #   resources/bin/llama/llama-server.exe      (+ Vulkan DLLs)       <- other GPUs
 #   resources/bin/llama-prism-cuda/llama-server.exe                <- Bonsai 2 NVIDIA
 #   resources/bin/cuda-runtime/*.dll                               <- shared CUDA runtime
-#   resources/bin/sd-cuda/sd-cli.exe       (+ CUDA DLLs)         <- NVIDIA image path
-#   resources/bin/sd/sd-cli.exe            (+ Vulkan DLLs)       <- other GPU path
+#   resources/bin/sd/sd-cli.exe            (+ Vulkan DLLs)       <- image GPU path
 #   resources/bin/sd-cpu/sd-cli.exe        (+ CPU DLLs)          <- image fallback
 #   resources/bin/whisper/whisper-cli.exe  (+ CUDA DLLs)        <- STT GPU path
 #   resources/bin/whisper-cpu/whisper-cli.exe (+ DLLs)          <- STT fallback
@@ -140,22 +139,14 @@ try {
   if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
 } catch { Write-Warning "whisper.cpp fetch failed: $_" }
 
-# --- stable-diffusion.cpp (image gen): CUDA + Vulkan + CPU fallback -----------
-# NVIDIA uses CUDA first. Vulkan covers AMD and Intel and remains the NVIDIA
-# fallback. A separate CPU build covers systems without either GPU runtime.
+# --- stable-diffusion.cpp (image gen): Vulkan GPU + CPU fallback ---------------
+# Vulkan covers NVIDIA, AMD, and Intel without adding a second 897 MB compressed
+# CUDA image runtime. A separate CPU build covers systems without Vulkan.
 # Keep this release pinned: Qwen-Image 2.1 needs the current runtime and a moving
 # latest release can change the packaged DLL contract without review.
 $SdRef = 'master-920-2f88688'
-Write-Host "== stable-diffusion.cpp (pinned $SdRef): CUDA + Vulkan + CPU =="
+Write-Host "== stable-diffusion.cpp (pinned $SdRef): Vulkan + CPU =="
 try {
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
-  $dest = Copy-Runtime $x 'sd-cuda'
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' '^cudart-sd-bin-win-cu12-x64\.zip$' $SdRef 'fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d'
-  Copy-Runtime $x 'sd-cuda' | Out-Null
-  $cli = Join-Path $dest 'sd-cli.exe'
-  $sd = Join-Path $dest 'sd.exe'
-  if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
-
   $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '63e84439c20dde75487a933066318ae01353e9e80ee70e031acad48e857e1cb9'
   $dest = Copy-Runtime $x 'sd'
   # Older releases named the one-shot binary sd.exe; normalize the app contract.
@@ -218,7 +209,6 @@ foreach ($p in @(
     (Join-Path $bin 'llama-cpu\llama-server.exe'),
     (Join-Path $bin 'whisper\whisper-cli.exe'),
     (Join-Path $bin 'whisper-cpu\whisper-cli.exe'),
-    (Join-Path $bin 'sd-cuda\sd-cli.exe'),
     (Join-Path $bin 'sd\sd-cli.exe'),
     (Join-Path $bin 'sd-cpu\sd-cli.exe'),
     (Join-Path $bin 'ffmpeg.exe'))) {

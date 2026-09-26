@@ -32,11 +32,11 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — stable-diffusion.cpp asset', (
     expect(activeAvx2).toBe(false)
   })
 
-  it('matches a currently-published Windows sd asset (cpu x64)', () => {
-    // CPU build is deliberate: the default one-shot sd-cli path has no launch-
-    // failure fallback, so the bundled binary must load without a GPU/Vulkan
-    // loader. See the script comment.
+  it('stages Vulkan GPU and CPU image runtimes without the oversized CUDA copy', () => {
+    expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-vulkan-x64\\\.zip\$'/)
     expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-cpu-x64\\\.zip\$'/)
+    expect(SRC).not.toMatch(/bin-win-cuda12-x64/)
+    expect(SRC).not.toMatch(/cudart-sd-bin-win/)
   })
 
   it('still renames upstream sd.exe to the sd-cli.exe the app resolves', () => {
