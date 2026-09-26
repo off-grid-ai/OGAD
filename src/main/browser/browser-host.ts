@@ -66,6 +66,10 @@ import { runBrowserPlaywrightTask } from './browser-playwright-task'
 import { automationTaskReadStatus, isAutomationTaskTerminal } from '@offgrid/automation'
 import { getWebUseSettings } from '../web-use-settings'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
+import {
+  activeModelProjectionIdentity,
+  getWebUseActiveModelProjection
+} from '../vision/vision-task-model-strategy'
 
 function broadcast(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -157,6 +161,7 @@ class BrowserHost implements BrowserRailHost {
   private readonly history = new BrowserHistoryStore(getDB())
   private readonly runOwners = new BrowserJourneyRunOwners()
   private readonly taskPointers = new Map<string, BrowserPointerEvent>()
+  private readonly pointerRestorations = new Map<string, Promise<boolean>>()
   private region: Rect | null = null
   /** Latest rect per hosting surface. The painted region is the highest-priority entry present. */
   private readonly regions = new Map<BrowserRegionOwner, Rect>()
@@ -197,9 +202,21 @@ class BrowserHost implements BrowserRailHost {
     })
   }
 
-  private async restoreTaskPointer(record: BrowserSessionRecord<WebContentsView>): Promise<void> {
-    if (record.kind !== 'task' || record.resource.webContents.isDestroyed()) return
-    await this.driverFor(record).ensurePointer(true)
+  private async restoreTaskPointer(
+    record: BrowserSessionRecord<WebContentsView>
+  ): Promise<boolean> {
+    if (record.kind !== 'task' || record.resource.webContents.isDestroyed()) return false
+    const existing = this.pointerRestorations.get(record.sessionId)
+    if (existing) return existing
+    const restoration = this.driverFor(record)
+      .verifyPointer(true)
+      .finally(() => {
+        if (this.pointerRestorations.get(record.sessionId) === restoration) {
+          this.pointerRestorations.delete(record.sessionId)
+        }
+      })
+    this.pointerRestorations.set(record.sessionId, restoration)
+    return restoration
   }
 
   private readChrome(record: BrowserSessionRecord<WebContentsView>): BrowserChromeState {
@@ -289,6 +306,34 @@ class BrowserHost implements BrowserRailHost {
     }
   }
 
+  /** Replace every live page for a journey before a retry or after its renderer
+   * stops answering CDP. Task history and the plan stay durable; only the old
+   * browser process is discarded. */
+  private recreateJourneySession(
+    record: BrowserSessionRecord<WebContentsView>
+  ): BrowserSessionRecord<WebContentsView> {
+    const journeyId = record.journeyId
+    const task = record.task
+    if (!journeyId || !task) return record
+    const rootSessionId = record.parentSessionId
+      ? (this.sessions.journeyRecords(journeyId).find((page) => !page.parentSessionId)?.sessionId ??
+        `journey:${journeyId}`)
+      : record.sessionId
+    for (const page of this.sessions.journeyRecords(journeyId)) {
+      const closed = this.sessions.close(page.sessionId)
+      if (!closed) continue
+      this.taskPointers.delete(page.sessionId)
+      this.pointerRestorations.delete(page.sessionId)
+      this.destroyView(closed.resource)
+    }
+    return this.createSession({
+      sessionId: rootSessionId,
+      kind: 'task',
+      journeyId,
+      task
+    })
+  }
+
   /** Keep the current result page available, but release completed Web Use
    * renderers from older journeys before a new live preview starts. History can
    * recreate those pages from its saved URL when the user opens them again. */
@@ -318,6 +363,7 @@ class BrowserHost implements BrowserRailHost {
     this.region = null
     this.runOwners.haltAll('browser host closed')
     this.taskPointers.clear()
+    this.pointerRestorations.clear()
     for (const record of this.sessions.clear()) this.destroyView(record.resource)
     this.broadcastSessions()
   }
@@ -656,17 +702,31 @@ class BrowserHost implements BrowserRailHost {
 
   async runTask(request: BrowserTaskRequest): Promise<WebTaskResult> {
     const { goal, url, taskId, journeyId, checkpoint } = request
+    const taskModelIdentityPromise = getWebUseActiveModelProjection()
+      .then(activeModelProjectionIdentity)
+      .catch((error: unknown) => {
+        console.warn('[web-use] could not resolve the active model identity', error)
+        return undefined
+      })
     this.releaseRetainedTaskViews(journeyId)
-    let record = this.sessions.findJourney(journeyId)
-    const continuingJourney = Boolean(record)
-    if (!record) {
-      record = this.createSession({
+    let existingRecord = this.sessions.findJourney(journeyId)
+    const continuingJourney = Boolean(existingRecord)
+    const retryingJourney = Boolean(existingRecord && checkpoint)
+    const continuationUrl =
+      existingRecord?.resource.webContents.getURL() || existingRecord?.chrome.url
+    // A retry must not inherit the renderer that caused the previous failure.
+    // The checkpoint restores task progress after a fresh page loads.
+    if (existingRecord && checkpoint) {
+      existingRecord = this.recreateJourneySession(existingRecord)
+    }
+    let record =
+      existingRecord ??
+      this.createSession({
         sessionId: `journey:${journeyId}`,
         kind: 'task',
         journeyId,
         task: { taskId, journeyId, goal, status: 'running', steps: [] }
       })
-    }
     this.activateSession(record.sessionId)
     const view = record.resource
     // A web task with no start URL would begin on a blank pane (no page to act
@@ -675,7 +735,11 @@ class BrowserHost implements BrowserRailHost {
     const start =
       url ??
       explicitBrowserAddress(goal) ??
-      (continuingJourney ? undefined : 'https://www.google.com')
+      (retryingJourney
+        ? continuationUrl || 'https://www.google.com'
+        : continuingJourney
+          ? undefined
+          : 'https://www.google.com')
     console.log(`[web-use] runTask goal="${goal}" url="${start ?? record.chrome.url}"`)
 
     // The browser rail's surface is the in-app watched pane (browser:*), which
@@ -709,6 +773,7 @@ class BrowserHost implements BrowserRailHost {
       takeovers: 0,
       finalUrl: ''
     })
+    const taskModelIdentity = await taskModelIdentityPromise
     const setState = (
       status: BrowserTaskStatus,
       summary?: string,
@@ -730,6 +795,7 @@ class BrowserHost implements BrowserRailHost {
         steps,
         executionDeviceId: executionDevice.id,
         executionDeviceName: executionDevice.name,
+        ...(taskModelIdentity ?? {}),
         lastUrl: finalPage?.url ?? record.chrome.url,
         lastTitle: finalPage?.title ?? record.chrome.title
       })
@@ -811,12 +877,31 @@ class BrowserHost implements BrowserRailHost {
         if (!ownsRun()) return replacedResult()
         if (!outcome.ok) throw outcome.error
         this.refreshSession(record.sessionId)
-        await this.restoreTaskPointer(record)
+        if (!(await this.restoreTaskPointer(record))) {
+          console.warn('[web-use] browser renderer stopped responding; replacing session')
+          record = this.recreateJourneySession(record)
+          await this.loadNatively(record.resource, start)
+          this.refreshSession(record.sessionId)
+          if (!(await this.restoreTaskPointer(record))) {
+            throw new Error('The browser page did not respond after session recovery.')
+          }
+          recordStep('recovered the browser session after it stopped responding')
+        }
         if (!ownsRun()) return replacedResult()
         recordStep(`opened ${start}`)
       } else {
         this.refreshSession(record.sessionId)
-        await this.restoreTaskPointer(record)
+        if (!(await this.restoreTaskPointer(record))) {
+          console.warn('[web-use] browser renderer stopped responding; replacing session')
+          const resumeUrl = record.chrome.url || 'https://www.google.com'
+          record = this.recreateJourneySession(record)
+          await this.loadNatively(record.resource, resumeUrl)
+          this.refreshSession(record.sessionId)
+          if (!(await this.restoreTaskPointer(record))) {
+            throw new Error('The browser page did not respond after session recovery.')
+          }
+          recordStep('recovered the browser session after it stopped responding')
+        }
         if (!ownsRun()) return replacedResult()
         recordStep(`continued at ${record.chrome.url || 'the current page'}`)
       }
@@ -1054,7 +1139,6 @@ class BrowserHost implements BrowserRailHost {
       const detail = error instanceof Error ? error.message : String(error)
       console.log(`[web-use] ERROR: ${detail}`)
       recordStep(`error: ${detail}`)
-      await this.restoreTaskPointer(this.sessions.findJourney(journeyId) ?? record)
       if (!ownsRun()) return replacedResult()
       const summary = `Web Use stopped: ${detail}`
       guard.fail(summary)

@@ -86,7 +86,7 @@ const NAVIGATION_TIMEOUT_MS = 20_000
  *  rejection - which froze the whole web task at setup with no step, no result,
  *  no error. Bound every command so a wedged transport fails fast and visibly
  *  instead of hanging. */
-const CDP_COMMAND_TIMEOUT_MS = 60_000
+const CDP_COMMAND_TIMEOUT_MS = 15_000
 const POINTER_FRAME_MS = 16
 const POINTER_MIN_DURATION_MS = 120
 const POINTER_MAX_DURATION_MS = 240
@@ -272,7 +272,7 @@ export class BrowserDriver {
     event: BrowserPointerEvent,
     onlyIfMissing = false,
     transitionMs = 0
-  ): Promise<boolean> {
+  ): Promise<boolean | null> {
     const pointerImage = browserPointerBackgroundImage()
     // Guard the divide: a zero or missing zoom must not produce an invisible or infinite cursor.
     const zoom = this.zoomFactor()
@@ -348,16 +348,17 @@ export class BrowserDriver {
       exceptionDetails?: { exception?: { description?: string }; text?: string }
     }>('Runtime.evaluate', { expression, returnByValue: true }).catch((error: unknown) => {
       console.warn('[browser] pointer evaluation failed', error)
-      return undefined
+      return null
     })
-    const thrown = response?.exceptionDetails
+    if (response === null) return null
+    const thrown = response.exceptionDetails
     if (thrown) {
       console.warn(
         '[browser] pointer injection threw',
         thrown.exception?.description ?? thrown.text
       )
     }
-    return response?.result?.value === true
+    return response.result?.value === true
   }
 
   private async movePointerTo(
@@ -367,7 +368,7 @@ export class BrowserDriver {
   ): Promise<void> {
     const destination = { phase: 'moved' as const, x, y }
     const motion = browserPointerMotion(this.pointer, destination)
-    const reduceMotion = await this.showPointer(destination, false, motion.durationMs)
+    const reduceMotion = (await this.showPointer(destination, false, motion.durationMs)) === true
     const points = reduceMotion ? [motion.points.at(-1)!] : motion.points
     const frameDelayMs = reduceMotion ? 0 : motion.durationMs / Math.max(1, points.length)
     for (const point of points) {
@@ -390,6 +391,16 @@ export class BrowserDriver {
   async ensurePointer(onlyIfMissing = true): Promise<void> {
     await this.showPointer(this.pointer, onlyIfMissing)
     this.onPointer?.(this.pointer)
+  }
+
+  /** Draw the pointer and report whether Chromium answered. The host uses this
+   * at task startup to replace a renderer whose CDP transport has stopped
+   * responding. Regular actions keep pointer painting best-effort. */
+  async verifyPointer(onlyIfMissing = true): Promise<boolean> {
+    const result = await this.showPointer(this.pointer, onlyIfMissing)
+    if (result === null) return false
+    this.onPointer?.(this.pointer)
+    return true
   }
 
   /** Chromium input uses CSS pixels, which can differ from capturePage pixels on Retina. */

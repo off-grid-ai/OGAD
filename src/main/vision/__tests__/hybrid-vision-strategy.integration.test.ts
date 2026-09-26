@@ -11,6 +11,7 @@ import { runVisionTaskGraph } from '../vision-task-graph'
 import { createHybridVisionGrounder } from '../hybrid-vision-grounder'
 import { uiTarsAdapter } from '../model-adapters/ui-tars'
 import {
+  activeModelProjectionIdentity,
   getComputerUseActiveModelProjection,
   withVisionTaskModelStrategy,
   type VisionTaskModelStrategyDependencies
@@ -107,6 +108,12 @@ describe('Text + Specialist visual task journey', () => {
           remote: false
         }
       ]
+    })
+    expect(
+      activeModelProjectionIdentity(await getComputerUseActiveModelProjection(dependencies))
+    ).toEqual({
+      modelId: 'decision/selector + chat/reasoner + vision/specialist',
+      modelName: 'decision/selector + chat/reasoner + vision/specialist'
     })
   })
 
