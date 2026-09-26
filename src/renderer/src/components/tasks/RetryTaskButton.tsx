@@ -18,6 +18,9 @@ interface RetryAvailability {
   activePhaseIndex?: number
 }
 
+const STOPPING_REASON = 'The earlier run is still stopping.'
+const STOPPING_RECHECK_MS = 500
+
 /** One retry control for task details and linked Chat work cards. */
 export function RetryTaskButton({
   task,
@@ -35,11 +38,20 @@ export function RetryTaskButton({
     const check = window.api.tasks?.retryAvailability
     if (!check) return
     let current = true
-    void check(task.taskId).then((result) => {
-      if (current) setAvailability(result)
-    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = (): void => {
+      void check(task.taskId).then((result) => {
+        if (!current) return
+        setAvailability(result)
+        if (!result.available && result.reason === STOPPING_REASON) {
+          timer = setTimeout(refresh, STOPPING_RECHECK_MS)
+        }
+      })
+    }
+    refresh()
     return () => {
       current = false
+      clearTimeout(timer)
     }
   }, [task.taskId, task.status])
 

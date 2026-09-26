@@ -423,6 +423,11 @@ describe('CDP command timeout (a wedged transport must not hang the rail)', () =
     await expect(driver.ensurePointer()).resolves.toBeUndefined()
   })
 
+  it('reports a pointer timeout when the host checks renderer health', async () => {
+    const driver = new BrowserDriver(deadTransport, 20)
+    await expect(driver.verifyPointer()).resolves.toBe(false)
+  })
+
   it('rejects navigate after the command timeout instead of hanging forever', async () => {
     const driver = new BrowserDriver(deadTransport, 20)
     await expect(driver.navigate('https://x.test')).rejects.toThrow(/Page\.enable timed out/)
