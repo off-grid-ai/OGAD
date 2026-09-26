@@ -43,11 +43,12 @@ export default defineConfig({
       sourcemap: coverageSourcemap,
       // The embedding worker is a SECOND main-process entry, bundled beside index.js so
       // embeddings.ts can spawn it by path. It must not be folded into the main chunk: the point
-      // is that its ONNX/WASM inference runs off the thread that owns the window.
+      // is that native ONNX inference runs off the thread that owns the window.
       rollupOptions: {
         input: {
           index: resolve('src/main/index.ts'),
-          'embeddings-worker': resolve('src/main/embeddings-worker.ts')
+          'embeddings-worker': resolve('src/main/embeddings-worker.ts'),
+          'tts-onnx-worker': resolve('src/main/tts-onnx-worker.ts')
         }
       }
     },
