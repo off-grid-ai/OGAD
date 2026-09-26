@@ -292,7 +292,7 @@ jobs:
             --extra-index-url https://pypi.org/simple
           python3 -c 'import torchgen, yaml, jinja2'
           sudo apt-get update -qq
-          sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc unzip
+          sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers unzip
 
       - name: Typecheck core Linux main process
         env:
