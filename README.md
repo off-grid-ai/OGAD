@@ -273,9 +273,12 @@ npm run build:win                  # package the NSIS installer → dist\*-setup
 ```
 
 Prereqs on Windows: Node 20, Python 3.12 (node-gyp can't parse VS 2026 yet — use
-the **VS 2022** Build Tools), and Git. CI also builds Windows on every push to
-`feat/windows-support` (`.github/workflows/windows-build.yml`) and uploads the
-installer as a downloadable artifact.
+the **VS 2022** Build Tools), and Git. The **Branch Builds (Windows and Linux)**
+workflow can build Windows, Linux, or both from any selected branch without a
+version bump or release. It uploads the installers as downloadable workflow
+artifacts. Set `build_ref` to build a different branch, tag, or commit while you
+run the workflow from `main`. Pushes to `feat/windows-support` continue to build
+Windows automatically.
 
 Stack: Electron 39 + React 19 + Tailwind v4 (electron-vite),
 `better-sqlite3-multiple-ciphers` (encrypted local DB), `@lancedb/lancedb` (vectors),

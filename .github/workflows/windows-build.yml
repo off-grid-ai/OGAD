@@ -1,10 +1,8 @@
-name: Windows Build (branch)
+name: Branch Builds (Windows and Linux)
 
-# Standalone Windows build for the feat/windows-support branch. Kept separate
-# from release.yml (macOS core+pro) on purpose: this neither bumps the version
-# nor publishes to Releases — it packages the NSIS installer and uploads it as a
-# workflow artifact you can download. Re-fold a windows-2022 job into release.yml
-# once a build is verified on a real Windows machine.
+# Manually package Windows and Linux installers from any branch without changing
+# package.json, creating a tag, or publishing a release. The historical push
+# trigger keeps the existing feat/windows-support Windows build behavior.
 
 on:
   push:
@@ -12,14 +10,27 @@ on:
       - feat/windows-support
   workflow_dispatch: # lets you trigger a build manually from the Actions tab
     inputs:
-      pro_ref:
-        # Without this the pro checkout below takes desktop-pro's DEFAULT branch, so
-        # dispatching from a core integration branch quietly builds against pro `main`
-        # and every pro-side change is absent from a green build.
-        description: 'desktop-pro branch/tag/sha to bundle (empty = its default branch)'
+      build_ref:
+        description: 'OGAD branch, tag, or commit to build (empty = selected workflow ref)'
         type: string
         required: false
         default: ''
+      platform:
+        description: 'Installer platform to build'
+        type: choice
+        required: true
+        default: both
+        options:
+          - both
+          - windows
+          - linux
+      pro_ref:
+        # Manual builds use desktop-pro main unless the operator pins another ref.
+        # The historical push trigger has no input and still uses the default branch.
+        description: 'desktop-pro branch, tag, or commit to bundle for Windows'
+        type: string
+        required: false
+        default: 'main'
       shared_ref:
         # off-grid-ai/shared carries @offgrid/models|sync|use. This core branch depends
         # on shared feature work that is NOT on shared main, and the auto match below is
@@ -35,6 +46,7 @@ permissions:
 
 jobs:
   build-win:
+    if: ${{ github.event_name == 'push' || inputs.platform == 'both' || inputs.platform == 'windows' }}
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026 (VS 18),
     # which node-gyp 11 can't parse — breaking native-module (better-sqlite3,
     # node-llama-cpp) compiles. Pin until node-gyp catches up.
@@ -47,6 +59,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.build_ref || github.ref }}
           persist-credentials: false # don't leave the token in .git/config for npm postinstall scripts
           lfs: false # pull only the cross-platform Kev launcher below, not ~235 MB of macOS binaries
       - name: Pull the Kev server launcher from LFS
@@ -68,8 +81,7 @@ jobs:
         if: env.HAS_PRO_TOKEN == 'true'
         with:
           repository: off-grid-ai/desktop-pro
-          # Empty = default branch (checkout treats '' as unset), so the push-triggered
-          # build is unchanged; set it on dispatch to pair with a core integration branch.
+          # Push events have no pro_ref input, so checkout uses the default branch.
           ref: ${{ inputs.pro_ref }}
           token: ${{ secrets.PRO_REPO_TOKEN }}
           path: pro
@@ -120,7 +132,7 @@ jobs:
         with:
           repository: off-grid-ai/shared
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: ${{ inputs.shared_ref || github.ref_name }}
+          ref: ${{ inputs.shared_ref || inputs.build_ref || github.ref_name }}
           path: _shared
           persist-credentials: false
       - name: Fall back to shared main
@@ -145,6 +157,7 @@ jobs:
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/use run build
+          npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
 
@@ -196,4 +209,152 @@ jobs:
           path: |
             dist/*.exe
             dist/*.zip
+          if-no-files-found: error
+
+  build-linux:
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.platform == 'both' || inputs.platform == 'linux') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.build_ref || github.ref }}
+          lfs: false # Tracked native binaries are macOS files; build Linux ELF below.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check out shared at the matching ref
+        id: shared_branch_linux
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: ${{ inputs.shared_ref || inputs.build_ref || github.ref_name }}
+          path: _shared
+          persist-credentials: false
+
+      - name: Fall back to shared main
+        if: ${{ steps.shared_branch_linux.outcome != 'success' }}
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          persist-credentials: false
+
+      - name: Build shared packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d _shared || { echo 'Shared source is missing' >&2; exit 1; }
+          rm -rf ../shared
+          mv _shared ../shared
+          npm --prefix ../shared ci
+          for package in models sync use automation speech ui rag design; do
+            npm --prefix "../shared/packages/$package" run build
+          done
+
+      - name: Check out the Desktop speech package
+        uses: actions/checkout@v4
+        with:
+          repository: off-grid-ai/executorch-speech
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: e3b471e6ea8504f3877cd9f27a11bfe98ce3b3b5
+          path: _executorch_speech
+          lfs: false
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Put the speech package beside this checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f _executorch_speech/package.json
+          rm -rf ../executorch-speech
+          mv _executorch_speech ../executorch-speech
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux build dependencies
+        run: |
+          python3 -m pip install --no-cache-dir 'torch==2.11.0+cpu' PyYAML Jinja2 \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple
+          python3 -c 'import torchgen, yaml, jinja2'
+          sudo apt-get update -qq
+          sudo apt-get install -y libgomp1 libvulkan1 unzip
+
+      - name: Typecheck core Linux main process
+        env:
+          OFFGRID_FORCE_CORE: '1'
+        run: npm run typecheck:node
+
+      - name: Build Linux installers without changing the version
+        env:
+          OFFGRID_FORCE_CORE: '1'
+        run: npm run build:linux
+
+      - name: Verify Linux package inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in llama llama-cpu llama-prism llama-prism-cpu; do
+            engine="dist/linux-unpacked/resources/bin/$variant/llama-server"
+            test -x "$engine"
+            file "$engine" | grep -q 'ELF 64-bit.*x86-64'
+            LD_LIBRARY_PATH="$(dirname "$engine")" ldd "$engine" | tee "$RUNNER_TEMP/$variant-ldd.txt"
+            ! grep -q 'not found' "$RUNNER_TEMP/$variant-ldd.txt"
+            LD_LIBRARY_PATH="$(dirname "$engine")" "$engine" --version
+          done
+          for variant in llama-cuda llama-prism-cuda; do
+            test -x "dist/linux-unpacked/resources/bin/$variant/llama-server"
+            test -f "dist/linux-unpacked/resources/bin/$variant/libggml-cuda.so"
+          done
+          for library in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
+            test -f "dist/linux-unpacked/resources/bin/cuda-runtime/$library"
+          done
+          test -n "$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$(find dist -maxdepth 1 -name '*-linux.yml' -print -quit)"
+
+      - name: Smoke-test local Linux voice
+        run: |
+          bash scripts/probe-linux-voice.sh dist/linux-unpacked/resources/bin
+          node scripts/probe-linux-tts.mjs
+
+      - name: Verify packaged CUDA dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/dist/linux-unpacked/resources/bin:/engines:ro" ubuntu:24.04 bash -euo pipefail -c '
+            for variant in llama-cuda llama-prism-cuda; do
+              export LD_LIBRARY_PATH="/engines/$variant:/engines/cuda-runtime"
+              dependencies="$(ldd "/engines/$variant/llama-server"; ldd "/engines/$variant/libggml-cuda.so")"
+              missing="$(printf "%s\n" "$dependencies" | grep "not found" | grep -v "libcuda.so.1" || true)"
+              test -z "$missing" || { printf "%s\n" "$missing" >&2; exit 1; }
+              if [ "$variant" = llama-cuda ]; then
+                "/engines/$variant/llama-server" --version
+                "/engines/$variant/llama-server" --list-devices
+              fi
+            done
+          '
+
+      - name: Upload Linux installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*-linux.yml
           if-no-files-found: error
