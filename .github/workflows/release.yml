@@ -27,8 +27,8 @@ on:
         # Internal demo build: the SAME signed + notarized DMG, but uploaded as a run
         # artifact (repo-scoped, auto-expiring) instead of a published Release. Skips the
         # release-create/upload, the pro-mac.yml + latest/nightly aliases, Slack, and the
-        # whole Windows job - so nothing lands on the releases page or the update feed.
-        description: 'Build the signed+notarized DMG as a run artifact only (no Release, no Windows, no Slack)'
+        # Windows and Linux jobs - so nothing lands on the releases page or the update feed.
+        description: 'Build the signed+notarized DMG as a run artifact only (no Release, no Windows or Linux, no Slack)'
         type: boolean
         required: false
         default: false
@@ -40,14 +40,14 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-# macOS-only for now. ONE signed + notarized DMG: the build bundles the private pro
+# ONE signed + notarized DMG: the macOS build bundles the private pro
 # source (cloned from off-grid-ai/desktop-pro) and is license-gated at runtime —
 # free = unlicensed (pro tabs locked), a valid Keygen key unlocks in place (no
 # re-download). The ASAR integrity fuse (electron-builder.yml) makes a tampered
 # app.asar refuse to load — our local-first anti-tamper lever (we don't phone home).
-# Actions are pinned to commit SHAs. macOS (build-mac) and Windows (build-win) share
-# the one `version` job and publish to the same release; Windows runtimes come from
-# fetch-win-binaries.ps1 rather than the macOS-only LFS binaries.
+# Actions are pinned to commit SHAs. macOS, Windows, and Linux share the one
+# `version` job and publish to the same release. Each platform stages its own
+# native engine; the Linux package currently contains the core product.
 jobs:
   # Resolve the channel + version. STABLE (manual promote) bumps the patch and
   # commits it so main tracks the released version; BETA (every merge) stamps a
@@ -263,6 +263,7 @@ jobs:
           # and needs the same explicit build - file-dep prepare alone does not emit
           # its dist/ output before the app bundle runs.
           npm --prefix ../shared/packages/use run build
+          npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
@@ -417,7 +418,7 @@ jobs:
       # Stable "always latest" download link. The versioned DMG (OffGrid-<v>.dmg)
       # changes name every release, so /releases/latest/download/<name> can't target
       # it. Upload a constant-named COPY so this URL is permanent across releases:
-      #   https://github.com/off-grid-ai/off-grid-ai-desktop/releases/latest/download/OffGrid-latest.dmg
+      #   https://github.com/off-grid-ai/OGAD/releases/latest/download/OffGrid-latest.dmg
       # --clobber replaces the copy from the prior run. The versioned DMG + updater
       # feed (latest-mac.yml) are untouched, so auto-update is unaffected.
       - name: Publish stable latest.dmg alias
@@ -433,7 +434,7 @@ jobs:
       # safe). Nightly therefore gets its own fixed-tag 'nightly' release whose dmg is
       # force-replaced every beta build — a permanent, SEPARATE URL that never touches
       # /releases/latest or the stable OffGrid-latest.dmg:
-      #   https://github.com/off-grid-ai/off-grid-ai-desktop/releases/download/nightly/OffGrid-nightly.dmg
+      #   https://github.com/off-grid-ai/OGAD/releases/download/nightly/OffGrid-nightly.dmg
       - name: Publish constant nightly.dmg link
         if: ${{ !inputs.artifact_only && needs.version.outputs.channel == 'beta' }}
         env:
@@ -446,7 +447,7 @@ jobs:
           # then clobber its dmg so the link always serves the freshest nightly.
           gh release view nightly >/dev/null 2>&1 || \
             gh release create nightly --prerelease --title "Nightly (rolling)" \
-              --notes "Rolling nightly build, auto-updated on every change. Pre-release — expect rough edges. Stable: https://github.com/off-grid-ai/off-grid-ai-desktop/releases/latest"
+              --notes "Rolling nightly build, auto-updated on every change. Pre-release — expect rough edges. Stable: https://github.com/off-grid-ai/OGAD/releases/latest"
           gh release upload nightly dist/OffGrid-nightly.dmg --clobber
       # electron-builder creates the GitHub release with empty notes; attach the notes
       # generated above. Runs for BOTH channels (beta + stable) — the notes file and the
@@ -471,7 +472,7 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
           CHANNEL_LABEL: ${{ needs.version.outputs.channel }}
           NOTES_FILE: release-notes.md
-          RELEASE_URL: https://github.com/off-grid-ai/off-grid-ai-desktop/releases/tag/v${{ needs.version.outputs.version }}
+          RELEASE_URL: https://github.com/off-grid-ai/OGAD/releases/tag/v${{ needs.version.outputs.version }}
         run: node scripts/notify-slack-release.mjs
 
   # Windows release build. Mirrors build-mac: it consumes the SAME resolved version
@@ -570,6 +571,7 @@ jobs:
           # and needs the same explicit build - file-dep prepare alone does not emit
           # its dist/ output before the app bundle runs.
           npm --prefix ../shared/packages/use run build
+          npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
@@ -625,7 +627,7 @@ jobs:
       # OffGrid-latest.dmg alias. The versioned installer (off-grid-ai-<v>-setup.exe)
       # changes name every release, so /releases/latest/download/<name> can't target
       # it; upload a constant-named copy for a stable URL:
-      #   https://github.com/off-grid-ai/off-grid-ai-desktop/releases/latest/download/OffGrid-latest-setup.exe
+      #   https://github.com/off-grid-ai/OGAD/releases/latest/download/OffGrid-latest-setup.exe
       # The versioned installer + latest.yml updater feed are untouched, so auto-update
       # is unaffected. --clobber replaces the copy from the prior run.
       - name: Publish stable latest-setup.exe alias
@@ -651,3 +653,231 @@ jobs:
             gh release create nightly --prerelease --title "Nightly (rolling)" \
               --notes "Rolling nightly build, auto-updated on every change. Pre-release - expect rough edges."
           gh release upload nightly dist/OffGrid-nightly-setup.exe --clobber
+
+  # Core Linux release. Wait for build-mac to create the versioned release, then
+  # add AppImage, deb, and Linux update metadata to that same release.
+  build-linux:
+    needs: [version, build-mac]
+    if: ${{ !inputs.artifact_only }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          lfs: false # Tracked native binaries are macOS files; build Linux ELF below.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Check out shared at the matching ref
+        id: shared_branch
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: ${{ github.ref_name }}
+          path: _shared
+          persist-credentials: false
+      - name: Fall back to shared main
+        if: ${{ steps.shared_branch.outcome != 'success' }}
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/shared
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          path: _shared
+          persist-credentials: false
+      - name: Build shared packages
+        run: |
+          test -d _shared || { echo 'Shared source is missing' >&2; exit 1; }
+          mv _shared ../shared
+          npm --prefix ../shared ci
+          for package in models sync use automation speech ui rag design; do
+            npm --prefix "../shared/packages/$package" run build
+          done
+      - name: Check out the Desktop speech package
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: off-grid-ai/executorch-speech
+          token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: e3b471e6ea8504f3877cd9f27a11bfe98ce3b3b5
+          path: _executorch_speech
+          lfs: false # Build the Linux executable from the pinned source.
+          submodules: recursive
+          persist-credentials: false
+      - name: Put the speech package beside this checkout
+        run: |
+          test -f _executorch_speech/package.json
+          mv _executorch_speech ../executorch-speech
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Linux local voice build dependency
+        run: |
+          # ExecuTorch 1.2 code generation imports torchgen from its matching
+          # PyTorch release. The CPU wheel is a build tool, not an app payload.
+          python3 -m pip install --no-cache-dir 'torch==2.11.0+cpu' PyYAML Jinja2 \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --extra-index-url https://pypi.org/simple
+          python3 -c 'import torchgen, yaml, jinja2'
+      - name: Install Linux GPU runtime dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers unzip
+      - name: Typecheck core Linux main process
+        env:
+          OFFGRID_FORCE_CORE: '1'
+        # Renderer integration tests import the absent private Pro checkout;
+        # electron-vite below validates the actual core renderer bundle.
+        run: npm run typecheck:node
+      - name: Stamp build version
+        run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Build core Linux packages
+        env:
+          OFFGRID_FORCE_CORE: '1'
+        run: npm run build:linux
+      - name: Verify Linux package inputs
+        run: |
+          for variant in llama llama-cpu llama-prism llama-prism-cpu; do
+            engine="dist/linux-unpacked/resources/bin/$variant/llama-server"
+            test -x "$engine"
+            file "$engine" | grep -q 'ELF 64-bit.*x86-64'
+            LD_LIBRARY_PATH="$(dirname "$engine")" ldd "$engine" | tee "$RUNNER_TEMP/$variant-ldd.txt"
+            ! grep -q 'not found' "$RUNNER_TEMP/$variant-ldd.txt"
+            LD_LIBRARY_PATH="$(dirname "$engine")" "$engine" --version
+          done
+          for variant in llama llama-prism; do
+            test -f "dist/linux-unpacked/resources/bin/$variant/libggml-vulkan.so"
+          done
+          for variant in llama-cuda llama-prism-cuda; do
+            test -x "dist/linux-unpacked/resources/bin/$variant/llama-server"
+            test -f "dist/linux-unpacked/resources/bin/$variant/libggml-cuda.so"
+          done
+          for library in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
+            test -f "dist/linux-unpacked/resources/bin/cuda-runtime/$library"
+          done
+          for helper in whisper/whisper-cli whisper-cpu/whisper-cli ffmpeg; do
+            binary="dist/linux-unpacked/resources/bin/$helper"
+            test -x "$binary"
+            file "$binary" | grep -q 'ELF 64-bit.*x86-64'
+            ldd "$binary" | tee "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
+            ! grep -q 'not found' "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
+          done
+          dist/linux-unpacked/resources/bin/ffmpeg -version >/dev/null
+          dist/linux-unpacked/resources/bin/whisper/whisper-cli --help >/dev/null 2>&1
+          dist/linux-unpacked/resources/bin/whisper-cpu/whisper-cli --help >/dev/null 2>&1
+          for helper in sd/sd-cli sd/sd-server executorch-speech; do
+            binary="dist/linux-unpacked/resources/bin/$helper"
+            test -x "$binary"
+            file "$binary" | grep -q 'ELF 64-bit.*x86-64'
+            LD_LIBRARY_PATH="$(dirname "$binary")" ldd "$binary" | tee "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
+            ! grep -q 'not found' "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
+          done
+          LD_LIBRARY_PATH=dist/linux-unpacked/resources/bin/sd \
+            dist/linux-unpacked/resources/bin/sd/sd-cli --list-devices | grep -q '^CPU'
+          dist/linux-unpacked/resources/bin/executorch-speech --probe
+          test -f dist/linux-unpacked/resources/speech-assets/index.json
+          test -f dist/linux-unpacked/resources/bin/whisper/LICENSE
+          test -f dist/linux-unpacked/resources/bin/licenses/ffmpeg.txt
+          test -f dist/linux-unpacked/resources/bin/licenses/libgomp1.txt
+          test -f dist/linux-unpacked/resources/bin/licenses/libvulkan1.txt
+          test -n "$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)"
+          test -n "$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$(find dist -maxdepth 1 -name '*-linux.yml' -print -quit)"
+      - name: Smoke-test local Linux voice transcription
+        run: bash scripts/probe-linux-voice.sh dist/linux-unpacked/resources/bin
+      - name: Smoke-test local Linux voice output
+        run: node scripts/probe-linux-tts.mjs
+      - name: Verify packaged CUDA dependencies
+        # Prism links libcuda at startup, so only a real NVIDIA host can launch it.
+        run: |
+          docker run --rm -v "$PWD/dist/linux-unpacked/resources/bin:/engines:ro" ubuntu:24.04 bash -euo pipefail -c '
+            for variant in llama-cuda llama-prism-cuda; do
+              export LD_LIBRARY_PATH="/engines/$variant:/engines/cuda-runtime"
+              dependencies="$(ldd "/engines/$variant/llama-server"; ldd "/engines/$variant/libggml-cuda.so")"
+              missing="$(printf "%s\n" "$dependencies" | grep "not found" | grep -v "libcuda.so.1" || true)"
+              test -z "$missing" || { printf "%s\n" "$missing" >&2; exit 1; }
+              if [ "$variant" = llama-cuda ]; then
+                "/engines/$variant/llama-server" --version
+                "/engines/$variant/llama-server" --list-devices
+              fi
+            done
+          '
+      - name: Verify packaged Linux native modules
+        run: |
+          ELECTRON_RUN_AS_NODE=1 dist/linux-unpacked/off-grid-ai -e '
+            const path = require("node:path")
+            const root = path.resolve("dist/linux-unpacked/resources/app.asar/node_modules")
+            const Database = require(path.join(root, "better-sqlite3-multiple-ciphers"))
+            new Database(":memory:").close()
+            if (typeof require(path.join(root, "@lancedb/lancedb")).connect !== "function") {
+              throw new Error("LanceDB native package did not load")
+            }
+            if (typeof require(path.join(root, "sharp")) !== "function") {
+              throw new Error("Sharp native package did not load")
+            }
+            console.log("packaged Linux native modules loaded")
+          '
+      - name: Verify Linux artifact payloads
+        run: |
+          appimage="$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)"
+          deb="$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
+          test -x "$appimage"
+          dpkg-deb --info "$deb" >/dev/null
+          dependencies="$(dpkg-deb --field "$deb" Depends)"
+          grep -q 'libgtk-3-0t64' <<< "$dependencies"
+          grep -q 'libatspi2.0-0t64' <<< "$dependencies"
+          extraction="$(mktemp -d)"
+          trap 'rm -rf -- "$extraction"' EXIT
+          (cd "$extraction" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
+          for variant in llama-cuda llama llama-cpu llama-prism-cuda llama-prism llama-prism-cpu; do
+            bundled="$(find "$extraction/squashfs-root" -path "*/resources/bin/$variant/llama-server" -type f -print -quit)"
+            test -n "$bundled"
+            cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
+          done
+          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+            bundled="$(find "$extraction/squashfs-root" -path "*/resources/bin/$helper" -type f -print -quit)"
+            test -n "$bundled"
+            cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
+          done
+          for variant in llama-cuda llama-prism-cuda; do
+            backend="$(find "$extraction/squashfs-root" -path "*/resources/bin/$variant/libggml-cuda.so" -print -quit)"
+            test -f "$backend"
+          done
+          test -f "$(find "$extraction/squashfs-root" -path '*/resources/bin/cuda-runtime/libcublasLt.so.12' -type f -print -quit)"
+          test -f "$(find "$extraction/squashfs-root" -path '*/resources/speech-assets/index.json' -type f -print -quit)"
+          bundled_asar="$(find "$extraction/squashfs-root" -name app.asar -type f -print -quit)"
+          test -n "$bundled_asar"
+          cmp dist/linux-unpacked/resources/app.asar "$bundled_asar"
+          rm -rf -- "$extraction/squashfs-root"
+          dpkg-deb --extract "$deb" "$extraction/deb"
+          for variant in llama-cuda llama llama-cpu llama-prism-cuda llama-prism llama-prism-cpu; do
+            bundled="$(find "$extraction/deb" -path "*/resources/bin/$variant/llama-server" -type f -print -quit)"
+            test -n "$bundled"
+            cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
+          done
+          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+            bundled="$(find "$extraction/deb" -path "*/resources/bin/$helper" -type f -print -quit)"
+            test -n "$bundled"
+            cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
+          done
+          for variant in llama-cuda llama-prism-cuda; do
+            backend="$(find "$extraction/deb" -path "*/resources/bin/$variant/libggml-cuda.so" -print -quit)"
+            test -f "$backend"
+          done
+          test -f "$(find "$extraction/deb" -path '*/resources/bin/cuda-runtime/libcublasLt.so.12' -type f -print -quit)"
+          test -f "$(find "$extraction/deb" -path '*/resources/speech-assets/index.json' -type f -print -quit)"
+          bundled_asar="$(find "$extraction/deb" -name app.asar -type f -print -quit)"
+          test -n "$bundled_asar"
+          cmp dist/linux-unpacked/resources/app.asar "$bundled_asar"
+      - name: Publish Linux artifacts to the versioned release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          shopt -s nullglob
+          artifacts=(dist/*.AppImage dist/*.deb dist/*-linux.yml)
+          test "${#artifacts[@]}" -ge 3
+          gh release upload "v$VERSION" "${artifacts[@]}" --clobber

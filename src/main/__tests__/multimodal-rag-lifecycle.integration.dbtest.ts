@@ -58,7 +58,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('@xenova/transformers', () => ({
+vi.mock('@huggingface/transformers', () => ({
   env: {},
   pipeline: async () => async (text: string) => {
     if (text.includes('FAIL_EMBED_AURORA')) throw new Error('synthetic embedding interruption')

@@ -46,7 +46,7 @@ const proEntitled = (): boolean => true
 
 // Pin darwin: these assert the full macOS tool set (messages_send, the inline
 // reads, etc.). Without it the extension defaults to process.platform, and on
-// a Linux CI runner specsForPlatform('linux') is empty - every tool unknown.
+// a Linux CI runner exposes only open_url.
 const makeExtension = (actions?: ActionsPort): NativeActionToolExtension =>
   new NativeActionToolExtension({ run, taskUseEnabled: proEntitled, actions }, 'darwin')
 

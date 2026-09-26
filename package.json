@@ -1,7 +1,8 @@
 {
   "name": "off-grid-ai",
   "productName": "Off Grid AI Desktop",
-  "version": "0.0.51",
+  "desktopName": "off-grid-ai.desktop",
+  "version": "0.0.53",
   "offgrid": {
     "llamaRef": "b11056",
     "prismLlamaRef": "prism-b10709-9a9394a"
@@ -40,7 +41,7 @@
     "build:unpack": "npm run build && npm run prepare:speech-defaults && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "node scripts/stage-native.mjs && electron-vite build && npm run prepare:speech-defaults && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
+    "build:linux": "LLAMA_ACCELERATOR=cuda bash scripts/build-llama-linux.sh && bash scripts/build-llama-linux.sh && LLAMA_ACCELERATOR=cpu bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism LLAMA_ACCELERATOR=cuda bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism LLAMA_ACCELERATOR=cpu bash scripts/build-llama-linux.sh && bash scripts/build-voice-linux.sh && bash scripts/fetch-image-linux.sh && bash scripts/build-tts-linux.sh && npm run prepare:speech-defaults && node scripts/stage-native.mjs && electron-vite build && electron-builder --linux --x64 --publish never",
     "test:e2e": "electron-vite build && OFFGRID_E2E_HEADLESS=1 playwright test",
     "test:sync:physical": "node scripts/physical-sync/iosMacKnowledgeSync.mjs",
     "smoke": "bash scripts/smoke-api.sh",
@@ -52,8 +53,11 @@
     "knip": "knip --no-gitignore",
     "coverage:all": "bash scripts/coverage-all.sh"
   },
-  "//overrides": "ONE sharp for the whole tree. sharp ships libvips as `libvips-42.dll`, and Windows resolves a DLL by NAME across the process: whichever copy loads first wins for every later binding. embeddings.ts loads @xenova/transformers (sharp 0.32 / libvips 8.14.5) at startup, so our own sharp 0.35 (libvips 8.18.3) then asked that older DLL for symbols it does not export and died with ERR_DLOPEN_FAILED. Every file attachment failed on Windows and only there — macOS binds by path, so three copies coexist. Proven by load order: sharp alone loads; @xenova-then-sharp does not. Deduping to one version is the fix, not load-order juggling.",
+  "//overrides": "ONE sharp for the whole tree. sharp ships libvips as `libvips-42.dll`, and Windows resolves a DLL by NAME across the process: whichever copy loads first wins for every later binding. The embedding runtime can load sharp before our own sharp 0.35; two libvips versions in one Windows process then fail with ERR_DLOPEN_FAILED. Every file attachment failed on Windows and only there because macOS binds by path. Proven by load order: sharp alone loads; transformers-then-sharp does not. Deduping to one version is the fix, not load-order juggling.",
   "overrides": {
+    "kokoro-js": {
+      "@huggingface/transformers": "$@huggingface/transformers"
+    },
     "sharp": "^0.35.2"
   },
   "dependencies": {
@@ -80,7 +84,7 @@
     "@tabler/icons-react": "^3.36.1",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-virtual": "3.14.13",
-    "@xenova/transformers": "^2.17.2",
+    "@huggingface/transformers": "4.3.0",
     "apache-arrow": "^18.1.0",
     "async-mutex": "^0.5.0",
     "better-sqlite3": "^12.6.2",
@@ -95,6 +99,7 @@
     "js-sha512": "^0.9.0",
     "jszip": "^3.10.1",
     "kdbxweb": "^2.1.1",
+    "kokoro-js": "1.2.1",
     "mammoth": "^1.8.0",
     "mdast-util-to-string": "^4.0.0",
     "motion": "^12.27.1",

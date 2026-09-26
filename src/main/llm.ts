@@ -1,5 +1,6 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
 import { Mutex } from 'async-mutex'
+import { prepareModelMemory, registerModelEvictor } from './model-memory'
 import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
 import * as fs from 'fs'
@@ -35,6 +36,7 @@ import { dflashFileName, primaryFileName, type CatalogEntry } from './models/cat
 import { pickFreePort, isPortFree } from './free-port'
 import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
+import { gpuDeviceAvailable, offloadedGpuLayers } from './llm/gpu-device-probe'
 import { shouldAutoRecover } from './llm/crash-policy'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import {
@@ -176,13 +178,14 @@ export function buildDecisionRequest(
 function withContextMetrics(
   result: StreamResult,
   messages: unknown[],
-  options: { contextWindowTokens?: number; tools?: unknown[] }
+  options: { contextWindowTokens?: number; tools?: unknown[]; computeBackend?: string | null }
 ): StreamResult {
-  const { contextWindowTokens, tools } = options
+  const { contextWindowTokens, tools, computeBackend } = options
   return {
     ...result,
     metrics: {
       ...result.metrics,
+      ...(computeBackend ? { computeBackend } : {}),
       ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {}),
       ...(result.metrics?.promptTokens
         ? {}
@@ -200,6 +203,8 @@ export class LLMService {
   // Single-flight init guard: concurrent chat() calls (e.g. the capture
   // extractor firing rapidly) must share ONE spawn, not each launch a server.
   private initPromise: Promise<void> | null = null
+  private launchGeneration = 0
+  private initGeneration = 0
   private modelPath = ''
   private mmProjPath = '' // empty for text-only models (no vision projector)
   private runtimeModelOverride: { id: string; primary: string; mmproj: string | null } | null = null
@@ -213,6 +218,7 @@ export class LLMService {
   // ONLY through activeAccelerator(), which gates it on `initialized` — that flag stays the
   // single authority on whether an engine is up, rather than a second flag kept in step.
   private activeEnginePath = ''
+  private activeGpuLayers: number | null = 0
   // A model selection is durable as soon as the manager writes active-model.json, but
   // replacing llama-server while it is answering destroys the user's in-flight turn.
   // LLMService owns that process, so it also owns the handoff: admitted generations
@@ -428,7 +434,8 @@ export class LLMService {
     if (!this.initialized) return null
     return acceleratorForEngine({
       platform: process.platform,
-      serverPath: this.activeEnginePath
+      serverPath: this.activeEnginePath,
+      gpuLayers: this.activeGpuLayers
     })
   }
 
@@ -846,6 +853,7 @@ export class LLMService {
   }
 
   async init(): Promise<void> {
+    await prepareModelMemory('chat')
     if (this.paused) {
       // A chat/tool turn needs the LLM NOW, but it's paused for a resident image
       // server (unified memory can't hold both). Ask the image server to evict
@@ -862,7 +870,12 @@ export class LLMService {
     }
     if (this.initialized) return
     // Coalesce concurrent inits into one spawn.
-    if (this.initPromise !== null) return this.initPromise
+    if (this.initPromise !== null) {
+      if (this.initGeneration === this.launchGeneration) return this.initPromise
+      await this.initPromise.catch(() => {})
+      return this.init()
+    }
+    this.initGeneration = this.launchGeneration
     this.initPromise = this._doInit().finally(() => {
       this.initPromise = null
     })
@@ -871,6 +884,7 @@ export class LLMService {
 
   private async _doInit(): Promise<void> {
     if (this.initialized) return
+    const generation = this.launchGeneration
 
     this.resolveModel()
 
@@ -914,16 +928,19 @@ export class LLMService {
     const requiresPrism = /^Ternary-Bonsai-2-27B-(?!mmproj).+\.gguf$/i.test(
       path.basename(this.modelPath)
     )
-    // Engines to try, IN ORDER. On Windows we ship a Vulkan (GPU) build in
-    // bin/llama and a CPU-only fallback in bin/llama-cpu: if the Vulkan server
-    // can't start (e.g. no Vulkan loader on the box) we fall through to CPU. On
-    // macOS also ships a separate Prism build for Bonsai 2.
+    // Try CUDA on NVIDIA, Vulkan on other GPUs, then the CPU-only engine.
+    // macOS has its own Metal engines, so the absent CUDA/Vulkan paths are skipped.
     const roots = binRoots()
     const serverPaths = roots
       .flatMap((r) =>
         requiresPrism
-          ? [path.join(r, 'llama-prism', exe('llama-server'))]
+          ? [
+              path.join(r, 'llama-prism-cuda', exe('llama-server')),
+              path.join(r, 'llama-prism', exe('llama-server')),
+              path.join(r, 'llama-prism-cpu', exe('llama-server'))
+            ]
           : [
+              path.join(r, 'llama-cuda', exe('llama-server')),
               path.join(r, 'llama', exe('llama-server')),
               path.join(r, 'llama-cpu', exe('llama-server')),
               path.join(r, exe('llama-server'))
@@ -958,29 +975,52 @@ export class LLMService {
     // prepareModelPort records an actionable conflict for System Health and aborts this startup.
     await this.prepareModelPort()
 
-    if (await this.launchWithFallback(serverPaths)) return
+    if (generation !== this.launchGeneration) return
+    if (await this.launchWithFallback(serverPaths, generation)) return
+    if (generation !== this.launchGeneration) return
     console.error('[LLMService] all llama-server engines failed to load the model')
   }
 
   /** Try each engine at the selected context, with a CPU attempt after GPU OOM.
    *  For other failures, try the next engine. Every attempt uses `buildLaunchArgs`. */
-  private async launchWithFallback(serverPaths: string[]): Promise<boolean> {
+  private async launchWithFallback(
+    serverPaths: string[],
+    generation = this.launchGeneration
+  ): Promise<boolean> {
     const attempts = loadAttempts(this.ctxSize, this.gpuLayers)
     for (const serverPath of serverPaths) {
+      if (generation !== this.launchGeneration) return false
       if (!serverPath) continue
+      const engineDir = path.basename(path.dirname(serverPath))
+      const backend = engineDir.endsWith('-cuda')
+        ? 'CUDA'
+        : engineDir === 'llama' || engineDir === 'llama-prism'
+          ? 'Vulkan'
+          : null
+      if ((process.platform === 'win32' || process.platform === 'linux') && backend) {
+        if (this.gpuLayers === 0) continue
+        if (!(await gpuDeviceAvailable(serverPath, backend, process.platform))) {
+          console.warn(
+            `[LLMService] no usable ${backend} device for ${serverPath}; trying next engine`
+          )
+          continue
+        }
+      }
       for (let a = 0; a < attempts.length; a++) {
+        if (generation !== this.launchGeneration) return false
         const at = attempts[a]
         if (!at) continue
         if (a > 0) {
           console.warn(`[LLMService] out of memory — retrying load at ${at.reason}`)
         }
         const args = this.launchArgsFor(at.ctxSize, at.gpuLayers)
-        if (await this.launchServer(serverPath, args)) {
+        if (await this.launchServer(serverPath, args, at.gpuLayers)) {
           if (a > 0) {
             console.warn(`[LLMService] model loaded via fallback: ${at.reason}`)
           }
           return true
         }
+        if (generation !== this.launchGeneration) return false
         const failure = classifyLlamaError(this.stderrTail.join('\n'))
         if (failure?.code === 'speculation_unsupported') {
           console.warn(
@@ -993,7 +1033,14 @@ export class LLMService {
             console.error('[LLMService] could not save the corrected speculative setting:', error)
           }
           await this.prepareModelPort()
-          if (await this.launchServer(serverPath, this.launchArgsFor(at.ctxSize, at.gpuLayers))) {
+          if (generation !== this.launchGeneration) return false
+          if (
+            await this.launchServer(
+              serverPath,
+              this.launchArgsFor(at.ctxSize, at.gpuLayers),
+              at.gpuLayers
+            )
+          ) {
             return true
           }
         }
@@ -1010,7 +1057,11 @@ export class LLMService {
    *  true when it's ready, false when it fails to start — so _doInit can fall
    *  through to the next engine (Windows Vulkan -> CPU). A failed process is torn
    *  down with its close handler neutralized so it can't trigger a crash-restart. */
-  private async launchServer(serverPath: string, args: string[]): Promise<boolean> {
+  private async launchServer(
+    serverPath: string,
+    args: string[],
+    gpuLayers: number
+  ): Promise<boolean> {
     const binDir = path.dirname(serverPath)
     console.log(`[LLMService] Starting llama-server from ${serverPath}`)
     // Strip macOS quarantine attributes on production builds (downloaded DMGs get quarantined)
@@ -1050,6 +1101,8 @@ export class LLMService {
     this.server = proc
     this.activeEnginePath = serverPath
     this.stderrTail = []
+    let confirmedOffload: number | null = null
+    let offloadLogTail = ''
     this.invalidateHealth()
     let abandoned = false // set when we give up on this proc so its close handler is inert
     // True until waitForReady() confirms THIS engine. A close while probing is a failed
@@ -1067,6 +1120,10 @@ export class LLMService {
     proc.stderr?.on('data', (data) => {
       const text = String(data)
       console.log(`[llama-server] ${text}`)
+      const offloadLog = offloadLogTail + text
+      const count = offloadedGpuLayers(offloadLog)
+      if (count !== null) confirmedOffload = count
+      offloadLogTail = offloadLog.slice(-128)
       // Keep a rolling tail so we can classify a load failure after it exits.
       for (const line of text.split(/\r?\n/)) if (line.trim()) this.stderrTail.push(line)
       if (this.stderrTail.length > 50) this.stderrTail = this.stderrTail.slice(-50)
@@ -1104,9 +1161,16 @@ export class LLMService {
 
     try {
       await this.waitForReady()
+      if (this.server !== proc) throw new Error('Model load was cancelled')
       // Confirmed healthy: from here a close IS a crash worth recovering from.
       probing = false
       console.log('[LLMService] Vision server ready!')
+      const engineDir = path.basename(binDir)
+      this.activeGpuLayers =
+        gpuLayers === 0 || engineDir.endsWith('-cpu') ? 0 : confirmedOffload
+      console.log(
+        `[LLMService] model ready: engine=${engineDir}, GPU layers=${this.activeGpuLayers ?? 'unconfirmed'}`
+      )
       this.initialized = true
       this.lastErrorMsg = null // healthy again — clear any prior failure reason
       this.invalidateHealth()
@@ -1135,6 +1199,7 @@ export class LLMService {
    *  init, and fail loudly if init didn't take. Single source of truth so the
    *  three chat methods don't each re-implement it. */
   private async ensureReady(): Promise<void> {
+    await prepareModelMemory('chat')
     if (this.paused) throw new Error('LLM paused during image generation — deferred')
     if (!this.initialized) {
       await this.init()
@@ -1573,7 +1638,8 @@ export class LLMService {
       })
       return {
         ...withContextMetrics(result, messages, {
-          contextWindowTokens: this.effectiveContextSize()
+          contextWindowTokens: this.effectiveContextSize(),
+          computeBackend: 'Remote'
         }),
         maxTokens: resolvedMaxTokens
       }
@@ -1607,7 +1673,8 @@ export class LLMService {
       })
       return {
         ...withContextMetrics(result, messages, {
-          contextWindowTokens: this.effectiveContextSize()
+          contextWindowTokens: this.effectiveContextSize(),
+          computeBackend: this.activeAccelerator()
         }),
         maxTokens: resolvedMaxTokens
       }
@@ -1662,7 +1729,8 @@ export class LLMService {
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),
-        tools: opts.tools
+        tools: opts.tools,
+        computeBackend: 'Remote'
       })
     }
     await this.beginGeneration()
@@ -1702,7 +1770,8 @@ export class LLMService {
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),
-        tools: opts.tools
+        tools: opts.tools,
+        computeBackend: this.activeAccelerator()
       })
     } finally {
       this.finishGeneration()
@@ -1710,6 +1779,8 @@ export class LLMService {
   }
 
   stop(): void {
+    this.launchGeneration++
+    this.initialized = false
     if (this.server) {
       this.intentionalStop = true // deliberate shutdown — don't auto-restart
       this.server.kill()
@@ -1764,6 +1835,7 @@ export class LLMService {
   }
 
   async unload(): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
+    this.launchGeneration++
     this.paused = true // stop the on-demand respawn path from warming a new server mid-teardown
     let outcome: TeardownOutcome = 'already-dead'
     // Terminate the current engine AND any that an in-flight init assigns after our snapshot: an
@@ -1883,3 +1955,7 @@ export class LLMService {
 }
 
 export const llm = new LLMService()
+registerModelEvictor('chat', async () => {
+  const result = await llm.unload()
+  if (!result.portFree) throw new Error('Chat model did not stop; cannot free memory for Decision.')
+})

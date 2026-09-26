@@ -16,6 +16,7 @@ import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
 import type { TranscriptionService, Transcript, TranscribeOptions, Seg } from './types'
 import { runNativeTranscriptionProcess } from './native-process'
 import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '../../shared/transcription-recovery'
+import { findWhisperBinary } from './whisper-runtime'
 
 const HINDI_DEVANAGARI_PROMPT = 'यह ऑडियो हिंदी में है। हिंदी को केवल देवनागरी लिपि में लिखें।'
 
@@ -23,7 +24,7 @@ const HINDI_DEVANAGARI_PROMPT = 'यह ऑडियो हिंदी मे�
  * reuses this exact runtime resolver so its Installed claim cannot drift from
  * the executable the transcription service will actually launch. */
 export function whisperBin(): string | null {
-  return existing(binRoots().map((r) => path.join(r, 'whisper', exe('whisper-cli'))))
+  return findWhisperBinary('whisper-cli')
 }
 
 /** Resolve ffmpeg: bundled first, then common system locations. */

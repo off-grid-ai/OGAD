@@ -1,11 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import fs from 'node:fs'
 import path from 'node:path'
 import { Mutex } from 'async-mutex'
+import { prepareModelMemory, registerModelEvictor } from '../model-memory'
 import type { RemoteTextModelConnection } from '../llm/remote-chat'
 import { buildLaunchArgs } from '../llm/settings-math'
 import { engineSpawnEnv } from '../llm/spawn-env'
-import { binRoots, exe } from '../runtime-env'
+import { selectLocalEngine } from '../llm/select-local-engine'
 import { isPortFree, pickFreePort } from '../free-port'
 import { reapOrphanProcessesOnPort } from '../kill-orphan-port'
 import { resolveComputerUseModelArtifact } from '../models-manager'
@@ -26,6 +26,7 @@ export class GrounderRuntime {
   }
 
   async connection(modelId: string): Promise<RemoteTextModelConnection> {
+    await prepareModelMemory('grounding')
     await this.mutex.runExclusive(async () => {
       if (!this.running || this.modelId !== modelId) await this.start(modelId)
     })
@@ -50,13 +51,7 @@ export class GrounderRuntime {
     )
     const port = await pickFreePort(GROUNDER_PORT, isPortFree, 20)
     if (port === null) throw new Error('No private port is available for the grounding runtime.')
-    const serverPath = binRoots()
-      .flatMap((root) => [
-        path.join(root, 'llama', exe('llama-server')),
-        path.join(root, 'llama-cpu', exe('llama-server')),
-        path.join(root, exe('llama-server'))
-      ])
-      .find((candidate) => fs.existsSync(candidate))
+    const serverPath = await selectLocalEngine()
     if (!serverPath) throw new Error('The bundled grounding engine is missing.')
 
     this.port = port
@@ -92,6 +87,7 @@ export class GrounderRuntime {
     this.process = process
     process.stderr!.on('data', (chunk) => {
       this.stderr = `${this.stderr}${String(chunk)}`.slice(-16_384)
+      console.log(`[Grounding runtime] ${String(chunk)}`)
     })
     process.once('close', () => {
       if (this.process === process) this.process = null
@@ -144,4 +140,4 @@ export class GrounderRuntime {
 }
 
 export const grounderRuntime = new GrounderRuntime()
-
+registerModelEvictor('grounding', () => grounderRuntime.shutdown())

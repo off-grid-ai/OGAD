@@ -24,7 +24,7 @@ try {
   Move-Item (Join-Path $Temp "python") (Join-Path $Dest "python")
 
   $Python = Join-Path $Dest "python/python.exe"
-  & $Python -m pip install --disable-pip-version-check torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+  & $Python -m pip install --disable-pip-version-check "torch==2.8.0+cu128" --index-url https://download.pytorch.org/whl/cu128
   if ($LASTEXITCODE -ne 0) { throw "Could not install the Kev Torch runtime" }
   & $Python -m pip install --disable-pip-version-check "kev[serve] @ git+https://github.com/jaredpalmer/kev.git@$KevRef"
   if ($LASTEXITCODE -ne 0) { throw "Could not install the Kev server" }
@@ -41,7 +41,8 @@ try {
   Get-ChildItem $Dest -File -Recurse -Force -Include *.pyc,*.pyo |
     Remove-Item -Force -ErrorAction SilentlyContinue
 
-  & $Python -c 'import kev, torch, uvicorn; print("Kev Windows runtime ready")'
+  # CI need not have a physical GPU, but the installed wheel must contain CUDA.
+  & $Python -c 'import kev, torch, uvicorn; assert torch.version.cuda, "CPU-only PyTorch is not allowed in the Windows Kev runtime"; print("Kev Windows CUDA runtime ready:", torch.version.cuda)'
   if ($LASTEXITCODE -ne 0) { throw "The staged Kev runtime failed its import check" }
   & $Python (Join-Path $Root "resources/bin/kev-local-server.py") --help | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "The staged Kev server failed its launch check" }

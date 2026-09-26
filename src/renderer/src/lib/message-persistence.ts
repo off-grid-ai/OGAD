@@ -142,5 +142,8 @@ export function readGenerationMetrics(ctx: unknown): GenerationMetrics | undefin
   if (typeof source.modelName === 'string' && source.modelName.trim()) {
     metrics.modelName = source.modelName.trim()
   }
+  if (typeof source.computeBackend === 'string' && source.computeBackend.trim()) {
+    metrics.computeBackend = source.computeBackend.trim()
+  }
   return Object.keys(metrics).length ? (metrics as GenerationMetrics) : undefined
 }

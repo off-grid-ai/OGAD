@@ -337,9 +337,9 @@ export function taskKindForActionType(actionType: string): 'web_use' | 'computer
 /**
  * Which tools each platform exposes to the model. macOS ships the full set
  * (the Swift helper). Windows ships the engine-routed set the local Outlook
- * rail supports; reads stay macOS-only until the Outlook read verbs land.
- * Defined once - the extension, its registration, and the tests all read
- * this. An unlisted platform exposes nothing.
+ * rail supports. Linux ships only link opening. Defined
+ * once - the extension, its registration, and the tests all read this.
+ * An unlisted platform exposes nothing.
  */
 export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'get_current_location',
@@ -353,6 +353,10 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'computer_use'
 ])
 
+// The task tools need the private watched workspace. A core-only Linux build
+// cannot show it, so expose only the link opener from this extension.
+export const LINUX_TOOL_NAMES: ReadonlySet<string> = new Set(['open_url'])
+
 export const TASK_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_use'])
 
 export function specsForPlatform(
@@ -364,6 +368,12 @@ export function specsForPlatform(
     specs = NATIVE_TOOL_SPECS
   } else if (platform === 'win32') {
     specs = NATIVE_TOOL_SPECS.filter((spec) => WINDOWS_TOOL_NAMES.has(spec.name))
+  } else if (platform === 'linux') {
+    specs = NATIVE_TOOL_SPECS.filter((spec) => LINUX_TOOL_NAMES.has(spec.name)).map((spec) => ({
+      ...spec,
+      description:
+        "Open a URL or app scheme in the user's default browser or app. It only opens the link and cannot control the browser."
+    }))
   } else {
     specs = []
   }
@@ -384,6 +394,9 @@ export function systemHintForPlatform(platform: NodeJS.Platform, includeTaskUse 
       return "You can act on the user's PC: get their current location for nearby requests (get_current_location), and use Outlook to create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url; it opens the target without interacting with it. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions requested in this Chat run directly; report the real result and never tell the user to approve them."
     }
     return "You can act on the user's PC: get their current location for nearby requests (get_current_location), and use Outlook to create calendar events (calendar_create_event) and tasks (reminders_create), and send an email (mail_send). Open a link or app with open_url - it ONLY opens, no interaction. Use web_use for normal website tasks; it runs inside Off Grid AI's own built-in browser. When the user explicitly requires their existing default-browser login, cookies, history, cache, recommendations, or signed-in account, call open_url first and then use computer_use on the visible browser. The user watches Computer Use and can take over. Prefer direct tools when they fit. Use ISO 8601 for all times. There is no message or contact lookup tool on Windows. Actions and tasks requested in this Chat run directly; report the real result and never tell the user to approve them."
+  }
+  if (platform === 'linux') {
+    return "You can use open_url to open a link in the user's default browser. You cannot control that browser or desktop apps, or use calendar, mail, contact, or location tools on Linux."
   }
   return ''
 }

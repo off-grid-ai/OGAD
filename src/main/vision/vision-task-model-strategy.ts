@@ -1,7 +1,12 @@
 import { llm } from '../llm'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { getWebUseSettings } from '../web-use-settings'
-import { getActiveModel, resolveModelIdentity, type ModelIdentity } from '../models-manager'
+import {
+  DECIDER_2B,
+  getActiveModel,
+  resolveModelIdentity,
+  type ModelIdentity
+} from '../models-manager'
 import type {
   ComputerUseActiveModel,
   ComputerUseActiveModelProjection,
@@ -203,7 +208,7 @@ export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModel
     ...productionDependencies,
     strategy: () =>
       currentRemoteScreenTaskSession()?.modelStrategy ?? getWebUseSettings().modelStrategy,
-    selectedDecisionId: () => getWebUseSettings().decisionModelId ?? selectedDecisionModelId()
+    selectedDecisionId: () => getWebUseSettings().decisionModelId ?? DECIDER_2B.id
   })
 }
 

@@ -1123,6 +1123,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
         height: 768,
         steps: 17,
         cfgScale: 5.5,
+        computeBackend: 'Vulkan',
         durationMs: 117_600
       },
       {
@@ -1136,6 +1137,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
         height: 768,
         steps: 17,
         cfgScale: 5.5,
+        computeBackend: 'Vulkan',
         durationMs: 90_000
       }
     ]
@@ -1182,6 +1184,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const generationDetails = screen.getAllByRole('button', { name: 'Generation details' })
     expect(generationDetails).toHaveLength(1)
     await user.click(generationDetails[0]!)
+    expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain('Vulkan')
     expect(screen.getAllByTestId('generation-metrics')[0]!.textContent).toContain('90.0s total')
     act(() => {
       boundary.emitIncomingFiles([

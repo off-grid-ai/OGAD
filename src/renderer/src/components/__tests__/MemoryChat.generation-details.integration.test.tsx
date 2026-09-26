@@ -15,6 +15,7 @@ import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-
 
 /** What a measured local run reports: a server rate, a token count, and our own TTFT. */
 const MEASURED = {
+  computeBackend: 'Metal',
   decodeTokensPerSecond: 42.5,
   prefillTokensPerSecond: 910,
   timeToFirstTokenSeconds: 0.37,
@@ -126,6 +127,7 @@ describe('<MemoryChat/> generation details', () => {
     await user.click(details)
     const row = await screen.findByTestId('generation-metrics')
     // The server's own rates, our measured TTFT, and the token count - the whole point of the row.
+    expect(row.textContent).toContain('Metal')
     expect(row.textContent).toContain('42.5 tok/s')
     expect(row.textContent).toContain('prefill 910 tok/s')
     expect(row.textContent).toContain('TTFT 0.37s')

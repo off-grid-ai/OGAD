@@ -19,12 +19,19 @@ import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, resourceDirs } from './runtime-env'
 import type { ManagedRuntime } from './runtime-manager'
 import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
+import { OnnxSpeechRuntime } from './tts-onnx'
 
 const LANGUAGE_TAGS: Readonly<Record<string, string>> = {
   'en-us': 'en-US',
   'en-gb': 'en-GB'
 }
 const SUPPORTED_VOICES = new Set(speechCapabilities.voices.map(({ id }) => id))
+const ONNX_VOICES = new Set(
+  speechCapabilities.voices
+    .filter(({ language }) => language === 'en-us' || language === 'en-gb')
+    .map(({ id }) => id)
+)
+const onnxSpeech = new OnnxSpeechRuntime()
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -57,12 +64,12 @@ function runtime(): ExecutorchSpeechRuntime {
 
 let busy = false
 
-/** ExecuTorch releases every model when its short-lived process exits. */
+/** The ONNX worker owns accelerated model memory and can be terminated on eviction. */
 export const ttsRuntime: ManagedRuntime = {
   modality: 'tts',
-  evict: () => {},
-  warm: () => {},
-  release: () => {}
+  evict: () => onnxSpeech.close(),
+  warm: () => onnxSpeech.prepare(DEFAULT_VOICE).then(() => undefined),
+  release: () => onnxSpeech.close()
 }
 
 /** Runtime-owned catalogue. Listing it never downloads model assets. */
@@ -90,6 +97,14 @@ export async function prepareVoiceAssets(
   voice: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<void> {
+  if (ONNX_VOICES.has(voice)) {
+    try {
+      await onnxSpeech.prepare(voice, onProgress)
+      return
+    } catch (error) {
+      writeDiagnosticLog('tts', 'onnx.prepare.failed', { error: messageOf(error) }, 'warn')
+    }
+  }
   await prepareVoice(cacheDirectory(), voice, onProgress, undefined, bundledCacheDirectory())
 }
 
@@ -123,22 +138,51 @@ export async function synthesize(
   writeDiagnosticLog('tts', 'request.started', {
     requestId,
     chars: input.length,
-    engine: 'executorch'
+    engine: ONNX_VOICES.has(chosenVoice) ? 'onnxruntime' : 'executorch'
   })
 
   try {
-    await runtime().synthesize({
-      text: input.slice(0, 2000),
-      voiceId: chosenVoice,
-      outputPath,
-      onDownloadProgress: onProgress
-    })
+    let engine = 'executorch'
+    let device = 'cpu'
+    if (ONNX_VOICES.has(chosenVoice)) {
+      try {
+        device = await onnxSpeech.synthesize({
+          text: input.slice(0, 2000),
+          voice: chosenVoice,
+          outputPath,
+          onProgress
+        })
+        engine = 'onnxruntime'
+      } catch (error) {
+        writeDiagnosticLog(
+          'tts',
+          'onnx.fallback',
+          { requestId, error: messageOf(error) },
+          'warn'
+        )
+        await runtime().synthesize({
+          text: input.slice(0, 2000),
+          voiceId: chosenVoice,
+          outputPath,
+          onDownloadProgress: onProgress
+        })
+      }
+    } else {
+      await runtime().synthesize({
+        text: input.slice(0, 2000),
+        voiceId: chosenVoice,
+        outputPath,
+        onDownloadProgress: onProgress
+      })
+    }
     const wav = await fs.promises.readFile(outputPath)
     if (wav.length <= 44) throw new Error('The local voice runtime returned empty audio.')
     writeDiagnosticLog('tts', 'request.completed', {
       requestId,
       durationMs: Date.now() - startedAt,
-      wavBytes: wav.length
+      wavBytes: wav.length,
+      engine,
+      device
     })
     return { dataUrl: `data:audio/wav;base64,${wav.toString('base64')}` }
   } catch (error) {

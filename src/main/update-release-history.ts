@@ -1,7 +1,7 @@
 import { clean, lt, prerelease, rcompare, valid } from 'semver'
 
 const RELEASES_URL =
-  'https://api.github.com/repos/off-grid-ai/off-grid-ai-desktop/releases?per_page=50'
+  'https://api.github.com/repos/off-grid-ai/OGAD/releases?per_page=50'
 const RELEASE_DOWNLOAD_PREFIXES = [
   '/off-grid-ai/off-grid-ai-desktop/releases/download/',
   '/off-grid-ai/OGAD/releases/download/'
@@ -29,6 +29,7 @@ interface GitHubRelease {
 function feedName(platform: NodeJS.Platform): string | null {
   if (platform === 'darwin') return 'latest-mac.yml'
   if (platform === 'win32') return 'latest.yml'
+  if (platform === 'linux') return 'latest-linux.yml'
   return null
 }
 

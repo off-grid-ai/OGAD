@@ -7,6 +7,8 @@ extraResources:
     filter:
       - '**/*'
       - '!models/**'
+      # Each platform supplies its own native binaries below.
+      - '!bin/**'
       # The legacy worker is not a runtime input. Speech uses the packaged
       # ExecuTorch helper under Resources/bin.
       - '!tts-worker.mjs'

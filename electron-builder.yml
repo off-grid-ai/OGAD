@@ -7,6 +7,13 @@ copyright: © Off Grid AI
 # This hook runs before electron-builder emits artifactCreated, which is the event
 # that schedules publishing. A truncated DMG therefore cannot reach GitHub.
 artifactBuildCompleted: scripts/verify-electron-builder-artifact.mjs
+afterPack: scripts/prune-onnx-runtime.mjs
+# Electron-builder unpacks .node files, but not every shared library that the
+# native addon loads beside itself. Keep those runtime files together in
+# app.asar.unpacked for Sharp and ONNX Runtime on every platform.
+asarUnpack:
+  - 'node_modules/@img/sharp-libvips-linux-x64/lib/*.so*'
+  - 'node_modules/**/onnxruntime-node/bin/**/*'
 directories:
   buildResources: build
 files:
@@ -36,6 +43,9 @@ win:
   # mac block sets its own icon below). The 512x512 PNG is auto-converted to a
   # multi-size Windows ICO for the exe + NSIS installer.
   icon: resources/icon.png
+  extraResources:
+    - from: resources/bin
+      to: bin
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -80,6 +90,8 @@ mac:
   notarize: true
   icon: resources/icon.png
   extraResources:
+    - from: resources/bin
+      to: bin
     - from: ../executorch-speech/native/bin/executorch-speech
       to: bin/executorch-speech
     - from: ../executorch-speech/generated/default-assets
@@ -102,10 +114,35 @@ linux:
   target:
     - AppImage
     - deb
+  executableName: off-grid-ai
+  syncDesktopName: true
+  icon: resources/icon.png
+  extraResources:
+    - from: build/linux-bin
+      to: bin
+    - from: ../executorch-speech/native/bin/executorch-speech
+      to: bin/executorch-speech
+    - from: ../executorch-speech/generated/default-assets
+      to: speech-assets
   maintainer: Off Grid AI <hello@getoffgridai.co>
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
+deb:
+  # Ubuntu 24.04 renamed these libraries in the time64 transition. The
+  # electron-builder defaults still name packages that Noble cannot install.
+  depends:
+    - libgtk-3-0t64
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0t64
+    - libuuid1
+    - libsecret-1-0
+    - libasound2t64
+    - libgbm1
 # Electron fuses (flipped at package time). ASAR integrity makes a tampered app.asar
 # refuse to load — the local-first anti-tamper lever (we don't phone home, so this is
 # the bar against cracking the offline license check). Only the integrity fuses are
@@ -117,9 +154,8 @@ electronFuses:
 publish:
   provider: github
   owner: off-grid-ai
-  # Current repo name. It was renamed from `desktop`; the old name still 301-redirects,
-  # but the updater must not depend on that redirect (a new `off-grid-ai/desktop` repo
-  # would silently break every client's update check). Point straight at the real repo.
-  repo: off-grid-ai-desktop
+  # Use the current repo name. The former off-grid-ai-desktop path redirects,
+  # but a release updater must not depend on that redirect.
+  repo: OGAD
   # Publish (not draft) so electron-updater on installed apps sees the release.
   releaseType: release

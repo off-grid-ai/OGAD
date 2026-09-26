@@ -20,8 +20,9 @@ import { spawn, type ChildProcess, execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { binRoots, isPackaged, exe } from '../runtime-env'
-import { existing } from './bin-resolution'
+import { isPackaged } from '../runtime-env'
+import { nativeLibraryEnv } from '../native-library-env'
+import { findWhisperBinary } from './whisper-runtime'
 import type { Transcript } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
 import { Mutex } from 'async-mutex'
@@ -142,9 +143,7 @@ export class WhisperServerService {
 
   /** Resolve the bundled whisper-server binary across dev / packaged layouts. */
   findBinary(): string | null {
-    // Shared first-existing-path resolver (bin-resolution), instead of a hand-rolled
-    // existsSync loop that duplicated it. exe() adds the .exe suffix on Windows.
-    return existing(binRoots().map((r) => path.join(r, 'whisper-server', exe('whisper-server'))))
+    return findWhisperBinary('whisper-server')
   }
 
   /** Ensure a server is up with EXACTLY this context; restart on a model/thread
@@ -193,10 +192,7 @@ export class WhisperServerService {
       // the ggml/whisper DLLs next to the exe resolve.
       env: {
         ...process.env,
-        DYLD_LIBRARY_PATH: binDir,
-        ...(process.platform === 'win32'
-          ? { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` }
-          : {})
+        ...nativeLibraryEnv(process.platform, binDir, process.env)
       }
     })
     this.server = proc

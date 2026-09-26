@@ -27,6 +27,8 @@ export interface ImageGenerationOutputContract {
   model: string
   /** The exact prompt sent to the image runtime. */
   prompt: string
+  /** Compute backend that produced the image. */
+  computeBackend?: string
   /** The effective settings used by the runtime after per-model overrides. */
   width?: number
   height?: number

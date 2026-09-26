@@ -4,6 +4,7 @@ import { Worker } from 'worker_threads'
 import { modelsDir } from './runtime-env'
 import { embedText } from './embeddings-core'
 import type { EmbeddingRequest, EmbeddingResponse } from './embeddings-worker'
+import { writeDiagnosticLog } from './diagnostics-log'
 
 /**
  * The built worker, when there is one.
@@ -36,6 +37,7 @@ class EmbeddingService {
   >()
   /** Serializes requests: the tail of the queue, not a list, so memory does not grow with it. */
   private queue: Promise<unknown> = Promise.resolve()
+  private reportedDevice: string | null = null
 
   private spawn(entry: string): Worker {
     if (this.worker) return this.worker
@@ -48,6 +50,13 @@ class EmbeddingService {
       const pending = this.waiting.get(response.id)
       if (!pending) return
       this.waiting.delete(response.id)
+      if (response.device && response.device !== this.reportedDevice) {
+        this.reportedDevice = response.device
+        writeDiagnosticLog('embeddings', 'runtime.ready', {
+          backend: 'onnxruntime',
+          device: response.device
+        })
+      }
       if (response.error) pending.reject(new Error(response.error))
       else pending.resolve(response.vector ?? [])
     })
