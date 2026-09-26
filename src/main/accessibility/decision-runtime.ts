@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import fs from 'node:fs'
 import path from 'node:path'
 import { Mutex } from 'async-mutex'
 import {
@@ -11,7 +10,7 @@ import {
 import { postCompletionOnce } from '../llm/http-post'
 import { buildLaunchArgs } from '../llm/settings-math'
 import { engineSpawnEnv } from '../llm/spawn-env'
-import { binRoots, exe } from '../runtime-env'
+import { selectLocalEngine } from '../llm/select-local-engine'
 import { isPortFree, pickFreePort } from '../free-port'
 import { reapOrphanProcessesOnPort } from '../kill-orphan-port'
 import {
@@ -85,13 +84,7 @@ export class DecisionRuntime {
         'No private port is available for the Decision runtime.',
         'startup'
       )
-    const serverPath = binRoots()
-      .flatMap((root) => [
-        path.join(root, 'llama', exe('llama-server')),
-        path.join(root, 'llama-cpu', exe('llama-server')),
-        path.join(root, exe('llama-server'))
-      ])
-      .find((candidate) => fs.existsSync(candidate))
+    const serverPath = await selectLocalEngine()
     if (!serverPath)
       throw new DecisionRuntimeError('The bundled Decision engine is missing.', 'startup')
     this.port = port
@@ -126,6 +119,7 @@ export class DecisionRuntime {
     this.process = process
     process.stderr!.on('data', (chunk) => {
       this.stderr = `${this.stderr}${String(chunk)}`.slice(-16_384)
+      console.log(`[Decision runtime] ${String(chunk)}`)
     })
     process.once('close', () => {
       if (this.process === process) this.process = null
@@ -176,6 +170,7 @@ export class DecisionRuntime {
     for (const stream of [process.stdout, process.stderr]) {
       stream?.on('data', (chunk) => {
         this.stderr = `${this.stderr}${String(chunk)}`.slice(-16_384)
+        console.log(`[Kev runtime] ${String(chunk)}`)
       })
     }
     process.once('close', () => {
@@ -233,7 +228,9 @@ export class DecisionRuntime {
               decision: {
                 type: 'choice',
                 instructions: question,
-                criteria: Object.fromEntries(options.map((option, index) => [`option_${index}`, option]))
+                criteria: Object.fromEntries(
+                  options.map((option, index) => [`option_${index}`, option])
+                )
               }
             }
           }),
@@ -248,7 +245,9 @@ export class DecisionRuntime {
         const probabilities = options.map((_, index) => answer?.probabilities?.[`option_${index}`])
         if (
           choice < 0 ||
-          probabilities.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+          probabilities.some(
+            (value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0
+          )
         ) {
           throw new Error('Kev returned an invalid Decision response.')
         }

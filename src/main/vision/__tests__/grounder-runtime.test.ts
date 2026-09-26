@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+vi.mock('../../llm/gpu-device-probe', () => ({ gpuDeviceAvailable: vi.fn(async () => true) }))
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
