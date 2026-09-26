@@ -35,8 +35,12 @@ import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
 import { binRoots, dataDir, modelsDir, resourceDirs } from './runtime-env'
 import { sdServer } from './sd-server'
-import { findSdBinaries, findSdBinary, imageBackendForRuntime } from './imagegen/sd-runtime'
-import { nativeLibraryEnv } from './native-library-env'
+import {
+  findSdBinaries,
+  findSdBinary,
+  imageBackendForRuntime,
+  sdRuntimeLibraryEnv
+} from './imagegen/sd-runtime'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
 import {
@@ -1070,7 +1074,7 @@ async function runImageGen(
         const binDir = path.dirname(runtime)
         const child = spawn(runtime, args, {
           cwd: binDir,
-          env: { ...process.env, ...nativeLibraryEnv(process.platform, binDir, process.env) }
+          env: { ...process.env, ...sdRuntimeLibraryEnv(process.platform, runtime, process.env) }
         })
         const debugNativeLogs = process.env.OFFGRID_NATIVE_LOGS === '1'
         if (debugNativeLogs) {
@@ -1148,24 +1152,25 @@ async function runImageGen(
         })
       })
 
-    let completedRuntime = cli
-    try {
-      await runNativeCli(cli)
-    } catch (error) {
-      const cpuRuntime =
-        !coreml && process.platform === 'win32'
-          ? findSdBinaries('sd-cli').find(
-              (runtime) => imageBackendForRuntime(process.platform, runtime) === 'CPU'
-            )
-          : undefined
-      if (!cpuRuntime || cpuRuntime === cli || generationLifecycle.isCancelled()) throw error
-      console.warn(
-        `[imagegen] ${imageBackendForRuntime(process.platform, cli)} runtime failed; retrying with CPU`,
-        error
-      )
-      await runNativeCli(cpuRuntime)
-      completedRuntime = cpuRuntime
+    const runtimes = coreml ? [cli] : findSdBinaries('sd-cli')
+    let completedRuntime: string | undefined
+    let lastError: unknown
+    for (const [index, runtime] of runtimes.entries()) {
+      try {
+        await runNativeCli(runtime)
+        completedRuntime = runtime
+        break
+      } catch (error) {
+        lastError = error
+        const next = runtimes[index + 1]
+        if (!next || generationLifecycle.isCancelled()) throw error
+        console.warn(
+          `[imagegen] ${imageBackendForRuntime(process.platform, runtime)} runtime failed; retrying with ${imageBackendForRuntime(process.platform, next)}`,
+          error
+        )
+      }
     }
+    if (!completedRuntime) throw lastError
 
     if (!fs.existsSync(outPath)) throw new Error('Image generation produced no output file.')
     const b64 = fs.readFileSync(outPath).toString('base64')
