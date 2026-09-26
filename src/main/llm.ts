@@ -202,6 +202,8 @@ export class LLMService {
   // Single-flight init guard: concurrent chat() calls (e.g. the capture
   // extractor firing rapidly) must share ONE spawn, not each launch a server.
   private initPromise: Promise<void> | null = null
+  private launchGeneration = 0
+  private initGeneration = 0
   private modelPath = ''
   private mmProjPath = '' // empty for text-only models (no vision projector)
   private runtimeModelOverride: { id: string; primary: string; mmproj: string | null } | null = null
@@ -866,7 +868,12 @@ export class LLMService {
     }
     if (this.initialized) return
     // Coalesce concurrent inits into one spawn.
-    if (this.initPromise !== null) return this.initPromise
+    if (this.initPromise !== null) {
+      if (this.initGeneration === this.launchGeneration) return this.initPromise
+      await this.initPromise.catch(() => {})
+      return this.init()
+    }
+    this.initGeneration = this.launchGeneration
     this.initPromise = this._doInit().finally(() => {
       this.initPromise = null
     })
@@ -875,6 +882,7 @@ export class LLMService {
 
   private async _doInit(): Promise<void> {
     if (this.initialized) return
+    const generation = this.launchGeneration
 
     this.resolveModel()
 
@@ -965,15 +973,21 @@ export class LLMService {
     // prepareModelPort records an actionable conflict for System Health and aborts this startup.
     await this.prepareModelPort()
 
-    if (await this.launchWithFallback(serverPaths)) return
+    if (generation !== this.launchGeneration) return
+    if (await this.launchWithFallback(serverPaths, generation)) return
+    if (generation !== this.launchGeneration) return
     console.error('[LLMService] all llama-server engines failed to load the model')
   }
 
   /** Try each engine at the selected context, with a CPU attempt after GPU OOM.
    *  For other failures, try the next engine. Every attempt uses `buildLaunchArgs`. */
-  private async launchWithFallback(serverPaths: string[]): Promise<boolean> {
+  private async launchWithFallback(
+    serverPaths: string[],
+    generation = this.launchGeneration
+  ): Promise<boolean> {
     const attempts = loadAttempts(this.ctxSize, this.gpuLayers)
     for (const serverPath of serverPaths) {
+      if (generation !== this.launchGeneration) return false
       if (!serverPath) continue
       const engineDir = path.basename(path.dirname(serverPath))
       const backend = engineDir.endsWith('-cuda')
@@ -991,6 +1005,7 @@ export class LLMService {
         }
       }
       for (let a = 0; a < attempts.length; a++) {
+        if (generation !== this.launchGeneration) return false
         const at = attempts[a]
         if (!at) continue
         if (a > 0) {
@@ -1003,6 +1018,7 @@ export class LLMService {
           }
           return true
         }
+        if (generation !== this.launchGeneration) return false
         const failure = classifyLlamaError(this.stderrTail.join('\n'))
         if (failure?.code === 'speculation_unsupported') {
           console.warn(
@@ -1015,6 +1031,7 @@ export class LLMService {
             console.error('[LLMService] could not save the corrected speculative setting:', error)
           }
           await this.prepareModelPort()
+          if (generation !== this.launchGeneration) return false
           if (
             await this.launchServer(
               serverPath,
@@ -1142,14 +1159,16 @@ export class LLMService {
 
     try {
       await this.waitForReady()
+      if (this.server !== proc) throw new Error('Model load was cancelled')
       // Confirmed healthy: from here a close IS a crash worth recovering from.
       probing = false
       console.log('[LLMService] Vision server ready!')
       const engineDir = path.basename(binDir)
-      const gpuEngine =
-        (process.platform === 'win32' || process.platform === 'linux') &&
-        (engineDir === 'llama' || engineDir === 'llama-prism' || engineDir.endsWith('-cuda'))
-      this.activeGpuLayers = gpuLayers === 0 ? 0 : gpuEngine ? confirmedOffload : gpuLayers
+      this.activeGpuLayers =
+        gpuLayers === 0 || engineDir.endsWith('-cpu') ? 0 : confirmedOffload
+      console.log(
+        `[LLMService] model ready: engine=${engineDir}, GPU layers=${this.activeGpuLayers ?? 'unconfirmed'}`
+      )
       this.initialized = true
       this.lastErrorMsg = null // healthy again — clear any prior failure reason
       this.invalidateHealth()
@@ -1757,6 +1776,8 @@ export class LLMService {
   }
 
   stop(): void {
+    this.launchGeneration++
+    this.initialized = false
     if (this.server) {
       this.intentionalStop = true // deliberate shutdown — don't auto-restart
       this.server.kill()
@@ -1811,6 +1832,7 @@ export class LLMService {
   }
 
   async unload(): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
+    this.launchGeneration++
     this.paused = true // stop the on-demand respawn path from warming a new server mid-teardown
     let outcome: TeardownOutcome = 'already-dead'
     // Terminate the current engine AND any that an in-flight init assigns after our snapshot: an
