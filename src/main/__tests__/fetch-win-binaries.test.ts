@@ -32,10 +32,11 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — stable-diffusion.cpp asset', (
     expect(activeAvx2).toBe(false)
   })
 
-  it('stages Vulkan GPU and CPU image runtimes without the oversized CUDA copy', () => {
+  it('stages CUDA, Vulkan, and CPU image runtimes with one shared CUDA runtime', () => {
+    expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-cuda12-x64\\\.zip\$'/)
     expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-vulkan-x64\\\.zip\$'/)
     expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-cpu-x64\\\.zip\$'/)
-    expect(SRC).not.toMatch(/bin-win-cuda12-x64/)
+    expect(SRC).toMatch(/Copy-Runtime \$x 'sd-cuda'/)
     expect(SRC).not.toMatch(/cudart-sd-bin-win/)
   })
 

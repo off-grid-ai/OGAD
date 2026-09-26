@@ -7,14 +7,16 @@
 #   resources/bin/llama/llama-server.exe      (+ Vulkan DLLs)       <- other GPUs
 #   resources/bin/llama-prism-cuda/llama-server.exe                <- Bonsai 2 NVIDIA
 #   resources/bin/cuda-runtime/*.dll                               <- shared CUDA runtime
-#   resources/bin/sd/sd-cli.exe            (+ Vulkan DLLs)       <- image GPU path
+#   resources/bin/sd-cuda/sd-cli.exe       (+ shared CUDA DLLs)  <- NVIDIA image path
+#   resources/bin/sd/sd-cli.exe            (+ Vulkan DLLs)       <- other GPU path
 #   resources/bin/sd-cpu/sd-cli.exe        (+ CPU DLLs)          <- image fallback
 #   resources/bin/whisper/whisper-cli.exe  (+ CUDA DLLs)        <- STT GPU path
 #   resources/bin/whisper-cpu/whisper-cli.exe (+ DLLs)          <- STT fallback
 #   resources/bin/ffmpeg.exe                                     <- src/main/rag/extractors.ts
 #
-# On Windows the DLL loader searches the directory of the .exe first, so each
-# runtime's DLLs MUST sit next to its .exe (hence the per-runtime subdirs).
+# On Windows the DLL loader searches the directory of the .exe first. Runtime-
+# specific DLLs stay beside each executable; the shared CUDA directory is added
+# to PATH when a CUDA engine starts.
 #
 # Most runtimes are resolved DYNAMICALLY from each project's latest GitHub
 # release so the script does not go stale. llama.cpp is the EXCEPTION: it is
@@ -139,13 +141,22 @@ try {
   if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
 } catch { Write-Warning "whisper.cpp fetch failed: $_" }
 
-# --- stable-diffusion.cpp (image gen): Vulkan GPU + CPU fallback ---------------
-# Vulkan covers NVIDIA, AMD, and Intel without adding a second 897 MB compressed
-# CUDA image runtime. A separate CPU build covers systems without Vulkan.
+# --- stable-diffusion.cpp (image gen): CUDA, Vulkan, then CPU -------------------
+# The CUDA engine reuses bin/cuda-runtime from llama.cpp. Do not fetch the
+# separate 563 MB stable-diffusion CUDA runtime archive: it contains the same
+# three CUDA DLLs and previously made the installer too large to build.
 # Keep this release pinned: Qwen-Image 2.1 needs the current runtime and a moving
 # latest release can change the packaged DLL contract without review.
 $SdRef = 'master-920-2f88688'
-Write-Host "== stable-diffusion.cpp (pinned $SdRef): Vulkan + CPU =="
+Write-Host "== stable-diffusion.cpp (pinned $SdRef): CUDA + Vulkan + CPU =="
+try {
+  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
+  $dest = Copy-Runtime $x 'sd-cuda'
+  $cli = Join-Path $dest 'sd-cli.exe'
+  $sd = Join-Path $dest 'sd.exe'
+  if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
+} catch { Write-Warning "stable-diffusion.cpp CUDA fetch failed: $_" }
+
 try {
   $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '63e84439c20dde75487a933066318ae01353e9e80ee70e031acad48e857e1cb9'
   $dest = Copy-Runtime $x 'sd'
@@ -202,7 +213,9 @@ foreach ($p in @(
     (Join-Path $bin 'llama-prism-cuda\llama-server.exe'),
     (Join-Path $bin 'cuda-runtime\cudart64_12.dll'),
     (Join-Path $bin 'cuda-runtime\cublas64_12.dll'),
-    (Join-Path $bin 'cuda-runtime\cublasLt64_12.dll'))) {
+    (Join-Path $bin 'cuda-runtime\cublasLt64_12.dll'),
+    (Join-Path $bin 'sd-cuda\sd-cli.exe'),
+    (Join-Path $bin 'sd-cuda\ggml-cuda.dll'))) {
   if (-not (Test-Path -LiteralPath $p)) { throw "REQUIRED CUDA runtime missing: $p" }
 }
 foreach ($p in @(

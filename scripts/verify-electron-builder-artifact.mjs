@@ -36,6 +36,14 @@ export default async function verifyElectronBuilderArtifact(event) {
         : ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12']
       ).map((library) => path.join('bin', 'cuda-runtime', library))
     ]
+    if (artifact.endsWith('.exe')) {
+      required.push(
+        path.join('bin', 'sd-cuda', 'sd-cli.exe'),
+        path.join('bin', 'sd-cuda', 'ggml-cuda.dll'),
+        path.join('bin', 'sd', 'sd-cli.exe'),
+        path.join('bin', 'sd-cpu', 'sd-cli.exe')
+      )
+    }
     if (artifact.endsWith('.appimage') || artifact.endsWith('.deb')) {
       required.push(
         path.join('bin', 'whisper', 'whisper-cli'),
