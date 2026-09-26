@@ -7,8 +7,10 @@
 #   resources/bin/llama/llama-server.exe      (+ Vulkan DLLs)       <- other GPUs
 #   resources/bin/llama-prism-cuda/llama-server.exe                <- Bonsai 2 NVIDIA
 #   resources/bin/cuda-runtime/*.dll                               <- shared CUDA runtime
-#   resources/bin/sd/sd-cli.exe            (+ DLLs)              <- src/main/imagegen.ts
-#   resources/bin/whisper/whisper-cli.exe  (+ DLLs)             <- src/main/rag/extractors.ts
+#   resources/bin/sd/sd-cli.exe            (+ Vulkan DLLs)       <- image GPU path
+#   resources/bin/sd-cpu/sd-cli.exe        (+ CPU DLLs)          <- image fallback
+#   resources/bin/whisper/whisper-cli.exe  (+ CUDA DLLs)        <- STT GPU path
+#   resources/bin/whisper-cpu/whisper-cli.exe (+ DLLs)          <- STT fallback
 #   resources/bin/ffmpeg.exe                                     <- src/main/rag/extractors.ts
 #
 # On Windows the DLL loader searches the directory of the .exe first, so each
@@ -117,39 +119,44 @@ Copy-Runtime $x 'llama-prism' | Out-Null
 $x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef '92cd4d1cee11107593ff87d77eb57b02d804c86dd4b13224e18ba963a4271ad8'
 Copy-Runtime $x 'llama-prism-cpu' | Out-Null
 
-# --- whisper.cpp (whisper-cli.exe + DLLs) ------------------------------------
-Write-Host '== whisper.cpp =='
+# --- whisper.cpp (whisper-cli.exe + DLLs): CUDA GPU + CPU fallback -----------
+# The newest semantic release can have no binary assets. Pin the current build
+# release so Windows voice cannot disappear because GitHub's "latest" moved.
+$WhisperRef = 'b5130'
+Write-Host "== whisper.cpp (pinned $WhisperRef): CUDA 11.8 + CPU =="
 try {
-  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-bin-x64\.zip$'
+  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-cublas-11\.8\.0-bin-x64\.zip$' $WhisperRef '0b29b2175bb17ec26da29677cbc7c467c57d103245144d62a49a703f6bc3fdae'
   $dest = Copy-Runtime $x 'whisper'
   # Older releases ship the CLI as main.exe; the app expects whisper-cli.exe.
   $wc = Join-Path $dest 'whisper-cli.exe'
   $mn = Join-Path $dest 'main.exe'
   if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
+
+  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-bin-x64\.zip$' $WhisperRef 'f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c'
+  $dest = Copy-Runtime $x 'whisper-cpu'
+  $wc = Join-Path $dest 'whisper-cli.exe'
+  $mn = Join-Path $dest 'main.exe'
+  if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
 } catch { Write-Warning "whisper.cpp fetch failed: $_" }
 
-# --- stable-diffusion.cpp (image gen), cpu x64 -------------------------------
-# CPU build ON PURPOSE, not the Vulkan/CUDA ones: the DEFAULT image path is the
-# one-shot `sd-cli` (imagegen.ts; resident sd-server is opt-in). That path spawns
-# once and reports a single exit code, so it CANNOT tell "GPU binary won't load
-# on this box" apart from "generation failed" — there's no launch-failure ladder
-# like llm.ts has (which detects load via HTTP readiness). So the one binary we
-# ship here MUST load unconditionally; only the CPU build does (the Vulkan build
-# hard-requires a Vulkan loader and would just trade "not found" for "won't load"
-# on GPU-less boxes). A Vulkan-primary + CPU-fallback ladder (mirroring the llama
-# bin/llama + bin/llama-cpu setup) is the future speed upgrade; it needs the
-# resident-server readiness seam to detect load failure first.
-#
-# NOTE: upstream renamed this asset — it was `bin-win-avx2-x64.zip`, now gone. The
-# fetch is optional (verify below only WARNS), so a stale pattern here fails
-# SILENTLY at build time and ships a Windows package with no image binary, which
-# surfaces as "Image generation binary (sd-cli) not found" at runtime. This is
-# dynamic 'latest' matching, so re-check the asset name on any upstream bump.
-Write-Host '== stable-diffusion.cpp (cpu x64) =='
+# --- stable-diffusion.cpp (image gen): Vulkan GPU + CPU fallback --------------
+# Vulkan works with current NVIDIA, AMD, and Intel Windows drivers and is much
+# smaller than the CUDA archive. The Vulkan build also contains CPU kernels. A
+# separate CPU build remains available for machines without the Vulkan loader.
+# Keep this release pinned: Qwen-Image 2.1 needs the current runtime and a moving
+# latest release can change the packaged DLL contract without review.
+$SdRef = 'master-920-2f88688'
+Write-Host "== stable-diffusion.cpp (pinned $SdRef): Vulkan + CPU =="
 try {
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cpu-x64\.zip$'
+  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '63e84439c20dde75487a933066318ae01353e9e80ee70e031acad48e857e1cb9'
   $dest = Copy-Runtime $x 'sd'
-  # Upstream names the one-shot binary sd.exe; the app resolves sd/sd-cli(.exe).
+  # Older releases named the one-shot binary sd.exe; normalize the app contract.
+  $cli = Join-Path $dest 'sd-cli.exe'
+  $sd = Join-Path $dest 'sd.exe'
+  if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
+
+  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cpu-x64\.zip$' $SdRef '10fc73b25bd97fb071c6bb6ba2a18e8811e6dd421c32bead98c18c84cd305d7f'
+  $dest = Copy-Runtime $x 'sd-cpu'
   $cli = Join-Path $dest 'sd-cli.exe'
   $sd = Join-Path $dest 'sd.exe'
   if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
@@ -202,7 +209,9 @@ foreach ($p in @(
 foreach ($p in @(
     (Join-Path $bin 'llama-cpu\llama-server.exe'),
     (Join-Path $bin 'whisper\whisper-cli.exe'),
+    (Join-Path $bin 'whisper-cpu\whisper-cli.exe'),
     (Join-Path $bin 'sd\sd-cli.exe'),
+    (Join-Path $bin 'sd-cpu\sd-cli.exe'),
     (Join-Path $bin 'ffmpeg.exe'))) {
   if (-not (Test-Path -LiteralPath $p)) { Write-Warning "optional runtime missing (feature will be unavailable): $p" }
 }

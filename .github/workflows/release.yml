@@ -724,8 +724,8 @@ jobs:
             --index-url https://download.pytorch.org/whl/cpu \
             --extra-index-url https://pypi.org/simple
           python3 -c 'import torchgen, yaml, jinja2'
-      - name: Install Linux image runtime dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 unzip
+      - name: Install Linux GPU runtime dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc unzip
       - name: Typecheck core Linux main process
         env:
           OFFGRID_FORCE_CORE: '1'
@@ -758,7 +758,7 @@ jobs:
           for library in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
             test -f "dist/linux-unpacked/resources/bin/cuda-runtime/$library"
           done
-          for helper in whisper/whisper-cli ffmpeg; do
+          for helper in whisper/whisper-cli whisper-cpu/whisper-cli ffmpeg; do
             binary="dist/linux-unpacked/resources/bin/$helper"
             test -x "$binary"
             file "$binary" | grep -q 'ELF 64-bit.*x86-64'
@@ -767,6 +767,7 @@ jobs:
           done
           dist/linux-unpacked/resources/bin/ffmpeg -version >/dev/null
           dist/linux-unpacked/resources/bin/whisper/whisper-cli --help >/dev/null 2>&1
+          dist/linux-unpacked/resources/bin/whisper-cpu/whisper-cli --help >/dev/null 2>&1
           for helper in sd/sd-cli sd/sd-server executorch-speech; do
             binary="dist/linux-unpacked/resources/bin/$helper"
             test -x "$binary"
@@ -836,7 +837,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/squashfs-root" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
@@ -857,7 +858,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/deb" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"

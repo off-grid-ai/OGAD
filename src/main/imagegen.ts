@@ -33,8 +33,9 @@ import { getActiveModal } from './active-models'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
-import { binRoots, dataDir, modelsDir, resourceDirs, exe } from './runtime-env'
+import { binRoots, dataDir, modelsDir, resourceDirs } from './runtime-env'
 import { sdServer } from './sd-server'
+import { findSdBinary } from './imagegen/sd-runtime'
 import { nativeLibraryEnv } from './native-library-env'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
@@ -77,11 +78,7 @@ import {
 } from '../shared/image-generation-contract'
 
 function findSdCli(): string | null {
-  for (const r of binRoots()) {
-    const p = path.join(r, 'sd', exe('sd-cli'))
-    if (fs.existsSync(p)) return p
-  }
-  return null
+  return findSdBinary('sd-cli')
 }
 
 /** The Core ML (ANE) image-gen Swift helper, if bundled. */

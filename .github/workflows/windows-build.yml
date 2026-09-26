@@ -292,7 +292,7 @@ jobs:
             --extra-index-url https://pypi.org/simple
           python3 -c 'import torchgen, yaml, jinja2'
           sudo apt-get update -qq
-          sudo apt-get install -y libgomp1 libvulkan1 unzip
+          sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc unzip
 
       - name: Typecheck core Linux main process
         env:
@@ -322,6 +322,9 @@ jobs:
           done
           for library in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
             test -f "dist/linux-unpacked/resources/bin/cuda-runtime/$library"
+          done
+          for helper in whisper/whisper-cli whisper-cpu/whisper-cli; do
+            test -x "dist/linux-unpacked/resources/bin/$helper"
           done
           test -n "$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)"
           test -n "$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
