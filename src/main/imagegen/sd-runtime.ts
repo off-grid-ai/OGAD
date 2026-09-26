@@ -2,6 +2,17 @@ import fs from 'fs'
 import path from 'path'
 import { binRoots, exe } from '../runtime-env'
 
+/** The backend selected by the native image binary that completed the run. */
+export function imageBackendForRuntime(
+  platform: NodeJS.Platform,
+  binaryPath: string
+): 'Metal' | 'CUDA' | 'Vulkan' | 'CPU' {
+  const directory = binaryPath.replace(/\\/g, '/').split('/').at(-2) ?? ''
+  if (directory.endsWith('-cuda')) return 'CUDA'
+  if (directory.endsWith('-cpu')) return 'CPU'
+  return platform === 'darwin' ? 'Metal' : 'Vulkan'
+}
+
 /** Windows needs the system Vulkan loader before the GPU image binary can start. */
 export function hasWindowsVulkanLoader(
   windowsDir = process.env.WINDIR ?? process.env.SystemRoot ?? 'C:\\Windows'

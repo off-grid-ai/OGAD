@@ -35,7 +35,7 @@ import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
 import { binRoots, dataDir, modelsDir, resourceDirs } from './runtime-env'
 import { sdServer } from './sd-server'
-import { findSdBinary } from './imagegen/sd-runtime'
+import { findSdBinary, imageBackendForRuntime } from './imagegen/sd-runtime'
 import { nativeLibraryEnv } from './native-library-env'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
@@ -578,7 +578,8 @@ export async function generateImage(
           remote.modelCatalog?.find(
             (model) => model.id === remote.selectedModel && model.kind === 'image'
           )?.name ?? remote.selectedModel,
-        prompt: enhanced
+        prompt: enhanced,
+        computeBackend: 'Remote'
       }
     } finally {
       remoteAbort = null
@@ -715,7 +716,8 @@ async function runImageGen(
         dataUrl: `data:image/png;base64,${b64}`,
         path: outPath,
         seed: params.seed ?? -1,
-        model: def.label
+        model: def.label,
+        computeBackend: 'Metal'
       }
     } finally {
       generationLifecycle.finish()
@@ -881,7 +883,8 @@ async function runImageGen(
         dataUrl: `data:image/png;base64,${png.toString('base64')}`,
         path: outPath,
         seed: usedSeed,
-        model: base
+        model: base,
+        computeBackend: imageBackendForRuntime(process.platform, cli)
       }
     } finally {
       generationLifecycle.finish()
@@ -1141,7 +1144,10 @@ async function runImageGen(
       dataUrl: `data:image/png;base64,${b64}`,
       path: outPath,
       seed: finalSeed,
-      model: path.basename(model)
+      model: path.basename(model),
+      computeBackend: coreml
+        ? 'Core ML (ANE)'
+        : imageBackendForRuntime(process.platform, cli)
     }
   } finally {
     generationLifecycle.finish()

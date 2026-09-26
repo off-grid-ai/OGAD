@@ -1697,7 +1697,11 @@ export function MemoryChat({
         }
         const imageMetrics: GenerationMetrics | undefined =
           typeof img.durationMs === 'number'
-            ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+            ? {
+                computeBackend: img.computeBackend,
+                modelName: img.model,
+                totalSeconds: img.durationMs / 1000
+              }
             : undefined
         const completedImage = completedImageMessage(
           `Generated for: ${trimmed}`,
@@ -2039,7 +2043,11 @@ export function MemoryChat({
                     : undefined
                 const imageMetrics: GenerationMetrics | undefined =
                   typeof img.durationMs === 'number'
-                    ? { modelName: img.model, totalSeconds: img.durationMs / 1000 }
+                    ? {
+                        computeBackend: img.computeBackend,
+                        modelName: img.model,
+                        totalSeconds: img.durationMs / 1000
+                      }
                     : undefined
                 if (!comicPageTotal) {
                   const ownsToolTurn = generatedImageCount === 0
