@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   settings: vi.fn(),
+  webSettings: vi.fn(),
+  session: vi.fn(),
   installed: vi.fn(),
   load: vi.fn(),
   remote: vi.fn(),
@@ -35,6 +37,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../llm', () => ({ llm: mocks.llm }))
 vi.mock('../../computer-use-settings', () => ({ getComputerUseSettings: mocks.settings }))
+vi.mock('../../web-use-settings', () => ({ getWebUseSettings: mocks.webSettings }))
 vi.mock('../../models-manager', () => ({
   DECIDER_2B: { id: 'offgrid/default-decider' },
   KEV_4B_ID: 'offgrid/kev-4b',
@@ -49,7 +52,7 @@ vi.mock('../../../shared/remote-vision-server', () => ({
   parseRemoteVisionModelId: mocks.parseRemoteId
 }))
 vi.mock('../../actions/remote-screen-session', () => ({
-  currentRemoteScreenTaskSession: vi.fn(() => null),
+  currentRemoteScreenTaskSession: mocks.session,
   runWithRemoteScreenTaskSession: vi.fn(async (_session, task) => task()),
   recordComputerUseMetric: mocks.recordMetric,
   recordComputerUseModelCall: mocks.recordCall
@@ -72,6 +75,8 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.session.mockReturnValue(null)
+  mocks.webSettings.mockReturnValue({ decisionModelId: 'offgrid/kev-4b' })
   mocks.settings.mockReturnValue({
     decisionModelId: 'offgrid/selected-decider',
     modelStrategy: 'decision_plus_specialist'
@@ -97,6 +102,25 @@ beforeEach(() => {
 })
 
 describe('decision model lifecycle', () => {
+  it('uses Web Use Kev for loading and decisions, not the Computer Use model', async () => {
+    mocks.session.mockReturnValue({ taskKind: 'web_use' })
+    mocks.installed.mockResolvedValue(['offgrid/kev-4b'])
+    expect(selectedDecisionModelId()).toBe('offgrid/kev-4b')
+    await withDecisionModel(() => decideWithDecisionModel('page', 'next?', ['A', 'B']))
+    expect(mocks.runtime.start).toHaveBeenCalledWith('offgrid/kev-4b')
+    expect(mocks.recordCall).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'offgrid/kev-4b' })
+    )
+    expect(mocks.load).not.toHaveBeenCalled()
+  })
+
+  it('does not inherit the Computer Use selection when Web Use has no selection', () => {
+    mocks.session.mockReturnValue({ taskKind: 'web_use' })
+    mocks.webSettings.mockReturnValue({ decisionModelId: null })
+    expect(selectedDecisionModelId()).toBe('offgrid/default-decider')
+    mocks.session.mockReturnValue({ taskKind: 'computer_use' })
+    expect(selectedDecisionModelId()).toBe('offgrid/selected-decider')
+  })
   it('selects the configured model and requires it to be installed', async () => {
     expect(selectedDecisionModelId()).toBe('offgrid/selected-decider')
     mocks.settings.mockReturnValueOnce({ decisionModelId: null })

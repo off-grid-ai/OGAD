@@ -1,5 +1,6 @@
 import { llm } from '../llm'
 import { getComputerUseSettings } from '../computer-use-settings'
+import { getWebUseSettings } from '../web-use-settings'
 import { DECIDER_2B, KEV_4B_ID, listInstalled, loadComputerUseModel } from '../models-manager'
 import { decisionRuntime, DecisionRuntimeError } from './decision-runtime'
 import type { OptionDecision } from '../llm'
@@ -34,7 +35,11 @@ async function ensureDedicatedRuntime(
 }
 
 export function selectedDecisionModelId(): string {
-  return getComputerUseSettings().decisionModelId ?? DECIDER_2B.id
+  const settings =
+    currentRemoteScreenTaskSession()?.taskKind === 'web_use'
+      ? getWebUseSettings()
+      : getComputerUseSettings()
+  return settings.decisionModelId ?? DECIDER_2B.id
 }
 
 /** Run one AX decision phase with the selected Decision model, then return the
