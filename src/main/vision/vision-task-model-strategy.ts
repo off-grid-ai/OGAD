@@ -10,10 +10,7 @@ import type {
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../../shared/remote-vision-server'
 import { withGrounder, selectedGrounderModelId } from './grounder-loader'
 import { createHybridVisionGrounder, productionHybridReasoner } from './hybrid-vision-grounder'
-import {
-  matchVisionModelAdapter,
-  resolveVisionModelAdapterForStrategy
-} from './model-adapters'
+import { matchVisionModelAdapter, resolveVisionModelAdapterForStrategy } from './model-adapters'
 import {
   bonsaiVisionOperatorAdapter,
   generalVisionOperatorAdapter
@@ -106,8 +103,7 @@ async function projectedModel(
 
 /** Canonical read-only model-role projection for Active Models. */
 export async function getComputerUseActiveModelProjection(
-  dependencies: VisionTaskModelStrategyDependencies = productionDependencies,
-  options: { decisionSpecialistUsesReasoner?: boolean } = {}
+  dependencies: VisionTaskModelStrategyDependencies = productionDependencies
 ): Promise<ComputerUseActiveModelProjection> {
   const strategy = dependencies.strategy()
   const remote = dependencies.activeRemote()
@@ -142,11 +138,10 @@ export async function getComputerUseActiveModelProjection(
   if (strategy === 'decision_plus_specialist') {
     const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
     const remoteDecision = getRemoteVisionServerForModel(decisionModelId, 'decision')
-    const usesReasoner = options.decisionSpecialistUsesReasoner ?? true
     const models: ComputerUseActiveModel[] = [
       await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies)
     ]
-    if (usesReasoner && chatModelId) {
+    if (chatModelId) {
       models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
     }
     models.push(
@@ -159,7 +154,7 @@ export async function getComputerUseActiveModelProjection(
     )
     return {
       strategy,
-      strategyLabel: usesReasoner ? 'Decision + Reasoning + Specialist' : 'Decision + Specialist',
+      strategyLabel: 'Decision + Reasoning + Specialist',
       models
     }
   }
@@ -189,16 +184,27 @@ export async function getComputerUseActiveModelProjection(
   return { strategy, strategyLabel: 'Reasoning + Specialist', models }
 }
 
+/** Persist the complete strategy identity on a task before its first model
+ * call. The task timeline then names every model that can take part in the
+ * selected strategy, including runs that never enter visual fallback. */
+export function activeModelProjectionIdentity(
+  projection: ComputerUseActiveModelProjection
+): ModelIdentity | undefined {
+  if (projection.models.length === 0) return undefined
+  return {
+    modelId: projection.models.map((model) => model.modelId).join(' + '),
+    modelName: projection.models.map((model) => model.modelName).join(' + ')
+  }
+}
+
 /** Web Use has its own strategy settings but shares the installed model runtimes. */
 export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModelProjection> {
-  return getComputerUseActiveModelProjection(
-    {
-      ...productionDependencies,
-      strategy: () => getWebUseSettings().modelStrategy,
-      selectedDecisionId: () => getWebUseSettings().decisionModelId ?? selectedDecisionModelId()
-    },
-    { decisionSpecialistUsesReasoner: false }
-  )
+  return getComputerUseActiveModelProjection({
+    ...productionDependencies,
+    strategy: () =>
+      currentRemoteScreenTaskSession()?.modelStrategy ?? getWebUseSettings().modelStrategy,
+    selectedDecisionId: () => getWebUseSettings().decisionModelId ?? selectedDecisionModelId()
+  })
 }
 
 function activeChatSelection(
