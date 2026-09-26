@@ -39,7 +39,7 @@ beforeEach(() => {
     primaryPath: '/models/grounder.gguf',
     projectorPath: '/models/mmproj.gguf'
   })
-  mocks.exists.mockReturnValue(true)
+  mocks.exists.mockImplementation((candidate: string) => !candidate.includes('llama-cuda'))
   mocks.pickPort.mockResolvedValue(8490)
   mocks.spawn.mockImplementation(() => new FakeProcess())
   vi.stubGlobal(
@@ -85,7 +85,7 @@ describe('GrounderRuntime', () => {
     mocks.pickPort.mockResolvedValueOnce(null)
     await expect(runtime.connection('no-port')).rejects.toThrow('No private port')
 
-    mocks.exists.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValueOnce(false)
+    mocks.exists.mockReturnValue(false)
     await expect(runtime.connection('no-engine')).rejects.toThrow('engine is missing')
   })
 

@@ -56,7 +56,7 @@ beforeEach(() => {
     python: '/runtime/python',
     script: '/runtime/server.py'
   })
-  mocks.exists.mockReturnValue(true)
+  mocks.exists.mockImplementation((candidate: string) => !candidate.includes('llama-cuda'))
   mocks.pickPort.mockResolvedValue(8460)
   mocks.parse.mockReturnValue({ choice: 1, confidence: 0.8, probabilities: [0.2, 0.8] })
   mocks.post.mockResolvedValue('{"choice":"B"}')
@@ -114,7 +114,7 @@ describe('DecisionRuntime', () => {
     mocks.pickPort.mockResolvedValueOnce(null)
     await expect(runtime.start('no-port')).rejects.toThrow('No private port')
 
-    mocks.exists.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValueOnce(false)
+    mocks.exists.mockReturnValue(false)
     await expect(runtime.start('no-engine')).rejects.toThrow('engine is missing')
   })
 
