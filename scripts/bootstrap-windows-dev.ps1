@@ -98,5 +98,5 @@ if ($WithKev) {
 Write-Host "Windows development environment is ready at $desktop"
 if (-not $SetupOnly) {
   Set-Location $desktop
-  & npm run dev
+  & node scripts/windows-dev-log-relay.mjs
 }
