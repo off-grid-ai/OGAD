@@ -177,13 +177,14 @@ export function buildDecisionRequest(
 function withContextMetrics(
   result: StreamResult,
   messages: unknown[],
-  options: { contextWindowTokens?: number; tools?: unknown[] }
+  options: { contextWindowTokens?: number; tools?: unknown[]; computeBackend?: string | null }
 ): StreamResult {
-  const { contextWindowTokens, tools } = options
+  const { contextWindowTokens, tools, computeBackend } = options
   return {
     ...result,
     metrics: {
       ...result.metrics,
+      ...(computeBackend ? { computeBackend } : {}),
       ...(contextWindowTokens && contextWindowTokens > 0 ? { contextWindowTokens } : {}),
       ...(result.metrics?.promptTokens
         ? {}
@@ -1615,7 +1616,8 @@ export class LLMService {
       })
       return {
         ...withContextMetrics(result, messages, {
-          contextWindowTokens: this.effectiveContextSize()
+          contextWindowTokens: this.effectiveContextSize(),
+          computeBackend: 'Remote'
         }),
         maxTokens: resolvedMaxTokens
       }
@@ -1649,7 +1651,8 @@ export class LLMService {
       })
       return {
         ...withContextMetrics(result, messages, {
-          contextWindowTokens: this.effectiveContextSize()
+          contextWindowTokens: this.effectiveContextSize(),
+          computeBackend: this.activeAccelerator()
         }),
         maxTokens: resolvedMaxTokens
       }
@@ -1704,7 +1707,8 @@ export class LLMService {
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),
-        tools: opts.tools
+        tools: opts.tools,
+        computeBackend: 'Remote'
       })
     }
     await this.beginGeneration()
@@ -1744,7 +1748,8 @@ export class LLMService {
       })
       return withContextMetrics(result, messages, {
         contextWindowTokens: this.effectiveContextSize(),
-        tools: opts.tools
+        tools: opts.tools,
+        computeBackend: this.activeAccelerator()
       })
     } finally {
       this.finishGeneration()

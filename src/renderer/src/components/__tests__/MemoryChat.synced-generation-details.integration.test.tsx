@@ -15,6 +15,7 @@ it('shows portable reply timing and offered tools after reload', async () => {
       durationMs: 3400,
       toolsOffered: ['web_use'],
       metrics: {
+        computeBackend: 'Metal',
         estimatedPromptTokens: 1024,
         contextWindowTokens: 4096,
         decodeTokensPerSecond: 42.5,
@@ -46,7 +47,8 @@ it('shows portable reply timing and offered tools after reload', async () => {
   expect(await screen.findByText('3.4s')).toBeTruthy()
   expect(await screen.findByRole('button', { name: 'Tools sent in request (1)' })).toBeTruthy()
   await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
-  expect((await screen.findByTestId('generation-metrics')).textContent).toContain('42.5 tok/s')
+  expect((await screen.findByTestId('generation-metrics')).textContent).toContain('Metal')
+  expect(screen.getByTestId('generation-metrics').textContent).toContain('42.5 tok/s')
 
   chat.unmount()
   renderChat({ conversationId: 'conversation-a' })
@@ -54,5 +56,6 @@ it('shows portable reply timing and offered tools after reload', async () => {
   expect(await screen.findByText('3.4s')).toBeTruthy()
   expect(await screen.findByRole('button', { name: 'Tools sent in request (1)' })).toBeTruthy()
   await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
-  expect((await screen.findByTestId('generation-metrics')).textContent).toContain('42.5 tok/s')
+  expect((await screen.findByTestId('generation-metrics')).textContent).toContain('Metal')
+  expect(screen.getByTestId('generation-metrics').textContent).toContain('42.5 tok/s')
 })
