@@ -2,13 +2,11 @@ import { createServer } from 'node:http'
 import { createWriteStream, readFileSync } from 'node:fs'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const logPath = join(tmpdir(), 'offgrid-desktop-dev.log')
-const token = randomBytes(16).toString('hex')
 const port = Number(process.env.OFFGRID_LOG_PORT || 8765)
 const log = createWriteStream(logPath, { flags: 'w' })
 
@@ -30,7 +28,7 @@ child.on('exit', (code) => write(`\nDevelopment app exited with code ${code ?? '
 
 const server = createServer((request, response) => {
   const path = new URL(request.url || '/', 'http://localhost').pathname
-  if (path !== `/${token}`) {
+  if (path !== '/logs') {
     response.writeHead(404).end('Not found')
     return
   }
@@ -52,7 +50,7 @@ server.listen(port, '0.0.0.0', () => {
   const addresses = Object.values(networkInterfaces())
     .flat()
     .filter((entry) => entry?.family === 'IPv4' && !entry.internal)
-    .map((entry) => `http://${entry.address}:${port}/${token}`)
+    .map((entry) => `http://${entry.address}:${port}/logs`)
 
   process.stdout.write(`\nLive development log:\n${addresses.join('\n')}\n`)
   process.stdout.write('If Windows asks, allow Node.js on private networks.\n\n')
