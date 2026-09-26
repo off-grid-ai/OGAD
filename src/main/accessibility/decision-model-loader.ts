@@ -3,6 +3,8 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import { getWebUseSettings } from '../web-use-settings'
 import { DECIDER_2B, KEV_4B_ID, listInstalled, loadComputerUseModel } from '../models-manager'
 import { decisionRuntime, DecisionRuntimeError } from './decision-runtime'
+import { withExclusiveModelMemory } from '../model-memory'
+import { modalityQueue, CHAT_JOB } from '../modality-queue/queue'
 import type { OptionDecision } from '../llm'
 import { parseRemoteVisionModelId } from '../../shared/remote-vision-server'
 import {
@@ -23,14 +25,14 @@ async function ensureDedicatedRuntime(
   session: NonNullable<typeof dedicatedSession>
 ): Promise<void> {
   if (decisionRuntime.running) return
-  if (session.restartsRemaining <= 0) {
+  if (!decisionRuntime.memoryEvicted && session.restartsRemaining <= 0) {
     throw new DecisionRuntimeError(
       'The dedicated Decision runtime stopped before selection.',
       'startup'
     )
   }
-  session.restartsRemaining -= 1
-  console.warn('[computer-use] restarting the dedicated Decision runtime once')
+  if (!decisionRuntime.memoryEvicted) session.restartsRemaining -= 1
+  console.log('[computer-use] loading Decision runtime after eviction or recovery')
   await decisionRuntime.start(session.modelId)
 }
 
@@ -46,6 +48,15 @@ export function selectedDecisionModelId(): string {
  * shared llama.cpp process to the saved Chat model before vision recovery. */
 export async function withDecisionModel<T>(task: () => Promise<T>): Promise<T> {
   const modelId = selectedDecisionModelId()
+  if (modelId === KEV_4B_ID) {
+    return modalityQueue.run(CHAT_JOB, () =>
+      withExclusiveModelMemory(() => runWithDecisionModel(task, modelId))
+    )
+  }
+  return runWithDecisionModel(task, modelId)
+}
+
+async function runWithDecisionModel<T>(task: () => Promise<T>, modelId: string): Promise<T> {
   const remote = getRemoteVisionServerForModel(modelId, 'decision')
   // Each remote decision binds only its own request. Keep the outer task bound
   // to Chat so reasoning recovery does not accidentally use the Decider.

@@ -1,5 +1,6 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
 import { Mutex } from 'async-mutex'
+import { prepareModelMemory, registerModelEvictor } from './model-memory'
 import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
 import * as fs from 'fs'
@@ -852,6 +853,7 @@ export class LLMService {
   }
 
   async init(): Promise<void> {
+    await prepareModelMemory('chat')
     if (this.paused) {
       // A chat/tool turn needs the LLM NOW, but it's paused for a resident image
       // server (unified memory can't hold both). Ask the image server to evict
@@ -1197,6 +1199,7 @@ export class LLMService {
    *  init, and fail loudly if init didn't take. Single source of truth so the
    *  three chat methods don't each re-implement it. */
   private async ensureReady(): Promise<void> {
+    await prepareModelMemory('chat')
     if (this.paused) throw new Error('LLM paused during image generation — deferred')
     if (!this.initialized) {
       await this.init()
@@ -1952,3 +1955,7 @@ export class LLMService {
 }
 
 export const llm = new LLMService()
+registerModelEvictor('chat', async () => {
+  const result = await llm.unload()
+  if (!result.portFree) throw new Error('Chat model did not stop; cannot free memory for Decision.')
+})

@@ -16,6 +16,7 @@ describe('model switch during startup', () => {
       .mockImplementationOnce(() => first)
       .mockResolvedValue(undefined)
     const oldLoad = service.init()
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1))
     service.stop()
     const newLoad = service.init()
     expect(load).toHaveBeenCalledTimes(1)

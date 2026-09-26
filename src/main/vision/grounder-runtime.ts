@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import { Mutex } from 'async-mutex'
+import { prepareModelMemory, registerModelEvictor } from '../model-memory'
 import type { RemoteTextModelConnection } from '../llm/remote-chat'
 import { buildLaunchArgs } from '../llm/settings-math'
 import { engineSpawnEnv } from '../llm/spawn-env'
@@ -25,6 +26,7 @@ export class GrounderRuntime {
   }
 
   async connection(modelId: string): Promise<RemoteTextModelConnection> {
+    await prepareModelMemory('grounding')
     await this.mutex.runExclusive(async () => {
       if (!this.running || this.modelId !== modelId) await this.start(modelId)
     })
@@ -138,3 +140,4 @@ export class GrounderRuntime {
 }
 
 export const grounderRuntime = new GrounderRuntime()
+registerModelEvictor('grounding', () => grounderRuntime.shutdown())

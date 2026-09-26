@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   recordMetric: vi.fn(),
   recordCall: vi.fn(),
   runtime: {
+    memoryEvicted: false,
     running: false,
     start: vi.fn(),
     shutdown: vi.fn(),
@@ -87,7 +88,9 @@ beforeEach(() => {
   mocks.parseRemoteId.mockReturnValue(null)
   mocks.useOpenRouter.mockReturnValue(false)
   mocks.runtime.running = false
+  mocks.runtime.memoryEvicted = false
   mocks.runtime.start.mockImplementation(async () => {
+    mocks.runtime.memoryEvicted = false
     mocks.runtime.running = true
   })
   mocks.runtime.shutdown.mockImplementation(async () => {
@@ -154,6 +157,17 @@ describe('decision model lifecycle', () => {
       })
     })
     expect(mocks.runtime.start).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not count deliberate memory swaps as crashes', async () => {
+    await withDecisionModel(async () => {
+      for (let i = 0; i < 3; i++) {
+        mocks.runtime.running = false
+        mocks.runtime.memoryEvicted = true
+        await decideWithDecisionModel('state', 'next?', ['A', 'B'])
+      }
+    })
+    expect(mocks.runtime.start).toHaveBeenCalledTimes(4)
   })
 
   it('uses the explicit shared-model fallback after local memory pressure', async () => {

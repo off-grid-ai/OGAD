@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import { Mutex } from 'async-mutex'
+import { prepareModelMemory, registerModelEvictor } from '../model-memory'
 import {
   buildDecisionPrompt,
   buildDecisionRequest,
@@ -38,6 +39,7 @@ export class DecisionRuntimeError extends Error {
 }
 
 export class DecisionRuntime {
+  memoryEvicted = false
   private process: ChildProcess | null = null
   private port = DECIDER_PORT
   private readonly mutex = new Mutex()
@@ -68,6 +70,8 @@ export class DecisionRuntime {
   }
 
   private async startInternal(modelId: string): Promise<void> {
+    await prepareModelMemory('decision')
+    this.memoryEvicted = false
     await this.shutdown()
     if (modelId === KEV_4B_ID) return this.startKev()
     const artifact = await resolveComputerUseModelArtifact(modelId)
@@ -298,3 +302,9 @@ export class DecisionRuntime {
 }
 
 export const decisionRuntime = new DecisionRuntime()
+registerModelEvictor('decision', async () => {
+  if (decisionRuntime.running) {
+    decisionRuntime.memoryEvicted = true
+    await decisionRuntime.shutdown()
+  }
+})
