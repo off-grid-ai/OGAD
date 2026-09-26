@@ -25,6 +25,7 @@ import { setupDesktopBackupIPC } from './backup/ipc'
 import { preloadPath } from './preload-path'
 import { rendererHtmlPath } from './renderer-path'
 import { setMainWindow } from './main-window'
+import { registerGodTwinWindowIpc, showGodTwinWindow } from './god-twin-window'
 import { startModelServer, stopModelServer } from './model-server'
 import { startMediaServer, stopMediaServer, mediaUrlFor } from './media-server'
 import { capturePathFromUrl, serveCaptureFile } from './ogcapture-serve'
@@ -511,6 +512,8 @@ app.whenReady().then(async () => {
     }
   ])
 
+  registerGodTwinWindowIpc()
+
   // Start optional Pro registration before the renderer loads. The activation
   // code yields between feature groups, so the shell can load at the same time,
   // while Pro IPC handlers still get a head start before the renderer mounts.
@@ -527,6 +530,8 @@ app.whenReady().then(async () => {
   // one more event-loop turn to present that frame before optional main-process
   // imports and local-model startup begin competing for CPU and memory.
   await new Promise<void>((resolve) => setImmediate(resolve))
+
+  if (windowPresentation.showWindow) showGodTwinWindow()
 
   // Network checks, model work, and optional services now run beside the visible shell.
   void runIndependentStartupStages([
