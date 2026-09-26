@@ -35,7 +35,7 @@ import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
 import { binRoots, dataDir, modelsDir, resourceDirs } from './runtime-env'
 import { sdServer } from './sd-server'
-import { findSdBinary, imageBackendForRuntime } from './imagegen/sd-runtime'
+import { findSdBinaries, findSdBinary, imageBackendForRuntime } from './imagegen/sd-runtime'
 import { nativeLibraryEnv } from './native-library-env'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
@@ -1064,78 +1064,108 @@ async function runImageGen(
   // model's load spike — otherwise the brief overlap causes a short stutter.
   try {
     await generationLifecycle.waitForMemoryReclaim()
-    await new Promise<void>((resolve, reject) => {
-      // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
-      const binDir = path.dirname(cli)
-      const child = spawn(cli, args, {
-        cwd: binDir,
-        env: { ...process.env, ...nativeLibraryEnv(process.platform, binDir, process.env) }
-      })
-      currentChild = child
-      let log = ''
-      // Pure progress reducer owns the seed parse + the denoise->decode phase
-      // transition; the shell only handles the preview PNG read + the callback.
-      let progress = initialProgressState(seed)
-      let progressBuffer = ''
-      let latestProgressEvent: ProgressEvent | undefined
-      let previewVersion = ''
-      const readPreview = (): string | undefined => {
-        try {
-          if (!fs.existsSync(previewPath)) return undefined
-          const stat = fs.statSync(previewPath)
-          const version = `${stat.mtimeMs}:${stat.size}`
-          if (version === previewVersion) return undefined
-          previewVersion = version
-          return `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
-        } catch {
-          return undefined
+    const runNativeCli = (runtime: string): Promise<void> =>
+      new Promise<void>((resolve, reject) => {
+        // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
+        const binDir = path.dirname(runtime)
+        const child = spawn(runtime, args, {
+          cwd: binDir,
+          env: { ...process.env, ...nativeLibraryEnv(process.platform, binDir, process.env) }
+        })
+        const debugNativeLogs = process.env.OFFGRID_NATIVE_LOGS === '1'
+        if (debugNativeLogs) {
+          console.info(
+            `[imagegen:native] backend=${imageBackendForRuntime(process.platform, runtime)} runtime=${runtime}`
+          )
         }
-      }
-      // sd-cli prints a step before its preview PNG has finished writing. Poll
-      // the file independently so the final step cannot leave the previous
-      // preview on screen while the final VAE decode is still running.
-      const previewPoll = setInterval(() => {
-        if (!onProgress || !latestProgressEvent) return
-        const preview = readPreview()
-        if (preview) onProgress({ ...latestProgressEvent, preview })
-      }, 250)
-      const capture = (d: Buffer): void => {
-        const s = d.toString()
-        log += s
-        // Terminal progress lines can arrive across multiple data chunks. Keep a
-        // short rolling buffer so "12/" and "42" still become step 12 of 42.
-        progressBuffer = `${progressBuffer}${s}`.slice(-2048)
-        const { state, event } = reduceProgress(progress, progressBuffer, params.steps)
-        progress = state
-        if (onProgress && event) {
-          latestProgressEvent = event
+        currentChild = child
+        let log = ''
+        // Pure progress reducer owns the seed parse + the denoise->decode phase
+        // transition; the shell only handles the preview PNG read + the callback.
+        let progress = initialProgressState(seed)
+        let progressBuffer = ''
+        let latestProgressEvent: ProgressEvent | undefined
+        let previewVersion = ''
+        const readPreview = (): string | undefined => {
+          try {
+            if (!fs.existsSync(previewPath)) return undefined
+            const stat = fs.statSync(previewPath)
+            const version = `${stat.mtimeMs}:${stat.size}`
+            if (version === previewVersion) return undefined
+            previewVersion = version
+            return `data:image/png;base64,${fs.readFileSync(previewPath).toString('base64')}`
+          } catch {
+            return undefined
+          }
+        }
+        // sd-cli prints a step before its preview PNG has finished writing. Poll
+        // the file independently so the final step cannot leave the previous
+        // preview on screen while the final VAE decode is still running.
+        const previewPoll = setInterval(() => {
+          if (!onProgress || !latestProgressEvent) return
           const preview = readPreview()
-          onProgress({ ...event, preview })
+          if (preview) onProgress({ ...latestProgressEvent, preview })
+        }, 250)
+        const capture = (stream: 'stdout' | 'stderr', d: Buffer): void => {
+          const s = d.toString()
+          log += s
+          if (debugNativeLogs) {
+            const destination = stream === 'stdout' ? process.stdout : process.stderr
+            destination.write(`[sd-cli:${stream}] ${s}`)
+          }
+          // Terminal progress lines can arrive across multiple data chunks. Keep a
+          // short rolling buffer so "12/" and "42" still become step 12 of 42.
+          progressBuffer = `${progressBuffer}${s}`.slice(-2048)
+          const { state, event } = reduceProgress(progress, progressBuffer, params.steps)
+          progress = state
+          if (onProgress && event) {
+            latestProgressEvent = event
+            const preview = readPreview()
+            onProgress({ ...event, preview })
+          }
         }
-      }
-      child.stdout.on('data', capture)
-      child.stderr.on('data', capture)
-      child.on('error', (error) => {
-        clearInterval(previewPoll)
-        reject(error)
+        child.stdout.on('data', (data: Buffer) => capture('stdout', data))
+        child.stderr.on('data', (data: Buffer) => capture('stderr', data))
+        child.on('error', (error) => {
+          clearInterval(previewPoll)
+          reject(error)
+        })
+        child.on('close', (code) => {
+          const preview = readPreview()
+          if (onProgress && latestProgressEvent && preview) {
+            onProgress({ ...latestProgressEvent, preview })
+          }
+          clearInterval(previewPoll)
+          if (generationLifecycle.isCancelled()) {
+            reject(new Error(IMAGE_CANCELLED_MESSAGE))
+          } else if (code === 0) {
+            // stash the resolved seed for the caller via closure
+            ;(params as ImageGenParams & { _seed?: number })._seed = progress.resolvedSeed
+            resolve()
+          } else {
+            reject(new Error(`Image generation failed (exit ${String(code)}): ${log.slice(-400)}`))
+          }
+        })
       })
-      child.on('close', (code) => {
-        const preview = readPreview()
-        if (onProgress && latestProgressEvent && preview) {
-          onProgress({ ...latestProgressEvent, preview })
-        }
-        clearInterval(previewPoll)
-        if (generationLifecycle.isCancelled()) {
-          reject(new Error(IMAGE_CANCELLED_MESSAGE))
-        } else if (code === 0) {
-          // stash the resolved seed for the caller via closure
-          ;(params as ImageGenParams & { _seed?: number })._seed = progress.resolvedSeed
-          resolve()
-        } else {
-          reject(new Error(`Image generation failed (exit ${String(code)}): ${log.slice(-400)}`))
-        }
-      })
-    })
+
+    let completedRuntime = cli
+    try {
+      await runNativeCli(cli)
+    } catch (error) {
+      const cpuRuntime =
+        !coreml && process.platform === 'win32'
+          ? findSdBinaries('sd-cli').find(
+              (runtime) => imageBackendForRuntime(process.platform, runtime) === 'CPU'
+            )
+          : undefined
+      if (!cpuRuntime || cpuRuntime === cli || generationLifecycle.isCancelled()) throw error
+      console.warn(
+        `[imagegen] ${imageBackendForRuntime(process.platform, cli)} runtime failed; retrying with CPU`,
+        error
+      )
+      await runNativeCli(cpuRuntime)
+      completedRuntime = cpuRuntime
+    }
 
     if (!fs.existsSync(outPath)) throw new Error('Image generation produced no output file.')
     const b64 = fs.readFileSync(outPath).toString('base64')
@@ -1147,7 +1177,7 @@ async function runImageGen(
       model: path.basename(model),
       computeBackend: coreml
         ? 'Core ML (ANE)'
-        : imageBackendForRuntime(process.platform, cli)
+        : imageBackendForRuntime(process.platform, completedRuntime)
     }
   } finally {
     generationLifecycle.finish()

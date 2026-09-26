@@ -25,16 +25,21 @@ export function hasWindowsVulkanLoader(
  * is installed, then uses the separately packaged CPU build. Linux and macOS keep
  * their existing `sd` runtime; the Linux Vulkan build contains CPU kernels too.
  */
-export function findSdBinary(name: 'sd-cli' | 'sd-server'): string | null {
+export function findSdBinaries(name: 'sd-cli' | 'sd-server'): string[] {
   let directories = ['sd', 'sd-cpu']
   if (process.platform === 'win32') {
     directories = hasWindowsVulkanLoader() ? ['sd', 'sd-cpu'] : ['sd-cpu', 'sd']
   }
+  const matches: string[] = []
   for (const root of binRoots()) {
     for (const directory of directories) {
       const candidate = path.join(root, directory, exe(name))
-      if (fs.existsSync(candidate)) return candidate
+      if (fs.existsSync(candidate) && !matches.includes(candidate)) matches.push(candidate)
     }
   }
-  return null
+  return matches
+}
+
+export function findSdBinary(name: 'sd-cli' | 'sd-server'): string | null {
+  return findSdBinaries(name)[0] ?? null
 }

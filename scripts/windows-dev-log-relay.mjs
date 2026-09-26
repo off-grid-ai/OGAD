@@ -17,14 +17,18 @@ function write(chunk, destination) {
 
 const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm run dev'], {
   cwd: root,
-  env: process.env,
-  stdio: ['inherit', 'pipe', 'pipe'],
+  env: { ...process.env, OFFGRID_NATIVE_LOGS: '1' },
+  stdio: ['inherit', 'pipe', 'pipe']
 })
 
 child.stdout.on('data', (chunk) => write(chunk, process.stdout))
 child.stderr.on('data', (chunk) => write(chunk, process.stderr))
-child.on('error', (error) => write(`\nCould not start the development app: ${error.message}\n`, process.stderr))
-child.on('exit', (code) => write(`\nDevelopment app exited with code ${code ?? 'unknown'}.\n`, process.stdout))
+child.on('error', (error) =>
+  write(`\nCould not start the development app: ${error.message}\n`, process.stderr)
+)
+child.on('exit', (code) =>
+  write(`\nDevelopment app exited with code ${code ?? 'unknown'}.\n`, process.stdout)
+)
 
 const server = createServer((request, response) => {
   const path = new URL(request.url || '/', 'http://localhost').pathname
@@ -41,7 +45,7 @@ const server = createServer((request, response) => {
 
   response.writeHead(200, {
     'Content-Type': 'text/plain; charset=utf-8',
-    'Cache-Control': 'no-store',
+    'Cache-Control': 'no-store'
   })
   response.end(body)
 })
