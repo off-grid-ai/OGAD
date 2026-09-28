@@ -77,6 +77,7 @@ function resolvedRequest(request: VideoGenerationRequestContract): Required<Omit
   const seed = !Number.isFinite(requestedSeed) || requestedSeed < 0 ? Math.floor(Math.random() * 2147483647) : requestedSeed
   if (!request.prompt.trim()) throw new Error('Enter a video prompt.')
   if (![width, height, frames, fps, steps, guidance, seed].every(Number.isFinite)) throw new Error('Video settings must be numbers.')
+  if (![width, height, frames, fps, steps, seed].every(Number.isInteger)) throw new Error('Video size, frame count, FPS, steps and seed must be whole numbers.')
   if (width < 256 || width > 832 || height < 192 || height > 480 || width % 16 || height % 16) throw new Error('Video size must use multiples of 16 from 256 × 192 through 832 × 480.')
   if (frames < 9 || frames > 81 || (frames - 1) % 4 !== 0) throw new Error('Frame count must be 4n + 1, from 9 through 81.')
   if (fps < 4 || fps > 24 || steps < 4 || steps > 50 || guidance < 0 || guidance > 20 || seed < 0) throw new Error('Video settings are outside the supported range.')
@@ -180,7 +181,7 @@ export async function generateVideo(
       let lastStep = 0
       await runProcess(cli, videoArgs(pack.pack, request, raw), (chunk) => {
         progressText = `${progressText}${chunk}`.slice(-256)
-        const match = progressText.match(/(?:^|[^\d])(\d{1,3})\s*\/\s*(\d{1,3})(?:[^\d]|$)/)
+        const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
         if (match) {
           const step = Number(match[1])
           const total = Number(match[2])
