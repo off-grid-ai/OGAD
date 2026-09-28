@@ -1358,7 +1358,7 @@ export async function setActiveModalChoice(
     let stored = modelId
     // The image resolver loads by FILENAME, but the UI passes a catalog id — map it
     // to the entry's primary filename so an in-app pick (e.g. Juggernaut) takes effect.
-    if (modelId && modal === 'image') {
+    if (modelId && (modal === 'image' || modal === 'video')) {
       try {
         const CATALOG = await desktopCatalog()
         const e = CATALOG.find((m) => m.id === modelId)

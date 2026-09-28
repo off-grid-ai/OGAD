@@ -14,6 +14,7 @@ const DIFFUSION_FAMILY =
 
 /** Whether a filename in the models dir is a pickable image model. */
 export function isImageModelFile(f: string): boolean {
+  if (/wan[._-]?2[._-]?1.*(?:t2v|text[._-]?to[._-]?video)/i.test(f)) return false
   if (EXCLUDE.test(f)) return false
   // Custom checkpoints (Civitai etc.) ship as a single .safetensors.
   if (/\.safetensors$/i.test(f)) return true

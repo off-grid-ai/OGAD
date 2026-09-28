@@ -149,6 +149,7 @@ interface ModelEntry {
   isNew?: boolean
   files: ModelFile[]
   imageModes?: string[]
+  videoModes?: string[]
   tags?: string[]
   releaseDate?: string
   quant?: string
@@ -925,7 +926,7 @@ export function ModelsScreen({
             </>
           ) : (
             <button
-              onClick={() => isHf ? void chooseVariant(m) : download(m.id)}
+              onClick={() => isHf && m.kind !== 'video' ? void chooseVariant(m) : download(m.id)}
               className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
             >
               <IconDownload className="h-3 w-3" /> Download
@@ -1374,6 +1375,15 @@ export function ModelsScreen({
                           className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500"
                         >
                           {MODE_LABELS[mode] ?? mode}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {m.videoModes && m.videoModes.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {m.videoModes.map((mode) => (
+                        <span key={mode} className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500">
+                          Text to video
                         </span>
                       ))}
                     </div>

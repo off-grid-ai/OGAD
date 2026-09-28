@@ -1,4 +1,4 @@
-export type Modality = 'computer_use' | 'image' | 'speech' | 'transcription'
+export type Modality = 'computer_use' | 'image' | 'video' | 'speech' | 'transcription'
 
 /** Map a catalog kind to its stateless runtime modality. Chat kinds return null. */
 export function modalityForKind(kind?: string | null): Modality | null {
@@ -7,6 +7,8 @@ export function modalityForKind(kind?: string | null): Modality | null {
       return 'computer_use'
     case 'image':
       return 'image'
+    case 'video':
+      return 'video'
     case 'voice':
     case 'speech':
       return 'speech'
@@ -23,7 +25,7 @@ export function isModelActive(opts: {
   id: string
   primaryFile?: string | null
   activeChatId: string | null
-  modals: Record<Modality, string | null>
+  modals: Partial<Record<Modality, string | null>>
 }): boolean {
   const modal = modalityForKind(opts.kind)
   if (modal) {

@@ -270,7 +270,7 @@ export function buildDiskEntry(opts: {
   catalogById: (id: string) => CatalogEntry | undefined
   isCatalogId: (id: string) => boolean
   activeChatId: string | null
-  modals: Record<Modality, string | null>
+  modals: Partial<Record<Modality, string | null>>
   sizeOf: SizeOf
 }): { id: string; name: string; kind?: string; bytes: number; active: boolean } {
   const { id, sizeOf } = opts
@@ -381,7 +381,7 @@ export function modalityForModel(kind?: string | null): Modality | null {
  *  the chat LLM. Mirrors the guard in setActiveModalChoice. */
 export function isModalKind(kind: string): kind is Modality {
   return (
-    kind === 'computer_use' || kind === 'image' || kind === 'speech' || kind === 'transcription'
+    kind === 'computer_use' || kind === 'image' || kind === 'video' || kind === 'speech' || kind === 'transcription'
   )
 }
 
