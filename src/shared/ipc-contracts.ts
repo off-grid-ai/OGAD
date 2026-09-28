@@ -69,6 +69,8 @@ export interface ActiveChatStreamContract {
     | 'loading_model'
     | 'loading_image_model'
     | 'generating_image'
+    | 'loading_video_model'
+    | 'generating_video'
   tools?: Array<{
     name: string
     status: 'running' | 'completed' | 'failed' | 'pending'

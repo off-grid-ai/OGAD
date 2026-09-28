@@ -42,6 +42,7 @@ export interface QueueRequest {
 // on unified memory. Frozen so a caller can't mutate the shared descriptor.
 export const CHAT_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'chat', evicts: ['image'] })
 export const IMAGE_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'image', evicts: ['llm'] })
+export const VIDEO_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'video', evicts: ['llm', 'image'] })
 
 // Background model work (capture distill, replay-vision, secretary/agent passes).
 // Tier 3 = lowest priority: runs only when no chat/workspace/image job is running

@@ -228,6 +228,67 @@ export function beginChatImageStream(conversationId: string | null | undefined):
   return true
 }
 
+export function beginChatVideoStream(conversationId: string | null | undefined): boolean {
+  if (!conversationId) return false
+  const existing = [...active.entries()].find(([, stream]) => stream.conversationId === conversationId)
+  if (existing) {
+    const [streamId, stream] = existing
+    if (!pendingMessageIds.has(conversationId)) {
+      const messageId = crypto.randomUUID()
+      pendingMessageIds.set(conversationId, messageId)
+      stream.messageId = messageId
+      stream.content = ''
+      stream.reasoning = ''
+      delete stream.tools
+    }
+    stream.phase = 'loading_video_model'
+    delete stream.progress
+    publish(streamId)
+    return true
+  }
+  const streamId = `video:${conversationId}`
+  const messageId = pendingMessageIds.get(conversationId) ?? crypto.randomUUID()
+  pendingMessageIds.set(conversationId, messageId)
+  active.set(streamId, {
+    conversationId, content: '', reasoning: '', reasoningRequested: false,
+    phase: 'loading_video_model', messageId
+  })
+  publish(streamId)
+  return true
+}
+
+export function continueChatStreamWithVideo(streamId: string | undefined): boolean {
+  if (!streamId) return false
+  const stream = active.get(streamId)
+  if (!stream) return false
+  stream.phase = 'loading_video_model'
+  delete stream.progress
+  publish(streamId)
+  return true
+}
+
+export function noteChatStreamVideoProgress(
+  conversationId: string | null | undefined,
+  step?: number,
+  total?: number
+): boolean {
+  if (!conversationId) return false
+  const entry = [...active.entries()].find(([, stream]) =>
+    stream.conversationId === conversationId &&
+    (stream.phase === 'loading_video_model' || stream.phase === 'generating_video'))
+  if (!entry) return false
+  const [streamId, stream] = entry
+  if (step !== undefined && step > 0 && total !== undefined && total > 0) {
+    stream.phase = 'generating_video'
+    stream.progress = { current: Math.min(Math.max(step, 0), total), total }
+  } else {
+    stream.phase = 'loading_video_model'
+    delete stream.progress
+  }
+  publish(streamId)
+  return true
+}
+
 /**
  * Keep a tool-using turn open while its deferred image job runs.
  *
