@@ -634,7 +634,7 @@ export async function downloadModel(
       return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
     const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
     const catalogAuxFiles =
-      inCatalog?.files.filter((file) => file.role !== 'primary' && file.role !== 'mmproj') ?? []
+      entry.files.filter((file) => file.role !== 'primary' && file.role !== 'mmproj') ?? []
     const projectorFiles = variant.mmproj
       ? [
           {
@@ -1300,7 +1300,7 @@ export async function activateModel(
       (candidate) => candidate.id === remote.serverId
     )
     const selected = server?.mediaModels ?? (server?.model ? { text: server.model } : {})
-    const modality = (['text', 'image', 'transcription', 'voice'] as const).find(
+    const modality = (['text', 'image', 'video', 'transcription', 'voice'] as const).find(
       (kind) => selected[kind] === remote.modelId
     )
     const activated =
@@ -1369,6 +1369,7 @@ export async function setActiveModalChoice(
       }
     }
     setModal(modal, stored)
+    if (modal === 'video') deactivateRemoteVisionMediaModel('video')
     if (modal === 'image') deactivateRemoteVisionMediaModel('image')
     if (modal === 'speech') deactivateRemoteVisionMediaModel('voice')
     if (modal === 'transcription') deactivateRemoteVisionMediaModel('transcription')
@@ -1382,7 +1383,9 @@ export function getActiveModalities(): { text: string | null } & Record<Modality
   const remote = settings.servers.find(
     (server) => server.id === settings.activeServerId && server.enabled !== false
   )
-  const remoteId = (modality: 'text' | 'image' | 'transcription' | 'voice'): string | null => {
+  const remoteId = (
+    modality: 'text' | 'image' | 'video' | 'transcription' | 'voice'
+  ): string | null => {
     const model =
       remote?.mediaModels?.[modality] ?? (modality === 'text' ? remote?.model : undefined)
     return remote && model ? remoteVisionModelId(remote.id, model) : null
@@ -1390,6 +1393,7 @@ export function getActiveModalities(): { text: string | null } & Record<Modality
   return {
     text: (remoteModelSelected('text') ? remoteId('text') : null) ?? getActiveModel(),
     ...getAllActiveModals(),
+    video: (remoteModelSelected('video') ? remoteId('video') : null) ?? getAllActiveModals().video,
     image: (remoteModelSelected('image') ? remoteId('image') : null) ?? getAllActiveModals().image,
     speech: (remoteVoiceSelected() ? remoteId('voice') : null) ?? getAllActiveModals().speech,
     transcription:

@@ -224,7 +224,7 @@ export function getActiveRemoteVisionServerForModality(
     (server) => server.id === stored.activeServerId && server.enabled !== false
   )
   const selectedModel = active?.mediaModels?.[modality]
-  return active && selectedModel
+  return active && selectedModel && (modality !== 'video' || active.provider === 'ogad')
     ? { ...active, apiKey: serverApiKey(active.id), selectedModel }
     : null
 }
@@ -276,7 +276,7 @@ export function setRemoteVisionServerSettings(
 ): RemoteVisionServerSettings {
   const stored = readStored()
   if (update.provider === 'local') {
-    for (const modality of ['text', 'image', 'voice', 'transcription'] as const) {
+    for (const modality of ['text', 'image', 'video', 'voice', 'transcription'] as const) {
       setRemoteModelSelected(modality, false)
     }
     writeStored({
@@ -323,6 +323,7 @@ export function setRemoteVisionServerSettings(
   if (isNewServer) {
     setRemoteModelSelected('text', Boolean(mediaModels.text))
     setRemoteModelSelected('image', false)
+    setRemoteModelSelected('video', false)
     setRemoteModelSelected('voice', false)
     setRemoteModelSelected('transcription', false)
   }
@@ -333,7 +334,7 @@ export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSe
   const stored = readStored()
   deleteSecret(secretKey(serverId))
   if (stored.activeServerId === serverId) {
-    for (const modality of ['text', 'image', 'voice', 'transcription'] as const) {
+    for (const modality of ['text', 'image', 'video', 'voice', 'transcription'] as const) {
       setRemoteModelSelected(modality, false)
     }
   }
@@ -426,6 +427,13 @@ export async function testRemoteVisionServer(
         typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
       if (!id) return []
       const kind = entry.kind
+      if (
+        (kind === 'video' ||
+          (Array.isArray(entry.architecture?.output_modalities) &&
+            entry.architecture.output_modalities.includes('video'))) &&
+        update.provider !== 'ogad'
+      )
+        return []
       const outputs = Array.isArray(entry.architecture?.output_modalities)
         ? entry.architecture.output_modalities
         : []
@@ -436,27 +444,29 @@ export async function testRemoteVisionServer(
         ? entry.supported_parameters.filter((value): value is string => typeof value === 'string')
         : []
       const modality: RemoteVisionModality =
-        kind === 'image'
-          ? 'image'
-          : kind === 'transcription'
-            ? 'transcription'
-            : kind === 'speech'
-              ? 'voice'
-              : kind === 'chat' || kind === 'vision' || kind === 'text'
-                ? 'text'
-                : outputs.includes('image')
-                  ? 'image'
-                  : outputs.includes('transcription')
-                    ? 'transcription'
-                    : outputs.includes('speech') || outputs.includes('audio')
-                      ? 'voice'
-                      : update.provider !== 'openrouter' &&
-                          inputs.includes('audio') &&
-                          outputs.includes('text')
-                        ? 'transcription'
-                        : update.provider !== 'openrouter' && outputs.includes('audio')
-                          ? 'voice'
-                          : 'text'
+        kind === 'video' || outputs.includes('video')
+          ? 'video'
+          : kind === 'image'
+            ? 'image'
+            : kind === 'transcription'
+              ? 'transcription'
+              : kind === 'speech'
+                ? 'voice'
+                : kind === 'chat' || kind === 'vision' || kind === 'text'
+                  ? 'text'
+                  : outputs.includes('image')
+                    ? 'image'
+                    : outputs.includes('transcription')
+                      ? 'transcription'
+                      : outputs.includes('speech') || outputs.includes('audio')
+                        ? 'voice'
+                        : update.provider !== 'openrouter' &&
+                            inputs.includes('audio') &&
+                            outputs.includes('text')
+                          ? 'transcription'
+                          : update.provider !== 'openrouter' && outputs.includes('audio')
+                            ? 'voice'
+                            : 'text'
       return [
         {
           id,

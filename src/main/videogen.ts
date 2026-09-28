@@ -1,9 +1,18 @@
+import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
+import { generateRemoteVideo } from './remote-media-runtime'
+import {
+  resolveVideoRequest,
+  isSupportedVideoWeight,
+  VIDEO_VAE_FILENAME,
+  VIDEO_ENCODER_FILENAME
+} from '@offgrid/models'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { getActiveModal } from './active-models'
-import { getSetting } from './database'
+import { getDB, getSetting, updateRagMessage } from './database'
+import { readGeneratedVideoReference } from '../shared/generated-video-reference'
 import { findSdBinary, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
 import { resolveExistingOwnedEntry, resolveExistingOwnedPath } from './imagegen/owned-path'
 import { cleanEnhancedPrompt } from './imagegen/prompt-enhance'
@@ -22,13 +31,13 @@ import { describeOwnGeneratedVideo } from './videogen/generated-video-share'
 import { emitSharedFileMutation } from './sync-shared-file'
 
 const VIDEO_DIR = 'generated-videos'
-const WEIGHT = /wan2[._-]?1[_-]?t2v[_-]?1[._]?3b.*\.(?:safetensors|gguf)$/i
-const VAE = 'wan_2.1_vae.safetensors'
-const ENCODER = 'umt5-xxl-encoder-Q4_K_M.gguf'
+const VAE = VIDEO_VAE_FILENAME
+const ENCODER = VIDEO_ENCODER_FILENAME
 const CANCELLED = 'Video generation stopped.'
 let currentChild: ChildProcess | null = null
 let cancelRequested = false
 let activeJob = false
+let remoteAbort: AbortController | null = null
 
 export const generatedVideosDir = (): string => path.join(dataDir(), VIDEO_DIR)
 
@@ -37,23 +46,28 @@ function availablePacks(): Array<{ name: string; pack: VideoModelPack }> {
   try {
     const entries = fs.readdirSync(directory)
     if (!entries.includes(VAE) || !entries.includes(ENCODER)) return []
-    return entries.filter((name) => WEIGHT.test(name)).flatMap((name) => {
-      const weight = resolveExistingOwnedEntry(directory, name)
-      const vae = resolveExistingOwnedEntry(directory, VAE)
-      const encoder = resolveExistingOwnedEntry(directory, ENCODER)
-      return weight && vae && encoder ? [{ name, pack: { weight, vae, encoder } }] : []
-    })
+    return entries
+      .filter((name) => isSupportedVideoWeight(name))
+      .flatMap((name) => {
+        const weight = resolveExistingOwnedEntry(directory, name)
+        const vae = resolveExistingOwnedEntry(directory, VAE)
+        const encoder = resolveExistingOwnedEntry(directory, ENCODER)
+        return weight && vae && encoder ? [{ name, pack: { weight, vae, encoder } }] : []
+      })
   } catch {
     return []
   }
 }
 
-export function videoGenStatus(): {
+export function videoGenStatus(options: { localOnly?: boolean } = {}): {
   available: boolean
   models: string[]
   active: string | null
   reason?: string
 } {
+  const remote = !options.localOnly && getActiveRemoteVisionServerForModality('video')
+  if (remote)
+    return { available: true, models: [remote.selectedModel], active: remote.selectedModel }
   const packs = availablePacks()
   const chosen = getActiveModal('video')
   const active = packs.find((p) => p.name === chosen)?.name ?? packs[0]?.name ?? null
@@ -63,32 +77,26 @@ export function videoGenStatus(): {
   return { available: true, models: packs.map((p) => p.name), active }
 }
 
-function resolvedRequest(request: VideoGenerationRequestContract): Required<Omit<VideoGenerationRequestContract, 'model' | 'enhancePrompt'>> {
+function resolvedRequest(
+  request: VideoGenerationRequestContract
+): Required<Omit<VideoGenerationRequestContract, 'model' | 'enhancePrompt'>> {
   const chosen = request.model ?? videoGenStatus().active ?? ''
-  const saved = getSetting<Record<string, Partial<VideoGenerationRequestContract>>>('videoParams', {})[chosen] ?? {}
-  const width = request.width ?? saved.width ?? 320
-  const height = request.height ?? saved.height ?? 192
-  const frames = request.frames ?? saved.frames ?? 17
-  const fps = request.fps ?? saved.fps ?? 8
-  const steps = request.steps ?? saved.steps ?? 20
-  const guidance = request.guidance ?? saved.guidance ?? 6
-  const savedSeed = Number.parseInt(getSetting('videoSeed', ''), 10)
-  const requestedSeed = request.seed ?? savedSeed
-  const seed = !Number.isFinite(requestedSeed) || requestedSeed < 0 ? Math.floor(Math.random() * 2147483647) : requestedSeed
-  if (!request.prompt.trim()) throw new Error('Enter a video prompt.')
-  if (![width, height, frames, fps, steps, guidance, seed].every(Number.isFinite)) throw new Error('Video settings must be numbers.')
-  if (![width, height, frames, fps, steps, seed].every(Number.isInteger)) throw new Error('Video size, frame count, FPS, steps and seed must be whole numbers.')
-  if (width < 256 || width > 832 || height < 192 || height > 480 || width % 16 || height % 16) throw new Error('Video size must use multiples of 16 from 256 × 192 through 832 × 480.')
-  if (frames < 9 || frames > 81 || (frames - 1) % 4 !== 0) throw new Error('Frame count must be 4n + 1, from 9 through 81.')
-  if (fps < 4 || fps > 24 || steps < 4 || steps > 50 || guidance < 0 || guidance > 20 || seed < 0) throw new Error('Video settings are outside the supported range.')
-  return {
-    prompt: request.prompt.trim(),
-    negativePrompt: request.negativePrompt ?? getSetting('videoNegative', ''),
-    width, height, frames, fps, steps, guidance, seed
-  }
+  const saved =
+    getSetting<Record<string, Partial<VideoGenerationRequestContract>>>('videoParams', {})[
+      chosen
+    ] ?? {}
+  const savedSeed = Number(getSetting<number | string>('videoSeed', -1))
+  return resolveVideoRequest(request, {
+    ...saved,
+    seed: Number.isFinite(savedSeed) ? savedSeed : -1,
+    negativePrompt: getSetting('videoNegative', '')
+  })
 }
 
-async function enhanceVideoPrompt(prompt: string, onUpdate?: (update: VideoGenerationUpdateContract) => void): Promise<string> {
+async function enhanceVideoPrompt(
+  prompt: string,
+  onUpdate?: (update: VideoGenerationUpdateContract) => void
+): Promise<string> {
   let streaming = ''
   try {
     const instruction = `Rewrite the request as one short, concrete video prompt. Keep the subject and action. Add camera movement, lighting and motion only when helpful. Return only the prompt, on one line.\n\nRequest:\n${prompt.slice(0, 2000)}`
@@ -107,7 +115,11 @@ async function enhanceVideoPrompt(prompt: string, onUpdate?: (update: VideoGener
   }
 }
 
-function runProcess(binary: string, args: string[], onText?: (text: string) => void): Promise<void> {
+function runProcess(
+  binary: string,
+  args: string[],
+  onText?: (text: string) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
       cwd: path.dirname(binary),
@@ -139,19 +151,25 @@ function runProcess(binary: string, args: string[], onText?: (text: string) => v
 export function cancelVideoGen(): boolean {
   if (!activeJob) return false
   cancelRequested = true
+  remoteAbort?.abort()
   currentChild?.kill('SIGTERM')
   return true
 }
 
 export async function generateVideo(
   input: VideoGenerationRequestContract,
-  onUpdate?: (update: VideoGenerationUpdateContract) => void
+  onUpdate?: (update: VideoGenerationUpdateContract) => void,
+  options: { localOnly?: boolean } = {}
 ): Promise<VideoGenerationOutputContract> {
-  const status = videoGenStatus()
+  if (activeJob) throw new Error('A video is already generating.')
+  const status = videoGenStatus(options)
   if (!status.available) throw new Error(status.reason ?? 'Video generation is unavailable.')
+  const remote = !options.localOnly && getActiveRemoteVisionServerForModality('video')
   const selected = input.model ?? status.active
+  if (remote && input.model && input.model !== remote.selectedModel)
+    throw new Error('Select the requested video model before generating.')
   const pack = availablePacks().find((item) => item.name === selected)
-  if (!pack) throw new Error('Select a complete video model pack.')
+  if (!pack && !remote) throw new Error('Select a complete video model pack.')
   let request = resolvedRequest(input)
   cancelRequested = false
   activeJob = true
@@ -175,35 +193,56 @@ export async function generateVideo(
   const cli = findSdBinary('sd-cli')!
   const ffmpeg = ffmpegBin()!
   try {
-    await modalityQueue.run(VIDEO_JOB, async () => {
-      if (cancelRequested) throw new Error(CANCELLED)
-      let progressText = ''
-      let lastStep = 0
-      await runProcess(cli, videoArgs(pack.pack, request, raw), (chunk) => {
-        progressText = `${progressText}${chunk}`.slice(-256)
-        const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
-        if (match) {
-          const step = Number(match[1])
-          const total = Number(match[2])
-          if (step > lastStep && step <= total && total <= request.steps) {
-            lastStep = step
-            onUpdate?.({ stage: 'generating', progress: { step, total } })
+    if (remote) {
+      remoteAbort = new AbortController()
+      if (cancelRequested) remoteAbort.abort()
+      await generateRemoteVideo(remote, request, output, remoteAbort.signal, (progress) =>
+        onUpdate?.({ stage: 'generating', progress })
+      )
+    } else
+      await modalityQueue.run(VIDEO_JOB, async () => {
+        if (cancelRequested) throw new Error(CANCELLED)
+        let progressText = ''
+        let lastStep = 0
+        await runProcess(cli, videoArgs(pack!.pack, request, raw), (chunk) => {
+          progressText = `${progressText}${chunk}`.slice(-256)
+          const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
+          if (match) {
+            const step = Number(match[1])
+            const total = Number(match[2])
+            if (step > lastStep && step <= total && total <= request.steps) {
+              lastStep = step
+              onUpdate?.({ stage: 'generating', progress: { step, total } })
+            }
           }
-        }
+        })
+        if (!fs.existsSync(raw) || fs.statSync(raw).size === 0)
+          throw new Error('Video engine produced no clip.')
+        onUpdate?.({ stage: 'encoding' })
+        await runProcess(ffmpeg, [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-y',
+          '-i',
+          raw,
+          '-an',
+          '-c:v',
+          'libx264',
+          '-pix_fmt',
+          'yuv420p',
+          '-movflags',
+          '+faststart',
+          output
+        ])
+        if (!fs.existsSync(output) || fs.statSync(output).size === 0)
+          throw new Error('Video encoder produced no MP4 file.')
       })
-      if (!fs.existsSync(raw) || fs.statSync(raw).size === 0) throw new Error('Video engine produced no clip.')
-      onUpdate?.({ stage: 'encoding' })
-      await runProcess(ffmpeg, [
-        '-hide_banner', '-loglevel', 'error', '-y', '-i', raw,
-        '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output
-      ])
-      if (!fs.existsSync(output) || fs.statSync(output).size === 0) throw new Error('Video encoder produced no MP4 file.')
-    })
     return {
       path: output,
       prompt: request.prompt,
       negativePrompt: request.negativePrompt,
-      model: pack.name,
+      model: remote ? remote.selectedModel : pack!.name,
       width: request.width,
       height: request.height,
       frames: request.frames,
@@ -217,14 +256,24 @@ export async function generateVideo(
     fs.rmSync(output, { force: true })
     throw error
   } finally {
+    remoteAbort = null
     fs.rmSync(raw, { force: true })
     cancelRequested = false
     activeJob = false
   }
 }
 
-export function listGeneratedVideos(scope?: { conversationId?: string; projectId?: string | null }): Array<{
-  path: string; name: string; mtime: number; syncId?: string; conversationId?: string; projectId?: string | null; durationSeconds?: number
+export function listGeneratedVideos(scope?: {
+  conversationId?: string
+  projectId?: string | null
+}): Array<{
+  path: string
+  name: string
+  mtime: number
+  syncId?: string
+  conversationId?: string
+  projectId?: string | null
+  durationSeconds?: number
 }> {
   const root = generatedVideosDir()
   try {
@@ -247,6 +296,15 @@ export function deleteGeneratedVideo(candidate: string): boolean {
   try {
     let shared: ReturnType<typeof describeOwnGeneratedVideo> = null
     try { shared = describeOwnGeneratedVideo(owned) } catch { /* An older local clip can lack sync metadata. */ }
+    const messages = getDB().prepare("SELECT uuid, conversation_id, content, context FROM rag_messages WHERE context LIKE '%videoRef%'").all() as Array<{ uuid: string; conversation_id: string; content: string; context: string }>
+    for (const message of messages) {
+      let context: Record<string, unknown>
+      try { context = JSON.parse(message.context) as Record<string, unknown> } catch { continue }
+      const reference = readGeneratedVideoReference(context)
+      if (!reference || (reference.path !== owned && !(shared?.syncId && reference.id === shared.syncId))) continue
+      delete context.videoRef
+      updateRagMessage(message.conversation_id, message.uuid, message.content, context)
+    }
     fs.rmSync(owned)
     fs.rmSync(generatedVideoSidecarPath(owned), { force: true })
     if (shared) emitSharedFileMutation({ kind: 'delete', file: shared })

@@ -69,6 +69,8 @@ export const HOOKS = {
    * Pro owns transfer and consent; free builds leave this inert.
    */
   syncSharedFileMutation: 'sync.sharedFileMutation',
+  /** () => RecordProvenance | undefined — origin of media produced by this host. */
+  syncLocalProvenance: 'sync.localProvenance',
   /**
    * (snapshot: { conversationId, content, reasoning } | null) => void - the reply this device is
    * generating, or null when it is generating nothing. Pro streams it live to paired devices; free

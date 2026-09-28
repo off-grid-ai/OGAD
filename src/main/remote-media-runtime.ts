@@ -62,12 +62,22 @@ async function providerFailure(response: Response): Promise<never> {
   let message = body.trim()
   let code = ''
   try {
-    const parsed = JSON.parse(body) as { error?: { message?: string; code?: string } | string; message?: string; code?: string }
-    message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message ?? ''
-    code = parsed.error && typeof parsed.error === 'object'
-      ? parsed.error.code ?? parsed.code ?? ''
-      : parsed.code ?? ''
-  } catch { /* A plain-text server error is still useful. */ }
+    const parsed = JSON.parse(body) as {
+      error?: { message?: string; code?: string } | string
+      message?: string
+      code?: string
+    }
+    message =
+      typeof parsed.error === 'string'
+        ? parsed.error
+        : (parsed.error?.message ?? parsed.message ?? '')
+    code =
+      parsed.error && typeof parsed.error === 'object'
+        ? (parsed.error.code ?? parsed.code ?? '')
+        : (parsed.code ?? '')
+  } catch {
+    /* A plain-text server error is still useful. */
+  }
   message = (message || `Server returned HTTP ${response.status}.`).slice(0, 500)
   if (code === IMAGE_MEMORY_GUARD_ERROR_CODE || message.includes(IMAGE_MEMORY_GUARD_ERROR_CODE)) {
     throw new Error(imageMemoryGuardErrorMessage(message.replace(`${IMAGE_MEMORY_GUARD_ERROR_CODE}:`, '').trim()))
@@ -94,18 +104,20 @@ export async function generateRemoteImage(
   allowUnsafeMemoryOverride: boolean,
   signal?: AbortSignal
 ): Promise<{ bytes: Buffer; mime: string }> {
-  const response = await checked(await fetch(`${server.endpoint}/images/generations`, {
-    method: 'POST',
-    headers: headers(server, 'application/json'),
-    signal,
-    body: JSON.stringify({
-      model: server.selectedModel,
-      prompt,
-      ...(width && height ? { size: `${width}x${height}` } : {}),
-      allow_unsafe_memory_override: allowUnsafeMemoryOverride
+  const response = await checked(
+    await fetch(`${server.endpoint}/images/generations`, {
+      method: 'POST',
+      headers: headers(server, 'application/json'),
+      signal,
+      body: JSON.stringify({
+        model: server.selectedModel,
+        prompt,
+        ...(width && height ? { size: `${width}x${height}` } : {}),
+        allow_unsafe_memory_override: allowUnsafeMemoryOverride
+      })
     })
-  }))
-  const body = await response.json() as {
+  )
+  const body = (await response.json()) as {
     data?: Array<{ b64_json?: string; url?: string }>
   }
   const value = body.data?.[0]?.url ?? (body.data?.[0]?.b64_json ? `data:image/png;base64,${body.data[0].b64_json}` : undefined)
@@ -122,17 +134,23 @@ export async function generateRemoteImage(
   return { bytes, mime }
 }
 
-export async function synthesizeRemoteVoice(server: RemoteServer, text: string, voice?: string): Promise<{ dataUrl: string }> {
-  const response = await checked(await fetch(`${server.endpoint}/audio/speech`, {
-    method: 'POST',
-    headers: headers(server, 'application/json'),
-    body: JSON.stringify({
-      model: server.selectedModel,
-      input: text,
-      ...(voice ? { voice } : {}),
-      ...(server.provider === 'openrouter' ? { response_format: 'mp3' } : {})
+export async function synthesizeRemoteVoice(
+  server: RemoteServer,
+  text: string,
+  voice?: string
+): Promise<{ dataUrl: string }> {
+  const response = await checked(
+    await fetch(`${server.endpoint}/audio/speech`, {
+      method: 'POST',
+      headers: headers(server, 'application/json'),
+      body: JSON.stringify({
+        model: server.selectedModel,
+        input: text,
+        ...(voice ? { voice } : {}),
+        ...(server.provider === 'openrouter' ? { response_format: 'mp3' } : {})
+      })
     })
-  }))
+  )
   const mime = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg'
   return { dataUrl: `data:${mime};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}` }
 }
@@ -157,4 +175,89 @@ export async function transcribeRemoteAudio(
   const result = await response.json() as { text?: string; language?: string }
   if (typeof result.text !== 'string' || !result.text.trim()) throw new Error('The remote server returned no transcript.')
   return { text: result.text.trim(), language: result.language }
+}
+
+/** OGAD owns the asynchronous job. Always fetch bytes from its authenticated
+ * content endpoint; never forward credentials to a URL from a response. */
+export async function generateRemoteVideo(
+  server: RemoteServer,
+  request: import('@offgrid/models').ResolvedVideoRequest,
+  output: string,
+  signal: AbortSignal,
+  onProgress?: (progress: { step: number; total: number }) => void
+): Promise<void> {
+  if (server.provider !== 'ogad')
+    throw new Error('Remote video generation requires an OGAD server.')
+  const { randomUUID } = await import('node:crypto')
+  const { Readable, Transform } = await import('node:stream')
+  const { pipeline } = await import('node:stream/promises')
+  const { setTimeout: delay } = await import('node:timers/promises')
+  const id = randomUUID()
+  const endpoint = `${server.endpoint}/videos/${id}`
+  const cancel = (): void => {
+    void fetch(`${endpoint}/cancel`, {
+      method: 'POST',
+      headers: headers(server),
+      signal: AbortSignal.timeout(10_000)
+    }).catch(() => {})
+  }
+  signal.addEventListener('abort', cancel, { once: true })
+  try {
+    signal.throwIfAborted()
+    await checked(
+      await fetch(`${server.endpoint}/videos`, {
+        method: 'POST',
+        headers: headers(server, 'application/json'),
+        signal,
+        body: JSON.stringify({
+          ...request,
+          model: server.selectedModel,
+          enhancePrompt: false,
+          client_job_id: id
+        })
+      })
+    )
+    for (;;) {
+      signal.throwIfAborted()
+      const response = await checked(await fetch(endpoint, { headers: headers(server), signal }))
+      const job = (await response.json()) as {
+        status: string
+        error?: { message?: string }
+        progress?: { step: number; total: number }
+      }
+      if (job.progress && Number.isFinite(job.progress.step) && Number.isFinite(job.progress.total))
+        onProgress?.(job.progress)
+      if (job.status === 'failed' || job.status === 'cancelled')
+        throw new Error(job.error?.message || 'Remote video generation failed.')
+      if (job.status === 'completed') break
+      await delay(1000, undefined, { signal })
+    }
+    const response = await checked(
+      await fetch(`${endpoint}/content`, { headers: headers(server), signal })
+    )
+    if (!response.body) throw new Error('The OGAD server returned no video.')
+    let bytes = 0
+    const limit = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        bytes += chunk.length
+        callback(
+          bytes > 512 * 1024 * 1024 ? new Error('The video exceeds the download limit.') : null,
+          chunk
+        )
+      }
+    })
+    await pipeline(
+      Readable.fromWeb(response.body as import('node:stream/web').ReadableStream),
+      limit,
+      fs.createWriteStream(output, { flags: 'wx' }),
+      { signal }
+    )
+    if (!bytes) throw new Error('The OGAD server returned an empty video.')
+  } catch (error) {
+    cancel()
+    await fs.promises.rm(output, { force: true })
+    throw error
+  } finally {
+    signal.removeEventListener('abort', cancel)
+  }
 }

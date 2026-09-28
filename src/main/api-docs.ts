@@ -21,6 +21,10 @@ EMBEDDINGS            POST ${b}/v1/embeddings          {input}  (local all-MiniL
 SPEECH -> TEXT (STT)  POST ${b}/v1/audio/transcriptions  multipart: file
 TEXT -> SPEECH (TTS)  POST ${b}/v1/audio/speech        {input, voice?}  -> audio/wav
   voices              GET  ${b}/v1/audio/voices
+TEXT -> VIDEO         POST ${b}/v1/videos             {prompt, model?, width?, height?, frames?, fps?, steps?, seed?, client_job_id?} -> 202 job
+  status              GET ${b}/v1/videos/:id
+  download            GET ${b}/v1/videos/:id/content -> video/mp4
+  stop                POST ${b}/v1/videos/:id/cancel
 TEXT -> IMAGE         POST ${b}/v1/images              {prompt, aspect_ratio?, resolution?, seed?}
 IMAGE -> IMAGE        POST ${b}/v1/images              {prompt, input_references:[{image_url:{url}}]}
   (OpenAI aliases)    POST ${b}/v1/images/generations  |  POST ${b}/v1/images/edits (multipart)
@@ -429,7 +433,11 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     cfg_scale: { type: 'number' },
                     negative_prompt: { type: 'string' },
                     model: { type: 'string', ...imgEnum },
-                    allow_unsafe_memory_override: { type: 'boolean', description: 'Run a remote image request after confirming its memory-limit warning.' },
+                    allow_unsafe_memory_override: {
+                      type: 'boolean',
+                      description:
+                        'Run a remote image request after confirming its memory-limit warning.'
+                    },
                     response_format: {
                       type: 'string',
                       enum: ['b64_json', 'url'],
@@ -468,6 +476,81 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
             '501': errorResponse,
             default: errorResponse
           }
+        }
+      },
+      '/v1/videos': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Generate a silent video with the selected local model pack',
+          description:
+            'Returns an asynchronous job. Reuse client_job_id with the same body to recover a lost response without generating another clip.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['prompt'],
+                  properties: {
+                    prompt: { type: 'string' },
+                    model: { type: 'string' },
+                    negativePrompt: { type: 'string' },
+                    client_job_id: { type: 'string', minLength: 16, maxLength: 100 },
+                    width: { type: 'integer', minimum: 256, maximum: 832, multipleOf: 16 },
+                    height: { type: 'integer', minimum: 192, maximum: 480, multipleOf: 16 },
+                    frames: {
+                      type: 'integer',
+                      minimum: 9,
+                      maximum: 81,
+                      description: '4n + 1 frames'
+                    },
+                    fps: { type: 'integer', minimum: 4, maximum: 24 },
+                    steps: { type: 'integer', minimum: 4, maximum: 50 },
+                    guidance: { type: 'number', minimum: 0, maximum: 20 },
+                    seed: { type: 'integer', minimum: -1, maximum: 2147483647 },
+                    enhancePrompt: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '202': { description: 'Accepted job with request_id and poll_url' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Video job status, progress and result',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': { description: 'Job state. Completed jobs include metadata and a content URL.' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}/content': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Download the completed MP4',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': {
+              description: 'Video file',
+              content: { 'video/mp4': { schema: { type: 'string', format: 'binary' } } }
+            },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}/cancel': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Stop this video job',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Stop requested' }, default: errorResponse }
         }
       },
       '/v1/images/generations': {

@@ -53,7 +53,7 @@ export class ActiveModalityStore {
 
 const activeModalStore = new ActiveModalityStore()
 
-export type RemoteModelModality = 'text' | 'image' | 'voice' | 'transcription'
+export type RemoteModelModality = 'text' | 'image' | 'video' | 'voice' | 'transcription'
 
 function remoteSelectionKey(modality: RemoteModelModality): `remote_${RemoteModelModality}` {
   return `remote_${modality}`

@@ -12,6 +12,7 @@ import { writeGeneratedVideoSidecar } from './gallery-sidecar'
 import { noteGeneratedVideoMessage, shareGeneratedVideo } from './generated-video-share'
 
 export type VideoJobRequest = VideoGenerationRequestContract & {
+  localOnly?: boolean
   conversationId?: string
   messageId?: string
   projectId?: string | null
@@ -65,7 +66,9 @@ export class VideoGenerationJobService {
     this.messageId = request.messageId ?? null
     const id = randomUUID()
     this.snapshot = {
-      ...idle(), id, phase: 'running',
+      ...idle(),
+      id,
+      phase: 'running',
       conversationId: request.conversationId ?? null,
       projectId: request.projectId ?? null,
       stage: 'preparing',
@@ -73,7 +76,9 @@ export class VideoGenerationJobService {
     }
     this.publish()
     try {
-      const output = await generateVideo(request, (update) => this.update(id, update))
+      const output = await generateVideo(request, (update) => this.update(id, update), {
+        localOnly: request.localOnly
+      })
       const durationMs = Date.now() - (this.snapshot.startedAt ?? Date.now())
       writeGeneratedVideoSidecar(output.path, {
         syncId: id,
