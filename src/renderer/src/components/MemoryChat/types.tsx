@@ -40,6 +40,8 @@ export type RagContext = {
   >
   image?: string
   imageMetadata?: ImageGenerationMetadata
+  videoRef?: { id?: string; path: string }
+  videoMetadata?: { width: number; height: number; durationSeconds: number; fps: number; frames: number; model?: string }
   sources?: { name: string; position: number; score: number }[]
   attachments?: { name: string; kind: string; text?: string; path?: string }[]
   taskGuidance?: {
@@ -79,6 +81,8 @@ export type ChatMessage = {
   context?: RagContext
   image?: string
   imagePath?: string
+  videoPath?: string
+  videoMetadata?: { width: number; height: number; durationSeconds: number; fps: number; frames: number; model?: string }
   imageMetadata?: ImageGenerationMetadata
   toolCalls?: ProjectedSyncedTool[]
   /** Tool schemas sent to the model for this reply, including tools it did not call. */
@@ -114,7 +118,7 @@ export type ChatMessage = {
   audioDuration?: number
 }
 
-export type ChatMode = 'ask' | 'image'
+export type ChatMode = 'ask' | 'image' | 'video'
 
 export type ImageProgress = {
   step: number
