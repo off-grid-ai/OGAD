@@ -1,3 +1,4 @@
+import { createVideoBoundary } from './video-boundary'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
@@ -20,6 +21,7 @@ export type ThinkSplitterFactory = (
   emit: (event: { text: string; kind: 'content' | 'reasoning' }) => void
 ) => ThinkSplitter
 type RagResult = RagChatResultContract & {
+  videoRequests?: Array<{ prompt: string; enhancePrompt?: boolean }>
   imageRequests?: Array<{ prompt: string; enhancePrompt?: boolean }>
   unified?: unknown[]
   toolCalls?: Array<{
@@ -192,6 +194,7 @@ export class ChatBoundary {
     },
     vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => { }),
+    ...createVideoBoundary(),
     onImageGenJobState: vi.fn(() => () => { }),
     onImageGenConversationUpdated: vi.fn(() => () => { }),
     imageGenJobStatus: vi.fn(async () => ({ id: null, phase: 'idle' as const, conversationId: null, projectId: null, stage: null, enhancedPrompt: '', progress: null, outputPath: null, error: null, startedAt: null, finishedAt: null })),
