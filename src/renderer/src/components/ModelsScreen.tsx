@@ -419,7 +419,7 @@ export function ModelsScreen({
       !detail ||
       detail.id === KEV_4B_ID ||
       detail.id.startsWith('local:') ||
-      !['text', 'vision', 'computer_use'].includes(detail.kind)
+      !['text', 'vision', 'computer_use', 'video'].includes(detail.kind)
     ) {
       setDetailFilesLoading(false)
       return
@@ -544,7 +544,7 @@ export function ModelsScreen({
     setVariants([])
     try {
       const files = await api.getModelFiles?.(model.id)
-      if (!files?.length) throw new Error('No GGUF files found in this repository.')
+      if (!files?.length) throw new Error('No compatible model files found in this repository.')
       setVariants(files)
     } catch (error) {
       setVariantError(error instanceof Error ? error.message : 'Could not load model files.')
@@ -926,7 +926,7 @@ export function ModelsScreen({
             </>
           ) : (
             <button
-              onClick={() => isHf && m.kind !== 'video' ? void chooseVariant(m) : download(m.id)}
+              onClick={() => (isHf && m.kind !== 'video' ? void chooseVariant(m) : download(m.id))}
               className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
             >
               <IconDownload className="h-3 w-3" /> Download
@@ -1382,7 +1382,10 @@ export function ModelsScreen({
                   {m.videoModes && m.videoModes.length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-1">
                       {m.videoModes.map((mode) => (
-                        <span key={mode} className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500">
+                        <span
+                          key={mode}
+                          className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500"
+                        >
                           Text to video
                         </span>
                       ))}
@@ -1441,7 +1444,7 @@ export function ModelsScreen({
                         )}
                         {!detailFilesLoading && !detailFilesError && detailFiles.length === 0 && (
                           <p className="text-xs text-neutral-500">
-                            No GGUF files found in this repository.
+                            No compatible model files found in this repository.
                           </p>
                         )}
                         <div className="space-y-2">
@@ -1566,9 +1569,17 @@ export function ModelsScreen({
                     }}
                     className="flex w-full flex-col gap-1 rounded border border-neutral-800 px-3 py-2 text-left transition-colors hover:border-green-500 hover:bg-green-500/5"
                   >
-                    <span className="break-all text-[11px] text-neutral-200">{variant.fileName}</span>
-                    <span className="text-[10px] text-neutral-400">{formatSize(variant.sizeBytes)}</span>
-                    {variant.mmproj && <span className="break-all text-[9px] text-neutral-500">Includes {variant.mmproj.fileName}</span>}
+                    <span className="break-all text-[11px] text-neutral-200">
+                      {variant.fileName}
+                    </span>
+                    <span className="text-[10px] text-neutral-400">
+                      {formatSize(variant.sizeBytes)}
+                    </span>
+                    {variant.mmproj && (
+                      <span className="break-all text-[9px] text-neutral-500">
+                        Includes {variant.mmproj.fileName}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
