@@ -1,3 +1,5 @@
+import { videoArchitecture } from '@offgrid/models'
+
 // Pure image-model filename classifier used by the model picker. No fs — the
 // caller lists the models dir and runs each entry through isImageModelFile.
 
@@ -5,7 +7,7 @@
 // image models (gemma/qwen LLMs, the Z-Image Qwen3 encoder + FLUX ae VAE,
 // whisper .bin, TTS .onnx, and standalone VAE/CLIP/T5 components).
 const EXCLUDE =
-  /qwen3-4b-instruct|gemma|^qwen(?![-_]?image)[^-]|mmproj|^ae\.|ggml-|kokoro|lessac|en_us|^clip[_-]?[lg]\b|[-_.](vae|clip|t5xxl|text_encoder|tokenizer)\b/i
+  /qwen3-4b-instruct|gemma|^qwen(?![-_]?image)[^-]|mmproj|^ae\.|ggml-|kokoro|lessac|en_us|^clip[_-]?[lg]\b|[-_.](vae|clip|t5xxl|text_encoder|tokenizer)(?![a-z0-9])/i
 
 // A .gguf counts as an image model only if the filename names a known diffusion
 // family — otherwise a stray gguf (an LLM missed by EXCLUDE) would show up.
@@ -14,7 +16,7 @@ const DIFFUSION_FAMILY =
 
 /** Whether a filename in the models dir is a pickable image model. */
 export function isImageModelFile(f: string): boolean {
-  if (/wan[._-]?2[._-]?1.*(?:t2v|text[._-]?to[._-]?video)/i.test(f)) return false
+  if (videoArchitecture(f)) return false
   if (EXCLUDE.test(f)) return false
   // Custom checkpoints (Civitai etc.) ship as a single .safetensors.
   if (/\.safetensors$/i.test(f)) return true
