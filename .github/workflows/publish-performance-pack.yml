@@ -16,10 +16,6 @@ on:
         description: 'Build and Release run with the installer artifact (empty uses the pinned source run)'
         type: string
         required: false
-      source_release:
-        description: 'Beta release tag to use when the source run no longer has retained artifacts'
-        type: string
-        required: false
 
 permissions:
   actions: read
@@ -37,7 +33,6 @@ jobs:
       PLATFORM: ${{ matrix.platform }}
       VERSION: ${{ inputs.version || '2026-09-29-v1' }}
       SOURCE_RUN_INPUT: ${{ inputs.source_run }}
-      SOURCE_RELEASE_INPUT: ${{ inputs.source_release }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -48,10 +43,6 @@ jobs:
       - name: Check input and source artifact
         run: |
           [[ "$VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]
-          if [ -n "$SOURCE_RELEASE_INPUT" ]; then
-            [[ "$SOURCE_RELEASE_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]
-            echo "source_release=$SOURCE_RELEASE_INPUT" >> "$GITHUB_ENV"
-          fi
           source_run="$SOURCE_RUN_INPUT"
           if [ -n "$source_run" ]; then
             [[ "$source_run" =~ ^[0-9]+$ ]]
@@ -67,32 +58,12 @@ jobs:
             echo 'source_name=off-grid-ai-windows' >> "$GITHUB_ENV"
           fi
       - name: Download existing build artifact
-        if: inputs.source_release == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p source
           gh run download "$source_run" --repo "$GITHUB_REPOSITORY" --name "$source_name" --dir source
           find source -maxdepth 3 -type f -printf '%p %s bytes\n'
-      - name: Download verified beta release package
-        if: inputs.source_release != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p source
-          if [ "$PLATFORM" = win32 ]; then
-            gh release download "$source_release" --repo "$GITHUB_REPOSITORY" \
-              --pattern '*-x64.nsis.7z' --pattern windows-packages.sha256 --dir source
-            package="$(find source -maxdepth 1 -name '*-x64.nsis.7z' -type f -print -quit)"
-            test -s "$package"
-            python3 scripts/verify-release-package-sha256.py source/windows-packages.sha256 "$package"
-          else
-            gh release download "$source_release" --repo "$GITHUB_REPOSITORY" \
-              --pattern '*_amd64.deb' --pattern linux-packages.sha256 --dir source
-            package="$(find source -maxdepth 1 -name '*_amd64.deb' -type f -print -quit)"
-            test -s "$package"
-            python3 scripts/verify-release-package-sha256.py source/linux-packages.sha256 "$package"
-          fi
       - name: Extract CUDA directories
         run: |
           mkdir -p extracted
