@@ -1378,7 +1378,7 @@ export class LLMService {
       } catch {
         /* not up yet */
       }
-      await new Promise((r) => setTimeout(r, 500))
+      await new Promise((r) => setTimeout(r, 500)) // NOSONAR: wait between sequential startup probes.
     }
     throw new Error('Server started but no model was loaded within the timeout')
   }
@@ -1994,7 +1994,7 @@ export class LLMService {
       if (pending === null) {
         break // no in-flight init to race with — done
       }
-      await pending.catch(() => {}) // let the in-flight spawn finish, then loop to kill it
+      await pending.catch(() => {}) // NOSONAR: finish this spawn before checking for another process.
     }
     this.initialized = false
     // Safety net: reap any llama-server WE own still holding the port (a forked/stuck child).
