@@ -781,6 +781,12 @@ jobs:
           echo '11f57bddc8b7b4c5efa4b4c298b8a000aaf0f203567f6c18953a6aff7a4e4b54  '"$RUNNER_TEMP/linux-native.tar.gz" | sha256sum -c -
           mkdir -p build/linux-bin
           tar -xzf "$RUNNER_TEMP/linux-native.tar.gz" -C build/linux-bin
+          git lfs pull --include="resources/bin/kev-local-server.py" --exclude=""
+          if head -n 1 resources/bin/kev-local-server.py | grep -q '^version https://git-lfs.github.com/spec/'; then
+            echo 'Kev launcher is still an LFS pointer' >&2
+            exit 1
+          fi
+          install -Dm644 resources/bin/kev-local-server.py build/linux-bin/kev-local-server.py
           install -Dm755 build/linux-bin/executorch-speech \
             ../executorch-speech/native/bin/executorch-speech
       - name: Install dependencies
@@ -802,6 +808,7 @@ jobs:
       - name: Verify Linux package inputs
         run: |
           test -s dist/linux-unpacked/resources/performance-packs.json
+          cmp resources/bin/kev-local-server.py dist/linux-unpacked/resources/bin/kev-local-server.py
           for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper-cuda kev-runtime; do
             test ! -e "dist/linux-unpacked/resources/bin/$folder"
           done
