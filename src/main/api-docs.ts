@@ -21,7 +21,7 @@ EMBEDDINGS            POST ${b}/v1/embeddings          {input}  (local all-MiniL
 SPEECH -> TEXT (STT)  POST ${b}/v1/audio/transcriptions  multipart: file
 TEXT -> SPEECH (TTS)  POST ${b}/v1/audio/speech        {input, voice?}  -> audio/wav
   voices              GET  ${b}/v1/audio/voices
-TEXT -> VIDEO         POST ${b}/v1/videos             {prompt, model?, width?, height?, frames?, fps?, steps?, seed?, client_job_id?} -> 202 job
+TEXT -> VIDEO         POST ${b}/v1/videos             {prompt, model?, width?, height?, frames?, fps?, steps?, seed?, client_job_id?, use_remote?} -> 202 job
   status              GET ${b}/v1/videos/:id
   download            GET ${b}/v1/videos/:id/content -> video/mp4
   stop                POST ${b}/v1/videos/:id/cancel
@@ -496,6 +496,7 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     model: { type: 'string' },
                     negativePrompt: { type: 'string' },
                     client_job_id: { type: 'string', minLength: 16, maxLength: 100 },
+                    use_remote: { type: 'boolean', default: false, description: 'Use the active OpenRouter video model. Default is local generation. Stop ends local polling; OpenRouter may continue generation and charge for it.' },
                     width: {
                       type: 'integer',
                       minimum: 256,

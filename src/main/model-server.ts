@@ -1058,11 +1058,14 @@ async function executeImage(
 /** Shared REST/MCP job admission. Runtime and durable API state have one owner. */
 export function startGatewayVideoJob(
   input: VideoGenerationRequestContract,
-  rid: string = randomUUID()
+  rid: string = randomUUID(),
+  options: { useRemote?: boolean } = {}
 ): ApiRequest {
+  if (options.useRemote && getActiveRemoteVisionServerForModality('video')?.provider !== 'openrouter')
+    throw new Error('Select an OpenRouter video model before using remote generation.')
   resolveVideoRequest(input)
   loadVideoRequests()
-  const fingerprint = JSON.stringify(input)
+  const fingerprint = JSON.stringify(options.useRemote ? { ...input, use_remote: true } : input)
   const existing = requests.get(rid)
   if (existing) {
     if (existing.kind !== 'video' || existing.videoInput !== fingerprint)
@@ -1086,7 +1089,7 @@ export function startGatewayVideoJob(
   void settle(
     request,
     videoGenerationJobs
-      .start({ ...input, localOnly: true })
+      .start({ ...input, localOnly: !options.useRemote })
       .then((output) => {
         request.videoPath = output.path
         const { path: _path, ...metadata } = output
@@ -1146,7 +1149,9 @@ async function handleVideoGeneration(
         throw new Error('Invalid video client job id.')
       rid = body.client_job_id
     }
-    dispatchAsync(res, startGatewayVideoJob(input, rid))
+    if (body.use_remote !== undefined && typeof body.use_remote !== 'boolean')
+      throw new Error('use_remote must be a boolean.')
+    dispatchAsync(res, startGatewayVideoJob(input, rid, { useRemote: body.use_remote === true }))
   } catch (error) {
     json(res, 400, errBody(error instanceof Error ? error.message : 'Video request failed.'))
   }
