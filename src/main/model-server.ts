@@ -1649,10 +1649,13 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
             )
           }
           if (url === '/v1/models/pull' && method === 'POST') {
-            const { id } = await readJson(req)
+            const { id, fileName } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
+            if (fileName !== undefined && (typeof fileName !== 'string' || !fileName.trim()))
+              return json(res, 400, { error: 'fileName must be a non-empty string' })
+            // The model manager resolves the selected weights and their companion files.
             // Kick off async; clients poll /v1/models/pull/status?id=.
-            void mm.downloadModel(String(id))
+            void mm.downloadModel(String(id), undefined, fileName)
             return json(res, 202, {
               status: 'started',
               id,
