@@ -7,6 +7,7 @@ export interface NativeProcessOptions {
   timeout: number
   maxBuffer?: number
   signal?: AbortSignal
+  env?: NodeJS.ProcessEnv
 }
 
 export function runNativeTranscriptionProcess(
@@ -19,7 +20,8 @@ export function runNativeTranscriptionProcess(
       encoding: 'utf8',
       timeout: options.timeout,
       ...(options.maxBuffer !== undefined ? { maxBuffer: options.maxBuffer } : {}),
-      ...(options.signal ? { signal: options.signal } : {})
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.env ? { env: options.env } : {})
     }
     const backendState = options.runtimeModel ? beginRuntimeBackend('transcription', options.runtimeModel) : undefined
     const child = execFile(file, [...args], execOptions, (error, stdout, stderr) => {

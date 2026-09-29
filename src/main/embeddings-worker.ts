@@ -13,13 +13,14 @@
  */
 import { parentPort, workerData } from 'worker_threads'
 import { embedText, embeddingDevice } from './embeddings-core'
+import type { BackendPreference } from '../shared/backend-preferences'
 
 if (!parentPort) throw new Error('embeddings-worker must be started as a worker thread')
 const port = parentPort
 
 // modelsDir() reads Electron's app paths, which do not exist in a worker thread — the host
 // resolves the directory and passes it in.
-const { modelsDir } = workerData as { modelsDir: string }
+const { modelsDir, backendPreference = 'auto' } = workerData as { modelsDir: string; backendPreference?: BackendPreference }
 
 export interface EmbeddingRequest {
   id: number
@@ -39,7 +40,7 @@ port.on('message', (request: EmbeddingRequest) => {
     try {
       const vector = await embedText(request.text, modelsDir, (device, fallbackReason) => {
         port.postMessage({ id: request.id, ready: true, device, fallbackReason } satisfies EmbeddingResponse)
-      })
+      }, backendPreference)
       port.postMessage({ id: request.id, vector, device: embeddingDevice() ?? undefined } as EmbeddingResponse)
     } catch (error) {
       port.postMessage({

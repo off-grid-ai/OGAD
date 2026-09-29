@@ -8,6 +8,7 @@ import {
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
 import { resolveModelName } from '@renderer/lib/model-summary'
 import { SettingsSelect } from './SettingsSelect'
+import { BackendPreferencesSection } from './ProcessingControls'
 
 type ImageSettings = {
   imageParams?: ImageParamStore
@@ -97,9 +98,12 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   if (!model) {
     return (
-      <div className="border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-500">
-        Download and activate an image model to configure image generation.
-      </div>
+      <>
+        <BackendPreferencesSection modalities={['image']} />
+        <div className="border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-500">
+          Download and activate an image model to configure image generation.
+        </div>
+      </>
     )
   }
 
@@ -117,6 +121,8 @@ export function ImageSettingsTab(): React.JSX.Element {
           options={models}
         />
       </div>
+
+      <BackendPreferencesSection modalities={['image']} />
 
       <div className="grid grid-cols-2 gap-3">
         <div>

@@ -7,6 +7,7 @@ import type { RemoteTextModelConnection } from '../llm/remote-chat'
 import { buildLaunchArgs } from '../llm/settings-math'
 import { engineSpawnEnv } from '../llm/spawn-env'
 import { selectLocalEngine } from '../llm/select-local-engine'
+import { getBackendPreference } from '../backend-preferences'
 import { isPortFree, pickFreePort } from '../free-port'
 import { reapOrphanProcessesOnPort } from '../kill-orphan-port'
 import { resolveComputerUseModelArtifact } from '../models-manager'
@@ -57,7 +58,7 @@ export class GrounderRuntime {
     )
     const port = await pickFreePort(GROUNDER_PORT, isPortFree, 20)
     if (port === null) throw new Error('No private port is available for the grounding runtime.')
-    const serverPath = await selectLocalEngine()
+    const serverPath = await selectLocalEngine(getBackendPreference('grounding'))
     if (!serverPath) throw new Error('The bundled grounding engine is missing.')
 
     this.port = port
@@ -74,7 +75,7 @@ export class GrounderRuntime {
         mmProjPath: artifact.projectorPath ?? '',
         port,
         effectiveCtxSize: 16_384,
-        gpuLayers: 99,
+        gpuLayers: getBackendPreference('grounding') === 'cpu' ? 0 : 99,
         flashAttn: true,
         kvCacheType: 'q8_0',
         speculativeDecoding: 'off',

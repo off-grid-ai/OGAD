@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { binRoots, exe } from '../runtime-env'
 import { nativeLibraryEnv } from '../native-library-env'
+import { prioritizeBackend, type BackendPreference } from '../../shared/backend-preferences'
 
 /** The backend selected by the native image binary that completed the run. */
 export function imageBackendForRuntime(
@@ -26,7 +27,7 @@ export function hasWindowsVulkanLoader(
  * is installed, then uses the separately packaged CPU build. Linux and macOS keep
  * their existing `sd` runtime; the Linux Vulkan build contains CPU kernels too.
  */
-export function findSdBinaries(name: 'sd-cli' | 'sd-server'): string[] {
+export function findSdBinaries(name: 'sd-cli' | 'sd-server', preference: BackendPreference = 'auto'): string[] {
   let directories =
     process.platform === 'linux' && fs.existsSync('/dev/nvidia0')
       ? ['sd-cuda', 'sd', 'sd-cpu']
@@ -43,7 +44,10 @@ export function findSdBinaries(name: 'sd-cli' | 'sd-server'): string[] {
       if (fs.existsSync(candidate) && !matches.includes(candidate)) matches.push(candidate)
     }
   }
-  return matches
+  return prioritizeBackend(matches, preference, (binary) => {
+    const backend = imageBackendForRuntime(process.platform, binary)
+    return backend.toLowerCase() as BackendPreference
+  })
 }
 
 export function findSdBinary(name: 'sd-cli' | 'sd-server'): string | null {

@@ -1417,7 +1417,7 @@ export function MemoryChat({
     override?: string,
     opts?: {
       regen?: boolean
-      voiceClip?: { url: string; duration: number }
+      voiceClip?: { url: string; duration: number; path?: string }
       atts?: Attachment[]
       conversationId?: string
       imageRequest?: ImageGenerationRequestContract
@@ -1596,6 +1596,7 @@ export function MemoryChat({
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'user',
+        createdAt: Date.now(),
         content: trimmed,
         attachments: [
           ...atts.map((a) => ({ name: a.name, kind: a.kind, text: a.text, path: a.path })),
@@ -1603,6 +1604,9 @@ export function MemoryChat({
           // though nothing had been attached until the conversation was loaded again.
           ...(initAttachment
             ? [{ name: initAttachment.name, kind: initAttachment.kind, path: initAttachment.path }]
+            : []),
+          ...(opts?.voiceClip?.path
+            ? [{ name: opts.voiceClip.path.split(/[\\/]/).at(-1) || 'voice.webm', kind: 'audio' as const, path: opts.voiceClip.path }]
             : [])
         ],
         audioUrl: opts?.voiceClip?.url,
@@ -1629,7 +1633,14 @@ export function MemoryChat({
         }))
         // Appended, never folded into `atts`: those are what the MODEL is given, and the init image is
         // an input to the image runtime rather than text for the language model to read.
-        const persisted = initAttachment ? [...attMeta, initAttachment] : attMeta
+        const voiceAttachment = opts?.voiceClip?.path
+          ? { name: opts.voiceClip.path.split(/[\\/]/).at(-1) || 'voice.webm', kind: 'audio' as const, path: opts.voiceClip.path }
+          : undefined
+        const persisted = [
+          ...attMeta,
+          ...(initAttachment ? [initAttachment] : []),
+          ...(voiceAttachment ? [voiceAttachment] : [])
+        ]
         await window.api.addRagMessage(
           convId,
           'user',
@@ -2454,6 +2465,7 @@ export function MemoryChat({
     isPlaybackActive: voicePlaybackOwner !== null,
     transcribeAudio: (audio, extension, requestId) =>
       window.api.transcribeAudio(audio, extension, requestId),
+    saveRecording: (audio, extension) => window.api.saveVoiceRecording(audio, extension),
     cancelTranscription: (requestId) => window.api.cancelTranscription(requestId),
     getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
     onTranscript: (text, clip) => {

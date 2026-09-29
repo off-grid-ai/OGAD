@@ -29,6 +29,7 @@ vi.mock('../../llm/http-post', () => ({ postCompletionOnce: mocks.post }))
 vi.mock('../../llm/settings-math', () => ({ buildLaunchArgs: vi.fn(() => ['--serve']) }))
 vi.mock('../../llm/spawn-env', () => ({ engineSpawnEnv: vi.fn(() => ({ TEST_ENGINE: '1' })) }))
 vi.mock('../../runtime-env', () => ({ binRoots: () => ['/bundle'], exe: (name: string) => name }))
+vi.mock('../../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
 vi.mock('../../free-port', () => ({ isPortFree: vi.fn(), pickFreePort: mocks.pickPort }))
 vi.mock('../../kill-orphan-port', () => ({ reapOrphanProcessesOnPort: mocks.reap }))
 vi.mock('../../models-manager', () => ({

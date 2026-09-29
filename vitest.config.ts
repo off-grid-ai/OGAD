@@ -139,15 +139,13 @@ export default defineConfig({
         // SQLite settings shell; policy is measured in runtime-residency-logic.ts.
         'src/main/runtime-residency.ts',
         // Native / subprocess-spawning I/O shells without coverage in this runner.
-        // Gateway and media-server sockets have product integration tests here,
-        // so they are measured rather than excluded.
+        // The resident SD server and Whisper CLI now have product tests here,
+        // so their new runtime fallback paths are measured rather than excluded.
         'src/main/imagegen.ts',
         'src/main/mflux.ts',
-        'src/main/sd-server.ts',
         // Cross-platform orphan-port reaper: execSync(netstat/lsof/tasklist/ps) + process.kill
         // — an OS-boundary shell, verified by the real macOS/Windows run, not in-process.
         'src/main/kill-orphan-port.ts',
-        'src/main/transcription/whisper-cli.ts',
         'src/main/transcription/parakeet-cli.ts',
         'src/main/transcription/whisper-server.ts',
         'src/main/coreml-image.ts',

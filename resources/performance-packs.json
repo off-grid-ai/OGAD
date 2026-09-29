@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "cuda": {
+    "win32": {
+      "url": "https://runtime.getoffgridai.co/desktop/cuda/win32/2026-09-29-v1.tar.gz",
+      "sha256": "579d0902d6e91ab88971d8987fec9d06698e046ee97dffd37c5171a4bef181ae",
+      "bytes": 5136587684,
+      "version": "2026-09-29-v1"
+    },
+    "linux": {
+      "url": "https://runtime.getoffgridai.co/desktop/cuda/linux/2026-09-29-v1.tar.gz",
+      "sha256": "9eae307688b2547bbd6db30dd3943ba20b2353feba638beaa466dddebe28bcc3",
+      "bytes": 5883271112,
+      "version": "2026-09-29-v1"
+    }
+  }
+}

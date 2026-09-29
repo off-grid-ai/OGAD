@@ -1,11 +1,15 @@
 import type { DeviceType } from '@huggingface/transformers'
+import { prioritizeBackend, type BackendPreference } from '../shared/backend-preferences'
 
 /**
  * Try one accelerator at a time. ONNX Runtime does not always continue to the
  * next provider when a GPU provider is installed but its driver/runtime cannot
  * start, so the caller must create a fresh session for each candidate.
  */
-export function onnxDeviceCandidates(platform = process.platform): DeviceType[] {
+export function onnxDeviceCandidates(
+  platform = process.platform,
+  preference: BackendPreference = 'auto'
+): DeviceType[] {
   const accelerated: DeviceType[] =
     platform === 'darwin'
       ? ['coreml', 'webgpu']
@@ -15,7 +19,9 @@ export function onnxDeviceCandidates(platform = process.platform): DeviceType[] 
           ? ['cuda', 'webgpu']
           : ['webgpu']
 
-  return [...accelerated, 'cpu']
+  return prioritizeBackend([...accelerated, 'cpu'], preference, (device) =>
+    device === 'coreml' ? 'metal' : device === 'dml' ? 'directml' : device as BackendPreference
+  )
 }
 
 export interface LoadedOnnxRuntime<T> {

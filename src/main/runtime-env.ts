@@ -88,8 +88,9 @@ export function binRoots(): string[] {
   if (cfg.binRoots?.length) return cfg.binRoots
   if (process.env.OFFGRID_BIN_DIR) return [process.env.OFFGRID_BIN_DIR]
   const e = electron()
-  if (e) return e.binRoots
-  return developmentBinRoots(process.cwd())
+  const bundledRoots = e?.binRoots ?? developmentBinRoots(process.cwd())
+  const performancePack = process.env.OFFGRID_PERFORMANCE_PACK_BIN
+  return performancePack ? [performancePack, ...bundledRoots] : bundledRoots
 }
 
 /** Append the platform executable extension to a bundled binary's base name:

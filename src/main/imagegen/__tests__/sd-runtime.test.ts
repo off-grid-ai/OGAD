@@ -14,6 +14,12 @@ describe('imageBackendForRuntime', () => {
 })
 
 describe('sdRuntimeLibraryEnv', () => {
+  it('adds the shared CUDA runtime for the Linux CUDA image engine', () => {
+    expect(
+      sdRuntimeLibraryEnv('linux', '/app/bin/sd-cuda/sd-cli', { LD_LIBRARY_PATH: '/host/lib' })
+    ).toEqual({ LD_LIBRARY_PATH: '/app/bin/sd-cuda:/app/bin/cuda-runtime:/host/lib' })
+  })
+
   it('adds the shared CUDA runtime for the Windows CUDA image engine', () => {
     expect(
       sdRuntimeLibraryEnv('win32', 'C:\\app\\bin\\sd-cuda\\sd-cli.exe', {

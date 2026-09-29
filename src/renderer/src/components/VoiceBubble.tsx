@@ -222,6 +222,10 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   )
 
   const handlePlayPause = useCallback(async () => {
+    if (isUser && !audioUrl) {
+      setPlaybackError('This voice recording is no longer on this device.')
+      return
+    }
     const audio = audioRef.current
     if (status === 'playing' && audio) {
       audio.pause()
@@ -266,7 +270,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
           : 'Speech could not be generated. Check that Text-to-speech is installed in Settings, then try again.'
       )
     }
-  }, [status, audioUrl, readVoice, transcript, synthesize, wire, messageId])
+  }, [status, isUser, audioUrl, readVoice, transcript, synthesize, wire, messageId])
 
   const cycleSpeed = useCallback(() => {
     setSpeed((prev) => {

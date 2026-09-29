@@ -6,6 +6,8 @@ describe('ONNX accelerator selection', () => {
     expect(onnxDeviceCandidates('darwin')).toEqual(['coreml', 'webgpu', 'cpu'])
     expect(onnxDeviceCandidates('win32')).toEqual(['cuda', 'dml', 'webgpu', 'cpu'])
     expect(onnxDeviceCandidates('linux')).toEqual(['cuda', 'webgpu', 'cpu'])
+    expect(onnxDeviceCandidates('linux', 'webgpu')).toEqual(['webgpu', 'cuda', 'cpu'])
+    expect(onnxDeviceCandidates('darwin', 'cpu')).toEqual(['cpu'])
   })
 
   it('starts a fresh load with the next provider after a provider fails', async () => {

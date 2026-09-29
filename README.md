@@ -245,7 +245,7 @@ Grab the latest build from [Releases](https://github.com/off-grid-ai/OGAD/releas
 
 ```bash
 git clone https://github.com/off-grid-ai/OGAD.git
-cd desktop
+cd OGAD
 git lfs install && git lfs pull   # pull the bundled native binaries (LFS) - REQUIRED
 npm install
 npm run dev          # full app
@@ -265,7 +265,7 @@ must compile there - cross-building from macOS is not supported):
 
 ```powershell
 git clone https://github.com/off-grid-ai/OGAD.git
-cd desktop
+cd OGAD
 npm install
 ./scripts/fetch-win-binaries.ps1   # pull win64 llama/whisper/sd/ffmpeg into resources/bin
 npm run dev                         # run locally, or:
@@ -279,6 +279,18 @@ version bump or release. It uploads the installers as downloadable workflow
 artifacts. Set `build_ref` to build a different branch, tag, or commit while you
 run the workflow from `main`. Pushes to `feat/windows-support` continue to build
 Windows automatically.
+
+### Build for Linux
+
+Run `scripts/Setup-OGAD-Source.sh` on Ubuntu 24.04 x64 to install the build tools
+and build the app. Set `OGAD_BRANCH=main` to use the current main branch.
+`npm run build:linux` requires a running Docker engine to compile the CUDA
+Whisper and image binaries with the pinned NVIDIA toolkit. The build uses
+`sudo docker` if the current user cannot access Docker directly.
+
+The installed app does not require Docker or a CUDA toolkit. It includes the
+CUDA runtime libraries and uses the host NVIDIA driver. Vulkan and CPU remain
+available when CUDA cannot run.
 
 Stack: Electron 39 + React 19 + Tailwind v4 (electron-vite),
 `better-sqlite3-multiple-ciphers` (encrypted local DB), `@lancedb/lancedb` (vectors),

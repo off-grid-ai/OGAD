@@ -6,6 +6,7 @@ import {
   chooseRecorderMime,
   type VoiceTurnMode
 } from '@offgrid/speech'
+import { captureUrlForPath } from '../../../shared/ogcapture-url'
 
 /*
  * These effects are transition inputs to one voice state machine: mode, generation, playback, and
@@ -19,6 +20,7 @@ export type ChatVoicePhase = 'idle' | 'starting' | 'listening' | 'recording' | '
 export interface ChatVoiceClip {
   url: string
   duration: number
+  path?: string
 }
 
 interface ChatVoiceTurnOptions {
@@ -29,6 +31,7 @@ interface ChatVoiceTurnOptions {
   isGenerating: boolean
   isPlaybackActive: boolean
   transcribeAudio: (audio: Uint8Array, extension: string, requestId: string) => Promise<string>
+  saveRecording?: (audio: Uint8Array, extension: string) => Promise<string>
   cancelTranscription?: (requestId: string) => Promise<boolean>
   getTranscriptionLabel?: () => Promise<{ label: string }>
   onTranscript: (text: string, clip: ChatVoiceClip | null) => void
@@ -239,10 +242,21 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           sawPlaybackRef.current = false
           setAwaitingReply(true)
         }
-        optionsRef.current.onTranscript(
-          text,
-          optionsRef.current.voiceMode ? { url: URL.createObjectURL(blob), duration } : null
-        )
+        let clip: ChatVoiceClip | null = null
+        if (optionsRef.current.voiceMode) {
+          try {
+            const savedPath = await optionsRef.current.saveRecording?.(bytes, extension)
+            clip = savedPath
+              ? { url: captureUrlForPath(savedPath), path: savedPath, duration }
+              : { url: URL.createObjectURL(blob), duration }
+          } catch (error) {
+            console.error('Voice recording could not be saved:', error)
+            clip = { url: URL.createObjectURL(blob), duration }
+            setError('This voice note could not be saved for later playback.')
+          }
+        }
+        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        optionsRef.current.onTranscript(text, clip)
       } catch (cause) {
         console.error('Transcription failed', cause)
         if (!mountedRef.current || sequence !== sequenceRef.current) return

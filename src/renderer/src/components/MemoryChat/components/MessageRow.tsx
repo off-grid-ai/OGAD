@@ -149,7 +149,7 @@ function VoiceMessageRow({
       const bytes = new Uint8Array(await response.arrayBuffer())
       const source =
         message.attachments?.find(
-          (attachment) => attachmentKindFor({ fileName: attachment.name }) === 'audio'
+          (attachment) => attachment.kind === 'audio' || attachmentKindFor({ fileName: attachment.name }) === 'audio'
         )?.path ?? audioUrl
       const extension = source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] ?? 'webm'
       const transcript = (
@@ -161,7 +161,7 @@ function VoiceMessageRow({
       console.error('Saved voice transcription failed:', error)
       setTranscriptionError(
         error instanceof Error && error.message === 'missing-audio'
-          ? 'This voice note is not on this Mac.'
+          ? 'This voice note is not on this device.'
           : 'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
       )
     } finally {
@@ -610,7 +610,7 @@ function StandardMessageRow({
 function recordedClipUrl(message: ChatMessage): string | undefined {
   if (message.audioUrl) return message.audioUrl
   const clip = message.attachments?.find(
-    (a) => !!a.path && attachmentKindFor({ fileName: a.name }) === 'audio'
+    (a) => !!a.path && (a.kind === 'audio' || attachmentKindFor({ fileName: a.name }) === 'audio')
   )
   return clip?.path ? captureUrlForPath(clip.path) : undefined
 }

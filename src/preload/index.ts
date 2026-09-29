@@ -1,4 +1,5 @@
 import type { RuntimeBackend } from '../shared/runtime-backends'
+import type { PerformancePackStatus } from '../shared/performance-pack'
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   CACHE_CLEANUP_CHANNEL,
@@ -393,6 +394,9 @@ const offGridApi = {
   residencyGet: () => ipcRenderer.invoke('runtime:residency:get'),
   residencySet: (modality: string, mode: string) =>
     ipcRenderer.invoke('runtime:residency:set', modality, mode),
+  backendPreferencesGet: () => ipcRenderer.invoke('runtime:backend:get'),
+  backendPreferenceSet: (modality: string, preference: string) =>
+    ipcRenderer.invoke('runtime:backend:set', modality, preference),
   // Unload a modality's model from memory now (free RAM); reloads on next use.
   unloadRuntime: (modality: string) => ipcRenderer.invoke('runtime:unload', modality),
   // Pipeline queue config (serialize heavy jobs; let speech coexist) + live state.
@@ -569,6 +573,17 @@ const offGridApi = {
     return unsubscribe('system:chat-health-changed', subscription)
   },
   runtimeBackends: (): Promise<RuntimeBackend[]> => ipcRenderer.invoke('system:runtime-backends'),
+  performancePack: {
+    status: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:status'),
+    start: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:start'),
+    pause: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:pause'),
+    restart: (): Promise<void> => ipcRenderer.invoke('performance-pack:restart'),
+    onChanged: (callback: (status: PerformancePackStatus) => void): (() => void) => {
+      const subscription = (_event: unknown, status: PerformancePackStatus): void => callback(status)
+      ipcRenderer.on('performance-pack:changed', subscription)
+      return unsubscribe('performance-pack:changed', subscription)
+    }
+  },
   systemHealth: (): Promise<SystemHealthContract> => ipcRenderer.invoke('system:health'),
   setupRecommendation: (mode?: string) => ipcRenderer.invoke('setup:recommendation', mode),
   setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),
@@ -747,6 +762,8 @@ const offGridApi = {
     return unsubscribe('tts:voice-progress', listener)
   },
   speak: (text: string, voice?: string) => ipcRenderer.invoke('tts:speak', text, voice),
+  saveVoiceRecording: (audio: Uint8Array, extension: string): Promise<string> =>
+    ipcRenderer.invoke('voice:save-recording', audio, extension),
 
   // --- On-device image generation (stable-diffusion.cpp) ---
   imageGenStatus: () => ipcRenderer.invoke('imagegen:status'),

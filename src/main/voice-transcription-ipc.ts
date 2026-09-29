@@ -1,5 +1,5 @@
 /** Request-scoped voice transcription IPC. Main owns cancellation and temp-file cleanup. */
-import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -41,6 +41,25 @@ export function setupVoiceTranscriptionIpc(
   host: VoiceTranscriptionIpcHost = ipcMain,
   getService: TranscriptionServiceProvider = productionService
 ): void {
+  host.handle('voice:save-recording', async (_event, audioValue, extValue) => {
+    const ext = typeof extValue === 'string' ? extValue.toLowerCase() : ''
+    if (!['webm', 'mp4', 'm4a', 'ogg', 'wav'].includes(ext)) throw new Error('Unsupported voice recording format.')
+    if (!(audioValue instanceof ArrayBuffer || ArrayBuffer.isView(audioValue))) {
+      throw new Error('Invalid voice recording.')
+    }
+    const audio = ArrayBuffer.isView(audioValue)
+      ? Buffer.from(audioValue.buffer, audioValue.byteOffset, audioValue.byteLength)
+      : Buffer.from(audioValue)
+    if (audio.length === 0 || audio.length > 50 * 1024 * 1024) {
+      throw new Error('Invalid voice recording size.')
+    }
+    const dir = path.join(app.getPath('userData'), 'voice')
+    await fs.promises.mkdir(dir, { recursive: true })
+    const file = path.join(dir, `${crypto.randomUUID()}.${ext}`)
+    await fs.promises.writeFile(file, audio, { flag: 'wx' })
+    return file
+  })
+
   // IPC carries the audio bytes, extension and request identity as separate structured-clone fields.
   // eslint-disable-next-line max-params
   host.handle('voice:transcribe', async (event, audioValue, extValue, requestIdValue) => {

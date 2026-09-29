@@ -15,6 +15,7 @@ import { ConnectorsScreen } from './components/ConnectorsScreen'
 import { GatewayScreen } from './components/GatewayScreen'
 import { Onboarding } from './components/Onboarding'
 import { PermissionGate } from './components/PermissionGate'
+import { PerformancePackGate } from './components/setup/PerformancePackGate'
 import type { SearchHit } from './types'
 // Open-core: pro screens live in the private pro package and render through the
 // pro view-router; the free build shows the UpgradeScreen for those tabs.
@@ -1485,15 +1486,17 @@ function App() {
 
   return (
     <RendererEntitlementProvider>
-      <PermissionGate>
-        <NotificationProvider>
-          <ToastProvider>
-            <ReprocessingProvider>
-              <AppContent />
-            </ReprocessingProvider>
-          </ToastProvider>
-        </NotificationProvider>
-      </PermissionGate>
+      <PerformancePackGate>
+        <PermissionGate>
+          <NotificationProvider>
+            <ToastProvider>
+              <ReprocessingProvider>
+                <AppContent />
+              </ReprocessingProvider>
+            </ToastProvider>
+          </NotificationProvider>
+        </PermissionGate>
+      </PerformancePackGate>
     </RendererEntitlementProvider>
   )
 }

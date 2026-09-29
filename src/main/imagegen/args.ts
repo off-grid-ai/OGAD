@@ -154,6 +154,11 @@ export function buildQwenImage21Args(i: QwenImage21ArgsInput): string[] {
   return args
 }
 
+/** Keep Qwen weights on the CUDA device; other runtimes can still offload. */
+export function qwenImageArgsForBackend(args: string[], backend: string): string[] {
+  return backend === 'CUDA' ? args.filter((arg) => arg !== '--offload-to-cpu') : args
+}
+
 export interface StandardArgsInput {
   /** Model filename (basename) — drives the shared defaults. */
   base: string

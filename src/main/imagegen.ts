@@ -43,6 +43,7 @@ import {
   imageBackendForRuntime,
   sdRuntimeLibraryEnv
 } from './imagegen/sd-runtime'
+import { getBackendPreference } from './backend-preferences'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
 import {
@@ -61,6 +62,7 @@ import { evaluateMemoryGuard } from './imagegen/memory-guard'
 import {
   buildCoreMLArgs,
   buildQwenImage21Args,
+  qwenImageArgsForBackend,
   buildZImageArgs,
   buildStandardArgs,
   DEFAULT_NEGATIVE
@@ -901,6 +903,7 @@ async function runImageGen(
         diffusionFa: true,
         taesdPath: taesd ?? undefined
       })
+      const residentBinary = sdServer.getBinaryPath() ?? cli
       generationLifecycle.throwIfCancelled()
       const { png, seed: usedSeed } = await sdServer.generate({
         prompt: params.prompt,
@@ -919,7 +922,7 @@ async function runImageGen(
         path: outPath,
         seed: usedSeed,
         model: base,
-        computeBackend: imageBackendForRuntime(process.platform, cli)
+        computeBackend: imageBackendForRuntime(process.platform, residentBinary)
       }
     } finally {
       generationLifecycle.finish()
@@ -1103,7 +1106,12 @@ async function runImageGen(
       new Promise<void>((resolve, reject) => {
         // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
         const binDir = path.dirname(runtime)
-        const child = spawn(runtime, args, {
+        // Qwen needs the model on the L40S for CUDA inference. Keep CPU offload
+        // for other runtimes, including a fallback after CUDA startup fails.
+        const runtimeArgs = isQwenImage21
+          ? qwenImageArgsForBackend(args, imageBackendForRuntime(process.platform, runtime))
+          : args
+        const child = spawn(runtime, runtimeArgs, {
           cwd: binDir,
           env: { ...process.env, ...sdRuntimeLibraryEnv(process.platform, runtime, process.env) }
         })
@@ -1187,7 +1195,7 @@ async function runImageGen(
         })
       })
 
-    const runtimes = coreml ? [cli] : findSdBinaries('sd-cli')
+    const runtimes = coreml ? [cli] : findSdBinaries('sd-cli', getBackendPreference('image'))
     let completedRuntime: string | undefined
     let lastError: unknown
     for (const [index, runtime] of runtimes.entries()) {

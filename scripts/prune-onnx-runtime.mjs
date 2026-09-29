@@ -28,17 +28,31 @@ export function targetOnnxRuntime(context) {
   return { platform, arch }
 }
 
+export function pruneMacKevHeaders(context) {
+  if (context.electronPlatformName !== 'darwin') return 0
+  const libRoot = path.join(packagedResourcesDir(context), 'bin', 'kev-runtime', 'python', 'lib')
+  if (!fs.existsSync(libRoot)) return 0
+  let removed = 0
+  for (const pythonDir of fs.readdirSync(libRoot)) {
+    if (!pythonDir.startsWith('python')) continue
+    const headers = path.join(libRoot, pythonDir, 'site-packages', 'torch', 'include')
+    if (!fs.existsSync(headers)) continue
+    fs.rmSync(headers, { recursive: true, force: true })
+    removed += 1
+  }
+  if (removed) console.log(`[kev-runtime] removed PyTorch build headers from ${removed} Python runtime`)
+  return removed
+}
+
 export default async function pruneOnnxRuntime(context) {
-  const runtimeRoot = path.join(
-    packagedResourcesDir(context),
-    'app.asar.unpacked',
-    'node_modules',
-    'onnxruntime-node',
-    'bin',
-    'napi-v6'
-  )
-  if (!fs.existsSync(runtimeRoot)) {
-    throw new Error(`Packaged ONNX Runtime directory is missing: ${runtimeRoot}`)
+  const nodeModules = path.join(packagedResourcesDir(context), 'app.asar.unpacked', 'node_modules')
+  const runtimeRoots = [
+    path.join(nodeModules, 'onnxruntime-node', 'bin', 'napi-v6'),
+    path.join(nodeModules, '@huggingface', 'transformers', 'node_modules', 'onnxruntime-node', 'bin', 'napi-v6')
+  ]
+  const runtimeRoot = runtimeRoots.find((candidate) => fs.existsSync(candidate))
+  if (!runtimeRoot) {
+    throw new Error(`Packaged ONNX Runtime directory is missing: ${runtimeRoots.join(' or ')}`)
   }
 
   const target = targetOnnxRuntime(context)
@@ -60,4 +74,5 @@ export default async function pruneOnnxRuntime(context) {
     throw new Error(`Packaged ONNX Runtime files are missing for ${target.platform}/${target.arch}`)
   }
   console.log(`[onnx-runtime] kept ${target.platform}/${target.arch}; removed other targets`)
+  pruneMacKevHeaders(context)
 }

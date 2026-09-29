@@ -23,10 +23,12 @@ step '1 of 6: Check host tools and NVIDIA GPU'
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   build-essential cmake ninja-build pkg-config git git-lfs gh curl ca-certificates \
-  unzip xz-utils python3 python3-venv python3-dev file \
+  unzip xz-utils python3 python3-venv python3-dev file docker.io \
   libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers \
   libx11-dev libxext-dev libxfixes-dev libxi-dev libxtst-dev libxrandr-dev \
-  libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libsecret-1-0 ubuntu-drivers-common
+  libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libsecret-1-0 \
+  pipewire-audio pipewire-module-xrdp ubuntu-drivers-common
+sudo systemctl start docker
 if ! command -v nvidia-smi >/dev/null || ! nvidia-smi >/dev/null 2>&1; then
   echo 'Installing the Ubuntu NVIDIA compute driver. A reboot is needed after this step.'
   sudo ubuntu-drivers install --gpgpu
@@ -38,6 +40,20 @@ if ! command -v nvidia-smi >/dev/null || ! nvidia-smi >/dev/null 2>&1; then
   exit 0
 fi
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+driver_major=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader |
+  head -n 1 | cut -d. -f1)
+[[ $driver_major =~ ^[0-9]+$ && $driver_major -ge 580 ]] || {
+  echo 'NVIDIA driver 580 or newer is required for ONNX CUDA 13.' >&2; exit 1;
+}
+if [[ -z ${OFFGRID_CUDA_ARCHITECTURES:-} ]]; then
+  gpu_arches=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader |
+    sed 's/\.//g' | sort -u | paste -sd ';' -)
+  [[ $gpu_arches =~ ^[0-9]+(\;[0-9]+)*$ ]] || {
+    echo 'Could not read the NVIDIA GPU compute capability.' >&2; exit 1;
+  }
+  export OFFGRID_CUDA_ARCHITECTURES=$gpu_arches
+fi
+echo "NVIDIA GPU architecture: $OFFGRID_CUDA_ARCHITECTURES"
 
 if ! command -v node >/dev/null || [[ $(node -p 'process.versions.node.split(".")[0]') != 22 ]]; then
   echo 'Installing Node 22 from nodejs.org.'
@@ -62,7 +78,7 @@ if ! gh auth status --hostname github.com >/dev/null 2>&1; then
 fi
 gh auth setup-git --hostname github.com
 gh api user --jq .login
-for repo in OGAD shared executorch-speech; do
+for repo in OGAD shared desktop-pro executorch-speech; do
   gh repo view "off-grid-ai/$repo" --json nameWithOwner --jq .nameWithOwner
 done
 
@@ -89,6 +105,7 @@ sync_repo() {
 }
 sync_repo off-grid-ai/OGAD "$workspace/desktop" "$branch"
 sync_repo off-grid-ai/shared "$workspace/shared" "$branch"
+GIT_LFS_SKIP_SMUDGE=1 git -C "$workspace/desktop" submodule update --init pro
 if [[ ! -e $workspace/executorch-speech ]]; then
   GIT_LFS_SKIP_SMUDGE=1 gh repo clone off-grid-ai/executorch-speech "$workspace/executorch-speech"
 fi
@@ -125,17 +142,32 @@ python3 -m venv "$workspace/build-python"
   --index-url https://download.pytorch.org/whl/cpu \
   --extra-index-url https://pypi.org/simple
 "$workspace/build-python/bin/python" -c 'import torchgen, yaml, jinja2'
+"$workspace/build-python/bin/pip" install --no-cache-dir --no-deps \
+  'nvidia-cuda-runtime==13.2.86' 'nvidia-cublas==13.2.2.2' \
+  'nvidia-curand==10.4.2.66' 'nvidia-cudnn-cu13==9.23.1.3'
 
-step '5 of 6: Build Linux core app'
+step '5 of 6: Build Linux app'
 export PATH="$workspace/build-python/bin:$PATH"
-export OFFGRID_FORCE_CORE=1
+export OFFGRID_FORCE_CORE=0
 npm run typecheck:node
 npm run build:linux
 for executable in build/linux-bin/llama-cuda/llama-server \
   build/linux-bin/llama-prism-cuda/llama-server \
+  build/linux-bin/whisper-cuda/whisper-cli \
+  build/linux-bin/sd-cuda/sd-cli \
   build/linux-bin/whisper/whisper-cli; do
   test -x "$executable"
 done
+for executable in dist/linux-unpacked/resources/bin/llama-cuda/llama-server \
+  dist/linux-unpacked/resources/bin/whisper-cuda/whisper-cli \
+  dist/linux-unpacked/resources/bin/sd-cuda/sd-cli; do
+  test -x "$executable"
+done
+for library in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
+  test -f "dist/linux-unpacked/resources/bin/cuda-runtime/$library"
+done
+test -n "$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)"
+test -n "$(find dist -maxdepth 1 -name '*.deb' -print -quit)"
 echo "Build complete: $workspace/desktop/dist"
 
 step '6 of 6: Start from source'
@@ -143,5 +175,5 @@ if [[ -n ${DISPLAY:-} && ${1:-} != --setup-only ]]; then
   read -r -p 'Press Enter to start OGAD. Keep this terminal open. ' _
   npm run dev
 else
-  echo "To start from the Linux desktop terminal: cd '$workspace/desktop' && OFFGRID_FORCE_CORE=1 npm run dev"
+  echo "To start from the Linux desktop terminal: cd '$workspace/desktop' && npm run dev"
 fi

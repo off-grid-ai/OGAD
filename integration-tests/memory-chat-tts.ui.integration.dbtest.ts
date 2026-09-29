@@ -163,6 +163,8 @@ function installProductionVoiceBridge(boundary: ChatBoundary): void {
     saveSetting: (key: string, value: unknown) => invoke('settings:save', key, value),
     transcribeAudio: (audio: ArrayBuffer | Uint8Array, ext: string, requestId: string) =>
       invoke('voice:transcribe', audio, ext, requestId),
+    saveVoiceRecording: (audio: ArrayBuffer | Uint8Array, ext: string) =>
+      invoke('voice:save-recording', audio, ext),
     cancelTranscription: (requestId: string) => invoke('voice:cancel-transcription', requestId),
     ragChat: (...args: unknown[]) => invoke('rag:chat', ...args),
     toolChat: (...args: unknown[]) => invoke('tools:chat', ...args),

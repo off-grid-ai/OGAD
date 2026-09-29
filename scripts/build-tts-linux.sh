@@ -13,6 +13,15 @@ if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
   exit 1
 fi
 test -f "$SPEECH_ROOT/package.json"
+BIN="$SPEECH_ROOT/native/bin/executorch-speech"
+if [ "${OFFGRID_TTS_PREBUILT:-0}" = 1 ]; then
+  test -x "$BIN"
+  file "$BIN" | grep -q 'ELF 64-bit.*x86-64'
+  ! ldd "$BIN" | grep -q 'not found'
+  "$BIN" --probe
+  echo '[build-tts-linux] reused pinned ExecuTorch speech binary'
+  exit 0
+fi
 "$PYTHON" -c 'import torchgen, yaml, jinja2'
 npm --prefix "$SPEECH_ROOT" ci
 cmake -S "$SPEECH_ROOT/native" -B "$SPEECH_ROOT/native/build" \
@@ -22,7 +31,6 @@ cmake -S "$SPEECH_ROOT/native" -B "$SPEECH_ROOT/native/build" \
 cmake --build "$SPEECH_ROOT/native/build" --parallel "${OFFGRID_BUILD_JOBS:-4}" \
   --target executorch-speech
 
-BIN="$SPEECH_ROOT/native/bin/executorch-speech"
 test -x "$BIN"
 file "$BIN" | grep -q 'ELF 64-bit.*x86-64'
 dependencies="$(ldd "$BIN")"

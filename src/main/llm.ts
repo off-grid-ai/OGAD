@@ -42,6 +42,8 @@ import { engineSpawnEnv } from './llm/spawn-env'
 import { gpuDeviceAvailable } from './llm/gpu-device-probe'
 import { shouldAutoRecover } from './llm/crash-policy'
 import { enginePriority } from './llm/engine-priority'
+import { getBackendPreference } from './backend-preferences'
+import { prioritizeBackend, type BackendPreference } from '../shared/backend-preferences'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import {
   nativeToolPlannerUnavailableMessage,
@@ -1007,13 +1009,25 @@ export class LLMService {
     generation = this.launchGeneration
   ): Promise<boolean> {
     this.backendFallbackReason = undefined
-    const ordered = [...serverPaths].sort((a, b) => enginePriority(a) - enginePriority(b))
-    const candidates = [
-      ...ordered.map((serverPath) => ({ serverPath, cpuOnly: false })),
-      ...ordered
-        .filter((p) => !p.includes('llama-cpu') && !p.includes('llama-prism-cpu'))
-        .map((serverPath) => ({ serverPath, cpuOnly: true }))
-    ]
+    const preference = getBackendPreference('llm')
+    const ordered = prioritizeBackend(
+      [...serverPaths].sort((a, b) => enginePriority(a) - enginePriority(b)),
+      preference === 'cpu' ? 'auto' : preference,
+      (serverPath): BackendPreference => {
+        const directory = path.basename(path.dirname(serverPath))
+        if (directory.endsWith('-cpu')) return 'cpu'
+        if (directory.endsWith('-cuda')) return 'cuda'
+        return process.platform === 'darwin' ? 'metal' : 'vulkan'
+      }
+    )
+    const candidates = preference === 'cpu'
+      ? ordered.map((serverPath) => ({ serverPath, cpuOnly: true }))
+      : [
+          ...ordered.map((serverPath) => ({ serverPath, cpuOnly: false })),
+          ...ordered
+            .filter((p) => !p.includes('llama-cpu') && !p.includes('llama-prism-cpu'))
+            .map((serverPath) => ({ serverPath, cpuOnly: true }))
+        ]
     for (const { serverPath, cpuOnly } of candidates) {
       const attempts = loadAttempts(
         this.ctxSize,

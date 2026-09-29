@@ -29,6 +29,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # makes Invoke-WebRequest downloads fast
+$IncludeCuda = $env:OFFGRID_INCLUDE_CUDA -ne '0'
 
 $bin = Join-Path $PSScriptRoot '..\resources\bin'
 New-Item -ItemType Directory -Force -Path $bin | Out-Null
@@ -98,15 +99,38 @@ function Copy-Runtime($srcDir, $destName) {
 # The version has ONE owner: package.json's offgrid.llamaRef, shared with build-llama.sh. Hardcoding it in
 # both is how the macOS build and the Windows binaries drift apart within a single release.
 $PackageJson = Join-Path (Split-Path $PSScriptRoot -Parent) 'package.json'
-$LlamaRef = if ($env:LLAMA_REF) { $env:LLAMA_REF } else { (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.llamaRef }
+$DefaultLlamaRef = (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.llamaRef
+$LlamaRef = if ($env:LLAMA_REF) { $env:LLAMA_REF } else { $DefaultLlamaRef }
+$LlamaHashes = @{
+  cuda = 'cb6e838cad17e9920b99ab8496ca9aa7cdc3d3c218128957179bb1fbe0772c4c'
+  cudart = '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6'
+  vulkan = 'b7b5ef4a1f47542635a3a5e3e471cbfcbaee057aa0c962f9573329ddd9168c5a'
+  cpu = 'a2668a200ca7271e66af0a54fd4376aaf8ae0b2a562cf7a63c41d8fd2a8245fa'
+}
+if ($LlamaRef -ne $DefaultLlamaRef) {
+  $overrideHashes = @{
+    cuda = $env:LLAMA_CUDA_SHA256
+    cudart = $env:LLAMA_CUDART_SHA256
+    vulkan = $env:LLAMA_VULKAN_SHA256
+    cpu = $env:LLAMA_CPU_SHA256
+  }
+  foreach ($name in $overrideHashes.Keys) {
+    if ($overrideHashes[$name] -notmatch '^[0-9a-fA-F]{64}$') {
+      throw "LLAMA_REF override requires LLAMA_${name}_SHA256 (64 hex characters) before any downloads"
+    }
+  }
+  $LlamaHashes = $overrideHashes
+}
 Write-Host "== llama.cpp (pinned $LlamaRef): CUDA + Vulkan + CPU =="
-$x = Expand-Asset 'ggml-org/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $LlamaRef 'cb6e838cad17e9920b99ab8496ca9aa7cdc3d3c218128957179bb1fbe0772c4c'
-Copy-Runtime $x 'llama-cuda' | Out-Null
-$x = Expand-Asset 'ggml-org/llama.cpp' '^cudart-llama-bin-win-cuda-12\.4-x64\.zip$' $LlamaRef '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6'
-Copy-Runtime $x 'cuda-runtime' | Out-Null
-$x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-vulkan-x64\.zip$' $LlamaRef 'b7b5ef4a1f47542635a3a5e3e471cbfcbaee057aa0c962f9573329ddd9168c5a'
+if ($IncludeCuda) {
+  $x = Expand-Asset 'ggml-org/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $LlamaRef $LlamaHashes.cuda
+  Copy-Runtime $x 'llama-cuda' | Out-Null
+  $x = Expand-Asset 'ggml-org/llama.cpp' '^cudart-llama-bin-win-cuda-12\.4-x64\.zip$' $LlamaRef $LlamaHashes.cudart
+  Copy-Runtime $x 'cuda-runtime' | Out-Null
+}
+$x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-vulkan-x64\.zip$' $LlamaRef $LlamaHashes.vulkan
 Copy-Runtime $x 'llama' | Out-Null
-$x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-cpu-x64\.zip$' $LlamaRef 'a2668a200ca7271e66af0a54fd4376aaf8ae0b2a562cf7a63c41d8fd2a8245fa'
+$x = Expand-Asset 'ggml-org/llama.cpp' 'bin-win-cpu-x64\.zip$' $LlamaRef $LlamaHashes.cpu
 Copy-Runtime $x 'llama-cpu' | Out-Null
 
 # Bonsai 2 uses packed ternary weights that require PrismML's llama.cpp fork.
@@ -114,8 +138,10 @@ Copy-Runtime $x 'llama-cpu' | Out-Null
 # Keep these DLLs separate from the standard llama.cpp DLLs.
 $PrismLlamaRef = (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.prismLlamaRef
 Write-Host "== Prism llama.cpp (pinned $PrismLlamaRef): CUDA + Vulkan + CPU =="
-$x = Expand-Asset 'PrismML-Eng/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $PrismLlamaRef 'f565c8428c1f108311f65ed97f02425188b3aa3c745c2bc597521bbd24bcbbc9'
-Copy-Runtime $x 'llama-prism-cuda' | Out-Null
+if ($IncludeCuda) {
+  $x = Expand-Asset 'PrismML-Eng/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $PrismLlamaRef 'f565c8428c1f108311f65ed97f02425188b3aa3c745c2bc597521bbd24bcbbc9'
+  Copy-Runtime $x 'llama-prism-cuda' | Out-Null
+}
 $x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-vulkan-x64\.zip$' $PrismLlamaRef 'fabef609b588cbbed85b5f10b45809c46088f0a63caca7976054034e24b40836'
 Copy-Runtime $x 'llama-prism' | Out-Null
 $x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef '92cd4d1cee11107593ff87d77eb57b02d804c86dd4b13224e18ba963a4271ad8'
@@ -126,20 +152,24 @@ Copy-Runtime $x 'llama-prism-cpu' | Out-Null
 # release so Windows voice cannot disappear because GitHub's "latest" moved.
 $WhisperRef = 'b5130'
 Write-Host "== whisper.cpp (pinned $WhisperRef): CUDA 11.8 + CPU =="
-try {
-  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-cublas-11\.8\.0-bin-x64\.zip$' $WhisperRef '0b29b2175bb17ec26da29677cbc7c467c57d103245144d62a49a703f6bc3fdae'
-  $dest = Copy-Runtime $x 'whisper'
-  # Older releases ship the CLI as main.exe; the app expects whisper-cli.exe.
-  $wc = Join-Path $dest 'whisper-cli.exe'
-  $mn = Join-Path $dest 'main.exe'
-  if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
+if ($IncludeCuda) {
+  try {
+    $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-cublas-11\.8\.0-bin-x64\.zip$' $WhisperRef '0b29b2175bb17ec26da29677cbc7c467c57d103245144d62a49a703f6bc3fdae'
+    $dest = Copy-Runtime $x 'whisper'
+    # Older releases ship the CLI as main.exe; the app expects whisper-cli.exe.
+    $wc = Join-Path $dest 'whisper-cli.exe'
+    $mn = Join-Path $dest 'main.exe'
+    if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
+  } catch { Write-Warning "whisper.cpp CUDA fetch failed: $_" }
+}
 
+try {
   $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-bin-x64\.zip$' $WhisperRef 'f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c'
   $dest = Copy-Runtime $x 'whisper-cpu'
   $wc = Join-Path $dest 'whisper-cli.exe'
   $mn = Join-Path $dest 'main.exe'
   if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
-} catch { Write-Warning "whisper.cpp fetch failed: $_" }
+} catch { Write-Warning "whisper.cpp CPU fetch failed: $_" }
 
 # --- stable-diffusion.cpp (image gen): CUDA, Vulkan, then CPU -------------------
 # The CUDA engine reuses bin/cuda-runtime from llama.cpp. Do not fetch the
@@ -149,13 +179,15 @@ try {
 # latest release can change the packaged DLL contract without review.
 $SdRef = 'master-920-2f88688'
 Write-Host "== stable-diffusion.cpp (pinned $SdRef): CUDA + Vulkan + CPU =="
-try {
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
-  $dest = Copy-Runtime $x 'sd-cuda'
-  $cli = Join-Path $dest 'sd-cli.exe'
-  $sd = Join-Path $dest 'sd.exe'
-  if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
-} catch { Write-Warning "stable-diffusion.cpp CUDA fetch failed: $_" }
+if ($IncludeCuda) {
+  try {
+    $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
+    $dest = Copy-Runtime $x 'sd-cuda'
+    $cli = Join-Path $dest 'sd-cli.exe'
+    $sd = Join-Path $dest 'sd.exe'
+    if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
+  } catch { Write-Warning "stable-diffusion.cpp CUDA fetch failed: $_" }
+}
 
 try {
   $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '63e84439c20dde75487a933066318ae01353e9e80ee70e031acad48e857e1cb9'
@@ -164,13 +196,15 @@ try {
   $cli = Join-Path $dest 'sd-cli.exe'
   $sd = Join-Path $dest 'sd.exe'
   if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
+} catch { Write-Warning "stable-diffusion.cpp Vulkan fetch failed: $_" }
 
+try {
   $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cpu-x64\.zip$' $SdRef '10fc73b25bd97fb071c6bb6ba2a18e8811e6dd421c32bead98c18c84cd305d7f'
   $dest = Copy-Runtime $x 'sd-cpu'
   $cli = Join-Path $dest 'sd-cli.exe'
   $sd = Join-Path $dest 'sd.exe'
   if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
-} catch { Write-Warning "stable-diffusion.cpp fetch failed: $_" }
+} catch { Write-Warning "stable-diffusion.cpp CPU fetch failed: $_" }
 
 # --- ffmpeg (GPL, win64) — single ffmpeg.exe flat in resources/bin -----------
 Write-Host '== ffmpeg =='
@@ -190,9 +224,8 @@ Write-Host 'resources/bin now contains (win64):'
 Get-ChildItem -Path $bin -Recurse -Include *.exe |
   ForEach-Object { Write-Host "  $($_.FullName.Replace($bin, '').TrimStart('\'))" }
 
-# Verify the result so a failed fetch fails LOUD here, not as a confusing
-# "binary not found" at app startup. llama-server is REQUIRED (no chat without
-# it); whisper/sd/ffmpeg are optional (voice/image degrade gracefully if absent).
+# Verify every runtime needed for chat, speech, and image generation. A failed
+# download must stop the build before an incomplete installer is uploaded.
 $llama = Join-Path $bin 'llama\llama-server.exe'
 if (-not (Test-Path -LiteralPath $llama)) {
   Write-Error "REQUIRED binary missing: $llama (the llama.cpp fetch failed above). Cannot run the model server."
@@ -209,24 +242,27 @@ if (-not (Test-Path -LiteralPath $prismCpu)) {
   exit 1
 }
 foreach ($p in @(
-    (Join-Path $bin 'llama-cuda\llama-server.exe'),
-    (Join-Path $bin 'llama-prism-cuda\llama-server.exe'),
-    (Join-Path $bin 'cuda-runtime\cudart64_12.dll'),
-    (Join-Path $bin 'cuda-runtime\cublas64_12.dll'),
-    (Join-Path $bin 'cuda-runtime\cublasLt64_12.dll'),
-    (Join-Path $bin 'sd-cuda\sd-cli.exe'),
-    (Join-Path $bin 'sd-cuda\ggml-cuda.dll'))) {
-  if (-not (Test-Path -LiteralPath $p)) { throw "REQUIRED CUDA runtime missing: $p" }
-}
-foreach ($p in @(
-    (Join-Path $bin 'llama-cpu\llama-server.exe'),
-    (Join-Path $bin 'whisper\whisper-cli.exe'),
     (Join-Path $bin 'whisper-cpu\whisper-cli.exe'),
     (Join-Path $bin 'sd\sd-cli.exe'),
     (Join-Path $bin 'sd-cpu\sd-cli.exe'),
     (Join-Path $bin 'ffmpeg.exe'))) {
-  if (-not (Test-Path -LiteralPath $p)) { Write-Warning "optional runtime missing (feature will be unavailable): $p" }
+  if (-not (Test-Path -LiteralPath $p)) { throw "REQUIRED Windows runtime missing: $p" }
 }
+if ($IncludeCuda) {
+  foreach ($p in @(
+      (Join-Path $bin 'llama-cuda\llama-server.exe'),
+      (Join-Path $bin 'llama-prism-cuda\llama-server.exe'),
+      (Join-Path $bin 'cuda-runtime\cudart64_12.dll'),
+      (Join-Path $bin 'cuda-runtime\cublas64_12.dll'),
+      (Join-Path $bin 'cuda-runtime\cublasLt64_12.dll'),
+      (Join-Path $bin 'whisper\whisper-cli.exe'),
+      (Join-Path $bin 'sd-cuda\sd-cli.exe'),
+      (Join-Path $bin 'sd-cuda\ggml-cuda.dll'))) {
+    if (-not (Test-Path -LiteralPath $p)) { throw "REQUIRED Windows CUDA runtime missing: $p" }
+  }
+}
+$cpuLlama = Join-Path $bin 'llama-cpu\llama-server.exe'
+if (-not (Test-Path -LiteralPath $cpuLlama)) { throw "REQUIRED Windows runtime missing: $cpuLlama" }
 Write-Host ''
 Write-Host "OK: llama-server.exe present at $llama"
 Write-Host "OK: Prism llama-server.exe present at $prism"

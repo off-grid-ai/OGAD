@@ -1,0 +1,120 @@
+name: Publish optional CUDA pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Pack an existing Windows or Linux build artifact'
+        type: choice
+        options: [win32, linux]
+        required: true
+      version:
+        description: 'Immutable pack version (letters, numbers, dot, dash, underscore)'
+        type: string
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(github.event_name == 'push' && '["linux","win32"]' || format('["{0}"]', inputs.platform)) }}
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      VERSION: ${{ inputs.version || '2026-09-29-v1' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Check input and source artifact
+        run: |
+          [[ "$VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]
+          case "$PLATFORM" in
+            linux)
+              echo 'source_run=36450913791' >> "$GITHUB_ENV"
+              echo 'source_name=off-grid-ai-linux-deb' >> "$GITHUB_ENV"
+              ;;
+            win32)
+              echo 'source_run=36448396362' >> "$GITHUB_ENV"
+              echo 'source_name=off-grid-ai-windows' >> "$GITHUB_ENV"
+              ;;
+          esac
+      - name: Download existing build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p source
+          gh run download "$source_run" --repo "$GITHUB_REPOSITORY" --name "$source_name" --dir source
+          find source -maxdepth 3 -type f -printf '%p %s bytes\n'
+      - name: Extract CUDA directories
+        run: |
+          mkdir -p extracted
+          if [ "$PLATFORM" = linux ]; then
+            deb="$(find source -name '*.deb' -type f -print -quit)"
+            test -s "$deb"
+            dpkg-deb --fsys-tarfile "$deb" | tar -x -C extracted --wildcards --no-anchored \
+              '*/resources/bin/llama-cuda/*' \
+              '*/resources/bin/llama-prism-cuda/*' \
+              '*/resources/bin/cuda-runtime/*' \
+              '*/resources/bin/sd-cuda/*' \
+              '*/resources/bin/whisper-cuda/*' \
+              '*/resources/bin/kev-runtime/*'
+          else
+            payload="$(find source -name '*.7z' -type f -print -quit)"
+            test -s "$payload"
+            7z l -slt "$payload" | sed -n 's/^Path = //p' | \
+              grep -E '(^|[/\\])resources[/\\]bin[/\\](llama-cuda|llama-prism-cuda|cuda-runtime|sd-cuda|whisper|kev-runtime)([/\\]|$)' \
+              > "$RUNNER_TEMP/cuda-files.txt"
+            test -s "$RUNNER_TEMP/cuda-files.txt"
+            7z x -y "$payload" "-o$PWD/extracted" "-i@$RUNNER_TEMP/cuda-files.txt"
+          fi
+          bin_root="$(find extracted -type d -path '*/resources/bin' -print -quit)"
+          test -n "$bin_root"
+          echo "BIN_ROOT=$PWD/$bin_root" >> "$GITHUB_ENV"
+          du -sh "$bin_root"/*
+      - name: Make and check versioned pack
+        run: |
+          node scripts/package-performance-pack.mjs "$PLATFORM" "$BIN_ROOT" "$RUNNER_TEMP/$VERSION.tar.gz" "$VERSION"
+          tar -tzf "$RUNNER_TEMP/$VERSION.tar.gz" | grep -q '^bin/llama-cuda/'
+          sha256sum "$RUNNER_TEMP/$VERSION.tar.gz"
+          cat "$RUNNER_TEMP/$VERSION.tar.gz.json"
+      - name: Install S3 client
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install AWS CLI
+        run: python3 -m pip install --user awscli
+      - name: Upload to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          endpoint='https://0693da34a224264a4ec10f07fc8336ae.r2.cloudflarestorage.com'
+          key="desktop/cuda/$PLATFORM/$VERSION.tar.gz"
+          if "$HOME/.local/bin/aws" s3api head-object --bucket offgrid-desktop-runtime-packs --key "$key" --endpoint-url "$endpoint" >/dev/null 2>&1; then
+            echo 'This pack version already exists. Choose a new version.' >&2
+            exit 1
+          fi
+          "$HOME/.local/bin/aws" s3 cp "$RUNNER_TEMP/$VERSION.tar.gz" "s3://offgrid-desktop-runtime-packs/$key" \
+            --endpoint-url "$endpoint" --no-progress --content-type application/gzip \
+            --cache-control 'public, max-age=31536000, immutable'
+          remote_size="$("$HOME/.local/bin/aws" s3api head-object --bucket offgrid-desktop-runtime-packs --key "$key" --endpoint-url "$endpoint" --query ContentLength --output text)"
+          test "$remote_size" = "$(stat -c %s "$RUNNER_TEMP/$VERSION.tar.gz")"
+      - name: Keep manifest for app pinning
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: cuda-${{ matrix.platform }}-${{ env.VERSION }}-manifest
+          path: ${{ runner.temp }}/${{ env.VERSION }}.tar.gz.json
+          if-no-files-found: error

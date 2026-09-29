@@ -12,6 +12,37 @@ if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
   exit 1
 fi
 
+# Reuse the multi-architecture CUDA engine from a successful pinned Linux CI build.
+# Set OFFGRID_BUILD_IMAGE_CUDA_FROM_SOURCE=1 only when regenerating the archive.
+if [ "${OFFGRID_BUILD_IMAGE_CUDA_FROM_SOURCE:-0}" != 1 ]; then
+  IMAGE_ARCHIVE="ogad-sd-${SD_REF}-linux-x64-cuda12.8-multiarch-v1.tar.gz"
+  IMAGE_SHA256=26f3e494a26d8fa3b18c5fb5bdf2865869bbd0e6cbfd14b1815dbaff9b4c7dd6
+  IMAGE_WORK="$(mktemp -d)"
+  trap 'rm -rf -- "$IMAGE_WORK"' EXIT
+  if [ -n "${OFFGRID_IMAGE_ARCHIVE_CACHE_DIR:-}" ] &&
+    [ -f "$OFFGRID_IMAGE_ARCHIVE_CACHE_DIR/$IMAGE_ARCHIVE" ]; then
+    cp "$OFFGRID_IMAGE_ARCHIVE_CACHE_DIR/$IMAGE_ARCHIVE" "$IMAGE_WORK/$IMAGE_ARCHIVE"
+  else
+    curl --fail --location --retry 3 --silent --show-error \
+      "https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/$IMAGE_ARCHIVE" \
+      --output "$IMAGE_WORK/$IMAGE_ARCHIVE"
+  fi
+  printf '%s  %s\n' "$IMAGE_SHA256" "$IMAGE_WORK/$IMAGE_ARCHIVE" | sha256sum --check --status
+  mkdir -p "$ROOT/build/linux-bin"
+  tar -xzf "$IMAGE_WORK/$IMAGE_ARCHIVE" -C "$ROOT/build/linux-bin" --no-same-owner
+  DEST="$ROOT/build/linux-bin/sd-cuda"
+  test -f "$DEST/LICENSE"
+  for name in sd-cli sd-server; do
+    test -x "$DEST/$name"
+    file "$DEST/$name" | grep -q 'ELF 64-bit.*x86-64'
+    dependencies="$(LD_LIBRARY_PATH="$DEST:$ROOT/build/linux-bin/cuda-runtime" ldd "$DEST/$name")"
+    missing="$(printf '%s\n' "$dependencies" | grep 'not found' | grep -v 'libcuda.so.1' || true)"
+    test -z "$missing" || { printf '%s\n' "$missing" >&2; exit 1; }
+  done
+  echo '[build-image-cuda-linux] reused checked CUDA image CLI and server'
+  exit 0
+fi
+
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
 git clone --depth 1 --branch "$SD_REF" --recurse-submodules \

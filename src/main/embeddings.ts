@@ -8,6 +8,7 @@ import { getResidencyMode } from './runtime-residency'
 import { recordAIRequest, type AIRequestHandle } from './ai-request-log'
 import type { EmbeddingRequest, EmbeddingResponse } from './embeddings-worker'
 import { writeDiagnosticLog } from './diagnostics-log'
+import { getBackendPreference } from './backend-preferences'
 
 /**
  * The built worker, when there is one.
@@ -49,7 +50,7 @@ class EmbeddingService {
     // than assuming the built layout: assuming it made every embedding fail outside a packaged
     // build, which silently demoted vector search to the FTS fallback instead of erroring.
     const backendState = beginRuntimeBackend('embeddings', 'Xenova/all-MiniLM-L6-v2')
-    const worker = new Worker(entry, { workerData: { modelsDir: modelsDir() } })
+    const worker = new Worker(entry, { workerData: { modelsDir: modelsDir(), backendPreference: getBackendPreference('embeddings') } })
     worker.on('message', (response: EmbeddingResponse) => {
       if (response.ready && response.device) {
         backendState.ready(providerLabel(response.device), undefined, response.fallbackReason)
@@ -118,7 +119,7 @@ class EmbeddingService {
                 undefined,
                 reason
               )
-            })
+            }, getBackendPreference('embeddings'))
           return new Promise<number[]>((resolve, reject) => {
             const worker = this.spawn(entry)
             const id = this.nextId++

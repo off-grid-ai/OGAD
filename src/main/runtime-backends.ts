@@ -27,7 +27,7 @@ export function beginRuntimeBackend(id: RuntimeId, model: string) {
     ready: (backend?: string, device?: string, detail?: string): void =>
       update({
         state: 'loaded',
-        ...(backend && !record.backend ? { backend } : {}),
+        ...(backend ? { backend } : {}),
         ...(device ? { device } : {}),
         ...(detail ? { detail } : {})
       }),

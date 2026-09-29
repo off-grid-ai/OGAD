@@ -64,7 +64,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '22'
       - name: Resolve channel + version
         id: bump
         run: |
@@ -99,12 +99,29 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           # Pin the build to THIS exact commit, not floating main.
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Create draft release for parallel platform builds
+        if: ${{ !inputs.artifact_only }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          CHANNEL: ${{ steps.bump.outputs.channel }}
+          TARGET_SHA: ${{ steps.bump.outputs.sha }}
+        run: |
+          TAG="v$VERSION"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --target "$TARGET_SHA" \
+              --title "Off Grid AI Desktop $VERSION" --notes 'Build in progress.'
+          fi
+          if [ "$CHANNEL" = beta ] && ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly --prerelease --title 'Nightly (rolling)' \
+              --notes 'Rolling nightly build. Pre-release.'
+          fi
 
   # Single build: pro code bundled, license-gated. Publishes to the default update
   # channel (latest-mac.yml).
   build-mac:
     needs: version
-    runs-on: macos-latest
+    runs-on: macos-15 # Standard arm64 runner; matches the pinned native payload.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -114,34 +131,26 @@ jobs:
             false # Smudge nothing on checkout; pull only the shipped, non-rebuilt
             # binaries below. Fetching everything (~200 MB) blew the org's monthly LFS
             # bandwidth budget and failed the release checkout ("exceeded its LFS budget").
-      - name: Pull shipped LFS binaries (skip the ones rebuilt below)
-        # resources/bin/{ffmpeg,text-extractor,sd/**,LICENSE} are prebuilt and shipped
-        # as-is, so they MUST be real files — a pointer stub spawns as ENOEXEC at runtime.
-        # llama/ + whisper/ are excluded because build-llama.sh / build-whisper-cli.sh
-        # recompile them from source in place later in this job, so pulling the committed
-        # copies is wasted bandwidth. Artifact verification still checks the signed
-        # package before publication.
-        run: git lfs pull --exclude="resources/bin/llama,resources/bin/whisper"
-      # Rebuild the chat engine from source with a PINNED macOS deployment target.
-      # The committed/LFS llama-server is minos 26 (built on a macOS-26 toolchain),
-      # so it only launches on macOS 26 — every macOS 13/14/15 user saw "Chat model
-      # Down". This compiles llama-server targeting macOS 13, GATES on its minos,
-      # and overwrites resources/bin/llama/ BEFORE electron-builder signs+notarizes,
-      # so the shipped engine is correct by construction. (~2 min, zero deps.)
-      - name: Build llama-server (pinned deployment target)
+      - name: Pull shipped LFS binaries
+        run: git lfs pull --exclude="resources/bin/llama,resources/bin/llama-prism,resources/bin/whisper,resources/bin/kev-runtime"
+      - name: Stage pinned macOS native engines
         run: |
-          command -v cmake >/dev/null || brew install cmake
-          MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
-          LLAMA_VARIANT=prism MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
-          otool -l resources/bin/llama/llama-server | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled engine minos="$2; exit}'
-          otool -l resources/bin/llama-prism/llama-server | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled Prism engine minos="$2; exit}'
-      # Rebuild the one-shot Whisper CLI instead of trusting the committed LFS
-      # payload. The production script disables OpenMP/BLAS auto-discovery and
-      # rejects Homebrew paths, missing @rpath names, symlinks, and a newer minos.
-      - name: Build Whisper CLI (pinned deployment target)
+          curl -fL --retry 3 -o "$RUNNER_TEMP/mac-native.tar.gz" \
+            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-mac-native-2026-09-arm64-v1.tar.gz'
+          echo 'ef1880daac727595bf825a254b1ebbc2a0c15c0cecd8da422c499b1568db0ad0  '"$RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
+          tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
+      - name: Verify cached macOS engines
         run: |
-          MACOS_DEPLOYMENT_TARGET=13.0 WHISPER_REF=v1.7.4 bash scripts/build-whisper-cli.sh
-          otool -l resources/bin/whisper/whisper-cli | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print "[ci] bundled Whisper minos="$2; exit}'
+          for variant in llama llama-prism; do
+            test -x "resources/bin/$variant/llama-server"
+            minos=$(otool -l "resources/bin/$variant/llama-server" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
+            test -n "$minos"
+            case "$minos" in 1[0-3].*|[1-9].*) ;; *) echo "Unsupported $variant minos $minos" >&2; exit 1 ;; esac
+            DYLD_LIBRARY_PATH="resources/bin/$variant" "resources/bin/$variant/llama-server" --help >/dev/null
+          done
+          test -x resources/bin/whisper/whisper-cli
+          otool -l resources/bin/whisper/whisper-cli | grep -q LC_BUILD_VERSION
+          DYLD_LIBRARY_PATH=resources/bin/whisper resources/bin/whisper/whisper-cli --help >/dev/null
       # Compile the native meeting recorder (ScreenCaptureKit + AVFoundation) and stage
       # it into resources/bin so extraResources bundles it at Contents/Resources/bin —
       # the first path recorderBin() resolves in the packaged app (pro meeting-native.ts).
@@ -185,8 +194,10 @@ jobs:
           mkdir -p resources/bin
           cp scripts/actions-helper/actions-helper resources/bin/actions-helper
           chmod +x resources/bin/actions-helper
-      - name: Build Kev server runtime (model weights excluded)
-        run: bash scripts/build-kev-runtime.sh
+      - name: Verify macOS Kev runtime
+        run: |
+          resources/bin/kev-runtime/python/bin/python3 -c 'import kev, mlx_lm, torch, uvicorn'
+          resources/bin/kev-runtime/python/bin/python3 resources/bin/kev-local-server.py --help >/dev/null
       # Stage the Parakeet STT runtime (sherpa-onnx CLI + ONNX model) into
       # resources/bin/parakeet. Additive: with SHERPA_ONNX_URL / PARAKEET_MODEL_URL
       # unset this is a no-op and transcription stays on whisper, so it can't break a
@@ -216,7 +227,7 @@ jobs:
         run: rm -rf pro/.git # don't nest a repo inside the build tree
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
       # Shared packages are file: dependencies on the shared monorepo, so it must sit BESIDE this
       # checkout before `npm ci` runs - an install cannot resolve a path that does not exist, and the
@@ -292,14 +303,13 @@ jobs:
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Stage native files and bundle
         run: node scripts/stage-native.mjs && npx electron-vite build
-      # Same approach as mobile (.github/workflows/release.yml): collect the commits
-      # since the previous release tag into release-notes.md. Generated BEFORE publish
-      # so the tag electron-builder is about to create (v$VERSION) is not yet the
-      # "last tag" — git describe resolves to the PREVIOUS release. We drop the
-      # bot version-bump commit ([skip ci]) so notes are only real changes.
+      # The version job has already created this build's draft tag. Exclude it
+      # when finding the previous release for the changelog.
       - name: Generate release notes
         run: |
-          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          LAST_TAG=$(git describe --tags --abbrev=0 \
+            --exclude="v${{ needs.version.outputs.version }}" \
+            --exclude=nightly 2>/dev/null || echo "")
           node scripts/release-notes.mjs \
             "$LAST_TAG" \
             "${{ needs.version.outputs.version }}" \
@@ -350,6 +360,7 @@ jobs:
           node scripts/refresh-mac-dmg-update-info.mjs "$DMG" dist/latest-mac.yml
           APP="$(find dist -maxdepth 2 -type d -name 'Off Grid AI Desktop.app' -print -quit)"
           test -n "$APP"
+          test -s "$APP/Contents/Resources/performance-packs.json"
           node scripts/probe-packaged-tts.mjs "$APP" --synthesize
       # Internal demo build: hand the signed+notarized DMG back as a run artifact and stop
       # (the publish steps below are all skipped). Repo-scoped, auto-expiring, no Release.
@@ -367,7 +378,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
           CHANNEL: ${{ needs.version.outputs.channel }}
-          TARGET_SHA: ${{ needs.version.outputs.sha }}
         run: |
           # electron-builder writes ONE update feed, latest-mac.yml, for BOTH channels
           # (we set no publish.channel, so it never emits beta-mac.yml). Beta vs stable
@@ -383,10 +393,7 @@ jobs:
             "dist/$FEED" dist dist/release-assets "$VERSION"
 
           TAG="v$VERSION"
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --target "$TARGET_SHA" \
-              --title "Off Grid AI Desktop $VERSION" --notes-file release-notes.md
-          fi
+          gh release view "$TAG" >/dev/null
           gh release upload "$TAG" dist/release-assets/* --clobber
           if [ "$CHANNEL" = stable ]; then
             gh release edit "$TAG" --draft=false --prerelease=false --latest
@@ -458,31 +465,15 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: gh release edit "v$VERSION" --notes-file release-notes.md
 
-      # Announce every published release in Slack: the GitHub release link + the notes
-      # generated above. Fail-soft (scripts/notify-slack-release.mjs always exits 0), so a
-      # Slack outage never fails a release. Needs org/repo secret SLACK_WEBHOOK_URL (an
-      # Incoming Webhook, channel-bound). No secret => the step is a logged no-op.
-      - name: Announce release in Slack
-        if: ${{ !inputs.artifact_only && success() }}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          PRODUCT: Off Grid AI Desktop
-          VERSION: ${{ needs.version.outputs.version }}
-          CHANNEL_LABEL: ${{ needs.version.outputs.channel }}
-          NOTES_FILE: release-notes.md
-          RELEASE_URL: https://github.com/off-grid-ai/OGAD/releases/tag/v${{ needs.version.outputs.version }}
-        run: node scripts/notify-slack-release.mjs
-
   # Windows release build. Mirrors build-mac: it consumes the SAME resolved version
   # + channel from the `version` job and publishes the NSIS installer plus the
   # Windows electron-updater feed (latest.yml for stable, beta.yml for nightly) to
   # the SAME GitHub release, so Windows and macOS ship as one version with working
-  # auto-update. Runs AFTER build-mac so the v$VERSION release already exists — this
-  # avoids a release-creation race between two concurrent `electron-builder --publish`
-  # runs. Windows native runtimes are fetched by scripts/fetch-win-binaries.ps1
+  # auto-update. The version job creates the draft release first, so all platform
+  # builds can upload to it in parallel. Windows native runtimes are fetched by scripts/fetch-win-binaries.ps1
   # (the repo's LFS binaries are macOS-only).
   build-win:
-    needs: [version, build-mac]
+    needs: version
     # Skipped for an artifact-only demo build (macOS DMG is all the lead needs).
     if: ${{ !inputs.artifact_only }}
     # windows-2022 = VS 2022 toolchain. windows-latest ships VS 2026, which node-gyp 11
@@ -523,7 +514,7 @@ jobs:
         run: rm -rf pro/.git # don't nest a repo inside the build tree
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
       # node-gyp (better-sqlite3-multiple-ciphers) fails on Python 3.13+; pin 3.12.
       - uses: actions/setup-python@v5
@@ -602,31 +593,78 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # raises the GitHub API rate limit
+          OFFGRID_INCLUDE_CUDA: '0'
         run: ./scripts/fetch-win-binaries.ps1
-      - name: Build Kev server runtime (model weights excluded)
-        shell: pwsh
-        run: ./scripts/build-kev-runtime.ps1
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Stage native files and bundle
         run: node scripts/stage-native.mjs && npx electron-vite build
-      - name: Package & publish (NSIS installer + auto-update metadata)
+      - name: Package Windows web installer, payload, and update metadata
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Optional Windows code signing — a no-op if the secrets are absent (the
           # build still publishes, unsigned; SmartScreen warns until a cert is added).
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
-          # Same version tag as build-mac -> both platforms land on ONE release.
-          #   stable -> latest.yml, published as a normal release (everyone)
-          #   beta   -> beta.yml (from the -beta suffix), published as a PRE-RELEASE
-          if [ "${{ needs.version.outputs.channel }}" = "stable" ]; then
-            npx electron-builder --win -c.publish.releaseType=release --publish always
-          else
-            npx electron-builder --win -c.publish.releaseType=prerelease --publish always
-          fi
+          npx electron-builder --win --publish never
+      - name: Verify Windows base runtimes
+        shell: bash
+        run: |
+          test -s dist/win-unpacked/resources/performance-packs.json
+          for binary in llama/llama-server.exe llama-cpu/llama-server.exe llama-prism/llama-server.exe llama-prism-cpu/llama-server.exe whisper-cpu/whisper-cli.exe sd/sd-cli.exe sd-cpu/sd-cli.exe ffmpeg.exe; do
+            test -s "dist/win-unpacked/resources/bin/$binary"
+          done
+          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper kev-runtime; do
+            test ! -e "dist/win-unpacked/resources/bin/$folder"
+          done
+      - name: Report Windows native payload sizes
+        shell: bash
+        run: du -sh resources/bin/* | sort -h | tail -20
+      - name: Publish Windows assets that fit GitHub Releases
+        id: win_assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          shopt -s nullglob
+          installers=(dist/nsis-web/*-setup.exe)
+          payloads=(dist/nsis-web/*.7z)
+          test "${#installers[@]}" -eq 1
+          test "${#payloads[@]}" -ge 1
+          # nsis-web writes its update feed beside the installer and payload.
+          feed=dist/nsis-web/latest.yml
+          test -s "$feed"
+          sha256sum "${installers[@]}" "${payloads[@]}" > dist/windows-packages.sha256
+          gh release upload "v$VERSION" dist/windows-packages.sha256 --clobber
+          limit=$((2 * 1024 * 1024 * 1024))
+          for asset in "${installers[@]}" "${payloads[@]}"; do
+            if [ "$(stat -c %s "$asset")" -ge "$limit" ]; then
+              echo 'large=true' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          gh release upload "v$VERSION" "${installers[@]}" "${payloads[@]}" "$feed" --clobber
+          echo 'large=false' >> "$GITHUB_OUTPUT"
+      - name: Upload large Windows installer and payload to this workflow run
+        if: steps.win_assets.outputs.large == 'true'
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: OffGrid-Windows-${{ needs.version.outputs.version }}
+          path: |
+            dist/nsis-web/*-setup.exe
+            dist/nsis-web/*.7z
+            dist/nsis-web/*.yml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Link large Windows package from the run summary
+        if: steps.win_assets.outputs.large == 'true'
+        shell: bash
+        run: |
+          echo "The Windows installer and payload are together in the [workflow run artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})." >> "$GITHUB_STEP_SUMMARY"
+          echo 'The SHA-256 checksums are attached to the versioned release as windows-packages.sha256.' >> "$GITHUB_STEP_SUMMARY"
       # Permanent Windows download link — the Windows counterpart to the Mac
       # OffGrid-latest.dmg alias. The versioned installer (off-grid-ai-<v>-setup.exe)
       # changes name every release, so /releases/latest/download/<name> can't target
@@ -635,33 +673,33 @@ jobs:
       # The versioned installer + latest.yml updater feed are untouched, so auto-update
       # is unaffected. --clobber replaces the copy from the prior run.
       - name: Publish stable latest-setup.exe alias
-        if: needs.version.outputs.channel == 'stable'
+        if: needs.version.outputs.channel == 'stable' && steps.win_assets.outputs.large != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          cp dist/*-setup.exe dist/OffGrid-latest-setup.exe
+          cp dist/nsis-web/*-setup.exe dist/OffGrid-latest-setup.exe
           gh release upload "v$VERSION" dist/OffGrid-latest-setup.exe --clobber
       # Constant nightly Windows link on the rolling 'nightly' pre-release (mirrors the
       # Mac nightly.dmg link). build-win runs after build-mac, which already ensured the
       # 'nightly' release exists — the fallback create is just belt-and-suspenders.
       - name: Publish constant nightly-setup.exe link
-        if: needs.version.outputs.channel == 'beta'
+        if: needs.version.outputs.channel == 'beta' && steps.win_assets.outputs.large != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp dist/*-setup.exe dist/OffGrid-nightly-setup.exe
+          cp dist/nsis-web/*-setup.exe dist/OffGrid-nightly-setup.exe
           gh release view nightly >/dev/null 2>&1 || \
             gh release create nightly --prerelease --title "Nightly (rolling)" \
               --notes "Rolling nightly build, auto-updated on every change. Pre-release - expect rough edges."
           gh release upload nightly dist/OffGrid-nightly-setup.exe --clobber
 
-  # Core Linux release. Wait for build-mac to create the versioned release, then
-  # add AppImage, deb, and Linux update metadata to that same release.
+  # Core Linux release. Upload AppImage, deb, and update metadata to the draft
+  # release created by the version job while macOS and Windows build in parallel.
   build-linux:
-    needs: [version, build-mac]
+    needs: version
     if: ${{ !inputs.artifact_only }}
     runs-on: ubuntu-24.04
     steps:
@@ -736,16 +774,17 @@ jobs:
         run: |
           test -f _executorch_speech/package.json
           mv _executorch_speech ../executorch-speech
+      - name: Stage pinned Linux native engines
+        run: |
+          curl -fL --retry 3 -o "$RUNNER_TEMP/linux-native.tar.gz" \
+            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-linux-native-2026-09-x64-v1.tar.gz'
+          echo '11f57bddc8b7b4c5efa4b4c298b8a000aaf0f203567f6c18953a6aff7a4e4b54  '"$RUNNER_TEMP/linux-native.tar.gz" | sha256sum -c -
+          mkdir -p build/linux-bin
+          tar -xzf "$RUNNER_TEMP/linux-native.tar.gz" -C build/linux-bin
+          install -Dm755 build/linux-bin/executorch-speech \
+            ../executorch-speech/native/bin/executorch-speech
       - name: Install dependencies
         run: npm ci
-      - name: Install Linux local voice build dependency
-        run: |
-          # ExecuTorch 1.2 code generation imports torchgen from its matching
-          # PyTorch release. The CPU wheel is a build tool, not an app payload.
-          python3 -m pip install --no-cache-dir 'torch==2.11.0+cpu' PyYAML Jinja2 \
-            --index-url https://download.pytorch.org/whl/cpu \
-            --extra-index-url https://pypi.org/simple
-          python3 -c 'import torchgen, yaml, jinja2'
       - name: Install Linux GPU runtime dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers unzip
       - name: Typecheck Linux main process
@@ -757,37 +796,32 @@ jobs:
       - name: Build Linux packages
         env:
           OFFGRID_FORCE_CORE: '0'
-        run: npm run build:linux
-      - name: Verify packaged Kev runtime
-        run: |
-          test -f dist/linux-unpacked/resources/bin/kev-local-server.py
-          dist/linux-unpacked/resources/bin/kev-runtime/python/bin/python3 -c 'import kev, torch, uvicorn; assert torch.version.cuda'
+        run: npm run build:linux:pinned
+      - name: Report Linux native payload sizes
+        run: du -sh dist/linux-unpacked/resources/bin/* | sort -h | tail -25
       - name: Verify Linux package inputs
         run: |
+          test -s dist/linux-unpacked/resources/performance-packs.json
+          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper-cuda kev-runtime; do
+            test ! -e "dist/linux-unpacked/resources/bin/$folder"
+          done
           for variant in llama llama-cpu llama-prism llama-prism-cpu; do
             engine="dist/linux-unpacked/resources/bin/$variant/llama-server"
             test -x "$engine"
             file "$engine" | grep -q 'ELF 64-bit.*x86-64'
             LD_LIBRARY_PATH="$(dirname "$engine")" ldd "$engine" | tee "$RUNNER_TEMP/$variant-ldd.txt"
-            ! grep -q 'not found' "$RUNNER_TEMP/$variant-ldd.txt"
+            if grep -q 'not found' "$RUNNER_TEMP/$variant-ldd.txt"; then exit 1; fi
             LD_LIBRARY_PATH="$(dirname "$engine")" "$engine" --version
           done
           for variant in llama llama-prism; do
             test -f "dist/linux-unpacked/resources/bin/$variant/libggml-vulkan.so"
-          done
-          for variant in llama-cuda llama-prism-cuda; do
-            test -x "dist/linux-unpacked/resources/bin/$variant/llama-server"
-            test -f "dist/linux-unpacked/resources/bin/$variant/libggml-cuda.so"
-          done
-          for library in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
-            test -f "dist/linux-unpacked/resources/bin/cuda-runtime/$library"
           done
           for helper in whisper/whisper-cli whisper-cpu/whisper-cli ffmpeg; do
             binary="dist/linux-unpacked/resources/bin/$helper"
             test -x "$binary"
             file "$binary" | grep -q 'ELF 64-bit.*x86-64'
             ldd "$binary" | tee "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
-            ! grep -q 'not found' "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
+            if grep -q 'not found' "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"; then exit 1; fi
           done
           dist/linux-unpacked/resources/bin/ffmpeg -version >/dev/null
           dist/linux-unpacked/resources/bin/whisper/whisper-cli --help >/dev/null 2>&1
@@ -797,7 +831,7 @@ jobs:
             test -x "$binary"
             file "$binary" | grep -q 'ELF 64-bit.*x86-64'
             LD_LIBRARY_PATH="$(dirname "$binary")" ldd "$binary" | tee "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
-            ! grep -q 'not found' "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"
+            if grep -q 'not found' "$RUNNER_TEMP/$(basename "$binary")-ldd.txt"; then exit 1; fi
           done
           LD_LIBRARY_PATH=dist/linux-unpacked/resources/bin/sd \
             dist/linux-unpacked/resources/bin/sd/sd-cli --list-devices | grep -q '^CPU'
@@ -814,21 +848,6 @@ jobs:
         run: bash scripts/probe-linux-voice.sh dist/linux-unpacked/resources/bin
       - name: Smoke-test local Linux voice output
         run: node scripts/probe-linux-tts.mjs
-      - name: Verify packaged CUDA dependencies
-        # Prism links libcuda at startup, so only a real NVIDIA host can launch it.
-        run: |
-          docker run --rm -v "$PWD/dist/linux-unpacked/resources/bin:/engines:ro" ubuntu:24.04 bash -euo pipefail -c '
-            for variant in llama-cuda llama-prism-cuda; do
-              export LD_LIBRARY_PATH="/engines/$variant:/engines/cuda-runtime"
-              dependencies="$(ldd "/engines/$variant/llama-server"; ldd "/engines/$variant/libggml-cuda.so")"
-              missing="$(printf "%s\n" "$dependencies" | grep "not found" | grep -v "libcuda.so.1" || true)"
-              test -z "$missing" || { printf "%s\n" "$missing" >&2; exit 1; }
-              if [ "$variant" = llama-cuda ]; then
-                "/engines/$variant/llama-server" --version
-                "/engines/$variant/llama-server" --list-devices
-              fi
-            done
-          '
       - name: Verify packaged Linux native modules
         run: |
           ELECTRON_RUN_AS_NODE=1 dist/linux-unpacked/off-grid-ai -e '
@@ -856,7 +875,7 @@ jobs:
           extraction="$(mktemp -d)"
           trap 'rm -rf -- "$extraction"' EXIT
           (cd "$extraction" && "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null)
-          for variant in llama-cuda llama llama-cpu llama-prism-cuda llama-prism llama-prism-cpu; do
+          for variant in llama llama-cpu llama-prism llama-prism-cpu; do
             bundled="$(find "$extraction/squashfs-root" -path "*/resources/bin/$variant/llama-server" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
@@ -866,18 +885,14 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
           done
-          for variant in llama-cuda llama-prism-cuda; do
-            backend="$(find "$extraction/squashfs-root" -path "*/resources/bin/$variant/libggml-cuda.so" -print -quit)"
-            test -f "$backend"
-          done
-          test -f "$(find "$extraction/squashfs-root" -path '*/resources/bin/cuda-runtime/libcublasLt.so.12' -type f -print -quit)"
+          test -z "$(find "$extraction/squashfs-root" -path '*/resources/bin/cuda-runtime/libcublasLt.so.12' -print -quit)"
           test -f "$(find "$extraction/squashfs-root" -path '*/resources/speech-assets/index.json' -type f -print -quit)"
           bundled_asar="$(find "$extraction/squashfs-root" -name app.asar -type f -print -quit)"
           test -n "$bundled_asar"
           cmp dist/linux-unpacked/resources/app.asar "$bundled_asar"
           rm -rf -- "$extraction/squashfs-root"
           dpkg-deb --extract "$deb" "$extraction/deb"
-          for variant in llama-cuda llama llama-cpu llama-prism-cuda llama-prism llama-prism-cpu; do
+          for variant in llama llama-cpu llama-prism llama-prism-cpu; do
             bundled="$(find "$extraction/deb" -path "*/resources/bin/$variant/llama-server" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
@@ -887,21 +902,86 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
           done
-          for variant in llama-cuda llama-prism-cuda; do
-            backend="$(find "$extraction/deb" -path "*/resources/bin/$variant/libggml-cuda.so" -print -quit)"
-            test -f "$backend"
-          done
-          test -f "$(find "$extraction/deb" -path '*/resources/bin/cuda-runtime/libcublasLt.so.12' -type f -print -quit)"
+          test -z "$(find "$extraction/deb" -path '*/resources/bin/cuda-runtime/libcublasLt.so.12' -print -quit)"
           test -f "$(find "$extraction/deb" -path '*/resources/speech-assets/index.json' -type f -print -quit)"
           bundled_asar="$(find "$extraction/deb" -name app.asar -type f -print -quit)"
           test -n "$bundled_asar"
           cmp dist/linux-unpacked/resources/app.asar "$bundled_asar"
-      - name: Publish Linux artifacts to the versioned release
+      - name: Publish Linux assets that fit GitHub Releases
+        id: linux_assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           shopt -s nullglob
-          artifacts=(dist/*.AppImage dist/*.deb dist/*-linux.yml)
-          test "${#artifacts[@]}" -ge 3
-          gh release upload "v$VERSION" "${artifacts[@]}" --clobber
+          appimages=(dist/*.AppImage)
+          debs=(dist/*.deb)
+          feeds=(dist/*-linux.yml)
+          test "${#appimages[@]}" -eq 1
+          test "${#debs[@]}" -eq 1
+          test "${#feeds[@]}" -ge 1
+          # GitHub Releases rejects each asset >= 2 GiB. Keep large verified
+          # packages as Actions artifacts instead of failing a public release.
+          limit=$((2 * 1024 * 1024 * 1024))
+          if [ "$(stat -c %s "${appimages[0]}")" -lt "$limit" ]; then
+            gh release upload "v$VERSION" "${appimages[0]}" "${feeds[@]}" --clobber
+            echo 'appimage_large=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'appimage_large=true' >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$(stat -c %s "${debs[0]}")" -lt "$limit" ]; then
+            gh release upload "v$VERSION" "${debs[0]}" --clobber
+            echo 'deb_large=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'deb_large=true' >> "$GITHUB_OUTPUT"
+          fi
+          sha256sum "${appimages[0]}" "${debs[0]}" > dist/linux-packages.sha256
+          gh release upload "v$VERSION" dist/linux-packages.sha256 --clobber
+      - name: Upload large Linux AppImage to this workflow run
+        if: steps.linux_assets.outputs.appimage_large == 'true'
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: OffGrid-Linux-AppImage-${{ needs.version.outputs.version }}
+          path: dist/*.AppImage
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload large Linux deb to this workflow run
+        if: steps.linux_assets.outputs.deb_large == 'true'
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
+        with:
+          name: OffGrid-Linux-deb-${{ needs.version.outputs.version }}
+          path: dist/*.deb
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Link large Linux packages from the run summary
+        if: steps.linux_assets.outputs.appimage_large == 'true' || steps.linux_assets.outputs.deb_large == 'true'
+        run: |
+          echo "Large Linux packages are available in the [workflow run artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})." >> "$GITHUB_STEP_SUMMARY"
+          echo 'The SHA-256 checksums are attached to the versioned release as linux-packages.sha256.' >> "$GITHUB_STEP_SUMMARY"
+
+  # Announce only when all three installers have built and published successfully.
+  announce:
+    needs: [version, build-mac, build-win, build-linux]
+    if: ${{ !inputs.artifact_only }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+      - name: Read published release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: gh release view "v$VERSION" --json body --jq .body > release-notes.md
+      - name: Announce release in Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PRODUCT: Off Grid AI Desktop
+          VERSION: ${{ needs.version.outputs.version }}
+          CHANNEL_LABEL: ${{ needs.version.outputs.channel }}
+          NOTES_FILE: release-notes.md
+          RELEASE_URL: https://github.com/off-grid-ai/OGAD/releases/tag/v${{ needs.version.outputs.version }}
+        run: node scripts/notify-slack-release.mjs

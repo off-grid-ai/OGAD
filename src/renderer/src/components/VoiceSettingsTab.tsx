@@ -23,6 +23,7 @@ import {
 } from '@renderer/lib/voice-preferences'
 import { SettingsRow } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
+import { BackendPreferencesSection } from './ProcessingControls'
 import { LoadingDots } from './ui/loading-dots'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
@@ -429,6 +430,8 @@ export function VoiceSettingsTab(): React.JSX.Element {
           }))}
         />
       </SettingsRow>}
+
+      <BackendPreferencesSection modalities={['tts']} />
 
       <SettingsRow
         label="Playback speed"

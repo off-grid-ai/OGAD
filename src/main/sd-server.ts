@@ -24,7 +24,8 @@ import fs from 'fs'
 import os from 'os'
 import { isPackaged } from './runtime-env'
 import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
-import { findSdBinary, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
+import { findSdBinaries, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
+import { getBackendPreference } from './backend-preferences'
 
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
  *  lingering LLM shouldn't block the image server's port either). */
@@ -174,6 +175,8 @@ class SdServerService {
   private port = SD_SERVER_PORT
   private activeKey: string | null = null // contextKey of the loaded model, null when down
   private startPromise: Promise<void> | null = null
+  private startEpoch = 0
+  private activeBinary: string | null = null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private idleMs = 60_000 // keep the model hot for a minute of inactivity, then evict
   private evictionHook: (() => void) | null = null
@@ -211,8 +214,9 @@ class SdServerService {
     }
   }
 
-  private findBinary(): string | null {
-    return findSdBinary('sd-server')
+  /** Binary that successfully loaded the resident image model. */
+  getBinaryPath(): string | null {
+    return this.activeBinary
   }
 
   /** Ensure a server is up with EXACTLY this context; restart on a model/flag
@@ -223,15 +227,30 @@ class SdServerService {
     if (this.server && this.activeKey === key) return // already the right model
     if (this.server && this.activeKey !== key) this.stopProcess() // swap → restart
     if (this.startPromise !== null) return this.startPromise
-    this.startPromise = this.spawn(ctx, key).finally(() => {
+    this.startPromise = this.startWithFallback(ctx, key, this.startEpoch).finally(() => {
       this.startPromise = null
     })
     return this.startPromise
   }
 
-  private async spawn(ctx: SdServerContext, key: string): Promise<void> {
-    const bin = this.findBinary()
-    if (!bin) throw new Error('Image server binary (sd-server) not found in resources/bin/sd.')
+  private async startWithFallback(ctx: SdServerContext, key: string, epoch: number): Promise<void> {
+    const binaries = findSdBinaries('sd-server', getBackendPreference('image'))
+    if (!binaries.length) throw new Error('Image server binary (sd-server) not found in resources/bin/sd.')
+    for (const [index, binary] of binaries.entries()) {
+      if (epoch !== this.startEpoch) throw new Error('Image server startup canceled.')
+      try {
+        await this.spawn(ctx, key, binary)
+        if (epoch !== this.startEpoch) throw new Error('Image server startup canceled.')
+        return
+      } catch (error) {
+        this.stopProcess()
+        if (epoch !== this.startEpoch || index === binaries.length - 1) throw error
+        console.warn(`[sd-server] Runtime failed; retrying ${binaries[index + 1]}`, error)
+      }
+    }
+  }
+
+  private async spawn(ctx: SdServerContext, key: string, bin: string): Promise<void> {
     if (!fs.existsSync(ctx.modelPath)) throw new Error(`Image model not found: ${ctx.modelPath}`)
     const binDir = path.dirname(bin)
 
@@ -270,11 +289,20 @@ class SdServerService {
     }
     proc.stdout.on('data', capture)
     proc.stderr.on('data', capture)
+    proc.on('error', (error) => {
+      backendState.fail(error)
+      if (this.server !== proc) return
+      this.stderrTail.push(error.message)
+      this.server = null
+      this.activeKey = null
+      this.activeBinary = null
+    })
     proc.on('close', () => {
       backendState.stop()
       if (this.server !== proc) return // an already-replaced instance
       this.server = null
       this.activeKey = null
+      this.activeBinary = null
     })
 
     try {
@@ -285,6 +313,7 @@ class SdServerService {
       throw error
     }
     this.activeKey = key
+    this.activeBinary = bin
   }
 
   private async waitForReady(timeoutMs = 90_000): Promise<void> {
@@ -361,6 +390,7 @@ class SdServerService {
   /** Stop the server now (model swap, shutdown, or memory reclaim) and fire the
    *  eviction hook so the caller can warm the LLM back up. */
   stop(): void {
+    this.startEpoch += 1
     this.clearIdleTimer()
     const wasUp = this.server !== null
     this.stopProcess()
@@ -380,6 +410,7 @@ class SdServerService {
       this.server = null
     }
     this.activeKey = null
+    this.activeBinary = null
   }
 
   private armIdleTimer(): void {
@@ -404,11 +435,11 @@ class SdServerService {
     // used to lack (a crashed sd-server would keep holding the port after a restart).
     // posix matches our OWN bundled binary by FULL PATH (a user's separately-run sd-server
     // is left untouched); win32's tasklist only exposes the image name, so match that.
-    const ownBin = this.findBinary()
-    if (!ownBin) return
+    const ownBins = findSdBinaries('sd-server', getBackendPreference('image'))
+    if (!ownBins.length) return
     reapOrphansOnPort(
       this.port,
-      (info) => (process.platform === 'win32' ? /sd-server/i.test(info) : info.includes(ownBin)),
+      (info) => (process.platform === 'win32' ? /sd-server/i.test(info) : ownBins.some((bin) => info.includes(bin))),
       'sd-server'
     )
   }

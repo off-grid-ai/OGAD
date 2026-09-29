@@ -342,7 +342,9 @@ try {
         Run-Checked 'git.exe' @('lfs', 'install', '--local', '--skip-repo')
         Run-Checked 'git.exe' @('lfs', 'pull', '--include=resources/bin/kev-local-server.py', '--exclude=')
         Run-Checked 'npm.cmd' @('--prefix', $shared, 'ci')
-        Run-Checked 'npm.cmd' @('--prefix', $shared, 'run', 'build')
+        foreach ($package in @('models', 'sync', 'use', 'automation', 'speech', 'ui', 'rag', 'design')) {
+            Run-Checked 'npm.cmd' @('--prefix', (Join-Path $shared "packages\$package"), 'run', 'build')
+        }
         Run-Checked 'npm.cmd' @('ci')
         Run-Checked 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts\fetch-win-binaries.ps1')
         # A checkpoint is written only after the complete runtime build succeeds.
@@ -363,6 +365,7 @@ try {
         }
         Run-KevScript 'scripts\enable-win-kev-gpu.ps1'
         Run-Checked $runtimePython @('resources\bin\kev-local-server.py', '--help')
+        Run-Checked 'npm.cmd' @('run', 'build')
         Set-Content $runtimeStamp $runtimeHash
         Write-Host 'Dependencies, Kev server check, and CUDA operation passed. Model inference still needs an app test.' -ForegroundColor Green
 

@@ -15,7 +15,8 @@ apt-get install -y build-essential cmake ninja-build pkg-config git git-lfs gh \
   libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers \
   libx11-dev libxext-dev libxfixes-dev libxi-dev libxtst-dev libxrandr-dev \
   libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libsecret-1-0 \
-  xfce4 xfce4-terminal xrdp xorgxrdp dbus-x11 ubuntu-drivers-common
+  xfce4 xfce4-terminal xrdp xorgxrdp dbus-x11 \
+  pipewire-audio pipewire-module-xrdp ubuntu-drivers-common
 
 # Use the official Node 22 distribution and verify its published checksum.
 work=$(mktemp -d)

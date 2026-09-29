@@ -91,6 +91,7 @@ export function getDB(): Database.Database {
   db = null
 
   const dbPath = path.join(dataDir(), 'memories.db')
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true })
   console.log('Opening database at:', dbPath)
 
   const key = loadOrCreateKey(dbPath)

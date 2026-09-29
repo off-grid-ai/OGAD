@@ -250,7 +250,7 @@ describe('<MemoryChat/> saved voice actions', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Transcribe again' }))
 
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'This voice note is not on this Mac.'
+      'This voice note is not on this device.'
     )
     await user.click(screen.getAllByRole('button', { name: 'Show transcript' })[0]!)
     expect(screen.getByText('Original transcript')).toBeTruthy()

@@ -6,6 +6,7 @@ import { Worker } from 'node:worker_threads'
 import type { DownloadProgress } from '@offgrid/executorch-speech'
 import { modelsDir } from './runtime-env'
 import type { TtsWorkerResponse } from './tts-onnx-worker'
+import { getBackendPreference } from './backend-preferences'
 
 export interface OnnxSynthesisInput {
   text: string
@@ -46,7 +47,7 @@ export class OnnxSpeechRuntime {
     const entry = workerEntry()
     if (!entry) throw new Error('The ONNX speech worker is not built.')
     const backendState = beginRuntimeBackend('speech', 'Kokoro')
-    const worker = new Worker(entry, { workerData: { modelsDir: modelsDir() } })
+    const worker = new Worker(entry, { workerData: { modelsDir: modelsDir(), backendPreference: getBackendPreference('tts') } })
     worker.on('message', (response: TtsWorkerResponse) => {
       if (response.type === 'ready') {
         backendState.ready(providerLabel(response.device!), undefined, response.fallbackReason)

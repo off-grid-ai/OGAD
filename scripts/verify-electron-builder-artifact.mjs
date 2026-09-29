@@ -18,36 +18,36 @@ export default async function verifyElectronBuilderArtifact(event) {
     return
   }
 
-  const appOutDir = event.packager.computeAppOutDir(event.target.outDir, event.arch)
+  // nsis-web stores its payload in dist/nsis-web, while the staged app stays in
+  // dist/win-unpacked. The target output directory is not the app directory.
+  const packageOutDir = event.target.name === 'nsis-web'
+    ? path.dirname(event.target.outDir)
+    : event.target.outDir
+  const appOutDir = event.packager.computeAppOutDir(packageOutDir, event.arch)
   if (asarOnlyArtifact) {
     assertAsarArchiveInventory(path.join(appOutDir, 'resources', 'app.asar'))
     const executable = artifact.endsWith('.exe') ? 'llama-server.exe' : 'llama-server'
     const required = [
       ...[
-        'llama-cuda',
         'llama',
         'llama-cpu',
-        'llama-prism-cuda',
         'llama-prism',
         'llama-prism-cpu'
-      ].map((variant) => path.join('bin', variant, executable)),
-      ...(artifact.endsWith('.exe')
-        ? ['cudart64_12.dll', 'cublas64_12.dll', 'cublasLt64_12.dll']
-        : ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12']
-      ).map((library) => path.join('bin', 'cuda-runtime', library))
+      ].map((variant) => path.join('bin', variant, executable))
     ]
     if (artifact.endsWith('.exe')) {
       required.push(
-        path.join('bin', 'sd-cuda', 'sd-cli.exe'),
-        path.join('bin', 'sd-cuda', 'ggml-cuda.dll'),
+        path.join('bin', 'whisper-cpu', 'whisper-cli.exe'),
         path.join('bin', 'sd', 'sd-cli.exe'),
         path.join('bin', 'sd-cpu', 'sd-cli.exe'),
-        path.join('bin', 'ffmpeg.exe')
+        path.join('bin', 'ffmpeg.exe'),
+        path.join('bin', 'kev-local-server.py')
       )
     }
     if (artifact.endsWith('.appimage') || artifact.endsWith('.deb')) {
       required.push(
         path.join('bin', 'whisper', 'whisper-cli'),
+        path.join('bin', 'whisper-cpu', 'whisper-cli'),
         path.join('bin', 'whisper', 'LICENSE'),
         path.join('bin', 'ffmpeg'),
         path.join('bin', 'licenses', 'ffmpeg.txt'),
@@ -70,18 +70,32 @@ export default async function verifyElectronBuilderArtifact(event) {
         throw new Error(`installer input is missing required runtime: ${relative}`)
       }
     }
+    const optionalGpuFolders = [
+      'llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'kev-runtime',
+      ...(artifact.endsWith('.exe') ? ['whisper'] : ['whisper-cuda'])
+    ]
+    for (const folder of optionalGpuFolders) {
+      if (fs.existsSync(path.join(appOutDir, 'resources', 'bin', folder))) {
+        throw new Error(`installer input includes optional GPU runtime: bin/${folder}`)
+      }
+    }
     if (artifact.endsWith('.appimage') || artifact.endsWith('.deb')) {
-      const libvips = path.join(
+      const libvipsDir = path.join(
         appOutDir,
         'resources',
         'app.asar.unpacked',
         'node_modules',
         '@img',
         'sharp-libvips-linux-x64',
-        'lib',
-        'libvips-cpp.so.8.18.3'
+        'lib'
       )
-      if (!fs.existsSync(libvips) || !fs.statSync(libvips).isFile()) {
+      const hasLibvips =
+        fs.existsSync(libvipsDir) &&
+        fs.readdirSync(libvipsDir).some((name) => {
+          const file = path.join(libvipsDir, name)
+          return /^libvips-cpp\.so\.\d+(?:\.\d+)*$/.test(name) && fs.statSync(file).isFile()
+        })
+      if (!hasLibvips) {
         throw new Error('installer input is missing the unpacked Sharp libvips library')
       }
     }

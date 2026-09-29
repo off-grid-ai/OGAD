@@ -3,7 +3,7 @@
 import { createServer } from 'node:http'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { synthesizeRemoteVoice } from '../../../../main/remote-media-runtime'
 import { VoiceBubble } from '../VoiceBubble'
 
@@ -30,6 +30,14 @@ afterEach(() => {
 })
 
 describe('<VoiceBubble/> with a remote voice provider', () => {
+  it('does not read a missing user recording with an AI voice', async () => {
+    const synthesize = vi.fn().mockResolvedValue({ dataUrl: 'data:audio/wav;base64,AAAA' })
+    render(<VoiceBubble messageId="note" isUser transcript="My words" synthesize={synthesize} />)
+    await userEvent.setup().click(screen.getByTitle('Play'))
+    expect(synthesize).not.toHaveBeenCalled()
+    expect(screen.getByText('This voice recording is no longer on this device.')).toBeTruthy()
+  })
+
   it('lets the provider choose its voice when no remote speaker is selected', async () => {
     let requestBody: Record<string, unknown> | null = null
     const provider = createServer(async (request, response) => {

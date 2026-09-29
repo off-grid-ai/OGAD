@@ -61,6 +61,17 @@ jobs:
           ref: ${{ inputs.build_ref || github.ref }}
           persist-credentials: false # don't leave the token in .git/config for npm postinstall scripts
           lfs: false # pull only the cross-platform Kev launcher below, not ~235 MB of macOS binaries
+      - name: Check Windows source setup script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/Setup-OGAD-Source.ps1').Path,
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
       - name: Pull the Kev server launcher from LFS
         shell: bash
         run: |
@@ -99,7 +110,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       # node-gyp (better-sqlite3-multiple-ciphers) fails on Python 3.13+; pin 3.12.
@@ -198,7 +209,7 @@ jobs:
       - name: Build (typecheck + bundle)
         run: npm run build
 
-      - name: Package Windows installer (NSIS)
+      - name: Package Windows web installer and payload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Optional Windows code signing (no-op if absent → unsigned; SmartScreen
@@ -212,9 +223,10 @@ jobs:
         with:
           name: off-grid-ai-windows
           path: |
-            dist/*.exe
-            dist/*.zip
+            dist/nsis-web/*.exe
+            dist/nsis-web/*.7z
           if-no-files-found: error
+          compression-level: 0
 
   build-linux:
     if: ${{ github.event_name == 'workflow_dispatch' && (inputs.platform == 'both' || inputs.platform == 'linux') }}
@@ -227,6 +239,8 @@ jobs:
           ref: ${{ inputs.build_ref || github.ref }}
           lfs: false # Tracked native binaries are macOS files; build Linux ELF below.
           persist-credentials: false
+      - name: Check Linux source setup script syntax
+        run: bash -n scripts/Setup-OGAD-Source.sh
 
       - name: Resolve pinned Pro source
         if: env.HAS_PRO_TOKEN == 'true'
@@ -345,7 +359,7 @@ jobs:
             test -x "$engine"
             file "$engine" | grep -q 'ELF 64-bit.*x86-64'
             LD_LIBRARY_PATH="$(dirname "$engine")" ldd "$engine" | tee "$RUNNER_TEMP/$variant-ldd.txt"
-            ! grep -q 'not found' "$RUNNER_TEMP/$variant-ldd.txt"
+            if grep -q 'not found' "$RUNNER_TEMP/$variant-ldd.txt"; then exit 1; fi
             LD_LIBRARY_PATH="$(dirname "$engine")" "$engine" --version
           done
           for variant in llama-cuda llama-prism-cuda; do
@@ -355,7 +369,7 @@ jobs:
           for library in libcudart.so.12 libcublas.so.12 libcublasLt.so.12; do
             test -f "dist/linux-unpacked/resources/bin/cuda-runtime/$library"
           done
-          for helper in whisper/whisper-cli whisper-cpu/whisper-cli; do
+          for helper in whisper-cuda/whisper-cli whisper/whisper-cli whisper-cpu/whisper-cli; do
             test -x "dist/linux-unpacked/resources/bin/$helper"
           done
           test -n "$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)"
@@ -382,14 +396,29 @@ jobs:
                 "/engines/$variant/llama-server" --list-devices
               fi
             done
+            for binary in whisper-cuda/whisper-cli sd-cuda/sd-cli sd-cuda/sd-server; do
+              test -x "/engines/$binary"
+              export LD_LIBRARY_PATH="/engines/$(dirname "$binary"):/engines/cuda-runtime"
+              dependencies="$(ldd "/engines/$binary")"
+              missing="$(printf "%s\n" "$dependencies" | grep "not found" | grep -v "libcuda.so.1" || true)"
+              test -z "$missing" || { printf "%s\n" "$missing" >&2; exit 1; }
+            done
           '
 
-      - name: Upload Linux installer artifacts
+      - name: Upload Linux AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: off-grid-ai-linux
+          name: off-grid-ai-linux-appimage
           path: |
             dist/*.AppImage
-            dist/*.deb
             dist/*-linux.yml
           if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload Linux deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: off-grid-ai-linux-deb
+          path: dist/*.deb
+          if-no-files-found: error
+          compression-level: 0

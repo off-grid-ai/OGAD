@@ -14,6 +14,7 @@ import { postCompletionOnce } from '../llm/http-post'
 import { buildLaunchArgs } from '../llm/settings-math'
 import { engineSpawnEnv } from '../llm/spawn-env'
 import { selectLocalEngine } from '../llm/select-local-engine'
+import { getBackendPreference } from '../backend-preferences'
 import { isPortFree, pickFreePort } from '../free-port'
 import { reapOrphanProcessesOnPort } from '../kill-orphan-port'
 import {
@@ -93,7 +94,7 @@ export class DecisionRuntime {
         'No private port is available for the Decision runtime.',
         'startup'
       )
-    const serverPath = await selectLocalEngine()
+    const serverPath = await selectLocalEngine(getBackendPreference('decision'))
     if (!serverPath)
       throw new DecisionRuntimeError('The bundled Decision engine is missing.', 'startup')
     this.port = port
@@ -110,7 +111,7 @@ export class DecisionRuntime {
       // Mapika Decider supports 32k tokens. Keep enough room for structured
       // Computer Use state without reserving the model's full context window.
       effectiveCtxSize: DECIDER_CONTEXT_SIZE,
-      gpuLayers: 99,
+      gpuLayers: getBackendPreference('decision') === 'cpu' ? 0 : 99,
       flashAttn: true,
       kvCacheType: 'q8_0',
       speculativeDecoding: 'off',
@@ -186,6 +187,7 @@ export class DecisionRuntime {
           ...globalThis.process.env,
           KEV_LOCAL_BASE: artifact.base,
           KEV_BACKEND: globalThis.process.platform === 'darwin' ? 'auto' : 'torch',
+          OFFGRID_KEV_DEVICE: getBackendPreference('decision'),
           HF_HUB_OFFLINE: '1',
           TRANSFORMERS_OFFLINE: '1',
           PYTHONUNBUFFERED: '1'

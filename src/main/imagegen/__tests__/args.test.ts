@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCoreMLArgs,
   buildQwenImage21Args,
+  qwenImageArgsForBackend,
   buildZImageArgs,
   buildStandardArgs,
   DEFAULT_NEGATIVE
@@ -124,6 +125,13 @@ describe('buildQwenImage21Args', () => {
     const args = buildQwenImage21Args({ ...base, initImage: '/in.png' })
     expect(flagVal(args, '--llm_vision')).toBe(base.llmVision)
     expect(flagVal(args, '-r')).toBe('/in.png')
+  })
+
+  it('keeps Qwen weights on CUDA and retains CPU offload for a fallback runtime', () => {
+    const args = buildQwenImage21Args(base)
+    expect(qwenImageArgsForBackend(args, 'CUDA')).not.toContain('--offload-to-cpu')
+    expect(qwenImageArgsForBackend(args, 'Vulkan')).toContain('--offload-to-cpu')
+    expect(args).toContain('--offload-to-cpu')
   })
 })
 

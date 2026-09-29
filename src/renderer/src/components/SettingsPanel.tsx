@@ -37,6 +37,7 @@ import { VoiceSettingsTab } from './VoiceSettingsTab'
 import { RemoteVisionSettingsTab } from './RemoteVisionSettingsTab'
 import { SettingsRow as Row } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
+import { BackendPreferencesSection } from './ProcessingControls'
 import type { SpeechLanguage } from '@offgrid/speech'
 import { CaretRight, X } from '@phosphor-icons/react'
 import { getSlot, SLOTS } from '@renderer/bootstrap/slotRegistry'
@@ -645,6 +646,7 @@ export function SettingsPanel({
             </Row>
             {/* Order matters: the OUTER budget first, because each inner one is bounded by it.
                 thinking budget within max output within context window (rule in @offgrid/models). */}
+            <BackendPreferencesSection modalities={['llm']} />
             <Row label="Context window" controlId="context-window" hint={contextWindowHint(s)}>
               <SettingsSelect
                 id="context-window"
@@ -915,6 +917,7 @@ export function SettingsPanel({
                 <p className="mt-1 text-[10px] text-neutral-600">{transcriptionInfo.label}</p>
               ) : null}
             </Row>
+            <BackendPreferencesSection modalities={['stt']} />
             <Row
               label="Spoken language"
               controlId="stt-language"
@@ -937,6 +940,7 @@ export function SettingsPanel({
 
         {tab === 'tools' && (
           <>
+            <BackendPreferencesSection modalities={['grounding', 'decision', 'embeddings']} />
             <div className="mb-3 flex items-center justify-between rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
               <div>
                 <div className="text-sm">Enable tools</div>

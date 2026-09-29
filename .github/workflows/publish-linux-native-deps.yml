@@ -1,0 +1,58 @@
+name: Pin Linux native release inputs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Download existing Linux installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p source
+          gh run download 36450913791 --repo "$GITHUB_REPOSITORY" \
+            --name off-grid-ai-linux-deb --dir source
+      - name: Extract shipped CPU and Vulkan runtimes
+        run: |
+          deb="$(find source -name '*.deb' -type f -print -quit)"
+          test -s "$deb"
+          mkdir -p extracted
+          dpkg-deb --fsys-tarfile "$deb" | tar -x -C extracted --wildcards --no-anchored \
+            '*/resources/bin/llama/*' \
+            '*/resources/bin/llama-cpu/*' \
+            '*/resources/bin/llama-prism/*' \
+            '*/resources/bin/llama-prism-cpu/*' \
+            '*/resources/bin/whisper/*' \
+            '*/resources/bin/whisper-cpu/*' \
+            '*/resources/bin/sd/*' \
+            '*/resources/bin/licenses/*' \
+            '*/resources/bin/ffmpeg' \
+            '*/resources/bin/executorch-speech'
+          bin_root="$(find extracted -type d -path '*/resources/bin' -print -quit)"
+          test -n "$bin_root"
+          for file in llama/llama-server llama-cpu/llama-server llama-prism/llama-server \
+            llama-prism-cpu/llama-server whisper/whisper-cli whisper-cpu/whisper-cli \
+            sd/sd-cli ffmpeg executorch-speech; do
+            test -x "$bin_root/$file"
+          done
+          ! find "$bin_root" -maxdepth 1 -type d -name '*cuda*' | grep -q .
+          tar -czf "$RUNNER_TEMP/ogad-linux-native-2026-09-x64-v1.tar.gz" -C "$bin_root" .
+          sha256sum "$RUNNER_TEMP/ogad-linux-native-2026-09-x64-v1.tar.gz"
+          stat -c '%s bytes' "$RUNNER_TEMP/ogad-linux-native-2026-09-x64-v1.tar.gz"
+      - name: Publish pinned input archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload native-deps-2026-09 \
+            "$RUNNER_TEMP/ogad-linux-native-2026-09-x64-v1.tar.gz" \
+            --repo "$GITHUB_REPOSITORY"

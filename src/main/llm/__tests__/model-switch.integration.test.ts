@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LLMService } from '../../llm'
 
+vi.mock('../../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
+
 afterEach(() => vi.restoreAllMocks())
 
 describe('model switch during startup', () => {

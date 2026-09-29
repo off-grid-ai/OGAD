@@ -1,9 +1,12 @@
 import { EventEmitter } from 'events'
 import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { app } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TranscriptionService } from '../transcription/types'
 
-vi.mock('electron', () => ({ ipcMain: { handle: vi.fn() } }))
+vi.mock('electron', () => ({ app: { getPath: vi.fn() }, ipcMain: { handle: vi.fn() } }))
 
 import {
   setupVoiceTranscriptionIpc,
@@ -39,6 +42,24 @@ describe('voice transcription IPC request lifecycle', () => {
 
   beforeEach(() => {
     host = new IpcHost()
+  })
+
+  it('saves a voice recording for playback after the chat reloads', async () => {
+    const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'ogad-voice-test-'))
+    vi.mocked(app.getPath).mockReturnValue(directory)
+    try {
+      setupVoiceTranscriptionIpc(host)
+      const saved = await host.invoke(
+        'voice:save-recording', event(new Sender(12)), new Uint8Array([1, 2, 3]), 'webm'
+      ) as string
+      expect(saved).toMatch(/\/voice\/[a-f0-9-]+\.webm$/)
+      expect(await fs.promises.readFile(saved)).toEqual(Buffer.from([1, 2, 3]))
+      await expect(host.invoke(
+        'voice:save-recording', event(new Sender(12)), new Uint8Array([1]), '../wav'
+      )).rejects.toThrow('Unsupported voice recording format.')
+    } finally {
+      await fs.promises.rm(directory, { recursive: true, force: true })
+    }
   })
 
   it('aborts the active native request for the same renderer and removes its temp audio', async () => {

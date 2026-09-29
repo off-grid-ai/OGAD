@@ -39,6 +39,10 @@ files:
   - '!**/*.tsbuildinfo'
 win:
   executableName: off-grid-ai
+  # The CUDA and Kev payload is too large for NSIS to embed in one executable.
+  # Ship a small web installer with its checked package archive beside it.
+  target:
+    - nsis-web
   # Without this, electron-builder ships the default Electron icon on Windows (the
   # mac block sets its own icon below). The 512x512 PNG is auto-converted to a
   # multi-size Windows ICO for the exe + NSIS installer.
@@ -46,7 +50,15 @@ win:
   extraResources:
     - from: resources/bin
       to: bin
-nsis:
+      filter:
+        - '**/*'
+        - '!llama-cuda/**'
+        - '!llama-prism-cuda/**'
+        - '!cuda-runtime/**'
+        - '!sd-cuda/**'
+        - '!whisper/**'
+        - '!kev-runtime/**'
+nsisWeb:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
@@ -120,6 +132,14 @@ linux:
   extraResources:
     - from: build/linux-bin
       to: bin
+      filter:
+        - '**/*'
+        - '!llama-cuda/**'
+        - '!llama-prism-cuda/**'
+        - '!cuda-runtime/**'
+        - '!sd-cuda/**'
+        - '!whisper-cuda/**'
+        - '!kev-runtime/**'
     - from: ../executorch-speech/native/bin/executorch-speech
       to: bin/executorch-speech
     - from: ../executorch-speech/generated/default-assets

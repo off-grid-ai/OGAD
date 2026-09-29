@@ -2,11 +2,10 @@
  * Regression guard for the Windows image-gen "binary not found" bug.
  *
  * scripts/fetch-win-binaries.ps1 populates resources/bin/sd/sd-cli.exe from an
- * upstream stable-diffusion.cpp release asset, matched by NAME. The sd fetch is
- * OPTIONAL (the script's verify block only WARNs when sd-cli.exe is missing), so
- * a stale asset pattern fails SILENTLY at build time: `Get-AssetUrl` throws "no
- * asset matching", the try/catch swallows it into a warning, and the Windows
- * package ships with NO image binary — surfacing only at runtime as
+ * upstream stable-diffusion.cpp release asset, matched by NAME. A stale asset
+ * pattern once failed silently at build time: `Get-AssetUrl` threw "no asset
+ * matching", the try/catch swallowed it into a warning, and the Windows
+ * package shipped with no image binary. The error appeared only at runtime as
  *   "Image generation binary (sd-cli) not found in resources/bin/sd."
  * (src/main/imagegen.ts:findSdCli -> throw).
  *
@@ -47,7 +46,7 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — stable-diffusion.cpp asset', (
     expect(SRC).toMatch(/Copy-Item \$sd \$cli -Force/)
   })
 
-  it('keeps sd-cli.exe in the post-fetch verify (present, even if only a warning)', () => {
+  it('keeps sd-cli.exe in the post-fetch verify', () => {
     expect(SRC).toMatch(/'sd\\sd-cli\.exe'/)
   })
 })

@@ -283,7 +283,7 @@ export function ConnectorsScreen(): ReactElement {
   }, [load])
 
   const installed = new Set(items.map((i) => i.name.toLowerCase()))
-  const gallery = CONNECTOR_CATALOG.filter((e) => !installed.has(e.name.toLowerCase()))
+  const gallery = CONNECTOR_CATALOG.filter((e) => e.ready && !installed.has(e.name.toLowerCase()))
 
   const doConnect = async (
     entry: CatalogEntry,

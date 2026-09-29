@@ -43,6 +43,8 @@ import {
   type Modality,
   type ResidencyMode
 } from './runtime-residency'
+import { getBackendPreferences, setBackendPreference } from './backend-preferences'
+import type { BackendModality, BackendPreference } from '../shared/backend-preferences'
 import {
   requestAccessibilityPermission,
   requestScreenRecordingPermission,
@@ -67,6 +69,13 @@ import {
   appNameLikeClause
 } from './ipc-query-logic'
 import { requestApplicationRelaunch } from './shutdown'
+import {
+  activateInstalledPerformancePack,
+  onPerformancePackChanged,
+  pausePerformancePack,
+  performancePackStatus,
+  startPerformancePack
+} from './performance-pack'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import { notifyRagConversationChanged } from './rag-conversation-events'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
@@ -578,6 +587,16 @@ export async function summarizeSession(sessionId: string): Promise<string | null
 }
 
 export function setupIPC() {
+  activateInstalledPerformancePack()
+  onPerformancePackChanged((status) => {
+    BrowserWindow.getAllWindows().forEach((window) =>
+      window.webContents.send('performance-pack:changed', status)
+    )
+  })
+  ipcMain.handle('performance-pack:status', performancePackStatus)
+  ipcMain.handle('performance-pack:start', startPerformancePack)
+  ipcMain.handle('performance-pack:pause', pausePerformancePack)
+  ipcMain.handle('performance-pack:restart', () => requestApplicationRelaunch(app))
   setupAIRequestLogIPC()
   setupVoiceTranscriptionIpc()
   const db = getDB()
@@ -1338,6 +1357,12 @@ export function setupIPC() {
   ipcMain.handle('runtime:residency:set', (_e, modality: Modality, mode: ResidencyMode) =>
     setResidencyMode(modality, mode)
   )
+  ipcMain.handle('runtime:backend:get', () => getBackendPreferences())
+  ipcMain.handle('runtime:backend:set', async (_e, modality: BackendModality, preference: BackendPreference) => {
+    const next = setBackendPreference(modality, preference)
+    // A loaded engine keeps its present backend until its next load. The UI says so.
+    return next
+  })
   // Unload one modality's model from memory now (the "free RAM" button). Goes through
   // the same evict() seam as residency/shutdown; the engine reloads on next use.
   ipcMain.handle('runtime:unload', async (_e, modality: Modality) => {

@@ -10,6 +10,7 @@ vi.mock('node:fs', async (original) => ({
   existsSync: () => true
 }))
 vi.mock('../runtime-env', () => ({ modelsDir: () => '/synthetic/models' }))
+vi.mock('../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
 vi.mock('node:worker_threads', async () => {
   const { EventEmitter } = await import('node:events')
   return {

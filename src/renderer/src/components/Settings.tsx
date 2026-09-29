@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
 import { ProgressiveBlur } from './ui/progressive-blur'
 import { SetupPanel } from './setup/SetupPanel'
+import { PerformancePackPanel } from './setup/PerformancePackPanel'
 import { StoragePanel } from './setup/StoragePanel'
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel'
 import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
@@ -24,6 +25,7 @@ export { ModelPipelineSection } from './ProcessingControls'
 const SETTINGS_SECTION_TITLES: Record<string, string> = {
   setup: 'Setup & health',
   permissions: 'Setup & health',
+  performance: 'GPU performance',
   capture: 'Capture & processing',
   'computer-use': 'Computer use',
   remote: 'Remote model server',
@@ -170,6 +172,14 @@ export function Settings({
                   <SettingsPermissionsPanel />
                 </section>
               ) : null}
+            </SettingsCard>
+
+            <SettingsCard
+              title="GPU performance"
+              summary="Manage GPU components for chat, images, transcription, and Computer Use."
+              delay={0.135}
+            >
+              <PerformancePackPanel showUnavailable />
             </SettingsCard>
 
             <SettingsCard
