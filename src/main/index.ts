@@ -18,6 +18,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { initializeAIRequestLogs } from './ai-request-log-store'
+import { activateInstalledPerformancePack } from './performance-pack'
 import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
 import { registerToolExtension } from './tools'
@@ -287,6 +288,8 @@ app.whenReady().then(async () => {
   const serverOnly =
     process.argv.includes('--server-only') || process.env.OFFGRID_SERVER_ONLY === '1'
   if (serverOnly) {
+    // Headless startup skips setupIPC, which activates the pack for the desktop UI.
+    activateInstalledPerformancePack()
     console.log('[gateway] server-only mode — gateway on :7878, no UI/capture')
     if (process.platform === 'darwin' && app.dock) {
       try {
