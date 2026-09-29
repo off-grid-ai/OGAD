@@ -1200,7 +1200,10 @@ export class LLMService {
     })
 
     try {
-      await this.waitForReady()
+      // A cold CUDA load can spend over a minute on model weights and CLIP
+      // initialization while the server is still healthy. Do not kill it and
+      // fall back to CPU at the normal one-minute deadline.
+      await this.waitForReady(path.basename(binDir).endsWith('-cuda') ? 180_000 : 60_000)
       if (this.server !== proc) throw new Error('Model load was cancelled')
       // Confirmed healthy: from here a close IS a crash worth recovering from.
       probing = false
