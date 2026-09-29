@@ -4,7 +4,8 @@ const host = vi.hoisted(() => ({
   post: vi.fn(),
   load: vi.fn(),
   generate: vi.fn(),
-  write: vi.fn()
+  write: vi.fn(),
+  device: 'coreml' as string
 }))
 vi.mock('node:worker_threads', () => ({
   parentPort: { on: host.on, postMessage: host.post },
@@ -14,15 +15,16 @@ vi.mock('kokoro-js', () => ({ KokoroTTS: { from_pretrained: host.load } }))
 vi.mock('node:fs/promises', () => ({ writeFile: host.write }))
 vi.mock('../embeddings-env', () => ({ configureTransformersEnv: vi.fn() }))
 vi.mock('../onnx-device', () => ({
-  onnxDeviceCandidates: () => ['coreml', 'cpu'],
+  onnxDeviceCandidates: () => [host.device, 'cpu'],
   loadWithOnnxFallback: async (load: (device: string) => Promise<unknown>) => ({
-    runtime: await load('coreml'),
-    device: 'coreml'
+    runtime: await load(host.device),
+    device: host.device
   })
 }))
 beforeEach(() => {
   vi.resetModules()
-  for (const mock of Object.values(host)) mock.mockReset()
+  host.device = 'coreml'
+  for (const mock of [host.on, host.post, host.load, host.generate, host.write]) mock.mockReset()
   host.load.mockImplementation(async (_id, options) => {
     options.progress_callback({
       status: 'progress',
@@ -37,6 +39,13 @@ beforeEach(() => {
   host.write.mockResolvedValue(undefined)
 })
 describe('ONNX speech worker response evidence', () => {
+  it('uses FP32 for CUDA speech so the T4 does not return NaN audio', async () => {
+    host.device = 'cuda'
+    await import('../tts-onnx-worker')
+    host.on.mock.calls[0]![1]({ id: 7, type: 'prepare', voice: 'af_heart' })
+    await vi.waitFor(() => expect(host.post).toHaveBeenCalledWith({ id: 7, type: 'complete', device: 'cuda' }))
+    expect(host.load.mock.calls[0]![1]).toMatchObject({ dtype: 'fp32', device: 'cuda' })
+  })
   it('reports the actual provider, emits progress and reuses its loaded runtime', async () => {
     await import('../tts-onnx-worker')
     const receive = host.on.mock.calls[0]![1]

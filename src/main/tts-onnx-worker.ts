@@ -101,7 +101,9 @@ async function runtime(id: number): Promise<{ runtime: KokoroRuntime; device: De
     // file. Its runtime forwards this value to Transformers.js, which supports
     // Core ML, DirectML, CUDA, WebGPU, and CPU.
     const runtime = await KokoroTTS.from_pretrained(MODEL_ID, {
-      dtype: device === 'cpu' ? 'q8' : device === 'webgpu' ? 'fp32' : 'fp16',
+      // Kokoro's FP16 CUDA graph can return only NaNs on NVIDIA T4. FP32
+      // produced finite, audible samples on the packaged Linux test VM.
+      dtype: device === 'cpu' ? 'q8' : device === 'webgpu' || device === 'cuda' ? 'fp32' : 'fp16',
       device: device as 'cpu',
       progress_callback: (info) => reportProgress(id, info)
     })
