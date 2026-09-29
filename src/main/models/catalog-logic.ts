@@ -293,10 +293,13 @@ export function buildDiskEntry(opts: {
     }
   }
   const dl = opts.downloaded.find((m) => m.id === id)
-  if (dl && !opts.isCatalogId(id)) {
+  if (dl && (!opts.isCatalogId(id) || opts.catalogById(id)?.kind === 'video')) {
     const bytes = dl.files.reduce((s, n) => s + sizeOf(n), 0)
     const primary = dl.files.find((name) => !isProjectorFileName(name)) ?? dl.files[0]
-    const kind = (dl.familyId ? opts.catalogById(dl.familyId)?.kind : undefined) ?? dl.kind
+    const kind =
+      (dl.familyId ? opts.catalogById(dl.familyId)?.kind : undefined) ??
+      dl.kind ??
+      opts.catalogById(id)?.kind
     return {
       id,
       name: dl.name,
@@ -360,7 +363,7 @@ export function scanModelDir(opts: {
   let totalBytes = 0
   const orphans: { name: string; bytes: number }[] = []
   for (const name of opts.entries) {
-    if (!name.endsWith('.gguf') && !name.endsWith('.part')) continue
+    if (!opts.known.has(name) && !/\.(gguf|safetensors|part)$/i.test(name)) continue
     const st = opts.statFile(name)
     if (!st || !st.isFile) continue
     totalBytes += st.size

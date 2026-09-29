@@ -137,6 +137,9 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     /* imagegen unavailable */
   }
 
+  const { videoGenStatus } = await import('./videogen')
+  const video = videoGenStatus({ localOnly: true })
+
   const gw = (gatewayHealth ?? {}) as { modalities?: Record<string, string> }
   const modality = (k: string): ComponentStatus => {
     if (!gatewayHealth) return 'down'
@@ -167,6 +170,12 @@ export async function getSystemHealth(): Promise<SystemHealth> {
       label: 'Image generation',
       status: image.available ? 'ready' : 'not_installed',
       detail: image.available ? undefined : (image.reason ?? 'No image model installed')
+    },
+    {
+      id: 'video',
+      label: 'Video generation',
+      status: video.available ? 'ready' : 'not_installed',
+      detail: video.available ? undefined : video.reason
     },
     ...(['grounding', 'decision'] as const).map((id): HealthComponent => {
       const runtime = runtimeBackendSnapshot().find((entry) => entry.id === id)
@@ -312,7 +321,7 @@ export interface SetupPlan {
 }
 
 /** The full set of models "Configure for me" will set up for a mode: the chat/vision
- *  model plus speech-to-text, text-to-speech, and (outside Conservative) image. Pure
+ *  model plus speech-to-text, text-to-speech, and optional image/video packs. Pure
  *  preview — no downloads — so the UI can list everything before the user commits.
  *  autoConfigure() consumes the same plan, so the preview and the action never drift. */
 export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
@@ -358,6 +367,31 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       installed: installed.includes(ex.id),
       required: false
     })
+  }
+
+  // Use the smallest complete video pack that meets the catalog RAM requirement.
+  // Heavy generation models remain optional and are skipped in Conservative mode.
+  if (effMode !== 'conservative') {
+    const video = CATALOG
+      .filter(
+        (entry) =>
+          entry.kind === 'video' &&
+          entry.minRamGb != null &&
+          entry.minRamGb <= ramGb() &&
+          entry.files.length > 0
+      )
+      .sort((a, b) => sizeOf(a.id) - sizeOf(b.id))[0]
+    if (video) {
+      items.push({
+        kind: 'video',
+        capability: 'Video generation',
+        id: video.id,
+        name: video.name,
+        sizeGb: sizeOf(video.id),
+        installed: installed.includes(video.id),
+        required: false
+      })
+    }
   }
 
   return { mode: effMode, ramGb: ramGb(), items, totalDownloadGb: totalDownloadGb(items) }

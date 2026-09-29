@@ -5,6 +5,7 @@ import {
   WarningCircle,
   ChatCircle,
   Image as ImageIcon,
+  VideoCamera,
   SpeakerHigh,
   Microphone,
   DownloadSimple,
@@ -24,7 +25,7 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   {
     id: 'conservative',
     label: 'Conservative',
-    hint: 'Lightest - small, fast, low memory (skips the image model)'
+    hint: 'Lightest - small, fast, low memory (skips image and video models)'
   },
   {
     id: 'balanced',
@@ -34,7 +35,7 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'extreme', label: 'Extreme', hint: 'Largest model and context your RAM allows' }
 ]
 
-type ItemKind = 'chat' | 'transcription' | 'voice' | 'image'
+type ItemKind = 'chat' | 'transcription' | 'voice' | 'image' | 'video'
 const KIND_ICON: Record<
   ItemKind,
   React.ComponentType<{ className?: string; weight?: 'fill' | 'regular' }>
@@ -42,7 +43,8 @@ const KIND_ICON: Record<
   chat: ChatCircle,
   transcription: Microphone,
   voice: SpeakerHigh,
-  image: ImageIcon
+  image: ImageIcon,
+  video: VideoCamera
 }
 
 interface SetupProgress {
