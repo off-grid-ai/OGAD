@@ -42,6 +42,7 @@ import { engineSpawnEnv } from './llm/spawn-env'
 import { gpuDeviceAvailable } from './llm/gpu-device-probe'
 import { shouldAutoRecover } from './llm/crash-policy'
 import { enginePriority } from './llm/engine-priority'
+import { modelStartupTimeout } from './llm/startup-timeout'
 import { getBackendPreference } from './backend-preferences'
 import { prioritizeBackend, type BackendPreference } from '../shared/backend-preferences'
 import { streamCompletion, type StreamResult } from './llm/stream'
@@ -1203,7 +1204,7 @@ export class LLMService {
       // A cold CUDA load can spend over a minute on model weights and CLIP
       // initialization while the server is still healthy. Do not kill it and
       // fall back to CPU at the normal one-minute deadline.
-      await this.waitForReady(path.basename(binDir).endsWith('-cuda') ? 180_000 : 60_000)
+      await this.waitForReady(modelStartupTimeout(path.basename(binDir)))
       if (this.server !== proc) throw new Error('Model load was cancelled')
       // Confirmed healthy: from here a close IS a crash worth recovering from.
       probing = false
