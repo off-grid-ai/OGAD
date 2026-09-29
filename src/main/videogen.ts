@@ -1,12 +1,7 @@
 import { beginRuntimeBackend, runtimeBackendSnapshot } from './runtime-backends'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { generateRemoteVideo } from './remote-media-runtime'
-import {
-  resolveVideoRequest,
-  isSupportedVideoWeight,
-  videoVaeFilename,
-  VIDEO_ENCODER_FILENAME
-} from '@offgrid/models'
+import { resolveVideoRequest, isSupportedVideoWeight, videoPackFiles } from '@offgrid/models'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -37,7 +32,6 @@ import { describeOwnGeneratedVideo } from './videogen/generated-video-share'
 import { emitSharedFileMutation } from './sync-shared-file'
 
 const VIDEO_DIR = 'generated-videos'
-const ENCODER = VIDEO_ENCODER_FILENAME
 const CANCELLED = 'Video generation stopped.'
 let currentChild: ChildProcess | null = null
 let cancelRequested = false
@@ -50,14 +44,17 @@ function availablePacks(): Array<{ name: string; pack: VideoModelPack }> {
   const directory = modelsDir()
   try {
     const entries = fs.readdirSync(directory)
-    if (!entries.includes(ENCODER)) return []
     return entries
       .filter((name) => isSupportedVideoWeight(name))
       .flatMap((name) => {
-        const weight = resolveExistingOwnedEntry(directory, name)
-        const vae = resolveExistingOwnedEntry(directory, videoVaeFilename(name)!)
-        const encoder = resolveExistingOwnedEntry(directory, ENCODER)
-        return weight && vae && encoder ? [{ name, pack: { weight, vae, encoder } }] : []
+        const names = videoPackFiles(name)!
+        const pack: Record<string, string> = {}
+        for (const [role, file] of Object.entries(names)) {
+          const owned = resolveExistingOwnedEntry(directory, file)
+          if (!owned) return []
+          pack[role] = owned
+        }
+        return [{ name, pack: pack as unknown as VideoModelPack }]
       })
   } catch {
     return []
@@ -76,9 +73,27 @@ export function videoGenStatus(options: { localOnly?: boolean } = {}): {
   const packs = availablePacks()
   const chosen = getActiveModal('video')
   const active = packs.find((p) => p.name === chosen)?.name ?? packs[0]?.name ?? null
-  if (!findSdBinary('sd-cli')) return { available: false, models: packs.map((p) => p.name), active, reason: 'Video engine was not found.' }
-  if (!ffmpegBin()) return { available: false, models: packs.map((p) => p.name), active, reason: 'Video encoder was not found.' }
-  if (!packs.length) return { available: false, models: [], active: null, reason: 'Download a complete video model pack.' }
+  if (!findSdBinary('sd-cli'))
+    return {
+      available: false,
+      models: packs.map((p) => p.name),
+      active,
+      reason: 'Video engine was not found.'
+    }
+  if (!ffmpegBin())
+    return {
+      available: false,
+      models: packs.map((p) => p.name),
+      active,
+      reason: 'Video encoder was not found.'
+    }
+  if (!packs.length)
+    return {
+      available: false,
+      models: [],
+      active: null,
+      reason: 'Download a complete video model pack.'
+    }
   return { available: true, models: packs.map((p) => p.name), active }
 }
 
@@ -91,11 +106,14 @@ function resolvedRequest(
       chosen
     ] ?? {}
   const savedSeed = Number(getSetting<number | string>('videoSeed', -1))
-  return resolveVideoRequest(request, {
-    ...saved,
-    seed: Number.isFinite(savedSeed) ? savedSeed : -1,
-    negativePrompt: getSetting('videoNegative', '')
-  })
+  return resolveVideoRequest(
+    { ...request, model: chosen },
+    {
+      ...saved,
+      seed: Number.isFinite(savedSeed) ? savedSeed : -1,
+      negativePrompt: getSetting('videoNegative', '')
+    }
+  )
 }
 
 async function enhanceVideoPrompt(
@@ -105,15 +123,21 @@ async function enhanceVideoPrompt(
   let streaming = ''
   try {
     const instruction = `Rewrite the request as one short, concrete video prompt. Keep the subject and action. Add camera movement, lighting and motion only when helpful. Return only the prompt, on one line.\n\nRequest:\n${prompt.slice(0, 2000)}`
-    const result = await modalityQueue.run(CHAT_JOB, () => llm.chatStream(
-      instruction, [], (text, kind) => {
-        if (kind === 'content') {
-          streaming += text
-          onUpdate?.({ stage: 'enhancing', enhancedPrompt: streaming })
-        }
-      },
-      { temperature: 0.7, thinking: false }, 2048, 60000
-    ))
+    const result = await modalityQueue.run(CHAT_JOB, () =>
+      llm.chatStream(
+        instruction,
+        [],
+        (text, kind) => {
+          if (kind === 'content') {
+            streaming += text
+            onUpdate?.({ stage: 'enhancing', enhancedPrompt: streaming })
+          }
+        },
+        { temperature: 0.7, thinking: false },
+        2048,
+        60000
+      )
+    )
     return cleanEnhancedPrompt(result.content, prompt)
   } catch {
     return prompt
@@ -342,14 +366,19 @@ export function listGeneratedVideos(scope?: {
 }> {
   const root = generatedVideosDir()
   try {
-    return fs.readdirSync(root).filter((name) => /\.mp4$/i.test(name)).flatMap((name) => {
-      const owned = resolveExistingOwnedEntry(root, name)
-      if (!owned) return []
-      const facts = readGeneratedVideoSidecar(owned)
-      if (scope?.conversationId && facts.conversationId !== scope.conversationId) return []
-      if (!scope?.conversationId && scope?.projectId && facts.projectId !== scope.projectId) return []
-      return [{ path: owned, name, mtime: fs.statSync(owned).mtimeMs, ...facts }]
-    }).sort((a, b) => b.mtime - a.mtime)
+    return fs
+      .readdirSync(root)
+      .filter((name) => /\.mp4$/i.test(name))
+      .flatMap((name) => {
+        const owned = resolveExistingOwnedEntry(root, name)
+        if (!owned) return []
+        const facts = readGeneratedVideoSidecar(owned)
+        if (scope?.conversationId && facts.conversationId !== scope.conversationId) return []
+        if (!scope?.conversationId && scope?.projectId && facts.projectId !== scope.projectId)
+          return []
+        return [{ path: owned, name, mtime: fs.statSync(owned).mtimeMs, ...facts }]
+      })
+      .sort((a, b) => b.mtime - a.mtime)
   } catch {
     return []
   }
@@ -360,13 +389,29 @@ export function deleteGeneratedVideo(candidate: string): boolean {
   if (!owned || !owned.endsWith('.mp4')) return false
   try {
     let shared: ReturnType<typeof describeOwnGeneratedVideo> = null
-    try { shared = describeOwnGeneratedVideo(owned) } catch { /* An older local clip can lack sync metadata. */ }
-    const messages = getDB().prepare("SELECT uuid, conversation_id, content, context FROM rag_messages WHERE context LIKE '%videoRef%'").all() as Array<{ uuid: string; conversation_id: string; content: string; context: string }>
+    try {
+      shared = describeOwnGeneratedVideo(owned)
+    } catch {
+      /* An older local clip can lack sync metadata. */
+    }
+    const messages = getDB()
+      .prepare(
+        "SELECT uuid, conversation_id, content, context FROM rag_messages WHERE context LIKE '%videoRef%'"
+      )
+      .all() as Array<{ uuid: string; conversation_id: string; content: string; context: string }>
     for (const message of messages) {
       let context: Record<string, unknown>
-      try { context = JSON.parse(message.context) as Record<string, unknown> } catch { continue }
+      try {
+        context = JSON.parse(message.context) as Record<string, unknown>
+      } catch {
+        continue
+      }
       const reference = readGeneratedVideoReference(context)
-      if (!reference || (reference.path !== owned && !(shared?.syncId && reference.id === shared.syncId))) continue
+      if (
+        !reference ||
+        (reference.path !== owned && !(shared?.syncId && reference.id === shared.syncId))
+      )
+        continue
       delete context.videoRef
       updateRagMessage(message.conversation_id, message.uuid, message.content, context)
     }

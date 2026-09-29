@@ -1,4 +1,4 @@
-import { VIDEO_DEFAULTS } from '@offgrid/models'
+import { videoModelDefaults, videoModelLimits } from '@offgrid/models'
 import { useEffect, useState } from 'react'
 import { SettingsSelect } from './SettingsSelect'
 
@@ -10,7 +10,6 @@ type VideoValues = {
   steps: number
   guidance: number
 }
-const DEFAULT: VideoValues = VIDEO_DEFAULTS
 type VideoSettings = {
   videoParams?: Record<string, Partial<VideoValues>>
   videoSeed?: string | number
@@ -18,7 +17,9 @@ type VideoSettings = {
   enhanceVideoPrompts?: boolean
 }
 
-const notify = (): void => { window.dispatchEvent(new Event('og:video-settings-changed')) }
+const notify = (): void => {
+  window.dispatchEvent(new Event('og:video-settings-changed'))
+}
 
 export function VideoSettingsTab(): React.JSX.Element {
   const [models, setModels] = useState<string[]>([])
@@ -42,7 +43,8 @@ export function VideoSettingsTab(): React.JSX.Element {
       .catch(() => {})
   }, [])
 
-  const values = { ...DEFAULT, ...(allParams[model] ?? {}) }
+  const limits = videoModelLimits(model)
+  const values = { ...videoModelDefaults(model), ...(allParams[model] ?? {}) }
   const persist = (key: string, value: unknown): void => {
     void Promise.resolve(window.api.saveSetting(key, value)).then(notify)
   }
@@ -57,7 +59,12 @@ export function VideoSettingsTab(): React.JSX.Element {
     persist('videoParams', next)
   }
 
-  if (!model) return <p className="border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-500">Download a complete video model pack in Models to set video options.</p>
+  if (!model)
+    return (
+      <p className="border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-500">
+        Download a complete video model pack in Models to set video options.
+      </p>
+    )
 
   return (
     <div className="space-y-4 text-xs text-neutral-300">
@@ -96,7 +103,8 @@ export function VideoSettingsTab(): React.JSX.Element {
             options={[
               { value: '320x192', label: '320 × 192' },
               { value: '512x288', label: '512 × 288' },
-              { value: '832x480', label: '832 × 480' }
+              { value: '832x480', label: '832 × 480' },
+              { value: `1280x${limits.heightMax}`, label: `1280 × ${limits.heightMax}` }
             ]}
           />
         </div>
@@ -109,7 +117,7 @@ export function VideoSettingsTab(): React.JSX.Element {
             label="Video frames"
             value={String(values.frames)}
             onValueChange={(value) => setValue('frames', Number(value))}
-            options={[17, 33, 49, 81].map((frames) => ({
+            options={[17, 33, 49, 81, 121].map((frames) => ({
               value: String(frames),
               label: `${frames} frames`
             }))}
