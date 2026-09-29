@@ -1,7 +1,7 @@
 import type { Session } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { pathToFileURL } from 'node:url'
-import { getMainWindow } from './main-window'
+import { getMainWindow, getMainWindowDocumentUrl } from './main-window'
 import { rendererHtmlPath } from './renderer-path'
 
 type PermissionSession = Pick<Session, 'setPermissionRequestHandler'>
@@ -26,10 +26,13 @@ export function installMediaPermissionHandler(target: PermissionSession): void {
       try {
         const expected = new URL(rendererUrl)
         const requester = new URL(details.requestingUrl)
+        const document = new URL(getMainWindowDocumentUrl() ?? '')
         // Embedded sites share this session, but cannot enter fullscreen as the app.
         callback(
           expected.protocol === 'file:'
-            ? requester.protocol === 'file:' && requester.pathname === expected.pathname
+            ? document.protocol === 'file:' &&
+              document.pathname === expected.pathname &&
+              requester.href === webContents.getURL()
             : requester.origin === expected.origin
         )
         return

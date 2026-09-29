@@ -174,5 +174,13 @@ profile. This skipped the packaged app updater and preserved the installed app.
 The gallery listed both generated clips. The 480p clip played inline. The native
 picture-in-picture window opened, showed a play control, and returned to the
 inline player with Back to tab. Its very short duration did not allow a useful
-pause/resume check. Fullscreen did not open and is still under investigation.
+pause/resume check.
+
+Fullscreen first failed because the packaged app's history router changed its
+file URL from `index.html` to `/chat`. The permission handler now checks the last
+full document navigation against the exact app renderer path. It allows history
+routes only in that same main window and main frame; a foreign document or
+pending navigation remains denied. With this change applied to the separate
+verification artifact, the gallery player entered fullscreen and Escape returned
+to the gallery. The main-process typecheck passed. No test suite ran.
 These player checks do not verify engine discovery in that development launch.
