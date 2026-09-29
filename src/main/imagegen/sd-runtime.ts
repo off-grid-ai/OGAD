@@ -27,7 +27,10 @@ export function hasWindowsVulkanLoader(
  * their existing `sd` runtime; the Linux Vulkan build contains CPU kernels too.
  */
 export function findSdBinaries(name: 'sd-cli' | 'sd-server'): string[] {
-  let directories = process.platform === 'linux' ? ['sd-cuda', 'sd', 'sd-cpu'] : ['sd', 'sd-cpu']
+  let directories =
+    process.platform === 'linux' && fs.existsSync('/dev/nvidia0')
+      ? ['sd-cuda', 'sd', 'sd-cpu']
+      : ['sd', 'sd-cpu']
   if (process.platform === 'win32') {
     directories = hasWindowsVulkanLoader()
       ? ['sd-cuda', 'sd', 'sd-cpu']
@@ -47,7 +50,7 @@ export function findSdBinary(name: 'sd-cli' | 'sd-server'): string | null {
   return findSdBinaries(name)[0] ?? null
 }
 
-/** CUDA image binaries reuse the CUDA DLLs already packaged for llama.cpp. */
+/** CUDA image binaries reuse the CUDA libraries already packaged for llama.cpp. */
 export function sdRuntimeLibraryEnv(
   platform: NodeJS.Platform,
   binaryPath: string,
@@ -55,10 +58,18 @@ export function sdRuntimeLibraryEnv(
 ): Record<string, string> {
   const pathApi = platform === 'win32' ? path.win32 : path.posix
   const binDir = pathApi.dirname(binaryPath)
-  if (platform !== 'win32' || imageBackendForRuntime(platform, binaryPath) !== 'CUDA') {
+  if (imageBackendForRuntime(platform, binaryPath) !== 'CUDA') {
     return nativeLibraryEnv(platform, binDir, inherited)
   }
   const cudaRuntime = pathApi.join(pathApi.dirname(binDir), 'cuda-runtime')
+  if (platform === 'linux') {
+    return nativeLibraryEnv(platform, binDir, {
+      ...inherited,
+      LD_LIBRARY_PATH: inherited.LD_LIBRARY_PATH
+        ? `${cudaRuntime}:${inherited.LD_LIBRARY_PATH}`
+        : cudaRuntime
+    })
+  }
   return nativeLibraryEnv(platform, binDir, {
     ...inherited,
     PATH: `${cudaRuntime}${path.win32.delimiter}${inherited.PATH ?? ''}`
