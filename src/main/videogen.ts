@@ -398,15 +398,19 @@ export async function generateVideo(
       durationSeconds: request.frames / request.fps
     }
   } catch (error) {
-    fs.rmSync(output, { force: true })
+    try { fs.rmSync(output, { force: true }) } catch { /* retain the generation error */ }
     throw error
   } finally {
     jobAbort = null
-    fs.rmSync(raw, { force: true })
-    fs.rmSync(previewPath, { force: true })
-    fs.rmSync(`${previewPath}.tmp.png`, { force: true })
     cancelRequested = false
     activeJob = false
+    // A preview can still be open in the player on Windows. Cleanup must not
+    // turn a completed clip into a failure or leave generation permanently busy.
+    for (const temporary of [raw, previewPath, `${previewPath}.tmp.png`]) {
+      try { fs.rmSync(temporary, { force: true }) } catch (error) {
+        console.warn('[videogen] Temporary file cleanup failed', error)
+      }
+    }
   }
 }
 

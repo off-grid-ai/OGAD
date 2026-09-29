@@ -240,7 +240,10 @@ export async function generateRemoteVideo(
       if (progress || stage) onProgress?.(progress, stage)
       if (!previewDownloaded && job.preview && Number.isFinite(job.preview.width) && Number.isFinite(job.preview.height)) {
         try {
-          const response = await fetch(`${endpoint}/preview`, { headers: headers(server), signal })
+          const response = await fetch(`${endpoint}/preview`, {
+            headers: headers(server),
+            signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+          })
           if (response.ok && response.body && response.headers.get('content-type')?.startsWith('image/png')) {
             const reader = response.body.getReader()
             const chunks: Uint8Array[] = []
