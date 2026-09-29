@@ -8,10 +8,10 @@
       "version": "2026-09-29-v1"
     },
     "linux": {
-      "url": "https://runtime.getoffgridai.co/desktop/cuda/linux/2026-09-29-v1.tar.gz",
-      "sha256": "9eae307688b2547bbd6db30dd3943ba20b2353feba638beaa466dddebe28bcc3",
-      "bytes": 5883271112,
-      "version": "2026-09-29-v1"
+      "url": "https://runtime.getoffgridai.co/desktop/cuda/linux/2026-09-29-v2.tar.gz",
+      "sha256": "7d374dec976af9b277c52ff35d12f71c915b545109810ad6cd7a3e9b7f7106db",
+      "bytes": 6862063080,
+      "version": "2026-09-29-v2"
     }
   }
 }
