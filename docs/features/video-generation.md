@@ -141,8 +141,7 @@ The completed content endpoint returned the same bytes as the saved MP4 (SHA-256
 `05560d68f6d1fb5855c85b0b50e3bb581976e227c965a91af8677e3f7ccaa3ce`).
 Both jobs were terminal and no `sd-cli.exe` remained after completion. The
 Windows upstream runtime does not include our decode-section/frame-preview
-callback patch. This check did not cover Windows player UI, cancellation,
-restart recovery, or a second-device OGAD client.
+callback patch. The checks below cover additional API and player behavior.
 
 ### Cross-machine HTTP check
 
@@ -159,7 +158,21 @@ progress/cancellation, or model sync. Those checks can use this same local Windo
 engine without provider credentials or paid inference. The app client must select
 the OGAD server and its video model before submitting a new local-engine request.
 
-Windows player, fullscreen, and PiP checks remain blocked: the available computer
-control tool reports that the Mac is locked, and no Windows remote-desktop surface
-is available through it. The server-only artifact was left running. Its GUI was
-not started, so the older branch artifact could not trigger an automatic update.
+### Cancellation, recovery, and player checks
+
+A preparation-stage cancellation returned `cancelled: true`, then persisted
+`failed` with `error.type: cancelled`. No native engine process remained.
+A second local job reached sampling step 2 of 20. The dedicated verification app
+process and its child engine were then stopped to check interruption recovery.
+After restart with the same profile, the job became `failed` with
+`error.type: interrupted`. That result and its timestamp were saved in the job
+record. No engine process remained.
+
+After the Mac was unlocked, Windows App provided the VM desktop. The same branch
+ASAR ran through stock Electron 39.2.7 in development mode with the original
+profile. This skipped the packaged app updater and preserved the installed app.
+The gallery listed both generated clips. The 480p clip played inline. The native
+picture-in-picture window opened, showed a play control, and returned to the
+inline player with Back to tab. Its very short duration did not allow a useful
+pause/resume check. Fullscreen did not open and is still under investigation.
+These player checks do not verify engine discovery in that development launch.
