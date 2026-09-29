@@ -167,9 +167,11 @@ function loadVideoRequests(): void {
   try {
     const saved = JSON.parse(fs.readFileSync(videoRequestPath(), 'utf8')) as ApiRequest[]
     if (!Array.isArray(saved)) return
+    let recoveredInterruptedJob = false
     for (const item of saved.slice(-REQUESTS_MAX)) {
       if (!item || item.kind !== 'video' || typeof item.id !== 'string') continue
       if (item.status === 'queued' || item.status === 'running') {
+        recoveredInterruptedJob = true
         item.status = 'failed'
         item.updated_at = Date.now()
         delete item.stage
@@ -182,6 +184,8 @@ function loadVideoRequests(): void {
       }
       requests.set(item.id, item)
     }
+    // Commit recovery once so later restarts retain the terminal status and time.
+    if (recoveredInterruptedJob) persistVideoRequests()
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
       console.error('[video] Could not restore API jobs', error)
