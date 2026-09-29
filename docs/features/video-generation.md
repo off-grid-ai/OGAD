@@ -124,3 +124,23 @@ Both jobs were terminal and no `sd-cli.exe` remained after completion. The
 Windows upstream runtime does not include our decode-section/frame-preview
 callback patch. This check did not cover Windows player UI, cancellation,
 restart recovery, or a second-device OGAD client.
+
+### Cross-machine HTTP check
+
+A Mac HTTP client then reached the Windows gateway through an SSH tunnel bound
+to Mac loopback. This did not change firewall rules or expose a new public port.
+The health and video-model discovery endpoints returned the installed Wan model
+with `offgrid-video-v1`. The completed job and MP4 content returned HTTP 200;
+the transferred MP4 matched the checksum above. OpenAPI listed all five video
+routes. No new generation or paid provider call was made.
+
+This verifies transport and completed output retrieval between two machines.
+It does not verify the Desktop or mobile remote-adapter UI, a new remote job's
+progress/cancellation, or model sync. Those checks can use this same local Windows
+engine without provider credentials or paid inference. The app client must select
+the OGAD server and its video model before submitting a new local-engine request.
+
+Windows player, fullscreen, and PiP checks remain blocked: the available computer
+control tool reports that the Mac is locked, and no Windows remote-desktop surface
+is available through it. The server-only artifact was left running. Its GUI was
+not started, so the older branch artifact could not trigger an automatic update.
