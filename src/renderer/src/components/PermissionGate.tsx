@@ -306,7 +306,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
             className="mb-2 flex flex-col items-center gap-2"
           >
             <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-neutral-400">
-              {['Chat', 'Vision', 'Images', 'Voice', 'Speech'].map((c) => (
+              {['Chat', 'Vision', 'Images', 'Video', 'Voice', 'Speech'].map((c) => (
                 <span key={c} className="flex items-center gap-1.5">
                   <span className="h-1 w-1 rounded-full bg-green-500" />
                   {c}

@@ -1750,6 +1750,15 @@ export async function getStorageInfo(): Promise<StorageInfo> {
     activeMmproj
   })
 
+  // Runtime discovery also accepts complete local video packs that were copied
+  // into the model directory. Their files must not become orphan-cleanup targets.
+  const { videoGenStatus } = await import('./videogen')
+  const { videoPackFiles } = await import('@offgrid/models')
+  for (const weight of videoGenStatus({ localOnly: true }).models) {
+    const pack = videoPackFiles(weight)
+    if (pack) Object.values(pack).forEach((name) => known.add(name))
+  }
+
   const active = getActiveModel()
   // Per-modality active picks (image/speech/transcription) are stored as the
   // chosen FILENAME, not the catalog id — so an image/voice/STT model is "active"

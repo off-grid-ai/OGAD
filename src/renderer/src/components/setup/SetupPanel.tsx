@@ -214,7 +214,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               Local and remote
             </div>
             <p className="mt-2 text-[11px] leading-5 text-neutral-500">
-              Installed models can handle Chat, images, transcription, voice, and Computer Use on
+              Installed models can handle Chat, images, videos, transcription, voice, and Computer Use on
               this {deviceNoun()}. A saved model server is an optional Chat source.
             </p>
           </div>
@@ -305,9 +305,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               })}
             </ul>
             <div className="mt-1.5 text-[11px] text-neutral-600">
-              Chat is ready first. Transcription, voice
-              {plan.items.some((i) => i.kind === 'image') ? ', and image' : ''} finish in the
-              background.
+              Chat is ready first. The other models finish downloading in the background.
             </div>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1.5 text-[11px] text-neutral-500">
               For solid reasoning and tool use,{' '}
