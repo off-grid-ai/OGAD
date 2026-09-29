@@ -513,6 +513,7 @@ export function ModelsScreen({
     setProgress((p) => withoutProgressEntry(p, id))
   }
   const download = (id: string, fileName?: string): void => {
+    setChosenVariants((current) => ({ ...current, [id]: fileName ?? '' }))
     // 'queued', not 'downloading': nothing has been downloaded yet, and claiming otherwise is what
     // left a refused request showing a spinner at 0% forever. The main process moves it to
     // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
@@ -926,7 +927,7 @@ export function ModelsScreen({
             </>
           ) : (
             <button
-              onClick={() => (isHf && m.kind !== 'video' ? void chooseVariant(m) : download(m.id))}
+              onClick={() => (isHf ? void chooseVariant(m) : download(m.id))}
               className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
             >
               <IconDownload className="h-3 w-3" /> Download
@@ -1563,7 +1564,6 @@ export function ModelsScreen({
                   <button
                     key={variant.fileName}
                     onClick={() => {
-                      setChosenVariants((current) => ({ ...current, [variantModel.id]: variant.fileName }))
                       download(variantModel.id, variant.fileName)
                       setVariantModel(null)
                     }}
