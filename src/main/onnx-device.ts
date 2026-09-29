@@ -14,7 +14,7 @@ export function onnxDeviceCandidates(
     platform === 'darwin'
       ? ['coreml', 'webgpu']
       : platform === 'win32'
-        ? ['dml', 'webgpu']
+        ? ['cuda', 'dml', 'webgpu']
         : platform === 'linux'
           ? ['cuda', 'webgpu']
           : ['webgpu']

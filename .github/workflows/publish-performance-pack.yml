@@ -90,6 +90,15 @@ jobs:
           test -n "$bin_root"
           echo "BIN_ROOT=$PWD/$bin_root" >> "$GITHUB_ENV"
           du -sh "$bin_root"/*
+      - name: Replace Windows Whisper engine with pinned CUDA 12.4 build
+        if: matrix.platform == 'win32'
+        run: |
+          curl -fL --retry 3 --silent --show-error \
+            'https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-cublas-12.4.0-bin-x64.zip' \
+            -o "$RUNNER_TEMP/whisper-cublas-12.4.0-bin-x64.zip"
+          python3 scripts/stage-win-whisper-cuda-pack.py \
+            "$RUNNER_TEMP/whisper-cublas-12.4.0-bin-x64.zip" \
+            "$BIN_ROOT/whisper"
       - name: Add prebuilt ONNX CUDA libraries
         if: matrix.platform == 'linux'
         run: |
@@ -103,6 +112,27 @@ jobs:
           done
           test -s "$BIN_ROOT/onnx-cuda/libcublasLt.so.13"
           test -s "$BIN_ROOT/onnx-cuda/libcudnn.so.9"
+      - name: Add pinned Windows ONNX CUDA libraries
+        if: matrix.platform == 'win32'
+        run: |
+          git lfs pull --include="resources/bin/onnx-cuda/onnxruntime_binding.node" --exclude=""
+          mkdir -p "$RUNNER_TEMP/onnx-wheels"
+          curl -fL --retry 3 --silent --show-error \
+            'https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip' \
+            -o "$RUNNER_TEMP/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip"
+          python3 -m pip download --no-deps --only-binary=:all: \
+            --platform win_amd64 --python-version 3.12 --implementation cp --abi cp312 \
+            -d "$RUNNER_TEMP/onnx-wheels" \
+            'nvidia-cuda-runtime-cu12==12.8.90' \
+            'nvidia-cublas-cu12==12.8.5.5' \
+            'nvidia-cuda-nvrtc-cu12==12.8.93' \
+            'nvidia-cufft-cu12==11.3.3.83' \
+            'nvidia-cudnn-cu12==9.19.0.56'
+          python3 scripts/stage-win-onnx-cuda-pack.py \
+            "$RUNNER_TEMP/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip" \
+            "$RUNNER_TEMP/onnx-wheels" \
+            resources/bin/onnx-cuda/onnxruntime_binding.node \
+            "$BIN_ROOT/onnx-cuda"
       - name: Make and check versioned pack
         run: |
           node scripts/package-performance-pack.mjs "$PLATFORM" "$BIN_ROOT" "$RUNNER_TEMP/$VERSION.tar.gz" "$VERSION"
