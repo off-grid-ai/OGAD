@@ -286,6 +286,14 @@ export async function generateVideo(
         VIDEO_JOB,
         async () => {
           if (cancelRequested) throw new Error(CANCELLED)
+          // Linux's redistributable FFmpeg uses OpenH264; other bundles can use x264.
+          // Check before sampling so a missing encoder cannot waste a full generation.
+          let encoders = ''
+          await runProcess(ffmpeg, ['-hide_banner', '-encoders'], (text) => { encoders += text })
+          const encoder = ['libx264', 'libopenh264'].find((name) =>
+            new RegExp(`\\b${name}\\b`).test(encoders)
+          )
+          if (!encoder) throw new Error('The installed video encoder does not support H.264.')
           const preference = getBackendPreference('video')
           const preferred = findSdBinaries('sd-cli', preference)
           // Metal and Vulkan distributions also contain CPU kernels. Explicit
@@ -416,7 +424,8 @@ export async function generateVideo(
             raw,
             '-an',
             '-c:v',
-            'libx264',
+            encoder,
+            ...(encoder === 'libopenh264' ? ['-b:v', '8M'] : []),
             '-pix_fmt',
             'yuv420p',
             '-movflags',
