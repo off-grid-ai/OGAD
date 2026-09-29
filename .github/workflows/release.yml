@@ -633,8 +633,8 @@ jobs:
           payloads=(dist/nsis-web/*.7z)
           test "${#installers[@]}" -eq 1
           test "${#payloads[@]}" -ge 1
-          # The current builder emits latest.yml for both beta and stable.
-          feed=dist/latest.yml
+          # nsis-web writes its update feed beside the installer and payload.
+          feed=dist/nsis-web/latest.yml
           test -s "$feed"
           sha256sum "${installers[@]}" "${payloads[@]}" > dist/windows-packages.sha256
           gh release upload "v$VERSION" dist/windows-packages.sha256 --clobber
@@ -655,7 +655,7 @@ jobs:
           path: |
             dist/nsis-web/*-setup.exe
             dist/nsis-web/*.7z
-            dist/*.yml
+            dist/nsis-web/*.yml
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
