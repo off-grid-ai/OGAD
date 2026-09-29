@@ -3818,7 +3818,7 @@ export function MemoryChat({
                                   {mode === 'image'
                                     ? 'Pick a style, then describe your subject — generated on-device.'
                                     : mode === 'video'
-                                      ? 'Describe a short, silent clip. It is generated on this device.'
+                                      ? 'Describe a short, silent clip.'
                                     : activeProjectName
                                       ? `Grounded in the “${activeProjectName}” knowledge base.`
                                       : isPro
