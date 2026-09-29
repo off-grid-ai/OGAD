@@ -30,8 +30,7 @@ export function installMediaPermissionHandler(target: PermissionSession): void {
         // Embedded sites share this session, but cannot enter fullscreen as the app.
         callback(
           expected.protocol === 'file:'
-            ? document.protocol === 'file:' &&
-              document.pathname === expected.pathname &&
+            ? document.href === expected.href &&
               requester.href === webContents.getURL()
             : requester.origin === expected.origin
         )
