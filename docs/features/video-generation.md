@@ -85,3 +85,42 @@ settled as `failed` with `error.type: cancelled`, as required by existing remote
 clients. Both native engine processes exited. No temporary raw video or preview
 files remained. The cancelled state was present in the durable API job record.
 These checks did not restart the app or exercise recovery after a process crash.
+
+## Live Windows CUDA check — September 30, 2026
+
+The Windows branch artifact built successfully in [run 36631863697](https://github.com/off-grid-ai/OGAD/actions/runs/36631863697),
+with Core `2f8d4bfe6` and shared models `b2d1ea5`. Windows typechecking,
+bundling, and installer packaging passed. No test suite or release publication ran.
+
+The separate unpacked artifact ran in server-only mode with the original profile
+on a Tesla T4 (15 GB VRAM). The installed app was stopped after checking that no
+API job was active; its installation was unchanged and its database files were
+backed up. The existing CUDA performance pack was selected explicitly through
+`OFFGRID_PERFORMANCE_PACK_BIN`. This artifact predates the automatic headless
+pack-activation fix, so this run does not verify that fix.
+
+The normal model-download API installed the complete Wan 2.1 pack (6,747,264,190
+bytes): FP16 diffusion model, Q4_K_M UMT5 encoder, and VAE. The health API then
+reported `video_generation: ready` and `offgrid-video-v1`.
+
+| Setting | Verified run |
+| --- | --- |
+| Model | Wan 2.1 T2V 1.3B, FP16 |
+| Size | 832 × 480 |
+| Frames / frame rate | 9 / 16 FPS |
+| Steps / guidance / seed | 20 / 6 / 42 |
+| Runtime | Installed `sd-cuda`; Tesla T4 at 100% GPU use during sampling |
+| Elapsed time | 97.3 seconds |
+| Output | H.264 MP4, 9 frames, 0.562 seconds, 52,870 bytes |
+
+The prompt described a glossy red ball rolling slowly across a wooden table.
+Frames 0, 4, and 8 showed a clear red ball, with little motion over this short
+clip. This confirms output at the requested size, not a general quality guarantee.
+A preceding 512 × 288, 17-frame run completed in 74.6 seconds as a pipeline check.
+
+The completed content endpoint returned the same bytes as the saved MP4 (SHA-256
+`05560d68f6d1fb5855c85b0b50e3bb581976e227c965a91af8677e3f7ccaa3ce`).
+Both jobs were terminal and no `sd-cli.exe` remained after completion. The
+Windows upstream runtime does not include our decode-section/frame-preview
+callback patch. This check did not cover Windows player UI, cancellation,
+restart recovery, or a second-device OGAD client.
