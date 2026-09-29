@@ -12,6 +12,10 @@ on:
         description: 'Immutable pack version (letters, numbers, dot, dash, underscore)'
         type: string
         required: true
+      source_run:
+        description: 'Build and Release run with the installer artifact (empty uses the pinned source run)'
+        type: string
+        required: false
 
 permissions:
   actions: read
@@ -28,6 +32,7 @@ jobs:
     env:
       PLATFORM: ${{ matrix.platform }}
       VERSION: ${{ inputs.version || '2026-09-29-v1' }}
+      SOURCE_RUN_INPUT: ${{ inputs.source_run }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -38,16 +43,20 @@ jobs:
       - name: Check input and source artifact
         run: |
           [[ "$VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]
-          case "$PLATFORM" in
-            linux)
-              echo 'source_run=36450913791' >> "$GITHUB_ENV"
-              echo 'source_name=off-grid-ai-linux-deb' >> "$GITHUB_ENV"
-              ;;
-            win32)
-              echo 'source_run=36448396362' >> "$GITHUB_ENV"
-              echo 'source_name=off-grid-ai-windows' >> "$GITHUB_ENV"
-              ;;
-          esac
+          source_run="$SOURCE_RUN_INPUT"
+          if [ -n "$source_run" ]; then
+            [[ "$source_run" =~ ^[0-9]+$ ]]
+          elif [ "$PLATFORM" = linux ]; then
+            source_run=36450913791
+          else
+            source_run=36448396362
+          fi
+          echo "source_run=$source_run" >> "$GITHUB_ENV"
+          if [ "$PLATFORM" = linux ]; then
+            echo 'source_name=off-grid-ai-linux-deb' >> "$GITHUB_ENV"
+          else
+            echo 'source_name=off-grid-ai-windows' >> "$GITHUB_ENV"
+          fi
       - name: Download existing build artifact
         env:
           GH_TOKEN: ${{ github.token }}
