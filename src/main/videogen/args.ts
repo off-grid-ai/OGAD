@@ -28,6 +28,11 @@ export function videoArgs(
     '--flow-shift', '3',
     '--diffusion-fa',
     '--vae-tiling',
+    // Wan 2.2's 3D VAE decode is much slower on Metal. Keep diffusion on
+    // Metal and use the CPU decoder that completed the live macOS check.
+    ...(process.platform === 'darwin' && pack.vae.endsWith('wan2.2_vae.safetensors')
+      ? ['--backend', 'vae=cpu']
+      : []),
     '-s', String(request.seed),
     '-o', output
   ]

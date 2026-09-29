@@ -56,6 +56,7 @@ speech are always ready (models download on first use). Image generation/edit re
 | Text → Speech (TTS)      | `/v1/audio/speech`                         | POST   | Kokoro-82M (ONNX)              |
 | List TTS voices          | `/v1/audio/voices`                         | GET    | Kokoro-82M                     |
 | Text → Image             | `/v1/images` (or `/v1/images/generations`) | POST   | stable-diffusion.cpp / Core ML |
+| Text → Video             | `/v1/videos`                              | POST   | stable-diffusion.cpp (Wan)      |
 | Image → Image            | `/v1/images` (or `/v1/images/edits`)       | POST   | stable-diffusion.cpp           |
 
 This surface follows the [OpenRouter multimodal](https://openrouter.ai/docs/guides/overview/multimodal/overview)
@@ -438,3 +439,28 @@ memory carefully (Apple Silicon shares RAM between CPU/GPU/ANE):
 The gateway (`src/main/model-server.ts`) is the only port you call (`7878`); it proxies
 or invokes the right backend per route. Models live in the app's `userData/models`
 directory; install them from the in-app Models screen.
+
+## Video generation
+
+Video uses the OGAD `offgrid-video-v1` job API. It returns an asynchronous job;
+it is not a drop-in implementation of a hosted video provider's API.
+
+```bash
+curl http://127.0.0.1:7878/v1/videos \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"A red ball rolls across a wooden table","model":"Wan2.2-TI2V-5B-Q5_K_M.gguf","width":832,"height":480,"frames":17,"fps":8,"steps":20,"seed":42}'
+```
+
+Use the same authorization header as other gateway requests when authentication
+is enabled. The response contains `request_id` and `poll_url`.
+
+- `GET /v1/videos/:id`: read status, step count, result, or error.
+- `GET /v1/videos/:id/content`: download the completed MP4.
+- `POST /v1/videos/:id/cancel`: stop the job.
+
+To recover a lost submission response, include a stable `client_job_id` and reuse
+it with the same request. The gateway returns the existing job.
+
+Install a complete model pack in Models → Video first. `/health` lists
+`video_models` and the video API version. Clips are silent. See `/openapi.json`
+for all settings and bounds.
