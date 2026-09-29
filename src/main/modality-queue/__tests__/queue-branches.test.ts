@@ -1,6 +1,6 @@
 // Branch fill for ModalityQueue. queue.test.ts covers ordering / eviction / coexist;
 // this drives the error-and-edge paths: a declared-but-unregistered evictable is
-// skipped, an evict/warm that throws is caught (never breaks the scheduler), an
+// skipped, an evict failure rejects admission, a warm failure is caught, an
 // evictable with no warm hook is not re-warmed, and an onChange listener that throws
 // is isolated. Real ModalityQueue, no mocks of its own logic.
 import { describe, it, expect, vi } from 'vitest'
@@ -16,18 +16,22 @@ describe('ModalityQueue error + edge branches', () => {
     expect(ran).toBe(true)
   })
 
-  it('catches an evict that throws and still runs the job', async () => {
+  it('rejects a job if eviction fails and releases the queue slot', async () => {
     const q = new ModalityQueue()
     const evict = vi.fn(async () => {
       throw new Error('evict boom')
     })
     q.registerEvictable('llm', { evict })
     let ran = false
-    await q.run({ tier: 2, label: 'x', evicts: ['llm'] }, async () => {
-      ran = true
-    })
+    await expect(
+      q.run({ tier: 2, label: 'x', evicts: ['llm'] }, async () => {
+        ran = true
+      })
+    ).rejects.toThrow('evict boom')
     expect(evict).toHaveBeenCalledTimes(1)
-    expect(ran).toBe(true)
+    expect(ran).toBe(false)
+    expect(q.getState().running).toHaveLength(0)
+    await expect(q.run({ tier: 2, label: 'next' }, async () => 7)).resolves.toBe(7)
   })
 
   it('does not re-warm an evictable that has no warm hook', async () => {

@@ -71,6 +71,7 @@ interface Waiter {
   job: QueueJob
   request: QueueRequest
   admit: () => void
+  reject: (reason: unknown) => void
 }
 
 interface RunningEntry {
@@ -163,8 +164,8 @@ export class ModalityQueue {
     }
 
     // Wait for admission (resolves synchronously if the slot is free right now).
-    await new Promise<void>((resolve) => {
-      this.waiting.push({ job, request, admit: resolve })
+    await new Promise<void>((resolve, reject) => {
+      this.waiting.push({ job, request, admit: resolve, reject })
       this.emitChange()
       this.pump()
     })
@@ -228,6 +229,12 @@ export class ModalityQueue {
         entry.evicted.push(id)
       } catch (err) {
         console.error(`[ModalityQueue] evict '${id}' failed:`, err)
+        // Do not start a competing heavy model while eviction may be incomplete.
+        this.running.delete(waiter.job.id)
+        this.emitChange()
+        waiter.reject(err)
+        this.pump()
+        return
       }
     }
     this.emitChange()

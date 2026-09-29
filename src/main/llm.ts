@@ -1972,7 +1972,7 @@ export class LLMService {
     )
   }
 
-  async unload(): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
+  async unload(keepPaused = false): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
     this.launchGeneration++
     this.paused = true // stop the on-demand respawn path from warming a new server mid-teardown
     let outcome: TeardownOutcome = 'already-dead'
@@ -2002,7 +2002,7 @@ export class LLMService {
     const reap = this.reapOrphansOnPort(this.port)
     // Leave the engine down but allow a future explicit start; releasePause clears the block
     // without warming a server (on-demand — the next chat/tool turn respawns).
-    this.paused = false
+    if (!keepPaused) this.paused = false
     this.invalidateHealth()
     return { outcome, portFree: outcome !== 'stuck' && reap.liveOwners.length === 0 }
   }
@@ -2019,6 +2019,15 @@ export class LLMService {
   pause(): void {
     this.paused = true
     this.stop()
+  }
+
+  /** Eviction must finish before a competing model starts. pause() only signals the
+   *  child, while unload() waits for exit and handles an in-flight init. */
+  private async pauseAndWait(): Promise<void> {
+    const { outcome } = await this.unload(true)
+    if (outcome === 'stuck') {
+      throw new Error('The chat model did not exit; image generation cannot start safely.')
+    }
   }
 
   /** Resume after image generation and warm the server back up (resident mode). */
@@ -2039,13 +2048,7 @@ export class LLMService {
   get runtime(): ManagedRuntime {
     return {
       modality: 'llm',
-      evict: () => {
-        try {
-          this.pause()
-        } catch {
-          /* ignore */
-        }
-      },
+      evict: () => this.pauseAndWait(),
       warm: () => {
         this.resume()
       },
