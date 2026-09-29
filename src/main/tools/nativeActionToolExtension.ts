@@ -146,8 +146,8 @@ export class NativeActionToolExtension implements ToolExtension {
   category = 'tool' as const
 
   private get linuxTaskUse(): boolean {
-    return this.platform === 'linux' && app.isPackaged === false &&
-      process.env.OFFGRID_LINUX_TASK_USE === '1'
+    return this.platform === 'linux' &&
+      (app.isPackaged || process.env.OFFGRID_LINUX_TASK_USE === '1')
   }
 
   constructor(

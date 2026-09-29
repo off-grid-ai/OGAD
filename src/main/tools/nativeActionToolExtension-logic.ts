@@ -353,8 +353,8 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
   'computer_use'
 ])
 
-// The task tools need the private watched workspace. A core-only Linux build
-// cannot show it, so expose only the link opener from this extension.
+// Linux exposes task tools when the host has enabled its watched workspace.
+// The core-only path exposes only the link opener.
 export const LINUX_TOOL_NAMES: ReadonlySet<string> = new Set(['open_url'])
 
 export const TASK_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_use'])
