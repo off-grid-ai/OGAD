@@ -59,6 +59,7 @@ export default async function verifyElectronBuilderArtifact(event) {
         path.join('bin', 'licenses', 'libgomp1.txt'),
         path.join('bin', 'licenses', 'libvulkan1.txt'),
         path.join('bin', 'executorch-speech'),
+        path.join('bin', 'kev-local-server.py'),
         path.join('speech-assets', 'index.json')
       )
     }
