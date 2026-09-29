@@ -138,6 +138,7 @@ export interface RemoteVisionServerUpdate {
 }
 
 export interface RemoteVisionConnectionResult {
+  provider?: RemoteVisionProvider
   ok: boolean
   latencyMs: number
   error?: string

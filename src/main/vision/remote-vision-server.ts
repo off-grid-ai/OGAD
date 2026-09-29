@@ -387,6 +387,7 @@ export async function testRemoteVisionServer(
         name?: unknown
         model?: unknown
         kind?: unknown
+        video_api?: unknown
         supported_parameters?: unknown
         reasoning?: unknown
         architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -396,6 +397,7 @@ export async function testRemoteVisionServer(
         name?: unknown
         model?: unknown
         kind?: unknown
+        video_api?: unknown
         supported_parameters?: unknown
         reasoning?: unknown
         architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -414,6 +416,7 @@ export async function testRemoteVisionServer(
       name?: unknown
       model?: unknown
       kind?: unknown
+      video_api?: unknown
       supported_parameters?: unknown
       reasoning?: unknown
       architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -424,6 +427,10 @@ export async function testRemoteVisionServer(
           .map((entry) => [String(entry.id ?? entry.model ?? ''), entry] as const)
       ).values()
     ]
+    // An OGAD server can use a custom port or sit behind a reverse proxy.
+    const provider = update.provider === 'custom' &&
+      entries.some((entry) => entry.video_api === 'offgrid-video-v1')
+      ? 'ogad' : update.provider
     const models = entries.flatMap((entry) => {
       const id =
         typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
@@ -433,7 +440,7 @@ export async function testRemoteVisionServer(
         (kind === 'video' ||
           (Array.isArray(entry.architecture?.output_modalities) &&
             entry.architecture.output_modalities.includes('video'))) &&
-        !['ogad', 'openrouter'].includes(update.provider)
+        !['ogad', 'openrouter'].includes(provider)
       )
         return []
       const outputs = Array.isArray(entry.architecture?.output_modalities)
@@ -484,7 +491,7 @@ export async function testRemoteVisionServer(
         }
       ]
     })
-    return { ok: true, latencyMs: Date.now() - startedAt, models }
+    return { ok: true, latencyMs: Date.now() - startedAt, models, provider }
   } catch (error) {
     return {
       ok: false,
