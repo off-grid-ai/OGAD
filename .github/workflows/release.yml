@@ -598,7 +598,7 @@ jobs:
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Stage native files and bundle
-        run: node scripts/stage-native.mjs && npx electron-vite build
+        run: node scripts/stage-native.mjs && npx electron-vite build && node scripts/check-windows-onnx-preload.mjs
       - name: Package Windows web installer, payload, and update metadata
         shell: bash
         env:
