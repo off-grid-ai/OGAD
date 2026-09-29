@@ -36,7 +36,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:inner": "node scripts/stage-native.mjs && electron-vite dev",
     "gateway": "node scripts/stage-native.mjs && OFFGRID_SERVER_ONLY=1 electron-vite dev",
-    "build": "node scripts/stage-native.mjs && npm run typecheck && electron-vite build",
+    "build": "node scripts/stage-native.mjs && npm run typecheck && electron-vite build && node scripts/check-windows-onnx-preload.mjs",
     "postinstall": "node scripts/patch-windows-onnx-cuda.mjs && electron-builder install-app-deps",
     "prepare:speech-defaults": "node scripts/prepare-default-speech.mjs",
     "build:unpack": "npm run build && npm run prepare:speech-defaults && electron-builder --dir",
