@@ -628,7 +628,14 @@ export async function downloadModel(
   const CATALOG = await desktopCatalog()
   const inCatalog = CATALOG.find((m) => m.id === modelId)
   let entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
-  if (fileName && entry) {
+  if (fileName && entry?.kind === 'video') {
+    // The selected weights determine the encoder and VAE. Replacing only the
+    // primary file can pair a Wan 2.2 variant with a Wan 2.1 default's VAE.
+    const selectedPack = await resolveHuggingFaceModel(modelId, { kind: 'video', fileName })
+    if (!selectedPack)
+      return publishRefusal(modelId, 'Selected video model file is no longer available.', onProgress)
+    entry = { ...entry, files: selectedPack.files, minRamGb: selectedPack.minRamGb }
+  } else if (fileName && entry) {
     const variant = (await getModelFiles(modelId)).find((file) => file.fileName === fileName)
     if (!variant)
       return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
@@ -652,7 +659,7 @@ export async function downloadModel(
           name: variant.fileName,
           url: variant.downloadUrl,
           sizeBytes: variant.sizeBytes,
-          sha256: catalogFile?.sha256,
+          sha256: catalogFile?.sha256 ?? variant.sha256,
           role: 'primary'
         },
         ...projectorFiles,

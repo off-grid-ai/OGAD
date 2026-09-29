@@ -132,7 +132,7 @@ export function VideoSettingsTab(): React.JSX.Element {
             label="Video frames per second"
             value={String(values.fps)}
             onValueChange={(value) => setValue('fps', Number(value))}
-            options={[8, 16].map((fps) => ({ value: String(fps), label: `${fps} fps` }))}
+            options={[8, 16, 24].map((fps) => ({ value: String(fps), label: `${fps} fps` }))}
           />
         </div>
         <label>
