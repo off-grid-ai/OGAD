@@ -232,13 +232,13 @@ export class ModalityQueue {
         entry.evicted.push(id)
       } catch (err) {
         console.error(`[ModalityQueue] evict '${id}' failed:`, err)
-        // Restore access to engines already evicted by this job, without loading
-        // them while the failed engine may still hold memory.
-        for (const priorId of [...entry.evicted].reverse()) {
+        // An evictor can fail after it has set its pause block. Clear that block
+        // and those of earlier evictions without loading any model into memory.
+        for (const recoveryId of [id, ...[...entry.evicted].reverse()]) {
           try {
-            await this.evictables.get(priorId)?.recover?.()
+            await this.evictables.get(recoveryId)?.recover?.()
           } catch (recoverError) {
-            console.error(`[ModalityQueue] recover '${priorId}' failed:`, recoverError)
+            console.error(`[ModalityQueue] recover '${recoveryId}' failed:`, recoverError)
           }
         }
         // Do not start a competing heavy model while eviction may be incomplete.
