@@ -1386,7 +1386,14 @@ export async function setActiveModalChoice(
       try {
         const CATALOG = await desktopCatalog()
         const e = CATALOG.find((m) => m.id === modelId)
-        const fname = e ? primaryFileName(e as unknown as CatalogEntry) : undefined
+        const downloaded = downloadedVariant(
+          reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG as unknown as CatalogEntry[]),
+          modelId
+        )
+        const { isSupportedVideoWeight } = await import('@offgrid/models')
+        const fname = downloaded
+          ? modal === 'video' ? downloaded.files.find(isSupportedVideoWeight) : downloadedPrimary(downloaded)
+          : e ? primaryFileName(e as unknown as CatalogEntry) : undefined
         if (fname) stored = fname
       } catch {
         /* keep modelId as-is */
