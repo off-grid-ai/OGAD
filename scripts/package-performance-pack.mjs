@@ -13,10 +13,10 @@ if (!['win32', 'linux'].includes(platform) || !binRoot || !archive || !/^[a-zA-Z
 
 const folders = platform === 'win32'
   ? ['llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'whisper', 'kev-runtime']
-  : ['llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'whisper-cuda', 'kev-runtime']
+  : ['llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'whisper-cuda', 'kev-runtime', 'onnx-cuda']
 const required = platform === 'win32'
   ? ['llama-cuda/llama-server.exe', 'llama-prism-cuda/llama-server.exe', 'cuda-runtime/cudart64_12.dll', 'sd-cuda/sd-cli.exe', 'whisper/whisper-cli.exe', 'kev-runtime/python/python.exe']
-  : ['llama-cuda/llama-server', 'llama-prism-cuda/llama-server', 'cuda-runtime/libcudart.so.12', 'sd-cuda/sd-cli', 'whisper-cuda/whisper-cli', 'kev-runtime/python/bin/python3']
+  : ['llama-cuda/llama-server', 'llama-prism-cuda/llama-server', 'cuda-runtime/libcudart.so.12', 'sd-cuda/sd-cli', 'whisper-cuda/whisper-cli', 'kev-runtime/python/bin/python3', 'onnx-cuda/libcublasLt.so.13', 'onnx-cuda/libcudnn.so.9']
 for (const relative of required) {
   if (!fs.statSync(path.join(binRoot, relative)).isFile()) throw new Error(`Missing CUDA input: ${relative}`)
 }

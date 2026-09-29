@@ -69,10 +69,12 @@ import {
   applicationShutdown,
   commitApplicationRelaunch,
   installApplicationShutdown,
+  requestApplicationRelaunch,
   registerCoreShutdownOwners
 } from './shutdown'
 import { shutdownRuntimes } from './runtime-manager'
 import { shutdownModelDownloads } from './models/download-queue'
+import { prepareInstalledOnnxCudaLibraries } from './performance-pack'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -276,6 +278,12 @@ if (!windowPresentation.showWindow) {
 }
 
 app.whenReady().then(async () => {
+  // glibc reads LD_LIBRARY_PATH when Electron starts, before an ONNX worker runs.
+  // Restart once with the verified optional libraries if this launch lacks them.
+  if (app.isPackaged && prepareInstalledOnnxCudaLibraries()) {
+    requestApplicationRelaunch(app)
+    return
+  }
   restoreCanonicalProductName()
   initializeAIRequestLogs()
 
