@@ -20,6 +20,7 @@
 //   (b) divergence — the composer's model dropdown didn't write through the same owner
 //       as the Active-models panel, so the two disagreed on which model ran.
 
+import { createVideoBoundary } from './harness/video-boundary'
 import { afterEach, describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { render, screen, waitFor, cleanup, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -296,6 +297,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
           finishedAt: null
         }
     ),
+    ...createVideoBoundary(),
     onImageGenJobState: vi.fn((cb: (job: ImageGenerationJobContract) => void) => {
       jobStateCb = cb
       return () => {

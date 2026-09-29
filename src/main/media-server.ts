@@ -169,6 +169,13 @@ function serveFile(req: http.IncomingMessage, res: http.ServerResponse, filePath
   }
   const size = stat.size
   const type = mimeForExt(path.extname(filePath))
+  // Media URLs contain an encoded local path. Give browser download controls
+  // the actual filename without changing inline playback or range requests.
+  const downloadName = encodeURIComponent(path.basename(filePath)).replace(
+    /['()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  )
+  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${downloadName}`)
   const r = parseRange(req.headers.range, size)
 
   if (r.unsatisfiable) {

@@ -3,6 +3,7 @@ export const OPEN_ACTIVE_MODELS_PANEL_EVENT = 'og:open-active-models-panel'
 export type ModelSettingsPanelTab =
   | 'model'
   | 'image'
+  | 'video'
   | 'voice'
   | 'transcription'
   | 'remote'
@@ -12,6 +13,7 @@ export type ModelSettingsPanelTab =
 
 export function modelSettingsTabForKind(kind?: string): ModelSettingsPanelTab {
   if (kind === 'image') return 'image'
+  if (kind === 'video') return 'video'
   if (kind === 'voice') return 'voice'
   if (kind === 'transcription') return 'transcription'
   return 'model'
@@ -22,6 +24,7 @@ export function supportsModelSettings(kind?: string): boolean {
     kind === 'text' ||
     kind === 'vision' ||
     kind === 'image' ||
+    kind === 'video' ||
     kind === 'voice' ||
     kind === 'transcription'
   )

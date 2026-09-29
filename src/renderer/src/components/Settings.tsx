@@ -176,7 +176,7 @@ export function Settings({
 
             <SettingsCard
               title="GPU performance"
-              summary="Manage GPU components for chat, images, transcription, and Computer Use."
+              summary="Manage GPU components for chat, images, video, transcription, and Computer Use."
               delay={0.135}
             >
               <PerformancePackPanel showUnavailable />

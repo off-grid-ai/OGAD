@@ -81,6 +81,10 @@ export function parseNativeBackend(
   )) {
     selected.add(normalize(match[1] || match[2] || ''))
   }
+  // New sd.cpp releases report the selected Metal device during context
+  // allocation. Device enumeration alone does not confirm a loaded backend.
+  const metalDevice = /ggml_metal_init:\s*picking default device:\s*([^\r\n]+)/i.exec(output)?.[1]?.trim()
+  if (metalDevice && /ggml_metal_init:\s*allocating\b/i.test(output)) selected.add('Metal')
   const used = allocated.size ? allocated : selected
   for (const failed of output.matchAll(
     /failed to initialize (CUDA\d*|Vulkan\d*|Metal|CPU) backend/gi
@@ -92,7 +96,8 @@ export function parseNativeBackend(
     .sort((a, b) => (a === 'CPU' ? 1 : b === 'CPU' ? -1 : a.localeCompare(b)))
     .join(' + ')
   const device = /using device\s+(?:CUDA\d*|Vulkan\d*|Metal)\s*\(([^)]+)\)/i.exec(output)?.[1]
-  return { backend, ...(device ? { device } : {}) }
+  const selectedDevice = device ?? (used.has('Metal') ? metalDevice : undefined)
+  return { backend, ...(selectedDevice ? { device: selectedDevice } : {}) }
 }
 
 export function providerLabel(device: string): string {

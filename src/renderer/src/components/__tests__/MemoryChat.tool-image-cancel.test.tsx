@@ -12,6 +12,7 @@
 // PERSISTED via addRagMessage (the row a reload re-renders) — asserted on its
 // content, the same way the reasoning-persistence test asserts the persisted blob.
 
+import { createVideoBoundary } from './harness/video-boundary'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -32,6 +33,7 @@ function installApi(): { addRagMessage: AddRag } {
     cancelImageGen: vi.fn(),
     cancelRag: vi.fn(),
     onImageGenProgress: vi.fn(() => () => { }),
+    ...createVideoBoundary(),
     onImageGenJobState: vi.fn(() => () => { }),
     onImageGenConversationUpdated: vi.fn(() => () => { }),
     imageGenJobStatus: vi.fn(async () => ({

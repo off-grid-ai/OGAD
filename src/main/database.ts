@@ -1,3 +1,4 @@
+import { VIDEO_SETTING_KEYS, acceptsVideoSetting } from '@offgrid/models'
 // better-sqlite3-multiple-ciphers is a drop-in superset of better-sqlite3 that
 // adds SQLCipher-style `PRAGMA key` encryption. Same API surface + types.
 import Database from 'better-sqlite3-multiple-ciphers'
@@ -1221,7 +1222,13 @@ export function searchProjectConversations(
         ORDER BY (${score}) DESC, rm.created_at DESC, rm.id DESC
         LIMIT ?`
     )
-    .all(projectId, excludeConversationId, ...patterns, ...patterns, Math.min(12, Math.max(1, limit))) as {
+    .all(
+      projectId,
+      excludeConversationId,
+      ...patterns,
+      ...patterns,
+      Math.min(12, Math.max(1, limit))
+    ) as {
     role: string
     content: string
     title: string | null
@@ -1433,8 +1440,23 @@ export function getSettings(): AppSettings {
   return settings
 }
 
-export function saveSetting(key: string, value: unknown): void {
+export function saveSetting(
+  key: string,
+  value: unknown,
+  options: { emitSync?: boolean } = {}
+): void {
+  const isVideo = (VIDEO_SETTING_KEYS as readonly string[]).includes(key)
+  // Admit the old desktop seed representation at the storage boundary.
+  if (key === 'videoSeed' && typeof value === 'string') value = value.trim() ? Number(value) : -1
+  if (isVideo && !acceptsVideoSetting(key, value)) throw new Error('Invalid video setting.')
   createSettingsStore(getDB()).set(key, value)
+  if (isVideo && options.emitSync !== false)
+    emitSyncMutation({
+      entity: CORE_SYNC_ENTITIES.modelSetting,
+      entityId: key,
+      kind: 'put',
+      fields: { value }
+    })
 }
 
 export function getSetting<T>(key: string, defaultValue: T): T {

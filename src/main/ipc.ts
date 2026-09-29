@@ -111,12 +111,15 @@ async function regenerateMasterMemory(): Promise<string | null> {
 import {
   activeChatStreamSnapshots,
   beginChatImageStream,
+  beginChatVideoStream,
   bindChatStream,
   continueChatStreamWithImage,
+  continueChatStreamWithVideo,
   currentChatStreamMessageId,
   endChatStream,
   endChatStreamForConversation,
   noteChatStreamImageProgress,
+  noteChatStreamVideoProgress,
   noteChatStreamDelta,
   resetChatStreamPartial,
   noteChatStreamToolCompleted,
@@ -1852,7 +1855,7 @@ export function setupIPC() {
   ipcMain.handle('data:clear', (_e, id: string, olderThanDays?: number) =>
     import('./data-privacy').then((m) =>
       m.clearCategory(
-        id as 'chats' | 'memories' | 'captures' | 'meetings' | 'images',
+        id as 'chats' | 'memories' | 'captures' | 'meetings' | 'images' | 'videos',
         olderThanDays
       )
     )
@@ -1996,6 +1999,60 @@ export function setupIPC() {
     return true
   })
 
+  // --- Local video generation ----------------------------------------------
+  const videoJobPublisherReady = import('./videogen/job-service').then(({ videoGenerationJobs }) => {
+    videoGenerationJobs.onChange((snapshot) => {
+      if (snapshot.phase === 'running') {
+        noteChatStreamVideoProgress(snapshot.conversationId, snapshot.progress?.step, snapshot.progress?.total)
+      } else if (snapshot.phase === 'succeeded') {
+        endChatStreamForConversation(snapshot.conversationId, 'record_pending')
+      } else if (snapshot.phase === 'failed' || snapshot.phase === 'cancelled') {
+        endChatStreamForConversation(snapshot.conversationId, 'discarded')
+      }
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('videogen:job-state', snapshot)
+      }
+    })
+    videoGenerationJobs.onConversationUpdated((conversationId) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('videogen:conversation-updated', conversationId)
+      }
+    })
+    return videoGenerationJobs
+  })
+  ipcMain.handle('videogen:status', async () => (await import('./videogen')).videoGenStatus())
+  ipcMain.handle('videogen:job-status', async () => (await videoJobPublisherReady).status())
+  ipcMain.handle('videogen:generate', async (_event, request: import('./videogen/job-service').VideoJobRequest) => {
+    const jobs = await videoJobPublisherReady
+    jobs.assertCanStart()
+    beginChatVideoStream(request.conversationId)
+    try {
+      const messageId = currentChatStreamMessageId(request.conversationId)
+      return await jobs.start({ ...request, ...(messageId ? { messageId } : {}) })
+    } catch (error) {
+      endChatStreamForConversation(request.conversationId, 'discarded')
+      throw error
+    }
+  })
+  ipcMain.handle('videogen:cancel', async () => (await videoJobPublisherReady).cancel())
+  ipcMain.handle('videogen:conversation-persisted', async (_event, conversationId: string, messageId?: string) =>
+    (await videoJobPublisherReady).acknowledgeConversation(conversationId, messageId))
+  ipcMain.handle('videogen:list', async (_event, scope?: { conversationId?: string; projectId?: string | null }) =>
+    (await import('./videogen')).listGeneratedVideos(scope))
+  ipcMain.handle('videogen:delete', async (_event, candidate: string) =>
+    (await import('./videogen')).deleteGeneratedVideo(candidate))
+  ipcMain.handle('videogen:export', async (event, source: string, suggestedName?: string) => {
+    const { dialog } = await import('electron')
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Save video', defaultPath: suggestedName || 'off-grid-video.mp4',
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
+    })
+    if (result.canceled || !result.filePath) return false
+    await (await import('./videogen')).exportGeneratedVideo(source, result.filePath)
+    return true
+  })
+
   // --- Agentic tool-calling (isolated, opt-in) ----------------------------
   ipcMain.handle('tools:list', async () => {
     const { listTools } = await import('./tools')
@@ -2019,6 +2076,7 @@ export function setupIPC() {
         allMemory?: boolean
         images?: string[]
         imageAvailable?: boolean
+        videoAvailable?: boolean
         streamId?: string
         thinking?: boolean
       }
@@ -2041,7 +2099,7 @@ export function setupIPC() {
       const controller = new AbortController()
       streamControllers.set(streamId, controller)
       bindChatStream(streamId, opts.conversationId, opts.thinking ? 'thinking' : 'waiting')
-      let continuesAsImage = false
+      let continuesAsMedia = false
       let toolStarted = false
       try {
         const { result, modelName } = await modalityQueue.run(CHAT_JOB, () =>
@@ -2108,12 +2166,14 @@ export function setupIPC() {
           )
         )
         if (result.imageRequests.length > 0) {
-          continuesAsImage = continueChatStreamWithImage(streamId)
+          continuesAsMedia = continueChatStreamWithImage(streamId)
+        } else if (result.videoRequests?.length) {
+          continuesAsMedia = continueChatStreamWithVideo(streamId)
         }
         return modelName ? { ...result, metrics: { ...result.metrics, modelName } } : result
       } finally {
         streamControllers.delete(streamId)
-        if (!continuesAsImage) {
+        if (!continuesAsMedia) {
           endChatStream(streamId, controller.signal.aborted ? 'discarded' : 'record_pending')
           try {
             sender.send('rag:stream', { streamId, type: 'done' })

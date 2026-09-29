@@ -1,0 +1,123 @@
+--- a/include/stable-diffusion.h
++++ b/include/stable-diffusion.h
+@@ -461,10 +461,16 @@
+ typedef void (*sd_log_cb_t)(enum sd_log_level_t level, const char* text, void* data);
+ typedef void (*sd_progress_cb_t)(int step, int steps, float time, void* data);
+ typedef void (*sd_preview_cb_t)(int step, int frame_count, sd_image_t* frames, bool is_noisy, void* data);
++// The decoded frame is borrowed for the duration of this callback only.
++typedef void (*sd_video_decode_progress_cb_t)(int completed, int total, void* data);
++typedef void (*sd_video_decoded_frame_cb_t)(const sd_image_t* frame, void* data);
+ typedef bool (*sd_graph_eval_callback_t)(struct ggml_tensor* t, bool ask, void* user_data);
+ 
+ SD_API void sd_set_log_callback(sd_log_cb_t sd_log_cb, void* data);
+ SD_API void sd_set_progress_callback(sd_progress_cb_t cb, void* data);
++// Reports final video decode sections and the first complete frame, without an extra decode.
++// total == 0 means the section count is not yet known. Does not report sampling previews.
++SD_API void sd_set_video_decode_callback(sd_video_decode_progress_cb_t progress, sd_video_decoded_frame_cb_t frame, void* data);
+ // In each sampling pass, a positive interval previews every Nth denoiser step, while a
+ // negative interval previews only completed logical step -interval. Zero previews the final
+ // completed step of the first sampling pass (base-resolution or high-noise).
+--- a/src/core/util.h
++++ b/src/core/util.h
+@@ -98,6 +98,18 @@
+ std::vector<std::pair<std::string, float>> split_quotation_attention(
+     const std::vector<std::pair<std::string, float>>& parsed_attention);
+ 
++class SDVideoDecodeScope {
++public:
++    SDVideoDecodeScope();
++    ~SDVideoDecodeScope();
++    SDVideoDecodeScope(const SDVideoDecodeScope&) = delete;
++    SDVideoDecodeScope& operator=(const SDVideoDecodeScope&) = delete;
++private:
++    bool previous;
++};
++void sd_video_decode_progress(int completed, int total);
++void sd_video_decoded_frame(const sd_image_t* frame);
++
+ sd_progress_cb_t sd_get_progress_callback();
+ void* sd_get_progress_callback_data();
+ 
+--- a/src/core/util.cpp
++++ b/src/core/util.cpp
+@@ -357,6 +357,30 @@
+     return n_threads > 0 ? (n_threads <= 4 ? n_threads : n_threads / 2) : 4;
+ }
+ 
++static sd_video_decode_progress_cb_t sd_decode_progress_cb = nullptr;
++static sd_video_decoded_frame_cb_t sd_decoded_frame_cb = nullptr;
++static void* sd_decode_cb_data = nullptr;
++static thread_local bool sd_video_decode_active = false;
++
++SDVideoDecodeScope::SDVideoDecodeScope() : previous(sd_video_decode_active) {
++    sd_video_decode_active = true;
++    sd_video_decode_progress(0, 0);
++}
++SDVideoDecodeScope::~SDVideoDecodeScope() { sd_video_decode_active = previous; }
++void sd_video_decode_progress(int completed, int total) {
++    if (sd_video_decode_active && sd_decode_progress_cb)
++        sd_decode_progress_cb(completed, total, sd_decode_cb_data);
++}
++void sd_video_decoded_frame(const sd_image_t* frame) {
++    if (frame && frame->data && sd_decoded_frame_cb)
++        sd_decoded_frame_cb(frame, sd_decode_cb_data);
++}
++void sd_set_video_decode_callback(sd_video_decode_progress_cb_t progress, sd_video_decoded_frame_cb_t frame, void* data) {
++    sd_decode_progress_cb = progress;
++    sd_decoded_frame_cb = frame;
++    sd_decode_cb_data = data;
++}
++
+ static sd_progress_cb_t sd_progress_cb = nullptr;
+ void* sd_progress_cb_data              = nullptr;
+ 
+@@ -581,6 +605,8 @@
+ }
+ 
+ void pretty_progress(int step, int steps, float time) {
++    // Video decode has its own section callback; keep it out of sampling progress.
++    if (sd_video_decode_active && sd_decode_progress_cb) return;
+     if (sd_progress_cb) {
+         sd_progress_cb(step, steps, time, sd_progress_cb_data);
+         return;
+--- a/src/runtime/tiling.cpp
++++ b/src/runtime/tiling.cpp
+@@ -193,6 +193,7 @@
+     }
+ 
+     int num_tiles   = num_tiles_x * num_tiles_y;
++    sd_video_decode_progress(0, num_tiles);
+     int tile_count  = 1;
+     bool last_y     = false;
+     bool last_x     = false;
+@@ -254,6 +255,7 @@
+                 last_time  = (t2 - t1) / 1000.0f;
+                 pretty_progress(tile_count, num_tiles, last_time);
+             }
++            sd_video_decode_progress(tile_count, num_tiles);
+             tile_count++;
+         }
+         last_x = false;
+--- a/src/pipeline/video.cpp
++++ b/src/pipeline/video.cpp
+@@ -1238,7 +1238,11 @@
+                     (int)video_latent.shape()[3]);
+         // auto z = sd::load_tensor_from_file_as_tensor<float>("ltx_vae_z.bin");
+         int64_t t4            = ggml_time_ms();
+-        sd::Tensor<float> vid = sd->decode_first_stage(video_latent, true);
++        sd::Tensor<float> vid;
++        {
++            SDVideoDecodeScope decode_scope;
++            vid = sd->decode_first_stage(video_latent, true);
++        }
+         int64_t t5            = ggml_time_ms();
+         LOG_INFO("decode_first_stage completed, taking %.2fs", (t5 - t4) * 1.0f / 1000);
+         if (vid.empty()) {
+@@ -1265,6 +1269,7 @@
+ 
+         for (int64_t i = 0; i < vid.shape()[2]; i++) {
+             result_images[i] = tensor_to_sd_image(vid, static_cast<int>(i));
++            if (i == 0) sd_video_decoded_frame(&result_images[i]);
+         }
+ 
+         return result_images;

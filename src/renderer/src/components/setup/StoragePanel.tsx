@@ -47,7 +47,7 @@ interface DownloadEntry {
 
 // Group order for the by-type storage layout. Display labels come from the shared
 // model-kind-labels source (single source of truth with the Models screen).
-const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'voice', 'transcription', 'other']
+const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'video', 'voice', 'transcription', 'other']
 
 /** Disk usage for downloaded models, orphan cleanup, and a download manager
  *  (active / failed / interrupted downloads with retry + cancel). */

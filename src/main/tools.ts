@@ -97,6 +97,7 @@ export interface ToolResult {
   sources?: UnifiedSource[]
   imageRequest?: { prompt: string; enhancePrompt?: boolean }
   imageRequests?: { prompt: string; enhancePrompt?: boolean }[]
+  videoRequest?: { prompt: string; enhancePrompt?: boolean }
 }
 
 type ToolDef = {
@@ -437,6 +438,25 @@ const TOOLS: ToolDef[] = [
           }
         : { text: 'Error: no image prompt provided.' }
     }
+  },
+  {
+    name: 'generate_video',
+    description: 'Generate a short silent video on this device from a text prompt. Use when the user asks for a video or moving clip.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'The subject, action and motion to show in the clip.' },
+        enhance_prompt: { type: 'boolean', description: 'Rewrite a short prompt before generation.' }
+      },
+      required: ['prompt']
+    },
+    run: (args): ToolResult => {
+      const prompt = String(args.prompt ?? '').trim()
+      const enhancePrompt = typeof args.enhance_prompt === 'boolean' ? args.enhance_prompt : undefined
+      return prompt
+        ? { text: 'Video generation started. The clip will appear in this chat.', videoRequest: { prompt, ...(enhancePrompt === undefined ? {} : { enhancePrompt }) } }
+        : { text: 'Error: no video prompt provided.' }
+    }
   }
 ]
 
@@ -444,12 +464,14 @@ const TOOLS: ToolDef[] = [
 // otherwise; every other built-in obeys only the disabled-set.
 function schemas(
   imageAvailable: boolean,
+  videoAvailable: boolean,
   scope: { projectActive: boolean; allMemory: boolean }
 ): unknown[] {
   const off = disabledSet()
   return (
     TOOLS.filter((t) => !off.has(t.name))
       .filter((t) => t.name !== 'generate_image' || imageAvailable)
+      .filter((t) => t.name !== 'generate_video' || videoAvailable)
       // Memory tools (search_knowledge_base / search_memory) follow the chat's memory scope.
       .filter((t) => isMemoryToolAllowed(t.name, scope))
       .map((t) => ({
@@ -565,6 +587,7 @@ export async function toolChat(
     allMemory?: boolean
     images?: string[]
     imageAvailable?: boolean
+    videoAvailable?: boolean
     thinking?: boolean
     signal?: AbortSignal
     onDelta?: (text: string, kind: 'content' | 'reasoning') => void
@@ -579,6 +602,7 @@ export async function toolChat(
   toolCalls: ToolCall[]
   unified: UnifiedSource[]
   imageRequests: { prompt: string; enhancePrompt?: boolean }[]
+  videoRequests?: { prompt: string; enhancePrompt?: boolean }[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string; enhancePrompt?: boolean }
   toolsOffered?: string[]
@@ -617,12 +641,21 @@ export async function toolChat(
   // correctly (single source of truth for "can we make an image right now").
   const toolsEnabled = getSetting<boolean>('toolsEnabled', true) !== false
   let imageAvailable = opts.imageAvailable ?? false
+  let videoAvailable = opts.videoAvailable ?? false
   if ((!opts.assistantOnly || toolsEnabled) && opts.imageAvailable === undefined) {
     try {
       const { activeImageModel } = await import('./imagegen')
       imageAvailable = !!activeImageModel()
     } catch {
       /* no image runtime -> stay false */
+    }
+  }
+  if ((!opts.assistantOnly || toolsEnabled) && opts.videoAvailable === undefined) {
+    try {
+      const { videoGenStatus } = await import('./videogen')
+      videoAvailable = videoGenStatus().available
+    } catch {
+      /* no video runtime */
     }
   }
 
@@ -665,7 +698,7 @@ export async function toolChat(
     }
   }
   const builtins = toolsEnabled
-    ? schemas(imageAvailable, {
+    ? schemas(imageAvailable, videoAvailable, {
         projectActive: !!opts.projectId,
         allMemory: !!opts.allMemory
       })
@@ -864,6 +897,7 @@ export async function toolChat(
   // the turn so we never evict the LLM mid-loop, and one model round that asks for two pictures does
   // not silently replace the first request with the last.
   const imageRequests: { prompt: string; enhancePrompt?: boolean }[] = []
+  const videoRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   let finishAfterDeferredImages = false
   const resultWithImages = (result: {
     answer: string
@@ -878,6 +912,7 @@ export async function toolChat(
     metrics?: GenerationMetrics
     cutoff?: ResponseCutoffContract
     imageRequests: { prompt: string; enhancePrompt?: boolean }[]
+    videoRequests: { prompt: string; enhancePrompt?: boolean }[]
     imageRequest?: { prompt: string; enhancePrompt?: boolean }
     toolsOffered?: string[]
   } => {
@@ -890,6 +925,7 @@ export async function toolChat(
         ...(result.metrics?.promptTokens ? {} : { estimatedPromptTokens: retainedPromptTokens })
       },
       imageRequests,
+      videoRequests,
       ...(offeredTools.size ? { toolsOffered: [...offeredTools] } : {}),
       ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
     }
@@ -1032,8 +1068,10 @@ export async function toolChat(
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
       let remainingImageRequests = requestedImageCount - imageRequests.length
+      let remainingVideoRequests = videoRequests.length === 0 ? 1 : 0
       const callsToRun = callsWithinToolBudget(permitted, toolCalls.length, maxToolCalls).filter(
-        (call) => call.name !== 'generate_image' || remainingImageRequests-- > 0
+        (call) => (call.name !== 'generate_image' || remainingImageRequests-- > 0) &&
+          (call.name !== 'generate_video' || remainingVideoRequests-- > 0)
       )
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
       messages.push({
@@ -1096,6 +1134,10 @@ export async function toolChat(
         } else if (res.imageRequest) {
           imageRequests.push(res.imageRequest)
           finishAfterDeferredImages = imageRequests.length >= requestedImageCount
+        }
+        if (res.videoRequest && videoRequests.length === 0) {
+          videoRequests.push(res.videoRequest)
+          finishAfterDeferredImages = true
         }
         const status = res.status ?? 'completed'
         toolCalls.push({ name: c.name, args: c.args, result: res.text, status })

@@ -40,10 +40,11 @@ interface ModelEntry {
 const MODALITIES: {
   label: string
   kinds: string[]
-  mode: 'text' | 'image' | 'speech' | 'transcription'
+  mode: 'text' | 'image' | 'video' | 'speech' | 'transcription'
 }[] = [
   { label: 'Text & Vision', kinds: ['text', 'vision'], mode: 'text' },
   { label: 'Image', kinds: ['image'], mode: 'image' },
+  { label: 'Video', kinds: ['video'], mode: 'video' },
   { label: 'Voice', kinds: ['voice', 'speech'], mode: 'speech' },
   { label: 'Transcription', kinds: ['transcription'], mode: 'transcription' }
 ]
@@ -54,6 +55,7 @@ type PickerMode = (typeof MODALITIES)[number]['mode']
 const MODE_TO_MODALITY: Record<PickerMode, string> = {
   text: 'llm',
   image: 'image',
+  video: 'video',
   speech: 'tts',
   transcription: 'stt'
 }
@@ -118,6 +120,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setActive({
       text: remoteTextActive ? null : (text ?? modal.text ?? null),
       image: modal.image ?? null,
+      video: modal.video ?? null,
       speech: modal.speech ?? null,
       transcription: modal.transcription ?? null,
       computer_use: modal.computer_use ?? null
@@ -448,7 +451,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                 <span className="text-[10px] uppercase tracking-wide text-neutral-600">
                   {label}
                 </span>
-                {cur && (
+                {cur && mode !== 'video' && (
                   <button
                     type="button"
                     onClick={() => void unloadModel(mode)}
@@ -494,7 +497,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                           <span className="block truncate">{m.name}</span>
                           {!m.remoteServerId && (
                             <span className="block whitespace-normal text-[10px] text-neutral-500">
-                              {backendFor(mode === 'text' ? 'chat' : mode, [
+                              {mode === 'video' ? 'Local · loads for each clip' : backendFor(mode === 'text' ? 'chat' : mode, [
                                 m.id,
                                 primaryFile(m),
                                 ...(mode === 'speech' ? ['Kokoro'] : [])

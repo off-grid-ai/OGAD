@@ -1,3 +1,7 @@
+import {
+  readGeneratedVideoReference,
+  withGeneratedVideoReference
+} from '../../shared/generated-video-reference'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { BundleError, type FileMapper, type FileRef } from '@offgrid/sync/portable'
@@ -36,13 +40,20 @@ export class DesktopBackupFileMapper implements FileMapper<DesktopBackupData> {
         return { ...document, path: key }
       })
     }))
-    return { files, keyed: { ...data, projects } }
+    const videos = (data.videos ?? []).map((video) => {
+      const digest = crypto.createHash('sha256').update(video.originalPath).digest('hex')
+      const key = `files/videos/${digest}.mp4`
+      files.push({ key, sourcePath: video.path })
+      return { ...video, path: key }
+    })
+    return { files, keyed: { ...data, projects, videos } }
   }
 
   listKeys(keyed: DesktopBackupData): string[] {
     const keys = keyed.projects.flatMap((project) =>
       project.documents.map((document) => document.path)
     )
+    keys.push(...(keyed.videos ?? []).map((video) => video.path))
     for (const key of keys) {
       if (!isSafeBackupKey(key)) {
         throw new BundleError('This backup contains an unsafe file path.')
@@ -52,8 +63,31 @@ export class DesktopBackupFileMapper implements FileMapper<DesktopBackupData> {
   }
 
   restore(keyed: DesktopBackupData, keyToPath: Record<string, string>): DesktopBackupData {
+    const videos = (keyed.videos ?? []).map((video) => {
+      const restored = keyToPath[video.path]
+      if (!restored) throw new BundleError(`This backup is missing ${video.path}.`)
+      return { ...video, path: restored }
+    })
+    const paths = new Map(videos.map((video) => [video.originalPath, video.path]))
     return {
       ...keyed,
+      videos,
+      conversations: keyed.conversations.map((conversation) => ({
+        ...conversation,
+        messages: conversation.messages.map((message) => {
+          const reference = readGeneratedVideoReference(message.context)
+          const restored = reference && paths.get(reference.path)
+          return restored
+            ? {
+                ...message,
+                context: withGeneratedVideoReference(message.context as Record<string, unknown>, {
+                  ...reference,
+                  path: restored
+                })
+              }
+            : message
+        })
+      })),
       projects: keyed.projects.map((project) => ({
         ...project,
         documents: project.documents.map((document) => {

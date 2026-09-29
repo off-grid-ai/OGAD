@@ -43,8 +43,15 @@ export interface DesktopBackupConversation {
   messages: DesktopBackupMessage[]
 }
 
+export interface DesktopBackupVideo {
+  path: string
+  originalPath: string
+  metadata: Record<string, unknown>
+}
+
 export interface DesktopBackupData {
   surface: 'offgrid-desktop'
+  videos?: DesktopBackupVideo[]
   projects: DesktopBackupProject[]
   conversations: DesktopBackupConversation[]
 }
@@ -133,7 +140,16 @@ export function validateDesktopBackupData(value: unknown): DesktopBackupData {
     !Array.isArray(value.projects) ||
     !value.projects.every(isProject) ||
     !Array.isArray(value.conversations) ||
-    !value.conversations.every(isConversation)
+    !value.conversations.every(isConversation) ||
+    (value.videos !== undefined &&
+      (!Array.isArray(value.videos) ||
+        !value.videos.every(
+          (video) =>
+            isRecord(video) &&
+            isString(video.path) &&
+            isString(video.originalPath) &&
+            isRecord(video.metadata)
+        )))
   ) {
     throw new BundleError('This backup does not contain valid Off Grid AI Desktop data.')
   }

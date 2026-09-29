@@ -10,6 +10,7 @@
 // toolChat uses that same project id for document retrieval. The SQLite round-trip
 // behind createRagConversation is covered by database-integration.dbtest.ts.
 
+import { createVideoBoundary } from './harness/video-boundary'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -48,6 +49,7 @@ function installApi(
     isPro: false,
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     onImageGenProgress: vi.fn(() => () => {}),
+    ...createVideoBoundary(),
     onImageGenJobState: vi.fn(() => () => {}),
     onImageGenConversationUpdated: vi.fn(() => () => {}),
     imageGenJobStatus: vi.fn(async () => ({

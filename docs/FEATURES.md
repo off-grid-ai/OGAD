@@ -12,6 +12,7 @@ device** — no cloud inference, no account, no API key. Each feature has its ow
 | [The Gateway](features/gateway.md)               | One local OpenAI-compatible API for every model — chat, vision, image, audio, embeddings. |
 | [Chat](features/chat.md)                         | Text + vision + reasoning, streaming, tabs, tools, voice mode, project scoping.           |
 | [Image generation](features/image-generation.md) | Text→image and image→image (SDXL GGUFs), styles, LoRA, live previews.                     |
+| [Video generation](features/video-generation.md) | Silent Wan clips, chat tools, playback, and an asynchronous video API. |
 | [Voice & speech](features/voice.md)              | Speech→text (whisper) and text→speech (Kokoro), hands-free voice mode.                    |
 | [Projects (RAG)](features/projects.md)           | Group chats, upload docs, chat grounded in them with cited retrieval.                     |
 | [Artifacts](features/artifacts.md)               | HTML / React / SVG / Mermaid / Markdown rendered in a sandboxed canvas.                   |

@@ -1,3 +1,11 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { generatedVideosDir, listGeneratedVideos } from '../videogen'
+import { readGeneratedVideoSidecar, writeGeneratedVideoSidecar } from '../videogen/gallery-sidecar'
+import {
+  readGeneratedVideoReference,
+  withGeneratedVideoReference
+} from '../../shared/generated-video-reference'
 import crypto from 'node:crypto'
 import type Database from 'better-sqlite3-multiple-ciphers'
 import type { BackupDataPort } from '@offgrid/sync/portable'
@@ -118,6 +126,7 @@ export class DesktopBackupDataPort implements BackupDataPort<
     return {
       surface: 'offgrid-desktop',
       projects: [project],
+      videos: this.videos({ projectId }),
       conversations: this.conversations(projectId)
     }
   }
@@ -129,6 +138,7 @@ export class DesktopBackupDataPort implements BackupDataPort<
     return {
       surface: 'offgrid-desktop',
       projects: project ? [project] : [],
+      videos: this.videos({ conversationId }),
       conversations: [conversation]
     }
   }
@@ -138,6 +148,43 @@ export class DesktopBackupDataPort implements BackupDataPort<
   }
 
   async apply(data: DesktopBackupData): Promise<DesktopRestoreSummary> {
+    const restoredPaths = new Map<string, string>()
+    for (const video of data.videos ?? []) {
+      // The mapper supplies archive-owned paths. Never use a peer's original path as a destination.
+      const root = generatedVideosDir()
+      fs.mkdirSync(root, { recursive: true })
+      const identity = crypto.createHash('sha256').update(video.originalPath).digest('hex')
+      const destination = path.join(root, `restored-${identity}.mp4`)
+      if (
+        fs.existsSync(destination) &&
+        (!fs.lstatSync(destination).isFile() || fs.lstatSync(destination).isSymbolicLink())
+      ) {
+        throw new Error('The restored video destination is not an app-owned file.')
+      }
+      if (!fs.existsSync(destination))
+        fs.copyFileSync(video.path, destination, fs.constants.COPYFILE_EXCL)
+      writeGeneratedVideoSidecar(destination, video.metadata)
+      restoredPaths.set(video.path, destination)
+    }
+    data = {
+      ...data,
+      conversations: data.conversations.map((conversation) => ({
+        ...conversation,
+        messages: conversation.messages.map((message) => {
+          const reference = readGeneratedVideoReference(message.context)
+          const destination = reference && restoredPaths.get(reference.path)
+          return destination
+            ? {
+                ...message,
+                context: withGeneratedVideoReference(message.context as Record<string, unknown>, {
+                  ...reference,
+                  path: destination
+                })
+              }
+            : message
+        })
+      }))
+    }
     const addedProjects: string[] = []
     const addedConversations: string[] = []
     const addedMessages: string[] = []
@@ -260,6 +307,14 @@ export class DesktopBackupDataPort implements BackupDataPort<
             message.context === undefined ? null : JSON.stringify(message.context),
             message.createdAt
           )
+          const video = readGeneratedVideoReference(message.context)
+          if (video && [...restoredPaths.values()].includes(video.path)) {
+            writeGeneratedVideoSidecar(video.path, {
+              messageId: uuid,
+              conversationId: conversation.id,
+              projectId: conversation.projectId
+            })
+          }
           addedMessages.push(uuid)
         }
       }
@@ -288,6 +343,14 @@ export class DesktopBackupDataPort implements BackupDataPort<
     }
   }
 
+  private videos(scope?: { conversationId?: string; projectId?: string }) {
+    return listGeneratedVideos(scope).map((video) => ({
+      path: video.path,
+      originalPath: video.path,
+      metadata: { ...readGeneratedVideoSidecar(video.path) }
+    }))
+  }
+
   private collect(): DesktopBackupData {
     const projects = (
       this.db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as ProjectRow[]
@@ -295,6 +358,7 @@ export class DesktopBackupDataPort implements BackupDataPort<
     return {
       surface: 'offgrid-desktop',
       projects,
+      videos: this.videos(),
       conversations: this.conversations()
     }
   }

@@ -42,6 +42,11 @@ export interface QueueRequest {
 // on unified memory. Frozen so a caller can't mutate the shared descriptor.
 export const CHAT_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'chat', evicts: ['image'] })
 export const IMAGE_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'image', evicts: ['llm'] })
+export const VIDEO_JOB: QueueRequest = Object.freeze({
+  tier: 2,
+  label: 'video',
+  evicts: ['llm', 'image']
+})
 
 // Background model work (capture distill, replay-vision, secretary/agent passes).
 // Tier 3 = lowest priority: runs only when no chat/workspace/image job is running
@@ -145,7 +150,8 @@ export class ModalityQueue {
    * `fn`, release the slot, then admit the next waiter. Cooperative: a running
    * job is NEVER killed to make room — admission only gates jobs not yet started.
    */
-  async run<T>(request: QueueRequest, fn: () => Promise<T>): Promise<T> {
+  async run<T>(request: QueueRequest, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
     if (!this.enabled) return fn()
 
     // Reentrancy guard: a job started while ALREADY inside a running queued job is
@@ -163,18 +169,35 @@ export class ModalityQueue {
     }
 
     // Wait for admission (resolves synchronously if the slot is free right now).
-    await new Promise<void>((resolve) => {
-      this.waiting.push({ job, request, admit: resolve })
+    await new Promise<void>((resolve, reject) => {
+      const abort = (): void => {
+        const index = this.waiting.findIndex((waiter) => waiter.job.id === job.id)
+        // An admitted job must finish eviction before it can release its slot.
+        if (index === -1) return
+        this.waiting.splice(index, 1)
+        signal?.removeEventListener('abort', abort)
+        reject(signal?.reason)
+        this.emitChange()
+        this.pump()
+      }
+      const admit = (): void => {
+        signal?.removeEventListener('abort', abort)
+        resolve()
+      }
+      this.waiting.push({ job, request, admit })
+      signal?.addEventListener('abort', abort, { once: true })
       this.emitChange()
       this.pump()
     })
 
     try {
       // Mark this async context as "inside a job" so any nested run() short-circuits.
+      signal?.throwIfAborted()
       return await this.jobContext.run(true, fn)
     } finally {
       const entry = this.running.get(job.id)
-      this.running.delete(job.id)
+      // Keep the admission slot while restoring engines: a new job must not
+      // evict an engine while the previous job is still warming it.
       // Re-warm what this job evicted. Each engine's warm() is mode-aware: a
       // 'resident' engine reloads now; an 'on-demand' engine just clears its
       // eviction block and stays down until its own next use.
@@ -182,11 +205,12 @@ export class ModalityQueue {
         const e = this.evictables.get(id)
         if (!e?.warm) continue
         try {
-          await e.warm()
+          await this.jobContext.run(true, () => e.warm!())
         } catch (err) {
           console.error(`[ModalityQueue] warm '${id}' failed:`, err)
         }
       }
+      this.running.delete(job.id)
       this.emitChange()
       this.pump()
     }

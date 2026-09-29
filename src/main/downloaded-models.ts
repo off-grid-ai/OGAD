@@ -12,6 +12,8 @@
 import fs from 'fs'
 import path from 'path'
 import { modelPackageIdentity } from '@offgrid/sync'
+import { extractQuantization, videoArchitecture, videoPackFiles } from '@offgrid/models'
+import { isValidGgufFile } from './models/gguf'
 import { isProjectorFileName } from './models/catalog-logic'
 
 export interface DownloadedModel {
@@ -50,6 +52,7 @@ function writeDownloaded(dir: string, list: DownloadedModel[]): void {
 
 export interface DownloadedRegistryCatalogEntry {
   id: string
+  name?: string
   kind?: string
   files: Array<{ name: string }>
 }
@@ -129,6 +132,40 @@ export function reconcileDownloadedModelRegistry(
     })
     changed = true
   }
+  // Adopt complete copied video variants into the existing package registry.
+  // Their normal Use/Delete/Transfer controls must use the same identity as downloads.
+  let entries: string[] = []
+  try { entries = fs.readdirSync(dir) } catch { /* no model directory yet */ }
+  for (const weight of entries) {
+    const architecture = videoArchitecture(weight)
+    if (!architecture || migrated.some((model) => model.kind === 'video' && model.files.includes(weight))) continue
+    const family = catalog.find((entry) => entry.kind === 'video' &&
+      entry.files.some((file) => videoArchitecture(file.name) === architecture))
+    if (!family) continue
+    const names = Object.values(videoPackFiles(weight)!)
+    // The catalog already provides controls when this is its exact default pack.
+    if (names.length === family.files.length && names.every((name) => family.files.some((file) => file.name === name))) continue
+    const files: Array<{ name: string; sizeBytes: number; role: 'primary' }> = []
+    for (const name of names) {
+      try {
+        const filePath = path.join(dir, name)
+        const stat = fs.lstatSync(filePath)
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 ||
+          (name.endsWith('.gguf') && !isValidGgufFile(filePath, fs))) break
+        files.push({ name, sizeBytes: stat.size, role: 'primary' })
+      } catch { break }
+    }
+    if (files.length !== names.length) continue
+    const name = `${family.name ?? 'Video model'} · ${extractQuantization(weight)}`
+    const packageIdentity = modelPackageIdentity({
+      id: family.id, name, kind: 'video', source: 'downloaded',
+      files: files as [(typeof files)[number], ...typeof files]
+    })
+    migrated.push({ id: packageIdentity, familyId: family.id, packageIdentity,
+      name, kind: 'video', files: names })
+    changed = true
+  }
+
   const unique = [...new Map(migrated.map((model) => [model.id, model])).values()]
   if (changed || unique.length !== current.length) writeDownloaded(dir, unique)
   return unique

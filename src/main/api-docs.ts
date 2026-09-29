@@ -21,6 +21,10 @@ EMBEDDINGS            POST ${b}/v1/embeddings          {input}  (local all-MiniL
 SPEECH -> TEXT (STT)  POST ${b}/v1/audio/transcriptions  multipart: file
 TEXT -> SPEECH (TTS)  POST ${b}/v1/audio/speech        {input, voice?}  -> audio/wav
   voices              GET  ${b}/v1/audio/voices
+TEXT -> VIDEO         POST ${b}/v1/videos             {prompt, model?, width?, height?, frames?, fps?, steps?, seed?, client_job_id?, use_remote?} -> 202 job
+  status              GET ${b}/v1/videos/:id
+  download            GET ${b}/v1/videos/:id/content -> video/mp4
+  stop                POST ${b}/v1/videos/:id/cancel
 TEXT -> IMAGE         POST ${b}/v1/images              {prompt, aspect_ratio?, resolution?, seed?}
 IMAGE -> IMAGE        POST ${b}/v1/images              {prompt, input_references:[{image_url:{url}}]}
   (OpenAI aliases)    POST ${b}/v1/images/generations  |  POST ${b}/v1/images/edits (multipart)
@@ -429,7 +433,11 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     cfg_scale: { type: 'number' },
                     negative_prompt: { type: 'string' },
                     model: { type: 'string', ...imgEnum },
-                    allow_unsafe_memory_override: { type: 'boolean', description: 'Run a remote image request after confirming its memory-limit warning.' },
+                    allow_unsafe_memory_override: {
+                      type: 'boolean',
+                      description:
+                        'Run a remote image request after confirming its memory-limit warning.'
+                    },
                     response_format: {
                       type: 'string',
                       enum: ['b64_json', 'url'],
@@ -468,6 +476,110 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
             '501': errorResponse,
             default: errorResponse
           }
+        }
+      },
+      '/v1/videos': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Generate a silent video with the selected local model pack',
+          description:
+            'Returns an asynchronous job. Reuse client_job_id with the same body to recover a lost response without generating another clip.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['prompt'],
+                  properties: {
+                    prompt: { type: 'string' },
+                    model: { type: 'string' },
+                    negativePrompt: { type: 'string' },
+                    client_job_id: { type: 'string', minLength: 16, maxLength: 100 },
+                    use_remote: { type: 'boolean', default: false, description: 'Use the active OpenRouter video model. Default is local generation. Stop ends local polling; OpenRouter may continue generation and charge for it.' },
+                    width: {
+                      type: 'integer',
+                      minimum: 256,
+                      maximum: 1280,
+                      multipleOf: 16,
+                      description: 'LTX models require multiples of 32.'
+                    },
+                    height: {
+                      type: 'integer',
+                      minimum: 192,
+                      maximum: 736,
+                      multipleOf: 16,
+                      description:
+                        'Up to 720 for Wan and Hunyuan; up to 736 in multiples of 32 for LTX.'
+                    },
+                    frames: {
+                      type: 'integer',
+                      minimum: 9,
+                      maximum: 121,
+                      description: '4n + 1 frames for Wan and Hunyuan; 8n + 1 for LTX.'
+                    },
+                    fps: { type: 'integer', minimum: 4, maximum: 24 },
+                    steps: { type: 'integer', minimum: 4, maximum: 50 },
+                    guidance: { type: 'number', minimum: 0, maximum: 20 },
+                    seed: { type: 'integer', minimum: -1, maximum: 2147483647 },
+                    enhancePrompt: { type: 'boolean' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '202': { description: 'Accepted job with request_id and poll_url' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Video job status, progress and result',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': {
+              description:
+                'Job status is queued, running, completed, or failed. Cancelled jobs fail with error type cancelled. Running jobs include a stage (enhancing, preparing, conditioning, generating, decoding, or encoding) and optional step/total progress. During decoding, progress counts completed sections. A preview field can provide dimensions and a preview URL for the first final decoded frame. Completed jobs include metadata and a content URL. Jobs interrupted by a server restart fail with error type interrupted.'
+            },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}/content': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Download the completed MP4',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': {
+              description: 'Video file',
+              content: { 'video/mp4': { schema: { type: 'string', format: 'binary' } } }
+            },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}/preview': {
+        get: {
+          tags: ['Videos'],
+          summary: 'First decoded video frame while the job finishes',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': { description: 'Final decoded frame, without a second decode', content: { 'image/png': { schema: { type: 'string', format: 'binary' } } } },
+            '404': { description: 'Preview is not ready or the job has finished' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}/cancel': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Stop this video job',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Stop requested' }, default: errorResponse }
         }
       },
       '/v1/images/generations': {

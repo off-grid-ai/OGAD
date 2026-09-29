@@ -12,6 +12,7 @@ import {
   readResponseCutoff
 } from '../../lib/message-persistence'
 import { readGeneratedImageReference } from '../../../../shared/generated-image-reference'
+import { readGeneratedVideoReference } from '../../../../shared/generated-video-reference'
 import { captureUrlForPath } from '../../../../shared/ogcapture-url'
 import type {
   Attachment,
@@ -133,6 +134,7 @@ function projectedTurnTools(turn: ProjectedTurn): Partial<ChatMessage> {
 
 function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMessage {
   const imageReference = readGeneratedImageReference(context)
+  const videoReference = readGeneratedVideoReference(context)
   return {
     id: turn.id,
     role: turn.role,
@@ -151,6 +153,8 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     provenance: turn.provenance,
     image: imageReference ? captureUrlForPath(imageReference.path) : undefined,
     imagePath: imageReference?.path,
+    videoPath: videoReference?.path,
+    videoMetadata: context?.videoMetadata,
     imageMetadata: context?.imageMetadata,
     attachments: Array.isArray(context?.attachments) ? context.attachments : undefined
   }

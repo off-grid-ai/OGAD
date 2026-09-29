@@ -1,3 +1,14 @@
+import { callHook, HOOKS } from './bootstrap/hookRegistry'
+import type { RecordProvenance } from '@offgrid/sync'
+import { dataDir } from './runtime-env'
+import { videoGenerationJobs } from './videogen/job-service'
+import { videoGenStatus, generatedVideosDir } from './videogen'
+import {
+  resolveVideoRequest,
+  type VideoGenerationRequestContract,
+  type VideoGenerationStage
+} from '@offgrid/models'
+import { resolveExistingOwnedPath } from './imagegen/owned-path'
 // Off Grid AI local inference gateway — ONE OpenAI-compatible endpoint for every
 // modality, on :7878. Any local tool (IDE, app, script) points here and gets the
 // on-device models, and so does a phone on the same LAN - Off Grid AI Mobile scans the
@@ -97,6 +108,7 @@ async function liveGatewayModalities(imageAvailable: boolean): Promise<GatewayMo
     embeddings: true,
     transcription: !!whisperModel() || (!!transcription && installed.includes(transcription)),
     speech: !!speech && installed.includes(speech),
+    video: videoGenStatus({ localOnly: true }).available,
     image: imageAvailable
   })
 }
@@ -127,16 +139,61 @@ interface ApiRequest {
   created_at: number
   updated_at: number
   result?: unknown
+  videoPath?: string
+  videoJobId?: string
+  videoInput?: string
+  preview?: { path: string; width: number; height: number }
+  stage?: VideoGenerationStage
   error?: { message: string; type: string }
   progress?: { step: number; total: number }
 }
 
 const requests = new Map<string, ApiRequest>()
 const REQUESTS_MAX = 500
+let videoRequestsLoaded = false
+const videoRequestPath = (): string => path.join(dataDir(), 'video-api-jobs.json')
+function persistVideoRequests(): void {
+  const destination = videoRequestPath()
+  fs.mkdirSync(path.dirname(destination), { recursive: true })
+  fs.writeFileSync(
+    `${destination}.tmp`,
+    JSON.stringify([...requests.values()].filter((item) => item.kind === 'video'))
+  )
+  fs.renameSync(`${destination}.tmp`, destination)
+}
+function loadVideoRequests(): void {
+  if (videoRequestsLoaded) return
+  videoRequestsLoaded = true
+  try {
+    const saved = JSON.parse(fs.readFileSync(videoRequestPath(), 'utf8')) as ApiRequest[]
+    if (!Array.isArray(saved)) return
+    for (const item of saved.slice(-REQUESTS_MAX)) {
+      if (!item || item.kind !== 'video' || typeof item.id !== 'string') continue
+      if (item.status === 'queued' || item.status === 'running') {
+        item.status = 'failed'
+        item.updated_at = Date.now()
+        delete item.stage
+        delete item.progress
+        delete item.preview
+        item.error = {
+          message: 'OGAD stopped before this video finished. Start a new job to retry.',
+          type: 'interrupted'
+        }
+      }
+      requests.set(item.id, item)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      console.error('[video] Could not restore API jobs', error)
+  }
+}
 
 function createRequest(id: string, kind: string, collection: string): ApiRequest {
   if (requests.size >= REQUESTS_MAX) {
-    const oldest = requests.keys().next().value
+    const oldest = [...requests.values()].find(
+      (item) =>
+        item.status === 'completed' || item.status === 'failed'
+    )?.id
     if (oldest) requests.delete(oldest)
   }
   const now = Date.now()
@@ -154,13 +211,15 @@ function settle<T>(r: ApiRequest, work: Promise<T>): Promise<T> {
       r.status = 'completed'
       r.result = result
       r.updated_at = Date.now()
+      if (r.kind === 'video') persistVideoRequests()
       return result
     },
     (e) => {
       const { type, message } = errMeta(e)
       r.status = 'failed'
-      r.error = { message, type }
+      r.error = { message, type: r.error?.type === 'cancelled' ? 'cancelled' : type }
       r.updated_at = Date.now()
+      if (r.kind === 'video') persistVideoRequests()
       throw e
     }
   )
@@ -182,6 +241,7 @@ function dispatchAsync(res: http.ServerResponse, r: ApiRequest): void {
 
 /** GET a request resource — the RESTful poll. */
 function handlePoll(res: http.ServerResponse, id: string): void {
+  loadVideoRequests()
   const r = requests.get(id)
   if (!r) {
     json(res, 404, errBody(`No request with id '${id}'.`, 'not_found'))
@@ -198,6 +258,8 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   }
   if (r.status === 'completed') body.result = r.result
   if (r.status === 'failed') body.error = r.error
+  if (r.stage) body.stage = r.stage
+  if (r.preview) body.preview = { url: `/v1/videos/${id}/preview`, width: r.preview.width, height: r.preview.height }
   if (r.progress) body.progress = r.progress
   json(res, 200, body)
 }
@@ -803,7 +865,23 @@ async function handleModelsList(
       (whisperModel() ? path.basename(whisperModel() as string) : null)
   const transcription = sttId ? [tag(sttId, 'transcription')] : []
 
-  const data: Record<string, unknown>[] = [...text, ...images, ...speech, ...transcription]
+  const video = videoGenStatus({ localOnly: true })
+  const videos =
+    video.available && video.active
+      ? [
+          tag(video.active, 'video', {
+            video_api: 'offgrid-video-v1',
+            architecture: { input_modalities: ['text'], output_modalities: ['video'] }
+          })
+        ]
+      : []
+  const data: Record<string, unknown>[] = [
+    ...text,
+    ...images,
+    ...videos,
+    ...speech,
+    ...transcription
+  ]
   const requested = outputModalities
     ?.split(',')
     .map((value) => value.trim())
@@ -812,7 +890,9 @@ async function handleModelsList(
     requested?.length && !requested.includes('all')
       ? data.filter((entry) =>
           requested.includes(
-            entry.kind === 'speech' || entry.kind === 'image' ? entry.kind : 'text'
+            entry.kind === 'video' || entry.kind === 'speech' || entry.kind === 'image'
+              ? entry.kind
+              : 'text'
           )
         )
       : data
@@ -972,6 +1052,108 @@ async function executeImage(
     }
   } finally {
     cleanup?.()
+  }
+}
+
+/** Shared REST/MCP job admission. Runtime and durable API state have one owner. */
+export function startGatewayVideoJob(
+  input: VideoGenerationRequestContract,
+  rid: string = randomUUID(),
+  options: { useRemote?: boolean } = {}
+): ApiRequest {
+  if (options.useRemote && getActiveRemoteVisionServerForModality('video')?.provider !== 'openrouter')
+    throw new Error('Select an OpenRouter video model before using remote generation.')
+  resolveVideoRequest(input)
+  loadVideoRequests()
+  const fingerprint = JSON.stringify(options.useRemote ? { ...input, use_remote: true } : input)
+  const existing = requests.get(rid)
+  if (existing) {
+    if (existing.kind !== 'video' || existing.videoInput !== fingerprint)
+      throw new Error('This job id belongs to a different request.')
+    return existing
+  }
+  videoGenerationJobs.assertCanStart()
+  const request = createRequest(rid, 'video', '/v1/videos')
+  request.videoInput = fingerprint
+  persistVideoRequests()
+  const unsubscribe = videoGenerationJobs.onChange((job) => {
+    if (request.videoJobId && request.videoJobId !== job.id) return
+    request.videoJobId = job.id ?? undefined
+    request.stage = job.stage ?? undefined
+    request.preview = job.preview ?? undefined
+    if (job.phase === 'cancelled')
+      request.error = { message: job.error ?? 'Video generation stopped.', type: 'cancelled' }
+    request.progress = job.progress ?? undefined
+    request.updated_at = Date.now()
+  })
+  void settle(
+    request,
+    videoGenerationJobs
+      .start({ ...input, localOnly: !options.useRemote })
+      .then((output) => {
+        request.videoPath = output.path
+        const { path: _path, ...metadata } = output
+        return {
+          ...metadata,
+          provenance: callHook<RecordProvenance>(HOOKS.syncLocalProvenance),
+          url: `/v1/videos/${rid}/content`
+        }
+      })
+      .finally(unsubscribe)
+  ).catch(() => {})
+  return request
+}
+
+export function gatewayVideoJob(id: string, cancel = false): Record<string, unknown> {
+  loadVideoRequests()
+  const request = requests.get(id)
+  if (!request || request.kind !== 'video') throw new Error('Video job was not found.')
+  if (cancel && request.videoJobId === videoGenerationJobs.status().id) videoGenerationJobs.cancel()
+  return {
+    request_id: request.id,
+    status: request.status,
+    stage: request.stage,
+    ...(request.preview ? { preview: { url: `/v1/videos/${id}/preview`, width: request.preview.width, height: request.preview.height } } : {}),
+    progress: request.progress,
+    result: request.result,
+    error: request.error,
+    poll_url: `/v1/videos/${id}`
+  }
+}
+
+async function handleVideoGeneration(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  rid: string
+): Promise<void> {
+  try {
+    const body = await readJson(req)
+    const input: VideoGenerationRequestContract = {
+      prompt: typeof body.prompt === 'string' ? body.prompt : '',
+      model: typeof body.model === 'string' ? body.model : undefined,
+      negativePrompt: typeof body.negativePrompt === 'string' ? body.negativePrompt : undefined,
+      enhancePrompt: typeof body.enhancePrompt === 'boolean' ? body.enhancePrompt : undefined,
+      ...Object.fromEntries(
+        ['width', 'height', 'frames', 'fps', 'steps', 'guidance', 'seed']
+          .filter((key) => body[key] !== undefined)
+          .map((key) => [key, body[key]])
+      )
+    }
+    resolveVideoRequest(input)
+    loadVideoRequests()
+    if (body.client_job_id !== undefined) {
+      if (
+        typeof body.client_job_id !== 'string' ||
+        !/^[a-zA-Z0-9_-]{16,100}$/.test(body.client_job_id)
+      )
+        throw new Error('Invalid video client job id.')
+      rid = body.client_job_id
+    }
+    if (body.use_remote !== undefined && typeof body.use_remote !== 'boolean')
+      throw new Error('use_remote must be a boolean.')
+    dispatchAsync(res, startGatewayVideoJob(input, rid, { useRemote: body.use_remote === true }))
+  } catch (error) {
+    json(res, 400, errBody(error instanceof Error ? error.message : 'Video request failed.'))
   }
 }
 
@@ -1233,10 +1415,60 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       )
     })
 
+    const videoResource = /^\/v1\/videos\/([^/]+)\/(content|cancel|preview)$/.exec(url)
+    if (videoResource) {
+      loadVideoRequests()
+      const request = requests.get(videoResource[1]!)
+      if (!request || request.kind !== 'video') {
+        json(res, 404, errBody('Video request not found.'))
+        return
+      }
+      if (videoResource[2] === 'cancel' && method === 'POST') {
+        const job = videoGenerationJobs.status()
+        const cancelled =
+          job.id === request.videoJobId && job.phase === 'running' && videoGenerationJobs.cancel()
+        json(res, 200, { cancelled })
+        return
+      }
+      if (videoResource[2] === 'preview' && method === 'GET') {
+        const owned = request.status === 'running' && request.preview &&
+          resolveExistingOwnedPath(generatedVideosDir(), request.preview.path)
+        if (!owned) {
+          json(res, 404, errBody('Video preview is not available.'))
+          return
+        }
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'Content-Length': fs.statSync(owned).size })
+        const stream = fs.createReadStream(owned)
+        res.once('close', () => stream.destroy())
+        stream.on('error', () => res.destroy())
+        stream.pipe(res)
+        return
+      }
+      if (videoResource[2] === 'content' && method === 'GET') {
+        const owned =
+          request.videoPath && resolveExistingOwnedPath(generatedVideosDir(), request.videoPath)
+        if (request.status !== 'completed' || !owned) {
+          json(res, 404, errBody('Video is not available.'))
+          return
+        }
+        res.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Content-Length': fs.statSync(owned).size
+        })
+        const stream = fs.createReadStream(owned)
+        res.once('close', () => stream.destroy())
+        stream.on('error', () => res.destroy())
+        stream.pipe(res)
+        return
+      }
+    }
+    if (url === '/v1/videos' && method === 'POST') return void handleVideoGeneration(req, res, rid)
+
     // RESTful polling: GET the request resource. Canonical /v1/requests/{id}, or
     // the per-collection resource (e.g. /v1/images/{id}, /v1/audio/speech/{id}).
     if (method === 'GET') {
-      const { id, isPollCollection } = matchPollRoute(url)
+      const { id, prefix, isPollCollection } = matchPollRoute(url)
+      if (prefix === '/v1/videos' && id) return handlePoll(res, id)
       if (url.startsWith('/v1/requests/') && id) return handlePoll(res, id)
       if (id && isPollCollection && requests.has(id)) return handlePoll(res, id)
     }
@@ -1251,6 +1483,8 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         docs: `http://${GATEWAY_HOST}:${boundGatewayPort}/docs`,
         mcp: `http://${GATEWAY_HOST}:${boundGatewayPort}/mcp`,
         modalities,
+        video_api: 'offgrid-video-v1',
+        video_models: videoGenStatus({ localOnly: true }).models,
         image_models: img.models,
         image_reason: img.available ? undefined : img.reason
       })
@@ -1291,7 +1525,11 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
           'GET  /v1/audio/voices',
           'POST /v1/images',
           'POST /v1/images/generations',
-          'POST /v1/images/edits'
+          'POST /v1/images/edits',
+          'POST /v1/videos',
+          'GET /v1/videos/:id',
+          'GET /v1/videos/:id/content',
+          'POST /v1/videos/:id/cancel'
         ],
         docs: `http://${GATEWAY_HOST}:${boundGatewayPort}/docs`
       })

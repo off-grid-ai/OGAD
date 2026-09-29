@@ -5,6 +5,7 @@ import {
   WarningCircle,
   ChatCircle,
   Image as ImageIcon,
+  VideoCamera,
   SpeakerHigh,
   Microphone,
   DownloadSimple,
@@ -24,7 +25,7 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   {
     id: 'conservative',
     label: 'Conservative',
-    hint: 'Lightest - small, fast, low memory (skips the image model)'
+    hint: 'Lightest - small, fast, low memory (skips image and video models)'
   },
   {
     id: 'balanced',
@@ -34,7 +35,7 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'extreme', label: 'Extreme', hint: 'Largest model and context your RAM allows' }
 ]
 
-type ItemKind = 'chat' | 'transcription' | 'voice' | 'image'
+type ItemKind = 'chat' | 'transcription' | 'voice' | 'image' | 'video'
 const KIND_ICON: Record<
   ItemKind,
   React.ComponentType<{ className?: string; weight?: 'fill' | 'regular' }>
@@ -42,7 +43,8 @@ const KIND_ICON: Record<
   chat: ChatCircle,
   transcription: Microphone,
   voice: SpeakerHigh,
-  image: ImageIcon
+  image: ImageIcon,
+  video: VideoCamera
 }
 
 interface SetupProgress {
@@ -212,7 +214,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               Local and remote
             </div>
             <p className="mt-2 text-[11px] leading-5 text-neutral-500">
-              Installed models can handle Chat, images, transcription, voice, and Computer Use on
+              Installed models can handle Chat, images, videos, transcription, voice, and Computer Use on
               this {deviceNoun()}. A saved model server is an optional Chat source.
             </p>
           </div>
@@ -303,9 +305,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               })}
             </ul>
             <div className="mt-1.5 text-[11px] text-neutral-600">
-              Chat is ready first. Transcription, voice
-              {plan.items.some((i) => i.kind === 'image') ? ', and image' : ''} finish in the
-              background.
+              Chat is ready first. The other models finish downloading in the background.
             </div>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1.5 text-[11px] text-neutral-500">
               For solid reasoning and tool use,{' '}

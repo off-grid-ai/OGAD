@@ -205,7 +205,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
         model: nextModel,
         modelCatalog: discovered,
         mediaModels: Object.fromEntries(
-          (['text', 'image', 'transcription', 'voice'] as const).flatMap((kind) => {
+          (['text', 'image', 'video', 'transcription', 'voice'] as const).flatMap((kind) => {
             const id = kind === 'text' ? nextModel : current.mediaModels[kind]
             return id && discovered.some((model) => model.id === id && model.kind === kind)
               ? [[kind, id]]
@@ -592,33 +592,53 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                 />
               </Row>
             ))}
-            {(['image', 'transcription', 'voice'] as const).map((kind) => (
-              <Row
-                key={kind}
-                label={kind === 'image' ? 'Image' : kind === 'voice' ? 'Voice' : 'Transcription'}
-                controlId={`remote-server-${kind}-model`}
-              >
-                <SettingsSelect
-                  id={`remote-server-${kind}-model`}
-                  label={`${kind} model`}
-                  value={form.mediaModels[kind] ?? ''}
-                  searchable
-                  options={[
-                    { value: '', label: `No ${kind} model` },
-                    ...models
-                      .filter((model) => model.kind === kind)
-                      .map((model) => ({ value: model.id, label: model.name }))
-                  ]}
-                  onValueChange={(value) => {
-                    setForm((current) => ({
-                      ...current,
-                      mediaModels: { ...current.mediaModels, [kind]: value || undefined }
-                    }))
-                    setStatus('Not saved.')
-                  }}
-                />
-              </Row>
-            ))}
+            {(['image', 'video', 'transcription', 'voice'] as const)
+              .filter(
+                (kind) =>
+                  kind !== 'video' ||
+                  ['ogad', 'openrouter'].includes(remoteVisionProviderForEndpoint(form.endpoint))
+              )
+              .map((kind) => (
+                <Row
+                  key={kind}
+                  label={
+                    kind === 'video'
+                      ? 'Video'
+                      : kind === 'image'
+                        ? 'Image'
+                        : kind === 'voice'
+                          ? 'Voice'
+                          : 'Transcription'
+                  }
+                  hint={
+                    kind === 'video' &&
+                    remoteVisionProviderForEndpoint(form.endpoint) === 'openrouter'
+                      ? 'Uses the nearest supported clip size and duration. Stop ends the download; the provider may still finish and charge for the video.'
+                      : undefined
+                  }
+                  controlId={`remote-server-${kind}-model`}
+                >
+                  <SettingsSelect
+                    id={`remote-server-${kind}-model`}
+                    label={`${kind} model`}
+                    value={form.mediaModels[kind] ?? ''}
+                    searchable
+                    options={[
+                      { value: '', label: `No ${kind} model` },
+                      ...models
+                        .filter((model) => model.kind === kind)
+                        .map((model) => ({ value: model.id, label: model.name }))
+                    ]}
+                    onValueChange={(value) => {
+                      setForm((current) => ({
+                        ...current,
+                        mediaModels: { ...current.mediaModels, [kind]: value || undefined }
+                      }))
+                      setStatus('Not saved.')
+                    }}
+                  />
+                </Row>
+              ))}
           </>
         ) : null}
       </div>

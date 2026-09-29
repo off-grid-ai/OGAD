@@ -35,7 +35,7 @@ export const STT_MODEL_BY_MODE: Record<RecMode, string> = {
 export const TTS_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX' // text-to-speech, ~82M
 export const IMAGE_MODEL_ID = 'offgrid-ai/juggernaut-xl-v9-GGUF' // image gen, ~4.35GB
 
-export type SetupItemKind = 'chat' | 'transcription' | 'voice' | 'image'
+export type SetupItemKind = 'chat' | 'transcription' | 'voice' | 'image' | 'video'
 
 /** A baseline extra (non-chat) the setup plan lists for a mode, in order:
  *  speech-to-text, text-to-speech, then image (only outside Conservative). The chat

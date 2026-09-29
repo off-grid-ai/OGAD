@@ -22,6 +22,12 @@ const ENDPOINTS: { label: string; method: string; path: string; note: string }[]
     note: 'also /v1/images/generations · /edits'
   },
   {
+    label: 'Text → Video',
+    method: 'POST',
+    path: '/v1/videos',
+    note: 'OGAD video jobs · progress, Stop and MP4 download'
+  },
+  {
     label: 'Speech → Text (STT)',
     method: 'POST',
     path: '/v1/audio/transcriptions',
