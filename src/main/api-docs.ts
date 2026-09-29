@@ -496,13 +496,26 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     model: { type: 'string' },
                     negativePrompt: { type: 'string' },
                     client_job_id: { type: 'string', minLength: 16, maxLength: 100 },
-                    width: { type: 'integer', minimum: 256, maximum: 832, multipleOf: 16 },
-                    height: { type: 'integer', minimum: 192, maximum: 480, multipleOf: 16 },
+                    width: {
+                      type: 'integer',
+                      minimum: 256,
+                      maximum: 1280,
+                      multipleOf: 16,
+                      description: 'LTX models require multiples of 32.'
+                    },
+                    height: {
+                      type: 'integer',
+                      minimum: 192,
+                      maximum: 736,
+                      multipleOf: 16,
+                      description:
+                        'Up to 720 for Wan and Hunyuan; up to 736 in multiples of 32 for LTX.'
+                    },
                     frames: {
                       type: 'integer',
                       minimum: 9,
-                      maximum: 81,
-                      description: '4n + 1 frames'
+                      maximum: 121,
+                      description: '4n + 1 frames for Wan and Hunyuan; 8n + 1 for LTX.'
                     },
                     fps: { type: 'integer', minimum: 4, maximum: 24 },
                     steps: { type: 'integer', minimum: 4, maximum: 50 },
@@ -526,7 +539,10 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
           summary: 'Video job status, progress and result',
           parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
           responses: {
-            '200': { description: 'Job state. Completed jobs include metadata and a content URL.' },
+            '200': {
+              description:
+                'Job status is queued, running, completed, or failed. Cancelled jobs fail with error type cancelled. Running jobs include a stage (enhancing, preparing, conditioning, generating, or encoding) and optional step/total progress. Completed jobs include metadata and a content URL. Jobs interrupted by a server restart fail with error type interrupted.'
+            },
             default: errorResponse
           }
         }

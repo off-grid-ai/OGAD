@@ -3,7 +3,11 @@ import type { RecordProvenance } from '@offgrid/sync'
 import { dataDir } from './runtime-env'
 import { videoGenerationJobs } from './videogen/job-service'
 import { videoGenStatus, generatedVideosDir } from './videogen'
-import { resolveVideoRequest, type VideoGenerationRequestContract } from '@offgrid/models'
+import {
+  resolveVideoRequest,
+  type VideoGenerationRequestContract,
+  type VideoGenerationStage
+} from '@offgrid/models'
 import { resolveExistingOwnedPath } from './imagegen/owned-path'
 // Off Grid AI local inference gateway — ONE OpenAI-compatible endpoint for every
 // modality, on :7878. Any local tool (IDE, app, script) points here and gets the
@@ -138,6 +142,7 @@ interface ApiRequest {
   videoPath?: string
   videoJobId?: string
   videoInput?: string
+  stage?: VideoGenerationStage
   error?: { message: string; type: string }
   progress?: { step: number; total: number }
 }
@@ -165,6 +170,9 @@ function loadVideoRequests(): void {
       if (!item || item.kind !== 'video' || typeof item.id !== 'string') continue
       if (item.status === 'queued' || item.status === 'running') {
         item.status = 'failed'
+        item.updated_at = Date.now()
+        delete item.stage
+        delete item.progress
         item.error = {
           message: 'OGAD stopped before this video finished. Start a new job to retry.',
           type: 'interrupted'
@@ -181,7 +189,8 @@ function loadVideoRequests(): void {
 function createRequest(id: string, kind: string, collection: string): ApiRequest {
   if (requests.size >= REQUESTS_MAX) {
     const oldest = [...requests.values()].find(
-      (item) => item.status === 'completed' || item.status === 'failed'
+      (item) =>
+        item.status === 'completed' || item.status === 'failed'
     )?.id
     if (oldest) requests.delete(oldest)
   }
@@ -206,7 +215,7 @@ function settle<T>(r: ApiRequest, work: Promise<T>): Promise<T> {
     (e) => {
       const { type, message } = errMeta(e)
       r.status = 'failed'
-      r.error = { message, type }
+      r.error = { message, type: r.error?.type === 'cancelled' ? 'cancelled' : type }
       r.updated_at = Date.now()
       if (r.kind === 'video') persistVideoRequests()
       throw e
@@ -247,6 +256,7 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   }
   if (r.status === 'completed') body.result = r.result
   if (r.status === 'failed') body.error = r.error
+  if (r.stage) body.stage = r.stage
   if (r.progress) body.progress = r.progress
   json(res, 200, body)
 }
@@ -1061,8 +1071,11 @@ export function startGatewayVideoJob(
   request.videoInput = fingerprint
   persistVideoRequests()
   const unsubscribe = videoGenerationJobs.onChange((job) => {
-    if (job.phase !== 'running') return
+    if (request.videoJobId && request.videoJobId !== job.id) return
     request.videoJobId = job.id ?? undefined
+    request.stage = job.stage ?? undefined
+    if (job.phase === 'cancelled')
+      request.error = { message: job.error ?? 'Video generation stopped.', type: 'cancelled' }
     request.progress = job.progress ?? undefined
     request.updated_at = Date.now()
   })
@@ -1092,6 +1105,7 @@ export function gatewayVideoJob(id: string, cancel = false): Record<string, unkn
   return {
     request_id: request.id,
     status: request.status,
+    stage: request.stage,
     progress: request.progress,
     result: request.result,
     error: request.error,
@@ -1429,7 +1443,8 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
     // RESTful polling: GET the request resource. Canonical /v1/requests/{id}, or
     // the per-collection resource (e.g. /v1/images/{id}, /v1/audio/speech/{id}).
     if (method === 'GET') {
-      const { id, isPollCollection } = matchPollRoute(url)
+      const { id, prefix, isPollCollection } = matchPollRoute(url)
+      if (prefix === '/v1/videos') loadVideoRequests()
       if (url.startsWith('/v1/requests/') && id) return handlePoll(res, id)
       if (id && isPollCollection && requests.has(id)) return handlePoll(res, id)
     }

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import type { VideoGenerationProgressContract, VideoGenerationStage } from '@offgrid/models'
 import { kokoroVoiceLanguage, type RuntimeSpeechVoice } from '@offgrid/speech'
 import { IMAGE_MEMORY_GUARD_ERROR_CODE, imageMemoryGuardErrorMessage } from '../shared/image-generation-contract'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
@@ -184,7 +185,7 @@ export async function generateRemoteVideo(
   request: import('@offgrid/models').ResolvedVideoRequest,
   output: string,
   signal: AbortSignal,
-  onProgress?: (progress: { step: number; total: number }) => void
+  onProgress?: (progress: VideoGenerationProgressContract | null, stage?: VideoGenerationStage) => void
 ): Promise<void> {
   if (server.provider !== 'ogad')
     throw new Error('Remote video generation requires an OGAD server.')
@@ -222,11 +223,19 @@ export async function generateRemoteVideo(
       const response = await checked(await fetch(endpoint, { headers: headers(server), signal }))
       const job = (await response.json()) as {
         status: string
+        stage?: VideoGenerationStage
         error?: { message?: string }
         progress?: { step: number; total: number }
       }
-      if (job.progress && Number.isFinite(job.progress.step) && Number.isFinite(job.progress.total))
-        onProgress?.(job.progress)
+      const progress =
+        job.progress && Number.isFinite(job.progress.step) && Number.isFinite(job.progress.total)
+          ? job.progress
+          : null
+      const stage =
+        job.stage && ['enhancing', 'preparing', 'conditioning', 'generating', 'encoding'].includes(job.stage)
+          ? job.stage
+          : undefined
+      if (progress || stage) onProgress?.(progress, stage)
       if (job.status === 'failed' || job.status === 'cancelled')
         throw new Error(job.error?.message || 'Remote video generation failed.')
       if (job.status === 'completed') break
