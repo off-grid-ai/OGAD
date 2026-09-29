@@ -19,7 +19,12 @@ import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './storage-format'
 
-type Mode = 'conservative' | 'balanced' | 'extreme'
+import type {
+  RecMode as Mode,
+  SetupPlan,
+  SetupItemKind as ItemKind,
+  SetupProgress
+} from '../../../../main/setup'
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   {
@@ -35,7 +40,6 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'extreme', label: 'Extreme', hint: 'Largest model and context your RAM allows' }
 ]
 
-type ItemKind = 'chat' | 'transcription' | 'voice' | 'image' | 'video'
 const KIND_ICON: Record<
   ItemKind,
   React.ComponentType<{ className?: string; weight?: 'fill' | 'regular' }>
@@ -45,34 +49,6 @@ const KIND_ICON: Record<
   voice: SpeakerHigh,
   image: ImageIcon,
   video: VideoCamera
-}
-
-interface SetupProgress {
-  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error'
-  message: string
-  modelId?: string
-  modelName?: string
-  percent?: number
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
-  totalBytes?: number
-  bytesPerSecond?: number
-}
-interface SetupItem {
-  kind: ItemKind
-  capability: string
-  id: string
-  name: string
-  sizeGb: number
-  installed: boolean
-  required: boolean
-}
-interface SetupPlan {
-  mode: Mode
-  ramGb: number
-  items: SetupItem[]
-  totalDownloadGb: number
 }
 
 interface SetupPanelProps {
@@ -197,7 +173,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
           </div>
           <button
             onClick={configure}
-            disabled={running}
+            disabled={running || savingMode || !plan}
             className={cn(
               'shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-medium transition-colors',
               'bg-green-600 text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60'
@@ -214,8 +190,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               Local and remote
             </div>
             <p className="mt-2 text-[11px] leading-5 text-neutral-500">
-              Installed models can handle Chat, images, videos, transcription, voice, and Computer Use on
-              this {deviceNoun()}. A saved model server is an optional Chat source.
+              Installed models can handle Chat, images, videos, transcription, voice, and Computer
+              Use on this {deviceNoun()}. A saved model server is an optional Chat source.
             </p>
           </div>
           <div className="bg-neutral-950/70 p-3">
@@ -239,8 +215,10 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
             {MODES.map((m) => (
               <button
                 key={m.id}
-                onClick={() => { void pickMode(m.id) }}
-                disabled={savingMode}
+                onClick={() => {
+                  void pickMode(m.id)
+                }}
+                disabled={savingMode || running}
                 aria-pressed={mode === m.id}
                 className={cn(
                   'flex-1 px-2 py-1.5 text-xs transition-colors',
@@ -289,6 +267,15 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                       <div className="text-[10px] uppercase tracking-wider text-neutral-600">
                         {it.capability}
                       </div>
+                      {it.files && (
+                        <div className="mt-1 break-all text-[10px] text-neutral-500">
+                          {it.files.map((file) => (
+                            <div key={file.name}>
+                              {file.name} ({formatStorageBytes(file.sizeBytes ?? 0)})
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     {it.installed ? (
                       <span className="flex shrink-0 items-center gap-1 text-[10px] text-green-500">
@@ -304,8 +291,11 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                 )
               })}
             </ul>
+            {plan.videoNote && (
+              <div className="mt-1.5 text-[11px] text-neutral-500">{plan.videoNote}</div>
+            )}
             <div className="mt-1.5 text-[11px] text-neutral-600">
-              Chat is ready first. The other models finish downloading in the background.
+              Chat is ready first. Saved model choices are kept. Missing models download next.
             </div>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1.5 text-[11px] text-neutral-500">
               For solid reasoning and tool use,{' '}
