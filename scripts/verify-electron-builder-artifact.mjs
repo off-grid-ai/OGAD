@@ -29,35 +29,24 @@ export default async function verifyElectronBuilderArtifact(event) {
     const executable = artifact.endsWith('.exe') ? 'llama-server.exe' : 'llama-server'
     const required = [
       ...[
-        'llama-cuda',
         'llama',
         'llama-cpu',
-        'llama-prism-cuda',
         'llama-prism',
         'llama-prism-cpu'
-      ].map((variant) => path.join('bin', variant, executable)),
-      ...(artifact.endsWith('.exe')
-        ? ['cudart64_12.dll', 'cublas64_12.dll', 'cublasLt64_12.dll']
-        : ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12']
-      ).map((library) => path.join('bin', 'cuda-runtime', library))
+      ].map((variant) => path.join('bin', variant, executable))
     ]
     if (artifact.endsWith('.exe')) {
       required.push(
-        path.join('bin', 'whisper', 'whisper-cli.exe'),
         path.join('bin', 'whisper-cpu', 'whisper-cli.exe'),
-        path.join('bin', 'sd-cuda', 'sd-cli.exe'),
-        path.join('bin', 'sd-cuda', 'ggml-cuda.dll'),
         path.join('bin', 'sd', 'sd-cli.exe'),
         path.join('bin', 'sd-cpu', 'sd-cli.exe'),
         path.join('bin', 'ffmpeg.exe'),
-        path.join('bin', 'kev-runtime', 'python', 'python.exe'),
         path.join('bin', 'kev-local-server.py')
       )
     }
     if (artifact.endsWith('.appimage') || artifact.endsWith('.deb')) {
       required.push(
         path.join('bin', 'whisper', 'whisper-cli'),
-        path.join('bin', 'whisper-cuda', 'whisper-cli'),
         path.join('bin', 'whisper-cpu', 'whisper-cli'),
         path.join('bin', 'whisper', 'LICENSE'),
         path.join('bin', 'ffmpeg'),
@@ -67,8 +56,6 @@ export default async function verifyElectronBuilderArtifact(event) {
         path.join('bin', 'sd', 'libggml-vulkan.so'),
         path.join('bin', 'sd', 'libgomp.so.1'),
         path.join('bin', 'sd', 'libvulkan.so.1'),
-        path.join('bin', 'sd-cuda', 'sd-cli'),
-        path.join('bin', 'sd-cuda', 'sd-server'),
         path.join('bin', 'licenses', 'libgomp1.txt'),
         path.join('bin', 'licenses', 'libvulkan1.txt'),
         path.join('bin', 'executorch-speech'),
@@ -79,6 +66,15 @@ export default async function verifyElectronBuilderArtifact(event) {
       const file = path.join(appOutDir, 'resources', relative)
       if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
         throw new Error(`installer input is missing required runtime: ${relative}`)
+      }
+    }
+    const optionalGpuFolders = [
+      'llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'kev-runtime',
+      ...(artifact.endsWith('.exe') ? ['whisper'] : ['whisper-cuda'])
+    ]
+    for (const folder of optionalGpuFolders) {
+      if (fs.existsSync(path.join(appOutDir, 'resources', 'bin', folder))) {
+        throw new Error(`installer input includes optional GPU runtime: bin/${folder}`)
       }
     }
     if (artifact.endsWith('.appimage') || artifact.endsWith('.deb')) {

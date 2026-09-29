@@ -235,7 +235,7 @@ describe('macOS artifact integrity', () => {
     )
   })
 
-  it('blocks a Windows installer input without the shared CUDA runtime', async () => {
+  it('blocks a Windows installer input without its base chat runtime', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-windows-cuda-artifact-'))
     tempRoots.push(root)
     const appOutDir = path.join(root, 'win-unpacked')
@@ -250,7 +250,7 @@ describe('macOS artifact integrity', () => {
       }
     }
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
-      'installer input is missing required runtime: bin/llama-cuda/llama-server.exe'
+      'installer input is missing required runtime: bin/llama/llama-server.exe'
     )
   })
 
@@ -277,7 +277,7 @@ describe('macOS artifact integrity', () => {
     )
   })
 
-  it('blocks a Linux package input without its CUDA server', async () => {
+  it('blocks a Linux package input without its base chat server', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-linux-cuda-artifact-'))
     tempRoots.push(root)
     const appOutDir = path.join(root, 'linux-unpacked')
@@ -292,7 +292,7 @@ describe('macOS artifact integrity', () => {
       }
     }
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
-      'installer input is missing required runtime: bin/llama-cuda/llama-server'
+      'installer input is missing required runtime: bin/llama/llama-server'
     )
   })
 
@@ -303,21 +303,14 @@ describe('macOS artifact integrity', () => {
     const resources = path.join(appOutDir, 'resources')
     writeAsarArchive(path.join(resources, 'app.asar'), ['out/main/index.js'])
     for (const variant of [
-      'llama-cuda',
       'llama',
       'llama-cpu',
-      'llama-prism-cuda',
       'llama-prism',
       'llama-prism-cpu'
     ]) {
       const server = path.join(resources, 'bin', variant, 'llama-server')
       fs.mkdirSync(path.dirname(server), { recursive: true })
       fs.writeFileSync(server, 'fixture')
-    }
-    for (const library of ['libcudart.so.12', 'libcublas.so.12', 'libcublasLt.so.12']) {
-      const destination = path.join(resources, 'bin', 'cuda-runtime', library)
-      fs.mkdirSync(path.dirname(destination), { recursive: true })
-      fs.writeFileSync(destination, 'fixture')
     }
     const event = {
       file: path.join(root, 'off-grid-ai.AppImage'),
@@ -335,12 +328,6 @@ describe('macOS artifact integrity', () => {
     const whisper = path.join(resources, 'bin', 'whisper', 'whisper-cli')
     fs.mkdirSync(path.dirname(whisper), { recursive: true })
     fs.writeFileSync(whisper, 'fixture')
-    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
-      'installer input is missing required runtime: bin/whisper-cuda/whisper-cli'
-    )
-    const whisperCuda = path.join(resources, 'bin', 'whisper-cuda', 'whisper-cli')
-    fs.mkdirSync(path.dirname(whisperCuda), { recursive: true })
-    fs.writeFileSync(whisperCuda, 'fixture')
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
       'installer input is missing required runtime: bin/whisper-cpu/whisper-cli'
     )
@@ -365,8 +352,6 @@ describe('macOS artifact integrity', () => {
       'bin/sd/libggml-vulkan.so',
       'bin/sd/libgomp.so.1',
       'bin/sd/libvulkan.so.1',
-      'bin/sd-cuda/sd-cli',
-      'bin/sd-cuda/sd-server',
       'bin/licenses/libgomp1.txt',
       'bin/licenses/libvulkan1.txt'
     ]) {
@@ -403,6 +388,13 @@ describe('macOS artifact integrity', () => {
     )
     fs.writeFileSync(libvips, 'fixture')
     await expect(verifyElectronBuilderArtifact(event)).resolves.toBeUndefined()
+
+    const optionalCuda = path.join(resources, 'bin', 'llama-cuda', 'llama-server')
+    fs.mkdirSync(path.dirname(optionalCuda), { recursive: true })
+    fs.writeFileSync(optionalCuda, 'fixture')
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input includes optional GPU runtime: bin/llama-cuda'
+    )
   })
 
   it('uses Ubuntu 24.04 package names for Linux deb dependencies', async () => {
