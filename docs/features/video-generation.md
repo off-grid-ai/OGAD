@@ -184,3 +184,14 @@ pending navigation remains denied. With this change applied to the separate
 verification artifact, the gallery player entered fullscreen and Escape returned
 to the gallery. The main-process typecheck passed. No test suite ran.
 These player checks do not verify engine discovery in that development launch.
+
+### Windows client reads Linux output
+
+A Windows HTTP client reached the Linux gateway through an SSH tunnel bound to
+Windows loopback. The health response advertised the installed Wan Q3 video pack.
+Job `c44fe77a-b4d4-4ade-9af4-92ee84177cd4` returned `completed`. Its content
+endpoint delivered 247,042 bytes with SHA-256
+`2d96bc6943f1403a581f8c79e1cd4e7daa68932cb51419d5685b9b7d71d2ae0e`,
+matching the file received by the Mac app. No additional generation was submitted.
+This verifies Windows-to-Linux completed output retrieval, not a Windows app
+submission or model sync.
