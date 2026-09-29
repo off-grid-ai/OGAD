@@ -4,7 +4,7 @@ import { generateRemoteVideo } from './remote-media-runtime'
 import {
   resolveVideoRequest,
   isSupportedVideoWeight,
-  VIDEO_VAE_FILENAME,
+  videoVaeFilename,
   VIDEO_ENCODER_FILENAME
 } from '@offgrid/models'
 import fs from 'node:fs'
@@ -37,7 +37,6 @@ import { describeOwnGeneratedVideo } from './videogen/generated-video-share'
 import { emitSharedFileMutation } from './sync-shared-file'
 
 const VIDEO_DIR = 'generated-videos'
-const VAE = VIDEO_VAE_FILENAME
 const ENCODER = VIDEO_ENCODER_FILENAME
 const CANCELLED = 'Video generation stopped.'
 let currentChild: ChildProcess | null = null
@@ -51,12 +50,12 @@ function availablePacks(): Array<{ name: string; pack: VideoModelPack }> {
   const directory = modelsDir()
   try {
     const entries = fs.readdirSync(directory)
-    if (!entries.includes(VAE) || !entries.includes(ENCODER)) return []
+    if (!entries.includes(ENCODER)) return []
     return entries
       .filter((name) => isSupportedVideoWeight(name))
       .flatMap((name) => {
         const weight = resolveExistingOwnedEntry(directory, name)
-        const vae = resolveExistingOwnedEntry(directory, VAE)
+        const vae = resolveExistingOwnedEntry(directory, videoVaeFilename(name)!)
         const encoder = resolveExistingOwnedEntry(directory, ENCODER)
         return weight && vae && encoder ? [{ name, pack: { weight, vae, encoder } }] : []
       })
