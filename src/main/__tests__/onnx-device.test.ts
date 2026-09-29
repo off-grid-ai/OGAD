@@ -4,7 +4,7 @@ import { loadWithOnnxFallback, onnxDeviceCandidates } from '../onnx-device'
 describe('ONNX accelerator selection', () => {
   it('uses the native GPU provider first and always keeps a CPU fallback', () => {
     expect(onnxDeviceCandidates('darwin')).toEqual(['coreml', 'webgpu', 'cpu'])
-    expect(onnxDeviceCandidates('win32')).toEqual(['cuda', 'dml', 'webgpu', 'cpu'])
+    expect(onnxDeviceCandidates('win32')).toEqual(['dml', 'webgpu', 'cpu'])
     expect(onnxDeviceCandidates('linux')).toEqual(['cuda', 'webgpu', 'cpu'])
     expect(onnxDeviceCandidates('linux', 'webgpu')).toEqual(['webgpu', 'cuda', 'cpu'])
     expect(onnxDeviceCandidates('darwin', 'cpu')).toEqual(['cpu'])

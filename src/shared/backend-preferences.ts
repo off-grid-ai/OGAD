@@ -11,7 +11,7 @@ export function backendChoices(modality: BackendModality, platform: string): Bac
   const onnx = platform === 'darwin'
     ? ['metal', 'webgpu']
     : platform === 'win32'
-      ? ['cuda', 'directml', 'webgpu']
+      ? ['directml', 'webgpu']
       : ['cuda', 'webgpu']
   const accelerated = modality === 'tts' || modality === 'embeddings'
     ? onnx
