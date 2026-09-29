@@ -595,7 +595,8 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
             {(['image', 'video', 'transcription', 'voice'] as const)
               .filter(
                 (kind) =>
-                  kind !== 'video' || remoteVisionProviderForEndpoint(form.endpoint) === 'ogad'
+                  kind !== 'video' ||
+                  ['ogad', 'openrouter'].includes(remoteVisionProviderForEndpoint(form.endpoint))
               )
               .map((kind) => (
                 <Row
@@ -608,6 +609,12 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                         : kind === 'voice'
                           ? 'Voice'
                           : 'Transcription'
+                  }
+                  hint={
+                    kind === 'video' &&
+                    remoteVisionProviderForEndpoint(form.endpoint) === 'openrouter'
+                      ? 'Uses the nearest supported clip size and duration. Stop ends the download; the provider may still finish and charge for the video.'
+                      : undefined
                   }
                   controlId={`remote-server-${kind}-model`}
                 >

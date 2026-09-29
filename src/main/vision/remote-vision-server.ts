@@ -224,7 +224,9 @@ export function getActiveRemoteVisionServerForModality(
     (server) => server.id === stored.activeServerId && server.enabled !== false
   )
   const selectedModel = active?.mediaModels?.[modality]
-  return active && selectedModel && (modality !== 'video' || active.provider === 'ogad')
+  return active &&
+    selectedModel &&
+    (modality !== 'video' || ['ogad', 'openrouter'].includes(active.provider))
     ? { ...active, apiKey: serverApiKey(active.id), selectedModel }
     : null
 }
@@ -431,7 +433,7 @@ export async function testRemoteVisionServer(
         (kind === 'video' ||
           (Array.isArray(entry.architecture?.output_modalities) &&
             entry.architecture.output_modalities.includes('video'))) &&
-        update.provider !== 'ogad'
+        !['ogad', 'openrouter'].includes(update.provider)
       )
         return []
       const outputs = Array.isArray(entry.architecture?.output_modalities)

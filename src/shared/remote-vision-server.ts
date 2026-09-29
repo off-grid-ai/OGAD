@@ -85,7 +85,8 @@ export function remoteVisionInventoryModels(
     const selections: RemoteVisionSelections = server.mediaModels ?? { text: server.model }
     return (['text', 'image', 'video', 'transcription', 'voice'] as const).flatMap((modality) => {
       const modelId = selections[modality]
-      if (!modelId || (modality === 'video' && server.provider !== 'ogad')) return []
+      if (!modelId || (modality === 'video' && !['ogad', 'openrouter'].includes(server.provider)))
+        return []
       return [
         {
           id: remoteVisionModelId(server.id, modelId),

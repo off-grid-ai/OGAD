@@ -249,9 +249,38 @@ export async function generateVideo(
   const ffmpeg = ffmpegBin()!
   try {
     if (remote) {
-      await generateRemoteVideo(remote, request, output, jobAbort.signal, (progress, stage, preview) =>
-        onUpdate?.({ stage: stage ?? 'generating', progress, ...(preview ? { preview } : {}) })
+      const effective = await generateRemoteVideo(
+        remote,
+        request,
+        output,
+        jobAbort.signal,
+        (progress, stage, preview) =>
+          onUpdate?.({ stage: stage ?? 'generating', progress, ...(preview ? { preview } : {}) })
       )
+      request = { ...request, ...effective }
+      // Read the downloaded container; providers can return a different frame rate.
+      let metadata = ''
+      await runProcess(
+        ffmpeg,
+        ['-hide_banner', '-i', output, '-map', '0:v:0', '-c', 'copy', '-t', '0', '-f', 'null', '-'],
+        (text) => {
+          metadata = `${metadata}${text}`.slice(-16_384)
+        }
+      )
+      const stream = metadata.match(/Video:[^\r\n]*?\b(\d{2,5})x(\d{2,5})\b[^\r\n]*?([\d.]+) fps/)
+      const duration = metadata.match(/Duration: (\d+):(\d+):([\d.]+)/)
+      if (stream && duration) {
+        const fps = Number(stream[3])
+        const seconds = Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3])
+        if (fps > 0 && seconds > 0)
+          request = {
+            ...request,
+            width: Number(stream[1]),
+            height: Number(stream[2]),
+            fps,
+            frames: Math.round(seconds * fps)
+          }
+      }
     } else
       await modalityQueue.run(
         VIDEO_JOB,
@@ -303,26 +332,43 @@ export async function generateVideo(
                   throw new Error('The CUDA engine found no usable CUDA device.')
               }
               let help = ''
-              await runProcess(runtime, ['--help'], (chunk) => { help += chunk })
+              await runProcess(runtime, ['--help'], (chunk) => {
+                help += chunk
+              })
               const decodedPreviewArgs = help.includes('--decode-preview-path')
-                ? ['--decode-preview-path', previewPath] : []
+                ? ['--decode-preview-path', previewPath]
+                : []
               await runProcess(
                 runtime,
-                [...videoArgs(pack!.pack, request, raw), ...decodedPreviewArgs, ...(cpu ? ['--backend', 'cpu'] : [])],
+                [
+                  ...videoArgs(pack!.pack, request, raw),
+                  ...decodedPreviewArgs,
+                  ...(cpu ? ['--backend', 'cpu'] : [])
+                ],
                 (chunk) => {
                   backend.observe(chunk)
                   progressText = `${progressText}${chunk}`.slice(-4096)
-                  const decoded = [...progressText.matchAll(/OFFGRID_VIDEO_DECODE (\d+) (\d+)(?=\r?\n)/g)].at(-1)
+                  const decoded = [
+                    ...progressText.matchAll(/OFFGRID_VIDEO_DECODE (\d+) (\d+)(?=\r?\n)/g)
+                  ].at(-1)
                   if (decoded && decoded[0] !== decodeMarker) {
                     decodeMarker = decoded[0]
                     decoding = true
-                    const step = Number(decoded[1]), total = Number(decoded[2])
+                    const step = Number(decoded[1]),
+                      total = Number(decoded[2])
                     onUpdate?.({ stage: 'decoding', progress: total > 0 ? { step, total } : null })
                   }
                   const frame = /OFFGRID_VIDEO_FRAME (\d+) (\d+)(?=\r?\n)/.exec(progressText)
                   if (!framePublished && frame && fs.existsSync(previewPath)) {
                     framePublished = true
-                    onUpdate?.({ stage: 'decoding', preview: { path: previewPath, width: Number(frame[1]), height: Number(frame[2]) } })
+                    onUpdate?.({
+                      stage: 'decoding',
+                      preview: {
+                        path: previewPath,
+                        width: Number(frame[1]),
+                        height: Number(frame[2])
+                      }
+                    })
                   }
 
                   const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
@@ -398,7 +444,11 @@ export async function generateVideo(
       durationSeconds: request.frames / request.fps
     }
   } catch (error) {
-    try { fs.rmSync(output, { force: true }) } catch { /* retain the generation error */ }
+    try {
+      fs.rmSync(output, { force: true })
+    } catch {
+      /* retain the generation error */
+    }
     throw error
   } finally {
     jobAbort = null
@@ -407,7 +457,9 @@ export async function generateVideo(
     // A preview can still be open in the player on Windows. Cleanup must not
     // turn a completed clip into a failure or leave generation permanently busy.
     for (const temporary of [raw, previewPath, `${previewPath}.tmp.png`]) {
-      try { fs.rmSync(temporary, { force: true }) } catch (error) {
+      try {
+        fs.rmSync(temporary, { force: true })
+      } catch (error) {
         console.warn('[videogen] Temporary file cleanup failed', error)
       }
     }
