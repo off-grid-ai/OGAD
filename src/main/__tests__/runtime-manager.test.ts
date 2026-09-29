@@ -58,6 +58,36 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
     expect(log).toEqual(['evict', 'job', 'release'])
   })
 
+  it('releases prior eviction blocks when a later eviction fails', async () => {
+    const q = new ModalityQueue()
+    const log: string[] = []
+    registerRuntime(recordingRuntime('llm', log), { queue: q, readMode: () => 'resident' })
+    registerRuntime(
+      {
+        modality: 'image',
+        evict: () => {
+          log.push('image-evict-failed')
+          throw new Error('image server still running')
+        },
+        warm: () => {
+          log.push('image-warm')
+        },
+        release: () => {
+          log.push('image-release')
+        }
+      },
+      { queue: q, readMode: () => 'resident' }
+    )
+
+    await expect(
+      q.run({ tier: 2, label: 'video', evicts: ['llm', 'image'] }, async () => {
+        log.push('video-started')
+      })
+    ).rejects.toThrow('image server still running')
+    expect(log).toEqual(['evict', 'image-evict-failed', 'release'])
+    expect(q.getState().running).toHaveLength(0)
+  })
+
   it('every modality flows through the SAME seam — mode alone changes behavior', async () => {
     // The point of the abstraction: the wiring is identical per engine; only the
     // persisted mode differs. Same registration path, same queue, uniform result.

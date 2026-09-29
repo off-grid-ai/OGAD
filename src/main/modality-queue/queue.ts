@@ -21,6 +21,9 @@ export interface Evictable {
    *  calls it for a declared id rather than tracking exact residency, so an engine
    *  that lazily reloaded can't slip through and leave two models resident). */
   evict: () => Promise<void> | void
+  /** Clear an eviction block if a later engine fails to evict. This must not
+   *  load a model while the failed engine may still hold memory. */
+  recover?: () => Promise<void> | void
   /** Warm the engine back up after the evicting job finishes. Called by the queue
    *  in run()'s finally. Make it MODE-AWARE: a 'resident' engine reloads here (low
    *  latency next use); an 'on-demand' engine should NOT reload — just clear any
@@ -229,6 +232,15 @@ export class ModalityQueue {
         entry.evicted.push(id)
       } catch (err) {
         console.error(`[ModalityQueue] evict '${id}' failed:`, err)
+        // Restore access to engines already evicted by this job, without loading
+        // them while the failed engine may still hold memory.
+        for (const priorId of [...entry.evicted].reverse()) {
+          try {
+            await this.evictables.get(priorId)?.recover?.()
+          } catch (recoverError) {
+            console.error(`[ModalityQueue] recover '${priorId}' failed:`, recoverError)
+          }
+        }
         // Do not start a competing heavy model while eviction may be incomplete.
         this.running.delete(waiter.job.id)
         this.emitChange()

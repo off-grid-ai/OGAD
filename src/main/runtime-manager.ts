@@ -59,6 +59,7 @@ export function registerRuntime(rt: ManagedRuntime, deps: RegisterDeps = {}): vo
   registry.set(rt.modality, rt)
   queue.registerEvictable(rt.modality, {
     evict: () => rt.evict(),
+    recover: () => rt.release(),
     warm: () => (warmActionForMode(readMode(rt.modality)) === 'warm' ? rt.warm() : rt.release())
   })
 }

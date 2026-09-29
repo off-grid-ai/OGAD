@@ -2024,9 +2024,9 @@ export class LLMService {
   /** Eviction must finish before a competing model starts. pause() only signals the
    *  child, while unload() waits for exit and handles an in-flight init. */
   private async pauseAndWait(): Promise<void> {
-    const { outcome } = await this.unload(true)
-    if (outcome === 'stuck') {
-      throw new Error('The chat model did not exit; image generation cannot start safely.')
+    const { portFree } = await this.unload(true)
+    if (!portFree) {
+      throw new Error('The chat model port is still occupied; image generation cannot start safely.')
     }
   }
 
