@@ -82,3 +82,6 @@ coverage-db/
 # Raw V8 output and the converted report from the e2e coverage capture
 coverage-e2e-raw/
 coverage-e2e/
+
+# Pinned macOS image/video runtime source and build cache
+/build/image-macos/
