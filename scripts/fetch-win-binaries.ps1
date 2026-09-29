@@ -151,16 +151,16 @@ Copy-Runtime $x 'llama-prism-cpu' | Out-Null
 # The newest semantic release can have no binary assets. Pin the current build
 # release so Windows voice cannot disappear because GitHub's "latest" moved.
 $WhisperRef = 'b5130'
-Write-Host "== whisper.cpp (pinned $WhisperRef): CUDA 11.8 + CPU =="
+Write-Host "== whisper.cpp (pinned $WhisperRef): CUDA 12.4 + CPU =="
 if ($IncludeCuda) {
-  try {
-    $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-cublas-11\.8\.0-bin-x64\.zip$' $WhisperRef '0b29b2175bb17ec26da29677cbc7c467c57d103245144d62a49a703f6bc3fdae'
-    $dest = Copy-Runtime $x 'whisper'
-    # Older releases ship the CLI as main.exe; the app expects whisper-cli.exe.
-    $wc = Join-Path $dest 'whisper-cli.exe'
-    $mn = Join-Path $dest 'main.exe'
-    if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
-  } catch { Write-Warning "whisper.cpp CUDA fetch failed: $_" }
+  # The CUDA 11.8 build needs cublas64_11.dll, while the performance pack
+  # provides CUDA 12.4. Keep Whisper's CUDA major version aligned with the pack.
+  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-cublas-12\.4\.0-bin-x64\.zip$' $WhisperRef 'af520ddd034d985b55dfeea3e465ed93653ba2aee1a55e865033edc548c272a7'
+  $dest = Copy-Runtime $x 'whisper'
+  # Older releases ship the CLI as main.exe; the app expects whisper-cli.exe.
+  $wc = Join-Path $dest 'whisper-cli.exe'
+  $mn = Join-Path $dest 'main.exe'
+  if (-not (Test-Path $wc) -and (Test-Path $mn)) { Copy-Item $mn $wc -Force }
 }
 
 try {
@@ -256,6 +256,11 @@ if ($IncludeCuda) {
       (Join-Path $bin 'cuda-runtime\cublas64_12.dll'),
       (Join-Path $bin 'cuda-runtime\cublasLt64_12.dll'),
       (Join-Path $bin 'whisper\whisper-cli.exe'),
+      (Join-Path $bin 'whisper\ggml-cuda.dll'),
+      (Join-Path $bin 'whisper\cudart64_12.dll'),
+      (Join-Path $bin 'whisper\cublas64_12.dll'),
+      (Join-Path $bin 'whisper\cublasLt64_12.dll'),
+      (Join-Path $bin 'whisper\nvrtc64_120_0.dll'),
       (Join-Path $bin 'sd-cuda\sd-cli.exe'),
       (Join-Path $bin 'sd-cuda\ggml-cuda.dll'))) {
     if (-not (Test-Path -LiteralPath $p)) { throw "REQUIRED Windows CUDA runtime missing: $p" }
