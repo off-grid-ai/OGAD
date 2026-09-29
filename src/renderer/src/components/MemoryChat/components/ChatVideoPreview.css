@@ -1,0 +1,36 @@
+.chat-video-player {
+  --media-primary-color: var(--og-text);
+  --media-secondary-color: var(--og-surface);
+  --media-control-background: var(--og-surface);
+  --media-control-hover-background: var(--og-surface-hover);
+  --media-range-bar-color: var(--og-primary);
+  --media-range-track-background: var(--og-border);
+  --media-font-family: var(--og-font-mono);
+  --media-font-size: var(--og-space-md);
+  --media-font-weight: 400;
+  --media-control-padding: var(--og-space-sm);
+  --media-control-height: var(--og-space-lg);
+  --media-button-icon-width: var(--og-space-lg);
+  --media-button-icon-height: var(--og-space-lg);
+  --media-focus-box-shadow: inset 0 0 0 2px var(--og-primary);
+  --media-control-transition-in: opacity 150ms;
+  --media-control-transition-out: opacity 150ms;
+  background: var(--og-background);
+}
+
+.chat-video-player svg {
+  width: var(--og-space-lg);
+  height: var(--og-space-lg);
+}
+
+.chat-video-player[mediaisfullscreen] video {
+  height: 100%;
+  max-height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-video-player {
+    --media-control-transition-in: none;
+    --media-control-transition-out: none;
+  }
+}
