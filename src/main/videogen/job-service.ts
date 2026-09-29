@@ -100,9 +100,9 @@ export class VideoGenerationJobService {
           frames: output.frames
         })
       })
-      if (!shareGeneratedVideo(output.path)) {
-        throw new Error('The clip was saved locally, but it exceeds the sync limit or cannot be shared.')
-      }
+      // The MP4 and its metadata are committed locally. Optional replication
+      // must not hide a completed clip when it exceeds the transfer limit.
+      shareGeneratedVideo(output.path)
       this.snapshot = {
         ...this.snapshot,
         phase: 'succeeded',
@@ -157,7 +157,13 @@ export class VideoGenerationJobService {
 
   private publish(): void {
     const snapshot = this.status()
-    this.listeners.forEach((listener) => listener(snapshot))
+    this.listeners.forEach((listener) => {
+      try {
+        listener(snapshot)
+      } catch (error) {
+        console.error('[video-job] Status listener failed', error)
+      }
+    })
   }
 }
 
