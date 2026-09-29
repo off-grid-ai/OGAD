@@ -1,5 +1,4 @@
 import { restoreCanonicalProductName } from './bootstrap/user-data'
-import './bootstrap/windows-onnx-cuda'
 import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
 import { tmpdir } from 'os'
 
