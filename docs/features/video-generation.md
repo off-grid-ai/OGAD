@@ -74,3 +74,14 @@ job, and MP4 content. This checks the server contract on the same Mac; it is not
 a two-device generation check. Scoped gallery listing and the OGAD remote
 adapter were reviewed in source. Restart recovery of an interrupted video job
 and a two-device OGAD video request still need a separate live check.
+
+### Live cancellation and retry
+
+Two additional local Wan 2.2 jobs used 832 × 480, 9 frames, 8 FPS, and 4 steps.
+The first was cancelled during preparation. A new job was then accepted and
+reached sampling; it had entered VAE decoding when the second cancellation
+request arrived. Both cancellation requests returned `cancelled: true` and
+settled as `failed` with `error.type: cancelled`, as required by existing remote
+clients. Both native engine processes exited. No temporary raw video or preview
+files remained. The cancelled state was present in the durable API job record.
+These checks did not restart the app or exercise recovery after a process crash.
