@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REVISION=3f8527a46c54ecf4cb4ed6003da8e8982283c73c
 CACHE="$ROOT/build/image-macos"
 SOURCE="$CACHE/source"
 DEST="${OFFGRID_SD_DEST:-$ROOT/resources/bin/sd}"
@@ -11,22 +10,7 @@ if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
   exit 1
 fi
 mkdir -p "$CACHE"
-if [ ! -d "$SOURCE/.git" ]; then
-  git clone --filter=blob:none --no-checkout https://github.com/leejet/stable-diffusion.cpp.git "$SOURCE"
-fi
-# Remove only our own previous patches before checking out the pinned source.
-for patch in "$ROOT/scripts/patches/video-decode-observer.patch" "$ROOT/scripts/patches/video-decode-cli.patch"; do
-  if git -C "$SOURCE" apply --reverse --check "$patch" 2>/dev/null; then
-    git -C "$SOURCE" apply --reverse "$patch"
-  fi
-done
-git -C "$SOURCE" fetch origin "$REVISION"
-git -C "$SOURCE" checkout --detach "$REVISION"
-git -C "$SOURCE" submodule update --init --depth 1 ggml
-test -z "$(git -C "$SOURCE" status --porcelain)"
-for patch in "$ROOT/scripts/patches/video-decode-observer.patch" "$ROOT/scripts/patches/video-decode-cli.patch"; do
-  git -C "$SOURCE" apply "$patch"
-done
+node "$ROOT/scripts/prepare-image-runtime.mjs" "$SOURCE"
 cmake -S "$SOURCE" -B "$CACHE/build" -DCMAKE_BUILD_TYPE=Release   -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0   -DSD_METAL=ON -DSD_BUILD_EXAMPLES=ON -DSD_BUILD_SHARED_LIBS=ON   -DSD_BUILD_SHARED_GGML_LIB=OFF -DGGML_NATIVE=OFF -DSD_SERVER_BUILD_FRONTEND=OFF
 cmake --build "$CACHE/build" --target sd-cli sd-server --parallel 2
 mkdir -p "$DEST"

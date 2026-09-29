@@ -25,6 +25,25 @@ Video remains expensive. A successful 832 × 480, 17-frame, 20-step Wan 2.2 run
 on an M5 with 32 GB RAM took about 25 minutes, including concurrent build work.
 This is a measured development run, not a device benchmark.
 
+## Native preview builds on Windows and Linux
+
+All source builds use `scripts/prepare-image-runtime.mjs` for the pinned runtime
+above and the same decode progress and first-frame preview patches.
+
+- Linux Vulkan: `OFFGRID_BUILD_IMAGE_FROM_SOURCE=1 bash scripts/fetch-image-linux.sh`.
+  The build host needs CMake, a C++ compiler, and Vulkan development tools.
+- Linux CUDA: `OFFGRID_BUILD_IMAGE_CUDA_FROM_SOURCE=1 bash scripts/build-image-cuda-linux.sh`.
+  This uses the script's pinned CUDA build container.
+- Windows: `./scripts/build-image-windows.ps1 -Backend cpu`, `vulkan`, or `cuda`.
+  The build host needs MSVC, CMake, and the selected GPU SDK. Set
+  `$env:OFFGRID_BUILD_IMAGE_FROM_SOURCE = '1'` before the existing Windows fetch
+  scripts to select these builds during packaging.
+
+Each source build checks that the CLI exposes `--decode-preview-path`. The shared
+source and CLI compiled on macOS. Windows and Linux builds of these patches still
+need native platform verification. Default archive downloads remain unchanged;
+they do not gain decode previews until new runtime archives are built and pinned.
+
 ## Live verification — September 29, 2026
 
 A local run through the normal Desktop gateway completed with this configuration:

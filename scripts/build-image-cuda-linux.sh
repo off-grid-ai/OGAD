@@ -4,7 +4,6 @@ set -euo pipefail
 # Match the Vulkan image runtime source while adding a separate NVIDIA engine.
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SD_REF=master-920-2f88688
-SD_COMMIT=2f886889e6e8b78738d6b87f7191f6018557c551
 CUDA_BUILD_IMAGE=nvidia/cuda:12.8.1-devel-ubuntu24.04@sha256:4b9ed5fa8361736996499f64ecebf25d4ec37ff56e4d11323ccde10aa36e0c43
 
 if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
@@ -45,9 +44,7 @@ fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
-git clone --depth 1 --branch "$SD_REF" --recurse-submodules \
-  https://github.com/leejet/stable-diffusion.cpp "$WORK/src"
-test "$(git -C "$WORK/src" rev-parse HEAD)" = "$SD_COMMIT"
+node "$ROOT/scripts/prepare-image-runtime.mjs" "$WORK/src"
 mkdir -p "$WORK/build"
 DOCKER=(docker)
 if ! docker info >/dev/null 2>&1; then DOCKER=(sudo docker); fi
@@ -79,4 +76,6 @@ for name in sd-cli sd-server; do
   test -z "$missing" || { printf '%s\n' "$missing" >&2; exit 1; }
 done
 install -m 644 "$WORK/src/LICENSE" "$DEST/LICENSE"
-echo '[build-image-cuda-linux] staged CUDA image CLI and server'
+help="$(LD_LIBRARY_PATH="$DEST:$ROOT/build/linux-bin/cuda-runtime" "$DEST/sd-cli" --help 2>&1)"
+grep -q -- '--decode-preview-path' <<< "$help"
+echo '[build-image-cuda-linux] staged CUDA image/video CLI with decoded previews'
