@@ -12,6 +12,9 @@ $name = if ($Backend -eq 'vulkan') { 'sd' } else { "sd-$Backend" }
 $destination = Join-Path $root "resources\bin\$name"
 
 # MSVC/CMake, the Vulkan SDK or CUDA 12.8 toolkit must be installed by the host.
+# Windows PowerShell treats native stderr (including git progress) as errors.
+# Check native exit codes explicitly instead.
+$ErrorActionPreference = 'Continue'
 & node (Join-Path $PSScriptRoot 'prepare-image-runtime.mjs') $source
 if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the patched image runtime.' }
 $cuda = if ($Backend -eq 'cuda') { 'ON' } else { 'OFF' }
@@ -23,6 +26,7 @@ $vulkan = if ($Backend -eq 'vulkan') { 'ON' } else { 'OFF' }
 if ($LASTEXITCODE -ne 0) { throw "Could not configure the $Backend image runtime." }
 & cmake --build $build --config Release --target sd-cli sd-server --parallel 4
 if ($LASTEXITCODE -ne 0) { throw "Could not build the $Backend image runtime." }
+$ErrorActionPreference = 'Stop'
 $cli = Get-ChildItem $build -Recurse -Filter sd-cli.exe | Select-Object -First 1
 if (-not $cli) { throw 'Built image CLI is missing.' }
 New-Item -ItemType Directory -Force -Path $destination | Out-Null
@@ -30,8 +34,11 @@ Get-ChildItem $cli.DirectoryName -File | Where-Object { $_.Extension -in '.exe',
   Copy-Item -Destination $destination -Force
 Copy-Item (Join-Path $source 'LICENSE') $destination -Force
 $env:PATH = "$destination;$(Join-Path $root 'resources\bin\cuda-runtime');$env:PATH"
+$ErrorActionPreference = 'Continue'
 $help = & (Join-Path $destination 'sd-cli.exe') --help 2>&1 | Out-String
-if ($LASTEXITCODE -ne 0 -or -not $help.Contains('--decode-preview-path')) {
+$exitCode = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+if ($exitCode -ne 0 -or -not $help.Contains('--decode-preview-path')) {
   throw 'Built image runtime does not expose decoded video previews.'
 }
 Write-Host "Patched $Backend image/video runtime ready at $destination"
