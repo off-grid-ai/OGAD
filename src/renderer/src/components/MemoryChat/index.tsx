@@ -2943,6 +2943,9 @@ export function MemoryChat({
       .then((streams) => {
         if (disposed) return
         for (const stream of streams) {
+          // Video jobs restore through their own job-state subscription. Their sync
+          // stream has no text-stream completion event to settle a restored row.
+          if (stream.phase === 'loading_video_model' || stream.phase === 'generating_video') continue
           streamConvRef.current.set(stream.streamId, stream.conversationId)
           reasoningByStream.current[stream.streamId] = stream.reasoning
           timelineByStream.current[stream.streamId] = [
