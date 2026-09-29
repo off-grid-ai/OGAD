@@ -21,14 +21,16 @@ const url = `https://runtime.getoffgridai.co/desktop/cuda/linux/${version}.tar.g
 let originalPlatform: PropertyDescriptor | undefined
 const originalLibraryPath = process.env.LD_LIBRARY_PATH
 
-function archive(): Buffer {
+function archive(withSpeechLibraries = true): Buffer {
   const source = path.join(fixture.root, 'source', 'bin', 'llama-cuda')
   fs.mkdirSync(source, { recursive: true })
   fs.writeFileSync(path.join(source, 'llama-server'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
-  const onnx = path.join(fixture.root, 'source', 'bin', 'onnx-cuda')
-  fs.mkdirSync(onnx, { recursive: true })
-  fs.writeFileSync(path.join(onnx, 'libcublasLt.so.13'), 'test')
-  fs.writeFileSync(path.join(onnx, 'libcudnn.so.9'), 'test')
+  if (withSpeechLibraries) {
+    const onnx = path.join(fixture.root, 'source', 'bin', 'onnx-cuda')
+    fs.mkdirSync(onnx, { recursive: true })
+    fs.writeFileSync(path.join(onnx, 'libcublasLt.so.13'), 'test')
+    fs.writeFileSync(path.join(onnx, 'libcudnn.so.9'), 'test')
+  }
   const output = path.join(fixture.root, 'source.tar.gz')
   const result = spawnSync('tar', ['-czf', output, '-C', path.join(fixture.root, 'source'), 'bin'])
   expect(result.status).toBe(0)
@@ -123,6 +125,15 @@ describe('optional NVIDIA performance pack', () => {
     expect(status.error).toMatch(/hash check/)
     expect(process.env.OFFGRID_PERFORMANCE_PACK_BIN).toBeUndefined()
     expect(fs.readdirSync(path.join(fixture.root, 'performance-packs'))).toEqual([])
+  })
+
+  it('rejects a Linux pack without the CUDA speech libraries', async () => {
+    const bytes = archive(false)
+    manifest(bytes)
+    vi.stubGlobal('fetch', async () => new Response(new Uint8Array(bytes), { status: 200 }))
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('failed')).error).toMatch(/CUDA speech libraries/)
   })
 
   it('resumes a partial download only from the requested byte', async () => {

@@ -184,6 +184,11 @@ async function fetchPack(asset: PerformancePackAsset, signal: AbortSignal): Prom
     if (!fs.statSync(bin).isDirectory() || !fs.statSync(server).isFile()) {
       throw new Error('The performance pack is missing its CUDA chat engine.')
     }
+    if (process.platform === 'linux' &&
+        (!fs.existsSync(path.join(bin, 'onnx-cuda', 'libcublasLt.so.13')) ||
+         !fs.existsSync(path.join(bin, 'onnx-cuda', 'libcudnn.so.9')))) {
+      throw new Error('The performance pack is missing its CUDA speech libraries.')
+    }
     fs.writeFileSync(path.join(staging, 'verified.sha256'), `${asset.sha256.toLowerCase()}\n`)
     fs.rmSync(root, { recursive: true, force: true })
     fs.renameSync(staging, root)
