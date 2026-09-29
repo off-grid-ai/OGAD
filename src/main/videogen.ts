@@ -1,3 +1,4 @@
+import { getBackendPreference } from './backend-preferences'
 import { beginRuntimeBackend, runtimeBackendSnapshot } from './runtime-backends'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { generateRemoteVideo } from './remote-media-runtime'
@@ -255,11 +256,21 @@ export async function generateVideo(
         VIDEO_JOB,
         async () => {
           if (cancelRequested) throw new Error(CANCELLED)
-          const runtimes = findSdBinaries('sd-cli')
+          const preference = getBackendPreference('video')
+          const preferred = findSdBinaries('sd-cli', preference)
+          // Metal and Vulkan distributions also contain CPU kernels. Explicit
+          // CPU must remain usable when no separate CPU binary is packaged.
+          const runtimes =
+            preference === 'cpu' && preferred.length === 0
+              ? findSdBinaries('sd-cli').filter(
+                  (runtime) => imageBackendForRuntime(process.platform, runtime) !== 'CUDA'
+                )
+              : preferred
           if (!runtimes.length) throw new Error('Video engine was not found.')
-          const attempts = runtimes.map((runtime) => ({ runtime, cpu: false }))
+          const attempts = runtimes.map((runtime) => ({ runtime, cpu: preference === 'cpu' }))
           // Linux's Vulkan distribution includes CPU kernels in the same binary.
           if (
+            preference !== 'cpu' &&
             !runtimes.some((runtime) => imageBackendForRuntime(process.platform, runtime) === 'CPU')
           ) {
             const runtime = runtimes.find(
@@ -278,7 +289,7 @@ export async function generateVideo(
               console.info(`[videogen] Starting runtime ${runtime}`)
               // CUDA binaries can start on a non-NVIDIA host and silently use CPU.
               // Try the Vulkan engine first in that case.
-              if (imageBackendForRuntime(process.platform, runtime) === 'CUDA') {
+              if (!cpu && imageBackendForRuntime(process.platform, runtime) === 'CUDA') {
                 let devices = ''
                 await runProcess(runtime, ['--list-devices'], (chunk) => {
                   devices = `${devices}${chunk}`.slice(-16384)

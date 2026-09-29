@@ -1,3 +1,4 @@
+import { BackendPreferencesSection } from './ProcessingControls'
 import { videoModelDefaults, videoModelLimits } from '@offgrid/models'
 import { useEffect, useState } from 'react'
 import { SettingsSelect } from './SettingsSelect'
@@ -61,13 +62,17 @@ export function VideoSettingsTab(): React.JSX.Element {
 
   if (!model)
     return (
-      <p className="border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-500">
-        Download a complete video model pack in Models to set video options.
-      </p>
+      <div className="space-y-4">
+        <BackendPreferencesSection modalities={['video']} />
+        <p className="border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-500">
+          Download a complete video model pack in Models to set video options.
+        </p>
+      </div>
     )
 
   return (
     <div className="space-y-4 text-xs text-neutral-300">
+      <BackendPreferencesSection modalities={['video']} />
       <div>
         <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
           Active video model

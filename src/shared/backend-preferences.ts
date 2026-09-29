@@ -1,5 +1,5 @@
 export const BACKEND_MODALITIES = [
-  'llm', 'image', 'stt', 'tts', 'grounding', 'decision', 'embeddings'
+  'llm', 'image', 'video', 'stt', 'tts', 'grounding', 'decision', 'embeddings'
 ] as const
 
 export type BackendModality = (typeof BACKEND_MODALITIES)[number]
