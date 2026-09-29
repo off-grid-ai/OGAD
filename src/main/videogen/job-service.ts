@@ -29,6 +29,7 @@ const idle = (): VideoGenerationJobContract => ({
   stage: null,
   enhancedPrompt: '',
   progress: null,
+  preview: null,
   outputPath: null,
   error: null,
   startedAt: null,
@@ -108,6 +109,7 @@ export class VideoGenerationJobService {
         phase: 'succeeded',
         stage: null,
         progress: null,
+        preview: null,
         outputPath: output.path,
         finishedAt: Date.now()
       }
@@ -119,6 +121,7 @@ export class VideoGenerationJobService {
         phase: error instanceof Error && /stopped/i.test(error.message) ? 'cancelled' : 'failed',
         stage: null,
         progress: null,
+        preview: null,
         error: error instanceof Error ? error.message : String(error),
         finishedAt: Date.now()
       }
@@ -150,7 +153,8 @@ export class VideoGenerationJobService {
       ...this.snapshot,
       stage: update.stage,
       ...(update.enhancedPrompt === undefined ? {} : { enhancedPrompt: update.enhancedPrompt }),
-      ...(update.progress === undefined ? {} : { progress: update.progress })
+      ...(update.progress === undefined ? {} : { progress: update.progress }),
+      ...(update.preview === undefined ? {} : { preview: update.preview })
     }
     this.publish()
   }

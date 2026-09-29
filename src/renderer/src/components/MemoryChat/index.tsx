@@ -3966,9 +3966,18 @@ export function MemoryChat({
                                 Off Grid AI
                               </div>
                               {generatingVideo ? (
-                                <div className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-300`} role="status">
-                                  <span>{videoJob?.stage === 'enhancing' ? 'Enhancing prompt…' : videoJob?.stage === 'encoding' ? 'Encoding MP4…' : videoJob?.stage === 'generating' ? 'Generating video…' : 'Preparing video…'}</span>
-                                  {videoJob?.progress ? <span>{videoJob.progress.step} / {videoJob.progress.total} steps</span> : null}
+                                <div className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start gap-2 text-xs text-neutral-400`} role="status">
+                                  <span>{videoJob?.stage === 'enhancing' ? 'Enhancing prompt…' : videoJob?.stage === 'encoding' ? 'Encoding MP4…' : videoJob?.stage === 'decoding' ? 'Decoding video…' : videoJob?.stage === 'conditioning' ? 'Processing prompt…' : videoJob?.stage === 'generating' ? 'Generating video…' : 'Preparing video…'}</span>
+                                  {videoJob?.progress ? <span>{videoJob.progress.step} / {videoJob.progress.total} {videoJob.stage === 'decoding' ? 'sections decoded' : 'steps'}</span> : null}
+                                  {videoJob?.preview ? (
+                                    <img
+                                      src={captureUrlForPath(videoJob.preview.path)}
+                                      width={videoJob.preview.width}
+                                      height={videoJob.preview.height}
+                                      alt="First decoded video frame"
+                                      className="max-w-full rounded-md object-contain"
+                                    />
+                                  ) : null}
                                 </div>
                               ) : mode === 'image' || generatingImage ? (
                                 <div

@@ -245,11 +245,12 @@ export async function generateVideo(
   const id = randomUUID()
   const raw = path.join(root, `${id}.webm`)
   const output = path.join(root, `${id}.mp4`)
+  const previewPath = `${output}.preview.png`
   const ffmpeg = ffmpegBin()!
   try {
     if (remote) {
-      await generateRemoteVideo(remote, request, output, jobAbort.signal, (progress, stage) =>
-        onUpdate?.({ stage: stage ?? 'generating', progress })
+      await generateRemoteVideo(remote, request, output, jobAbort.signal, (progress, stage, preview) =>
+        onUpdate?.({ stage: stage ?? 'generating', progress, ...(preview ? { preview } : {}) })
       )
     } else
       await modalityQueue.run(
@@ -282,10 +283,14 @@ export async function generateVideo(
             if (cancelRequested) throw new Error(CANCELLED)
             const backend = beginRuntimeBackend('video', pack!.name)
             let progressText = ''
+            let decoding = false
+            let decodeMarker = ''
+            let framePublished = false
             let lastStep = 0
             try {
               // A failed engine can leave a partial file. Never accept it on retry.
               fs.rmSync(raw, { force: true })
+              fs.rmSync(previewPath, { force: true })
               console.info(`[videogen] Starting runtime ${runtime}`)
               // CUDA binaries can start on a non-NVIDIA host and silently use CPU.
               // Try the Vulkan engine first in that case.
@@ -297,14 +302,31 @@ export async function generateVideo(
                 if (!/^CUDA\d*\s/im.test(devices))
                   throw new Error('The CUDA engine found no usable CUDA device.')
               }
+              let help = ''
+              await runProcess(runtime, ['--help'], (chunk) => { help += chunk })
+              const decodedPreviewArgs = help.includes('--decode-preview-path')
+                ? ['--decode-preview-path', previewPath] : []
               await runProcess(
                 runtime,
-                [...videoArgs(pack!.pack, request, raw), ...(cpu ? ['--backend', 'cpu'] : [])],
+                [...videoArgs(pack!.pack, request, raw), ...decodedPreviewArgs, ...(cpu ? ['--backend', 'cpu'] : [])],
                 (chunk) => {
                   backend.observe(chunk)
-                  progressText = `${progressText}${chunk}`.slice(-256)
+                  progressText = `${progressText}${chunk}`.slice(-4096)
+                  const decoded = [...progressText.matchAll(/OFFGRID_VIDEO_DECODE (\d+) (\d+)/g)].at(-1)
+                  if (decoded && decoded[0] !== decodeMarker) {
+                    decodeMarker = decoded[0]
+                    decoding = true
+                    const step = Number(decoded[1]), total = Number(decoded[2])
+                    onUpdate?.({ stage: 'decoding', progress: total > 0 ? { step, total } : null })
+                  }
+                  const frame = /OFFGRID_VIDEO_FRAME (\d+) (\d+)/.exec(progressText)
+                  if (!framePublished && frame && fs.existsSync(previewPath)) {
+                    framePublished = true
+                    onUpdate?.({ stage: 'decoding', preview: { path: previewPath, width: Number(frame[1]), height: Number(frame[2]) } })
+                  }
+
                   const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
-                  if (match) {
+                  if (match && !decoding) {
                     const step = Number(match[1])
                     const total = Number(match[2])
                     if (step > lastStep && step <= total && total <= request.steps) {
@@ -335,10 +357,10 @@ export async function generateVideo(
                 `[videogen] Runtime failed; retrying with ${next.runtime}${next.cpu ? ' (CPU)' : ''}`,
                 error
               )
-              onUpdate?.({ stage: 'preparing' })
+              onUpdate?.({ stage: 'preparing', progress: null, preview: null })
             }
           }
-          onUpdate?.({ stage: 'encoding' })
+          onUpdate?.({ stage: 'encoding', progress: null })
           await runProcess(ffmpeg, [
             '-hide_banner',
             '-loglevel',
@@ -381,6 +403,8 @@ export async function generateVideo(
   } finally {
     jobAbort = null
     fs.rmSync(raw, { force: true })
+    fs.rmSync(previewPath, { force: true })
+    fs.rmSync(`${previewPath}.tmp.png`, { force: true })
     cancelRequested = false
     activeJob = false
   }

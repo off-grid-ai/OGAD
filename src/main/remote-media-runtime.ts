@@ -185,7 +185,7 @@ export async function generateRemoteVideo(
   request: import('@offgrid/models').ResolvedVideoRequest,
   output: string,
   signal: AbortSignal,
-  onProgress?: (progress: VideoGenerationProgressContract | null, stage?: VideoGenerationStage) => void
+  onProgress?: (progress: VideoGenerationProgressContract | null, stage?: VideoGenerationStage, preview?: { path: string; width: number; height: number }) => void
 ): Promise<void> {
   if (server.provider !== 'ogad')
     throw new Error('Remote video generation requires an OGAD server.')
@@ -195,6 +195,7 @@ export async function generateRemoteVideo(
   const { setTimeout: delay } = await import('node:timers/promises')
   const id = randomUUID()
   const endpoint = `${server.endpoint}/videos/${id}`
+  let previewDownloaded = false
   const cancel = (): void => {
     void fetch(`${endpoint}/cancel`, {
       method: 'POST',
@@ -224,6 +225,7 @@ export async function generateRemoteVideo(
       const job = (await response.json()) as {
         status: string
         stage?: VideoGenerationStage
+        preview?: { width: number; height: number }
         error?: { message?: string }
         progress?: { step: number; total: number }
       }
@@ -232,10 +234,38 @@ export async function generateRemoteVideo(
           ? job.progress
           : null
       const stage =
-        job.stage && ['enhancing', 'preparing', 'conditioning', 'generating', 'encoding'].includes(job.stage)
+        job.stage && ['enhancing', 'preparing', 'conditioning', 'generating', 'decoding', 'encoding'].includes(job.stage)
           ? job.stage
           : undefined
       if (progress || stage) onProgress?.(progress, stage)
+      if (!previewDownloaded && job.preview && Number.isFinite(job.preview.width) && Number.isFinite(job.preview.height)) {
+        try {
+          const response = await fetch(`${endpoint}/preview`, { headers: headers(server), signal })
+          if (response.ok && response.body && response.headers.get('content-type')?.startsWith('image/png')) {
+            const reader = response.body.getReader()
+            const chunks: Uint8Array[] = []
+            let size = 0
+            try {
+              for (;;) {
+                const { value, done } = await reader.read()
+                if (done) break
+                size += value.length
+                if (size > 16 * 1024 * 1024) { await reader.cancel(); break }
+                chunks.push(value)
+              }
+            } finally { reader.releaseLock() }
+            if (size > 0 && size <= 16 * 1024 * 1024) {
+              const path = `${output}.preview.png`
+              await fs.promises.writeFile(path, Buffer.concat(chunks))
+              previewDownloaded = true
+              onProgress?.(progress, stage, { path, width: job.preview.width, height: job.preview.height })
+            }
+          }
+        } catch {
+          // A preview is optional; keep the authoritative remote job running.
+          signal.throwIfAborted()
+        }
+      }
       if (job.status === 'failed' || job.status === 'cancelled')
         throw new Error(job.error?.message || 'Remote video generation failed.')
       if (job.status === 'completed') break

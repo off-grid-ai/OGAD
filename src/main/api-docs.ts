@@ -541,7 +541,7 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
           responses: {
             '200': {
               description:
-                'Job status is queued, running, completed, or failed. Cancelled jobs fail with error type cancelled. Running jobs include a stage (enhancing, preparing, conditioning, generating, or encoding) and optional step/total progress. Completed jobs include metadata and a content URL. Jobs interrupted by a server restart fail with error type interrupted.'
+                'Job status is queued, running, completed, or failed. Cancelled jobs fail with error type cancelled. Running jobs include a stage (enhancing, preparing, conditioning, generating, decoding, or encoding) and optional step/total progress. During decoding, progress counts completed sections. A preview field can provide dimensions and a preview URL for the first final decoded frame. Completed jobs include metadata and a content URL. Jobs interrupted by a server restart fail with error type interrupted.'
             },
             default: errorResponse
           }
@@ -557,6 +557,18 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
               description: 'Video file',
               content: { 'video/mp4': { schema: { type: 'string', format: 'binary' } } }
             },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/{id}/preview': {
+        get: {
+          tags: ['Videos'],
+          summary: 'First decoded video frame while the job finishes',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': { description: 'Final decoded frame, without a second decode', content: { 'image/png': { schema: { type: 'string', format: 'binary' } } } },
+            '404': { description: 'Preview is not ready or the job has finished' },
             default: errorResponse
           }
         }

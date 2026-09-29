@@ -142,6 +142,7 @@ interface ApiRequest {
   videoPath?: string
   videoJobId?: string
   videoInput?: string
+  preview?: { path: string; width: number; height: number }
   stage?: VideoGenerationStage
   error?: { message: string; type: string }
   progress?: { step: number; total: number }
@@ -173,6 +174,7 @@ function loadVideoRequests(): void {
         item.updated_at = Date.now()
         delete item.stage
         delete item.progress
+        delete item.preview
         item.error = {
           message: 'OGAD stopped before this video finished. Start a new job to retry.',
           type: 'interrupted'
@@ -257,6 +259,7 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   if (r.status === 'completed') body.result = r.result
   if (r.status === 'failed') body.error = r.error
   if (r.stage) body.stage = r.stage
+  if (r.preview) body.preview = { url: `/v1/videos/${id}/preview`, width: r.preview.width, height: r.preview.height }
   if (r.progress) body.progress = r.progress
   json(res, 200, body)
 }
@@ -1074,6 +1077,7 @@ export function startGatewayVideoJob(
     if (request.videoJobId && request.videoJobId !== job.id) return
     request.videoJobId = job.id ?? undefined
     request.stage = job.stage ?? undefined
+    request.preview = job.preview ?? undefined
     if (job.phase === 'cancelled')
       request.error = { message: job.error ?? 'Video generation stopped.', type: 'cancelled' }
     request.progress = job.progress ?? undefined
@@ -1106,6 +1110,7 @@ export function gatewayVideoJob(id: string, cancel = false): Record<string, unkn
     request_id: request.id,
     status: request.status,
     stage: request.stage,
+    ...(request.preview ? { preview: { url: `/v1/videos/${id}/preview`, width: request.preview.width, height: request.preview.height } } : {}),
     progress: request.progress,
     result: request.result,
     error: request.error,
@@ -1405,7 +1410,7 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       )
     })
 
-    const videoResource = /^\/v1\/videos\/([^/]+)\/(content|cancel)$/.exec(url)
+    const videoResource = /^\/v1\/videos\/([^/]+)\/(content|cancel|preview)$/.exec(url)
     if (videoResource) {
       loadVideoRequests()
       const request = requests.get(videoResource[1]!)
@@ -1418,6 +1423,20 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         const cancelled =
           job.id === request.videoJobId && job.phase === 'running' && videoGenerationJobs.cancel()
         json(res, 200, { cancelled })
+        return
+      }
+      if (videoResource[2] === 'preview' && method === 'GET') {
+        const owned = request.status === 'running' && request.preview &&
+          resolveExistingOwnedPath(generatedVideosDir(), request.preview.path)
+        if (!owned) {
+          json(res, 404, errBody('Video preview is not available.'))
+          return
+        }
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'Content-Length': fs.statSync(owned).size })
+        const stream = fs.createReadStream(owned)
+        res.once('close', () => stream.destroy())
+        stream.on('error', () => res.destroy())
+        stream.pipe(res)
         return
       }
       if (videoResource[2] === 'content' && method === 'GET') {
