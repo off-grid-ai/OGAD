@@ -1015,6 +1015,19 @@ function deleteTransferredModel(context: TransferredDeletionContext): DeleteMode
   return { success: true, freedFiles }
 }
 
+/** Files owned by complete runtime-discovered video packs, including copied variants. */
+async function installedVideoFileNames(excludeWeight?: string): Promise<Set<string>> {
+  const { videoGenStatus } = await import('./videogen')
+  const { videoPackFiles } = await import('@offgrid/models')
+  const names = new Set<string>()
+  for (const weight of videoGenStatus({ localOnly: true }).models) {
+    if (weight === excludeWeight) continue
+    const pack = videoPackFiles(weight)
+    if (pack) Object.values(pack).forEach((name) => names.add(name))
+  }
+  return names
+}
+
 /** Delete a model's files from disk. Clears it as active if it was selected. */
 export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   const dir = llm.getModelsDir()
@@ -1061,6 +1074,9 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
   if (!entry) return { success: false, error: 'unknown model' }
   let freed = 0
+  const retainedVideoFiles = entry.kind === 'video'
+    ? await installedVideoFileNames(primaryFileName(entry as unknown as CatalogEntry))
+    : new Set<string>()
 
   if (entry.runtime === 'mflux') {
     try {
@@ -1072,6 +1088,7 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
     }
   } else {
     for (const f of entry.files) {
+      if (retainedVideoFiles.has(f.name)) continue
       try {
         fs.rmSync(path.join(dir, f.name), { force: true })
         freed++
@@ -1752,12 +1769,7 @@ export async function getStorageInfo(): Promise<StorageInfo> {
 
   // Runtime discovery also accepts complete local video packs that were copied
   // into the model directory. Their files must not become orphan-cleanup targets.
-  const { videoGenStatus } = await import('./videogen')
-  const { videoPackFiles } = await import('@offgrid/models')
-  for (const weight of videoGenStatus({ localOnly: true }).models) {
-    const pack = videoPackFiles(weight)
-    if (pack) Object.values(pack).forEach((name) => known.add(name))
-  }
+  for (const name of await installedVideoFileNames()) known.add(name)
 
   const active = getActiveModel()
   // Per-modality active picks (image/speech/transcription) are stored as the
