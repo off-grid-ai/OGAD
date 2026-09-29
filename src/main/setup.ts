@@ -8,11 +8,19 @@ import { runtimeBackendSnapshot } from './runtime-backends'
 //
 // Everything here is on-device; no network except the model download itself.
 import os from 'os'
+import { videoPackError } from '@offgrid/models'
+import { totalBytes } from './model-sizing'
+import { evaluateMemoryGuard } from './imagegen/memory-guard'
+import { findSdBinary } from './imagegen/sd-runtime'
+import { ffmpegBin } from './transcription/whisper-cli'
+import { modalityForKind } from './active-models-logic'
 import * as http from 'http'
 import { llm } from './llm'
 import { decideChatStatus } from './chat-health'
 import {
   getActiveModel,
+  getActiveModalities,
+  resolveModelIdentity,
   downloadModel,
   listInstalled,
   setActiveModel,
@@ -183,9 +191,13 @@ export async function getSystemHealth(): Promise<SystemHealth> {
         id,
         label: id === 'grounding' ? 'Computer Use grounding' : 'Computer / Web Use decision',
         status:
-          runtime?.state === 'loaded' ? 'ready'
-            : runtime?.state === 'loading' ? 'starting'
-              : runtime?.state === 'error' ? 'down' : 'idle',
+          runtime?.state === 'loaded'
+            ? 'ready'
+            : runtime?.state === 'loading'
+              ? 'starting'
+              : runtime?.state === 'error'
+                ? 'down'
+                : 'idle',
         detail: runtime?.state === 'error' ? runtime.detail : undefined
       }
     }),
@@ -214,7 +226,7 @@ export async function recommendChatModel(
 ): Promise<{ id: string; name: string } | null> {
   const { recommendForRam } = await import('@offgrid/models')
   const CATALOG = await desktopCatalog()
-  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, totalBytes, modeBudget } =
+  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, modeBudget } =
     await import('./model-sizing')
   const gb = ramGb()
   const tier = recommendForRam(gb)
@@ -311,6 +323,7 @@ export interface SetupItem {
   name: string
   sizeGb: number
   installed: boolean
+  files?: { name: string; sizeBytes?: number }[]
   required: boolean // chat is required; the rest are best-effort extras
 }
 export interface SetupPlan {
@@ -318,6 +331,7 @@ export interface SetupPlan {
   ramGb: number
   items: SetupItem[]
   totalDownloadGb: number
+  videoNote?: string
 }
 
 /** The full set of models "Configure for me" will set up for a mode: the chat/vision
@@ -343,8 +357,12 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
   const nameOf = (id: string, fallback: string): string =>
     CATALOG.find((m) => m.id === id)?.name ?? fallback
 
+  const selections = getActiveModalities()
   const items: SetupItem[] = []
-  const chat = await recommendChatModel(effMode)
+  const savedChat = selections.text ? await resolveModelIdentity(selections.text) : null
+  const chat = savedChat
+    ? { id: savedChat.modelId, name: savedChat.modelName }
+    : await recommendChatModel(effMode)
   if (chat)
     items.push({
       kind: 'chat',
@@ -352,12 +370,14 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       id: chat.id,
       name: chat.name,
       sizeGb: sizeOf(chat.id),
-      installed: installed.includes(chat.id),
+      installed: !!savedChat || installed.includes(chat.id),
       required: true
     })
   // The non-chat baseline (STT, TTS, and image outside Conservative) - order + the
   // per-mode STT tier come from the single source of truth in setup-logic.
   for (const ex of baselineExtras(effMode)) {
+    const modality = modalityForKind(ex.kind)
+    if (modality && selections[modality]) continue
     items.push({
       kind: ex.kind,
       capability: ex.capability,
@@ -369,32 +389,54 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
     })
   }
 
-  // Use the smallest complete video pack that meets the catalog RAM requirement.
-  // Heavy generation models remain optional and are skipped in Conservative mode.
-  if (effMode !== 'conservative') {
-    const video = CATALOG
-      .filter(
-        (entry) =>
-          entry.kind === 'video' &&
-          entry.minRamGb != null &&
-          entry.minRamGb <= ramGb() &&
-          entry.files.length > 0
-      )
-      .sort((a, b) => sizeOf(a.id) - sizeOf(b.id))[0]
+  // Reuse the runtime probes and image memory reserve. Count the complete pack,
+  // including the encoder and VAE, before recommending an optional download.
+  let videoNote: string | undefined
+  if (selections.video) {
+    videoNote = 'Your saved video model choice is kept.'
+  } else if (effMode === 'conservative') {
+    videoNote = 'Video models are skipped in Conservative mode.'
+  } else if (!findSdBinary('sd-cli') || !ffmpegBin()) {
+    videoNote = 'Video setup needs the local video engine and encoder.'
+  } else {
+    const video = CATALOG.filter(
+      (entry) =>
+        entry.kind === 'video' &&
+        entry.availability !== 'coming_soon' &&
+        entry.minRamGb != null &&
+        entry.minRamGb <= ramGb() &&
+        !videoPackError(entry.files) &&
+        entry.files.every((file) => (file.sizeBytes ?? 0) > 0) &&
+        !evaluateMemoryGuard({
+          totalGb: os.totalmem() / 1e9,
+          modelSizeGb: totalBytes(entry) / 1e9,
+          coreml: false,
+          zImageStack: false
+        }).overBudget
+    ).sort((a, b) => totalBytes(a) - totalBytes(b))[0]
     if (video) {
       items.push({
         kind: 'video',
         capability: 'Video generation',
         id: video.id,
         name: video.name,
-        sizeGb: sizeOf(video.id),
+        sizeGb: totalBytes(video) / 1e9,
+        files: video.files.map(({ name, sizeBytes }) => ({ name, sizeBytes })),
         installed: installed.includes(video.id),
         required: false
       })
+    } else {
+      videoNote = 'No complete video model pack fits the memory budget on this device.'
     }
   }
 
-  return { mode: effMode, ramGb: ramGb(), items, totalDownloadGb: totalDownloadGb(items) }
+  return {
+    mode: effMode,
+    ramGb: ramGb(),
+    items,
+    totalDownloadGb: totalDownloadGb(items),
+    videoNote
+  }
 }
 
 /** "Configure for me": pick → download (if needed) → activate → start → verify. */
@@ -413,14 +455,15 @@ export async function autoConfigure(
     phase: 'select',
     message: `Picking a model that fits your ${deviceNoun(process.platform)}…`
   })
-  const model = await recommendChatModel()
+  const plan = await getSetupPlan()
+  const model = plan.items.find((item) => item.kind === 'chat')
   if (!model) {
     emit({ phase: 'error', message: 'No suitable model found.' })
     return { success: false, error: 'no suitable model found' }
   }
 
   const installed = await listInstalled()
-  if (!installed.includes(model.id)) {
+  if (!model.installed && !installed.includes(model.id)) {
     emit({
       phase: 'download',
       message: `Downloading ${model.name}…`,
@@ -448,45 +491,55 @@ export async function autoConfigure(
     }
   }
 
-  emit({
-    phase: 'activate',
-    message: `Activating ${model.name}…`,
-    modelId: model.id,
-    modelName: model.name
-  })
-  const act = await setActiveModel(model.id)
-  if (!act.success) {
-    emit({ phase: 'error', message: act.error ?? 'Activation failed.', modelId: model.id })
-    return { success: false, error: act.error, modelId: model.id }
-  }
+  // A saved chat source stays active; setup must not restart an active run.
+  if (!getActiveModalities().text) {
+    emit({
+      phase: 'activate',
+      message: `Activating ${model.name}…`,
+      modelId: model.id,
+      modelName: model.name
+    })
+    const act = await setActiveModel(model.id)
+    if (!act.success) {
+      emit({ phase: 'error', message: act.error ?? 'Activation failed.', modelId: model.id })
+      return { success: false, error: act.error, modelId: model.id }
+    }
 
-  emit({
-    phase: 'start',
-    message: 'Starting the local model server…',
-    modelId: model.id,
-    modelName: model.name
-  })
-  try {
-    await llm.restart()
-  } catch (e) {
-    emit({ phase: 'error', message: (e as Error).message, modelId: model.id })
-    return { success: false, error: (e as Error).message, modelId: model.id }
+    emit({
+      phase: 'start',
+      message: 'Starting the local model server…',
+      modelId: model.id,
+      modelName: model.name
+    })
+    try {
+      await llm.restart()
+    } catch (e) {
+      emit({ phase: 'error', message: (e as Error).message, modelId: model.id })
+      return { success: false, error: (e as Error).message, modelId: model.id }
+    }
   }
 
   emit({ phase: 'verify', message: 'Verifying…', modelId: model.id, modelName: model.name })
   const ok = !!(await pingJson(llm.getPort(), '/health', 3000))
 
   // Chat is live — now set up the rest of the baseline (speech-to-text, text-to-
-  // speech, and image outside Conservative). These are best-effort: a failure here
+  // speech, and image/video outside Conservative). These are best-effort: a failure here
   // never fails setup, and the chat model being ready already lets the user in.
   try {
-    const plan = await getSetupPlan()
     const extras = plan.items.filter((i) => !i.required)
     const installedNow = await listInstalled()
+    const activateExtra = async (ex: SetupItem): Promise<void> => {
+      const modality = modalityForKind(ex.kind)
+      if (modality && !getActiveModalities()[modality]) {
+        await setActiveModalChoice(ex.kind, ex.id)
+      }
+    }
     for (const ex of extras) {
+      const modality = modalityForKind(ex.kind)
+      if (modality && getActiveModalities()[modality]) continue
       if (installedNow.includes(ex.id)) {
         try {
-          await setActiveModalChoice(ex.kind, ex.id)
+          await activateExtra(ex)
         } catch {
           /* ignore */
         }
@@ -514,7 +567,7 @@ export async function autoConfigure(
             bytesPerSecond: p.bytesPerSecond
           })
         )
-        if (r.success) await setActiveModalChoice(ex.kind, ex.id)
+        if (r.success) await activateExtra(ex)
       } catch {
         /* best-effort extra */
       }
@@ -526,7 +579,7 @@ export async function autoConfigure(
   emit({
     phase: 'done',
     message: ok
-      ? `Ready - ${model.name} is active. Optional model downloads are complete.`
+      ? `Ready - ${model.name} is active. Setup finished. Check Models for download status.`
       : `${model.name} installed; the server is still warming up.`,
     modelId: model.id,
     modelName: model.name
