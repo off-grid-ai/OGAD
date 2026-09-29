@@ -1444,7 +1444,7 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
     // the per-collection resource (e.g. /v1/images/{id}, /v1/audio/speech/{id}).
     if (method === 'GET') {
       const { id, prefix, isPollCollection } = matchPollRoute(url)
-      if (prefix === '/v1/videos') loadVideoRequests()
+      if (prefix === '/v1/videos' && id) return handlePoll(res, id)
       if (url.startsWith('/v1/requests/') && id) return handlePoll(res, id)
       if (id && isPollCollection && requests.has(id)) return handlePoll(res, id)
     }
