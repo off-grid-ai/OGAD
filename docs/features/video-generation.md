@@ -57,7 +57,20 @@ The following checks used the completed job and did not start another generation
   the app permission fix. PiP entry and exit worked. Native PiP playback controls
   could not be inspected through the available window binding.
 
-Storage ownership, Auto Configure selection, scoped gallery listing, and the
-OGAD remote adapter were reviewed in source. No model was deleted and no
-interrupted job was created for this check. Restart recovery of an interrupted
-job and a two-device OGAD video request still need a separate live check.
+## Live settings check — September 30, 2026
+
+The normal Desktop Settings → Setup & health screen showed three video packs in
+Storage: Wan 2.1 Q3_K_M (4.4 GB), Wan 2.1 (6.7 GB), and Wan 2.2 (8.9 GB). Each
+had a Delete control. No model was deleted. The compact copied pack appeared as
+an installed model, not an unused file.
+
+Auto Configure's displayed plan included “Wan 2.1 (1.3B) VIDEO GENERATION” and
+marked it installed. Clicking Configure during the check started the selected
+plan's Gemma 4 12B download. Cancel stopped it at 1%; the app removed the new
+partial file and the active model selections stayed unchanged.
+
+A separate HTTP client read the running OGAD server's video capability, completed
+job, and MP4 content. This checks the server contract on the same Mac; it is not
+a two-device generation check. Scoped gallery listing and the OGAD remote
+adapter were reviewed in source. Restart recovery of an interrupted video job
+and a two-device OGAD video request still need a separate live check.
