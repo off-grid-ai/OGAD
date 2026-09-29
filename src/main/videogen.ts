@@ -312,14 +312,14 @@ export async function generateVideo(
                 (chunk) => {
                   backend.observe(chunk)
                   progressText = `${progressText}${chunk}`.slice(-4096)
-                  const decoded = [...progressText.matchAll(/OFFGRID_VIDEO_DECODE (\d+) (\d+)/g)].at(-1)
+                  const decoded = [...progressText.matchAll(/OFFGRID_VIDEO_DECODE (\d+) (\d+)(?=\r?\n)/g)].at(-1)
                   if (decoded && decoded[0] !== decodeMarker) {
                     decodeMarker = decoded[0]
                     decoding = true
                     const step = Number(decoded[1]), total = Number(decoded[2])
                     onUpdate?.({ stage: 'decoding', progress: total > 0 ? { step, total } : null })
                   }
-                  const frame = /OFFGRID_VIDEO_FRAME (\d+) (\d+)/.exec(progressText)
+                  const frame = /OFFGRID_VIDEO_FRAME (\d+) (\d+)(?=\r?\n)/.exec(progressText)
                   if (!framePublished && frame && fs.existsSync(previewPath)) {
                     framePublished = true
                     onUpdate?.({ stage: 'decoding', preview: { path: previewPath, width: Number(frame[1]), height: Number(frame[2]) } })
