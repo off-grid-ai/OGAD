@@ -1,3 +1,4 @@
+import { beginRuntimeBackend, runtimeBackendSnapshot } from './runtime-backends'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { generateRemoteVideo } from './remote-media-runtime'
 import {
@@ -13,7 +14,12 @@ import { randomUUID } from 'node:crypto'
 import { getActiveModal } from './active-models'
 import { getDB, getSetting, updateRagMessage } from './database'
 import { readGeneratedVideoReference } from '../shared/generated-video-reference'
-import { findSdBinary, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
+import {
+  findSdBinary,
+  findSdBinaries,
+  imageBackendForRuntime,
+  sdRuntimeLibraryEnv
+} from './imagegen/sd-runtime'
 import { resolveExistingOwnedEntry, resolveExistingOwnedPath } from './imagegen/owned-path'
 import { cleanEnhancedPrompt } from './imagegen/prompt-enhance'
 import { llm } from './llm'
@@ -135,14 +141,19 @@ function runProcess(
     child.stdout.on('data', capture)
     child.stderr.on('data', capture)
     child.once('error', (error) => {
-      currentChild = null
+      if (currentChild === child) currentChild = null
       reject(error)
     })
-    child.once('close', (code) => {
-      currentChild = null
+    child.once('close', (code, signal) => {
+      if (currentChild === child) currentChild = null
       if (cancelRequested) reject(new Error(CANCELLED))
       else if (code === 0) resolve()
-      else reject(new Error(`Video engine exited with code ${String(code)}: ${tail}`))
+      else
+        reject(
+          new Error(
+            `Video engine exited with ${signal ? `signal ${signal}` : `code ${String(code)}`}: ${tail}`
+          )
+        )
     })
     if (cancelRequested) child.kill('SIGTERM')
   })
@@ -190,7 +201,6 @@ export async function generateVideo(
   const id = randomUUID()
   const raw = path.join(root, `${id}.webm`)
   const output = path.join(root, `${id}.mp4`)
-  const cli = findSdBinary('sd-cli')!
   const ffmpeg = ffmpegBin()!
   try {
     if (remote) {
@@ -202,22 +212,78 @@ export async function generateVideo(
     } else
       await modalityQueue.run(VIDEO_JOB, async () => {
         if (cancelRequested) throw new Error(CANCELLED)
-        let progressText = ''
-        let lastStep = 0
-        await runProcess(cli, videoArgs(pack!.pack, request, raw), (chunk) => {
-          progressText = `${progressText}${chunk}`.slice(-256)
-          const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
-          if (match) {
-            const step = Number(match[1])
-            const total = Number(match[2])
-            if (step > lastStep && step <= total && total <= request.steps) {
-              lastStep = step
-              onUpdate?.({ stage: 'generating', progress: { step, total } })
+        const runtimes = findSdBinaries('sd-cli')
+        if (!runtimes.length) throw new Error('Video engine was not found.')
+        const attempts = runtimes.map((runtime) => ({ runtime, cpu: false }))
+        // Linux's Vulkan distribution includes CPU kernels in the same binary.
+        if (
+          !runtimes.some((runtime) => imageBackendForRuntime(process.platform, runtime) === 'CPU')
+        ) {
+          const runtime = runtimes.find(
+            (item) => imageBackendForRuntime(process.platform, item) !== 'CUDA'
+          )
+          if (runtime) attempts.push({ runtime, cpu: true })
+        }
+        for (const [index, { runtime, cpu }] of attempts.entries()) {
+          if (cancelRequested) throw new Error(CANCELLED)
+          const backend = beginRuntimeBackend('video', pack!.name)
+          let progressText = ''
+          let lastStep = 0
+          try {
+            // A failed engine can leave a partial file. Never accept it on retry.
+            fs.rmSync(raw, { force: true })
+            console.info(`[videogen] Starting runtime ${runtime}`)
+            // CUDA binaries can start on a non-NVIDIA host and silently use CPU.
+            // Try the Vulkan engine first in that case.
+            if (imageBackendForRuntime(process.platform, runtime) === 'CUDA') {
+              let devices = ''
+              await runProcess(runtime, ['--list-devices'], (chunk) => {
+                devices = `${devices}${chunk}`.slice(-16384)
+              })
+              if (!/^CUDA\d*\s/im.test(devices))
+                throw new Error('The CUDA engine found no usable CUDA device.')
             }
+            await runProcess(
+              runtime,
+              [...videoArgs(pack!.pack, request, raw), ...(cpu ? ['--backend', 'cpu'] : [])],
+              (chunk) => {
+                backend.observe(chunk)
+                progressText = `${progressText}${chunk}`.slice(-256)
+                const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
+                if (match) {
+                  const step = Number(match[1])
+                  const total = Number(match[2])
+                  if (step > lastStep && step <= total && total <= request.steps) {
+                    lastStep = step
+                    backend.ready()
+                    onUpdate?.({ stage: 'generating', progress: { step, total } })
+                  }
+                }
+              }
+            )
+            if (!fs.existsSync(raw) || fs.statSync(raw).size === 0)
+              throw new Error('Video engine produced no clip.')
+            console.info(
+              '[videogen] Completed runtime',
+              runtimeBackendSnapshot().find((item) => item.id === 'video')
+            )
+            backend.stop()
+            break
+          } catch (error) {
+            if (cancelRequested) {
+              backend.stop()
+              throw new Error(CANCELLED)
+            }
+            backend.fail(error)
+            const next = attempts[index + 1]
+            if (!next) throw error
+            console.warn(
+              `[videogen] Runtime failed; retrying with ${next.runtime}${next.cpu ? ' (CPU)' : ''}`,
+              error
+            )
+            onUpdate?.({ stage: 'preparing' })
           }
-        })
-        if (!fs.existsSync(raw) || fs.statSync(raw).size === 0)
-          throw new Error('Video engine produced no clip.')
+        }
         onUpdate?.({ stage: 'encoding' })
         await runProcess(ffmpeg, [
           '-hide_banner',

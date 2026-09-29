@@ -2,6 +2,7 @@
 export type RuntimeId =
   | 'chat'
   | 'image'
+  | 'video'
   | 'speech'
   | 'transcription'
   | 'embeddings'
