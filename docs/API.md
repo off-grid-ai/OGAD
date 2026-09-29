@@ -455,12 +455,23 @@ Use the same authorization header as other gateway requests when authentication
 is enabled. The response contains `request_id` and `poll_url`.
 
 - `GET /v1/videos/:id`: read status, step count, result, or error.
+- `GET /v1/videos/:id/preview`: read a decoded frame when the job reports a preview URL.
 - `GET /v1/videos/:id/content`: download the completed MP4.
 - `POST /v1/videos/:id/cancel`: stop the job.
 
 To recover a lost submission response, include a stable `client_job_id` and reuse
 it with the same request. The gateway returns the existing job.
 
-Install a complete model pack in Models → Video first. `/health` lists
-`video_models` and the video API version. Clips are silent. See `/openapi.json`
+Requests use local generation by default. Install a complete model pack in
+Models → Video first. `/health` lists local `video_models` and the video API version.
+Local clips are silent.
+
+To use the active remote video model, set `"use_remote":true` in the request.
+Select that model in the app first. OpenRouter jobs use the provider's supported
+duration, resolution, and aspect ratio. Provider charges apply. Stopping an
+OpenRouter job stops local tracking; it does not cancel the provider job or its
+charges.
+
+A local preview reuses a frame from final decoding; it does not run another
+generation or decode. It is not available during sampling. See `/openapi.json`
 for all settings and bounds.
