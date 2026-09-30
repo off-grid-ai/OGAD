@@ -68,8 +68,15 @@ export function videoGenStatus(options: { localOnly?: boolean } = {}): {
   reason?: string
 } {
   const remote = !options.localOnly && getActiveRemoteVisionServerForModality('video')
-  if (remote)
-    return { available: true, models: [remote.selectedModel], active: remote.selectedModel }
+  if (remote) {
+    const encoderAvailable = Boolean(ffmpegBin())
+    return {
+      available: encoderAvailable,
+      models: [remote.selectedModel],
+      active: remote.selectedModel,
+      ...(!encoderAvailable ? { reason: 'Video encoder was not found.' } : {})
+    }
+  }
   const packs = availablePacks()
   const chosen = getActiveModal('video')
   const active = packs.find((p) => p.name === chosen)?.name ?? packs[0]?.name ?? null
