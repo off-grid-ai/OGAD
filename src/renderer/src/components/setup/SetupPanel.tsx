@@ -13,6 +13,7 @@ import { formatStorageBytes } from './storage-format'
 import type {
   RecMode as Mode,
   SetupPlan,
+  SetupItem,
   SetupItemKind as ItemKind,
   SetupProgress
 } from '../../../../main/setup'
@@ -34,6 +35,11 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
     hint: 'Larger chat and speech recommendations. Other models are optional.'
   }
 ]
+
+// Cached embeddings have no activation step in Auto Setup.
+function canSetUpItem(item: SetupItem): boolean {
+  return !(item.kind === 'embedding' && item.installed)
+}
 
 interface SetupPanelProps {
   onConfigured?: () => void // called once auto-configure succeeds (e.g. to dismiss a gate)
@@ -90,7 +96,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [selectedKinds, setSelectedKinds] = useState<Partial<Record<ItemKind, boolean>>>({
     chat: true
   })
-  const selectedItems = plan?.items.filter((item) => selectedKinds[item.kind]) ?? []
+  const selectedItems =
+    plan?.items.filter((item) => selectedKinds[item.kind] && canSetUpItem(item)) ?? []
   const downloadGb = totalDownloadGb(selectedItems)
   const firedConfigured = useRef(false)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
@@ -283,51 +290,63 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               </span>
             </div>
             <ul className="divide-y divide-neutral-800/70 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/40">
-              {plan.items.map((it) => (
-                <li key={it.id}>
-                  <label
-                    htmlFor={`${selectionId}-${it.kind}`}
-                    className={cn(
-                      'flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 transition-colors hover:bg-neutral-800/40 focus-within:bg-neutral-800/40',
-                      running || loadingPlan ? 'cursor-default' : 'cursor-pointer'
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      id={`${selectionId}-${it.kind}`}
-                      aria-label={`Set up ${it.name} for ${it.capability}`}
-                      checked={!!selectedKinds[it.kind]}
-                      disabled={running || loadingPlan}
-                      onChange={(event) =>
-                        setSelectedKinds((current) => ({
-                          ...current,
-                          [it.kind]: event.target.checked
-                        }))
-                      }
-                      className="h-4 w-4 shrink-0 accent-primary"
-                    />
-                    <span className="min-w-0 flex-1 truncate text-xs text-white" title={it.name}>
-                      {it.name}
-                    </span>
-                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-500">
-                      {it.capability}
-                    </span>
-                    <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-neutral-400">
-                      {it.sizeGb ? formatStorageBytes(it.sizeGb * 1e9) : 'size unknown'}
-                    </span>
-                    <span className="flex w-20 shrink-0 items-center justify-end gap-1 text-[10px]">
-                      {it.installed ? (
-                        <>
-                          <CheckCircle weight="fill" className="h-3.5 w-3.5 text-green-500" />
-                          <span className="text-green-500">installed</span>
-                        </>
-                      ) : (
-                        <span className="text-neutral-500">download</span>
+              {plan.items.map((it) => {
+                const selectable = canSetUpItem(it)
+                const Row = selectable ? 'label' : 'div'
+                return (
+                  <li key={it.id}>
+                    <Row
+                      htmlFor={selectable ? `${selectionId}-${it.kind}` : undefined}
+                      className={cn(
+                        'flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2',
+                        selectable &&
+                          'transition-colors hover:bg-neutral-800/40 focus-within:bg-neutral-800/40',
+                        !selectable || running || loadingPlan ? 'cursor-default' : 'cursor-pointer'
                       )}
-                    </span>
-                  </label>
-                </li>
-              ))}
+                    >
+                      {selectable ? (
+                        <input
+                          type="checkbox"
+                          id={`${selectionId}-${it.kind}`}
+                          aria-label={`Set up ${it.name} for ${it.capability}`}
+                          checked={!!selectedKinds[it.kind]}
+                          disabled={running || loadingPlan}
+                          onChange={(event) =>
+                            setSelectedKinds((current) => ({
+                              ...current,
+                              [it.kind]: event.target.checked
+                            }))
+                          }
+                          className="h-4 w-4 shrink-0 accent-primary"
+                        />
+                      ) : (
+                        <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-xs text-white" title={it.name}>
+                        {it.name}
+                      </span>
+                      <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-500">
+                        {it.capability}
+                      </span>
+                      <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-neutral-400">
+                        {it.sizeGb ? formatStorageBytes(it.sizeGb * 1e9) : 'size unknown'}
+                      </span>
+                      <span className="flex w-20 shrink-0 items-center justify-end gap-1 text-[10px]">
+                        {it.installed ? (
+                          <>
+                            <CheckCircle weight="fill" className="h-3.5 w-3.5 text-green-500" />
+                            <span className="text-green-500">
+                              {selectable ? 'installed' : 'Included'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-neutral-500">download</span>
+                        )}
+                      </span>
+                    </Row>
+                  </li>
+                )
+              })}
             </ul>
             {plan.items.some((item) => item.files?.length) && (
               <details className="mt-1.5 text-[10px] text-neutral-500">
