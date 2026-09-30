@@ -386,7 +386,8 @@ export function ModelsScreen({
       const unsubscribe = api.onEmbeddingRebuildStatusChanged?.((status: { phase: string; error?: string }) => {
         if (status.phase === 'done' || status.phase === 'error' || status.phase === 'restored') {
           void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
-          if (status.phase === 'error') setSwitchError(status.error ?? 'Could not rebuild the search index.')
+          // The app-wide rebuild notice owns terminal recovery errors.
+          setSwitchError(null)
         }
       })
       return () => unsubscribe?.()
@@ -396,6 +397,15 @@ export function ModelsScreen({
   const chooseEmbedding = async (id: string): Promise<void> => {
     setSwitching(id)
     setSwitchError(null)
+    const reportError = (error: unknown): void => {
+      console.error('Embedding model change failed:', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setSwitchError(
+        /^(Another embedding model change is in progress\.|Index rebuild is in progress\.)$/.test(message)
+          ? message
+          : 'Could not change the embedding model. Choose another embedding model, then try again.'
+      )
+    }
     try {
       const result = await api.chooseEmbeddingModel(id) as { success?: boolean; error?: string }
       if (result.success) setEmbeddingChoices((current) => {
@@ -404,9 +414,9 @@ export function ModelsScreen({
         return { active: id, models: current.models.some((model) => model.id === id)
           ? current.models : [...current.models, { id, name: found?.name ?? id.split('/').pop() ?? id, detail: id, badge: 'Your model' }] }
       })
-      else if (result.error) setSwitchError(result.error)
+      else if (result.error) reportError(result.error)
     } catch (error) {
-      setSwitchError(error instanceof Error ? error.message : 'Could not change the embedding model.')
+      reportError(error)
     } finally {
       setSwitching(null)
     }
@@ -1135,7 +1145,7 @@ export function ModelsScreen({
               className="min-w-0 flex-1 bg-transparent text-xs text-neutral-200 placeholder-neutral-600 outline-none" />
             {searching && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />}
           </div>
-          {switchError && <div role="alert" className="mb-3 text-xs text-red-300">{switchError}</div>}
+          {switchError && <div role="alert" className="mb-3 text-xs text-neutral-300">{switchError}</div>}
           <div className="mb-2 text-[10px] uppercase tracking-widest text-neutral-500">Recommended models</div>
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
             {embeddingChoices?.models.map((model) => (

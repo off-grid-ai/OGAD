@@ -74,7 +74,11 @@ export function EmbeddingRebuildNotice(): React.JSX.Element | null {
         className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 bg-red-950/90 px-4 py-1.5 font-mono text-[11px] text-red-200"
       >
         <WarningCircle size={13} aria-hidden />
-        <span>Search index rebuild failed: {status.error ?? 'Unknown error'}</span>
+        <span className="min-w-0">
+          {status.error?.startsWith('Could not restore the previous index:')
+            ? 'Search index could not be restored. Restart the app to retry recovery. Details are in the app log.'
+            : 'Search index rebuild failed. Previous model and index restored. Try again. Details are in the app log.'}
+        </span>
         <Button
           variant="ghost"
           size="xs"
