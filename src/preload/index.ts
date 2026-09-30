@@ -589,6 +589,7 @@ const offGridApi = {
   setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),
   chatVisionAvailable: () => ipcRenderer.invoke('model:chat-vision'),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+  cancelSetupDownload: (modelId: string) => ipcRenderer.invoke('setup:cancel-download', modelId),
   autoConfigure: (selectedModelIds?: string[], mode?: 'conservative' | 'balanced' | 'extreme') =>
     ipcRenderer.invoke('setup:auto-configure', selectedModelIds, mode),
   restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),

@@ -10,11 +10,14 @@ import {
   Microphone,
   DownloadSimple,
   DesktopTower,
-  Devices
+  Devices,
+  MagnifyingGlass
 } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
+import { Button } from '../ui/button'
+import { OFF_GRID_DESKTOP_RELEASES_URL } from '../../constants/links'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { totalDownloadGb } from '../../../../main/models/setup-logic'
@@ -31,14 +34,18 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   {
     id: 'conservative',
     label: 'Conservative',
-    hint: 'Lightest - small, fast, low memory (skips image and video models)'
+    hint: 'Smaller chat and speech models. Image and video are optional.'
   },
   {
     id: 'balanced',
     label: 'Balanced',
-    hint: 'Recommended - capable vision model within a safe share of RAM'
+    hint: 'Recommended chat model for this device. Other models are optional.'
   },
-  { id: 'extreme', label: 'Extreme', hint: 'Largest model and context your RAM allows' }
+  {
+    id: 'extreme',
+    label: 'Extreme',
+    hint: 'Larger chat and speech recommendations. Other models are optional.'
+  }
 ]
 
 const KIND_ICON: Record<
@@ -49,7 +56,8 @@ const KIND_ICON: Record<
   transcription: Microphone,
   voice: SpeakerHigh,
   image: ImageIcon,
-  video: VideoCamera
+  video: VideoCamera,
+  embedding: MagnifyingGlass
 }
 
 interface SetupPanelProps {
@@ -59,6 +67,39 @@ interface SetupPanelProps {
 
 function reportSetupFailure(operation: string, error: unknown): void {
   console.error(`[setup] ${operation} failed`, error)
+}
+
+function VideoRuntimeRecovery({
+  issue,
+  disabled,
+  onRecheck
+}: {
+  issue?: string
+  disabled: boolean
+  onRecheck: () => void
+}): React.ReactElement | null {
+  if (!issue) return null
+  return (
+    <div className="mt-2 space-y-1.5 text-[11px] text-neutral-400" role="status">
+      <p>{issue}</p>
+      <div className="flex gap-2">
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => {
+            void window.api
+              .openExternal(OFF_GRID_DESKTOP_RELEASES_URL)
+              .catch((error: unknown) => reportSetupFailure('installer link', error))
+          }}
+        >
+          Open app downloads
+        </Button>
+        <Button size="xs" variant="outline" disabled={disabled} onClick={onRecheck}>
+          Check again
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 /** The reusable setup surface: pick a resource mode, see exactly which model it'll
@@ -161,7 +202,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
     const id = progress?.modelId
     if (id) {
       api
-        .cancelModelDownload(id)
+        .cancelSetupDownload(id)
         .catch((error: unknown) => reportSetupFailure('model-download cancellation', error))
     }
   }
@@ -258,11 +299,11 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               <span>Choose local models</span>
               <span className="normal-case tracking-normal text-neutral-500">
                 {downloadGb > 0
-                  ? `~${downloadGb.toFixed(1)} GB to download`
+                  ? `~${formatStorageBytes(downloadGb * 1e9)} to download`
                   : selectedItems.length
                     ? 'selected models installed'
                     : 'no models selected'}
-                {' · sized for your '}
+                {' · device RAM: '}
                 {plan.ramGb} GB {deviceNoun()}
               </span>
             </div>
@@ -316,16 +357,29 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                     ) : (
                       <span className="flex shrink-0 items-center gap-1 text-[10px] text-neutral-500">
                         <DownloadSimple className="h-3.5 w-3.5" />{' '}
-                        {it.sizeGb ? `${it.sizeGb.toFixed(1)} GB` : 'size unknown'}
+                        {it.sizeGb
+                          ? formatStorageBytes((it.downloadSizeGb ?? it.sizeGb) * 1e9)
+                          : 'size unknown'}
                       </span>
                     )}
                   </li>
                 )
               })}
             </ul>
+            {plan.embeddingNote && (
+              <div className="mt-1.5 text-[11px] text-neutral-500">{plan.embeddingNote}</div>
+            )}
             {plan.videoNote && (
               <div className="mt-1.5 text-[11px] text-neutral-500">{plan.videoNote}</div>
             )}
+            <VideoRuntimeRecovery
+              issue={plan.videoRuntimeIssue}
+              disabled={running || loadingPlan}
+              onRecheck={() => {
+                setLoadingPlan(true)
+                void loadPlan(mode).finally(() => setLoadingPlan(false))
+              }}
+            />
             <div className="mt-1.5 text-[11px] text-neutral-600">
               Only checked models download. Each video model includes all required files. Your saved
               active choices stay unchanged.

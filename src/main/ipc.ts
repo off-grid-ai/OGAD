@@ -1804,6 +1804,9 @@ export function setupIPC() {
   })
   // "Configure for me": pick a RAM-appropriate model, download, activate, start,
   // verify. Streams progress back to all windows via 'setup:progress'.
+  ipcMain.handle('setup:cancel-download', (_e, modelId: string) =>
+    import('./setup').then((setup) => setup.cancelSetupDownload(modelId))
+  )
   ipcMain.handle('setup:auto-configure', async (_e, selectedModelIds?: string[], mode?: string) => {
     const { autoConfigure } = await import('./setup')
     return autoConfigure(

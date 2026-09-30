@@ -25,7 +25,7 @@ export function recommendBudgetBytes(ramGb: number, mode: RecMode): number {
 }
 
 // The non-chat baseline "Configure for me" sets up. Binaries ship in the app; only
-// these MODELS download. Image is heavy (~4GB) so it's skipped in Conservative.
+// these MODELS download. Heavy models are opt-in in every recommendation mode.
 // Whisper scales with the mode (tiny -> base -> small). TTS is tiny and fixed.
 export const STT_MODEL_BY_MODE: Record<RecMode, string> = {
   conservative: 'ggerganov/whisper.cpp/tiny', // ~78MB
@@ -35,10 +35,10 @@ export const STT_MODEL_BY_MODE: Record<RecMode, string> = {
 export const TTS_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX' // text-to-speech, ~82M
 export const IMAGE_MODEL_ID = 'offgrid-ai/juggernaut-xl-v9-GGUF' // image gen, ~4.35GB
 
-export type SetupItemKind = 'chat' | 'transcription' | 'voice' | 'image' | 'video'
+export type SetupItemKind = 'chat' | 'transcription' | 'voice' | 'image' | 'video' | 'embedding'
 
 /** A baseline extra (non-chat) the setup plan lists for a mode, in order:
- *  speech-to-text, text-to-speech, then image (only outside Conservative). The chat
+ *  speech-to-text, text-to-speech, then image. The chat
  *  item is prepended by the caller since it needs an async recommendation. */
 export function baselineExtras(
   mode: RecMode
@@ -52,20 +52,20 @@ export function baselineExtras(
     },
     { kind: 'voice', capability: 'Text-to-speech', id: TTS_MODEL_ID, fallbackName: 'Kokoro TTS' }
   ]
-  if (mode !== 'conservative') {
-    items.push({
-      kind: 'image',
-      capability: 'Image generation',
-      id: IMAGE_MODEL_ID,
-      fallbackName: 'Juggernaut XL v9'
-    })
-  }
+  items.push({
+    kind: 'image',
+    capability: 'Image generation',
+    id: IMAGE_MODEL_ID,
+    fallbackName: 'Juggernaut XL v9'
+  })
   return items
 }
 
 /** Sum the download size (GB) of a plan's not-yet-installed items. */
-export function totalDownloadGb(items: { sizeGb: number; installed: boolean }[]): number {
-  return items.filter((i) => !i.installed).reduce((s, i) => s + i.sizeGb, 0)
+export function totalDownloadGb(
+  items: { sizeGb: number; downloadSizeGb?: number; installed: boolean }[]
+): number {
+  return items.filter((i) => !i.installed).reduce((s, i) => s + (i.downloadSizeGb ?? i.sizeGb), 0)
 }
 
 export type FitLevel = 'ok' | 'tight' | 'risky'

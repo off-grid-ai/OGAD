@@ -10,9 +10,9 @@ import { runtimeBackendSnapshot } from './runtime-backends'
 import os from 'os'
 import { videoPackError } from '@offgrid/models'
 import { totalBytes } from './model-sizing'
-import { evaluateMemoryGuard } from './imagegen/memory-guard'
 import { findSdBinary } from './imagegen/sd-runtime'
 import { ffmpegBin } from './transcription/whisper-cli'
+import { getEmbeddingSetupModel, downloadEmbeddingModel } from './embedding-setup-download'
 import { modalityForKind } from './active-models-logic'
 import * as http from 'http'
 import { llm } from './llm'
@@ -21,6 +21,7 @@ import {
   getActiveModel,
   getActiveModalities,
   downloadModel,
+  cancelDownload,
   listInstalled,
   setActiveModel,
   setActiveModalChoice,
@@ -321,6 +322,7 @@ export interface SetupItem {
   name: string
   sizeGb: number
   installed: boolean
+  downloadSizeGb?: number
   files?: { name: string; sizeBytes?: number }[]
   required: boolean // legacy default-plan priority; explicit selections can omit chat
 }
@@ -330,6 +332,8 @@ export interface SetupPlan {
   items: SetupItem[]
   totalDownloadGb: number
   videoNote?: string
+  videoRuntimeIssue?: string
+  embeddingNote?: string
 }
 
 /** The full set of models "Configure for me" will set up for a mode: the chat/vision
@@ -367,7 +371,7 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       installed: installed.includes(chat.id),
       required: true
     })
-  // The non-chat baseline (STT, TTS, and image outside Conservative) - order + the
+  // The non-chat baseline (STT, TTS, and optional image models) - order + the
   // per-mode STT tier come from the single source of truth in setup-logic.
   for (const ex of baselineExtras(effMode)) {
     items.push({
@@ -381,51 +385,107 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
     })
   }
 
-  // Reuse the runtime probes and image memory reserve. Count the complete pack,
-  // including the encoder and VAE, before recommending an optional download.
-  let videoNote: string | undefined
-  if (effMode === 'conservative') {
-    videoNote = 'Video models are skipped in Conservative mode.'
-  } else if (!findSdBinary('sd-cli') || !ffmpegBin()) {
-    videoNote = 'Video setup needs the local video engine and encoder.'
-  } else {
-    const video = CATALOG.filter(
-      (entry) =>
-        entry.kind === 'video' &&
-        entry.availability !== 'coming_soon' &&
-        entry.minRamGb != null &&
-        entry.minRamGb <= ramGb() &&
-        !videoPackError(entry.files) &&
-        entry.files.every((file) => (file.sizeBytes ?? 0) > 0) &&
-        !evaluateMemoryGuard({
-          totalGb: os.totalmem() / 1e9,
-          modelSizeGb: totalBytes(entry) / 1e9,
-          coreml: false,
-          zImageStack: false
-        }).overBudget
-    ).sort((a, b) => totalBytes(a) - totalBytes(b))[0]
-    if (video) {
-      items.push({
-        kind: 'video',
-        capability: 'Video generation',
-        id: video.id,
-        name: video.name,
-        sizeGb: totalBytes(video) / 1e9,
-        files: video.files.map(({ name, sizeBytes }) => ({ name, sizeBytes })),
-        installed: installed.includes(video.id),
-        required: false
-      })
-    } else {
-      videoNote = 'No complete video model pack fits the memory budget on this device.'
-    }
+  const embedding = getEmbeddingSetupModel()
+  if (embedding) {
+    items.push({
+      kind: 'embedding',
+      capability: 'Search embeddings',
+      id: embedding.id,
+      name: embedding.name,
+      sizeGb: embedding.totalBytes / 1e9,
+      downloadSizeGb: embedding.remainingBytes / 1e9,
+      files: embedding.files,
+      installed: embedding.installed,
+      required: false
+    })
   }
+  const embeddingNote = embedding
+    ? 'Embedding setup downloads files only. It does not change the active model or rebuild search indexes.'
+    : 'Your custom embedding choice is kept. Its download size is not in the setup catalog; manage it in Models.'
+
+  // Pack bytes describe the download, not resident video memory. Catalog RAM
+  // guidance is advisory; Auto Setup does not verify runtime fit or output quality.
+  let videoNote: string | undefined
+  const video = CATALOG.filter(
+    (entry) =>
+      entry.kind === 'video' &&
+      entry.availability !== 'coming_soon' &&
+      !videoPackError(entry.files) &&
+      entry.files.every((file) => (file.sizeBytes ?? 0) > 0)
+  ).sort((a, b) => totalBytes(a) - totalBytes(b))[0]
+  if (video) {
+    items.push({
+      kind: 'video',
+      capability: 'Video generation',
+      id: video.id,
+      name: video.name,
+      sizeGb: totalBytes(video) / 1e9,
+      files: video.files.map(({ name, sizeBytes }) => ({ name, sizeBytes })),
+      installed: installed.includes(video.id),
+      required: false
+    })
+    const guidance = video.minRamGb ? `Catalog RAM guidance: ${video.minRamGb} GB. ` : ''
+    videoNote = `${guidance}Video runtime memory and output quality are not checked by Auto Setup.`
+  } else {
+    videoNote = 'The catalog has no complete supported video model pack.'
+  }
+
+  const missingRuntime = [
+    !findSdBinary('sd-cli') ? 'video engine' : null,
+    !ffmpegBin() ? 'video encoder' : null
+  ].filter(Boolean)
+  const videoRuntimeIssue = missingRuntime.length
+    ? `This app installation is missing its ${missingRuntime.join(' and ')}. These files should be included. Reinstall or update the app package, then check again. Model downloads do not repair app files.`
+    : undefined
 
   return {
     mode: effMode,
     ramGb: ramGb(),
     items,
     totalDownloadGb: totalDownloadGb(items),
-    videoNote
+    videoNote,
+    videoRuntimeIssue,
+    embeddingNote
+  }
+}
+
+let embeddingDownload: { id: string; controller: AbortController } | null = null
+
+/** Cancel the current setup download through its owning downloader. */
+export function cancelSetupDownload(modelId: string): boolean {
+  if (embeddingDownload?.id === modelId) {
+    embeddingDownload.controller.abort()
+    return true
+  }
+  return cancelDownload(modelId)
+}
+
+async function downloadSetupEmbedding(item: SetupItem, emit: SetupProgressCb): Promise<void> {
+  if (embeddingDownload) throw new Error('An embedding download is already in progress.')
+  const controller = new AbortController()
+  embeddingDownload = { id: item.id, controller }
+  try {
+    emit({
+      phase: 'download',
+      message: `Downloading ${item.name}...`,
+      modelId: item.id,
+      percent: 0
+    })
+    await downloadEmbeddingModel(
+      item.id,
+      (p) =>
+        emit({
+          phase: 'download',
+          message: `Downloading ${item.name}...`,
+          modelId: item.id,
+          downloadedBytes: p.downloadedBytes,
+          totalBytes: p.totalBytes
+        }),
+      controller.signal
+    )
+    if (controller.signal.aborted) throw new Error('Download canceled.')
+  } finally {
+    embeddingDownload = null
   }
 }
 
@@ -470,6 +530,11 @@ export async function autoConfigure(
   let activatedChat: SetupItem | undefined
   for (const item of items) {
     try {
+      if (item.kind === 'embedding') {
+        await downloadSetupEmbedding(item, emit)
+        // Download-only: activation belongs to the explicit Models confirmation flow.
+        continue
+      }
       if (!(await listInstalled()).includes(item.id)) {
         const report = (p: Partial<SetupProgress>): void =>
           emit({
@@ -519,11 +584,14 @@ export async function autoConfigure(
     }
   }
 
+  const activeIdentity = activatedChat && {
+    modelId: activatedChat.id,
+    modelName: activatedChat.name
+  }
   emit({
     phase: 'done',
-    message: 'Selected models are ready. Saved active model choices are unchanged.',
-    modelId: activatedChat?.id,
-    modelName: activatedChat?.name
+    message: 'Selected model files are installed. Saved active model choices are unchanged.',
+    ...activeIdentity
   })
-  return { success: true, modelId: activatedChat?.id, modelName: activatedChat?.name }
+  return { success: true, ...activeIdentity }
 }
