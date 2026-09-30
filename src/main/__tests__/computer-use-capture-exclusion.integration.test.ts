@@ -17,6 +17,7 @@ const originalCaptureSource = process.env.OFFGRID_CAPTURE_CLEAN_SOURCE
 let platformSpy: ReturnType<typeof vi.spyOn>
 
 vi.mock('electron', () => ({
+  safeStorage: { isEncryptionAvailable: () => false },
   app: {
     getPath: () => nativeCapture.profile,
     getAppPath: () => process.cwd(),
@@ -68,15 +69,19 @@ import { configureRuntime } from '../runtime-env'
 import { vision } from '../vision'
 import { modelScreenshot } from '../vision/vision-policy-runner'
 import { showSupervisorWindow } from '../vision/supervisor-window'
+import { getDB } from '../database'
 
 beforeAll(() => {
+  // Each worker must own its SQLite file, even when the push hook sets a data dir.
+  configureRuntime({ dataDir: nativeCapture.profile })
   // The production boundary is macOS-only. Make the CI host exercise that branch too.
   platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin')
 })
 
 afterAll(() => {
+  getDB().close()
   platformSpy.mockRestore()
-  configureRuntime({ binRoots: undefined })
+  configureRuntime({ binRoots: undefined, dataDir: undefined })
   if (originalCaptureArguments === undefined) delete process.env.OFFGRID_CAPTURE_ARGUMENTS
   else process.env.OFFGRID_CAPTURE_ARGUMENTS = originalCaptureArguments
   if (originalCaptureSource === undefined) delete process.env.OFFGRID_CAPTURE_CLEAN_SOURCE
