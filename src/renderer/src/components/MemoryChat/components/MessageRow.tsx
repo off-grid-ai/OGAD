@@ -353,6 +353,8 @@ function VoiceMessageRow({
           {showGenerationDetails ? (
             <GenerationMetricsRow
               metrics={message.metrics}
+              videoMetadata={message.videoMetadata}
+              generationTimeMs={message.generationTimeMs}
               open={openFooterDetail === 'generation'}
               onOpenChange={(open) => setOpenFooterDetail(open ? 'generation' : null)}
             />
@@ -558,6 +560,8 @@ function StandardMessageRow({
           {state.showGenerationDetails ? (
             <GenerationMetricsRow
               metrics={message.metrics}
+              videoMetadata={message.videoMetadata}
+              generationTimeMs={message.generationTimeMs}
               open={openFooterDetail === 'generation'}
               onOpenChange={(open) => setOpenFooterDetail(open ? 'generation' : null)}
             />

@@ -8,21 +8,38 @@ import {
 import { resolveModelName } from '@renderer/lib/model-summary'
 import { formatGenerationMetrics, type GenerationMetrics } from '../../../../../shared/generation-metrics'
 import type { ResponseCutoffContract } from '../../../../../shared/ipc-contracts'
+import type { ChatMessage } from '../types'
 
 function GenerationMetricsRowComponent({
   metrics,
+  videoMetadata,
+  generationTimeMs,
   open,
   onOpenChange
 }: Readonly<{
   metrics?: GenerationMetrics
+  videoMetadata?: ChatMessage['videoMetadata']
+  generationTimeMs?: number
   open: boolean
   onOpenChange: (open: boolean) => void
 }>): React.JSX.Element | null {
   console.log('MemoryChat GenerationMetricsRow rendered')
-  const displayMetrics = metrics?.modelName
-    ? { ...metrics, modelName: resolveModelName([], metrics.modelName) ?? metrics.modelName }
-    : metrics
-  const parts = displayMetrics ? formatGenerationMetrics(displayMetrics) : []
+  const availableMetrics = metrics ?? (videoMetadata ? {
+    modelName: videoMetadata.model,
+    totalSeconds: generationTimeMs === undefined ? undefined : generationTimeMs / 1000
+  } : undefined)
+  const displayMetrics = availableMetrics?.modelName
+    ? { ...availableMetrics, modelName: resolveModelName([], availableMetrics.modelName) ?? availableMetrics.modelName }
+    : availableMetrics
+  const parts = [
+    ...(videoMetadata ? [
+      `${videoMetadata.width} × ${videoMetadata.height}`,
+      `${videoMetadata.durationSeconds}s video`,
+      `${videoMetadata.fps} fps`,
+      `${videoMetadata.frames} frames`
+    ] : []),
+    ...(displayMetrics ? formatGenerationMetrics(displayMetrics) : [])
+  ]
   const contextWindowTokens = metrics?.contextWindowTokens
   const promptTokens = metrics?.promptTokens ?? metrics?.estimatedPromptTokens
   const estimated =
