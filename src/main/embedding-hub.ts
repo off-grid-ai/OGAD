@@ -18,7 +18,8 @@ interface HubModel {
 type FetchLike = typeof fetch
 
 export function isTextEmbeddingRepository(model: HubModel): boolean {
-  if (model.pipeline_tag !== 'feature-extraction' || !model.id) return false
+  if (!['feature-extraction', 'sentence-similarity'].includes(model.pipeline_tag ?? '') || !model.id)
+    return false
   if (/(?:rerank|cross[-_]?encoder)/i.test(model.id)) return false
   if (
     model.config?.architectures?.some((name) =>
@@ -42,19 +43,25 @@ export async function searchEmbeddingModels(
 ): Promise<EmbeddingHubModel[]> {
   const trimmed = query.trim()
   if (trimmed.length < 2) return []
-  const params = new URLSearchParams({
-    pipeline_tag: 'feature-extraction',
-    search: trimmed,
-    sort: 'downloads',
-    direction: '-1',
-    limit: '100',
-    full: 'true'
-  })
-  const response = await fetchImpl(`https://huggingface.co/api/models?${params}`)
-  if (!response.ok) throw new Error(`Hugging Face search failed: HTTP ${response.status}`)
-  const models = (await response.json()) as HubModel[]
-  return models
+  const searches = await Promise.all(
+    ['feature-extraction', 'sentence-similarity'].map(async (tag) => {
+      const params = new URLSearchParams({
+        pipeline_tag: tag,
+        search: trimmed,
+        sort: 'downloads',
+        direction: '-1',
+        limit: '100',
+        full: 'true'
+      })
+      const response = await fetchImpl(`https://huggingface.co/api/models?${params}`)
+      if (!response.ok) throw new Error(`Hugging Face search failed: HTTP ${response.status}`)
+      return (await response.json()) as HubModel[]
+    })
+  )
+  const models = new Map(searches.flat().map((model) => [model.id, model]))
+  return [...models.values()]
     .filter(isTextEmbeddingRepository)
+    .sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0))
     .slice(0, 30)
     .map((model) => ({
       id: model.id!,
