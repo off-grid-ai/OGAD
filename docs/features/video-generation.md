@@ -56,6 +56,14 @@ The checked Linux CLI SHA-256 is
 The Windows CPU CLI built with MSVC and passed the preview-option check; its
 SHA-256 is `dc5b6dc46596fae77dce8a24293a727eac6596806f415b57ec59f78eed60244b`.
 
+A Windows CPU callback check also completed at 832 × 480 and 9 frames. It used
+one sampling step to check the callback and saved files, not image quality.
+All ten decode updates and the final frame callback arrived, and all nine frames
+were saved. Preview pixels matched output frame zero
+(MD5 `6f06c0e02e17905c372112f52bec3e0b`). Total time was 1,645.71 seconds,
+including 1,145.08 seconds of CPU decoding. No installed app runtime was replaced.
+
+
 ## Live verification — September 29, 2026
 
 A local run through the normal Desktop gateway completed with this configuration:
