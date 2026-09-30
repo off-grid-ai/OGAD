@@ -59,6 +59,14 @@ export type SizeOf = (name: string) => number
 /** True when a filename exists on disk with size > 0. */
 export type FilePresent = (name: string) => boolean
 
+/** Missing bytes, using the same presence probe as the downloader. */
+export function remainingDownloadBytes(entry: Pick<CatalogEntry, 'files'>, sizeOf: SizeOf): number {
+  return entry.files.reduce(
+    (bytes, file) => bytes + (sizeOf(file.name) > 0 ? 0 : file.sizeBytes ?? 0),
+    0
+  )
+}
+
 export const isProjectorFileName = (name: string): boolean =>
   /(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(name)
 

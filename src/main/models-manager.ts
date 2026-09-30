@@ -33,6 +33,7 @@ import {
 } from './downloaded-models'
 import {
   mergeCatalog,
+  remainingDownloadBytes,
   installedIds,
   buildDiskEntry,
   primaryFileName,
@@ -419,10 +420,7 @@ function fileSizeOf(dir: string, name: string): number {
 /** Use the downloader's disk probe to count only files this job must fetch. */
 export function remainingModelDownloadBytes(entry: Pick<CatalogEntry, 'files'>): number {
   const dir = llm.getModelsDir()
-  return entry.files.reduce(
-    (bytes, file) => bytes + (fileSizeOf(dir, file.name) > 0 ? 0 : file.sizeBytes ?? 0),
-    0
-  )
+  return remainingDownloadBytes(entry, (name) => fileSizeOf(dir, name))
 }
 
 function downloadedPrimary(model: DownloadedModel): string | undefined {
