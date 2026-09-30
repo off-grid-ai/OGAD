@@ -55,7 +55,7 @@ export function ExploreSection({
         <div className="mb-4">
           <h2 className="text-sm text-foreground">Explore what Off Grid AI can do</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Pick one - add the details once, then start the run. Everything runs on your Mac.
+            Pick one, add your details, then start the run.
           </p>
         </div>
       ) : null}
