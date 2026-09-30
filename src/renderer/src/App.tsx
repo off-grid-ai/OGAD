@@ -1,4 +1,5 @@
 import { ChatList } from './components/ChatList'
+import { rendererRoute, replaceRendererRoute } from './lib/renderer-route'
 import { ChatDetail } from './components/ChatDetail'
 import { CommandPalette } from './components/CommandPalette'
 import logo from './assets/logo.png'
@@ -482,9 +483,7 @@ function AppContent() {
 
   // Handle browser URL changes
   useEffect(() => {
-    const path = window.location.protocol === 'file:'
-      ? window.location.hash.slice(1) || '/'
-      : window.location.pathname
+    const path = rendererRoute(window.location, '/')
     const viewMap: Record<string, ViewMode> = {
       '/': 'day',
       '/explore': 'explore',
@@ -631,12 +630,8 @@ function AppContent() {
     } else if (isInternalTabView(viewMode)) {
       newPath = internalTabPath(viewMode, navigationSubroute)
     }
-    const fileRoute = window.location.protocol === 'file:'
-    const currentPath = fileRoute ? window.location.hash.slice(1) : window.location.pathname
-    if (currentPath !== newPath) {
-      // File builds must keep index.html as the document so reload can find it.
-      window.history.replaceState(null, '', fileRoute ? `#${newPath}` : newPath)
-    }
+    // File builds must keep index.html as the document so reload can find it.
+    replaceRendererRoute(window.location, window.history, newPath)
     // Publish the view for anything that needs to reason about the current screen. replaceState
     // fires no event, so the URL alone is not observable.
     setCurrentView(viewMode)
