@@ -416,6 +416,15 @@ function fileSizeOf(dir: string, name: string): number {
   }
 }
 
+/** Use the downloader's disk probe to count only files this job must fetch. */
+export function remainingModelDownloadBytes(entry: Pick<CatalogEntry, 'files'>): number {
+  const dir = llm.getModelsDir()
+  return entry.files.reduce(
+    (bytes, file) => bytes + (fileSizeOf(dir, file.name) > 0 ? 0 : file.sizeBytes ?? 0),
+    0
+  )
+}
+
 function downloadedPrimary(model: DownloadedModel): string | undefined {
   return model.files.find((name) => !isProjectorFileName(name)) ?? model.files[0]
 }

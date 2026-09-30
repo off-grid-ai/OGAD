@@ -26,7 +26,8 @@ import {
   setActiveModel,
   setActiveModalChoice,
   BONSAI_2,
-  desktopCatalog
+  desktopCatalog,
+  remainingModelDownloadBytes
 } from './models-manager'
 import { getGatewayPort } from './model-server'
 import type {
@@ -358,6 +359,10 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
   }
   const nameOf = (id: string, fallback: string): string =>
     CATALOG.find((m) => m.id === id)?.name ?? fallback
+  const downloadSizeOf = (id: string): number => {
+    const entry = CATALOG.find((model) => model.id === id)
+    return entry ? remainingModelDownloadBytes(entry) / 1e9 : 0
+  }
 
   const items: SetupItem[] = []
   const chat = await recommendChatModel(effMode)
@@ -368,6 +373,7 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       id: chat.id,
       name: chat.name,
       sizeGb: sizeOf(chat.id),
+      downloadSizeGb: downloadSizeOf(chat.id),
       installed: installed.includes(chat.id),
       required: true
     })
@@ -380,6 +386,7 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       id: ex.id,
       name: nameOf(ex.id, ex.fallbackName),
       sizeGb: sizeOf(ex.id),
+      downloadSizeGb: downloadSizeOf(ex.id),
       installed: installed.includes(ex.id),
       required: false
     })
@@ -420,6 +427,7 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       id: video.id,
       name: video.name,
       sizeGb: totalBytes(video) / 1e9,
+      downloadSizeGb: remainingModelDownloadBytes(video) / 1e9,
       files: video.files.map(({ name, sizeBytes }) => ({ name, sizeBytes })),
       installed: installed.includes(video.id),
       required: false

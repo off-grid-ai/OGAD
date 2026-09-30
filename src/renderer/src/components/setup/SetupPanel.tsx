@@ -9,6 +9,7 @@ import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { totalDownloadGb } from '../../../../main/models/setup-logic'
 import { formatStorageBytes } from './storage-format'
+import { modelSetupErrorMessage } from '@renderer/lib/download-label'
 
 import type {
   RecMode as Mode,
@@ -329,7 +330,9 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                         {it.capability}
                       </span>
                       <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-neutral-400">
-                        {it.sizeGb ? formatStorageBytes(it.sizeGb * 1e9) : 'size unknown'}
+                        {(it.installed ? it.sizeGb : it.downloadSizeGb ?? it.sizeGb)
+                          ? formatStorageBytes((it.installed ? it.sizeGb : it.downloadSizeGb ?? it.sizeGb) * 1e9)
+                          : 'size unknown'}
                       </span>
                       <span className="flex w-20 shrink-0 items-center justify-end gap-1 text-[10px]">
                         {it.installed ? (
@@ -402,7 +405,9 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
             <div className="flex items-center gap-2 text-xs">
               {done && <CheckCircle weight="fill" className="h-4 w-4 text-green-500" />}
               {errored && <WarningCircle weight="fill" className="h-4 w-4 text-neutral-300" />}
-              <span className={progressTextClass}>{progress.message}</span>
+              <span className={progressTextClass} role={errored ? 'alert' : undefined}>
+                {errored ? modelSetupErrorMessage(progress.message) : progress.message}
+              </span>
             </div>
             {running && progress.phase === 'download' && (
               <div className="mt-2">
