@@ -40,9 +40,21 @@ above and the same decode progress and first-frame preview patches.
   scripts to select these builds during packaging.
 
 Each source build checks that the CLI exposes `--decode-preview-path`. The shared
-source and CLI compiled on macOS. Windows and Linux builds of these patches still
-need native platform verification. Default archive downloads remain unchanged;
-they do not gain decode previews until new runtime archives are built and pinned.
+source and CLI compiled on macOS, Windows CPU, and Linux CUDA (Tesla T4, SM75).
+Windows GPU builds remain unverified: the checked VM has neither the CUDA toolkit
+nor the Vulkan SDK. Default archive downloads remain unchanged; they do not gain
+decode previews until new runtime archives are built and pinned.
+
+A separate Linux CUDA run at 832 × 480, 9 frames, 20 steps, CFG 6, and seed
+80886910 completed in 111.96 seconds with the Wan 2.1 Q3 pack. It emitted all ten
+decode-section updates and the final frame callback. The saved 832 × 480 preview
+showed a clear red ball and matched the decoded pixels of output frame zero
+(MD5 `767c1d9f057d14e884a563a96d062395`). All nine output frames were saved.
+This verifies the native callback and preview file, not the app preview UI.
+The checked Linux CLI SHA-256 is
+`3c1000bfdc4c6dc4c9fe3419f4dad80f94976eb848b64b8e97d84ccbfb256b84`.
+The Windows CPU CLI built with MSVC and passed the preview-option check; its
+SHA-256 is `dc5b6dc46596fae77dce8a24293a727eac6596806f415b57ec59f78eed60244b`.
 
 ## Live verification — September 29, 2026
 
