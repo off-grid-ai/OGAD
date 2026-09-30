@@ -126,6 +126,10 @@ export function selectedMessageContent(message: ChatMessage): string {
 export function renderedMessageContent(message: ChatMessage): string {
   const selected = selectedMessageContent(message)
   if (message.role !== 'assistant') return preprocessChatMarkdown(selected)
+  // Keep saved history intact while presenting old native video failures clearly.
+  if (/^Error invoking remote method 'videogen:generate':/.test(selected)) {
+    return videoGenerationErrorContent(selected)
+  }
   return preprocessChatMarkdown(
     selected
       .replace(ASK_FENCE, '')
@@ -184,6 +188,27 @@ export function generationErrorContent(error: unknown): string {
     .trim()
     .slice(0, 800)
   return message || 'Sorry, something went wrong while generating a response.'
+}
+
+/** Native video diagnostics stay in the app log, not in the chat answer. */
+export function videoGenerationErrorContent(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (/extends beyond.*model file|new_sd_ctx_t failed|loading diffusion model.*failed/i.test(raw)) {
+    return 'The video model could not load. In Models, choose another video model or download its files again. Technical details are in the app log.'
+  }
+  if (/already generating/i.test(raw)) {
+    return 'A video is still running or stopping. Wait for it to stop, then try again.'
+  }
+  if (/not enough|memory limit|out of memory/i.test(raw)) {
+    return 'There is not enough free memory for this video. Use a smaller video model or reduce the video size in Video options.'
+  }
+  if (/engine.*not found|encoder.*not found|encoder.*does not support/i.test(raw)) {
+    return 'The video engine or encoder is unavailable. Update Off Grid AI Desktop, then try again. Technical details are in the app log.'
+  }
+  if (/select.*video model|download a complete video model pack/i.test(raw)) {
+    return 'Choose a complete video model in Models, then try again.'
+  }
+  return 'Video generation failed. Check the selected video model, then try again. Technical details are in the app log.'
 }
 
 export function nextVoicePlaybackOwner(

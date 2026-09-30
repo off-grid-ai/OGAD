@@ -163,6 +163,7 @@ import {
 import {
   findDurableWorkMessageId,
   generationErrorContent,
+  videoGenerationErrorContent,
   IMAGE_MESSAGE_COLUMN_WIDTH,
   imageProgressLabel,
   isPromptEnhancementMessage,
@@ -1709,8 +1710,10 @@ export function MemoryChat({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (!/stopped|cancel/i.test(message)) {
-          setConvMessages(convId, (previous) => [...previous, { id: `a-${Date.now()}`, role: 'assistant', content: message }])
-          await window.api.addRagMessage(convId, 'assistant', message).catch(() => {})
+          console.error('Video generation failed:', error)
+          const content = videoGenerationErrorContent(error)
+          setConvMessages(convId, (previous) => [...previous, { id: `a-${Date.now()}`, role: 'assistant', content }])
+          await window.api.addRagMessage(convId, 'assistant', content).catch(() => {})
         }
       } finally {
         markGenerating(convId, false)
@@ -2090,8 +2093,10 @@ export function MemoryChat({
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
             if (!/stopped|cancel/i.test(message)) {
-              created.push({ id: `a-${Date.now()}`, role: 'assistant', content: message })
-              await window.api.addRagMessage(convId, 'assistant', message).catch(() => {})
+              console.error('Video generation failed:', error)
+              const content = videoGenerationErrorContent(error)
+              created.push({ id: `a-${Date.now()}`, role: 'assistant', content })
+              await window.api.addRagMessage(convId, 'assistant', content).catch(() => {})
             }
           } finally {
             setVideoGenConv((owner) => owner === convId ? null : owner)
