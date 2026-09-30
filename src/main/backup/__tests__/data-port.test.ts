@@ -217,7 +217,7 @@ describe('taking a backup out of the database, and putting one back', () => {
     it('exports an empty database as an empty backup rather than failing', async () => {
       const data = await port.collectAll()
 
-      expect(data).toEqual({ surface: 'offgrid-desktop', projects: [], conversations: [] })
+      expect(data).toEqual({ surface: 'offgrid-desktop', projects: [], conversations: [], videos: [] })
     })
 
     it('parses a message context back into an object, and drops one that is not JSON', async () => {

@@ -37,6 +37,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     }),
     getModelCatalog: async () => ({ kinds: ['text'], models: [] }),
     getInstalledModels: async () => [],
+    getModelScanFolders: async () => [],
     getActiveModelIds: async () => [],
     listProjects: async () => APP_PROJECTS.map((project) => ({ ...project })),
     getRagConversations: async () => [],
