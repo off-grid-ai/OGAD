@@ -80,6 +80,15 @@
      if (sd_progress_cb) {
          sd_progress_cb(step, steps, time, sd_progress_cb_data);
          return;
+@@ -600,6 +626,8 @@
+ void pretty_bytes_progress(int step, int steps, uint64_t bytes_processed, float elapsed_seconds) {
++    // Loading counts are not sampling steps, even when their totals happen to match.
++    if (sd_decode_progress_cb) return;
+     if (sd_progress_cb) {
+         float time = elapsed_seconds / (step + 1e-6f);
+         sd_progress_cb(step, steps, time, sd_progress_cb_data);
+         return;
+     }
 --- a/src/runtime/tiling.cpp
 +++ b/src/runtime/tiling.cpp
 @@ -193,6 +193,7 @@
