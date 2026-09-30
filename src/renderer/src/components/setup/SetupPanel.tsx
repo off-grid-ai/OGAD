@@ -240,7 +240,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
         {plan && (
           <div className="mt-3">
             <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-widest text-neutral-600">
-              <span>Will set up</span>
+              <span>Local models to set up</span>
               <span className="normal-case tracking-normal text-neutral-500">
                 {plan.totalDownloadGb > 0
                   ? `~${plan.totalDownloadGb.toFixed(1)} GB to download`
@@ -295,7 +295,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               <div className="mt-1.5 text-[11px] text-neutral-500">{plan.videoNote}</div>
             )}
             <div className="mt-1.5 text-[11px] text-neutral-600">
-              Chat is ready first. Saved model choices are kept. Missing models download next.
+              Missing local models download in this order. Your active model choices stay unchanged.
             </div>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1.5 text-[11px] text-neutral-500">
               For solid reasoning and tool use,{' '}
