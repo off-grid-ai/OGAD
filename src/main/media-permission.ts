@@ -27,11 +27,14 @@ export function installMediaPermissionHandler(target: PermissionSession): void {
         const expected = new URL(rendererUrl)
         const requester = new URL(details.requestingUrl)
         const document = new URL(getMainWindowDocumentUrl() ?? '')
+        const current = new URL(webContents.getURL())
+        // A route hash identifies a view within the same trusted file document.
+        for (const url of [expected, requester, document, current]) url.hash = ''
         // Embedded sites share this session, but cannot enter fullscreen as the app.
         callback(
           expected.protocol === 'file:'
             ? document.href === expected.href &&
-              requester.href === webContents.getURL()
+              requester.href === current.href
             : requester.origin === expected.origin
         )
         return

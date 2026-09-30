@@ -482,7 +482,9 @@ function AppContent() {
 
   // Handle browser URL changes
   useEffect(() => {
-    const path = window.location.pathname
+    const path = window.location.protocol === 'file:'
+      ? window.location.hash.slice(1) || '/'
+      : window.location.pathname
     const viewMap: Record<string, ViewMode> = {
       '/': 'day',
       '/explore': 'explore',
@@ -629,8 +631,11 @@ function AppContent() {
     } else if (isInternalTabView(viewMode)) {
       newPath = internalTabPath(viewMode, navigationSubroute)
     }
-    if (window.location.pathname !== newPath) {
-      window.history.replaceState(null, '', newPath)
+    const fileRoute = window.location.protocol === 'file:'
+    const currentPath = fileRoute ? window.location.hash.slice(1) : window.location.pathname
+    if (currentPath !== newPath) {
+      // File builds must keep index.html as the document so reload can find it.
+      window.history.replaceState(null, '', fileRoute ? `#${newPath}` : newPath)
     }
     // Publish the view for anything that needs to reason about the current screen. replaceState
     // fires no event, so the URL alone is not observable.
