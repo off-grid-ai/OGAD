@@ -478,6 +478,7 @@ export function MemoryChat({
   const [imageAvailable, setImageAvailable] = useState(false)
   const [videoAvailable, setVideoAvailable] = useState(false)
   const [videoGenConv, setVideoGenConv] = useState<string | null>(null)
+  const videoCancelPendingRef = useRef(new Set<string>())
   const [videoJob, setVideoJob] = useState<VideoGenerationJobContract | null>(null)
   const generatingVideo = videoGenConv !== null && videoGenConv === activeConversationId
   const [imgSize, setImgSize] = useState(512)
@@ -2622,14 +2623,26 @@ export function MemoryChat({
         queuedRef.current = clearQueue(queuedRef.current, convId)
         setQueuedByConv({ ...queuedRef.current })
       }
+      // Keep the turn busy until the video job publishes its terminal state.
+      // The cancel IPC only requests an abort; clearing ownership here lets
+      // Resend truncate the chat while the old engine is still stopping.
+      if (videoGenConv === convId) {
+        if (videoCancelPendingRef.current.has(convId)) return
+        videoCancelPendingRef.current.add(convId)
+        try {
+          await window.api.cancelVideoGen()
+        } catch (error) {
+          console.error('Failed to stop video generation:', error)
+          setAttachWarn('Video could not be stopped. Try Stop again.')
+        } finally {
+          videoCancelPendingRef.current.delete(convId)
+        }
+        return
+      }
       markGenerating(convId, false)
       // Cancel + clear the image job ONLY if THIS conversation owns it, so stopping
       // one conversation never kills another's in-flight image (D9). imgProgress is a
       // shared stream buffer — clear it too when the owner stops.
-      if (videoGenConv === convId) {
-        void window.api.cancelVideoGen()
-        setVideoGenConv(null)
-      }
       if (imageGenConv === convId) {
         window.api.cancelImageGen()
         setImageGenConv(null)
@@ -3017,7 +3030,11 @@ export function MemoryChat({
     (messageId: string) => {
       // A regeneration replaces the current answer. Do not let a stale click race an active
       // stream and truncate the turn that still owns the conversation.
-      if (activeConversationId && generatingRef.current.has(activeConversationId)) return
+      if (
+        activeConversationId &&
+        (generatingRef.current.has(activeConversationId) ||
+          videoCancelPendingRef.current.has(activeConversationId))
+      ) return
       const idx = messages.findIndex((m) => m.id === messageId)
       if (idx < 0) return
       // Regenerating an assistant answer keeps prior answers as navigable variants.
