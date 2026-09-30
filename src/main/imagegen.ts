@@ -755,7 +755,7 @@ async function runImageGen(
         path: outPath,
         seed: params.seed ?? -1,
         model: def.label,
-        computeBackend: 'Metal'
+        computeBackend: 'MLX runtime (device unknown)'
       }
     } finally {
       generationLifecycle.finish()
@@ -923,7 +923,7 @@ async function runImageGen(
         path: outPath,
         seed: usedSeed,
         model: base,
-        computeBackend: imageBackendForRuntime(process.platform, residentBinary)
+        computeBackend: `SD runtime (${imageBackendForRuntime(process.platform, residentBinary)} build; device unknown)`
       }
     } finally {
       generationLifecycle.finish()
@@ -1234,8 +1234,8 @@ async function runImageGen(
       seed: finalSeed,
       model: path.basename(model),
       computeBackend: coreml
-        ? 'Core ML (ANE)'
-        : imageBackendForRuntime(process.platform, completedRuntime)
+        ? 'Core ML runtime (device unknown)'
+        : `SD runtime (${imageBackendForRuntime(process.platform, completedRuntime)} build; device unknown)`
     }
   } finally {
     generationLifecycle.finish()
