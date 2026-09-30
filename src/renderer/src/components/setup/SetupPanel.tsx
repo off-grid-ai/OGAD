@@ -1,18 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import {
-  MagicWand,
-  CheckCircle,
-  WarningCircle,
-  ChatCircle,
-  Image as ImageIcon,
-  VideoCamera,
-  SpeakerHigh,
-  Microphone,
-  DownloadSimple,
-  DesktopTower,
-  Devices,
-  MagnifyingGlass
-} from '@phosphor-icons/react'
+import { MagicWand, CheckCircle, WarningCircle, DesktopTower, Devices } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
@@ -47,18 +34,6 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
     hint: 'Larger chat and speech recommendations. Other models are optional.'
   }
 ]
-
-const KIND_ICON: Record<
-  ItemKind,
-  React.ComponentType<{ className?: string; weight?: 'fill' | 'regular' }>
-> = {
-  chat: ChatCircle,
-  transcription: Microphone,
-  voice: SpeakerHigh,
-  image: ImageIcon,
-  video: VideoCamera,
-  embedding: MagnifyingGlass
-}
 
 interface SetupPanelProps {
   onConfigured?: () => void // called once auto-configure succeeds (e.g. to dismiss a gate)
@@ -307,11 +282,16 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                 {plan.ramGb} GB {deviceNoun()}
               </span>
             </div>
-            <ul className="divide-y divide-neutral-800/70 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950/40">
-              {plan.items.map((it) => {
-                const Icon = KIND_ICON[it.kind]
-                return (
-                  <li key={it.id} className="flex items-center gap-2 px-2.5 py-1.5">
+            <ul className="divide-y divide-neutral-800/70 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/40">
+              {plan.items.map((it) => (
+                <li key={it.id}>
+                  <label
+                    htmlFor={`${selectionId}-${it.kind}`}
+                    className={cn(
+                      'flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 transition-colors hover:bg-neutral-800/40 focus-within:bg-neutral-800/40',
+                      running || loadingPlan ? 'cursor-default' : 'cursor-pointer'
+                    )}
+                  >
                     <input
                       type="checkbox"
                       id={`${selectionId}-${it.kind}`}
@@ -326,46 +306,50 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                       }
                       className="h-4 w-4 shrink-0 accent-primary"
                     />
-                    <Icon className="h-4 w-4 shrink-0 text-green-500" weight="regular" />
-                    <div className="min-w-0 flex-1">
-                      <label
-                        htmlFor={`${selectionId}-${it.kind}`}
-                        className="block cursor-pointer truncate text-xs text-white"
-                      >
-                        {it.name}
-                      </label>
-                      <div className="text-[10px] uppercase tracking-wider text-neutral-600">
-                        {it.capability}
-                      </div>
-                      {it.files && (
-                        <details className="text-[10px] text-neutral-500">
-                          <summary className="w-fit cursor-pointer transition-colors hover:text-foreground">
-                            Required files ({it.files.length})
-                          </summary>
-                          {it.files.map((file) => (
-                            <div key={file.name} className="break-all">
-                              {file.name} ({formatStorageBytes(file.sizeBytes ?? 0)})
-                            </div>
-                          ))}
-                        </details>
+                    <span className="min-w-0 flex-1 truncate text-xs text-white" title={it.name}>
+                      {it.name}
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-500">
+                      {it.capability}
+                    </span>
+                    <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-neutral-400">
+                      {it.sizeGb ? formatStorageBytes(it.sizeGb * 1e9) : 'size unknown'}
+                    </span>
+                    <span className="flex w-20 shrink-0 items-center justify-end gap-1 text-[10px]">
+                      {it.installed ? (
+                        <>
+                          <CheckCircle weight="fill" className="h-3.5 w-3.5 text-green-500" />
+                          <span className="text-green-500">installed</span>
+                        </>
+                      ) : (
+                        <span className="text-neutral-500">download</span>
                       )}
-                    </div>
-                    {it.installed ? (
-                      <span className="flex shrink-0 items-center gap-1 text-[10px] text-green-500">
-                        <CheckCircle weight="fill" className="h-3.5 w-3.5" /> installed
-                      </span>
-                    ) : (
-                      <span className="flex shrink-0 items-center gap-1 text-[10px] text-neutral-500">
-                        <DownloadSimple className="h-3.5 w-3.5" />{' '}
-                        {it.sizeGb
-                          ? formatStorageBytes((it.downloadSizeGb ?? it.sizeGb) * 1e9)
-                          : 'size unknown'}
-                      </span>
-                    )}
-                  </li>
-                )
-              })}
+                    </span>
+                  </label>
+                </li>
+              ))}
             </ul>
+            {plan.items.some((item) => item.files?.length) && (
+              <details className="mt-1.5 text-[10px] text-neutral-500">
+                <summary className="w-fit cursor-pointer transition-colors hover:text-foreground">
+                  Required files
+                </summary>
+                <div className="mt-1 space-y-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-2">
+                  {plan.items
+                    .filter((item) => item.files?.length)
+                    .map((item) => (
+                      <div key={item.id}>
+                        <div className="text-neutral-300">{item.name}</div>
+                        {item.files?.map((file) => (
+                          <div key={file.name} className="break-all">
+                            {file.name} ({formatStorageBytes(file.sizeBytes ?? 0)})
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                </div>
+              </details>
+            )}
             {plan.embeddingNote && (
               <div className="mt-1.5 text-[11px] text-neutral-500">{plan.embeddingNote}</div>
             )}
