@@ -279,6 +279,12 @@ if (!windowPresentation.showWindow) {
 app.whenReady().then(async () => {
   restoreCanonicalProductName()
   initializeAIRequestLogs()
+  try {
+    const { startEmbeddingIndexRebuild } = await import('./embedding-index-rebuild')
+    void startEmbeddingIndexRebuild().catch((error) => console.error('[embeddings] index rebuild failed', error))
+  } catch (error) {
+    console.error('[embeddings] index preparation failed', error)
+  }
 
   // Server-only (headless) mode: boot just the multimodal gateway + LLM runtime,
   // no window / tray / capture / CRM loops. Lets the gateway be deployed on its

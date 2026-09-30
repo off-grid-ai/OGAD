@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import { join } from 'node:path'
 import { beginProductIdentityBootstrap } from '../product-identity-lifecycle'
 import { repairMissingDefaultKeychainAtBootstrap } from '../secure-storage-bootstrap'
+import { configureRuntime } from '../runtime-env'
+import { readModelStorageChoice } from '../model-storage-choice'
 
 let restoreProductName: (() => void) | null = null
 
@@ -18,6 +20,7 @@ function initializeUserData(): void {
   if (process.env.OFFGRID_USER_DATA) {
     fs.mkdirSync(process.env.OFFGRID_USER_DATA, { recursive: true })
     app.setPath('userData', process.env.OFFGRID_USER_DATA)
+    configureRuntime({ modelsDir: readModelStorageChoice(process.env.OFFGRID_USER_DATA) ?? undefined })
     console.log('[userData] override path:', process.env.OFFGRID_USER_DATA)
     return
   }
@@ -41,6 +44,7 @@ function initializeUserData(): void {
   move(join(appData, 'my-memories'), 'memories.db')
   move(join(appData, 'My Memories'), 'memories.db')
   app.setPath('userData', canonical)
+  configureRuntime({ modelsDir: readModelStorageChoice(canonical) ?? undefined })
   console.log('[userData] canonical path:', canonical)
 }
 

@@ -597,6 +597,24 @@ const offGridApi = {
 
   // Storage + download manager
   getStorageInfo: () => ipcRenderer.invoke('models:storage'),
+  chooseModelDirectory: () => ipcRenderer.invoke('models:choose-directory'),
+  restartForModelDirectory: () => ipcRenderer.invoke('models:restart-for-directory'),
+  getModelScanFolders: () => ipcRenderer.invoke('models:scan-folders'),
+  addModelScanFolder: () => ipcRenderer.invoke('models:add-scan-folder'),
+  removeModelScanFolder: (directory: string) => ipcRenderer.invoke('models:remove-scan-folder', directory),
+  onModelInventoryChanged: (callback: () => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('models:inventory-changed', listener)
+    return () => ipcRenderer.removeListener('models:inventory-changed', listener)
+  },
+  getEmbeddingModelChoices: () => ipcRenderer.invoke('models:embedding-choices'),
+  chooseEmbeddingModel: (id: string) => ipcRenderer.invoke('models:choose-embedding', id),
+  getEmbeddingRebuildStatus: () => ipcRenderer.invoke('models:embedding-rebuild-status'),
+  onEmbeddingRebuildStatusChanged: (callback: (status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus): void => callback(status)
+    ipcRenderer.on('models:embedding-rebuild-status-changed', listener)
+    return () => ipcRenderer.removeListener('models:embedding-rebuild-status-changed', listener)
+  },
   deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
   listDownloads: () => ipcRenderer.invoke('models:downloads'),
   retryDownload: (modelId: string) => ipcRenderer.invoke('models:retry-download', modelId),

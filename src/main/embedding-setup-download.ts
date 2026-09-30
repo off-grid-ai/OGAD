@@ -8,7 +8,7 @@ import {
   EMBEDDING_MODELS,
   getEmbeddingModelId
 } from './embedding-model-choice'
-import { modelsDir } from './runtime-env'
+import { modelsDir, requireModelStorage } from './runtime-env'
 
 export interface EmbeddingSetupFile {
   name: string
@@ -72,6 +72,7 @@ export async function downloadEmbeddingModel(
   onProgress?: (progress: EmbeddingDownloadProgress) => void,
   signal?: AbortSignal
 ): Promise<void> {
+  requireModelStorage()
   const files = filesFor(id)
   if (!files) throw new Error('This embedding model is not in the setup catalog.')
   const missing = files.filter((file) => !cached(id, file))

@@ -35,7 +35,7 @@ import { getActiveModal } from './active-models'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
-import { binRoots, dataDir, modelsDir, resourceDirs } from './runtime-env'
+import { binRoots, dataDir, modelsDir, requireModelStorage, resourceDirs } from './runtime-env'
 import { sdServer } from './sd-server'
 import {
   findSdBinaries,
@@ -247,6 +247,7 @@ export function listLoras(): LoraInfo[] {
 
 /** Absolute path to the LoRA folder (created on demand) — for "reveal in Finder". */
 export function ensureLoraDir(): string {
+  requireModelStorage()
   const dir = loraDir()
   fs.mkdirSync(dir, { recursive: true })
   return dir

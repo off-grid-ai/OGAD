@@ -5,6 +5,7 @@
 // files and what Off Grid AI has seen (the KB-sources decision).
 
 import { getDB } from '../database'
+import { isEmbeddingIndexRebuilding } from '../embedding-rebuild-state'
 import { deleteArtifactsForProject } from '../artifacts'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from '../sync-mutation'
 import { emitKnowledgeDocumentMutation } from '../sync-knowledge-document'
@@ -136,6 +137,7 @@ export const desktopVectorStore: VectorStore = {
   },
 
   async getChunkCandidates(projectId) {
+    if (isEmbeddingIndexRebuilding()) return []
     ensureRagStoreSchema()
     const db = getDB()
     const out: ChunkCandidate[] = []

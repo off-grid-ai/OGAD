@@ -11,6 +11,7 @@ export const MODEL_KIND_LABELS: Record<string, string> = {
   video: 'Video',
   voice: 'Voice',
   transcription: 'Transcription',
+  embedding: 'Embedding',
   other: 'Other'
 }
 

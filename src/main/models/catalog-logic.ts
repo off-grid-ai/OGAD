@@ -44,6 +44,7 @@ export interface LocalModelLike {
   kind: string
   params?: number
   sizeBytes: number
+  source?: string
 }
 export interface DownloadedModelLike {
   id: string
@@ -73,10 +74,13 @@ export function localsForCatalog(locals: LocalModelLike[], present: FilePresent)
       id: lm.id,
       name: lm.name,
       kind: lm.kind,
-      org: 'Local',
+      org: lm.source ?? 'Local',
       params: lm.params,
-      tags: ['Imported'],
-      files: [{ name: lm.primary, url: '', sizeBytes: lm.sizeBytes }]
+      tags: [lm.id.startsWith('external:') ? 'External' : 'Imported'],
+      files: [
+        { name: lm.primary, url: '', sizeBytes: lm.sizeBytes, role: 'primary' },
+        ...(lm.mmproj ? [{ name: lm.mmproj, url: '', role: 'mmproj' }] : [])
+      ]
     }))
 }
 
@@ -274,7 +278,7 @@ export function buildDiskEntry(opts: {
   sizeOf: SizeOf
 }): { id: string; name: string; kind?: string; bytes: number; active: boolean } {
   const { id, sizeOf } = opts
-  const lm = id.startsWith('local:') ? opts.locals.find((m) => m.id === id) : undefined
+  const lm = id.startsWith('local:') || id.startsWith('external:') ? opts.locals.find((m) => m.id === id) : undefined
   if (lm) {
     const bytes = [lm.primary, lm.mmproj]
       .filter(Boolean)
@@ -282,10 +286,10 @@ export function buildDiskEntry(opts: {
     return {
       id,
       name: lm.name,
-      kind: 'local',
+      kind: lm.id.startsWith('external:') ? lm.kind : 'local',
       bytes,
       active: isModelActive({
-        kind: 'local',
+        kind: lm.id.startsWith('external:') ? lm.kind : 'local',
         id,
         activeChatId: opts.activeChatId,
         modals: opts.modals

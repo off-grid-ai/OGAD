@@ -3,6 +3,8 @@
 // `${kind}:${refId}` back to the SQLite source of truth. MiniLM 384-dim vectors.
 import * as lancedb from '@lancedb/lancedb'
 import path from 'path'
+import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { kindsPredicate, olderThanPredicate } from './vectors-predicates'
 
@@ -18,23 +20,103 @@ export interface VecChunk {
 }
 
 const TABLE = 'chunks'
+interface VectorPointer {
+  active: string
+  pending?: string
+  previous?: string
+}
+const pointerFile = (): string => path.join(app.getPath('userData'), 'vector-active-table.json')
+function readPointer(): VectorPointer {
+  try {
+    const value = JSON.parse(fs.readFileSync(pointerFile(), 'utf8')) as VectorPointer
+    return value && typeof value.active === 'string' ? value : { active: TABLE }
+  } catch {
+    return { active: TABLE }
+  }
+}
+function writePointer(pointer: VectorPointer): void {
+  const target = pointerFile()
+  const temp = `${target}.tmp-${randomUUID()}`
+  fs.writeFileSync(temp, JSON.stringify(pointer), { mode: 0o600 })
+  fs.renameSync(temp, target)
+}
 let connPromise: Promise<lancedb.Connection> | null = null
 let tablePromise: Promise<lancedb.Table | null> | null = null
+let rebuildTablePromise: Promise<lancedb.Table | null> | null = null
+let cachedTableName = TABLE
+let cachedRebuildName = ''
 
 function conn(): Promise<lancedb.Connection> {
   if (!connPromise) connPromise = lancedb.connect(path.join(app.getPath('userData'), 'lancedb'))
   return connPromise
 }
 
-async function loadTable(): Promise<lancedb.Table | null> {
+async function loadTable(name: string): Promise<lancedb.Table | null> {
   const db = await conn()
   const names = await db.tableNames()
-  return names.includes(TABLE) ? db.openTable(TABLE) : null
+  return names.includes(name) ? db.openTable(name) : null
 }
 
 function table(): Promise<lancedb.Table | null> {
-  if (!tablePromise) tablePromise = loadTable()
+  const name = readPointer().active
+  if (cachedTableName !== name) {
+    tablePromise = null
+    cachedTableName = name
+  }
+  if (!tablePromise) tablePromise = loadTable(name)
   return tablePromise
+}
+
+async function writeTable(): Promise<lancedb.Table | null> {
+  const pending = readPointer().pending
+  if (!pending) return table()
+  if (cachedRebuildName !== pending) {
+    rebuildTablePromise = null
+    cachedRebuildName = pending
+  }
+  if (!rebuildTablePromise) rebuildTablePromise = loadTable(pending)
+  return rebuildTablePromise
+}
+
+/** Keep the old search table readable while a replacement is built. */
+export async function beginVectorRebuild(): Promise<void> {
+  const pointer = readPointer()
+  const db = await conn()
+  if (pointer.pending && (await db.tableNames()).includes(pointer.pending))
+    await db.dropTable(pointer.pending)
+  const pending = `chunks_${randomUUID().replaceAll('-', '')}`
+  writePointer({ active: pointer.active, pending })
+  rebuildTablePromise = null
+  cachedRebuildName = pending
+}
+
+/** Atomically point new search requests at the complete replacement table. */
+export async function commitVectorRebuild(): Promise<void> {
+  const pointer = readPointer()
+  if (!pointer.pending) throw new Error('No replacement vector table is pending.')
+  writePointer({ active: pointer.pending, previous: pointer.active })
+  tablePromise = null
+  rebuildTablePromise = null
+}
+
+export async function finishVectorRebuild(): Promise<void> {
+  const pointer = readPointer()
+  if (!pointer.previous) return
+  const db = await conn()
+  if ((await db.tableNames()).includes(pointer.previous)) await db.dropTable(pointer.previous)
+  writePointer({ active: pointer.active })
+}
+
+/** Discard a failed replacement and point search back at the prior table. */
+export async function abortVectorRebuild(): Promise<void> {
+  const pointer = readPointer()
+  const old = pointer.previous ?? pointer.active
+  const replacement = pointer.pending ?? (pointer.previous ? pointer.active : null)
+  writePointer({ active: old })
+  const db = await conn()
+  if (replacement && (await db.tableNames()).includes(replacement)) await db.dropTable(replacement)
+  tablePromise = null
+  rebuildTablePromise = null
 }
 
 /** Append chunks; lazily creates the table (inferring schema) on first batch. */
@@ -42,13 +124,17 @@ export async function addChunks(rows: VecChunk[]): Promise<void> {
   if (!rows.length) return
   const db = await conn()
   const data = rows as unknown as Record<string, unknown>[]
-  const tbl = await table()
+  const tbl = await writeTable()
   if (tbl) {
     await tbl.add(data)
     return
   }
-  const created = await db.createTable(TABLE, data, { mode: 'create' })
-  tablePromise = Promise.resolve(created)
+  const pointer = readPointer()
+  const created = await db.createTable(pointer.pending ?? pointer.active, data, {
+    mode: 'create'
+  })
+  if (pointer.pending) rebuildTablePromise = Promise.resolve(created)
+  else tablePromise = Promise.resolve(created)
 }
 
 /** k-NN over the store. Returns chunks with `_distance` (smaller = closer). */
@@ -97,4 +183,7 @@ export async function deleteByKindsOlderThan(kinds: string[], cutoffMs: number):
 export function resetVectors(): void {
   connPromise = null
   tablePromise = null
+  rebuildTablePromise = null
+  cachedTableName = TABLE
+  cachedRebuildName = ''
 }

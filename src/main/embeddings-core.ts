@@ -6,6 +6,28 @@ import {
 import { configureTransformersEnv } from './embeddings-env'
 import { loadWithOnnxFallback, onnxDeviceCandidates } from './onnx-device'
 import type { BackendPreference } from '../shared/backend-preferences'
+import { DEFAULT_EMBEDDING_MODEL, type EmbeddingModelId } from './embedding-model-choice'
+
+export async function probeEmbeddingModel(
+  modelId: EmbeddingModelId,
+  modelsDir: string
+): Promise<number> {
+  configureTransformersEnv(modelsDir)
+  const candidate = await pipeline('feature-extraction', modelId, { device: 'cpu' })
+  try {
+    const output = await candidate('Off Grid AI embedding check', {
+      pooling: 'mean',
+      normalize: true
+    })
+    const vector = Array.from(output.data)
+    if (!vector.length || vector.length > 4096 || vector.some((value) => !Number.isFinite(value))) {
+      throw new Error('This model returned an invalid embedding.')
+    }
+    return vector.length
+  } finally {
+    await candidate.dispose()
+  }
+}
 
 /**
  * Text -> vector. The actual inference, owned in ONE place.
@@ -38,12 +60,13 @@ export async function embedText(
   text: string,
   modelsDir: string,
   onReady?: (device: string, reason?: string) => void,
-  backendPreference: BackendPreference = 'auto'
+  backendPreference: BackendPreference = 'auto',
+  modelId: EmbeddingModelId = DEFAULT_EMBEDDING_MODEL
 ): Promise<number[]> {
   if (!pipe) {
     configureTransformersEnv(modelsDir)
-    loading ??= loadWithOnnxFallback((device) =>
-      pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { device }),
+    loading ??= loadWithOnnxFallback(
+      (device) => pipeline('feature-extraction', modelId, { device }),
       onnxDeviceCandidates(process.platform, backendPreference)
     )
       .then(({ runtime, device, fallbackReason }) => {

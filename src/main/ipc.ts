@@ -37,6 +37,7 @@ import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
 import { setWebUseSettings } from './web-use-settings'
 import { WEB_USE_SETTINGS_KEY } from '../shared/web-use-settings'
 import { embeddings } from './embeddings'
+import { isEmbeddingIndexRebuilding } from './embedding-rebuild-state'
 import {
   getResidency,
   setResidencyMode,
@@ -669,6 +670,7 @@ export function setupIPC() {
 
   ipcMain.handle('db:search-memories', async (_, query: string) => {
     try {
+      if (isEmbeddingIndexRebuilding()) throw new Error('Embedding index is rebuilding')
       const queryVector = await embeddings.generateEmbedding(query)
       const vecStr = JSON.stringify(queryVector)
 
@@ -918,6 +920,7 @@ export function setupIPC() {
 
       let memories: any[] = []
       try {
+        if (isEmbeddingIndexRebuilding()) throw new Error('Embedding index is rebuilding')
         const queryVector = await embeddings.generateEmbedding(query)
         const vecStr = JSON.stringify(queryVector)
         const params: any[] = [vecStr]
@@ -1358,11 +1361,14 @@ export function setupIPC() {
     setResidencyMode(modality, mode)
   )
   ipcMain.handle('runtime:backend:get', () => getBackendPreferences())
-  ipcMain.handle('runtime:backend:set', async (_e, modality: BackendModality, preference: BackendPreference) => {
-    const next = setBackendPreference(modality, preference)
-    // A loaded engine keeps its present backend until its next load. The UI says so.
-    return next
-  })
+  ipcMain.handle(
+    'runtime:backend:set',
+    async (_e, modality: BackendModality, preference: BackendPreference) => {
+      const next = setBackendPreference(modality, preference)
+      // A loaded engine keeps its present backend until its next load. The UI says so.
+      return next
+    }
+  )
   // Unload one modality's model from memory now (the "free RAM" button). Goes through
   // the same evict() seam as residency/shutdown; the engine reloads on next use.
   ipcMain.handle('runtime:unload', async (_e, modality: Modality) => {
@@ -1739,6 +1745,173 @@ export function setupIPC() {
 
   // Storage + download manager
   ipcMain.handle('models:storage', () => import('./models-manager').then((m) => m.getStorageInfo()))
+  ipcMain.handle('models:choose-directory', async () => {
+    const { dialog } = await import('electron')
+    const fs = await import('node:fs')
+    const current = (await import('./runtime-env')).modelsDir()
+    const result = await dialog.showOpenDialog({
+      title: 'Choose model storage folder',
+      defaultPath: current,
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || !result.filePaths[0]) return { canceled: true }
+    const directory = result.filePaths[0]
+    const downloads = await import('./models-manager').then((m) => m.listDownloads())
+    if (downloads.some((entry) => entry.status === 'queued' || entry.status === 'downloading')) {
+      return { error: 'Wait for model downloads to finish or cancel them, then try again.' }
+    }
+    try {
+      const { saveModelStorageChoice } = await import('./model-storage-choice')
+      const profile = app.getPath('userData')
+      const currentFiles = fs.existsSync(current) ? fs.readdirSync(current) : []
+      const sameFolder =
+        fs.existsSync(current) && fs.realpathSync(current) === fs.realpathSync(directory)
+      let moved = false
+      let warning: string | undefined
+      if (!sameFolder && currentFiles.length) {
+        const choice = await dialog.showMessageBox({
+          type: 'question',
+          title: 'Existing model files',
+          message: 'Move your existing model files to the new folder?',
+          detail:
+            'Move keeps your downloaded models in the new folder after restart. Leave keeps them in the old folder and adds it as a folder to scan.',
+          buttons: ['Move files', 'Leave files', 'Cancel'],
+          defaultId: 0,
+          cancelId: 2
+        })
+        if (choice.response === 2) return { canceled: true }
+        if (choice.response === 0) {
+          const result = await import('./model-storage-move').then((m) =>
+            m.moveModelStorage(profile, current, directory)
+          )
+          moved = result.moved > 0
+          warning = result.warning
+        } else {
+          const { addModelScanFolder } = await import('./model-storage-choice')
+          addModelScanFolder(profile, current)
+        }
+      }
+      if (!moved) saveModelStorageChoice(profile, directory)
+      return { directory, moved, warning, restartRequired: !sameFolder }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Cannot use this folder.' }
+    }
+  })
+  ipcMain.handle('models:restart-for-directory', () => requestApplicationRelaunch(app))
+  ipcMain.handle('models:embedding-choices', async () => {
+    const { EMBEDDING_MODELS, getEmbeddingModelId } = await import('./embedding-model-choice')
+    const active = getEmbeddingModelId()
+    const models: Array<{ id: string; name: string; detail: string; badge?: string }> = [
+      ...EMBEDDING_MODELS
+    ]
+    return {
+      models: models.some((model) => model.id === active)
+        ? models
+        : [
+            ...models,
+            {
+              id: active,
+              name: active.split('/').pop() ?? active,
+              detail: active,
+              badge: 'Your model'
+            }
+          ],
+      active
+    }
+  })
+  ipcMain.handle('models:embedding-rebuild-status', async () => {
+    const { getEmbeddingRebuildStatus } = await import('./embedding-index-rebuild')
+    return getEmbeddingRebuildStatus()
+  })
+  void import('./embedding-index-rebuild').then(({ onEmbeddingRebuildStatus }) => {
+    onEmbeddingRebuildStatus((status) => {
+      for (const window of BrowserWindow.getAllWindows())
+        window.webContents.send('models:embedding-rebuild-status-changed', status)
+    })
+  })
+  let embeddingChoiceInProgress = false
+  ipcMain.handle('models:choose-embedding', async (_, id: string) => {
+    if (embeddingChoiceInProgress)
+      return { error: 'Another embedding model change is in progress.' }
+    embeddingChoiceInProgress = true
+    try {
+      const { dialog } = await import('electron')
+      const { EMBEDDING_MODELS, getEmbeddingModelId, isEmbeddingModelId } =
+        await import('./embedding-model-choice')
+      if (!isEmbeddingModelId(id)) return { error: 'Unknown embedding model.' }
+      const {
+        cancelPendingEmbeddingChoice,
+        getEmbeddingRebuildStatus,
+        savePreviousEmbeddingChoice,
+        startEmbeddingIndexRebuild
+      } = await import('./embedding-index-rebuild')
+      if (['preparing', 'rebuilding'].includes(getEmbeddingRebuildStatus().phase))
+        return { error: 'Index rebuild is in progress.' }
+      if (id === getEmbeddingModelId()) return { canceled: true }
+      if (!EMBEDDING_MODELS.some((model) => model.id === id)) {
+        try {
+          await import('./embedding-hub').then((hub) => hub.verifyEmbeddingModel(id))
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : 'Could not check this model.' }
+        }
+      }
+      const result = await dialog.showMessageBox({
+        type: 'question',
+        title: 'Change embedding model',
+        message: 'Use this embedding model?',
+        detail:
+          'Off Grid AI Desktop will rebuild saved search and project knowledge indexes now. This can take time. The model may download on first use.',
+        buttons: ['Use and rebuild', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1
+      })
+      if (result.response !== 0) return { canceled: true }
+      try {
+        const { embeddings } = await import('./embeddings')
+        const dimensions = await embeddings.probeModel(id)
+        savePreviousEmbeddingChoice()
+        await embeddings.switchModel(id, dimensions)
+        void startEmbeddingIndexRebuild().catch((error) =>
+          console.error('[embeddings] index rebuild failed', error)
+        )
+        return { success: true }
+      } catch (error) {
+        cancelPendingEmbeddingChoice()
+        return {
+          error: error instanceof Error ? error.message : 'Could not load this embedding model.'
+        }
+      }
+    } finally {
+      embeddingChoiceInProgress = false
+    }
+  })
+  ipcMain.handle('models:scan-folders', () =>
+    import('./model-storage-choice').then((m) => m.readModelScanFolders(app.getPath('userData')))
+  )
+  ipcMain.handle('models:add-scan-folder', async () => {
+    const { dialog } = await import('electron')
+    const result = await dialog.showOpenDialog({
+      title: 'Add a model folder',
+      properties: ['openDirectory']
+    })
+    if (result.canceled || !result.filePaths[0]) return { canceled: true }
+    try {
+      const folders = await import('./model-storage-choice').then((m) =>
+        m.addModelScanFolder(app.getPath('userData'), result.filePaths[0]!)
+      )
+      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('models:inventory-changed'))
+      return { folders }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Cannot read this folder.' }
+    }
+  })
+  ipcMain.handle('models:remove-scan-folder', async (_, directory: string) => {
+    const folders = await import('./model-storage-choice').then((m) =>
+      m.removeModelScanFolder(app.getPath('userData'), directory)
+    )
+    BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('models:inventory-changed'))
+    return folders
+  })
   ipcMain.handle('models:delete-orphans', () =>
     import('./models-manager').then((m) => m.deleteOrphans())
   )
@@ -2005,52 +2178,70 @@ export function setupIPC() {
   })
 
   // --- Local video generation ----------------------------------------------
-  const videoJobPublisherReady = import('./videogen/job-service').then(({ videoGenerationJobs }) => {
-    videoGenerationJobs.onChange((snapshot) => {
-      if (snapshot.phase === 'running') {
-        noteChatStreamVideoProgress(snapshot.conversationId, snapshot.progress?.step, snapshot.progress?.total)
-      } else if (snapshot.phase === 'succeeded') {
-        endChatStreamForConversation(snapshot.conversationId, 'record_pending')
-      } else if (snapshot.phase === 'failed' || snapshot.phase === 'cancelled') {
-        endChatStreamForConversation(snapshot.conversationId, 'discarded')
-      }
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (!window.isDestroyed()) window.webContents.send('videogen:job-state', snapshot)
-      }
-    })
-    videoGenerationJobs.onConversationUpdated((conversationId) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        if (!window.isDestroyed()) window.webContents.send('videogen:conversation-updated', conversationId)
-      }
-    })
-    return videoGenerationJobs
-  })
+  const videoJobPublisherReady = import('./videogen/job-service').then(
+    ({ videoGenerationJobs }) => {
+      videoGenerationJobs.onChange((snapshot) => {
+        if (snapshot.phase === 'running') {
+          noteChatStreamVideoProgress(
+            snapshot.conversationId,
+            snapshot.progress?.step,
+            snapshot.progress?.total
+          )
+        } else if (snapshot.phase === 'succeeded') {
+          endChatStreamForConversation(snapshot.conversationId, 'record_pending')
+        } else if (snapshot.phase === 'failed' || snapshot.phase === 'cancelled') {
+          endChatStreamForConversation(snapshot.conversationId, 'discarded')
+        }
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) window.webContents.send('videogen:job-state', snapshot)
+        }
+      })
+      videoGenerationJobs.onConversationUpdated((conversationId) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed())
+            window.webContents.send('videogen:conversation-updated', conversationId)
+        }
+      })
+      return videoGenerationJobs
+    }
+  )
   ipcMain.handle('videogen:status', async () => (await import('./videogen')).videoGenStatus())
   ipcMain.handle('videogen:job-status', async () => (await videoJobPublisherReady).status())
-  ipcMain.handle('videogen:generate', async (_event, request: import('./videogen/job-service').VideoJobRequest) => {
-    const jobs = await videoJobPublisherReady
-    jobs.assertCanStart()
-    beginChatVideoStream(request.conversationId)
-    try {
-      const messageId = currentChatStreamMessageId(request.conversationId)
-      return await jobs.start({ ...request, ...(messageId ? { messageId } : {}) })
-    } catch (error) {
-      endChatStreamForConversation(request.conversationId, 'discarded')
-      throw error
+  ipcMain.handle(
+    'videogen:generate',
+    async (_event, request: import('./videogen/job-service').VideoJobRequest) => {
+      const jobs = await videoJobPublisherReady
+      jobs.assertCanStart()
+      beginChatVideoStream(request.conversationId)
+      try {
+        const messageId = currentChatStreamMessageId(request.conversationId)
+        return await jobs.start({ ...request, ...(messageId ? { messageId } : {}) })
+      } catch (error) {
+        endChatStreamForConversation(request.conversationId, 'discarded')
+        throw error
+      }
     }
-  })
+  )
   ipcMain.handle('videogen:cancel', async () => (await videoJobPublisherReady).cancel())
-  ipcMain.handle('videogen:conversation-persisted', async (_event, conversationId: string, messageId?: string) =>
-    (await videoJobPublisherReady).acknowledgeConversation(conversationId, messageId))
-  ipcMain.handle('videogen:list', async (_event, scope?: { conversationId?: string; projectId?: string | null }) =>
-    (await import('./videogen')).listGeneratedVideos(scope))
+  ipcMain.handle(
+    'videogen:conversation-persisted',
+    async (_event, conversationId: string, messageId?: string) =>
+      (await videoJobPublisherReady).acknowledgeConversation(conversationId, messageId)
+  )
+  ipcMain.handle(
+    'videogen:list',
+    async (_event, scope?: { conversationId?: string; projectId?: string | null }) =>
+      (await import('./videogen')).listGeneratedVideos(scope)
+  )
   ipcMain.handle('videogen:delete', async (_event, candidate: string) =>
-    (await import('./videogen')).deleteGeneratedVideo(candidate))
+    (await import('./videogen')).deleteGeneratedVideo(candidate)
+  )
   ipcMain.handle('videogen:export', async (event, source: string, suggestedName?: string) => {
     const { dialog } = await import('electron')
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
     const result = await dialog.showSaveDialog(win!, {
-      title: 'Save video', defaultPath: suggestedName || 'off-grid-video.mp4',
+      title: 'Save video',
+      defaultPath: suggestedName || 'off-grid-video.mp4',
       filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
     })
     if (result.canceled || !result.filePath) return false

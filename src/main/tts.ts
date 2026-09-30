@@ -18,7 +18,7 @@ import { getActiveModal } from './active-models'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { listRemoteVoices, synthesizeRemoteVoice } from './remote-media-runtime'
 import { writeDiagnosticLog } from './diagnostics-log'
-import { modelsDir, resourceDirs } from './runtime-env'
+import { modelsDir, requireModelStorage, resourceDirs } from './runtime-env'
 import type { ManagedRuntime } from './runtime-manager'
 import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
 import { OnnxSpeechRuntime } from './tts-onnx'
@@ -50,6 +50,7 @@ function executablePath(): string {
 }
 
 function cacheDirectory(): string {
+  requireModelStorage()
   return path.join(modelsDir(), '.cache', 'executorch-speech')
 }
 

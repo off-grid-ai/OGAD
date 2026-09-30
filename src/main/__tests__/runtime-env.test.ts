@@ -21,7 +21,7 @@ import {
 // The module holds a private `cfg` that persists across calls. Reset it before
 // each test so cases don't leak into one another.
 function resetConfig(): void {
-  configureRuntime({ dataDir: undefined, binRoots: undefined, resourceDirs: undefined })
+  configureRuntime({ dataDir: undefined, modelsDir: undefined, binRoots: undefined, resourceDirs: undefined })
 }
 
 const ENV_KEYS = [
@@ -76,6 +76,12 @@ describe('runtime-env', () => {
 
     it('tracks the cwd fallback when unconfigured', () => {
       expect(modelsDir()).toBe(path.join(process.cwd(), '.offgrid', 'models'))
+    })
+
+    it('uses a host-selected model directory', () => {
+      configureRuntime({ dataDir: '/explicit/data', modelsDir: '/external/models' })
+      expect(modelsDir()).toBe('/external/models')
+      expect(dataDir()).toBe('/explicit/data')
     })
   })
 

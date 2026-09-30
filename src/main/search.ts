@@ -4,6 +4,7 @@
 // observation/frame/transcript backlog (using the in-app MiniLM model) so the
 // semantic half actually covers your captured life. All local, all offline.
 import { getDB } from './database'
+import { isEmbeddingIndexRebuilding } from './embedding-rebuild-state'
 import { embeddings } from './embeddings'
 import { ensureRagStoreSchema } from './rag/store'
 import { addChunks, searchVectors, vectorCount, type VecChunk } from './vectors'
@@ -387,6 +388,7 @@ function semanticSourceExists(hit: VecChunk): boolean {
  * Stale vectors are harmless cache entries and never become user-visible hits.
  */
 export async function searchSemanticSources(vector: number[], limit: number): Promise<RawHit[]> {
+  if (isEmbeddingIndexRebuilding()) return []
   const hits = await searchVectors(vector, limit)
   return hits.filter(semanticSourceExists).map((h) => ({
     key: h.key,
@@ -451,7 +453,7 @@ export async function universalSearch(
   const perSource = opts.sources?.length ? 80 : Math.min(40, limit + 10)
 
   const lists = keywordHits(q, perSource)
-  if (opts.semantic !== false) {
+  if (opts.semantic !== false && !isEmbeddingIndexRebuilding()) {
     try {
       lists.push(await semanticHits(q, perSource))
     } catch {

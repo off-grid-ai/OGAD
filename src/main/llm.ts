@@ -723,8 +723,8 @@ export class LLMService {
     try {
       const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
       if (cfg?.primary) {
-        this.modelPath = path.join(modelsDir, cfg.primary)
-        this.mmProjPath = cfg.mmproj ? path.join(modelsDir, cfg.mmproj) : ''
+        this.modelPath = path.resolve(modelsDir, cfg.primary)
+        this.mmProjPath = cfg.mmproj ? path.resolve(modelsDir, cfg.mmproj) : ''
         return
       }
     } catch {

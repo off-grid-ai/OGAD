@@ -369,6 +369,10 @@ export function ModelsScreen({
   const [switchError, setSwitchError] = useState<string | null>(null)
   const [ramGb, setRamGb] = useState<number | null>(null)
   const [importing, setImporting] = useState(false)
+  const [embeddingChoices, setEmbeddingChoices] = useState<{
+    active: string
+    models: Array<{ id: string; name: string; detail: string; badge?: string }>
+  } | null>(null)
   const [useCase, setUseCase] = useState('all')
   // Capability-tag filter (Light / Photoreal / Fast / Anime …). A model must carry
   // every selected tag. Reset when the tab changes so stale tags don't hide the list.
@@ -376,6 +380,37 @@ export function ModelsScreen({
   useEffect(() => {
     setSelectedTags([])
   }, [activeKind])
+  useEffect(() => {
+    if (activeKind === 'embedding') {
+      void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
+      const unsubscribe = api.onEmbeddingRebuildStatusChanged?.((status: { phase: string; error?: string }) => {
+        if (status.phase === 'done' || status.phase === 'error') {
+          void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
+          if (status.phase === 'error') setSwitchError(status.error ?? 'Could not rebuild the search index.')
+        }
+      })
+      return () => unsubscribe?.()
+    }
+    return undefined
+  }, [activeKind])
+  const chooseEmbedding = async (id: string): Promise<void> => {
+    setSwitching(id)
+    setSwitchError(null)
+    try {
+      const result = await api.chooseEmbeddingModel(id) as { success?: boolean; error?: string }
+      if (result.success) setEmbeddingChoices((current) => {
+        if (!current) return current
+        const found = hfResults.find((item) => item.id === id)
+        return { active: id, models: current.models.some((model) => model.id === id)
+          ? current.models : [...current.models, { id, name: found?.name ?? id.split('/').pop() ?? id, detail: id, badge: 'Your model' }] }
+      })
+      else if (result.error) setSwitchError(result.error)
+    } catch (error) {
+      setSwitchError(error instanceof Error ? error.message : 'Could not change the embedding model.')
+    } finally {
+      setSwitching(null)
+    }
+  }
   const [detail, setDetail] = useState<ModelEntry | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -409,6 +444,12 @@ export function ModelsScreen({
     setDetailFilesLoading(true)
     setDetail(m)
   }, [])
+
+  useEffect(() => api.onModelInventoryChanged?.(() => {
+    api.getModelCatalog?.().then((catalog: { models: ModelEntry[] }) => setModels(catalog.models))
+    api.getInstalledModels?.().then(setInstalled)
+    refreshVision()
+  }), [])
 
   const closeDetail = useCallback(() => {
     setDetail(null)
@@ -603,15 +644,22 @@ export function ModelsScreen({
     const q = query.trim()
     if (!searchEnabled || q.length < 2) {
       setHfResults([])
+      setSearching(false)
       return
     }
+    let cancelled = false
     setSearching(true)
     const t = setTimeout(async () => {
-      const res = await api.searchModels?.(q, activeKind)
-      setHfResults(res ?? [])
-      setSearching(false)
+      try {
+        const res = await api.searchModels?.(q, activeKind)
+        if (!cancelled) setHfResults(res ?? [])
+      } catch {
+        if (!cancelled) setHfResults([])
+      } finally {
+        if (!cancelled) setSearching(false)
+      }
     }, 400)
-    return () => clearTimeout(t)
+    return () => { cancelled = true; clearTimeout(t) }
   }, [query, activeKind, searchEnabled])
 
   const list = models.filter(
@@ -945,7 +993,7 @@ export function ModelsScreen({
                   Settings
                 </button>
               )}
-              {!isRemote && (
+              {!isRemote && !m.id.startsWith('external:') && (
                 <button
                   onClick={() => removeModel(m.id, m.name)}
                   disabled={deleting === m.id || active}
@@ -1061,7 +1109,7 @@ export function ModelsScreen({
             )}
           </button>
         ))}
-        {ramGb && activeKind !== 'storage' && (
+        {ramGb && activeKind !== 'storage' && activeKind !== 'embedding' && (
           <span className="ml-auto pb-2 text-[9px] text-neutral-700">
             {ramGb}GB RAM · fits ≤{Math.round(ramGb * FIT_OK_FRAC)}GB
           </span>
@@ -1075,8 +1123,66 @@ export function ModelsScreen({
         </div>
       )}
 
+      {activeKind === 'embedding' && (
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <p className="mb-4 text-xs text-neutral-500">
+            The embedding model powers semantic search and project knowledge. Changing it rebuilds saved indexes now. This can take time.
+          </p>
+          <div className="mb-4 flex max-w-md items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 focus-within:border-neutral-600">
+            <IconSearch className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search Hugging Face embedding models" aria-label="Search embedding models"
+              className="min-w-0 flex-1 bg-transparent text-xs text-neutral-200 placeholder-neutral-600 outline-none" />
+            {searching && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />}
+          </div>
+          {switchError && <div role="alert" className="mb-3 text-xs text-red-300">{switchError}</div>}
+          <div className="mb-2 text-[10px] uppercase tracking-widest text-neutral-500">Recommended models</div>
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+            {embeddingChoices?.models.map((model) => (
+              <div key={model.id} className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm text-neutral-200">{model.name}{model.badge && <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[9px] text-neutral-400">{model.badge}</span>}</div>
+                    <div className="mt-1 text-[11px] text-neutral-500">{model.detail}</div>
+                  </div>
+                  {embeddingChoices.active === model.id ? (
+                    <span className="text-[10px] text-green-500">Active</span>
+                  ) : (
+                    <button type="button" onClick={() => void chooseEmbedding(model.id)} disabled={switching !== null}
+                      className="shrink-0 rounded-md border border-neutral-700 px-2.5 py-1 text-[11px] text-neutral-300 transition-colors hover:border-green-500 hover:text-white focus-visible:outline focus-visible:outline-green-500">
+                      {switching === model.id ? 'Changing...' : 'Use'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {query.trim().length >= 2 && (
+            <div className="mt-5">
+              <div className="mb-2 text-[10px] uppercase tracking-widest text-neutral-500">Hugging Face results</div>
+              {!searching && hfResults.length === 0 && <p className="text-xs text-neutral-500">No compatible text embedding models found.</p>}
+              <div role="list" aria-label="Embedding model search results" className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                {hfResults.map((model) => <div role="listitem" key={model.id} className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-neutral-200" title={model.id}>{model.name}</div>
+                      <div className="mt-1 truncate text-[11px] text-neutral-500" title={model.id}>{model.id}</div>
+                    </div>
+                    {embeddingChoices?.active === model.id ? <span className="text-[10px] text-green-500">Active</span> :
+                      <button type="button" onClick={() => void chooseEmbedding(model.id)} disabled={switching !== null}
+                        className="shrink-0 rounded-md border border-neutral-700 px-2.5 py-1 text-[11px] text-neutral-300 transition-colors hover:border-green-500 hover:text-white focus-visible:outline focus-visible:outline-green-500 disabled:opacity-50">
+                        {switching === model.id ? 'Checking...' : 'Use'}
+                      </button>}
+                  </div>
+                </div>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Catalog tab */}
-      {activeKind !== 'storage' && (
+      {activeKind !== 'storage' && activeKind !== 'embedding' && (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Filter bar */}
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-neutral-800/60 px-6 py-2">
@@ -1499,7 +1605,7 @@ export function ModelsScreen({
                       >
                         Use this model
                       </button>
-                      <button
+                      {!m.id.startsWith('external:') && <button
                         onClick={() => {
                           void removeModel(m.id, m.name)
                           closeDetail()
@@ -1507,7 +1613,7 @@ export function ModelsScreen({
                         className="rounded border border-neutral-800 px-3 py-1.5 text-xs text-neutral-500 transition-all duration-150 hover:border-red-500/60 hover:text-red-400 active:scale-95"
                       >
                         Delete
-                      </button>
+                      </button>}
                     </>
                   ) : downloading ? (
                     <span className="text-xs text-neutral-400">

@@ -69,6 +69,7 @@ import { internalTabPaletteScreens } from './lib/paletteScreens'
 import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
 import { StartupNotice } from './components/StartupNotice'
+import { EmbeddingRebuildNotice } from './components/EmbeddingRebuildNotice'
 import { CHAT_VIEW, setCurrentView } from './lib/current-view'
 import {
   OPEN_ACTIVE_MODELS_PANEL_EVENT,
@@ -1071,6 +1072,7 @@ function AppContent() {
   return (
     <div className="h-screen w-full overflow-hidden bg-neutral-950 relative">
       <StartupNotice />
+      <EmbeddingRebuildNotice />
       <CommandPalette
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}

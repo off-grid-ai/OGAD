@@ -31,6 +31,7 @@ let activationRequests: Array<[string, string?]> = []
   downloadModel: async () => new Promise(() => {}),
   cancelModelDownload: async () => true,
   searchModels: async () => [],
+  getModelScanFolders: async () => [],
   onModelProgress: () => () => {}
 }
 
