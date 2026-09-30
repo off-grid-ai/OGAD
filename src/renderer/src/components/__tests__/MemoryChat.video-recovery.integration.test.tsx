@@ -88,6 +88,12 @@ it('blocks Resend during engine shutdown and a still-pending cancel acknowledgem
     acknowledgeCancel(true)
     await cancellation
   })
+  fireEvent.pointerDown(screen.getAllByRole('button', { name: 'Message actions' })[0]!, {
+    button: 0,
+    ctrlKey: false
+  })
+  await user.click(await screen.findByRole('menuitem', { name: 'Resend' }))
+  await waitFor(() => expect(boundary.messages['conversation-a']).toEqual([before![0]]))
 })
 
 it('opens saved video details after remount when the old row has no metrics object', async () => {
