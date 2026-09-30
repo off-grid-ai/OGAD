@@ -9,7 +9,6 @@ const ports = vi.hoisted(() => ({
   run: vi.fn(), share: vi.fn()
 }))
 vi.mock('../../database', () => ({ getSetting: (key: string, fallback: unknown) => ports.settings[key] ?? fallback }))
-vi.mock('../../active-models', () => ({ getActiveModal: () => null }))
 vi.mock('../../llm', () => ({ llm: { chatStream: vi.fn() } }))
 vi.mock('../../runtime-env', () => ({ dataDir: () => ports.root, modelsDir: () => path.join(ports.root, 'models') }))
 vi.mock('../../imagegen/sd-runtime', () => ({ findSdBinary: () => '/bin/sd-cli', sdRuntimeLibraryEnv: () => ({}) }))

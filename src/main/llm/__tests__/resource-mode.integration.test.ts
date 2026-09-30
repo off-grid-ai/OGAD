@@ -94,7 +94,7 @@ describe('resource mode settings -> restart -> setup plan', () => {
       expect(plan.items.find((item) => item.kind === 'transcription')?.id).toBe(
         setupLogic.STT_MODEL_BY_MODE[mode]
       )
-      expect(plan.items.some((item) => item.kind === 'image')).toBe(mode !== 'conservative')
+      expect(plan.items.find((item) => item.kind === 'image')?.id).toBe(setupLogic.IMAGE_MODEL_ID)
       recommendations.set(mode, recommendation?.id ?? '')
     }
 
