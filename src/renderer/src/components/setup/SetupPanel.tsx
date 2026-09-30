@@ -69,7 +69,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [mode, setMode] = useState<Mode>('balanced')
-  const [savingMode, setSavingMode] = useState(false)
+  const [loadingPlan, setLoadingPlan] = useState(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const [selectedKinds, setSelectedKinds] = useState<Partial<Record<ItemKind, boolean>>>({
     chat: true
@@ -123,26 +123,29 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   }, [api, onConfigured])
 
   const pickMode = async (m: Mode): Promise<void> => {
-    if (savingMode || m === mode) return
-    setSavingMode(true)
+    if (loadingPlan || m === mode) return
+    setLoadingPlan(true)
     try {
-      await api.setLlmSettings({ performanceMode: m })
+      // This control previews downloads; it must not update or reload the live LLM.
       setMode(m)
       await loadPlan(m)
     } catch (error) {
-      reportSetupFailure('resource-mode persistence', error)
+      reportSetupFailure('resource-mode preview', error)
     } finally {
-      setSavingMode(false)
+      setLoadingPlan(false)
     }
   }
 
   const configure = async (): Promise<void> => {
-    if (running || savingMode || !selectedItems.length) return
+    if (running || loadingPlan || !selectedItems.length) return
     firedConfigured.current = false
     setRunning(true)
     setProgress({ phase: 'select', message: 'Checking selected local models...' })
     try {
-      const result = await api.autoConfigure(selectedItems.map((item) => item.id))
+      const result = await api.autoConfigure(
+        selectedItems.map((item) => item.id),
+        mode
+      )
       if (!result.success) {
         setProgress({ phase: 'error', message: result.error ?? 'Setup failed.' })
       }
@@ -185,7 +188,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
           </div>
           <button
             onClick={configure}
-            disabled={running || savingMode || !selectedItems.length}
+            disabled={running || loadingPlan || !selectedItems.length}
             className={cn(
               'shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-medium transition-colors',
               'bg-green-600 text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60'
@@ -230,7 +233,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                 onClick={() => {
                   void pickMode(m.id)
                 }}
-                disabled={savingMode || running}
+                disabled={loadingPlan || running}
                 aria-pressed={mode === m.id}
                 className={cn(
                   'flex-1 px-2 py-1.5 text-xs transition-colors',
@@ -273,7 +276,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                       id={`${selectionId}-${it.kind}`}
                       aria-label={`Set up ${it.name} for ${it.capability}`}
                       checked={!!selectedKinds[it.kind]}
-                      disabled={running || savingMode}
+                      disabled={running || loadingPlan}
                       onChange={(event) =>
                         setSelectedKinds((current) => ({
                           ...current,

@@ -432,7 +432,8 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
 /** "Configure for me": pick → download (if needed) → activate → start → verify. */
 export async function autoConfigure(
   onProgress?: SetupProgressCb,
-  selectedModelIds?: string[]
+  selectedModelIds?: string[],
+  mode?: RecMode
 ): Promise<{ success: boolean; error?: string; modelId?: string; modelName?: string }> {
   const emit = (p: SetupProgress): void => {
     try {
@@ -450,7 +451,7 @@ export async function autoConfigure(
   }
 
   emit({ phase: 'select', message: 'Checking selected local models...' })
-  const plan = await getSetupPlan()
+  const plan = await getSetupPlan(mode)
   // Accept only IDs from the current hardware-checked plan. A stale preview must
   // be refreshed instead of silently downloading a different model.
   if (
