@@ -207,3 +207,29 @@ endpoint delivered 247,042 bytes with SHA-256
 matching the file received by the Mac app. No additional generation was submitted.
 This verifies Windows-to-Linux completed output retrieval, not a Windows app
 submission or model sync.
+
+### Windows app submits to Linux
+
+Build `36647366918` ran through stock Electron with the original Windows profile.
+The updater remained disabled by development mode. The launch used the existing
+bundled tools through `OFFGRID_BIN_DIR`. In Settings, the app discovered the Linux
+server on a loopback SSH tunnel as OGAD, listed its Wan Q3 model under Video, and
+saved the connection. Selecting that remote video model in Active models routed
+a new chat prompt to Linux.
+
+Job `4ddf0c1e-6d1f-49af-8870-6fed5807270d` completed in 190.641 seconds with
+832 × 480, 17 frames, 8 fps, 20 steps, guidance 6, and seed 555436194. The Windows
+chat showed sampling progress, received the clip, and played it inline. Its saved
+MP4 was 130,645 bytes. A full FFmpeg decode returned exit 0. The local file and
+Linux content response had the same SHA-256:
+`7673bb2187f023c7631043653a97288554539dc2a57db395a51d374cc361d6ea`.
+The sidecar contained the chat and message references and the actual parameters.
+Remote mode was then turned off through Settings and saved; the completed chat
+and clip remain available.
+
+The first development launch lacked FFmpeg and failed after downloading a remote
+result. Remote video availability now checks that required tool before submitting
+a job, matching the local path. The main-process typecheck passed. The live retry
+used the existing bundled FFmpeg. No paid service or test suite was used.
+This check did not verify model sync or remote decode previews; the running Linux
+server still used its earlier native runtime without the preview callback patch.
