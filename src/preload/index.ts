@@ -609,6 +609,11 @@ const offGridApi = {
   },
   getEmbeddingModelChoices: () => ipcRenderer.invoke('models:embedding-choices'),
   chooseEmbeddingModel: (id: string) => ipcRenderer.invoke('models:choose-embedding', id),
+  cancelEmbeddingRebuild: () =>
+    ipcRenderer.invoke('models:cancel-embedding-rebuild') as Promise<{
+      canceled?: boolean
+      error?: string
+    }>,
   getEmbeddingRebuildStatus: () => ipcRenderer.invoke('models:embedding-rebuild-status'),
   onEmbeddingRebuildStatusChanged: (callback: (status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus): void => callback(status)

@@ -384,7 +384,7 @@ export function ModelsScreen({
     if (activeKind === 'embedding') {
       void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
       const unsubscribe = api.onEmbeddingRebuildStatusChanged?.((status: { phase: string; error?: string }) => {
-        if (status.phase === 'done' || status.phase === 'error') {
+        if (status.phase === 'done' || status.phase === 'error' || status.phase === 'restored') {
           void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
           if (status.phase === 'error') setSwitchError(status.error ?? 'Could not rebuild the search index.')
         }

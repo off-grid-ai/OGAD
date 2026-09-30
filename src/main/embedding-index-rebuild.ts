@@ -15,7 +15,7 @@ import {
   commitVectorRebuild,
   finishVectorRebuild
 } from './vectors'
-import { runBackfill } from './search'
+import { runBackfill, searchIndexableCount, waitForSearchBackfill } from './search'
 import { setEmbeddingIndexRebuilding } from './embedding-rebuild-state'
 import type { EmbeddingRebuildStatus } from '../shared/embedding-rebuild-contract'
 
@@ -34,6 +34,32 @@ interface PreviousChoice {
 let status: EmbeddingRebuildStatus = { phase: 'idle', model: '', done: 0, total: 0 }
 let listener: ((status: EmbeddingRebuildStatus) => void) | null = null
 let rebuild: Promise<void> | null = null
+let cancelRequested = false
+
+/** Approximate work shown before a person confirms a model switch. */
+export function estimateEmbeddingRebuildItems(): number {
+  ensureRagStoreSchema()
+  const db = getDB()
+  const saved = (
+    db.prepare('SELECT COUNT(*) AS count FROM memories WHERE content IS NOT NULL').get() as {
+      count: number
+    }
+  ).count
+  const knowledge = (
+    db.prepare('SELECT COUNT(*) AS count FROM rag_chunks WHERE content IS NOT NULL').get() as {
+      count: number
+    }
+  ).count
+  return saved + knowledge + searchIndexableCount()
+}
+
+/** Cancel at the next batch boundary and restore the previous choice and indexes. */
+export async function cancelEmbeddingIndexRebuild(): Promise<boolean> {
+  if (!rebuild || !['preparing', 'rebuilding'].includes(status.phase)) return false
+  cancelRequested = true
+  await rebuild
+  return status.phase === 'restored'
+}
 
 export function getEmbeddingRebuildStatus(): EmbeddingRebuildStatus {
   return status
@@ -136,6 +162,8 @@ export async function prepareEmbeddingIndexRebuild(): Promise<boolean> {
     return false
   }
   setEmbeddingIndexRebuilding(true)
+  await waitForSearchBackfill()
+  if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
   if (!readPrevious())
     fs.writeFileSync(previousFile(), JSON.stringify({ id: indexed, dimensions: 384 }), {
       mode: 0o600
@@ -188,7 +216,9 @@ export async function rebuildEmbeddingIndexes(): Promise<void> {
         .all(cursor) as Array<{ id: number; text: string }>
       if (!rows.length) break
       for (const row of rows) {
+        if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
         const vector = await embeddings.generateEmbedding(row.text)
+        if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
         db.prepare(`UPDATE ${source.table} SET embedding = ? WHERE id = ?`).run(
           JSON.stringify(vector),
           row.id
@@ -200,14 +230,18 @@ export async function rebuildEmbeddingIndexes(): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
   }
-  await runBackfill(({ done: indexed, remaining }) => {
-    publish({
-      phase: 'rebuilding',
-      model: getEmbeddingModelId(),
-      done: count + indexed,
-      total: count + indexed + remaining
-    })
-  })
+  await runBackfill(
+    ({ done: indexed, remaining }) => {
+      publish({
+        phase: 'rebuilding',
+        model: getEmbeddingModelId(),
+        done: count + indexed,
+        total: count + indexed + remaining
+      })
+    },
+    () => cancelRequested
+  )
+  if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
   await commitVectorRebuild()
   fs.writeFileSync(markerFile(), JSON.stringify(getEmbeddingModelId()), { mode: 0o600 })
   setEmbeddingIndexRebuilding(false)
@@ -224,6 +258,7 @@ export async function rebuildEmbeddingIndexes(): Promise<void> {
 
 export function startEmbeddingIndexRebuild(): Promise<void> {
   if (rebuild) return rebuild
+  cancelRequested = false
   publish({ phase: 'preparing', model: getEmbeddingModelId(), done: 0, total: 0 })
   rebuild = Promise.resolve().then(async () => {
     try {
@@ -235,14 +270,14 @@ export function startEmbeddingIndexRebuild(): Promise<void> {
       } else if (readPrevious() && hasBackups()) {
         await rollback()
         publish({
-          phase: 'error',
+          phase: 'restored',
           model: getEmbeddingModelId(),
           done: 0,
-          total: 0,
-          error: 'The previous embedding model was restored after an interrupted rebuild.'
+          total: 0
         })
         return
       }
+      if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
       if (await prepareEmbeddingIndexRebuild()) await rebuildEmbeddingIndexes()
       else {
         await finishVectorRebuild().catch(() => undefined)
@@ -254,6 +289,20 @@ export function startEmbeddingIndexRebuild(): Promise<void> {
         await rollback()
       } catch (rollbackError) {
         console.error('[embeddings] rollback failed', rollbackError)
+        const restoreMessage =
+          rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+        publish({
+          phase: 'error',
+          model: getEmbeddingModelId(),
+          done: status.done,
+          total: status.total,
+          error: `Could not restore the previous index: ${restoreMessage}`
+        })
+        throw rollbackError
+      }
+      if (cancelRequested) {
+        publish({ phase: 'restored', model: getEmbeddingModelId(), done: 0, total: 0 })
+        return
       }
       publish({
         phase: 'error',

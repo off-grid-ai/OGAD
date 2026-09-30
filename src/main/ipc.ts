@@ -1823,6 +1823,16 @@ export function setupIPC() {
     const { getEmbeddingRebuildStatus } = await import('./embedding-index-rebuild')
     return getEmbeddingRebuildStatus()
   })
+  ipcMain.handle('models:cancel-embedding-rebuild', async () => {
+    const { cancelEmbeddingIndexRebuild } = await import('./embedding-index-rebuild')
+    try {
+      return { canceled: await cancelEmbeddingIndexRebuild() }
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : 'Could not restore the previous model.'
+      }
+    }
+  })
   void import('./embedding-index-rebuild').then(({ onEmbeddingRebuildStatus }) => {
     onEmbeddingRebuildStatus((status) => {
       for (const window of BrowserWindow.getAllWindows())
@@ -1855,12 +1865,17 @@ export function setupIPC() {
           return { error: error instanceof Error ? error.message : 'Could not check this model.' }
         }
       }
+      let itemCount: number | null = null
+      try {
+        itemCount = (await import('./embedding-index-rebuild')).estimateEmbeddingRebuildItems()
+      } catch (error) {
+        console.warn('[embeddings] could not estimate rebuild size', error)
+      }
       const result = await dialog.showMessageBox({
         type: 'question',
         title: 'Change embedding model',
         message: 'Use this embedding model?',
-        detail:
-          'Off Grid AI Desktop will rebuild saved search and project knowledge indexes now. This can take time. The model may download on first use.',
+        detail: `${itemCount === null ? 'Saved search and project knowledge indexes' : `About ${itemCount.toLocaleString()} search and knowledge entries`} will be indexed now. This can take a long time on large profiles. You can cancel during indexing and restore your previous model and indexes. The model may download on first use.`,
         buttons: ['Use and rebuild', 'Cancel'],
         defaultId: 0,
         cancelId: 1

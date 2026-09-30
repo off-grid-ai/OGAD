@@ -82,6 +82,14 @@ function pendingCount(): number {
   return row.c
 }
 
+/** Count the source rows that a new embedding model must re-index. */
+export function searchIndexableCount(): number {
+  const row = getDB().prepare(`SELECT COUNT(*) AS count FROM (${SOURCES_SQL})`).get() as {
+    count: number
+  }
+  return row.count
+}
+
 /** Embed one batch of un-indexed items into LanceDB. Returns progress. */
 async function indexBatch(limit = 48): Promise<{ indexed: number; remaining: number }> {
   ensureIndexTable()
@@ -120,18 +128,27 @@ async function indexBatch(limit = 48): Promise<{ indexed: number; remaining: num
 }
 
 let backfilling = false
+/** Wait for an in-flight search batch before replacing the embedding index. */
+export async function waitForSearchBackfill(): Promise<void> {
+  while (backfilling) await new Promise((resolve) => setTimeout(resolve, 50))
+}
+
 /** Drain the backlog in the background, one throttled batch at a time. */
 export async function runBackfill(
-  onProgress?: (p: { done: number; remaining: number }) => void
+  onProgress?: (p: { done: number; remaining: number }) => void,
+  shouldStop?: () => boolean
 ): Promise<void> {
   if (backfilling) return
   backfilling = true
   try {
     let done = 0
     for (;;) {
+      if (shouldStop?.()) throw new Error('Embedding index rebuild canceled.')
+      if (!shouldStop && isEmbeddingIndexRebuilding()) break
       const { indexed, remaining } = await indexBatch()
       done += indexed
       onProgress?.({ done, remaining })
+      if (shouldStop?.()) throw new Error('Embedding index rebuild canceled.')
       if (remaining === 0) break
       await new Promise((r) => setTimeout(r, 50)) // breathe — don't starve the LLM/UI
     }
