@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   MagicWand,
   CheckCircle,
@@ -17,6 +17,7 @@ import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
+import { totalDownloadGb } from '../../../../main/models/setup-logic'
 import { formatStorageBytes } from './storage-format'
 
 import type {
@@ -64,11 +65,17 @@ function reportSetupFailure(operation: string, error: unknown): void {
  *  install, then one-click Configure. Used on the first-run gate and in Settings. */
 export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React.ReactElement {
   const api = window.api
+  const selectionId = useId()
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [mode, setMode] = useState<Mode>('balanced')
   const [savingMode, setSavingMode] = useState(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
+  const [selectedKinds, setSelectedKinds] = useState<Partial<Record<ItemKind, boolean>>>({
+    chat: true
+  })
+  const selectedItems = plan?.items.filter((item) => selectedKinds[item.kind]) ?? []
+  const downloadGb = totalDownloadGb(selectedItems)
   const firedConfigured = useRef(false)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
 
@@ -130,14 +137,19 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   }
 
   const configure = async (): Promise<void> => {
-    if (running) return
+    if (running || savingMode || !selectedItems.length) return
     firedConfigured.current = false
     setRunning(true)
-    setProgress({ phase: 'select', message: `Picking a model that fits your ${deviceNoun()}...` })
+    setProgress({ phase: 'select', message: 'Checking selected local models...' })
     try {
-      await api.autoConfigure()
+      const result = await api.autoConfigure(selectedItems.map((item) => item.id))
+      if (!result.success) {
+        setProgress({ phase: 'error', message: result.error ?? 'Setup failed.' })
+      }
+      await loadPlan(mode)
     } catch (e) {
       setProgress({ phase: 'error', message: e instanceof Error ? e.message : 'Setup failed.' })
+    } finally {
       setRunning(false)
     }
   }
@@ -173,13 +185,13 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
           </div>
           <button
             onClick={configure}
-            disabled={running || savingMode || !plan}
+            disabled={running || savingMode || !selectedItems.length}
             className={cn(
               'shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-medium transition-colors',
               'bg-green-600 text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60'
             )}
           >
-            {running ? 'Setting up...' : done ? 'Run again' : 'Configure'}
+            {running ? 'Setting up...' : 'Set up selected'}
           </button>
         </div>
 
@@ -240,11 +252,13 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
         {plan && (
           <div className="mt-3">
             <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-widest text-neutral-600">
-              <span>Local models to set up</span>
+              <span>Choose local models</span>
               <span className="normal-case tracking-normal text-neutral-500">
-                {plan.totalDownloadGb > 0
-                  ? `~${plan.totalDownloadGb.toFixed(1)} GB to download`
-                  : 'all installed'}
+                {downloadGb > 0
+                  ? `~${downloadGb.toFixed(1)} GB to download`
+                  : selectedItems.length
+                    ? 'selected models installed'
+                    : 'no models selected'}
                 {' · sized for your '}
                 {plan.ramGb} GB {deviceNoun()}
               </span>
@@ -253,28 +267,43 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               {plan.items.map((it) => {
                 const Icon = KIND_ICON[it.kind]
                 return (
-                  <li key={it.id} className="flex items-center gap-3 px-3 py-2">
+                  <li key={it.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                    <input
+                      type="checkbox"
+                      id={`${selectionId}-${it.kind}`}
+                      aria-label={`Set up ${it.name} for ${it.capability}`}
+                      checked={!!selectedKinds[it.kind]}
+                      disabled={running || savingMode}
+                      onChange={(event) =>
+                        setSelectedKinds((current) => ({
+                          ...current,
+                          [it.kind]: event.target.checked
+                        }))
+                      }
+                      className="h-4 w-4 shrink-0 accent-primary"
+                    />
                     <Icon className="h-4 w-4 shrink-0 text-green-500" weight="regular" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs text-white">
+                      <label
+                        htmlFor={`${selectionId}-${it.kind}`}
+                        className="block cursor-pointer truncate text-xs text-white"
+                      >
                         {it.name}
-                        {it.kind === 'chat' && (
-                          <span className="ml-1.5 text-[10px] text-neutral-500">
-                            {' / chat + vision'}
-                          </span>
-                        )}
-                      </div>
+                      </label>
                       <div className="text-[10px] uppercase tracking-wider text-neutral-600">
                         {it.capability}
                       </div>
                       {it.files && (
-                        <div className="mt-1 break-all text-[10px] text-neutral-500">
+                        <details className="text-[10px] text-neutral-500">
+                          <summary className="w-fit cursor-pointer transition-colors hover:text-foreground">
+                            Required files ({it.files.length})
+                          </summary>
                           {it.files.map((file) => (
-                            <div key={file.name}>
+                            <div key={file.name} className="break-all">
                               {file.name} ({formatStorageBytes(file.sizeBytes ?? 0)})
                             </div>
                           ))}
-                        </div>
+                        </details>
                       )}
                     </div>
                     {it.installed ? (
@@ -295,7 +324,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               <div className="mt-1.5 text-[11px] text-neutral-500">{plan.videoNote}</div>
             )}
             <div className="mt-1.5 text-[11px] text-neutral-600">
-              Missing local models download in this order. Your active model choices stay unchanged.
+              Only checked models download. Each video model includes all required files. Your saved
+              active choices stay unchanged.
             </div>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1.5 text-[11px] text-neutral-500">
               For solid reasoning and tool use,{' '}

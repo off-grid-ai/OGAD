@@ -28,7 +28,6 @@ import {
   desktopCatalog
 } from './models-manager'
 import { getGatewayPort } from './model-server'
-import { deviceNoun } from '../shared/device'
 import type {
   SystemHealthComponentContract,
   SystemHealthComponentStatusContract,
@@ -323,7 +322,7 @@ export interface SetupItem {
   sizeGb: number
   installed: boolean
   files?: { name: string; sizeBytes?: number }[]
-  required: boolean // chat is required; the rest are best-effort extras
+  required: boolean // legacy default-plan priority; explicit selections can omit chat
 }
 export interface SetupPlan {
   mode: RecMode
@@ -432,7 +431,8 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
 
 /** "Configure for me": pick → download (if needed) → activate → start → verify. */
 export async function autoConfigure(
-  onProgress?: SetupProgressCb
+  onProgress?: SetupProgressCb,
+  selectedModelIds?: string[]
 ): Promise<{ success: boolean; error?: string; modelId?: string; modelName?: string }> {
   const emit = (p: SetupProgress): void => {
     try {
@@ -441,115 +441,46 @@ export async function autoConfigure(
       /* ignore */
     }
   }
+  const fail = (
+    message: string,
+    modelId?: string
+  ): { success: false; error: string; modelId?: string } => {
+    emit({ phase: 'error', message, modelId })
+    return { success: false, error: message, modelId }
+  }
 
-  emit({
-    phase: 'select',
-    message: `Picking a model that fits your ${deviceNoun(process.platform)}…`
-  })
+  emit({ phase: 'select', message: 'Checking selected local models...' })
   const plan = await getSetupPlan()
-  const model = plan.items.find((item) => item.kind === 'chat')
-  if (!model) {
-    emit({ phase: 'error', message: 'No suitable model found.' })
-    return { success: false, error: 'no suitable model found' }
+  // Accept only IDs from the current hardware-checked plan. A stale preview must
+  // be refreshed instead of silently downloading a different model.
+  if (
+    selectedModelIds !== undefined &&
+    (!Array.isArray(selectedModelIds) ||
+      selectedModelIds.some(
+        (id) => typeof id !== 'string' || !plan.items.some((item) => item.id === id)
+      ))
+  ) {
+    return fail('The setup plan changed. Select a resource mode to refresh it, then try again.')
   }
+  const selected = selectedModelIds === undefined ? null : new Set(selectedModelIds)
+  const items = plan.items.filter((item) => !selected || selected.has(item.id))
+  if (!items.length) return fail('Select at least one model to set up.')
 
-  const installed = await listInstalled()
-  if (!model.installed && !installed.includes(model.id)) {
-    emit({
-      phase: 'download',
-      message: `Downloading ${model.name}…`,
-      modelId: model.id,
-      modelName: model.name,
-      percent: 0
-    })
-    const res = await downloadModel(model.id, (p) =>
-      emit({
-        phase: 'download',
-        message: `Downloading ${model.name}…`,
-        modelId: model.id,
-        modelName: model.name,
-        percent: p.percent,
-        downloadedMB: p.downloadedMB,
-        totalMB: p.totalMB,
-        downloadedBytes: p.downloadedBytes,
-        totalBytes: p.totalBytes,
-        bytesPerSecond: p.bytesPerSecond
-      })
-    )
-    if (!res.success) {
-      emit({ phase: 'error', message: res.error ?? 'Download failed.', modelId: model.id })
-      return { success: false, error: res.error, modelId: model.id }
-    }
-  }
-
-  // A saved chat source stays active; setup must not restart an active run.
-  const preservedChat = getActiveModalities().text
-  if (!preservedChat) {
-    emit({
-      phase: 'activate',
-      message: `Activating ${model.name}…`,
-      modelId: model.id,
-      modelName: model.name
-    })
-    const act = await setActiveModel(model.id)
-    if (!act.success) {
-      emit({ phase: 'error', message: act.error ?? 'Activation failed.', modelId: model.id })
-      return { success: false, error: act.error, modelId: model.id }
-    }
-
-    emit({
-      phase: 'start',
-      message: 'Starting the local model server…',
-      modelId: model.id,
-      modelName: model.name
-    })
+  let activatedChat: SetupItem | undefined
+  for (const item of items) {
     try {
-      await llm.restart()
-    } catch (e) {
-      emit({ phase: 'error', message: (e as Error).message, modelId: model.id })
-      return { success: false, error: (e as Error).message, modelId: model.id }
-    }
-  }
-
-  emit({ phase: 'verify', message: 'Verifying…', modelId: model.id, modelName: model.name })
-  // A saved source may be remote. Its health is separate from installing this plan.
-  const ok = !!preservedChat || !!(await pingJson(llm.getPort(), '/health', 3000))
-
-  // Chat is live — now set up the rest of the baseline (speech-to-text, text-to-
-  // speech, and image/video outside Conservative). These are best-effort: a failure here
-  // never fails setup, and the chat model being ready already lets the user in.
-  try {
-    const extras = plan.items.filter((i) => !i.required)
-    const installedNow = await listInstalled()
-    const activateExtra = async (ex: SetupItem): Promise<void> => {
-      const modality = modalityForKind(ex.kind)
-      if (modality && !getActiveModalities()[modality]) {
-        await setActiveModalChoice(ex.kind, ex.id)
-      }
-    }
-    for (const ex of extras) {
-      if (installedNow.includes(ex.id)) {
-        try {
-          await activateExtra(ex)
-        } catch {
-          /* ignore */
-        }
-        continue
-      }
-      try {
-        emit({
-          phase: 'download',
-          message: `Downloading ${ex.capability} (${ex.name})…`,
-          modelId: ex.id,
-          modelName: ex.name,
-          percent: 0
-        })
-        const r = await downloadModel(ex.id, (p) =>
+      if (!(await listInstalled()).includes(item.id)) {
+        const report = (p: Partial<SetupProgress>): void =>
           emit({
+            ...p,
             phase: 'download',
-            message: `Downloading ${ex.capability} (${ex.name})…`,
-            modelId: ex.id,
-            modelName: ex.name,
+            message: `Downloading ${item.name}...`,
+            modelId: item.id,
+            modelName: item.name
+          })
+        report({ percent: 0 })
+        const result = await downloadModel(item.id, (p) =>
+          report({
             percent: p.percent,
             downloadedMB: p.downloadedMB,
             totalMB: p.totalMB,
@@ -558,24 +489,40 @@ export async function autoConfigure(
             bytesPerSecond: p.bytesPerSecond
           })
         )
-        if (r.success) await activateExtra(ex)
-      } catch {
-        /* best-effort extra */
+        // Stop on cancellation or failure. Never continue into another large pack.
+        if (!result.success) return fail(result.error ?? 'Download failed.', item.id)
       }
+
+      if (item.kind === 'chat') {
+        // Preserve local and remote choices, including choices made during download.
+        if (getActiveModalities().text) continue
+        emit({ phase: 'activate', message: `Activating ${item.name}...`, modelId: item.id })
+        const result = await setActiveModel(item.id)
+        if (!result.success) return fail(result.error ?? 'Activation failed.', item.id)
+        emit({ phase: 'start', message: 'Starting the local model server...', modelId: item.id })
+        await llm.restart()
+        emit({ phase: 'verify', message: 'Verifying...', modelId: item.id })
+        if (!(await pingJson(llm.getPort(), '/health', 3000))) {
+          return fail(`${item.name} is installed, but the local server is not ready.`, item.id)
+        }
+        activatedChat = item
+      } else {
+        const modality = modalityForKind(item.kind)
+        if (modality && !getActiveModalities()[modality]) {
+          const result = await setActiveModalChoice(item.kind, item.id)
+          if (!result.success) return fail(result.error ?? 'Activation failed.', item.id)
+        }
+      }
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : 'Setup failed.', item.id)
     }
-  } catch {
-    /* extras are optional */
   }
 
   emit({
     phase: 'done',
-    message: preservedChat
-      ? 'Local setup finished. Your active model choices are unchanged. Check Models for download status.'
-      : ok
-        ? `Ready - ${model.name} is active. Setup finished. Check Models for download status.`
-        : `${model.name} installed; the server is still warming up.`,
-    modelId: model.id,
-    modelName: model.name
+    message: 'Selected models are ready. Saved active model choices are unchanged.',
+    modelId: activatedChat?.id,
+    modelName: activatedChat?.name
   })
-  return { success: ok, modelId: model.id, modelName: model.name }
+  return { success: true, modelId: activatedChat?.id, modelName: activatedChat?.name }
 }

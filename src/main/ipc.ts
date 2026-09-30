@@ -1804,10 +1804,11 @@ export function setupIPC() {
   })
   // "Configure for me": pick a RAM-appropriate model, download, activate, start,
   // verify. Streams progress back to all windows via 'setup:progress'.
-  ipcMain.handle('setup:auto-configure', async () => {
+  ipcMain.handle('setup:auto-configure', async (_e, selectedModelIds?: string[]) => {
     const { autoConfigure } = await import('./setup')
-    return autoConfigure((p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p))
+    return autoConfigure(
+      (p) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p)),
+      selectedModelIds
     )
   })
   // Restart a component. We only ever stop OUR OWN processes — never SIGKILL an
