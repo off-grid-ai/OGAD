@@ -1,3 +1,4 @@
+import { appLocationPath, replaceAppLocation } from './lib/app-location'
 import { ChatList } from './components/ChatList'
 import { ChatDetail } from './components/ChatDetail'
 import { CommandPalette } from './components/CommandPalette'
@@ -481,7 +482,7 @@ function AppContent() {
 
   // Handle browser URL changes
   useEffect(() => {
-    const path = window.location.pathname
+    const path = appLocationPath()
     const viewMap: Record<string, ViewMode> = {
       '/': 'day',
       '/explore': 'explore',
@@ -628,8 +629,8 @@ function AppContent() {
     } else if (isInternalTabView(viewMode)) {
       newPath = internalTabPath(viewMode, navigationSubroute)
     }
-    if (window.location.pathname !== newPath) {
-      window.history.replaceState(null, '', newPath)
+    if (appLocationPath() !== newPath) {
+      replaceAppLocation(newPath)
     }
     // Publish the view for anything that needs to reason about the current screen. replaceState
     // fires no event, so the URL alone is not observable.

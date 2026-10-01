@@ -1,3 +1,4 @@
+import { replaceAppLocation } from '@renderer/lib/app-location'
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'motion/react'
 import { GridBackdrop } from './ui/grid-backdrop'
@@ -147,7 +148,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
   const openModels = (): void => {
     window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'models' }))
-    window.history.replaceState(null, '', '/models')
+    replaceAppLocation('/models')
   }
 
   const handleVisionAction = (): void => {

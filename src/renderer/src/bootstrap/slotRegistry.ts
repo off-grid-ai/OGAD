@@ -31,6 +31,8 @@ export const SLOTS = {
   /** Per-connector credential setup UI for `oauthClient: 'byo'` entries (e.g. the
    *  Google client_id/secret form). Receives the catalog entry as a prop. */
   connectorSetup: 'connectors.setup',
+  /** Optional provider-owned quick setup, used in onboarding and Integrations. */
+  quickConnectionProviders: 'connectors.quickProviders',
   /** Rows appended after the message list of the open conversation (e.g. a reply
    *  streaming live on another device). Receives `{ conversationId }`. */
   chatMessagesFooter: 'chat.messagesFooter',

@@ -6,6 +6,7 @@ import {
   addConnector,
   setConnectorEnabled,
   removeConnector,
+  cancelConnectorAuthorization,
   testConnector,
   callConnectorTool,
   type NewConnector
@@ -20,6 +21,7 @@ export function setupMcpIpc(): void {
     setConnectorEnabled(id, enabled)
   )
   ipcMain.handle('mcp:remove', (_e, id: number) => removeConnector(id))
+  ipcMain.handle('mcp:cancel', (_e, id: number) => cancelConnectorAuthorization(id))
   ipcMain.handle('mcp:test', (_e, id: number) => testConnector(id))
   ipcMain.handle('mcp:call', (_e, id: number, tool: string, args: unknown) =>
     callConnectorTool(id, tool, args)

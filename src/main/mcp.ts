@@ -6,7 +6,7 @@
 // closed — we don't hold long-lived child processes.
 
 import { getDB } from './database'
-import { deleteSecretsByPrefix, getSecret } from './secrets'
+import { deleteSecretsByPrefix, getSecret, setSecret } from './secrets'
 import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
 import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
@@ -42,6 +42,8 @@ export interface ConnectorToolCallResult {
  */
 export interface ConnectorToolSource {
   tools: ConnectorToolDefinition[]
+  /** Optional direct authorization owned by the provider, without a remote MCP handshake. */
+  authorize?: () => Promise<void>
   verify: () => Promise<void>
   callTool: (tool: string, args: unknown) => Promise<ConnectorToolCallResult>
 }
@@ -90,6 +92,8 @@ export interface NewConnector {
   args?: string[]
   envKeys?: string[] // names of secrets to inject as env vars
   url?: string
+  /** Connect for live tools without background memory imports. */
+  liveOnly?: boolean
 }
 
 export function listConnectors(): Connector[] {
@@ -113,7 +117,13 @@ export function addConnector(c: NewConnector): number {
       c.url ?? null,
       Date.now()
     )
-  return Number(info.lastInsertRowid)
+  const id = Number(info.lastInsertRowid)
+  if (c.liveOnly && !setSecret(`connector:${id}:live-only`, 'true')) {
+    getDB().prepare('DELETE FROM connectors WHERE id = ?').run(id)
+    throw new Error('Could not protect the connection settings.')
+  }
+  if (c.liveOnly) setConnectorEnabled(id, false)
+  return id
 }
 
 export function setConnectorEnabled(id: number, enabled: boolean): void {
@@ -146,6 +156,10 @@ export function removeConnector(id: number): void {
     deleteSecretsByPrefix(`connector:${id}:`)
     database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
   })()
+}
+
+export function cancelConnectorAuthorization(id: number): void {
+  cancelOAuthAuthorization(id)
 }
 
 function getConnector(id: number): Connector | undefined {
@@ -298,8 +312,11 @@ export async function testConnector(
       // A fresh account still needs the existing interactive OAuth handshake. Once tokens exist,
       // provider verification must not touch a preview-gated MCP endpoint.
       if (!hasOAuthTokens(c.id)) {
-        const session = await connect(c, true)
-        await session.close()
+        if (source.authorize) await source.authorize()
+        else {
+          const session = await connect(c, true)
+          await session.close()
+        }
       }
       await source.verify()
       tools = source.tools
@@ -307,6 +324,12 @@ export async function testConnector(
       const { client, close } = await connect(c, true) // user-initiated → allow browser OAuth
       try {
         const res = await client.listTools()
+        await callHook(
+          'mcp:identifyAccount',
+          id,
+          client,
+          res.tools.map((tool) => tool.name)
+        )
         tools = res.tools.map((tool) => ({
           name: tool.name,
           description: tool.description

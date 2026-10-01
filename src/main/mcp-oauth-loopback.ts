@@ -31,7 +31,8 @@ export class OAuthLoopbackServer {
 
   constructor(private readonly options: OAuthLoopbackOptions) {
     this.host = options.host ?? '127.0.0.1'
-    this.authorizationTimeoutMs = options.authorizationTimeoutMs ?? 3 * 60 * 1000
+    // Account selection, MFA, and workspace approval can take several minutes.
+    this.authorizationTimeoutMs = options.authorizationTimeoutMs ?? 10 * 60 * 1000
   }
 
   get redirectUrl(): string {

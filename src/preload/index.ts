@@ -574,7 +574,8 @@ const offGridApi = {
     pause: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:pause'),
     restart: (): Promise<void> => ipcRenderer.invoke('performance-pack:restart'),
     onChanged: (callback: (status: PerformancePackStatus) => void): (() => void) => {
-      const subscription = (_event: unknown, status: PerformancePackStatus): void => callback(status)
+      const subscription = (_event: unknown, status: PerformancePackStatus): void =>
+        callback(status)
       ipcRenderer.on('performance-pack:changed', subscription)
       return unsubscribe('performance-pack:changed', subscription)
     }
@@ -950,10 +951,12 @@ const offGridApi = {
     args?: string[]
     envKeys?: string[]
     url?: string
+    liveOnly?: boolean
   }) => ipcRenderer.invoke('mcp:add', c),
   mcpSetEnabled: (id: number, enabled: boolean) =>
     ipcRenderer.invoke('mcp:set-enabled', id, enabled),
   mcpRemove: (id: number) => ipcRenderer.invoke('mcp:remove', id),
+  mcpCancel: (id: number) => ipcRenderer.invoke('mcp:cancel', id),
   mcpTest: (id: number) => ipcRenderer.invoke('mcp:test', id),
   mcpIngest: (id: number, query?: string) => ipcRenderer.invoke('mcp:ingest', id, query),
   mcpItems: (surface: string) => ipcRenderer.invoke('mcp:items', surface),

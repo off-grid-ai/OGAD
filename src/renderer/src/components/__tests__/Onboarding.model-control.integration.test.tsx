@@ -69,6 +69,8 @@ describe('rendered multimodal onboarding journey', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(renderedText()).toContain('Connect your work'))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await waitFor(() => expect(renderedText()).toContain('You choose where each model runs'))
     expect(renderedText()).toContain(
       'Personal Mesh does not copy server API keys to Off Grid AI Mobile'

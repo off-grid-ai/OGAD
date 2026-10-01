@@ -1,4 +1,8 @@
+/* Shared controls must follow the reset in the CSS cascade. */
+@layer theme, base, components, utilities;
+
 @import './base.css';
+@import '@offgrid/operator-ui/styles.css';
 @import 'tailwindcss';
 
 /* Tailwind v4 auto-detects content but SKIPS .gitignored paths — and the pro/
@@ -581,4 +585,41 @@ code {
     radial-gradient(2px 2px at 70px 158px, rgba(255, 255, 255, 0.9), transparent),
     radial-gradient(1px 1px at 150px 192px, rgba(255, 255, 255, 0.6), transparent),
     radial-gradient(1px 1px at 205px 120px, rgba(255, 255, 255, 0.78), transparent);
+}
+
+/* Connection composition reuses the existing Item and SidePanel owners. */
+.connection-group-label {
+  margin-bottom: var(--og-space-md);
+  color: var(--og-text-secondary);
+  font-size: var(--og-type-label-size);
+  font-weight: var(--og-type-label-weight);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.connection-app-logo {
+  width: var(--og-space-xl);
+  height: var(--og-space-xl);
+  flex-shrink: 0;
+  object-fit: contain;
+  filter: invert(1);
+}
+[data-theme='light'] .connection-app-logo {
+  filter: none;
+}
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--og-space-xs);
+  color: var(--og-primary);
+  font-size: var(--og-type-meta-size);
+}
+.connection-error {
+  color: var(--og-error);
+  font-size: var(--og-type-h3-size);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .connection-item {
+    flex-wrap: wrap;
+  }
 }

@@ -6,6 +6,8 @@ import { GridBackdrop } from './ui/grid-backdrop'
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import logo from '@/assets/logo.png'
+import { QuickConnections } from './QuickConnections'
+import { Button } from './ui/button'
 import {
   ArrowRight,
   Check,
@@ -76,13 +78,18 @@ const steps = [
   { id: 'capabilities' },
   { id: 'pro' },
   { id: 'sync' },
+  { id: 'connections' },
   { id: 'private' }
 ]
 const ONBOARDING_STEP_KEY = 'onboarding_step'
 
 function restoredStep(): number {
-  const value = Number(localStorage.getItem(ONBOARDING_STEP_KEY))
-  return Number.isInteger(value) && value >= 0 && value < steps.length ? value : 0
+  const saved = localStorage.getItem(ONBOARDING_STEP_KEY)
+  const byId = steps.findIndex((step) => step.id === saved)
+  if (byId >= 0) return byId
+  // Older versions saved numeric steps. Preserve their private close screen.
+  const value = Number(saved)
+  return Number.isInteger(value) && value >= 0 && value <= 4 ? (value === 4 ? 5 : value) : 0
 }
 
 const ORBIT = [
@@ -165,11 +172,12 @@ const SYNC_GRID = [
 
 export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
   const [currentStep, setCurrentStep] = useState(restoredStep)
+  const [connectionBusy, setConnectionBusy] = useState(false)
 
   const handleNext = (): void => {
     if (currentStep < steps.length - 1) {
       const nextStep = currentStep + 1
-      localStorage.setItem(ONBOARDING_STEP_KEY, String(nextStep))
+      localStorage.setItem(ONBOARDING_STEP_KEY, steps[nextStep]!.id)
       setCurrentStep(nextStep)
     } else {
       localStorage.removeItem(ONBOARDING_STEP_KEY)
@@ -423,8 +431,32 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
           </motion.div>
         )}
 
-        {/* Step 4 - Private close */}
         {currentStep === 4 && (
+          <motion.div
+            key="connections"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="h-full overflow-y-auto px-8 pb-40 pt-8"
+          >
+            <div className="mx-auto w-full max-w-7xl">
+              <div className="mb-10 flex items-center justify-between border-b border-neutral-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <img src={logo} alt="" className="size-6 object-contain" />
+                  <span className="text-xs tracking-widest">OFF GRID AI</span>
+                </div>
+                <span className="text-xs text-neutral-400">SETUP / 05</span>
+              </div>
+              <QuickConnections onBusyChange={setConnectionBusy} />
+              <p className="mt-5 text-xs text-neutral-400">
+                Optional. You can add or change connections in Integrations later.
+              </p>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Private close */}
+        {currentStep === 5 && (
           <motion.div
             key="step-4"
             initial={{ opacity: 0 }}
@@ -477,40 +509,59 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
       </AnimatePresence>
 
       {/* Navigation */}
-      <div className="fixed bottom-12 left-0 right-0 z-50 flex flex-col items-center gap-6">
-        <div className="flex gap-2">
-          {steps.map((_, idx) => (
-            <motion.div
-              key={idx}
-              initial={false}
-              animate={{
-                width: currentStep === idx ? 24 : 6,
-                backgroundColor: currentStep === idx ? 'rgb(52 211 153)' : 'rgb(64 64 64)'
-              }}
-              className="h-1 rounded-full"
-              transition={{ duration: 0.3 }}
-            />
-          ))}
-        </div>
-        <motion.button
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          onClick={handleNext}
-          className="group flex items-center gap-2 rounded-full border border-green-500/40 bg-green-600/90 px-8 py-3 text-white transition-all duration-200 hover:bg-green-500"
+      <div
+        className={
+          currentStep === 4
+            ? 'fixed bottom-0 left-0 right-0 z-50 border-t border-neutral-800 bg-neutral-950 px-8 py-6'
+            : 'fixed bottom-12 left-0 right-0 z-50 flex flex-col items-center gap-6'
+        }
+      >
+        <div
+          className={
+            currentStep === 4
+              ? 'mx-auto flex max-w-7xl items-center justify-between'
+              : 'flex flex-col items-center gap-6'
+          }
         >
-          <span className="text-sm font-medium">
-            {currentStep === steps.length - 1 ? 'Start using Off Grid AI' : 'Continue'}
-          </span>
-          {currentStep === steps.length - 1 ? (
-            <Check className="h-4 w-4" weight="bold" />
-          ) : (
-            <ArrowRight
-              className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
-              weight="bold"
-            />
-          )}
-        </motion.button>
+          <div className="flex gap-2">
+            {steps.map((_, idx) => (
+              <motion.div
+                key={idx}
+                initial={false}
+                animate={{
+                  width: currentStep === idx ? 24 : 6,
+                  backgroundColor: currentStep === idx ? 'rgb(52 211 153)' : 'rgb(64 64 64)'
+                }}
+                className="h-1 rounded-full"
+                transition={{ duration: 0.3 }}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-3">
+            {currentStep === 4 && (
+              <Button variant="ghost" disabled={connectionBusy} onClick={handleNext}>
+                Skip for now
+              </Button>
+            )}
+            <Button
+              onClick={handleNext}
+              disabled={currentStep === 4 && connectionBusy}
+              className="group"
+            >
+              <span className="text-sm font-medium">
+                {currentStep === steps.length - 1 ? 'Start using Off Grid AI' : 'Continue'}
+              </span>
+              {currentStep === steps.length - 1 ? (
+                <Check className="h-4 w-4" weight="bold" />
+              ) : (
+                <ArrowRight
+                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                  weight="bold"
+                />
+              )}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   )

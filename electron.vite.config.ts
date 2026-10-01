@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { createRendererContentSecurityPolicy } from './src/shared/renderer-csp'
@@ -22,6 +23,19 @@ const proRenderer = proExists ? resolve('pro/renderer/index.tsx') : stub
 // Baked into every bundle so runtime code can tell a pro build from a free build
 // without relying on an env var default (which can't distinguish "unset" from "pro").
 const proDefine = { __OFFGRID_PRO__: JSON.stringify(proExists) }
+// Explicitly select a Desktop registration. A Web application's confidential secret must not
+// enter an installed app. Google's Desktop client credential is a public application identity.
+const microsoftEnv = loadEnv('production', process.cwd(), 'MICROSOFT_')
+const microsoftClientId = process.env.MICROSOFT_CLIENT_ID || microsoftEnv.MICROSOFT_CLIENT_ID || ''
+const googleEnv = loadEnv('production', process.cwd(), 'GOOGLE_')
+const googleDesktopClient =
+  (process.env.GOOGLE_OAUTH_CLIENT_TYPE || googleEnv.GOOGLE_OAUTH_CLIENT_TYPE) === 'desktop'
+const googleClientId = googleDesktopClient
+  ? process.env.GOOGLE_CLIENT_ID || googleEnv.GOOGLE_CLIENT_ID || ''
+  : ''
+const googleClientSecret = googleDesktopClient
+  ? process.env.GOOGLE_CLIENT_SECRET || googleEnv.GOOGLE_CLIENT_SECRET || ''
+  : ''
 
 // Sourcemaps, for one purpose: making the e2e run's coverage land on source.
 //
@@ -38,7 +52,12 @@ const rendererContentSecurityPolicy = createRendererContentSecurityPolicy(render
 
 export default defineConfig({
   main: {
-    define: proDefine,
+    define: {
+      ...proDefine,
+      __OFFGRID_MICROSOFT_CLIENT_ID__: JSON.stringify(microsoftClientId),
+      __OFFGRID_GOOGLE_CLIENT_ID__: JSON.stringify(googleClientId),
+      __OFFGRID_GOOGLE_CLIENT_SECRET__: JSON.stringify(googleClientSecret)
+    },
     build: {
       sourcemap: coverageSourcemap,
       // The embedding worker is a SECOND main-process entry, bundled beside index.js so

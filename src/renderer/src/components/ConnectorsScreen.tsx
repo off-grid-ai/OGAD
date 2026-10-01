@@ -20,6 +20,9 @@ import {
 } from './connectorCatalog'
 import slackLogo from '@/assets/logos/slack.svg'
 import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
+import { QuickConnections } from './QuickConnections'
+import { QUICK_CONNECTION_IDS } from './quickConnectionCatalog'
+import { CONNECTIONS_CHANGED_EVENT } from './useQuickConnection'
 
 // Brands Simple Icons dropped (trademark) → bundled local logos, keyed by catalog id.
 const LOGO_OVERRIDE: Record<string, string> = { slack: slackLogo }
@@ -280,10 +283,21 @@ export function ConnectorsScreen(): ReactElement {
   }, [])
   useEffect(() => {
     void load()
+    const changed = (): void => {
+      void load()
+    }
+    window.addEventListener(CONNECTIONS_CHANGED_EVENT, changed)
+    return () => window.removeEventListener(CONNECTIONS_CHANGED_EVENT, changed)
   }, [load])
 
   const installed = new Set(items.map((i) => i.name.toLowerCase()))
-  const gallery = CONNECTOR_CATALOG.filter((e) => e.ready && !installed.has(e.name.toLowerCase()))
+  const gallery = CONNECTOR_CATALOG.filter(
+    (e) =>
+      e.ready &&
+      !QUICK_CONNECTION_IDS.includes(e.id) &&
+      !(getSlot(SLOTS.quickConnectionProviders) && ['gmail', 'google-calendar'].includes(e.id)) &&
+      !installed.has(e.name.toLowerCase())
+  )
 
   const doConnect = async (
     entry: CatalogEntry,
@@ -458,11 +472,19 @@ export function ConnectorsScreen(): ReactElement {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        {detailId == null && tab !== 'connected' && (
+          <div className="mb-6">
+            <QuickConnections />
+          </div>
+        )}
         {(() => {
           const detail = detailId != null ? items.find((c) => c.id === detailId) : null
           if (detail) {
             const dcat = CONNECTOR_CATALOG.find((x) => x.name === detail.name)
-            const dNotReady = dcat != null && !dcat.ready // preview/unverified — don't expose Test/Sync
+            const dNotReady =
+              dcat != null &&
+              !dcat.ready &&
+              !(detail.tools && detail.tools !== '[]' && detail.url?.startsWith('offgrid-')) // preview/unverified — don't expose Test/Sync
             const dtools = detail.tools
               ? (JSON.parse(detail.tools) as { name: string; description?: string }[])
               : []
@@ -826,10 +848,12 @@ export function ConnectorsScreen(): ReactElement {
                     <div className="space-y-2">
                       {items.map((c) => {
                         const cat = CONNECTOR_CATALOG.find((x) => x.name === c.name)
-                        // A connector whose catalog entry is not `ready` is a preview/unverified
-                        // integration (e.g. Gmail, Google Calendar) — never present it as working
-                        // "connected", even if a stale row exists. Show it as disabled.
-                        const notReady = cat != null && !cat.ready
+                        // Preview catalog entries stay disabled. A verified internal local provider
+                        // can supply working tools without that catalog's third-party server.
+                        const notReady =
+                          cat != null &&
+                          !cat.ready &&
+                          !(c.tools && c.tools !== '[]' && c.url?.startsWith('offgrid-'))
                         return (
                           <button
                             key={c.id}
