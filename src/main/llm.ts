@@ -1602,6 +1602,10 @@ export class LLMService {
     opts: {
       temperature?: number
       topP?: number
+      topK?: number
+      minP?: number
+      presencePenalty?: number
+      repetitionPenalty?: number
       thinking?: boolean
       signal?: AbortSignal
       tools?: unknown[]
@@ -1614,6 +1618,16 @@ export class LLMService {
   ): Promise<StreamResult> {
     const remote = this.activeRemoteTextModel()
     if (remote) {
+      if (
+        opts.topK !== undefined ||
+        opts.minP !== undefined ||
+        opts.presencePenalty !== undefined ||
+        opts.repetitionPenalty !== undefined
+      ) {
+        throw new Error(
+          'The remote inference path does not support the requested model-specific top-k, min-p, presence-penalty, or repetition-penalty values.'
+        )
+      }
       const result = await this.completeRemote(remote, messages, onDelta, {
         timeoutMs,
         maxTokens: opts.maxTokens,
@@ -1640,6 +1654,14 @@ export class LLMService {
         temperature: opts.temperature ?? this.temperature,
         ...this.samplingPayload(),
         ...(opts.topP === undefined ? {} : { top_p: opts.topP }),
+        ...(opts.topK === undefined ? {} : { top_k: opts.topK }),
+        ...(opts.minP === undefined ? {} : { min_p: opts.minP }),
+        ...(opts.presencePenalty === undefined
+          ? {}
+          : { presence_penalty: opts.presencePenalty }),
+        ...(opts.repetitionPenalty === undefined
+          ? {}
+          : { repeat_penalty: opts.repetitionPenalty }),
         stream: true,
         // Ask for the token counts. Without this the final chunk carries no usage, so the app can
         // report how long a generation took but never how many tokens it produced.
