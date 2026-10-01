@@ -12,6 +12,11 @@ export interface VisionModelArtifacts {
 export interface VisionPolicyHistoryStep {
   response: string
   actionText: string
+  /** Separated reasoning from this operator turn. Replayed only by profiles
+   * whose engine accepts historical reasoning_content. */
+  reasoningContent?: string
+  /** Execution and fresh-observation result for this transition. */
+  result?: string
   /** Recent visual state. Older steps keep text only after the image window collapses. */
   screenshotDataUrl?: string
 }
@@ -61,6 +66,8 @@ export interface VisionPolicyCoordinateFrame {
 export interface VisionPolicyMessage {
   role: 'system' | 'user' | 'assistant'
   content: string | ContentPart[]
+  /** OpenAI-compatible historical reasoning channel. */
+  reasoning_content?: string
 }
 
 export interface VisionPolicyToolCall {
@@ -84,6 +91,10 @@ export interface VisionPolicyRequest {
   toolChoice?: string
   temperature?: number
   topP?: number
+  topK?: number
+  minP?: number
+  presencePenalty?: number
+  repetitionPenalty?: number
   /** Preserve the model's inline <think> protocol while explicitly enabling its template mode. */
   enableThinking?: boolean
   disableThinking?: boolean

@@ -131,6 +131,10 @@ export async function runVisionPolicyRequest(
             {
               temperature: request.temperature,
               topP: request.topP,
+              topK: request.topK,
+              minP: request.minP,
+              presencePenalty: request.presencePenalty,
+              repetitionPenalty: request.repetitionPenalty,
               thinking: request.enableThinking === true && request.disableThinking !== true,
               responseFormat: request.responseFormat,
               tools: request.tools,

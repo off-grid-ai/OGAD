@@ -15,7 +15,10 @@ import {
   resolveVisionModelAdapter,
   resolveVisionModelAdapterForStrategy
 } from './model-adapters'
-import { generalVisionOperatorAdapter } from './model-adapters/general-vision-operator'
+import {
+  bonsaiQwenVisionOperatorAdapter,
+  generalVisionOperatorAdapter
+} from './model-adapters/general-vision-operator'
 import type {
   VisionModelAdapter,
   VisionModelArtifacts,
@@ -91,6 +94,9 @@ export async function getComputerUseActiveModelProjection(
     ? remoteVisionModelId(remote.id, remote.model)
     : dependencies.selectedChatId()
   const specialistModelId = dependencies.selectedSpecialistId()
+  const artifacts = dependencies.activeArtifacts()
+  const directBonsaiOperator =
+    !remote && Boolean(artifacts && bonsaiQwenVisionOperatorAdapter.matches(artifacts))
   if (strategy === 'same_as_chat') {
     return {
       strategy,
@@ -135,6 +141,13 @@ export async function getComputerUseActiveModelProjection(
       models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
     }
     return { strategy, strategyLabel: 'Decision + Reasoning', models }
+  }
+  if (strategy === 'text_plus_specialist' && directBonsaiOperator && chatModelId) {
+    return {
+      strategy,
+      strategyLabel: 'Bonsai direct operator',
+      models: [await projectedModel('reasoner', chatModelId, false, dependencies)]
+    }
   }
   const models: ComputerUseActiveModel[] = []
   if (chatModelId) {
@@ -241,6 +254,10 @@ export async function withVisionTaskModelStrategy<T>(
 ): Promise<T> {
   const strategy = dependencies.strategy()
   if (strategy === 'text_plus_specialist') {
+    const reasoner = activeChatSelection(dependencies)
+    if (reasoner.adapter === bonsaiQwenVisionOperatorAdapter) {
+      return task(await directSession(environment, reasoner, dependencies))
+    }
     return task(await hybridSession(environment, dependencies))
   }
   if (strategy === 'same_as_chat') {

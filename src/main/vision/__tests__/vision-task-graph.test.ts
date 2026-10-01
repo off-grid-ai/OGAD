@@ -41,6 +41,7 @@ function action(point = { x: 100, y: 295 }): VisionPolicyDecision {
     kind: 'actions',
     actionText: 'Click the visible control',
     actions: [{ type: 'click', point }],
+    expectedEffect: 'The requested panel is visible.',
     decisionRationale: 'The point is visibly inside the named control.'
   }
 }
@@ -197,6 +198,26 @@ describe('runVisionTaskGraph', () => {
     expect(w.observations.map((item) => item.result)).toEqual(['reviewed', 'actuated', 'terminal'])
   })
 
+  it('returns an inconclusive expected-state mismatch to the same operator on a fresh observation', async () => {
+    const w = workflow([action(), complete(), complete()])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
+    const transitionResults: Array<Array<string | undefined>> = []
+    const decide = w.deps.decide
+    w.deps.decide = async (input) => {
+      transitionResults.push(input.policyHistory.map((step) => step.result))
+      return decide(input)
+    }
+
+    const result = await runVisionTaskGraph('Use the visible control.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(transitionResults[1]).toEqual([
+      expect.stringContaining(
+        'Expected state: The requested panel is visible. Observed result: The expected state is not verified automatically.'
+      )
+    ])
+  })
+
   it('blocks a nearby repeated click and recovers with a different visible target', async () => {
     const w = workflow([
       action(),
@@ -282,11 +303,24 @@ describe('runVisionTaskGraph', () => {
     const w = workflow([action(), complete(), complete()])
     w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
     w.deps.screen.actuate = async () => ({ rejected: 'The captured viewport changed.' })
+    const transitionResults: Array<Array<string | undefined>> = []
+    const decide = w.deps.decide
+    w.deps.decide = async (input) => {
+      transitionResults.push(input.policyHistory.map((step) => step.result))
+      return decide(input)
+    }
 
     const result = await runVisionTaskGraph('Use the visible control.', w.deps)
 
     expect(result.ok).toBe(true)
-    expect(w.policyHistory).toEqual([[], [], []])
+    expect(w.policyHistory).toEqual([
+      [],
+      ['Click the visible control'],
+      ['Click the visible control']
+    ])
+    expect(transitionResults[1]).toEqual([
+      'Action was rejected before execution: The captured viewport changed.'
+    ])
     expect(w.observations.map((item) => item.result)).toEqual([
       'reviewed',
       'blocked',

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TaskExecutionPlan } from '../../../shared/task-execution-plan'
 import { llm } from '../../llm'
 import {
+  bonsaiQwenVisionOperatorAdapter,
   generalVisionOperatorAdapter,
   generalVisionPolicyFailure
 } from '../model-adapters/general-vision-operator'
@@ -54,7 +55,9 @@ function perform(
     summary: 'Open the visible result.',
     visible_evidence: 'The result control is visible.',
     action,
-    action_reason: 'The structured point is inside the visible control.'
+    action_reason: 'The structured point is inside the visible control.',
+    action_intent: 'Open the visible result.',
+    expected_state: 'The result panel is visible.'
   })
 }
 
@@ -114,8 +117,57 @@ describe('general vision native tool policy', () => {
   it('maps a typed normalized point to encoded pixels without an action-text parser', () => {
     expect(parseGeneralVisionToolResponse(perform(), bounds)).toMatchObject({
       kind: 'actions',
+      actionText: 'Open the visible result.',
+      expectedEffect: 'The result panel is visible.',
       actions: [{ type: 'click', point: { x: 287, y: 227 } }]
     })
+  })
+
+  it('uses the Bonsai Qwen thinking profile and replays ordered trajectory reasoning', () => {
+    const adapter = resolveVisionModelAdapter({
+      id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
+      primaryFile: 'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      projectorFile: 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf',
+      availableFiles: [
+        'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+        'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf'
+      ]
+    })
+    const request = adapter.buildRequest({
+      goal: 'Open the result.',
+      currentScreenshotDataUrl: 'data:image/png;base64,current',
+      coordinateFrame: { encoded: bounds, source: bounds },
+      history: [
+        {
+          response: '{"tool_calls":[{"name":"perform_action"}]}',
+          actionText: 'Open the menu.',
+          reasoningContent: 'The menu button is visible.',
+          result: 'The menu opened.',
+          screenshotDataUrl: 'data:image/png;base64,prior'
+        }
+      ],
+      recentSteps: ['Open the menu.'],
+      olderVisualFacts: []
+    })
+
+    expect(adapter).toBe(bonsaiQwenVisionOperatorAdapter)
+    expect(request).toMatchObject({
+      temperature: 1,
+      topP: 0.95,
+      topK: 20,
+      minP: 0,
+      presencePenalty: 0,
+      repetitionPenalty: 1
+    })
+    expect(request.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          reasoning_content: 'The menu button is visible.'
+        }),
+        expect.objectContaining({ role: 'user', content: 'Transition result: The menu opened.' })
+      ])
+    )
   })
 
   it('routes milestone, rethink, and user handoff from their top-level tools', () => {
@@ -182,6 +234,8 @@ describe('general vision native tool policy', () => {
           visible_evidence: 'It is visible.',
           action: { type: 'click', point: { x: 200, y: 300 } },
           action_reason: 'It is in the control.',
+          action_intent: 'Open it.',
+          expected_state: 'It is open.',
           extra: true
         }),
         bounds

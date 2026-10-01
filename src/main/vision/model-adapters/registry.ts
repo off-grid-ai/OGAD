@@ -1,6 +1,9 @@
 import type { ComputerUseModelStrategy } from '../../../shared/computer-use-settings'
 import type { VisionModelAdapter, VisionModelArtifacts } from './types'
-import { generalVisionOperatorAdapter } from './general-vision-operator'
+import {
+  bonsaiQwenVisionOperatorAdapter,
+  generalVisionOperatorAdapter
+} from './general-vision-operator'
 import { fara15Adapter } from './fara-1-5'
 import { holo31Adapter } from './holo-3-1'
 import { uiMateAdapter } from './ui-mate'
@@ -13,6 +16,7 @@ const adapters: readonly VisionModelAdapter[] = [
   holo31Adapter,
   uiMateAdapter,
   uiTarsAdapter,
+  bonsaiQwenVisionOperatorAdapter,
   generalVisionOperatorAdapter
 ]
 
@@ -28,8 +32,11 @@ export function resolveVisionModelAdapterForStrategy(
   strategy: Exclude<ComputerUseModelStrategy, 'text_plus_specialist'>
 ): VisionModelAdapter {
   if (strategy === 'same_as_chat') {
-    generalVisionOperatorAdapter.assertCapabilities(model)
-    return generalVisionOperatorAdapter
+    const operator = bonsaiQwenVisionOperatorAdapter.matches(model)
+      ? bonsaiQwenVisionOperatorAdapter
+      : generalVisionOperatorAdapter
+    operator.assertCapabilities(model)
+    return operator
   }
   return resolveVisionModelAdapter(model)
 }

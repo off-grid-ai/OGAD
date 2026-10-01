@@ -130,7 +130,7 @@ function actionEffect(
   const semanticComparable = before.semantic !== undefined && after.semantic !== undefined
   const semanticChanged = semanticComparable && before.semantic !== after.semantic
   if (semanticChanged) {
-    return { effect: 'confirmed', semanticComparable, semanticChanged, visualComparable: false }
+    return { effect: 'unverifiable', semanticComparable, semanticChanged, visualComparable: false }
   }
   if (!before.visual || !after.visual || before.visual.length !== after.visual.length) {
     return {
@@ -146,15 +146,15 @@ function actionEffect(
   }
   const meanDelta = delta / (before.visual.length * 255)
   const local = localVisualChange(before.visual, after.visual, previousAction)
-  const visualConfirmed =
+  const visualChanged =
     meanDelta >= VISUAL_CONFIRMED_MEAN_DELTA ||
     (local !== undefined &&
       local.meanDelta >= VISUAL_LOCAL_CONFIRMED_MEAN_DELTA &&
       local.strongPixels >= VISUAL_LOCAL_STRONG_PIXEL_COUNT)
   const visuallyUnchanged = meanDelta <= VISUAL_NOOP_MEAN_DELTA
   return {
-    effect: visualConfirmed
-      ? 'confirmed'
+    effect: visualChanged
+      ? 'unverifiable'
       : visuallyUnchanged && semanticComparable
         ? 'suspected_noop'
         : 'unverifiable',
@@ -480,6 +480,14 @@ class VisionTaskGraphRuntime {
         )
         this.previousActionEffect = measurement.effect
         this.previousExpectedEffect = this.pendingExpectedEffect
+        const lastTransition = this.policyHistory.at(-1)
+        if (lastTransition) {
+          const observed =
+            measurement.effect === 'suspected_noop'
+              ? 'The expected state was not observed; the screen and Accessibility state were unchanged.'
+              : 'The expected state is not verified automatically. Inspect this fresh observation and compare it with the expected state; unrelated screen change is inconclusive.'
+          lastTransition.result = `Expected state: ${this.pendingExpectedEffect ?? 'unspecified'}. Observed result: ${observed}`
+        }
         this.note(`action effect: ${this.previousActionEffect}`)
         console.log('[vision][verification] action effect', {
           action: this.previousVerifiedAction?.action.type,
@@ -574,6 +582,7 @@ class VisionTaskGraphRuntime {
       this.pendingPolicyHistory = {
         response: grounding.response,
         actionText: this.decision.actionText,
+        ...(this.currentReasoning ? { reasoningContent: this.currentReasoning } : {}),
         ...(grounding.screenshotDataUrl ? { screenshotDataUrl: grounding.screenshotDataUrl } : {})
       }
       return { route: 'handle_decision' }
@@ -675,7 +684,7 @@ class VisionTaskGraphRuntime {
       if (repeatedType) {
         this.duplicateTypeRecoveries += 1
         const summary = 'Repeated text input blocked because the same text was already typed.'
-        this.discardPendingPolicyHistory()
+        this.rejectPendingPolicyHistory(summary)
         this.observeDecision('blocked', summary)
         this.note(summary)
         this.checkpoint()
@@ -701,7 +710,7 @@ class VisionTaskGraphRuntime {
         const summary = `Repeated click region blocked at (${repeatedClick.point.x}, ${repeatedClick.point.y}). The previous click marker shows where the earlier attempt landed.`
         const recovery =
           'Do not guess another control from its appearance or position. Use a visibly identified control, or use the operating system launcher or search when the target application is not visible.'
-        this.discardPendingPolicyHistory()
+        this.rejectPendingPolicyHistory(`${summary} ${recovery}`)
         this.observeDecision('blocked', summary)
         this.note(summary)
         this.note(recovery)
@@ -899,7 +908,7 @@ class VisionTaskGraphRuntime {
       return { route: 'gate' }
     }
     if (executionRejection) {
-      this.discardPendingPolicyHistory()
+      this.rejectPendingPolicyHistory(`Action was rejected before execution: ${executionRejection}`)
       this.observeDecision('blocked', executionRejection)
       this.progress('checking', 'Taking a fresh observation after the action was not executed')
       this.checkpoint()
@@ -910,6 +919,9 @@ class VisionTaskGraphRuntime {
     else {
       this.pendingActionEvidence = captured.evidence
       this.pendingExpectedEffect = decision.expectedEffect
+      if (this.pendingPolicyHistory) {
+        this.pendingPolicyHistory.result = `Action executed. Expected state: ${decision.expectedEffect ?? 'unspecified'}. A fresh observation is required for verification.`
+      }
       this.commitPendingPolicyHistory()
     }
     const blockedPhase: ComputerUsePhase = this.deps.guard.isHalted ? 'stopped' : 'paused'
@@ -1089,6 +1101,12 @@ class VisionTaskGraphRuntime {
 
   private discardPendingPolicyHistory(): void {
     this.pendingPolicyHistory = undefined
+  }
+
+  private rejectPendingPolicyHistory(result: string): void {
+    if (!this.pendingPolicyHistory) return
+    this.pendingPolicyHistory.result = result
+    this.commitPendingPolicyHistory()
   }
 
   private requireCaptured(): CapturedStep {

@@ -79,7 +79,9 @@ describe('macOS Computer Use journey', () => {
         summary: 'Open the visible control.',
         visible_evidence: 'The control is visible at the center-left of the screen.',
         action: { type: 'click', point: { x: 500, y: 250 } },
-        action_reason: 'The point is inside the visible control.'
+        action_reason: 'The point is inside the visible control.',
+        action_intent: 'Open the visible control.',
+        expected_state: 'The control is open.'
       }),
       toolResponse('complete_milestone', {
         summary: 'The control is open.',
@@ -253,7 +255,9 @@ describe('macOS Computer Use journey', () => {
         summary: 'Open the visible matching item.',
         visible_evidence: 'The matching item is visible below the search field.',
         action: { type: 'click', point: { x: 500, y: 600 } },
-        action_reason: 'The point is inside the matching result.'
+        action_reason: 'The point is inside the matching result.',
+        action_intent: 'Open the visible matching item.',
+        expected_state: 'The matching item is open.'
       }),
       toolResponse('complete_milestone', {
         summary: 'The matching item is open.',
@@ -337,7 +341,9 @@ describe('macOS Computer Use journey', () => {
         summary: 'Open the visible matching person.',
         visible_evidence: 'The matching person is visible below the name field.',
         action: { type: 'click', point: { x: 500, y: 600 } },
-        action_reason: 'The point is inside the matching result.'
+        action_reason: 'The point is inside the matching result.',
+        action_intent: 'Open the visible matching person.',
+        expected_state: 'The matching person is open.'
       }),
       toolResponse('complete_milestone', {
         summary: 'The matching person is open.',

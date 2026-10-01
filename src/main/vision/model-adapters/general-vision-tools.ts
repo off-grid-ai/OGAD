@@ -222,7 +222,9 @@ function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
       'summary',
       'visible_evidence',
       'action',
-      'action_reason'
+      'action_reason',
+      'action_intent',
+      'expected_state'
     ])
   ])
   if ('error' in common) return common
@@ -233,15 +235,19 @@ function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
   }
   const action = structuredAction(value.action, bounds)
   const actionReason = normalizedText(value.action_reason)
+  const actionIntent = normalizedText(value.action_intent)
+  const expectedState = normalizedText(value.expected_state)
   const continuation = optionalContinuation(value)
   if (!action) return { error: 'action was not one supported structured action' }
   if (!actionReason) return { error: 'action_reason was empty or was not text' }
+  if (!actionIntent) return { error: 'action_intent was empty or was not text' }
+  if (!expectedState) return { error: 'expected_state was empty or was not text' }
   if (continuation === null) return { error: 'continuation was not a valid bounded capsule' }
   if (action.type === 'wait') {
     return {
       decision: {
         kind: 'wait',
-        actionText: 'wait',
+        actionText: actionIntent,
         durationMs: action.durationMs ?? 0,
         decisionRationale: common.visibleEvidence,
         ...(continuation ? { continuation } : {})
@@ -251,8 +257,9 @@ function performAction(value: ObjectValue, bounds: Bounds): DecisionResult {
   return {
     decision: {
       kind: 'actions',
-      actionText: common.summary,
+      actionText: actionIntent,
       actions: [action],
+      expectedEffect: expectedState,
       decisionRationale: `${common.visibleEvidence} ${actionReason}`,
       ...(continuation ? { continuation } : {})
     }
@@ -408,6 +415,8 @@ export const GENERAL_VISION_TOOLS = [
       visible_evidence: text,
       action: structuredActionSchema,
       action_reason: text,
+      action_intent: text,
+      expected_state: text,
       continuation: CONTINUATION_CAPSULE_SCHEMA
     },
     required: [
@@ -416,6 +425,8 @@ export const GENERAL_VISION_TOOLS = [
       'visible_evidence',
       'action',
       'action_reason',
+      'action_intent',
+      'expected_state',
       'continuation'
     ]
   }),

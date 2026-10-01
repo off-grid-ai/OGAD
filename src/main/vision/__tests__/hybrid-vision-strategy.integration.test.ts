@@ -40,6 +40,53 @@ function imageFrom(request: VisionPolicyRequest): string {
 }
 
 describe('Text + Specialist visual task journey', () => {
+  it('keeps Bonsai as the end-to-end operator without loading the grounding specialist', async () => {
+    const bonsai = {
+      id: 'prism-ml/Ternary-Bonsai-2-27B-gguf',
+      primaryFile: 'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+      projectorFile: 'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf',
+      availableFiles: [
+        'Ternary-Bonsai-2-27B-PQ2_0.gguf',
+        'Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf'
+      ]
+    }
+    const dependencies: VisionTaskModelStrategyDependencies = {
+      strategy: () => 'text_plus_specialist',
+      activeArtifacts: () => bonsai,
+      activeRemote: () => null,
+      selectedChatId: () => bonsai.id,
+      selectedSpecialistId: () => 'mradermacher/UI-TARS-1.5-7B-GGUF',
+      resolveIdentity: async (modelId) => ({ modelId, modelName: modelId }),
+      withSpecialist: async () => {
+        throw new Error('Bonsai direct operation must not load the grounding specialist.')
+      },
+      runReasoner: async () => {
+        throw new Error('Bonsai direct operation must not use the hybrid reasoner boundary.')
+      }
+    }
+
+    const adapterId = await withVisionTaskModelStrategy(
+      'desktop',
+      async (session) => session.adapter.id,
+      dependencies
+    )
+    const projection = await getComputerUseActiveModelProjection(dependencies)
+
+    expect(adapterId).toBe('bonsai-qwen-vision-operator')
+    expect(projection).toEqual({
+      strategy: 'text_plus_specialist',
+      strategyLabel: 'Bonsai direct operator',
+      models: [
+        {
+          role: 'reasoner',
+          modelId: bonsai.id,
+          modelName: bonsai.id,
+          remote: false
+        }
+      ]
+    })
+  })
+
   it('turns one public URL decision into one deterministic navigation action', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-hybrid-navigation-'))
     tempDirs.push(directory)
