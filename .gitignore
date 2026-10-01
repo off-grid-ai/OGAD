@@ -85,3 +85,11 @@ coverage-e2e/
 
 # Pinned macOS image/video runtime source and build cache
 /build/image-macos/
+
+# Local visitor analytics, marketing research, and verification artifacts
+/outputs/
+/docs/COMPETITOR_MARKET_REPORT_*.md
+
+# New screenshot captures stay local; existing documentation assets remain tracked
+/docs/screenshots/
+/e2e/screenshots/
