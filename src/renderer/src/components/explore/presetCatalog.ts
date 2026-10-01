@@ -214,7 +214,7 @@ ${EXECUTION_RULES}`,
               help: 'Maximum distance or travel time and mode.',
               kind: 'text',
               required: true,
-              defaultValue: 'Within 20 minutes by car'
+              defaultValue: 'The closer the better'
             },
             {
               id: 'party',
