@@ -13,6 +13,7 @@ import {
   deactivateProFeaturesMain,
   loadProFeaturesMain,
   proEnabled,
+  proMainActivationFailed,
   proEntitlementBootstrapEnabled
 } from './bootstrap/loadProFeaturesMain'
 import { requestApplicationRelaunch } from './shutdown'
@@ -45,7 +46,13 @@ export function setupLicenseIpc(): void {
     if (effectiveInfo.isPro) {
       licenseChangeTask = loadProFeaturesMain()
         .then(() => {
-          if (revision === licenseChangeRevision) publish()
+          if (revision !== licenseChangeRevision) return
+          // Unlocking Pro screens whose main handlers never registered would leave them broken.
+          if (proMainActivationFailed()) {
+            console.error('[pro] entitlement is valid but paid features failed to start')
+            return
+          }
+          publish()
         })
         .catch(console.error.bind(console, '[pro] entitlement activation failed'))
       return

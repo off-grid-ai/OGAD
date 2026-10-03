@@ -81,6 +81,21 @@ describe('ephemeral cache cleanup', () => {
     expect(boundary.clearCalls).toEqual([{ dataTypes: ['cache'] }])
   })
 
+  it('clears an incomplete download left by an earlier session', async () => {
+    // No download history: the transfer was interrupted before this launch.
+    const modelsDir = path.join(temporaryDataDir, 'models')
+    fs.mkdirSync(modelsDir, { recursive: true })
+    const orphan = path.join(modelsDir, 'interrupted-model.gguf.part')
+    const installed = path.join(modelsDir, 'installed.gguf')
+    fs.writeFileSync(orphan, Buffer.alloc(2_048))
+    fs.writeFileSync(installed, 'keep')
+    boundary.cacheBytes = 0
+
+    await expect(clearEphemeralCache()).resolves.toEqual({ success: true, freedBytes: 2_048 })
+    expect(fs.existsSync(orphan)).toBe(false)
+    expect(fs.readFileSync(installed, 'utf8')).toBe('keep')
+  })
+
   it('does not report success when Electron rejects the cleanup', async () => {
     boundary.cleanupFails = true
 

@@ -75,10 +75,18 @@ export function ArtifactCanvas({
   width?: number | null
   onResize?: (w: number) => void
 }) {
-  const [runtime, setRuntime] = useState<Record<string, string> | null>(null)
+  // Runtime libraries are tagged with the kind they were loaded for, so a kind change never
+  // builds a preview with the previous kind's libraries.
+  const [loadedRuntime, setLoadedRuntime] = useState<{
+    kind: Artifact['kind']
+    libs: Record<string, string>
+  } | null>(null)
+  const runtime = loadedRuntime?.kind === artifact.kind ? loadedRuntime.libs : null
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const [resizing, setResizing] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState('')
+  // The preview URL is tagged with the HTML it was built from, so the previous artifact's
+  // preview is never shown while the new one is being registered.
+  const [preview, setPreview] = useState<{ html: string; url: string } | null>(null)
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null)
   const artifactAudioRef = useRef<HTMLAudioElement | null>(null)
   // Holds the active drag's teardown so we can force it on unmount — otherwise
@@ -128,10 +136,10 @@ export function ArtifactCanvas({
     window.api
       .artifactRuntime?.(artifact.kind)
       .then((r: Record<string, string>) => {
-        if (alive) setRuntime(r)
+        if (alive) setLoadedRuntime({ kind: artifact.kind, libs: r })
       })
       .catch(() => {
-        if (alive) setRuntime({})
+        if (alive) setLoadedRuntime({ kind: artifact.kind, libs: {} })
       })
     return () => {
       alive = false
@@ -212,11 +220,12 @@ if (_Comp) { ReactDOM.createRoot(_root).render(React.createElement(_Comp)); }
 else { __ogShow('No React component found — define a component named App or a default export.'); }
 </script></body></html>`
   }, [artifact, runtime])
+  const previewUrl = preview?.html === documentHtml ? preview.url : ''
 
   useEffect(() => {
     let active = true
     let registeredUrl: string | undefined
-    setPreviewUrl('')
+    setPreview(null)
 
     if (documentHtml) {
       window.api
@@ -224,13 +233,13 @@ else { __ogShow('No React component found — define a component named App or a 
         .then((url) => {
           registeredUrl = url
           if (active) {
-            setPreviewUrl(url)
+            setPreview({ html: documentHtml, url })
           } else {
             revokePreview(url)
           }
         })
         .catch(() => {
-          if (active) setPreviewUrl('')
+          if (active) setPreview(null)
         })
     }
 
@@ -519,7 +528,7 @@ else { __ogShow('No React component found — define a component named App or a 
         ) : previewUrl ? (
           <iframe
             ref={previewFrameRef}
-            key={artifact.code.length}
+            key={previewUrl}
             title="artifact"
             sandbox="allow-scripts"
             src={previewUrl}

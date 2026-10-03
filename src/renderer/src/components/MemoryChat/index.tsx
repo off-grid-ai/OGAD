@@ -659,14 +659,28 @@ export function MemoryChat({
   }, [])
   // Persist the global image-composer params only when they differ from the latest
   // main-owned values. Hydration and settings invalidations update the snapshot first.
+  // Seed and negative prompt are typed, so they are written once typing pauses rather than on
+  // every character.
   useEffect(() => {
     console.log('MemoryChat effect: persist image seed')
-    persistChangedPreference('imgSeed', imgSeed)
+    const timer = setTimeout(() => persistChangedPreference('imgSeed', imgSeed), 400)
+    return () => clearTimeout(timer)
   }, [imgSeed, persistChangedPreference])
   useEffect(() => {
     console.log('MemoryChat effect: persist negative prompt')
-    persistChangedPreference('imgNegative', imgNegative)
+    const timer = setTimeout(() => persistChangedPreference('imgNegative', imgNegative), 400)
+    return () => clearTimeout(timer)
   }, [imgNegative, persistChangedPreference])
+  // Leaving the composer within the pause must not drop the last edit: write what is pending.
+  const typedImageParams = useRef({ imgSeed, imgNegative })
+  typedImageParams.current = { imgSeed, imgNegative }
+  useEffect(
+    () => () => {
+      persistChangedPreference('imgSeed', typedImageParams.current.imgSeed)
+      persistChangedPreference('imgNegative', typedImageParams.current.imgNegative)
+    },
+    [persistChangedPreference]
+  )
   useEffect(() => {
     console.log('MemoryChat effect: persist image enhancement preference')
     persistChangedPreference('enhanceImagePrompts', enhanceImg)

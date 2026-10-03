@@ -291,6 +291,14 @@ export class LLMService {
   // a server that keeps dying (e.g. memory pressure on a too-large model) can NOT
   // thrash-respawn a multi-GB process forever.
   private restartTimes: number[] = []
+  // Launch-setting restarts are serialized and last-wins. A slider drag or a fast
+  // sequence of settings writes used to call stop()+init() once per change, so several
+  // spawns raced and an EARLIER one could win and leave the engine running arguments the
+  // user had already moved past. Each request takes the next id; a request whose id is no
+  // longer the latest is superseded and never spawns, and at most one spawn is ever in
+  // flight.
+  private launchRestartRequest = 0
+  private launchRestartQueue: Promise<void> = Promise.resolve()
   // Last ~50 stderr lines from llama-server, so we can explain WHY it died on
   // load (unknown arch / OOM / OS-too-old) instead of a blank "Down".
   private stderrTail: string[] = []
@@ -699,9 +707,7 @@ export class LLMService {
       this.draftModel = path.basename(compatibleSettings.draftModel)
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
-    try {
-      this.persist()
-    } catch (error) {
+    const restorePrior = (): void => {
       this.performanceMode = priorSettings.performanceMode ?? this.performanceMode
       this.temperature = priorSettings.temperature ?? this.temperature
       this.ctxSize = priorSettings.ctxSize ?? this.ctxSize
@@ -722,6 +728,11 @@ export class LLMService {
       this.draftModel = priorSettings.draftModel ?? this.draftModel
       this.userExplicit.clear()
       priorExplicit.forEach((field) => this.userExplicit.add(field))
+    }
+    try {
+      this.persist()
+    } catch (error) {
+      restorePrior()
       throw error
     }
     if (before) {
@@ -731,9 +742,52 @@ export class LLMService {
       )
     }
     if (launchChanged && !this.paused) {
+      // A running model is only replaced once the new launch succeeds. If it fails, the
+      // previous settings are restored and the previous model is relaunched - unless a newer
+      // launch change is already queued, which then owns the engine and its settings.
+      const wasRunning = this.initialized
+      const restart = this.restartForLaunchChange()
+      const request = this.launchRestartRequest
+      try {
+        await restart
+      } catch (error) {
+        if (!wasRunning || request !== this.launchRestartRequest) throw error
+        const attempted = this.getSettings()
+        restorePrior()
+        try {
+          this.persist()
+        } catch (persistError) {
+          console.error('[llm] could not restore settings after a failed relaunch:', persistError)
+        }
+        if (before) {
+          emitChangedLlmSettings(
+            attempted as Record<string, unknown>,
+            this.getSettings() as Record<string, unknown>
+          )
+        }
+        this.stop()
+        await this.init().catch((restartError: unknown) => {
+          console.error('[llm] could not relaunch the previous model:', restartError)
+        })
+        throw error
+      }
+    }
+  }
+
+  /** The engine owns restart policy: one spawn at a time, and the newest settings win. */
+  private async restartForLaunchChange(): Promise<void> {
+    const request = ++this.launchRestartRequest
+    const run = this.launchRestartQueue.then(async () => {
+      // A newer launch change is already queued and will spawn with the newest arguments,
+      // so this one has nothing left to do.
+      if (request !== this.launchRestartRequest) return
       this.stop()
       await this.init()
-    }
+    })
+    // The queue itself must never carry a rejection: a failed respawn is reported to the
+    // caller that asked for it, and the next request still gets its turn.
+    this.launchRestartQueue = run.catch(() => {})
+    await run
   }
 
   // Resolve the active model's files. The Models screen writes active-model.json

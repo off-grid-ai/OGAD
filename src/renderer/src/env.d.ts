@@ -274,7 +274,7 @@ interface RendererAPIOverrides {
   getDashboardStats: () => Promise<DashboardStats>
   extractMemory: (text: string) => Promise<{ summary: string; entities: string[]; topic: string }>
 
-  getChatSessions: (appName?: string) => Promise<ChatSessionRecord[]>
+  getChatSessions: () => Promise<ChatSessionRecord[]>
   getMemoriesForSession: (sessionId: string) => Promise<unknown[]>
   getEntitiesForSession: (sessionId: string) => Promise<SessionEntityRecord[]>
   getMemoryRecordsForSession: (sessionId: string) => Promise<SessionMemoryRecord[]>
@@ -313,7 +313,10 @@ interface RendererAPIOverrides {
 
   // RAG Conversations
   createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
-  getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
+  getRagConversations: (
+    projectId?: string | null,
+    page?: { limit?: number; updatedBefore?: string }
+  ) => Promise<RagConversation[]>
   onRagConversationsChanged?: (
     callback: (data: { conversationId: string; projectId: string | null }) => void
   ) => () => void

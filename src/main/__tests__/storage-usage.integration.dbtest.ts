@@ -100,4 +100,22 @@ describe('storage usage', () => {
       bytes: 8_192
     })
   })
+
+  it('clears a download interrupted in an earlier session and keeps installed models', async () => {
+    writeFixture(path.join('models', 'kept.gguf'), 2_048)
+    writeFixture(path.join('models', 'earlier-session.gguf.part'), 1_536)
+    fs.mkdirSync(path.join(testRoot, 'models', 'folder.part'), { recursive: true })
+
+    const before = await modelManager.getStorageInfo()
+    const result = await modelManager.clearInactiveDownloads()
+
+    expect(result.success).toBe(true)
+    expect(result.freedBytes).toBeGreaterThanOrEqual(1_536)
+    expect(fs.existsSync(path.join(testRoot, 'models', 'earlier-session.gguf.part'))).toBe(false)
+    expect(fs.existsSync(path.join(testRoot, 'models', 'kept.gguf'))).toBe(true)
+    // Only files are incomplete transfers; a directory that happens to end in .part is left alone.
+    expect(fs.existsSync(path.join(testRoot, 'models', 'folder.part'))).toBe(true)
+    const after = await modelManager.getStorageInfo()
+    expect(after.totalBytes).toBe(before.totalBytes - result.freedBytes)
+  })
 })

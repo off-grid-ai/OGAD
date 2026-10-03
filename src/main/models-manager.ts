@@ -1926,5 +1926,32 @@ export async function clearInactiveDownloads(): Promise<{
     const r = await clearDownload(id)
     freedBytes += r.freedBytes
   }
-  return { success: true, count: ids.length, freedBytes }
+  let count = ids.length
+  // A transfer interrupted in an earlier session (quit, crash, power loss) has no entry above,
+  // but its .part file still holds disk space. With nothing downloading or queued, every
+  // remaining .part file is an incomplete transfer.
+  const transfers = downloadQueue.counts()
+  if (transfers.running === 0 && transfers.queued === 0) {
+    const dir = llm.getModelsDir()
+    let entries: string[] = []
+    try {
+      entries = fs.readdirSync(dir)
+    } catch {
+      /* no models folder yet */
+    }
+    for (const name of entries) {
+      if (!name.endsWith('.part')) continue
+      const part = path.join(dir, name)
+      try {
+        const st = fs.statSync(part)
+        if (!st.isFile()) continue
+        fs.rmSync(part, { force: true })
+        freedBytes += st.size
+        count++
+      } catch {
+        /* removal failed; leave it for the next cleanup */
+      }
+    }
+  }
+  return { success: true, count, freedBytes }
 }
