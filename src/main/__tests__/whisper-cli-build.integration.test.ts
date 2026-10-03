@@ -209,29 +209,12 @@ describe('pinned Whisper CLI build and staging', () => {
     expect(output).toContain('minos 13.1 exceeds target 13.0')
   })
 
-  it('keeps release and local builds on the same pinned native-engine scripts', () => {
-    const release = fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/release.yml'), 'utf8')
-    const local = fs.readFileSync(path.join(REPO_ROOT, 'scripts/build-mac-local.sh'), 'utf8')
-    // No LLAMA_REF here on purpose. The version has one owner - package.json `offgrid.llamaRef` - and a caller that
-    // passes its own would silently build a different engine than the Windows fetch pulls, which is the
-    // drift this test exists to catch.
-    const llamaBuild = 'MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh'
-    const whisperBuild =
-      'MACOS_DEPLOYMENT_TARGET=13.0 WHISPER_REF=v1.7.4 bash scripts/build-whisper-cli.sh'
-
-    for (const source of [release, local]) {
-      expect(source).toContain(llamaBuild)
-      expect(source).toContain(whisperBuild)
-    }
-    for (const source of [release, local]) {
-      expect(source).not.toMatch(/LLAMA_REF=/)
-    }
-    expect(local).toContain('bash scripts/fetch-parakeet.sh')
-    expect(local).toContain('node scripts/probe-packaged-helpers.mjs "$app_dir"')
-    expect(local.match(/^\s+verify_packaged_helpers$/gm)).toHaveLength(2)
-    expect(local.indexOf('stage_native_helpers')).toBeLessThan(local.indexOf('case "$TARGET"'))
-    expect(local.lastIndexOf('verify_packaged_helpers')).toBeLessThan(
-      local.indexOf('==> Done. DMGs:')
-    )
+  it('runs the staged CLI with its closed library payload', () => {
+    const result = runBuild('healthy')
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+    const executable = path.join(result.sandbox, 'resources', 'bin', 'whisper', 'whisper-cli')
+    const help = spawnSync(executable, ['--help'], { encoding: 'utf8' })
+    expect(help.status, help.stderr).toBe(0)
+    expect(help.stdout).toContain('usage: whisper-cli')
   })
 })

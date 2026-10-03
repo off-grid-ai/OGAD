@@ -21,7 +21,7 @@ interface ReprocessingContextType {
 
 const ReprocessingContext = createContext<ReprocessingContextType | undefined>(undefined)
 
-export function ReprocessingProvider({ children }: { children: ReactNode }) {
+export function ReprocessingProvider({ children }: { children: ReactNode }): React.JSX.Element {
   const [reprocessing, setReprocessing] = useState(false)
   const [progress, setProgress] = useState<ReprocessProgress | null>(null)
   const [result, setResult] = useState<ReprocessResult | null>(null)
@@ -64,7 +64,7 @@ export function ReprocessingProvider({ children }: { children: ReactNode }) {
   )
 }
 
-export function useReprocessing() {
+export function useReprocessing(): ReprocessingContextType {
   const context = useContext(ReprocessingContext)
   if (!context) {
     throw new Error('useReprocessing must be used within a ReprocessingProvider')

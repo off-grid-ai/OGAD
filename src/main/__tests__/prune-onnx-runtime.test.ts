@@ -14,7 +14,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
 })
 
-function context(root: string) {
+function context(root: string): { appOutDir: string; electronPlatformName: string; arch: number; packager: { appInfo: { productFilename: string; }; }; } {
   return {
     appOutDir: root,
     electronPlatformName: 'linux',

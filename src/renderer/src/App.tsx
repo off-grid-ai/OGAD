@@ -32,9 +32,10 @@ import { UpgradeScreen } from './components/pro/UpgradeScreen'
 import {
   featureSupportsPlatform,
   getProFeature,
-  proFeatureComingSoon
+  proFeatureComingSoon,
+  landingView
 } from './components/pro/proCatalog'
-import { currentPlatform, isMac } from './lib/device'
+import { currentPlatform, primaryModifier } from './lib/device'
 import { NotificationProvider } from './hooks/NotificationProvider'
 import { useNotifications } from './hooks/useNotifications'
 import { ToastProvider } from './hooks/ToastProvider'
@@ -134,7 +135,7 @@ interface NavigationState {
   selectedProjectId: string | null
 }
 
-function ReprocessingBanner() {
+function ReprocessingBanner(): React.JSX.Element | null {
   const { reprocessing, progress } = useReprocessing()
   if (!reprocessing) return null
 
@@ -281,7 +282,7 @@ function ModelStatusDot({
   )
 }
 
-function AppContent() {
+function AppContent(): React.JSX.Element {
   const { addNotification, unreadCount } = useNotifications()
 
   // Main owns entitlement truth. The preload value seeds this renderer, then
@@ -329,9 +330,8 @@ function AppContent() {
     )
   }, [addNotification, isPro, proReady])
 
-  // Free users land on Models (download a model first, with the sidebar to
-  // explore); Mac Pro users land on Day. Never land on a locked or unavailable tab.
-  const [viewMode, commitViewMode] = useState<ViewMode>(isPro && isMac() ? 'day' : 'models')
+  // Open on Day only where the catalog supports it.
+  const [viewMode, commitViewMode] = useState<ViewMode>(landingView(currentPlatform(), isPro))
   const [settingsSection, setSettingsSection] = useState<string | null>(null)
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0)
   const [navigationSubroute, setNavigationSubroute] = useState<string | null>(null)
@@ -565,7 +565,7 @@ function AppContent() {
     }
     window.addEventListener('og:navigate', onNav)
     // Main-driven navigation (tray → a screen).
-    const offNav = window.api.onNavigate?.((v: string) => {
+    const offNav = window.api.onNavigate((v: string) => {
       navigateTo(v as ViewMode, () => {
         setNavigationSubroute(null)
         setSettingsSection(null)
@@ -573,7 +573,7 @@ function AppContent() {
     })
     return () => {
       window.removeEventListener('og:navigate', onNav)
-      offNav?.()
+      offNav()
     }
   }, [navigateTo])
 
@@ -914,7 +914,7 @@ function AppContent() {
 
   // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key === '[') {
         e.preventDefault()
         if (activeModelsOpen) setActiveModelsOpen(false)
@@ -1211,7 +1211,7 @@ function AppContent() {
                   onClick={navigateBack}
                   disabled={!canGoBack}
                   aria-label="Back"
-                  title="Back (⌘[)"
+                  title={`Back (${primaryModifier()}+[)`}
                   className={cn(
                     'flex items-center justify-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-800/40 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40',
                     sidebarOpen ? 'flex-1 px-2 py-1.5' : 'h-9 w-9'
@@ -1225,7 +1225,7 @@ function AppContent() {
                     onClick={navigateForward}
                     disabled={!canGoForward}
                     aria-label="Forward"
-                    title="Forward (⌘])"
+                    title={`Forward (${primaryModifier()}+])`}
                     className="flex items-center justify-center rounded-lg border border-neutral-800 bg-neutral-800/40 px-2 py-1.5 text-neutral-300 transition-colors hover:border-neutral-700 hover:bg-neutral-800 hover:text-white disabled:opacity-30 disabled:hover:bg-neutral-800/40"
                   >
                     <IconArrowRight className="h-4 w-4 shrink-0" />
@@ -1385,11 +1385,18 @@ function AppContent() {
                         activeSection={settingsSection}
                         onSectionChange={setSettingsSection}
                       />
+                    ) : isPro && !proReady ? (
+                      <div className="flex h-full items-center justify-center" role="status">
+                        <IconLoader2 className="h-5 w-5 animate-spin text-neutral-500" />
+                        <span className="sr-only">Loading Pro features</span>
+                      </div>
                     ) : !isPro ? (
                       <UpgradeScreen feature={getProFeature(viewMode)} />
                     ) : (
                       // Pro tabs: render through the pro view-router when active,
                       // otherwise show the upgrade writeup for that feature.
+                      // Context carries event callbacks; the router does not read their refs.
+                      // eslint-disable-next-line react-hooks/refs
                       (renderProView(viewMode, {
                         setView: (v) => navigateTo(v as ViewMode),
                         onNavigate: handleProNavigate,
@@ -1482,15 +1489,10 @@ function writeSidebarPinned(pinned: boolean): void {
   }
 }
 
-function App() {
+function App(): React.JSX.Element | null {
   // Onboarding runs FIRST — before the model/permission gate — so a new user sees
   // the intro, then goes straight to model selection (handled by PermissionGate).
-  const [onboarded, setOnboarded] = useState<boolean | null>(null)
-  useEffect(() => {
-    setOnboarded(localStorage.getItem('onboarding_completed') === 'true')
-  }, [])
-
-  if (onboarded === null) return null
+  const [onboarded, setOnboarded] = useState(() => localStorage.getItem('onboarding_completed') === 'true')
   if (!onboarded) return <Onboarding onComplete={() => setOnboarded(true)} />
 
   return (

@@ -17,7 +17,7 @@ export function currentPlatform(): DevicePlatform {
   return bridge?.platform ?? 'unknown'
 }
 
-/** The user-facing name for this machine ('Mac' on macOS, else 'device'). */
+/** The user-facing name for this machine, including its platform when known. */
 export function deviceNoun(opts?: { capitalize?: boolean }): string {
   return nounForPlatform(currentPlatform(), opts)
 }

@@ -42,7 +42,7 @@ const previousDataDir = process.env.OFFGRID_DATA_DIR
 
 function installLlamaBoundary(source: string): string {
   const binRoot = path.join(TMP_DIR, 'test-bin')
-  const executable = path.join(binRoot, 'llama', 'llama-server')
+  const executable = path.join(binRoot, process.platform === 'linux' ? 'llama-cpu' : 'llama', 'llama-server')
   fs.mkdirSync(path.dirname(executable), { recursive: true })
   fs.writeFileSync(executable, `#!/usr/bin/env node\n${source}\n`)
   fs.chmodSync(executable, 0o755)
@@ -403,7 +403,18 @@ describe('model gateway chat streaming', () => {
   it('downloads only the manually chosen model, activates it, and answers (#11)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
     process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
-      "setInterval(() => {}, 1000); process.on('SIGTERM', () => process.exit(0))"
+      String.raw`const http = require('node:http')
+const args = process.argv.slice(2)
+const port = Number(args[args.indexOf('--port') + 1])
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  if (req.url === '/health') return res.end(JSON.stringify({status:'ok'}))
+  if (req.url === '/v1/models') return res.end(JSON.stringify({data:[{id:'fixture-chat'}]}))
+  if (req.url === '/v1/chat/completions') return res.end(JSON.stringify({choices:[{message:{content:'manual model ready'}}]}))
+  res.statusCode=404; res.end('{}')
+})
+server.listen(port, '127.0.0.1')
+process.on('SIGTERM', () => server.close(() => process.exit(0)))`
     )
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -445,7 +456,18 @@ describe('model gateway chat streaming', () => {
   it('configures the recommended local baseline and activates every chosen model (#10)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
     process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
-      "setInterval(() => {}, 1000); process.on('SIGTERM', () => process.exit(0))"
+      String.raw`const http = require('node:http')
+const args = process.argv.slice(2)
+const port = Number(args[args.indexOf('--port') + 1])
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  if (req.url === '/health') return res.end(JSON.stringify({status:'ok'}))
+  if (req.url === '/v1/models') return res.end(JSON.stringify({data:[{id:'fixture-chat'}]}))
+  if (req.url === '/v1/chat/completions') return res.end(JSON.stringify({choices:[{message:{content:'manual model ready'}}]}))
+  res.statusCode=404; res.end('{}')
+})
+server.listen(port, '127.0.0.1')
+process.on('SIGTERM', () => server.close(() => process.exit(0)))`
     )
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -500,7 +522,7 @@ describe('model gateway chat streaming', () => {
 
     const [{ llm }, setup] = await Promise.all([import('../llm'), import('../setup')])
     try {
-      await expect(llm.restart()).rejects.toThrow(/did not come back up/i)
+      await expect(llm.restart()).rejects.toThrow(/engine.*too old/i)
       // The crash handler has a delayed retry. Pausing is the real lifecycle intent
       // that prevents that recovery timer from leaking work beyond this journey.
       llm.pause()

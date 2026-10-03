@@ -142,7 +142,7 @@ async function synthesizeWithFallback(request: TtsWorkerRequest): Promise<Device
       unusableDevices.add(selected.device)
       loaded = null
       loading = null
-      await selected.runtime.model?.dispose?.().catch(() => {})
+      await (selected.runtime as Partial<typeof selected.runtime>).model?.dispose().catch(() => {})
       if (unusableDevices.size >= maxAttempts) break
     }
   }

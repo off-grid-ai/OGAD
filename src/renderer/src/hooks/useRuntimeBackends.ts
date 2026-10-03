@@ -24,11 +24,11 @@ export function useRuntimeBackends(): RuntimeBackend[] {
       if (pending || disposed || document.visibilityState === 'hidden') return
       pending = true
       try {
-        const snapshot = await window.api.runtimeBackends?.()
-        if (!disposed) setBackends(snapshot ?? unavailable())
+        const snapshot = await (window.api as Partial<typeof window.api>).runtimeBackends?.()
+        if (!(disposed as boolean)) setBackends(snapshot ?? unavailable())
       } catch {
         // Do not display a stale GPU claim when the main process cannot answer.
-        if (!disposed) setBackends(unavailable())
+        if (!(disposed as boolean)) setBackends(unavailable())
       } finally {
         pending = false
       }

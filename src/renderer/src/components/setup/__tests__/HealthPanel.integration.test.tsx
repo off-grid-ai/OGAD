@@ -73,7 +73,7 @@ const boundary = new NativeIpcBoundary()
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-system-health-'))
 const profile = path.join(root, 'profile')
 const binRoot = path.join(root, 'bin')
-const enginePath = path.join(binRoot, 'llama', 'llama-server')
+const enginePath = path.join(binRoot, process.platform === 'linux' ? 'llama-cpu' : 'llama', 'llama-server')
 const ffmpegPath = path.join(binRoot, 'ffmpeg')
 const whisperPath = path.join(binRoot, 'whisper', 'whisper-cli')
 const snapshots: SystemHealthContract[] = []
@@ -127,11 +127,20 @@ beforeAll(async () => {
   process.env.OFFGRID_BIN_DIR = binRoot
   configureRuntime({ dataDir: profile, binRoots: [binRoot] })
 
-  const model = path.join(profile, 'models', 'gemma-4-E4B-it-Q4_K_M.gguf')
-  fs.mkdirSync(path.dirname(model), { recursive: true })
-  const gguf = Buffer.alloc(2048, 7)
-  gguf.write('GGUF')
-  fs.writeFileSync(model, gguf)
+  const manager = await import('../../../../../main/models-manager')
+  const setup = await import('../../../../../main/setup')
+  const choice = await setup.getRecommendation('conservative')
+  if (!choice) throw new Error('No local model is available for the health journey')
+  const catalog = await manager.desktopCatalog()
+  const model = catalog.find((entry) => entry.id === choice.id)
+  if (!model) throw new Error('The recommended model is missing from the catalog')
+  fs.mkdirSync(path.join(profile, 'models'), { recursive: true })
+  for (const file of model.files) {
+    const bytes = Buffer.alloc(2048, 7)
+    if (file.name.endsWith('.gguf')) bytes.write('GGUF')
+    fs.writeFileSync(path.join(profile, 'models', file.name), bytes)
+  }
+  expect(await manager.activateModel(choice.id)).toEqual({ success: true })
   writeHealthyEngine()
   executable(ffmpegPath, "process.stdout.write('ffmpeg version integration\\n')")
   executable(whisperPath, "process.stdout.write('usage: whisper-cli [options]\\n')")
@@ -158,7 +167,7 @@ beforeAll(async () => {
 afterAll(async () => {
   cleanup()
   const { llm } = await import('../../../../../main/llm')
-  llm.pause()
+  await llm.unload(true)
   fs.rmSync(root, { recursive: true, force: true })
   if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previousDataDir
@@ -174,9 +183,9 @@ describe('<HealthPanel/> production status integration', () => {
     await screen.findByRole('status', { name: 'Chat model (llama-server)' })
     await expect(boundary.invoke('permissions:get-status')).resolves.toEqual({
       accessibility: true,
-      screenRecording: false,
+      screenRecording: process.platform !== 'darwin',
       localNetwork: true,
-      allGranted: false
+      allGranted: process.platform !== 'darwin'
     })
     expect(latestComponent('chat').status).toBe('ready')
     expectRenderedRecord('chat')
@@ -186,7 +195,9 @@ describe('<HealthPanel/> production status integration', () => {
     expectRenderedRecord('helper-whisper')
     expect(latestComponent('permission-accessibility').status).toBe('granted')
     expectRenderedRecord('permission-accessibility')
-    expect(latestComponent('permission-screen-recording').status).toBe('denied')
+    expect(latestComponent('permission-screen-recording').status).toBe(
+      process.platform === 'darwin' ? 'denied' : 'granted'
+    )
     expectRenderedRecord('permission-screen-recording')
     expect(latestComponent('permission-local-network').status).toBe('granted')
     expectRenderedRecord('permission-local-network')
@@ -200,33 +211,38 @@ describe('<HealthPanel/> production status integration', () => {
       expect(latestComponent('permission-screen-recording').status).toBe('granted')
     )
     expectRenderedRecord('permission-screen-recording')
-    expect(latestComponent('permission-accessibility').status).toBe('denied')
+    expect(latestComponent('permission-accessibility').status).toBe(
+      process.platform === 'darwin' ? 'denied' : 'granted'
+    )
     expectRenderedRecord('permission-accessibility')
     expect(latestComponent('helper-whisper').status).toBe('not_installed')
     expectRenderedRecord('helper-whisper')
 
-    tccBoundary.error = new Error('TCC database unavailable')
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
-    await waitFor(() => expect(latestComponent('permission-accessibility').status).toBe('down'))
-    expectRenderedRecord('permission-accessibility')
-    expectRenderedRecord('permission-screen-recording')
-    expectRenderedRecord('permission-local-network')
+    if (process.platform === 'darwin') {
+      tccBoundary.error = new Error('TCC database unavailable')
+      await user.click(screen.getByRole('button', { name: 'Refresh' }))
+      await waitFor(() => expect(latestComponent('permission-accessibility').status).toBe('down'))
+      expectRenderedRecord('permission-accessibility')
+      expectRenderedRecord('permission-screen-recording')
+      expectRenderedRecord('permission-local-network')
 
-    tccBoundary.error = 'TCC bridge unavailable'
-    await user.click(screen.getByRole('button', { name: 'Refresh' }))
-    await waitFor(() =>
-      expect(latestComponent('permission-accessibility').detail).toContain('TCC bridge unavailable')
-    )
-    expectRenderedRecord('permission-accessibility')
-    expectRenderedRecord('permission-screen-recording')
-    expectRenderedRecord('permission-local-network')
+      tccBoundary.error = 'TCC bridge unavailable'
+      await user.click(screen.getByRole('button', { name: 'Refresh' }))
+      await waitFor(() =>
+        expect(latestComponent('permission-accessibility').detail).toContain('TCC bridge unavailable')
+      )
+      expectRenderedRecord('permission-accessibility')
+      expectRenderedRecord('permission-screen-recording')
+      expectRenderedRecord('permission-local-network')
+
+    }
 
     executable(
       enginePath,
       'process.stderr.write("unknown model architecture: \'gemma4\'\\n"); setTimeout(() => process.exit(23), 20)'
     )
     const { llm } = await import('../../../../../main/llm')
-    await expect(llm.restart()).rejects.toThrow(/did not come back up/i)
+    await expect(llm.restart()).rejects.toThrow(/engine.*too old/i)
     llm.pause()
     await user.click(screen.getByRole('button', { name: 'Refresh' }))
 

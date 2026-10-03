@@ -78,7 +78,17 @@ export default defineConfig({
   },
   preload: {
     define: proDefine,
-    build: { sourcemap: coverageSourcemap }
+    build: {
+      sourcemap: coverageSourcemap,
+      rollupOptions: {
+        input: {
+          index: resolve('src/preload/index.ts'),
+          ...(proExists
+            ? { 'meeting-recorder': resolve('pro/main/meeting-recorder-preload.ts') }
+            : {})
+        }
+      }
+    }
   },
   renderer: {
     define: proDefine,

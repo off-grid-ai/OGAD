@@ -141,7 +141,7 @@ export function UpgradeScreen({
           ) : (
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-emerald-400">
               <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro ·{' '}
-              {linux && !f ? 'Vault available now' : 'Available now'}
+              {linux && !f && platformNotice ? 'Available features' : 'Available now'}
             </span>
           )}
 
@@ -236,10 +236,10 @@ export function UpgradeScreen({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs font-medium text-neutral-200">
-                    Use Pro on Windows or macOS
+                    Use Pro on Windows, Linux, or macOS
                   </span>
                   <span className="mt-0.5 block text-[11px] leading-tight text-neutral-500">
-                    Install Off Grid AI Desktop on Windows or Mac and use the same license.
+                    Install Off Grid AI Desktop on Windows, Linux, or macOS and use the same license.
                   </span>
                 </span>
                 <ArrowSquareOut weight="bold" className="h-4 w-4 shrink-0 text-neutral-500" />
@@ -257,7 +257,7 @@ export function UpgradeScreen({
                     </span>{' '}
                     {linux
                       ? `${linuxAvailable} are available on Linux now. Other Pro features are available on Windows and macOS.`
-                      : 'This feature is available on Windows and macOS.'}
+                      : 'This feature is available on Windows, Linux, and macOS.'}
                   </span>
                 </div>
               )}

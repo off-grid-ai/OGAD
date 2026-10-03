@@ -35,11 +35,11 @@ main: exiting due to model loading error`
     ).toBe('out_of_memory')
   })
 
-  it('names the machine per platform in the OOM reason (Mac on macOS, device elsewhere)', () => {
+  it('names macOS, Windows, and Linux machines in the memory error', () => {
     const oom = 'ggml_metal_buffer: failed to allocate buffer, size = 9216.00 MiB'
     expect(classifyLlamaError(oom, 'darwin')?.reason).toContain('too large for this Mac')
-    expect(classifyLlamaError(oom, 'win32')?.reason).toContain('too large for this device')
-    expect(classifyLlamaError(oom, 'linux')?.reason).toContain('too large for this device')
+    expect(classifyLlamaError(oom, 'win32')?.reason).toContain('too large for this Windows PC')
+    expect(classifyLlamaError(oom, 'linux')?.reason).toContain('too large for this Linux computer')
   })
 
   it('flags a missing dylib', () => {

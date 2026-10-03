@@ -26,7 +26,7 @@
 // recomputing, or the dropdown stops routing through setActiveModalModel — this
 // test goes red.
 
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, type Mock } from 'vitest'
 import { standardModelDefaults } from '../../../../shared/image-defaults'
 import { resolveImageParams, setOverride, type ImageParamStore } from '../image-params'
 
@@ -37,7 +37,7 @@ const FULL = 'dreamlike-photoreal-v2.gguf' // defaultSteps 28
  *  (window.api.saveSetting / getSettings). The composer persists the whole
  *  imageParams store under one key and reloads it on mount; we round-trip through
  *  the same JSON boundary so a serialization regression would surface here too. */
-function makeSettingsStore() {
+function makeSettingsStore(): { saveSetting: Mock<(key: string, value: unknown) => void>; getSetting<T>(key: string): T | undefined; } {
   const raw: Record<string, string> = {}
   return {
     saveSetting: vi.fn((key: string, value: unknown) => {
@@ -65,7 +65,7 @@ function makeSettingsStore() {
  *    reading the SAME local mirror state the component reads (L824-831). This is
  *    the closest reachable proxy for the terminal artifact.
  */
-function makeComposer(setActiveModalModel: (kind: string, model: string) => void) {
+function makeComposer(setActiveModalModel: (kind: string, model: string) => void): { chooseImageModel(model: string): void; setStepsOverride(value: number): void; remount(): void; buildGeneratePayload(): { steps: number; width: number; height: number; model: string | undefined; }; } {
   const settings = makeSettingsStore()
   let imgModel = ''
   let imgSteps = 10
@@ -74,7 +74,7 @@ function makeComposer(setActiveModalModel: (kind: string, model: string) => void
 
   // The `[imgModel, imgParamStore]` effect. Run after every state change that the
   // component lists as a dependency (model OR store), exactly like React re-runs it.
-  function runResolveEffect() {
+  function runResolveEffect(): void {
     if (!imgModel) return
     const { steps, size } = resolveImageParams(imgModel, store)
     imgSize = size

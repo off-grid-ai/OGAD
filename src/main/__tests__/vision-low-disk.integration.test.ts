@@ -16,20 +16,70 @@ const CAPTURES_DIR = path.join(TMP_DIR, 'captures')
 vi.mock('electron', () => ({
   app: { getPath: () => fixture.tmpDir },
   desktopCapturer: {
-    getSources: async () => [
-      {
-        name: 'Release notes',
-        display_id: '1',
-        thumbnail: {
-          isEmpty: () => false,
-          toPNG: () => Buffer.from('synthetic screenshot bytes')
-        }
-      }
-    ]
+    getSources: async ({ types }: { types: string[] }) =>
+      types.includes('screen')
+        ? [
+            {
+              id: 'screen:1:0',
+              display_id: '1',
+              thumbnail: {
+                isEmpty: () => false,
+                getSize: () => ({ width: 2, height: 2 }),
+                toPNG: () =>
+                  Buffer.from(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWMQ80sW80tmgFAAFJ4DHTBv/HUAAAAASUVORK5CYII=',
+                    'base64'
+                  )
+              }
+            },
+            {
+              id: 'screen:3:0',
+              display_id: '3',
+              thumbnail: {
+                isEmpty: () => false,
+                getSize: () => ({ width: 2, height: 2 }),
+                toPNG: () =>
+                  Buffer.from(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWMQ80sW80tmgFAAFJ4DHTBv/HUAAAAASUVORK5CYII=',
+                    'base64'
+                  )
+              }
+            }
+          ]
+        : [
+            {
+              id: 'window:51:0',
+              name: 'Release notes',
+              display_id: '1',
+              thumbnail: {
+                isEmpty: () => false,
+                toPNG: () => Buffer.from('synthetic screenshot bytes')
+              }
+            },
+            {
+              id: 'window:52:0',
+              name: 'Shared title',
+              thumbnail: {
+                isEmpty: () => false,
+                toPNG: () => Buffer.from('focused window 52')
+              }
+            },
+            {
+              id: 'window:53:0',
+              name: 'Shared title',
+              thumbnail: {
+                isEmpty: () => false,
+                toPNG: () => Buffer.from('other window 53')
+              }
+            }
+          ]
   },
   screen: {
     getCursorScreenPoint: () => ({ x: 0, y: 0 }),
-    getDisplayNearestPoint: () => ({ id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 } })
+    getDisplayNearestPoint: (point: { x: number }) =>
+      point.x >= 1920
+        ? { id: 2, bounds: { x: 1920, y: 0, width: 1920, height: 1080 } }
+        : { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 } }
   }
 }))
 
@@ -51,6 +101,42 @@ afterAll(() => {
 })
 
 describe('vision capture on an exhausted filesystem', () => {
+  it('selects the focused window by native ID when titles are duplicated', async () => {
+    const result = await vision.captureAppWindow('Notes', 'Shared title', undefined, 52)
+    expect(result).not.toBeNull()
+    expect(fs.readFileSync(result!)).toEqual(Buffer.from('focused window 52'))
+  })
+
+  it('does not save a display image when no unique active window can be identified', async () => {
+    const result = await vision.captureAppWindow('Notes', 'Shared title')
+    expect(result).toBeNull()
+    expect(fs.readdirSync(CAPTURES_DIR)).toEqual([])
+  })
+
+  it('crops a matching display to the focused window bounds', async () => {
+    const result = await vision.captureAppWindow('Notes', 'No Electron window source', {
+      x: 300,
+      y: 200,
+      width: 1200,
+      height: 700
+    })
+    expect(result).not.toBeNull()
+    const { default: sharp } = await import('sharp')
+    const image = await sharp(fs.readFileSync(result!)).metadata()
+    expect({ width: image.width, height: image.height }).toEqual({ width: 2, height: 2 })
+  })
+
+  it('does not use another display when the active window display has no source', async () => {
+    const result = await vision.captureAppWindow('Notes', 'No Electron window source', {
+      x: 2100,
+      y: 200,
+      width: 900,
+      height: 700
+    })
+    expect(result).toBeNull()
+    expect(fs.readdirSync(CAPTURES_DIR)).toEqual([])
+  })
+
   it('stops safely without creating a corrupt capture or disturbing existing bytes', async () => {
     const existing = path.join(CAPTURES_DIR, 'existing.png')
     const existingBytes = Buffer.from('existing readable capture')

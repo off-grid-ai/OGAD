@@ -281,14 +281,14 @@ export function SettingsPanel({
   }, [])
 
   const refreshConnectors = useCallback((): void => {
-    window.api
+    ;(window.api as Partial<typeof window.api>)
       .mcpList?.()
       .then((c: Connector[]) => setConnectors(c))
       .catch(() => setConnectors([]))
   }, [])
 
   useEffect(() => {
-    window.api
+    ;(window.api as Partial<typeof window.api>)
       .getLlmSettings?.()
       .then((v: LlmSettings) => setS(v))
       .catch(() => {})
@@ -309,7 +309,7 @@ export function SettingsPanel({
         modelApi.getActiveModel(),
         modelApi.getActiveModelIds(),
         modelApi.getModelVisionStatus(),
-        window.api.getLlmSettings?.()
+        (window.api as Partial<typeof window.api>).getLlmSettings?.()
       ])
         .then(([catalog, activeId, activeIds, companionStatus, llmSettings]) => {
           setActiveModelName(
@@ -331,18 +331,18 @@ export function SettingsPanel({
           setDflashModels([])
         })
     }
-    window.api
+    ;(window.api as Partial<typeof window.api>)
       .getTranscriptionInfo?.()
       .then((info: TranscriptionInfo) => setTranscriptionInfo(info))
       .catch(() => setTranscriptionInfo(null))
-    window.api
+    ;(window.api as Partial<typeof window.api>)
       .getSettings?.()
       .then((settings) => {
         setShowGenerationDetails(settings.showGenerationDetails === true)
         setToolsEnabled(settings.toolsEnabled !== false)
       })
       .catch(() => {})
-    window.api
+    ;(window.api as Partial<typeof window.api>)
       .listTools?.()
       .then((t: ToolSetting[]) => setTools(t))
       .catch(() => {})
@@ -352,8 +352,8 @@ export function SettingsPanel({
   // Persist one inference setting (optimistic) — backend applies it per-request.
   const set = (patch: LlmSettings): void => {
     setS((prev) => ({ ...prev, ...patch }))
-    void Promise.resolve(window.api.setLlmSettings?.(patch))
-      .then(() => window.api.getLlmSettings?.())
+    void Promise.resolve((window.api as Partial<typeof window.api>).setLlmSettings?.(patch))
+      .then(() => (window.api as Partial<typeof window.api>).getLlmSettings?.())
       .then((next) => {
         if (next) {
           setS(next)
@@ -361,7 +361,7 @@ export function SettingsPanel({
         }
       })
       .catch(() => {
-        void window.api
+        void (window.api as Partial<typeof window.api>)
           .getLlmSettings?.()
           .then((next) => setS(next))
           .catch(() => {})
@@ -370,10 +370,10 @@ export function SettingsPanel({
 
   const resetDefaults = (): void => {
     setS((prev) => ({ ...prev, ...DEFAULTS }))
-    void Promise.resolve(window.api.setLlmSettings?.(DEFAULTS))
+    void Promise.resolve((window.api as Partial<typeof window.api>).setLlmSettings?.(DEFAULTS))
       .then(() => {
         invalidateLlmSettings()
-        return window.api.getLlmSettings?.()
+        return (window.api as Partial<typeof window.api>).getLlmSettings?.()
       })
       .then((next) => {
         if (next) setS(next)
@@ -401,8 +401,8 @@ export function SettingsPanel({
     if (!transcriptionInfo) return
     setTranscriptionInfo({ ...transcriptionInfo, language })
     void Promise.resolve(window.api.saveSetting('sttLanguage', language)).catch(() => {
-      void window.api
-        .getTranscriptionInfo()
+      void (window.api as Partial<typeof window.api>)
+        .getTranscriptionInfo?.()
         .then((persisted) => setTranscriptionInfo(persisted))
         .catch(() => {})
     })
@@ -411,11 +411,13 @@ export function SettingsPanel({
   const pickTranscriptionModel = (value: string): void => {
     const modelId = value === DEFAULT_TRANSCRIPTION_MODEL ? null : value
     void Promise.resolve(window.api.setActiveModalModel('transcription', modelId))
-      .then(() => window.api.getTranscriptionInfo())
-      .then((info) => setTranscriptionInfo(info))
+      .then(() => (window.api as Partial<typeof window.api>).getTranscriptionInfo?.())
+      .then((info) => {
+        if (info) setTranscriptionInfo(info)
+      })
       .catch(() => {
-        void window.api
-          .getTranscriptionInfo()
+        void (window.api as Partial<typeof window.api>)
+          .getTranscriptionInfo?.()
           .then((persisted) => setTranscriptionInfo(persisted))
           .catch(() => {})
       })
@@ -423,7 +425,7 @@ export function SettingsPanel({
 
   const addConnector = async (): Promise<void> => {
     if (!newConn.name.trim() || !newConn.url.trim()) return
-    await window.api.mcpAdd?.({
+    await (window.api as Partial<typeof window.api>).mcpAdd?.({
       name: newConn.name.trim(),
       transport: 'http',
       url: newConn.url.trim()
@@ -488,6 +490,8 @@ export function SettingsPanel({
       </div>
 
       <div className={embedded ? 'p-1 pt-4 text-sm' : 'min-h-0 flex-1 overflow-y-auto p-4 text-sm'}>
+        {/* The registry returns a stable registered component, not a component factory. */}
+        {/* eslint-disable-next-line react-hooks/static-components */}
         {tab === 'tasks' && TaskSettings ? <TaskSettings /> : null}
         {tab === 'model' && (
           <>
@@ -1032,7 +1036,10 @@ export function SettingsPanel({
                             )
                             void persistToggle(nextTools, tools, setTools, async () => {
                               for (const tool of group.tools) {
-                                await window.api.setToolEnabled?.(tool.name, next)
+                                await (window.api as Partial<typeof window.api>).setToolEnabled?.(
+                                  tool.name,
+                                  next
+                                )
                               }
                             })
                           }}
@@ -1074,7 +1081,11 @@ export function SettingsPanel({
                                     ),
                                     tools,
                                     setTools,
-                                    () => window.api.setToolEnabled?.(tool.name, next)
+                                    () =>
+                                      (window.api as Partial<typeof window.api>).setToolEnabled?.(
+                                        tool.name,
+                                        next
+                                      )
                                   )
                                 }}
                                 className={`shrink-0 rounded px-2 py-1 text-[11px] transition-all duration-150 active:scale-95 ${tool.enabled === false ? 'text-neutral-500' : 'text-green-500'}`}
@@ -1138,7 +1149,10 @@ export function SettingsPanel({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={async () => {
-                          await window.api.mcpSetEnabled?.(c.id, !c.enabled)
+                          await (window.api as Partial<typeof window.api>).mcpSetEnabled?.(
+                            c.id,
+                            !c.enabled
+                          )
                           refreshConnectors()
                         }}
                         className={`rounded px-2 py-1 text-[11px] ${c.enabled ? 'text-green-500' : 'text-neutral-500'}`}
@@ -1147,7 +1161,7 @@ export function SettingsPanel({
                       </button>
                       <button
                         onClick={async () => {
-                          await window.api.mcpRemove?.(c.id)
+                          await (window.api as Partial<typeof window.api>).mcpRemove?.(c.id)
                           refreshConnectors()
                         }}
                         className="rounded px-2 py-1 text-[11px] text-red-400 hover:bg-red-500/10"

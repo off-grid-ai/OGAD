@@ -74,7 +74,7 @@ export function ArtifactCanvas({
   onClose: () => void
   width?: number | null
   onResize?: (w: number) => void
-}) {
+}): React.JSX.Element {
   const [runtime, setRuntime] = useState<Record<string, string> | null>(null)
   const [view, setView] = useState<'preview' | 'code'>('preview')
   const [resizing, setResizing] = useState(false)
@@ -125,7 +125,7 @@ export function ArtifactCanvas({
 
   useEffect(() => {
     let alive = true
-    window.api
+    ;(window.api as Partial<typeof window.api>)
       .artifactRuntime?.(artifact.kind)
       .then((r: Record<string, string>) => {
         if (alive) setRuntime(r)

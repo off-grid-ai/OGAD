@@ -52,8 +52,6 @@ let userDataDir: string
 let syntheticPeer: SyncEngine | null = null
 let syntheticState: StateSync | null = null
 let syntheticFiles: FileTransferManager | null = null
-let syntheticImportedEntitlement: unknown
-let syntheticEntitlementCommitted = false
 let syntheticClipboard: ClipboardSyncCoordinator | null = null
 const syntheticClipboardRecords = new Map<string, ClipboardHistoryRecord>()
 /** The peer's pending clipboard deliveries, keyed the way the coordinator keys them: record × device. */
@@ -320,17 +318,11 @@ test.describe('Devices surface — pro tier', () => {
         commitExport: async () => {},
         rollbackExport: async () => {},
         finalizeExport: async () => {},
-        prepareImport: async (credential) => {
-          syntheticImportedEntitlement = credential
+        prepareImport: async () => {
           return { id: 'synthetic-entitlement-import' }
         },
-        commitImport: async () => {
-          syntheticEntitlementCommitted = true
-        },
-        rollbackImport: async () => {
-          syntheticImportedEntitlement = undefined
-          syntheticEntitlementCommitted = false
-        },
+        commitImport: async () => {},
+        rollbackImport: async () => {},
         finalizeImport: async () => {}
       },
       pairingPersistence: {

@@ -1,0 +1,7 @@
+{
+  "uuid": "offgrid-capture@getoffgridai.co",
+  "name": "Off Grid AI Capture",
+  "description": "Lets Off Grid AI follow the focused window after you enable capture.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "version": 1
+}

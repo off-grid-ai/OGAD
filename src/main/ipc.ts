@@ -444,7 +444,7 @@ export async function evaluateAndStoreMemoryForMessage(params: {
     if (params.sessionId) {
       const existingMemories = getMemoryRecordsForSession(params.sessionId)
       const memLower = memoryText.toLowerCase()
-      const isDuplicate = existingMemories.some((m: any) => {
+      const isDuplicate = existingMemories.some((m) => {
         const existing = (m.content || '').toLowerCase()
         return existing === memLower || existing.includes(memLower) || memLower.includes(existing)
       })
@@ -471,7 +471,7 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
   // Get strictness setting
   const strictness = getSetting<'lenient' | 'balanced' | 'strict'>('entityStrictness', 'balanced')
 
-  const memoryText = memories.map((m: any) => `- ${m.content}`).join('\n')
+  const memoryText = memories.map((m) => `- ${m.content}`).join('\n')
 
   const prompt = getPrompt(`entityExtraction.${strictness}`, { MEMORY_TEXT: memoryText })
 
@@ -553,7 +553,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   if (memories.length === 0) return null
 
   const conversationText = memories
-    .map((m: any) => `[${m.role || 'unknown'}]: ${m.content}`)
+    .map((m) => `[${m.role || 'unknown'}]: ${m.content}`)
     .join('\n')
   const prompt = getPrompt('sessionSummary', { CONVERSATION_TEXT: conversationText })
 
@@ -583,7 +583,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   }
 }
 
-export function setupIPC() {
+export function setupIPC(): void {
   activateInstalledPerformancePack()
   onPerformancePackChanged((status) => {
     BrowserWindow.getAllWindows().forEach((window) =>
@@ -607,7 +607,7 @@ export function setupIPC() {
 
   ipcMain.handle('db:get-memories', (_, limit: number = 50, appName?: string) => {
     let query = 'SELECT * FROM memories '
-    const params: any[] = []
+    const params: unknown[] = []
 
     const memFilter = appNameLikeClause(appName, 'source_app')
     if (memFilter) {
@@ -913,11 +913,11 @@ export function setupIPC() {
       // which failed the whole retrieval. Preserves the any-term (OR) recall the retrieval expects.
       const ftsQuery = ftsMatchExpression(query)
 
-      let memories: any[] = []
+      let memories: Array<{ source_app: string | null; created_at: string; content: string; score?: number }> = []
       try {
         const queryVector = await embeddings.generateEmbedding(query)
         const vecStr = JSON.stringify(queryVector)
-        const params: any[] = [vecStr]
+        const params: unknown[] = [vecStr]
         let memoryQuery = `
             SELECT *, cosine_similarity(embedding, ?) as score
             FROM memories
@@ -929,11 +929,11 @@ export function setupIPC() {
           params.push(vecFilter.param)
         }
         memoryQuery += ` ORDER BY score DESC LIMIT 12`
-        memories = db.prepare(memoryQuery).all(...params)
-        memories = memories.filter((m: any) => typeof m.score !== 'number' || m.score >= 0.2)
+        memories = db.prepare<unknown[], (typeof memories)[number]>(memoryQuery).all(...params)
+        memories = memories.filter((m) => typeof m.score !== 'number' || m.score >= 0.2)
       } catch (e) {
         console.error('[RAG] Vector search failed, falling back to FTS', e)
-        const params: any[] = []
+        const params: unknown[] = []
         let fallbackQuery = `
             SELECT memories.*
             FROM memories
@@ -947,10 +947,10 @@ export function setupIPC() {
           params.push(ftsFilter.param)
         }
         fallbackQuery += ` LIMIT 12`
-        memories = db.prepare(fallbackQuery).all(...params)
+        memories = db.prepare<unknown[], (typeof memories)[number]>(fallbackQuery).all(...params)
       }
 
-      const messageParams: any[] = [ftsQuery]
+      const messageParams: unknown[] = [ftsQuery]
       let messageQuery = `
                 SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title, c.app_name,
                              bm25(message_fts) as score
@@ -965,9 +965,9 @@ export function setupIPC() {
         messageParams.push(msgFilter.param)
       }
       messageQuery += ` ORDER BY score ASC LIMIT 12`
-      const messages = db.prepare(messageQuery).all(...messageParams)
+      const messages = db.prepare<unknown[], { app_name: string | null; title: string | null; created_at: string; role: string; content: string }>(messageQuery).all(...messageParams)
 
-      const summaryParams: any[] = [ftsQuery]
+      const summaryParams: unknown[] = [ftsQuery]
       let summaryQuery = `
                 SELECT cs.session_id, cs.summary, c.title, c.app_name, c.updated_at,
                              bm25(summary_fts) as score
@@ -982,9 +982,9 @@ export function setupIPC() {
         summaryParams.push(sumFilter.param)
       }
       summaryQuery += ` ORDER BY score ASC LIMIT 8`
-      const summaries = db.prepare(summaryQuery).all(...summaryParams)
+      const summaries = db.prepare<unknown[], { app_name: string | null; title: string | null; summary: string }>(summaryQuery).all(...summaryParams)
 
-      const entityParams: any[] = [ftsQuery]
+      const entityParams: unknown[] = [ftsQuery]
       let entityQuery = `
                 SELECT e.id, e.name, e.type, e.summary, e.updated_at,
                              bm25(entity_fts) as score
@@ -1005,9 +1005,9 @@ export function setupIPC() {
         entityParams.push(entFilter.param)
       }
       entityQuery += ` ORDER BY score ASC LIMIT 8`
-      const entities = db.prepare(entityQuery).all(...entityParams)
+      const entities = db.prepare<unknown[], { type: string | null; name: string; summary: string | null }>(entityQuery).all(...entityParams)
 
-      const factParams: any[] = [ftsQuery]
+      const factParams: unknown[] = [ftsQuery]
       let factQuery = `
                 SELECT f.fact, f.created_at, f.source_session_id, e.name, e.type,
                              bm25(entity_fact_fts) as score
@@ -1022,14 +1022,14 @@ export function setupIPC() {
         factParams.push(factFilter.param)
       }
       factQuery += ` ORDER BY score ASC LIMIT 8`
-      const entityFacts = db.prepare(factQuery).all(...factParams)
+      const entityFacts = db.prepare<unknown[], { type: string | null; name: string; fact: string }>(factQuery).all(...factParams)
 
       // Supplementary context (no bracket labels — the ONLY citeable tags are the
       // numbered [S#] SOURCES below, so the model can't invent uncited labels).
       const memoryLines = memories
         .slice(0, 6)
         .map(
-          (m: any) =>
+          (m) =>
             `- (${m.source_app || 'Unknown'} | ${m.created_at}): ${clipText(m.content, 500)}`
         )
         .join('\n')
@@ -1037,7 +1037,7 @@ export function setupIPC() {
       const messageLines = messages
         .slice(0, 6)
         .map(
-          (m: any) =>
+          (m) =>
             `- (${m.app_name || 'Unknown'} | ${m.title || 'Untitled'} | ${m.created_at}) ${m.role}: ${clipText(m.content, 400)}`
         )
         .join('\n')
@@ -1045,19 +1045,19 @@ export function setupIPC() {
       const summaryLines = summaries
         .slice(0, 6)
         .map(
-          (s: any) =>
+          (s) =>
             `- (${s.app_name || 'Unknown'} | ${s.title || 'Untitled'}): ${clipText(s.summary, 600)}`
         )
         .join('\n')
 
       const entityLines = entities
         .slice(0, 6)
-        .map((e: any) => `- (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`)
+        .map((e) => `- (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`)
         .join('\n')
 
       const factLines = entityFacts
         .slice(0, 6)
-        .map((f: any) => `- (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`)
+        .map((f) => `- (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`)
         .join('\n')
 
       const contextBlock = `RELEVANT MEMORIES:\n${memoryLines || '(none)'}\n\nRELEVANT MESSAGES:\n${messageLines || '(none)'}\n\nRELEVANT SUMMARIES:\n${summaryLines || '(none)'}\n\nRELEVANT ENTITIES:\n${entityLines || '(none)'}\n\nRELEVANT ENTITY FACTS:\n${factLines || '(none)'}`
@@ -1309,7 +1309,7 @@ export function setupIPC() {
   })
   ipcMain.handle(
     'rag:add-message',
-    (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => {
+    (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: unknown) => {
       // A reply that was streamed is already named, and keeps that name: every paired device has been
       // rendering it under this id, so the arriving record retires their live preview instead of
       // standing beside it. Read from the one owner of "what this device is generating", so no caller
@@ -1340,7 +1340,7 @@ export function setupIPC() {
   // App version (for the Settings footer — so users know what build they're on).
   ipcMain.handle('app:version', () => app.getVersion())
 
-  ipcMain.handle('settings:save', (_, key: string, value: any) => {
+  ipcMain.handle('settings:save', (_, key: string, value: unknown) => {
     if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
     else if (key === WEB_USE_SETTINGS_KEY) setWebUseSettings(value)
     else saveSetting(key, value)
@@ -1585,7 +1585,7 @@ export function setupIPC() {
         const file = fs.createWriteStream(destPath)
         let rateSample: ProgressRateSample | undefined
 
-        const request = (redirectUrl: string) => {
+        const request = (redirectUrl: string): void => {
           https
             .get(redirectUrl, (response) => {
               if (
@@ -1662,9 +1662,9 @@ export function setupIPC() {
       }
 
       return { success: true }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[Model] Download failed:', err)
-      return { success: false, error: err.message }
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })
 

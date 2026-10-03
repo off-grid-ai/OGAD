@@ -3,9 +3,8 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { KeyboardShortcuts } from '../KeyboardShortcuts'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const setPro = (v: boolean | undefined): void => {
-  ;(window as any).api = v === undefined ? undefined : { isPro: v }
+  ;(window as unknown as { api?: { isPro: boolean } }).api = v === undefined ? undefined : { isPro: v }
 }
 
 describe('KeyboardShortcuts reference', () => {

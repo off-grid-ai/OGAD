@@ -21,7 +21,7 @@ type VisionIssue =
   | { kind: 'missing-projector'; modelId: string; modelName: string }
   | { kind: 'choose-vision-model'; modelId: string | null; modelName: string | null }
 
-export function PermissionGate({ children }: PermissionGateProps) {
+export function PermissionGate({ children }: PermissionGateProps): React.JSX.Element {
   const { isPro } = useRendererEntitlement()
   const [modelStatus, setModelStatus] = useState<{ downloaded: boolean; modelsDir: string } | null>(
     null
@@ -58,8 +58,8 @@ export function PermissionGate({ children }: PermissionGateProps) {
     if (!isPro || !window.api.proInvoke) return
     try {
       const [activeId, statuses, capture, catalog] = await Promise.all([
-        window.api.getActiveModel?.(),
-        window.api.getModelVisionStatus?.(),
+        window.api.getActiveModel(),
+        window.api.getModelVisionStatus(),
         window.api.proInvoke('capture:status'),
         window.api.getModelCatalog().catch(() => undefined)
       ])
@@ -103,8 +103,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
 
   // Initial check
   useEffect(() => {
-    checkModelStatus()
-    void checkCaptureVision()
+    void Promise.resolve().then(() => Promise.all([checkModelStatus(), checkCaptureVision()]))
   }, [checkModelStatus, checkCaptureVision])
 
   useEffect(() => {
@@ -155,7 +154,7 @@ export function PermissionGate({ children }: PermissionGateProps) {
       setVisionDownloadFailure(null)
       setVisionDownloadProgress({ percent: 0 })
       void window.api
-        .downloadModel?.(visionIssue.modelId)
+        .downloadModel(visionIssue.modelId)
         .catch((error) => {
           console.error('Failed to download capture vision support:', error)
           setVisionDownloadFailure(
@@ -358,13 +357,12 @@ function SetupNudge({
   failure?: string | null
   onOpen: () => void
   onDismiss: () => void
-}) {
+}): React.JSX.Element | null {
   const taskWorkspaceOpen = useTaskWorkspaceOpen()
   const [taskLeft, setTaskLeft] = useState<number | null>(null)
 
   useEffect(() => {
     if (!taskWorkspaceOpen) {
-      setTaskLeft(null)
       return
     }
     const taskPane = document.querySelector<HTMLElement>('[data-testid="task-side-panel"]')
@@ -419,7 +417,8 @@ function SetupNudge({
   // When Tasks consumes the whole usable workspace, defer this non-blocking
   // prompt. In split mode, keep it wholly inside Chat and away from native
   // browser content.
-  if (taskLeft !== null && taskLeft < 520) return null
+  const currentTaskLeft = taskWorkspaceOpen ? taskLeft : null
+  if (currentTaskLeft !== null && currentTaskLeft < 520) return null
 
   return (
     <motion.div
@@ -427,7 +426,7 @@ function SetupNudge({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
       className="fixed bottom-14 z-50 flex max-w-[min(560px,calc(100vw-2rem))] items-center gap-3 rounded-xl border border-green-500/30 bg-background/95 px-4 py-3 text-foreground shadow-xl backdrop-blur-xl"
-      style={{ right: taskLeft === null ? 16 : window.innerWidth - taskLeft + 16 }}
+      style={{ right: currentTaskLeft === null ? 16 : window.innerWidth - currentTaskLeft + 16 }}
     >
       <Cpu className="h-4 w-4 shrink-0 text-green-500" />
       <div className="text-xs leading-tight">

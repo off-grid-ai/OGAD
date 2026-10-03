@@ -25,7 +25,7 @@ const SHORTCUTS: Shortcut[] = [
     pro: true
   }, // pro/main/clipboard.ts
   {
-    keys: ['⌥', 'Space'],
+    keys: [isMac() ? '⌥' : 'Alt', 'Space'],
     action: 'Dictation — hold or toggle',
     pro: true,
     note: 'Customizable in Voice'

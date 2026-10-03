@@ -7,6 +7,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+// The DB test compiler uses the classic JSX runtime.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import React from 'react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'

@@ -8,7 +8,7 @@ import type { ActionRecord } from '@offgrid/use'
 import { calendarVerifyWindow, listContainsTitle, makeReadBackVerifiers } from '../verification'
 import type { NativeActionCommand } from '../native-helper-logic'
 
-const action = (type: string, args: Record<string, unknown>) => ({ type, args }) as ActionRecord
+const action = (type: string, args: Record<string, unknown>): ActionRecord => ({ type, args }) as ActionRecord
 
 describe('listContainsTitle', () => {
   it('matches an exact title in the helper shape', () => {

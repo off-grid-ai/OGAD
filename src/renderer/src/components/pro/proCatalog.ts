@@ -61,7 +61,7 @@ export const PRO_FEATURES: ProFeature[] = [
     description:
       'Choose a workflow, add its details, and start it in Chat. The work stays on your device.',
     highlights: ['Prepared workflows', 'One intake before the run', 'Starts in your local Chat'],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'tasks',
@@ -71,7 +71,7 @@ export const PRO_FEATURES: ProFeature[] = [
     description:
       'Track running and completed work, open its live view, and respond when a task needs attention.',
     highlights: ['Live task status', 'Saved task history', 'Attention requests in one place'],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'day',
@@ -85,7 +85,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'Per-meeting prep: who’s in it and your open items',
       'Priorities surfaced from what you actually did'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'reflect',
@@ -99,7 +99,11 @@ export const PRO_FEATURES: ProFeature[] = [
       'Focus vs. distraction trends',
       'All computed locally — never uploaded'
     ],
-    platforms: ['darwin', 'win32']
+    // Ported to Windows: Reflect adds no capture of its own — it is pure aggregation
+    // over observations the capture pipeline already writes, which Replay's port put
+    // on Windows and Linux. The whole path (crm/reflect.ts, its IPC, ReflectScreen)
+    // carries no platform-native code and reaches SQLite through core getDB.
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'replay',
@@ -132,7 +136,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'On-device transcription',
       'Searchable transcripts & summaries'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'actions',
@@ -146,7 +150,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'Secretary-proposed actions',
       'Approval-gated — you’re always in control'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'entities',
@@ -160,7 +164,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'Cross-source narrative summaries',
       'Relationship graph'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'search',
@@ -170,7 +174,7 @@ export const PRO_FEATURES: ProFeature[] = [
     description:
       'One search bar across your captured activity, meetings, entities, and connectors — semantic + keyword, all on-device.',
     highlights: ['Unified semantic search', 'Across capture, meetings & connectors', 'Fully local'],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'notifications',
@@ -184,20 +188,20 @@ export const PRO_FEATURES: ProFeature[] = [
       'Approval queue for actions',
       'Auto-extracted to-dos'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'voice',
     label: 'Voice',
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
-    description: `Hold Option+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
+    description: `Hold ${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
     highlights: [
-      'Option+Space push-to-talk or toggle, anywhere',
+      `${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space push-to-talk or toggle, anywhere`,
       'Paste-at-cursor + a searchable recordings library',
       'Transcribe any audio/video file, all on-device'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'vault',
@@ -245,12 +249,9 @@ export const PRO_FEATURES: ProFeature[] = [
       'Known devices reconnect when they return to the network',
       'Direct encrypted transfer on your local network'
     ],
-    // Both platforms: sync is cross-platform by construction. The transport is node:net and
-    // discovery is bonjour-service (pure JS mDNS), so a Windows install gets the LAN route with
-    // no native code. The single `process.platform === 'darwin'` branch in the activation path
-    // only ADDS the Apple proximity route on top - macOS ends up with LAN plus proximity,
-    // Windows with LAN. Gating this to darwin would dark-out a feature that works.
-    platforms: ['darwin', 'win32']
+    // LAN sync uses node:net and bonjour-service on all three desktop platforms.
+    // Apple proximity is an extra macOS route; Linux and Windows use LAN.
+    platforms: ['darwin', 'win32', 'linux']
   }
 ]
 
@@ -270,14 +271,11 @@ export function featureSupportsPlatform(feature: ProFeature, platform: DevicePla
 
 /**
  * The baseline rule for Pro surfaces that don't (yet) have their own per-feature
- * `platforms` declaration — today just the pro Settings sections (proactive
- * delivery, learned prefs), which aren't catalog routes. Linux subscribers see
- * a "coming soon" placeholder; free users see the upgrade screen. Catalog routes use
- * the per-feature `featureSupportsPlatform` seam via `proFeatureComingSoon`
- * instead — prefer that for anything backed by a ProFeature.
+ * `platforms` declaration. Registered Settings sections run on each supported
+ * desktop platform; an unknown platform keeps the placeholder.
  */
 export function proComingSoonHere(platform: DevicePlatform, isPro: boolean): boolean {
-  return isPro && platform !== 'darwin' && platform !== 'win32'
+  return isPro && platform === 'unknown'
 }
 
 /**
@@ -299,4 +297,24 @@ export function proFeatureComingSoon(
     return false
   }
   return !featureSupportsPlatform(feature, platform)
+}
+
+/**
+ * Which view the app should OPEN on. Free users land on Models (they need a model
+ * before anything else works); Pro users land on Day — but only where Day is
+ * actually available.
+ *
+ * This lives here, beside the seam, because it is a per-feature platform decision and
+ * `platforms` is the single source of truth for those. It previously sat in App.tsx as
+ * `isPro && isMac() ? 'day' : 'models'`, which was right only by accident: it agreed
+ * with the catalog while Day was macOS-only, and would have stranded a ported Day on
+ * Windows — nav and gating would light Day up from `platforms` while the landing
+ * screen still asked `isMac()`. Route the decision through the seam so porting a
+ * feature never leaves a second place to update.
+ *
+ * Never land on a locked or unavailable tab.
+ */
+export function landingView(platform: DevicePlatform, isPro: boolean): 'day' | 'models' {
+  const day = getProFeature('day')
+  return isPro && day && featureSupportsPlatform(day, platform) ? 'day' : 'models'
 }

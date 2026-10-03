@@ -26,32 +26,22 @@ afterEach(() => {
 })
 
 describe('Pro platform availability', () => {
-  it.each(['darwin', 'win32'])('shows Pro as live on %s', (platform) => {
+  it.each(['darwin', 'win32', 'linux'])('shows Pro as live on %s', (platform) => {
     renderOn(platform)
     expect(screen.getByText(/Off Grid AI Pro · Available now/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
     expect(screen.queryByText(/coming soon to Linux/i)).toBeNull()
   })
 
-  it('keeps other Pro features gated on Linux', () => {
-    expect(
-      PRO_FEATURES.filter((feature) => feature.platforms.includes('linux')).map(
-        (feature) => feature.route
-      )
-    ).toEqual(['replay', 'vault', 'clipboard'])
-    renderOn('linux')
-    expect(screen.getByText(/Off Grid AI Pro · Coming soon/)).toBeTruthy()
-    expect(screen.getByText(/This feature is coming soon to Linux/)).toBeTruthy()
-    expect(screen.getByText(/Replay, Vault, Clipboard are available on Linux now/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Get Pro/ })).toBeNull()
-  })
-
-  it('gives an existing Linux subscriber the same status', () => {
-    renderOn('linux', 'coming-soon')
-    expect(screen.getByText(/This feature is coming soon to Linux/)).toBeTruthy()
-    expect(screen.getByText(/Core features work on your device today/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Get Pro/ })).toBeNull()
-  })
+  it.each(PRO_FEATURES.map((feature) => [feature.route, feature] as const))(
+    'offers %s on Linux',
+    (_route, feature) => {
+      renderOn('linux', 'upgrade', feature)
+      expect(screen.getByText(/Off Grid AI Pro · Available now/)).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
+      expect(screen.queryByText(/coming soon to Linux/i)).toBeNull()
+    }
+  )
 
   it('offers Vault and license activation on Linux', () => {
     renderOn('linux', 'upgrade', getProFeature('vault')!, true)
@@ -69,8 +59,8 @@ describe('Pro platform availability', () => {
     })
     render(<UpgradeScreen />)
 
-    expect(screen.getByText(/Some Pro features are coming soon to Linux/)).toBeTruthy()
-    expect(screen.getByText(/Replay, Vault, Clipboard are available on Linux now/)).toBeTruthy()
+    expect(screen.queryByText(/Some Pro features are coming soon to Linux/)).toBeNull()
+    expect(screen.getByText(/Off Grid AI Pro · Available now/)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Activate/ })).toBeTruthy()
   })

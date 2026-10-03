@@ -294,7 +294,7 @@ export function setRemoteVisionServerSettings(
   if (
     !endpoint ||
     ![...Object.values(mediaModels), ...Object.values(roleModels)].some((selected) =>
-      Boolean(selected?.trim())
+      Boolean((selected as string | undefined)?.trim())
     )
   ) {
     throw new Error('Remote model server and at least one model are required.')

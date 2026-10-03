@@ -68,10 +68,7 @@ export function CommandPalette({
 
   // Debounced fast search (keyword only for instant feel).
   useEffect(() => {
-    if (!query.trim()) {
-      setHits([])
-      return undefined
-    }
+    if (!query.trim()) return undefined
     const id = ++seq.current
     const t = setTimeout(async () => {
       const result = await api.universalSearch(query, { limit: 8, semantic: false })
@@ -110,7 +107,10 @@ export function CommandPalette({
         <Command shouldFilter={false} className="font-mono">
           <CommandInput
             value={query}
-            onValueChange={setQuery}
+            onValueChange={(value) => {
+              setQuery(value)
+              if (!value.trim()) setHits([])
+            }}
             placeholder="Search everything, or jump to a screen…"
           />
           <CommandList>

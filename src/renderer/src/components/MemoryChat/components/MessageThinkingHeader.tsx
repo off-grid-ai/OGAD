@@ -11,14 +11,14 @@ function WebTaskStepFeed(): React.JSX.Element | null {
   console.log('MemoryChat WebTaskStepFeed rendered')
   const [steps, setSteps] = useState<string[]>([])
   useEffect(() => {
-    const offStep = window.api.browser?.onStep?.((e) => {
-      const note = (e as { note?: string })?.note
+    const offStep = window.api.browser?.onStep((e) => {
+      const note = (e as { note?: string } | null)?.note
       if (typeof note === 'string') {
         setSteps((prev) => [...prev, note])
       }
     })
-    const offState = window.api.browser?.onTaskState?.((e) => {
-      if ((e as { status?: string })?.status === 'running') {
+    const offState = window.api.browser?.onTaskState((e) => {
+      if ((e as { status?: string } | null)?.status === 'running') {
         setSteps([])
       }
     })

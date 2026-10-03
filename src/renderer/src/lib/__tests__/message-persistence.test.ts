@@ -31,9 +31,9 @@ describe('message-persistence carrier', () => {
     expect(ctx).toMatchObject(base)
     expect(readReasoning(ctx)).toBe('because X')
     // Mirror mapRagMessages' restore of the other fields.
-    expect((ctx as any).toolCalls).toEqual(base.toolCalls)
-    expect((ctx as any).image).toBe('img/123.png')
-    expect((ctx as any).attachments).toEqual(base.attachments)
+    expect((ctx as typeof base).toolCalls).toEqual(base.toolCalls)
+    expect((ctx as typeof base).image).toBe('img/123.png')
+    expect((ctx as typeof base).attachments).toEqual(base.attachments)
   })
 
   it('keeps base context intact when no reasoning is provided', () => {

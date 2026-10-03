@@ -6,12 +6,12 @@ describe('deviceNoun', () => {
     expect(deviceNoun('darwin')).toBe('Mac')
   })
 
-  it('names Windows the neutral "device"', () => {
-    expect(deviceNoun('win32')).toBe('device')
+  it('names Windows as "Windows PC"', () => {
+    expect(deviceNoun('win32')).toBe('Windows PC')
   })
 
-  it('names Linux the neutral "device"', () => {
-    expect(deviceNoun('linux')).toBe('device')
+  it('names Linux as "Linux computer"', () => {
+    expect(deviceNoun('linux')).toBe('Linux computer')
   })
 
   it('falls back to "device" for any other/unknown platform', () => {
@@ -21,9 +21,9 @@ describe('deviceNoun', () => {
   })
 
   describe('capitalize option', () => {
-    it('capitalizes "device" -> "Device" for sentence-initial use', () => {
-      expect(deviceNoun('win32', { capitalize: true })).toBe('Device')
-      expect(deviceNoun('linux', { capitalize: true })).toBe('Device')
+    it('keeps platform names capitalized for sentence-initial use', () => {
+      expect(deviceNoun('win32', { capitalize: true })).toBe('Windows PC')
+      expect(deviceNoun('linux', { capitalize: true })).toBe('Linux computer')
     })
 
     it('leaves "Mac" unchanged (already capitalized)', () => {
@@ -31,7 +31,7 @@ describe('deviceNoun', () => {
     })
 
     it('is a no-op when capitalize is false/omitted', () => {
-      expect(deviceNoun('win32', { capitalize: false })).toBe('device')
+      expect(deviceNoun('win32', { capitalize: false })).toBe('Windows PC')
       expect(deviceNoun('darwin')).toBe('Mac')
     })
   })

@@ -39,7 +39,7 @@ describe('<SettingsPanel/> tool settings', () => {
   it('shows and saves the maximum tool-call setting', async () => {
     let settings = { maxToolCalls: 25 }
     const saved: Array<{ maxToolCalls?: number }> = []
-    const setLlmSettings = async (patch: { maxToolCalls?: number }) => {
+    const setLlmSettings = async (patch: { maxToolCalls?: number }): Promise<{ maxToolCalls: number; }> => {
       saved.push(patch)
       settings = { ...settings, ...patch }
       return settings

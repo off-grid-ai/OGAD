@@ -51,7 +51,7 @@ function flattenTrigger(
       action,
       connectors
     }
-  if (t.kind === 'event' && (t.on === 'calendar' || t.on === 'approval'))
+  if (t.kind === 'event' && (['calendar', 'approval'] as readonly string[]).includes(t.on))
     return { triggerKind: 'event', triggerConfig: t.on, action, connectors }
   return { triggerKind: '', triggerConfig: '', action: '', connectors: true }
 }

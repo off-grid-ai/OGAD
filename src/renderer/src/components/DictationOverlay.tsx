@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Microphone, Square } from '@phosphor-icons/react'
 import { voice } from '@renderer/lib/voiceApi'
+import { isMac } from '@renderer/lib/device'
 
 type Phase = 'recording' | 'transcribing'
 
@@ -23,7 +24,7 @@ export function DictationOverlay(): React.JSX.Element | null {
   const [interim, setInterim] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [mode, setMode] = useState<'hold' | 'toggle' | 'both'>('hold')
-  const [accelerator, setAccelerator] = useState('Option+Space')
+  const [accelerator, setAccelerator] = useState(isMac() ? 'Option+Space' : 'Alt+Space')
 
   const ctxRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -207,7 +208,7 @@ export function DictationOverlay(): React.JSX.Element | null {
     })
     void v.getSettings().then((s) => {
       setMode(s.mode)
-      setAccelerator(s.accelerator || 'Option+Space')
+      setAccelerator(s.accelerator || (isMac() ? 'Option+Space' : 'Alt+Space'))
     })
     const offs = [
       v.on('begin', begin),

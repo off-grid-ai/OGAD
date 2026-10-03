@@ -13,10 +13,10 @@ describe('renderer deviceNoun wrapper', () => {
     expect(deviceNoun()).toBe('Mac')
   })
 
-  it('reads window.api.platform: win32 -> device', () => {
+  it('reads window.api.platform: win32 -> Windows PC', () => {
     vi.stubGlobal('window', { api: { platform: 'win32' } })
-    expect(deviceNoun()).toBe('device')
-    expect(deviceNoun({ capitalize: true })).toBe('Device')
+    expect(deviceNoun()).toBe('Windows PC')
+    expect(deviceNoun({ capitalize: true })).toBe('Windows PC')
   })
 
   it('falls back to "device" when window.api is absent', () => {

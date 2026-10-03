@@ -30,7 +30,7 @@ export function registerTaskHistoryIpc(): void {
         recoveryCheckpoint = checkpoint,
         continuation?: import('../vision/vision-agent').VisionTaskContinuation,
         targetLabel?: string
-      ) => {
+      ): Promise<import('../vision/vision-agent').VisionTaskResult> => {
         return getVisionRailHost().runTask(
           task.title,
           taskId,

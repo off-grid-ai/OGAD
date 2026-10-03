@@ -153,7 +153,7 @@ describe('<App/> locked Pro navigation integration', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/day'))
   }, 30_000)
 
-  it('keeps an unavailable Linux Pro route gated without a purchase action', async () => {
+  it('offers Day on Linux to a free user', async () => {
     window.history.replaceState(null, '', '/day')
     const openExternal = vi.fn()
     installAppBoundary({ platform: 'linux', isPro: false, openExternal })
@@ -161,9 +161,9 @@ describe('<App/> locked Pro navigation integration', () => {
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: 'Day' })).toBeTruthy()
-    expect(screen.getByText(/Off Grid AI Pro · Coming soon/)).toBeTruthy()
-    expect(screen.getByText(/This feature is coming soon to Linux/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Get Pro/ })).toBeNull()
+    expect(screen.getByText(/Off Grid AI Pro · Available now/)).toBeTruthy()
+    expect(screen.queryByText(/This feature is coming soon to Linux/)).toBeNull()
+    expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
     expect(openExternal).not.toHaveBeenCalled()
   }, 30_000)
 
@@ -182,8 +182,8 @@ describe('<App/> locked Pro navigation integration', () => {
   it('unlocks the ported routes for an entitled Linux user', async () => {
     const user = userEvent.setup()
     installAppBoundary({ platform: 'linux', isPro: true })
-    const paidView = vi.fn((view: string) => <h1>Paid {view}</h1>)
-    const taskWorkspace = vi.fn(() => <h1>Paid Tasks workspace</h1>)
+    const paidView = (view: string): React.JSX.Element => <h1>Paid {view}</h1>
+    const taskWorkspace = (): React.JSX.Element => <h1>Paid Tasks workspace</h1>
     registerProView(paidView)
     registerSlot(SLOTS.taskWorkspace, taskWorkspace)
 
@@ -192,30 +192,26 @@ describe('<App/> locked Pro navigation integration', () => {
     await user.hover(navigation)
     await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('true'))
 
-    const linuxRoutes = new Set(['vault', 'clipboard', 'replay'])
     for (const feature of PRO_FEATURES) {
       const navButton = within(navigation).getByRole('button', { name: feature.label })
-      if (linuxRoutes.has(feature.route)) {
-        expect(within(navButton).queryByTitle('Coming soon')).toBeNull()
-        expect(within(navButton).queryByTitle('Pro')).toBeNull()
-        await user.click(navButton)
-        expect(await screen.findByRole('heading', { name: `Paid ${feature.route}` })).toBeTruthy()
-      } else {
-        expect(within(navButton).getByTitle('Coming soon')).toBeTruthy()
-        paidView.mockClear()
-        await user.click(navButton)
-        expect(await screen.findByRole('heading', { name: feature.label, level: 1 })).toBeTruthy()
-        expect(screen.getByText(/This feature is coming soon to Linux/)).toBeTruthy()
-        expect(screen.queryByRole('button', { name: /Get Pro/ })).toBeNull()
-        // A previous ported screen can render during its exit animation.
-        expect(paidView.mock.calls.every(([route]) => linuxRoutes.has(String(route)))).toBe(true)
-        expect(taskWorkspace).not.toHaveBeenCalled()
-      }
+      expect(within(navButton).queryByTitle('Coming soon')).toBeNull()
+      expect(within(navButton).queryByTitle('Pro')).toBeNull()
+      await user.click(navButton)
+      expect(
+        await screen.findByRole('heading', {
+          name:
+            feature.route === 'tasks'
+              ? 'Paid Tasks workspace'
+              : feature.route === 'explore'
+                ? 'Assistant'
+                : `Paid ${feature.route}`
+        })
+      ).toBeTruthy()
       await user.hover(navigation)
     }
   }, 30_000)
 
-  it('marks Pro Settings cards as coming soon on Linux', async () => {
+  it('does not mark all Pro Settings cards as coming soon on Linux', async () => {
     window.history.replaceState(null, '', '/settings')
     installAppBoundary({ platform: 'linux', isPro: false })
 
@@ -223,7 +219,7 @@ describe('<App/> locked Pro navigation integration', () => {
 
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
     expect(
-      screen.getAllByText('Pro features are coming soon to Linux. Core features work now.').length
-    ).toBeGreaterThan(0)
+      screen.queryByText('Pro features are coming soon to Linux. Core features work now.')
+    ).toBeNull()
   }, 30_000)
 })

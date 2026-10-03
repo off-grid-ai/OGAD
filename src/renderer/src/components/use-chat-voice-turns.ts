@@ -227,7 +227,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         const requestId = crypto.randomUUID()
         transcriptionRequestRef.current = requestId
         const text = (await optionsRef.current.transcribeAudio(bytes, extension, requestId)).trim()
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         if (!text) {
           setError("Didn't catch that. Tap the microphone and try again.")
           updateSuspended(optionsRef.current.mode === 'handsfree')
@@ -255,11 +255,11 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
             setError('This voice note could not be saved for later playback.')
           }
         }
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         optionsRef.current.onTranscript(text, clip)
       } catch (cause) {
         console.error('Transcription failed', cause)
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         setError(
           transcriptionRecoveryMessage(cause) ??
             'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
@@ -307,7 +307,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
             autoGainControl: true
           }
         })
-        if (!mountedRef.current || sequence !== sequenceRef.current) {
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) {
           stream.getTracks().forEach((track) => track.stop())
           return
         }
@@ -380,7 +380,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           stopAnalysis(resources)
           stopTracks(resources)
         }
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         const failure = microphoneFailure(cause)
         setError(failure.message)
         setMicrophoneDenied(failure.denied)

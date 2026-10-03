@@ -300,8 +300,30 @@ export class LLMService {
     return path.join(getModelsDir(), 'llm-settings.json')
   }
 
-  constructor() {
+  /** Whether the persisted state (active model + user settings) has been read yet. */
+  private loaded = false
+
+  /** Read persisted state ONCE, on first use — never from the constructor.
+   *
+   *  `llm` is a module-level singleton, so it is constructed while index.ts's IMPORTS
+   *  are still evaluating, which under ESM completes before index.ts's own body runs
+   *  `unifyUserDataPath()` → `app.setPath('userData', …)`. Resolving paths at
+   *  construction therefore reads the PRE-override profile: an OFFGRID_USER_DATA
+   *  harness dir is ignored, and in production the canonical-dir migration ("My
+   *  Memories" / "my-memories" → "Off Grid AI Desktop") has not happened yet, so the
+   *  user's active model and saved settings are silently missed and replaced by
+   *  defaults. Writes never had this bug — `persist()` goes through the settingsFile
+   *  getter, which resolves late. This is exactly the hazard the activeModelFile /
+   *  settingsFile getters were introduced to avoid; calling resolveModel() and reading
+   *  the settings file from the constructor defeated them. */
+  private ensureLoaded(): void {
+    if (this.loaded) return
+    this.loaded = true
     this.resolveModel()
+    this.loadPersistedSettings()
+  }
+
+  private loadPersistedSettings(): void {
     try {
       const s = JSON.parse(fs.readFileSync(this.settingsFile, 'utf-8'))
       if (typeof s.temperature === 'number') this.temperature = s.temperature
@@ -387,6 +409,7 @@ export class LLMService {
   /** The model's trained context window, or null if unknown — exposed so the UI can offer the
    *  slider up to the model's own maximum instead of a hardcoded cap. */
   modelMaxContext(): number | null {
+    this.ensureLoaded()
     return this.trainedContext()
   }
 
@@ -432,6 +455,7 @@ export class LLMService {
 
   /** The selected app context cap for local and remote inference. */
   effectiveContextSize(): number {
+    this.ensureLoaded()
     return this.ctxSize
   }
 
@@ -460,6 +484,7 @@ export class LLMService {
   }
 
   getSettings(): LlmSettings {
+    this.ensureLoaded()
     const speculativeCapabilities = this.speculativeModelCapabilities()
     return {
       temperature: this.temperature,
@@ -498,6 +523,7 @@ export class LLMService {
   /** The exact argv handed to `llama-server` for the current settings.
    *  Both `_doInit` and tests use the same `buildLaunchArgs` path. */
   launchArgs(): string[] {
+    this.ensureLoaded()
     return this.launchArgsFor(this.ctxSize, this.gpuLayers)
   }
 
@@ -574,6 +600,7 @@ export class LLMService {
   /** Update inference settings; respawns the server if any launch-time arg changed
    *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
   async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
+    this.ensureLoaded()
     this.resolveModel()
     const requestedMode = s.speculativeDecoding ?? this.speculativeDecoding
     const requestedDraft =
@@ -754,6 +781,7 @@ export class LLMService {
 
   /** Switch the active model without terminating a generation already using it. */
   reloadModel(): void {
+    this.ensureLoaded()
     if (this.activeGenerations > 0) {
       this.modelReloadPending = true
       return
@@ -794,6 +822,7 @@ export class LLMService {
   // on mmproj wrongly kept "Setup Required" up for an activated vision model.)
   /** Whether the active chat model can read images (has a vision projector / mmproj). */
   hasVision(): boolean {
+    this.ensureLoaded()
     this.resolveModel()
     return !!this.mmProjPath && fs.existsSync(this.mmProjPath)
   }
@@ -809,6 +838,7 @@ export class LLMService {
   }
 
   modelsExist(): boolean {
+    this.ensureLoaded()
     this.resolveModel()
     return fs.existsSync(this.modelPath)
   }
@@ -823,6 +853,7 @@ export class LLMService {
    *  loaded it yet (otherwise an idle/headless gateway reports no chat model).
    *  Returns null when no model is downloaded. */
   activeModelInfo(): { id: string; vision: boolean } | null {
+    this.ensureLoaded()
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = this.runtimeModelOverride?.id ?? path.basename(this.modelPath)
@@ -839,6 +870,7 @@ export class LLMService {
 
   /** Exact active artifacts for a model-family policy adapter. */
   activeModelArtifacts(): VisionModelArtifacts | null {
+    this.ensureLoaded()
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = this.runtimeModelOverride?.id ?? path.basename(this.modelPath)
@@ -874,6 +906,7 @@ export class LLMService {
   }
 
   async init(): Promise<void> {
+    this.ensureLoaded()
     await prepareModelMemory('chat')
     if (this.paused) {
       // A chat/tool turn needs the LLM NOW, but it's paused for a resident image
@@ -999,7 +1032,10 @@ export class LLMService {
     if (generation !== this.launchGeneration) return
     if (await this.launchWithFallback(serverPaths, generation)) return
     if (generation !== this.launchGeneration) return
-    this.lastErrorMsg = 'All model engines failed to load the model.'
+    this.lastErrorMsg =
+      classifyLlamaError(this.stderrTail.join('\n'))?.reason ??
+      this.lastErrorMsg ??
+      'All model engines failed to load the model.'
     this.invalidateHealth()
     throw new Error(this.lastErrorMsg)
   }
@@ -1317,7 +1353,7 @@ export class LLMService {
       await this.init()
     } catch (error) {
       console.error('[LLMService] recovery startup failed:', error)
-      if (generation === this.launchGeneration && !this.server) await this.handleCrash(code)
+      if (generation === this.launchGeneration && !(this.server as ChildProcess | null)) await this.handleCrash(code)
     }
   }
 

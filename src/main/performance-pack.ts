@@ -25,7 +25,7 @@ function manifestAsset(): PerformancePackAsset | null {
   const manifestPath = resourceFile('performance-packs.json')
   if (!manifestPath) return null
   try {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as PerformancePackManifest
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Omit<PerformancePackManifest, 'schemaVersion'> & { schemaVersion?: number }
     if (manifest.schemaVersion !== 1 || !['win32', 'linux'].includes(process.platform)) return null
     const asset = manifest.cuda[process.platform as 'win32' | 'linux']
     if (
@@ -144,7 +144,7 @@ async function fetchPack(asset: PerformancePackAsset, signal: AbortSignal): Prom
   let lastProgressPublishedAt = Date.now()
   try {
     const reader = response.body.getReader()
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read()
       if (done) break
       if (signal.aborted) throw signal.reason

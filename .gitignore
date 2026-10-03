@@ -84,3 +84,11 @@ coverage-db/
 # Raw V8 output and the converted report from the e2e coverage capture
 coverage-e2e-raw/
 coverage-e2e/
+
+# Pinned Linux desktop tools staged by the packaging script
+resources/linux-desktop/bin/
+resources/linux-desktop/__pycache__/
+coverage-native-raw/
+coverage-native/
+coverage-native-desktop-raw/
+coverage-native-desktop/

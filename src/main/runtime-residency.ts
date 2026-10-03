@@ -41,7 +41,7 @@ export function setResidencyMode(
   modality: Modality,
   mode: ResidencyMode
 ): Record<Modality, ResidencyMode> {
-  if (!MODALITIES.includes(modality) || (mode !== 'resident' && mode !== 'on-demand')) {
+  if (!MODALITIES.includes(modality) || !(['resident', 'on-demand'] as readonly string[]).includes(mode)) {
     throw new Error('Invalid model memory setting')
   }
   const effective = isResidencyLocked(modality) ? 'resident' : mode

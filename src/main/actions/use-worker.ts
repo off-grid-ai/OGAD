@@ -41,7 +41,7 @@ export function createActionWorker(engine: EngineLike, park: ParkSignal): Action
   const outcomeListeners = new Set<(outcome: TickOutcome) => void>()
   let running = false
 
-  const notify = (outcome: TickOutcome) => {
+  const notify = (outcome: TickOutcome): void => {
     const list = waiters.get(outcome.id)
     if (list) {
       waiters.delete(outcome.id)
@@ -54,7 +54,7 @@ export function createActionWorker(engine: EngineLike, park: ParkSignal): Action
     }
   }
 
-  const drain = async () => {
+  const drain = async (): Promise<void> => {
     running = true
     try {
       for (;;) {
@@ -114,7 +114,7 @@ export function createActionWorker(engine: EngineLike, park: ParkSignal): Action
           }
           resolve(undefined)
         }, timeoutMs)
-        const wrapped = (outcome: TickOutcome) => {
+        const wrapped = (outcome: TickOutcome): void => {
           clearTimeout(timer)
           resolve(outcome)
         }

@@ -99,6 +99,7 @@ const intentionalUnusedParameters = {
       'error',
       {
         argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
         destructuredArrayIgnorePattern: '^_'
       }
     ]
@@ -111,12 +112,18 @@ export default defineConfig(
       '**/node_modules/**',
       '**/dist/**',
       '**/out/**',
+      'build/image-macos/**',
+      'build/linux-bin/**',
+      'build-sd-gguf/**',
       '**/coverage/**',
+      '**/coverage-*/**',
       '.claude/**',
       '.offgrid/**',
       '.demo-profile/**',
       'component-library-animations/**',
       'resources/artifacts/**',
+      'resources/bin/**',
+      'outputs/**',
       '**/*.min.js',
       '**/*.min.css'
     ]
@@ -135,7 +142,7 @@ export default defineConfig(
     }
   },
   {
-    files: ['**/*.{ts,tsx}'],
+    files: ['src/renderer/**/*.{ts,tsx}', 'pro/renderer/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': eslintPluginReactHooks,
       'react-refresh': eslintPluginReactRefresh
@@ -148,7 +155,7 @@ export default defineConfig(
   intentionalUnusedParameters,
   {
     name: 'CommonJS build hooks',
-    files: ['scripts/resign.js'],
+    files: ['scripts/resign.js', 'scripts/**/*.cjs'],
     rules: {
       '@typescript-eslint/no-require-imports': 'off'
     }
@@ -160,6 +167,48 @@ export default defineConfig(
       // Framework fakes such as ResizeObserver intentionally expose no-op methods.
       '@typescript-eslint/no-empty-function': 'off'
     }
+  },
+  {
+    name: 'JavaScript runtime helpers',
+    files: ['**/*.{js,mjs,cjs}'],
+    rules: {
+      // Type annotations are not valid JavaScript (including GNOME extensions).
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
+  // These existing modules export their public hooks/helpers beside components.
+  // Vite invalidates their consumers on helper changes; keep those API exports.
+  {
+    files: ['src/renderer/src/components/ArtifactCanvas.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['artifactSpeechModelName', 'parseArtifact'] }] }
+  },
+  {
+    files: ['src/renderer/src/components/MemoryChat/components/AssistantMessageActions.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['speechControlState'] }] }
+  },
+  {
+    files: ['src/renderer/src/components/MemoryChat/components/MessageContext.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['hasInlineMemorySources', 'openUnifiedContext'] }] }
+  },
+  {
+    files: ['src/renderer/src/components/MemoryChat/components/StylePresetPicker.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['ASK_EXAMPLES', 'ASK_EXAMPLES_PRO', 'IMAGE_EXAMPLES', 'STYLE_PRESETS'] }] }
+  },
+  {
+    files: ['src/renderer/src/components/actions/ApprovalSetup.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['buildApprovalChatPrompt'] }] }
+  },
+  {
+    files: ['src/renderer/src/components/ui/animated-modal.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['useModal', 'useOutsideClick'] }] }
+  },
+  {
+    files: ['src/renderer/src/components/ui/sidebar.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['useSidebar'] }] }
+  },
+  {
+    files: ['src/renderer/src/hooks/useReprocessing.tsx'],
+    rules: { 'react-refresh/only-export-components': ['error', { allowConstantExport: true, allowExportNames: ['useReprocessing'] }] }
   },
   eslintConfigPrettier
 )

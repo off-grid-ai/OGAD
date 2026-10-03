@@ -164,7 +164,19 @@ deb:
     - libasound2t64
     - libgbm1
     - xdotool
+    - x11-utils
     - wtype
+    - python3-gi
+    - gir1.2-gstreamer-1.0
+    - gstreamer1.0-pipewire
+    - gstreamer1.0-plugins-base
+    - gstreamer1.0-plugins-good
+    - gstreamer1.0-plugins-bad
+    - gstreamer1.0-plugins-ugly
+    - gstreamer1.0-libav
+    - xdg-desktop-portal
+    - grim
+    - kde-spectacle
 # Electron fuses (flipped at package time). ASAR integrity makes a tampered app.asar
 # refuse to load — the local-first anti-tamper lever (we don't phone home, so this is
 # the bar against cracking the offline license check). Only the integrity fuses are

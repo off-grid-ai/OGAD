@@ -22,7 +22,7 @@ export function PerformancePackPanel({ onSkip, showUnavailable = false }: Perfor
   const [status, setStatus] = useState<PerformancePackStatus | null>(null)
 
   useEffect(() => {
-    const pack = window.api.performancePack
+    const pack = window.api.performancePack as Partial<typeof window.api.performancePack> | undefined
     if (typeof pack?.status !== 'function') return
     void pack.status().then(setStatus).catch(() => {})
     return pack.onChanged?.(setStatus)
