@@ -9,14 +9,13 @@
 // 16 kHz mono WAV first, exactly like the whisper path.
 
 import fs from 'fs'
-import { recordAIRequest } from '../ai-request-log'
 import os from 'os'
 import path from 'path'
 import { binRoots, modelsDir } from '../runtime-env'
-import { getActiveModal } from '../active-models'
+import { activeDesktopModelId } from '../desktop-generation'
+import { modelsByKind, transcriptionModelsByEngine } from '@offgrid/models'
 import { ffmpegBin } from './whisper-cli'
 import { existing } from './bin-resolution'
-import { modelsByEngine } from './classify'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
 import type { TranscriptionService, Transcript, TranscribeOptions } from './types'
 import { runNativeTranscriptionProcess } from './native-process'
@@ -101,9 +100,9 @@ function downloadedCatalogModel(): ParakeetModel | null {
   const dir = modelsDir()
   // Partition the catalog by engine in ONE place (select.modelsByEngine), not a local
   // `m.engine === 'parakeet'` filter duplicated against whisper-cli's classification.
-  const entries = modelsByEngine('parakeet')
+  const entries = transcriptionModelsByEngine('parakeet', modelsByKind('transcription'))
   if (!entries.length) return null
-  const active = getActiveModal('transcription')
+  const active = activeDesktopModelId('transcription')
   const ordered = active
     ? [...entries].sort((a, b) =>
         activeMatchesEntry(active, a) ? -1 : activeMatchesEntry(active, b) ? 1 : 0
@@ -185,59 +184,42 @@ class ParakeetCliTranscription implements TranscriptionService {
   }
 
   async transcribe(input: { path: string }, opts: TranscribeOptions = {}): Promise<Transcript> {
-    return recordAIRequest(
-      {
-        modality: 'stt',
-        source: 'Parakeet transcription',
-        model: 'Parakeet',
-        request: { ...input, ...opts },
-        signal: opts.signal
-      },
-      async (log) => {
-        await log.inputFile(input.path)
-        const bin = parakeetBin()
-        if (!bin) throw new Error('Parakeet runtime is not installed.')
-        const model = parakeetModel()
-        if (!model) throw new Error('No Parakeet model found.')
+    const bin = parakeetBin()
+    if (!bin) throw new Error('Parakeet runtime is not installed.')
+    const model = parakeetModel()
+    if (!model) throw new Error('No Parakeet model found.')
 
-        let wav = input.path
-        let tmp: string | null = null
-        if (!opts.alreadyWav16k) {
-          const ff = ffmpegBin()
-          if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
-          tmp = path.join(os.tmpdir(), `offgrid-parakeet-${Date.now()}-${process.pid}.wav`)
-          try {
-            await runNativeTranscriptionProcess(ff, decodeToWavArgs(input.path, tmp), {
-              timeout: DECODE_TIMEOUT_MS,
-              signal: opts.signal
-            })
-          } catch (e) {
-            fs.promises.unlink(tmp).catch(() => {})
-            throw e
-          }
-          wav = tmp
-        }
-
-        try {
-          const { stdout } = await runNativeTranscriptionProcess(
-            bin,
-            buildParakeetArgs(model, wav),
-            {
-              runtimeModel: model.encoder,
-              maxBuffer: 64 * 1024 * 1024,
-              timeout: 30 * 60_000,
-              signal: opts.signal
-            }
-          )
-          const text = parseParakeetOutput(stdout)
-          // Parakeet models here are English transducers; report language when the caller pinned one.
-          const language = opts.language && opts.language !== 'auto' ? opts.language : undefined
-          return { text, language }
-        } finally {
-          if (tmp) fs.promises.unlink(tmp).catch(() => {})
-        }
+    let wav = input.path
+    let tmp: string | null = null
+    if (!opts.alreadyWav16k) {
+      const ff = ffmpegBin()
+      if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
+      tmp = path.join(os.tmpdir(), `offgrid-parakeet-${Date.now()}-${process.pid}.wav`)
+      try {
+        await runNativeTranscriptionProcess(ff, decodeToWavArgs(input.path, tmp), {
+          timeout: DECODE_TIMEOUT_MS,
+          signal: opts.signal
+        })
+      } catch (e) {
+        fs.promises.unlink(tmp).catch(() => {})
+        throw e
       }
-    )
+      wav = tmp
+    }
+
+    try {
+      const { stdout } = await runNativeTranscriptionProcess(bin, buildParakeetArgs(model, wav), {
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: 30 * 60_000,
+        signal: opts.signal
+      })
+      const text = parseParakeetOutput(stdout)
+      // Parakeet models here are English transducers; report language when the caller pinned one.
+      const language = opts.language && opts.language !== 'auto' ? opts.language : undefined
+      return { text, language }
+    } finally {
+      if (tmp) fs.promises.unlink(tmp).catch(() => {})
+    }
   }
 }
 
