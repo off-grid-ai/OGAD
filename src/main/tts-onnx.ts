@@ -59,8 +59,8 @@ export class OnnxSpeechRuntime {
         pending.onProgress?.({
           voiceId: pending.voice,
           downloadedBytes: response.downloadedBytes ?? 0,
-          totalBytes: response.totalBytes ?? null,
-          percentage: response.percentage ?? null,
+          totalBytes: response.totalBytes ?? 0,
+          percentage: response.percentage ?? 0,
           currentAsset: response.currentAsset ?? 'kokoro-onnx'
         })
         return

@@ -1,14 +1,9 @@
 /** Request-scoped voice transcription IPC. Main owns cancellation and temp-file cleanup. */
-import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import crypto from 'crypto'
-import {
-  admitTranscriptionRequest,
-  isValidRequestId,
-  transcriptionRequestKey
-} from '@offgrid/speech'
 import type { TranscriptionService } from './transcription/types'
 
 type InvokeHandler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
@@ -20,6 +15,14 @@ export interface VoiceTranscriptionIpcHost {
 export type TranscriptionServiceProvider = () => Promise<TranscriptionService>
 
 const active = new Map<string, AbortController>()
+
+function requestKey(senderId: number, requestId: string): string {
+  return `${senderId}:${requestId}`
+}
+
+function validRequestId(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value)
+}
 
 async function unlinkTemp(file: string): Promise<void> {
   try {
@@ -38,22 +41,39 @@ export function setupVoiceTranscriptionIpc(
   host: VoiceTranscriptionIpcHost = ipcMain,
   getService: TranscriptionServiceProvider = productionService
 ): void {
+  host.handle('voice:save-recording', async (_event, audioValue, extValue) => {
+    const ext = typeof extValue === 'string' ? extValue.toLowerCase() : ''
+    if (!['webm', 'mp4', 'm4a', 'ogg', 'wav'].includes(ext)) throw new Error('Unsupported voice recording format.')
+    if (!(audioValue instanceof ArrayBuffer || ArrayBuffer.isView(audioValue))) {
+      throw new Error('Invalid voice recording.')
+    }
+    const audio = ArrayBuffer.isView(audioValue)
+      ? Buffer.from(audioValue.buffer, audioValue.byteOffset, audioValue.byteLength)
+      : Buffer.from(audioValue)
+    if (audio.length === 0 || audio.length > 50 * 1024 * 1024) {
+      throw new Error('Invalid voice recording size.')
+    }
+    const dir = path.join(app.getPath('userData'), 'voice')
+    await fs.promises.mkdir(dir, { recursive: true })
+    const file = path.join(dir, `${crypto.randomUUID()}.${ext}`)
+    await fs.promises.writeFile(file, audio, { flag: 'wx' })
+    return file
+  })
+
   // IPC carries the audio bytes, extension and request identity as separate structured-clone fields.
   // eslint-disable-next-line max-params
   host.handle('voice:transcribe', async (event, audioValue, extValue, requestIdValue) => {
-    const admission = admitTranscriptionRequest({
-      senderId: event.sender.id,
-      requestId: requestIdValue,
-      extension: extValue,
-      isActive: (key) => active.has(key)
-    })
-    if (!admission.ok) throw new Error(admission.message)
-    const { extension: safeExt, key } = admission
+    if (!validRequestId(requestIdValue)) throw new Error('Invalid transcription request identity.')
+    const requestId = requestIdValue
+    const key = requestKey(event.sender.id, requestId)
+    if (active.has(key)) throw new Error('This transcription request is already active.')
 
     const audio = audioValue as ArrayBuffer | Uint8Array
+    const ext = typeof extValue === 'string' ? extValue : 'webm'
     const buf = ArrayBuffer.isView(audio)
       ? Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength)
       : Buffer.from(audio)
+    const safeExt = ext.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10) || 'webm'
     const tmp = path.join(
       os.tmpdir(),
       `offgrid-mic-${process.pid}-${crypto.randomUUID()}.${safeExt}`
@@ -75,8 +95,8 @@ export function setupVoiceTranscriptionIpc(
   })
 
   host.handle('voice:cancel-transcription', (event, requestIdValue) => {
-    if (!isValidRequestId(requestIdValue)) return false
-    const controller = active.get(transcriptionRequestKey(event.sender.id, requestIdValue))
+    if (!validRequestId(requestIdValue)) return false
+    const controller = active.get(requestKey(event.sender.id, requestIdValue))
     if (!controller) return false
     controller.abort()
     return true

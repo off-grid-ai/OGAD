@@ -7,7 +7,7 @@ describe('vision-aware prompt budget', () => {
     const messages = [{ role: 'user', content: 'Describe this system.' }]
     const tools = [{ type: 'function', function: { name: 'inspect' } }]
 
-    expect(toolPromptChars(messages, tools)).toBe(serializedToolPromptChars(messages, tools))
+    expect(toolPromptChars(messages as never, tools)).toBe(serializedToolPromptChars(messages as never, tools))
   })
 
   it('counts vision embeddings instead of base64 transport bytes', () => {
@@ -22,9 +22,9 @@ describe('vision-aware prompt budget', () => {
       }
     ]
 
-    expect(serializedToolPromptChars(messages)).toBeGreaterThan(300_000)
-    expect(toolPromptChars(messages)).toBeLessThan(16_384 * 4)
-    expect(toolPromptChars(messages)).toBeGreaterThan(2_048 * 4)
+    expect(serializedToolPromptChars(messages as never)).toBeGreaterThan(300_000)
+    expect(toolPromptChars(messages as never)).toBeLessThan(16_384 * 4)
+    expect(toolPromptChars(messages as never)).toBeGreaterThan(2_048 * 4)
   })
 
   it('keeps separate vision allowances for separate images', () => {

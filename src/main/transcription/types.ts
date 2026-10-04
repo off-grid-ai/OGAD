@@ -5,21 +5,37 @@
 // file ingest). Model selection, the ffmpeg 16 kHz-mono re-encode, and the
 // hallucination-suppression flags live behind here as the single source of truth.
 
-import type {
-  TranscriptResult,
-  TranscriptSegment,
-  TranscriptionDecodeRequest
-} from '@offgrid/models'
+export interface Seg {
+  start: number
+  end: number
+  text: string
+}
 
-export type Seg = TranscriptSegment
-export type Transcript = TranscriptResult
+export interface Transcript {
+  text: string
+  segments?: Seg[]
+  language?: string
+}
 
-export interface TranscribeOptions extends TranscriptionDecodeRequest {
+export interface TranscribeOptions {
   /** Cancel this one transcription. Native adapters must pass it to their process/request boundary. */
   signal?: AbortSignal
   /** Model file: absolute path, or a filename resolved in the models dir.
    *  Defaults to the user's configured/auto-picked transcription model. */
   model?: string
+  /** Spoken-language hint; 'auto' detects. Default 'auto'. */
+  language?: string
+  /** Suppress non-speech tokens + the repetition loop (whisper -sns -mc 0). Default true. */
+  suppressNonSpeech?: boolean
+  /** Input is already 16 kHz mono PCM WAV — skip the ffmpeg re-encode. Default false. */
+  alreadyWav16k?: boolean
+  /** Initial-prompt text that biases recognition toward custom vocabulary
+   *  (names, jargon) — whisper's --prompt. Keep it short. */
+  prompt?: string
+  /** Return per-utterance timestamped `segments` (drops whisper's -nt). Callers
+   *  that need to interleave/diarize by time (meetings) set this; plain dictation
+   *  leaves it off and reads only `text`. Default false. */
+  timestamps?: boolean
 }
 
 export interface TranscriptionService {
