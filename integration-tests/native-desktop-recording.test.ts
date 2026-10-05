@@ -62,7 +62,7 @@ it.runIf(process.env.OFFGRID_NATIVE_DESKTOP_TEST === '1')(
         [...args, path.join(output, 'main.cjs'), root],
         { env, timeout: 100_000, maxBuffer: 4 * 1024 * 1024 }
       )
-      expect(result.stdout).toContain('NATIVE_DESKTOP_PARITY_PASSED')
+      expect(result.stdout, result.stderr).toContain('NATIVE_DESKTOP_PARITY_PASSED')
     } finally {
       await fs.rm(root, { recursive: true, force: true })
     }

@@ -5,7 +5,6 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: { isPackaged: false }, shell: { openExternal: vi.fn() } }))
-import { app } from 'electron'
 import {
   NATIVE_TOOL_SPECS,
   specsForPlatform,
@@ -39,13 +38,16 @@ describe('specsForPlatform', () => {
     ).toEqual([...WINDOWS_TOOL_NAMES].sort())
   })
 
-  it('Linux exposes links, but no task tools without the watched workspace', () => {
+  it('Linux exposes location and links without the watched workspace', () => {
     expect(
       specsForPlatform('linux')
         .map((spec) => spec.name)
         .sort()
     ).toEqual([...LINUX_TOOL_NAMES].sort())
-    expect(specsForPlatform('linux', false).map((spec) => spec.name)).toEqual(['open_url'])
+    expect(specsForPlatform('linux', false).map((spec) => spec.name)).toEqual([
+      'get_current_location',
+      'open_url'
+    ])
     expect(specsForPlatform('freebsd')).toEqual([])
   })
 })
@@ -93,41 +95,24 @@ describe('the extension on win32', () => {
 describe('the extension on Linux', () => {
   const extension = new NativeActionToolExtension(boundary, 'linux')
 
-  it('offers links without task or desktop actions', () => {
-    expect(extension.schemas()).toHaveLength(LINUX_TOOL_NAMES.size)
-    expect(extension.canHandle('web_use')).toBe(false)
+  it('offers location, links, and task tools in development builds', () => {
+    expect(extension.canHandle('get_current_location')).toBe(true)
+    expect(extension.canHandle('web_use')).toBe(true)
     expect(extension.canHandle('open_url')).toBe(true)
-    expect(extension.canHandle('computer_use')).toBe(false)
+    expect(extension.canHandle('computer_use')).toBe(true)
     expect(extension.canHandle('calendar_create_event')).toBe(false)
-    expect(JSON.stringify(extension.schemas())).not.toContain('computer_use')
-  })
-
-  it('offers watched task tools in a packaged build', () => {
-    Object.defineProperty(app, 'isPackaged', { value: true, configurable: true })
-    try {
-      expect(extension.canHandle('computer_use')).toBe(true)
-      expect(extension.canHandle('web_use')).toBe(true)
-      expect(JSON.stringify(extension.schemas())).toContain('computer_use')
-      expect(extension.settings.map((spec) => spec.name)).toContain('computer_use')
-      expect(extension.systemHint()).toContain('visible desktop apps')
-    } finally {
-      Object.defineProperty(app, 'isPackaged', { value: false, configurable: true })
-    }
+    expect(extension.settings.map((spec) => spec.name)).toContain('computer_use')
+    expect(extension.systemHint()).toContain('visible desktop apps')
   })
 
   it('does not offer task tools when the action runtime is absent', () => {
-    Object.defineProperty(app, 'isPackaged', { value: true, configurable: true })
-    try {
-      const unavailable = new NativeActionToolExtension(
-        { ...boundary, taskUseEnabled: () => false },
-        'linux'
-      )
-      expect(unavailable.canHandle('computer_use')).toBe(false)
-      expect(unavailable.canHandle('web_use')).toBe(false)
-      expect(JSON.stringify(unavailable.schemas())).not.toContain('computer_use')
-    } finally {
-      Object.defineProperty(app, 'isPackaged', { value: false, configurable: true })
-    }
+    const unavailable = new NativeActionToolExtension(
+      { ...boundary, taskUseEnabled: () => false },
+      'linux'
+    )
+    expect(unavailable.canHandle('computer_use')).toBe(false)
+    expect(unavailable.canHandle('web_use')).toBe(false)
+    expect(unavailable.canHandle('get_current_location')).toBe(true)
   })
 })
 

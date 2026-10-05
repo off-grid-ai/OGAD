@@ -70,7 +70,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: 'get_current_location',
     description:
-      "Get the user's current device location as latitude, longitude, accuracy, and timestamp. Read-only; use it before a nearby task when the user has not supplied another starting location. If it fails, do not start Web Use or Computer Use; ask for an address or neighborhood.",
+      "Get the user's current device location as latitude, longitude, accuracy, and timestamp. Read-only; use it before a nearby task when the user has not supplied another starting location. Exact coordinates are optional. Use a supplied city, neighborhood, or address, or the website’s own location result. If none is available, ask for a starting location. Report the location used and do not invent coordinates.",
     parameters: { type: 'object', properties: {} },
     command: 'location.current',
     risk: 'read',
@@ -223,7 +223,7 @@ export const NATIVE_TOOL_SPECS: NativeToolSpec[] = [
   {
     name: WEB_USE_TOOL_NAME,
     description:
-      "Do a task on a website in Off Grid AI's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it, unless the user explicitly requires their existing default-browser session, cookies, history, cache, or signed-in account. That case requires open_url followed by computer_use. For a task near the user's current location, call get_current_location first and start Web Use only when it returns coordinates. Web Use runs INSIDE Off Grid AI's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Use the full conversation. Ask the user before calling this tool only when a material fact is missing. Call it once for the complete goal. Do not call it again while that task runs. Live progress and the final result appear in the chat.",
+      "Do a task on a website in Off Grid AI's own built-in browser - playing or watching a video (YouTube, etc.), searching a site and opening a result, checking in for a flight, placing an order, filling a form, or logging in. Use this whenever the goal needs to click, type, or navigate a page, not merely open it, unless the user explicitly requires their existing default-browser session, cookies, history, cache, or signed-in account. That case requires open_url followed by computer_use. For a nearby task, exact coordinates are optional. Use a supplied city, neighborhood, or address, or the website’s own location result. Use get_current_location when useful. Report the location used and ask for a starting location only if none is available. Web Use runs INSIDE Off Grid AI's browser and never touches the user's cursor, keyboard, or their own browser, so the user keeps working while it goes; it hands control back for any sign-in, one-time code, or payment. Use the full conversation. Ask the user before calling this tool only when a material fact is missing. Call it once for the complete goal. Do not call it again while that task runs. Live progress and the final result appear in the chat.",
     parameters: {
       type: 'object',
       properties: {
@@ -354,8 +354,8 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
 ])
 
 // Linux exposes task tools when the host has enabled its watched workspace.
-// The core-only path exposes only the link opener.
-export const LINUX_TOOL_NAMES: ReadonlySet<string> = new Set(['open_url'])
+// Location and the link opener are also available without task tools.
+export const LINUX_TOOL_NAMES: ReadonlySet<string> = new Set(['open_url', 'get_current_location'])
 
 export const TASK_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_use'])
 
@@ -409,9 +409,9 @@ export function systemHintForPlatform(
   }
   if (platform === 'linux') {
     if (includeTaskUse && linuxTaskUse) {
-      return "Use web_use for website tasks in the built-in browser. Use computer_use for visible desktop apps or the user's existing browser session. Use open_url only to open a link. Linux has no location, calendar, mail, or contact tools. Report only results observed through the tools."
+      return "Exact coordinates are optional for nearby tasks. Use a supplied city, neighborhood, or address, or the website’s own location result. Use get_current_location when useful. Report the location used; ask for a starting location only if none is available. Use web_use for website tasks in the built-in browser. Use computer_use for visible desktop apps or the user's existing browser session. Use open_url only to open a link. Linux has no calendar, mail, or contact tools. Report only results observed through the tools."
     }
-    return "You can use open_url to open a link in the user's default browser. You cannot control that browser or desktop apps, or use calendar, mail, contact, or location tools on Linux."
+    return "Use get_current_location to get the user's current device coordinates. If location is unavailable, ask for a starting address or neighborhood. Use open_url to open a link in the user's default browser. You cannot control that browser or desktop apps, or use calendar, mail, or contact tools on Linux."
   }
   return ''
 }

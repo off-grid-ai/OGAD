@@ -10,7 +10,11 @@ const normalized = {}
 for (const [name, entry] of Object.entries(report)) {
   const relative =
     mode === 'relative' ? path.relative(process.cwd(), name).replaceAll('\\', '/') : name
-  if (!relative.startsWith('pro/') || /__tests__|\.test\./.test(relative)) continue
+  if (
+    (!relative.startsWith('pro/') && !relative.startsWith('src/')) ||
+    /__tests__|\.test\./.test(relative)
+  )
+    continue
   const key = mode === 'absolute' ? path.resolve(relative) : relative
   normalized[key] = { ...entry, path: key }
 }

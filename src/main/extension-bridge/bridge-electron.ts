@@ -134,7 +134,13 @@ function store(): BridgeStore {
     list: async () => readFile()?.browsers ?? [],
     save: async (browsers) => {
       const file = readFile()
-      if (file) writeFile({ ...file, browsers: [...browsers] })
+      if (file) {
+        writeFile({ ...file, browsers: [...browsers] })
+        const paired = new Set(browsers.map((browser) => browser.id))
+        for (const link of links.list()) {
+          if (!paired.has(link.browser.id)) link.close()
+        }
+      }
     }
   }
 }
@@ -337,6 +343,11 @@ export function getBrowserLinks(): BrowserLink[] {
 
 /** Keep a browser's live link once its socket has passed the handshake. */
 export function addBrowserLink(link: BrowserLink): void {
+  // Pairing can be revoked while the socket handshake is in progress.
+  if (!readFile()?.browsers.some((browser) => browser.id === link.browser.id)) {
+    link.close()
+    return
+  }
   links.add(link)
 }
 

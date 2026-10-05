@@ -111,10 +111,13 @@ export function handleExtensionUpgrade(
     socket.destroy()
     return true
   }
-  sockets.handleUpgrade(req, socket, head, (ws) => {
-    void getBridgeService()
-      .then((bridge) =>
-        acceptBrowserSocket(
+  // Load the service before completing the upgrade, so hello cannot arrive
+  // while the service starts and before its socket listener exists.
+  void getBridgeService()
+    .then((bridge) => {
+      if (socket.destroyed) return
+      sockets.handleUpgrade(req, socket, head, (ws) => {
+        void acceptBrowserSocket(
           {
             linkKey: (id) => bridge.linkKey(id),
             acceptNonce: (id, nonce) => bridge.acceptNonce(id, nonce),
@@ -123,11 +126,12 @@ export function handleExtensionUpgrade(
           ws,
           deviceId
         )
-      )
-      .then((link) => {
-        if (link) addBrowserLink(link)
+          .then((link) => {
+            if (link) addBrowserLink(link)
+          })
+          .catch(() => ws.close(1011, 'bridge_error'))
       })
-      .catch(() => ws.close(1011, 'bridge_error'))
-  })
+    })
+    .catch(() => socket.destroy())
   return true
 }

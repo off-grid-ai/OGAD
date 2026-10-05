@@ -8,7 +8,7 @@ import { transformSync } from 'esbuild'
 
 const output = path.resolve(process.argv[2])
 const compiled = path.join(output, 'compiled')
-const fixture = 'pro/main/__tests__/native-desktop.fixture.ts'
+const fixture = process.argv[3] ?? 'pro/main/__tests__/native-desktop.fixture.ts'
 const sources = []
 const pending = ['src', 'pro/main', 'pro/shared']
 while (pending.length) {
@@ -91,5 +91,7 @@ fs.writeFileSync(
 )
 fs.writeFileSync(
   path.join(output, 'main.cjs'),
-  'const {app}=require("electron"); app.setPath("userData", require("path").join(process.env.OFFGRID_NATIVE_PROFILE, "profile")); global.__OFFGRID_PRO__ = true; require("./compiled/pro/main/__tests__/native-desktop.fixture.js");'
+  'const {app}=require("electron"); app.setPath("userData", require("path").join(process.env.OFFGRID_NATIVE_PROFILE, "profile")); global.__OFFGRID_PRO__ = true; require(' +
+    JSON.stringify('./compiled/' + fixture.replace(/\.tsx?$/, '.js')) +
+    ');'
 )

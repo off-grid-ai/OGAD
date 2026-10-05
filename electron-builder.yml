@@ -167,12 +167,16 @@ deb:
     - x11-utils
     - wtype
     - python3-gi
+    - geoclue-2.0
+    - gir1.2-atspi-2.0
     - gir1.2-gstreamer-1.0
+    - gir1.2-gst-plugins-base-1.0
     - gstreamer1.0-pipewire
     - gstreamer1.0-plugins-base
     - gstreamer1.0-plugins-good
     - gstreamer1.0-plugins-bad
     - gstreamer1.0-plugins-ugly
+    - gstreamer1.0-pulseaudio
     - gstreamer1.0-libav
     - xdg-desktop-portal
     - grim

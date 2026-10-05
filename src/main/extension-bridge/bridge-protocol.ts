@@ -122,7 +122,8 @@ const WORDS = (
  * extension compute the same words without agreeing on who is "first".
  */
 export async function pairingCode(publicA: string, publicB: string): Promise<string> {
-  const [x, y] = [publicA, publicB].sort()
+  // Keys are wire data: keep code-unit ordering, independent of the OS locale.
+  const [x, y] = [publicA, publicB].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(`${x}|${y}`)))
   return Array.from(digest.slice(0, 6), (b) => WORDS[b] as string).join('-')
 }

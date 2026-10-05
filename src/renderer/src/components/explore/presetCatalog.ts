@@ -292,7 +292,9 @@ ${EXECUTION_RULES}`,
         title: 'Best-reviewed spots nearby',
         prompt: `Use Web Use to find nearby places that match the approved brief.
 
-- If the starting point is the current location, call get_current_location and give its coordinates to Web Use.
+- Use the starting city, neighborhood, address, or landmark supplied in the brief. A city such as Pune is sufficient; exact coordinates are not required.
+- Use San Francisco when no starting location is supplied. Do not request device location unless the user asks for their current location.
+- If the user asks for current location, try get_current_location. If it fails, ask for a city, neighborhood, or address.
 - Apply every stated time, travel, party, price, dietary, and access constraint.
 - Verify current hours on the source page when they are unclear.
 - Return up to three ranked choices with address, distance or travel time, rating and review count, price, availability notes, one reason, one caution, and the source page.
@@ -308,11 +310,11 @@ ${EXECUTION_RULES}`,
             {
               id: 'location',
               label: 'Starting location',
-              help: 'Address, neighborhood, or landmark.',
+              help: 'City, address, neighborhood, or landmark. Exact coordinates are not required.',
               kind: 'text',
               required: true,
-              defaultValue: 'Use my current location',
-              placeholder: 'Union Square, San Francisco'
+              defaultValue: 'San Francisco',
+              placeholder: 'Pune or Union Square, San Francisco'
             },
             {
               id: 'category',

@@ -164,12 +164,13 @@ export class ExtensionTabContents implements RelayContents {
     for (const l of listeners) l()
   }
 
-  private destroy(): void {
+  destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
     this.attachment = null
     this.stopEvents()
     this.stopClose()
+    this.messageListeners.clear()
     this.fireDetach()
     const listeners = [...(this.lifecycle.get('destroyed') ?? [])]
     this.lifecycle.clear()
@@ -219,7 +220,10 @@ export function createExtensionPageProvider(link: BrowserLink): ElectronPlaywrig
     },
     active: () => [...pages.values()].filter((p) => !p.isDestroyed()).at(-1),
     async closeAll() {
-      for (const p of [...pages.values()]) p.debugger.detach()
+      for (const p of [...pages.values()]) {
+        p.debugger.detach()
+        p.destroy()
+      }
       pages.clear()
     }
   }

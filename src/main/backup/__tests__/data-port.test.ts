@@ -1,8 +1,9 @@
 import { DatabaseSync } from 'node:sqlite'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3-multiple-ciphers'
 import { DesktopBackupDataPort } from '../data-port'
 import type { DesktopBackupData } from '../types'
+import { registerHook, unregisterHook, HOOKS } from '../../bootstrap/hookRegistry'
 
 /**
  * What a backup takes out of the database, and what restoring one puts back.
@@ -105,15 +106,13 @@ function realDatabase(): Database.Database {
 // The port announces every restored row so pro sync can pick it up. Asserting on the announcements is how
 // a test can tell that a restore joined the mesh rather than quietly writing rows only this device knows.
 const mutations: { entity: string; kind: string }[] = []
-vi.mock('../../sync-mutation', async () => {
-  const actual = await vi.importActual<typeof import('../../sync-mutation')>('../../sync-mutation')
-  return {
-    ...actual,
-    emitSyncMutation: (mutation: { entity: string; kind: string }) => {
-      mutations.push({ entity: mutation.entity, kind: mutation.kind })
-    }
-  }
-})
+// Mesh delivery is an external boundary; observe the production hook dispatch.
+const recordMutation = (mutation: { entity: string; kind: string }): void => {
+  mutations.push({ entity: mutation.entity, kind: mutation.kind })
+}
+// Only model inference is controlled. The port still embeds every archived chunk,
+// stores its vector in real SQLite, and dispatches the real committed-write hook.
+const embed = async (_text: string): Promise<number[]> => Array(384).fill(0.25)
 
 describe('taking a backup out of the database, and putting one back', () => {
   let db: Database.Database
@@ -121,8 +120,14 @@ describe('taking a backup out of the database, and putting one back', () => {
 
   beforeEach(() => {
     mutations.length = 0
+    registerHook(HOOKS.syncRecordLocalMutation, recordMutation)
     db = realDatabase()
-    port = new DesktopBackupDataPort(db)
+    port = new DesktopBackupDataPort(db, embed)
+  })
+
+  afterEach(() => {
+    unregisterHook(HOOKS.syncRecordLocalMutation, recordMutation)
+    db.close()
   })
 
   const insertProject = (id: string, name = id, updatedAt = '2026-01-01 09:00:00'): void => {
@@ -580,7 +585,7 @@ describe('taking a backup out of the database, and putting one back', () => {
       const exported = await port.collectAll()
 
       const restoredDb = realDatabase()
-      await new DesktopBackupDataPort(restoredDb).apply(exported)
+      await new DesktopBackupDataPort(restoredDb, embed).apply(exported)
       const reExported = await new DesktopBackupDataPort(restoredDb).collectAll()
 
       // The strongest statement available: what came out went back in and came out the same. Timestamps

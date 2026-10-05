@@ -13,7 +13,7 @@ The desktop must grant the required permissions. A desktop that does not provide
 
 ## Meeting recording
 
-On Wayland, the ScreenCast portal lets the user choose the meeting window or screen. PipeWire supplies its video. On X11, ximagesrc records the detected meeting window, or the display at the cursor when no meeting window is found. PipeWire-Pulse or PulseAudio supplies system sound and microphone input. GStreamer writes the screen and microphone tracks separately; the existing meeting service combines them and stores the transcript.
+On Wayland, the ScreenCast portal lets the user choose the meeting window or screen. PipeWire supplies its video. On X11, ximagesrc records the display that holds the detected meeting window, or the display at the cursor when no meeting window is found. This keeps recording if the meeting window ID changes during a call. PipeWire-Pulse or PulseAudio supplies system sound and microphone input. GStreamer writes the screen and microphone tracks separately; the existing meeting service combines them and stores the transcript.
 
 ## Runtime requirements
 

@@ -147,8 +147,10 @@ export async function acceptBrowserSocket(
   socket: SocketLike,
   deviceId: string
 ): Promise<BrowserLink | null> {
+  // Listen before key derivation yields: the browser sends hello immediately.
+  const helloMessage = firstMessage(socket, HELLO_TIMEOUT_MS)
   const known = await deps.linkKey(deviceId)
-  const helloText = await firstMessage(socket, HELLO_TIMEOUT_MS)
+  const helloText = await helloMessage
   let hello: ReturnType<typeof parseHello> = null
   if (known && helloText) {
     try {

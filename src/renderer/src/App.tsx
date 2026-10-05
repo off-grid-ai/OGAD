@@ -1234,7 +1234,12 @@ function AppContent(): React.JSX.Element {
               </div>
 
               {/* Navigation (scrolls; Settings is pinned to the bottom) */}
-              <div className="mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5">
+              <div
+                className={cn(
+                  'mt-5 flex flex-1 flex-col overflow-y-auto overflow-x-hidden pr-0.5',
+                  !sidebarOpen && 'sidebar-nav-scroll-collapsed'
+                )}
+              >
                 {sidebarOpen && (
                   <div className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-neutral-500">
                     Menu

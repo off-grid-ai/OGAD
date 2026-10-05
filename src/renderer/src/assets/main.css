@@ -244,6 +244,15 @@ code {
   flex-shrink: 0;
 }
 
+/* Keep the collapsed rail scrollable without a full scrollbar over its icons. */
+.sidebar-nav-scroll-collapsed {
+  scrollbar-width: none;
+}
+
+.sidebar-nav-scroll-collapsed::-webkit-scrollbar {
+  display: none;
+}
+
 .main-content {
   flex: 1;
   display: flex;

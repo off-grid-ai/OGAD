@@ -127,7 +127,7 @@ describe('<MemoryChat/> assistant preset runs', () => {
     expect(boundary.toolQueries[0]?.query).not.toContain('q=offgridai')
   })
 
-  it('starts a nearby search from the current location by default', async () => {
+  it('starts a nearby search from San Francisco by default', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
     const user = userEvent.setup()
@@ -135,7 +135,7 @@ describe('<MemoryChat/> assistant preset runs', () => {
 
     const form = await screen.findByTestId('preset-intake-best-nearby')
     expect((screen.getByLabelText(/Starting location/) as HTMLInputElement).value).toBe(
-      'Use my current location'
+      'San Francisco'
     )
     fireEvent.change(screen.getByLabelText(/What are you looking for/), {
       target: { value: 'Quiet Japanese restaurant' }
@@ -148,7 +148,7 @@ describe('<MemoryChat/> assistant preset runs', () => {
         )
       ].map((control) => [control.id, control.value])
     ).toEqual([
-      ['preset-field-location', 'Use my current location'],
+      ['preset-field-location', 'San Francisco'],
       ['preset-field-category', 'Quiet Japanese restaurant'],
       ['preset-field-when', 'Open now'],
       ['preset-field-range', 'Within 20 minutes by car']
@@ -158,7 +158,7 @@ describe('<MemoryChat/> assistant preset runs', () => {
 
     await waitFor(() => expect(boundary.api.createRagConversation).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(boundary.toolQueries).toHaveLength(1))
-    expect(boundary.toolQueries[0]?.query).toContain('call get_current_location')
-    expect(boundary.toolQueries[0]?.query).toContain('A: Use my current location')
+    expect(boundary.toolQueries[0]?.query).toContain('exact coordinates are not required')
+    expect(boundary.toolQueries[0]?.query).toContain('A: San Francisco')
   })
 })

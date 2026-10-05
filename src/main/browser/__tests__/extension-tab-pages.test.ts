@@ -194,4 +194,28 @@ describe('extension tab pages under the Playwright relay', () => {
     })
     expect(seen).toEqual(['Page.frameNavigated'])
   })
+  it('stops task events after completion while preserving the user browser tab', async () => {
+    const link = fakeLink()
+    const provider = createExtensionPageProvider(link)
+    const tab = await provider.open('https://a.test/')
+    tab.debugger.attach()
+    const received: string[] = []
+    tab.transport().on((method) => received.push(method))
+    await provider.closeAll()
+    link.emit({ event: 'tab.updated', tabId: tab.tabId, data: { title: 'Later title' } })
+    link.emit({
+      event: 'cdp.event',
+      tabId: tab.tabId,
+      data: { method: 'Page.loadEventFired', params: {} }
+    })
+    expect(received).toEqual([])
+    expect(tab.getTitle()).toBe('')
+    expect(provider.pages()).toEqual([])
+    await expect(tab.transport().send('Page.reload')).rejects.toThrow(/not attached/)
+    // A following task has its own active session.
+    const next = await provider.open('https://b.test/')
+    link.emit({ event: 'tab.updated', tabId: next.tabId, data: { title: 'Next task' } })
+    expect(provider.active()?.getTitle()).toBe('Next task')
+    await provider.closeAll()
+  })
 })

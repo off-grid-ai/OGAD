@@ -53,14 +53,16 @@ interface World {
   tab: FakeSocket
 }
 
-async function world(opts: { known?: boolean } = {}): Promise<World> {
+async function world(opts: { known?: boolean; keyReady?: Promise<void> } = {}): Promise<World> {
   const a = await generateKeyPair()
   const b = await generateKeyPair(true)
   const key = await deriveSessionKey(a.privateKey, b.publicKey, DEVICE)
   const seen = new Set<string>()
   const deps: AcceptDeps = {
-    linkKey: async (id) =>
-      opts.known === false || id !== DEVICE ? null : { browser: BROWSER, key },
+    linkKey: async (id) => {
+      await opts.keyReady
+      return opts.known === false || id !== DEVICE ? null : { browser: BROWSER, key }
+    },
     acceptNonce: (id, nonce) => {
       const k = `${id}:${nonce}`
       if (seen.has(k)) return false
@@ -117,6 +119,30 @@ describe('acceptBrowserSocket', () => {
     link!.onEvent((e) => events.push(e))
     expect(await link!.request('tabs.list')).toEqual([{ id: 7 }])
     expect(events).toEqual([{ event: 'tab.updated', tabId: 7, data: { url: 'https://a.test/' } }])
+  })
+
+  it('accepts hello sent while the paired key is still loading', async () => {
+    let releaseKey!: () => void
+    const keyReady = new Promise<void>((resolve) => {
+      releaseKey = resolve
+    })
+    const w = await world({ keyReady })
+    const nonce = newNonce()
+    const hello = JSON.stringify(await seal(w.key, helloAad(DEVICE), { nonce, ts: Date.now() }))
+    const ready = new Promise<string>((resolve) =>
+      w.tab.on('message', (data) => resolve(String(data)))
+    )
+    const accepted = acceptBrowserSocket(w.deps, w.desk, DEVICE)
+    w.tab.send(hello)
+    // Delivery is queued before this barrier; key lookup is still blocked.
+    await new Promise<void>((resolve) => queueMicrotask(resolve))
+    releaseKey()
+    expect(
+      parseReady(await open(w.key, readyAad(DEVICE, nonce), JSON.parse(await ready)))
+    ).not.toBeNull()
+    const link = await accepted
+    expect(link?.browser.name).toBe(BROWSER.name)
+    link?.close()
   })
 
   it('passes on a browser error and rejects pending work when the browser goes', async () => {

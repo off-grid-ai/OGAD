@@ -458,13 +458,13 @@ jobs:
             pactl set-default-sink offgrid_test
             pactl set-default-source offgrid_test.monitor
             openbox >/tmp/offgrid-openbox.log 2>&1 &
-            npx vitest run integration-tests/native-desktop-recording.test.ts --project product-integration
+            npx vitest run integration-tests/native-desktop-recording.test.ts integration-tests/extension-bridge-native.test.ts --no-file-parallelism --project product-integration
           '
       - name: Record on the synthetic Windows desktop
         if: runner.os == 'Windows'
         env:
           OFFGRID_NATIVE_DESKTOP_TEST: '1'
-        run: npx vitest run integration-tests/native-desktop-recording.test.ts --project product-integration
+        run: npx vitest run integration-tests/native-desktop-recording.test.ts integration-tests/extension-bridge-native.test.ts --no-file-parallelism --project product-integration
       - name: Convert native source coverage
         run: |
           node scripts/convert-native-coverage.mjs coverage-native-desktop-raw coverage-native-desktop

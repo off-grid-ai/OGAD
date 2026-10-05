@@ -42,6 +42,7 @@ export default defineConfig({
     alias: {
       '@renderer': resolve(__dirname, 'src/renderer/src'),
       '@offgrid/core': resolve(__dirname, 'src'),
+      '@offgrid/pro/main': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@offgrid/pro/renderer': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@offgrid/pro': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@': resolve(__dirname, 'src/renderer/src')

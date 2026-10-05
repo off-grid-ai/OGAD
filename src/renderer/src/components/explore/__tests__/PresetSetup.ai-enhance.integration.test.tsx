@@ -72,11 +72,37 @@ describe('<PresetSetup/> AI enhancement', () => {
     )
     expect(requests).toHaveLength(1)
     expect(requests[0]).toContain('Form question: What are you looking for?')
-    expect(requests[0]).toContain('Starting location: Use my current location')
+    expect(requests[0]).toContain('Starting location: San Francisco')
 
     fireEvent.click(screen.getByRole('button', { name: 'Start in chat' }))
     expect(submissions).toHaveLength(1)
     expect(submissions[0]).toContain('A: Quiet Japanese restaurant with strong recent reviews')
+  })
+
+  it('submits a city supplied by the user without asking for coordinates', () => {
+    const submissions: string[] = []
+    window.api = { mcpList: async () => [] } as unknown as Window['api']
+    const preset = ALL_PRESETS.find((item) => item.id === 'best-nearby')
+    if (!preset) throw new Error('Nearby-search preset is missing')
+    render(
+      <PresetSetup
+        preset={preset}
+        onSubmit={(prompt) => submissions.push(prompt)}
+        onCancel={() => undefined}
+      />
+    )
+
+    const location = screen.getByLabelText(/Starting location/) as HTMLInputElement
+    expect(location.value).toBe('San Francisco')
+    fireEvent.change(location, { target: { value: 'Pune' } })
+    fireEvent.change(screen.getByLabelText(/What are you looking for/), {
+      target: { value: 'Indian restaurant' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Start in chat' }))
+
+    expect(submissions).toHaveLength(1)
+    expect(submissions[0]).toContain('Q: Starting location\nA: Pune')
+    expect(submissions[0]).toContain('Q: What are you looking for?\nA: Indian restaurant')
   })
 
   it('creates a pertinent surprise answer when an open-ended field is empty', async () => {

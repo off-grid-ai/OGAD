@@ -18,7 +18,8 @@ const report = libCoverage.createCoverageMap({})
 for (const script of mergeProcessCovs(snapshots).result) {
   if (!script.url.startsWith('file:')) continue
   const file = fileURLToPath(script.url)
-  if (!file.replaceAll('\\', '/').includes('/compiled/pro/')) continue
+  const normalized = file.replaceAll('\\', '/')
+  if (!normalized.includes('/compiled/pro/') && !normalized.includes('/compiled/src/')) continue
   const code = await fs.readFile(file, 'utf8')
   const encoded = code.match(/sourceMappingURL=data:application\/json;base64,([^\s]+)/)?.[1]
   if (!encoded) continue
@@ -39,10 +40,10 @@ for (const script of mergeProcessCovs(snapshots).result) {
     })
   )
 }
-if (!report.files().length) throw new Error('No native Pro source coverage was collected')
+if (!report.files().length) throw new Error('No native product source coverage was collected')
 await fs.mkdir(reportDirectory, { recursive: true })
 await fs.writeFile(
   path.join(reportDirectory, 'coverage-final.json'),
   JSON.stringify(report.toJSON())
 )
-console.log(`Converted native coverage for ${report.files().length} Pro source files`)
+console.log(`Converted native coverage for ${report.files().length} product source files`)
