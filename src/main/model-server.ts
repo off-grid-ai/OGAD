@@ -56,6 +56,8 @@ import {
 } from './model-server/data-url'
 import { errBody, errMeta } from './model-server/errors'
 import { isAsync, matchPollRoute } from './model-server/async-request'
+import { diarizeRecording, embedClip } from './audio/diarization-offload'
+import { ensureFingerprint } from './audio/diarization-install'
 import { sanitizeChatMessages } from './model-server/chat-messages'
 import { applyThinkingPayload, requestedThinking } from './llm/chat-payload'
 import { parseMultipart } from './model-server/multipart'
@@ -889,6 +891,83 @@ async function handleTranscription(
   )
 }
 
+// ─── Speaker diarization + voiceprint offload (pyannote + ECAPA on this Mac) ──
+// Re-registered after the main-integration rebuild dropped these two routes: the ambient recorder
+// on the phone offloads diarization + enrollment here (POST /v1/audio/diarize and /v1/audio/embed),
+// so without them the phone's Mac-offload diarizer got a 404 and fell back to on-device.
+async function handleDiarize(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  rid: string
+): Promise<void> {
+  const ct = req.headers['content-type'] || ''
+  if (!ct.includes('multipart/form-data')) {
+    json(res, 400, errBody('Send multipart/form-data with a "file" field.'))
+    return
+  }
+  let body: Buffer
+  try {
+    body = await readBody(req, MAX_UPLOAD)
+  } catch {
+    json(res, 413, errBody('Audio too large.'))
+    return
+  }
+  const { files, fields } = parseMultipart(body, ct)
+  const file = files.file || Object.values(files)[0]
+  if (!file || !file.data.length) {
+    json(res, 400, errBody('No audio file in "file" field.'))
+    return
+  }
+  const ext = path.extname(file.filename) || '.wav'
+  const embeddingModel = typeof fields.embeddingModel === 'string' ? fields.embeddingModel : undefined
+  const tmp = path.join(os.tmpdir(), `offgrid-diar-${process.pid}-${body.length}${ext}`)
+  const run = async (): Promise<unknown> => {
+    try {
+      await fs.promises.writeFile(tmp, file.data)
+      await ensureFingerprint(embeddingModel)
+      return await diarizeRecording(tmp, embeddingModel)
+    } finally {
+      fs.promises.unlink(tmp).catch(() => {})
+    }
+  }
+  await serve(res, rid, 'diarization', '/v1/audio/diarize', isAsync(req, undefined, {}), run, (result) =>
+    jsonWithId(res, rid, result)
+  )
+}
+
+async function handleVoiceEmbed(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  rid: string
+): Promise<void> {
+  let payload: Record<string, unknown>
+  try {
+    payload = await readJson(req)
+  } catch {
+    json(res, 400, errBody('Invalid JSON body.'))
+    return
+  }
+  const audio = typeof payload.audio === 'string' ? payload.audio : ''
+  if (!audio) {
+    json(res, 400, errBody('Field "audio" (base64 WAV) is required.'))
+    return
+  }
+  const embeddingModel = typeof payload.embeddingModel === 'string' ? payload.embeddingModel : undefined
+  const tmp = path.join(os.tmpdir(), `offgrid-embed-${process.pid}-${audio.length}.wav`)
+  const run = async (): Promise<unknown> => {
+    try {
+      await fs.promises.writeFile(tmp, Buffer.from(audio, 'base64'))
+      await ensureFingerprint(embeddingModel)
+      return await embedClip(tmp, embeddingModel)
+    } finally {
+      fs.promises.unlink(tmp).catch(() => {})
+    }
+  }
+  await serve(res, rid, 'embedding', '/v1/audio/embed', isAsync(req, payload), run, (result) =>
+    jsonWithId(res, rid, result)
+  )
+}
+
 // ─── Text-to-speech (Kokoro) ─────────────────────────────────────────────────
 async function handleSpeech(
   req: http.IncomingMessage,
@@ -1287,6 +1366,8 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
           'POST /v1/embeddings',
           'GET  /v1/models',
           'POST /v1/audio/transcriptions',
+          'POST /v1/audio/diarize',
+          'POST /v1/audio/embed',
           'POST /v1/audio/speech',
           'GET  /v1/audio/voices',
           'POST /v1/images',
@@ -1367,6 +1448,8 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
     if (url === '/v1/embeddings' && method === 'POST') return void handleEmbeddings(req, res, rid)
     if (url === '/v1/audio/transcriptions' && method === 'POST')
       return void handleTranscription(req, res, rid)
+    if (url === '/v1/audio/diarize' && method === 'POST') return void handleDiarize(req, res, rid)
+    if (url === '/v1/audio/embed' && method === 'POST') return void handleVoiceEmbed(req, res, rid)
     if (url === '/v1/audio/speech' && method === 'POST') return void handleSpeech(req, res, rid)
     if (url === '/v1/audio/voices' && method === 'GET') {
       void tts

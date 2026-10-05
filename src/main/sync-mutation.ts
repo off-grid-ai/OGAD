@@ -24,7 +24,9 @@ export const CORE_SYNC_ENTITIES = {
   taskLaunch: TASK_LAUNCH_ENTITY,
   taskRun: TASK_RUN_ENTITY,
   taskControl: TASK_CONTROL_ENTITY,
-  taskVisualStep: TASK_VISUAL_STEP_ENTITY
+  taskVisualStep: TASK_VISUAL_STEP_ENTITY,
+  /** Ambient Day: one derived to-do, synced phone<->desktop. Wire name must match the phone's. */
+  ambientTodo: 'ambient_todo'
 } as const
 
 export type CoreSyncEntity = (typeof CORE_SYNC_ENTITIES)[keyof typeof CORE_SYNC_ENTITIES]
