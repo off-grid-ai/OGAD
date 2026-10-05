@@ -7,6 +7,7 @@
 
 import { listTaskRuns } from '../tasks/task-history'
 import { browserTaskProgress } from './task-progress'
+import { startTabs } from './browser-start-tab'
 import { controlVisionTask } from '../vision/vision-controller'
 import fs from 'fs'
 import path from 'path'
@@ -290,7 +291,11 @@ const data: BridgeData = {
     notifyRagConversationChanged({ conversationId: id })
   },
   listTools,
-  runTool: async (name, args, browser) => {
+  runTool: async (name, args, browser, tabId) => {
+    // A web task asked for from a browser's chat starts in that chat's tab, in that browser.
+    if (name === 'web_use' && tabId !== undefined) {
+      startTabs.offer(browser.id, tabId)
+    }
     const result = await runTool(
       name,
       args,

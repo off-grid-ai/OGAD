@@ -183,27 +183,40 @@ export class ExtensionTabContents implements RelayContents {
  */
 export function createExtensionPageProvider(link: BrowserLink): ElectronPlaywrightPageProvider & {
   open(url: string): Promise<ExtensionTabContents>
+  /** Takes the tab the browser offered (its chat's tab), at `url` when the task names one. */
+  adopt(tabId: number, url?: string): Promise<ExtensionTabContents>
   active(): ExtensionTabContents | undefined
   closeAll(): Promise<void>
 } {
   const pages = new Map<number, ExtensionTabContents>()
-  const open = async (url: string): Promise<ExtensionTabContents> => {
-    const info = await link.request('tab.create', { url })
-    if (!isTabInfo(info)) throw new Error('The browser did not open a tab.')
+  /** The user's own tab: the task works in it but never closes it. */
+  const adopted = new Set<number>()
+  const track = (info: unknown, failure: string): ExtensionTabContents => {
+    if (!isTabInfo(info)) throw new Error(failure)
     const contents = new ExtensionTabContents(link, info)
     pages.set(info.tabId, contents)
     contents.once('destroyed', () => pages.delete(info.tabId))
     return contents
   }
+  const open = async (url: string): Promise<ExtensionTabContents> =>
+    track(await link.request('tab.create', { url }), 'The browser did not open a tab.')
   const asPage = (contents: ExtensionTabContents): RelayPage => ({ id: contents.tabId, contents })
   return {
     pages: () => [...pages.values()].filter((p) => !p.isDestroyed()).map(asPage),
     create: async (url) => asPage(await open(url)),
     close: async (id) => {
       pages.delete(id)
-      await link.request('tab.close', { tabId: id })
+      if (!adopted.has(id)) {
+        await link.request('tab.close', { tabId: id })
+      }
     },
     open,
+    async adopt(tabId, url) {
+      const info = await link.request('tab.adopt', { tabId, ...(url ? { url } : {}) })
+      const contents = track(info, 'The browser did not hand over its tab.')
+      adopted.add(contents.tabId)
+      return contents
+    },
     active: () => [...pages.values()].filter((p) => !p.isDestroyed()).at(-1),
     async closeAll() {
       for (const p of [...pages.values()]) p.debugger.detach()

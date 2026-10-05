@@ -5,6 +5,7 @@
 // it runs in Off Grid AI's own browser, as it always has.
 
 import type { WebUseBrowserTarget } from '../../shared/web-use-settings'
+import { BROWSER_ORIGIN_PREFIX } from '../extension-bridge/bridge-conversations'
 
 const FAMILIES: ReadonlyArray<readonly [string, RegExp]> = [
   ['brave', /brave/i],
@@ -30,4 +31,20 @@ export function pickBrowserLink<T extends { browser: { name: string } }>(
   if (target !== 'default_browser' || links.length === 0) return null
   const family = browserFamily(defaultBrowser)
   return links.find((l) => family && browserFamily(l.browser.name) === family) ?? links[0] ?? null
+}
+
+/**
+ * A task a browser's chat asked for, with that chat's tab offered (browser-start-tab.ts), runs
+ * in that browser whatever Tasks > Web Use says: the user asked from there, for that tab. Its
+ * journey is the browser's origin (BROWSER_ORIGIN_PREFIX + id). Null for any other task, or when that browser is not connected.
+ */
+export function pickRequestingLink<T extends { browser: { id: string } }>(
+  journeyId: string,
+  links: readonly T[],
+  hasOffer: (browserId: string) => boolean
+): T | null {
+  const id = journeyId.startsWith(BROWSER_ORIGIN_PREFIX)
+    ? journeyId.slice(BROWSER_ORIGIN_PREFIX.length)
+    : ''
+  return id && hasOffer(id) ? (links.find((l) => l.browser.id === id) ?? null) : null
 }

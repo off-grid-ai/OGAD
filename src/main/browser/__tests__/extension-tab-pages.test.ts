@@ -27,6 +27,13 @@ function fakeLink(): FakeLink {
       if (op === 'tab.create') {
         return { tabId: ++nextTab, url: String(args.url), title: '' }
       }
+      if (op === 'tab.adopt') {
+        return {
+          tabId: Number(args.tabId),
+          url: String(args.url ?? 'https://mine.test/'),
+          title: ''
+        }
+      }
       if (op === 'cdp.send' && args.method === 'Target.getTargetInfo') {
         return { targetInfo: { targetId: `T${String(args.tabId)}` } }
       }
@@ -52,6 +59,29 @@ function fakeLink(): FakeLink {
   }
   return link
 }
+
+describe("the user's own tab", () => {
+  it('takes the tab the browser offered, where it is, and never closes it', async () => {
+    const link = fakeLink()
+    const provider = createExtensionPageProvider(link)
+    const tab = await provider.adopt(7)
+    expect(tab.tabId).toBe(7)
+    expect(link.calls[0]).toEqual({ op: 'tab.adopt', args: { tabId: 7 } })
+    expect(provider.active()).toBe(tab)
+    await provider.close(7)
+    expect(link.calls.map((c) => c.op)).toEqual(['tab.adopt'])
+  })
+
+  it('takes it at the page the task names, and still closes a tab of its own', async () => {
+    const link = fakeLink()
+    const provider = createExtensionPageProvider(link)
+    await provider.adopt(7, 'https://x.com/')
+    expect(link.calls[0]?.args).toEqual({ tabId: 7, url: 'https://x.com/' })
+    const own = await provider.open('https://popup.test/')
+    await provider.close(own.tabId)
+    expect(link.calls.at(-1)).toEqual({ op: 'tab.close', args: { tabId: own.tabId } })
+  })
+})
 
 describe('extension tab pages under the Playwright relay', () => {
   it('opens a tab, attaches its debugger, and names it to Playwright', async () => {

@@ -59,7 +59,13 @@ export interface BridgeData {
   putConversation(conversation: unknown, browser: PairedBrowser): Promise<void>
   deleteConversation(id: string): Promise<void>
   listTools(): Promise<unknown[]>
-  runTool(name: string, args: Record<string, unknown>, browser: PairedBrowser): Promise<unknown>
+  /** `tabId`: the browser's tab a web task should start in (browser-start-tab.ts). */
+  runTool(
+    name: string,
+    args: Record<string, unknown>,
+    browser: PairedBrowser,
+    tabId?: number
+  ): Promise<unknown>
   vault(request: unknown, browser: PairedBrowser): Promise<unknown>
   /** This browser's latest task started at or after `since` (ms): web_use answers "started" at
    *  once, so a browser waiting on the result asks here. Null when none has started yet. */
@@ -153,7 +159,16 @@ export function createBridgeService(deps: BridgeDeps): BridgeService {
       if (typeof p.name !== 'string' || typeof p.args !== 'object' || p.args === null) {
         throw new Error('invalid')
       }
-      return deps.data.runTool(p.name, p.args as Record<string, unknown>, browser)
+      const tabId = p.tabId
+      if (tabId !== undefined && !(Number.isSafeInteger(tabId) && Number(tabId) >= 0)) {
+        throw new Error('invalid')
+      }
+      return deps.data.runTool(
+        p.name,
+        p.args as Record<string, unknown>,
+        browser,
+        tabId === undefined ? undefined : Number(tabId)
+      )
     },
     'tasks.latest': async (p, browser) => {
       requireFeature('tools')

@@ -82,7 +82,10 @@ async function setup(opts: { approve?: boolean; features?: BridgeFeatures } = {}
       calls.push(`delete:${id}`)
     },
     listTools: async () => [{ name: 'notion_search' }],
-    runTool: async (name) => ({ ok: true, output: `ran ${name}` }),
+    runTool: async (name, _args, _browser, tabId) => ({
+      ok: true,
+      output: `ran ${name}${tabId === undefined ? '' : ` in tab ${tabId}`}`
+    }),
     latestTask: async (browser, since) =>
       since > 2_000_000
         ? null
@@ -300,6 +303,15 @@ describe('sealed rpc', () => {
       ok: false,
       error: 'invalid'
     })
+    // A web task can name the chat's tab to start in; anything but a tab id is refused.
+    expect(
+      (await pro.call('device000001', 'tools.run', { name: 'web_use', args: {}, tabId: 42 })).body
+    ).toMatchObject({ ok: true, result: { output: 'ran web_use in tab 42' } })
+    for (const tabId of [-1, 1.5, '42', null]) {
+      expect(
+        (await pro.call('device000001', 'tools.run', { name: 'web_use', args: {}, tabId })).body
+      ).toMatchObject({ ok: false, error: 'invalid' })
+    }
   })
 
   it("tasks.latest reports this browser's latest task, for a run that started one", async () => {

@@ -15,6 +15,7 @@
 import { automationTaskReadStatus } from '@offgrid/automation'
 import { encodeTaskPhase } from '../../shared/task-execution-plan'
 import type { BrowserLink } from '../extension-bridge/bridge-socket'
+import { startTabs } from '../extension-bridge/browser-start-tab'
 import { getTaskExecutionDevice, recordTaskRun, reportTaskProgress } from '../tasks/task-history'
 import { registerTaskGuideHandler, TASK_GUIDANCE_TRACE } from '../tasks/task-guide'
 import { prepareTaskExecutionPlan } from '../tasks/task-execution-plan-service'
@@ -148,8 +149,15 @@ async function runInBrowser(
         { goal: retryPlanningGoal(goal, checkpoint), surface: 'web', signal: controller.signal },
         recordStep
       ))
-    const tab = await pages.open(start)
-    recordStep(`opened ${start} in ${link.browser.name}`)
+    // Asked for from the browser's chat: work in that chat's tab, where the user is, from
+    // the page it shows unless the task names one. Otherwise a tab of the task's own.
+    const offered = startTabs.take(link.browser.id)
+    const tab = offered === null ? await pages.open(start) : await pages.adopt(offered, url)
+    recordStep(
+      offered === null
+        ? `opened ${start} in ${link.browser.name}`
+        : `working in your tab in ${link.browser.name}`
+    )
     const task = await openTaskSession(link, pages, tab)
     const semantic = await runBrowserPlaywrightTask({
       goal,

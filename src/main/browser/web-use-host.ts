@@ -8,7 +8,8 @@ import { getWebUseSettings } from '../web-use-settings'
 import { getBrowserRailHost } from './browser-host'
 import type { BrowserRailHost } from './browser-rail'
 import { createExtensionBrowserHost } from './extension-browser-host'
-import { pickBrowserLink } from './web-use-target'
+import { pickBrowserLink, pickRequestingLink } from './web-use-target'
+import { startTabs } from '../extension-bridge/browser-start-tab'
 
 export function getWebUseRailHost(): BrowserRailHost {
   return {
@@ -19,7 +20,9 @@ export function getWebUseRailHost(): BrowserRailHost {
         browserTarget === 'default_browser' && links.length > 1
           ? ((await defaultBrowserTarget().catch(() => null))?.name ?? null)
           : null
-      const link = pickBrowserLink(browserTarget, links, defaultName)
+      const link =
+        pickRequestingLink(request.journeyId, links, startTabs.has) ??
+        pickBrowserLink(browserTarget, links, defaultName)
       return link
         ? createExtensionBrowserHost(() => link).runTask(request)
         : getBrowserRailHost().runTask(request)

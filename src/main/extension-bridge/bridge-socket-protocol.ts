@@ -122,6 +122,8 @@ export const SOCKET_OPS = [
   'browser.caps',
   'tabs.list',
   'tab.create',
+  /** Take the tab the browser offered for this task (tools.run tabId), instead of a new one. */
+  'tab.adopt',
   'tab.close',
   'cdp.attach',
   'cdp.detach',
