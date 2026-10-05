@@ -6,6 +6,8 @@
 // are they registered. Nothing here grants a browser more than the desktop app itself has.
 
 import { listTaskRuns } from '../tasks/task-history'
+import { browserTaskProgress } from './task-progress'
+import { controlVisionTask } from '../vision/vision-controller'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
@@ -302,7 +304,14 @@ const data: BridgeData = {
       (task) =>
         task.journeyId === `${BROWSER_ORIGIN_PREFIX}${browser.id}` && task.startedAt >= since
     )
-    return run ? { status: run.status, summary: run.summary ?? '' } : null
+    return run ? browserTaskProgress(run) : null
+  },
+  stopTask: async (browser, taskId) => {
+    const run = listTaskRuns(50).find((task) => task.taskId === taskId)
+    // Only a task this browser started: a paired browser never stops another's work.
+    return run?.journeyId === `${BROWSER_ORIGIN_PREFIX}${browser.id}`
+      ? controlVisionTask('stop', taskId)
+      : false
   },
   vault: async (request, browser) =>
     callHookAsync(HOOKS.extensionVaultRequest, request, {

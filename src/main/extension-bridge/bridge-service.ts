@@ -24,6 +24,7 @@ import {
   type RpcMethod
 } from './bridge-protocol'
 import { isSettingsSection, parseSettingsPatch, type SettingsSection } from './bridge-settings'
+import type { BrowserTaskProgress } from './task-progress'
 
 export interface PairedBrowser {
   readonly id: string
@@ -62,10 +63,9 @@ export interface BridgeData {
   vault(request: unknown, browser: PairedBrowser): Promise<unknown>
   /** This browser's latest task started at or after `since` (ms): web_use answers "started" at
    *  once, so a browser waiting on the result asks here. Null when none has started yet. */
-  latestTask(
-    browser: PairedBrowser,
-    since: number
-  ): Promise<{ status: string; summary: string } | null>
+  latestTask(browser: PairedBrowser, since: number): Promise<BrowserTaskProgress | null>
+  /** Stops a task this browser started (its journey is this browser's). False otherwise. */
+  stopTask(browser: PairedBrowser, taskId: string): Promise<boolean>
   /** One section of the desktop's settings (settings.ts), as its Settings screen shows it. */
   readSettings(section: SettingsSection): Promise<unknown>
   /** Apply an already-validated patch through the desktop's own setters. */
@@ -161,6 +161,13 @@ export function createBridgeService(deps: BridgeDeps): BridgeService {
         throw new Error('invalid')
       }
       return deps.data.latestTask(browser, p.since)
+    },
+    'tasks.stop': async (p, browser) => {
+      requireFeature('tools')
+      if (typeof p.taskId !== 'string' || !/^[\w-]{1,128}$/.test(p.taskId)) {
+        throw new Error('invalid')
+      }
+      return deps.data.stopTask(browser, p.taskId)
     },
     vault: async (p, browser) => {
       requireFeature('vault')
