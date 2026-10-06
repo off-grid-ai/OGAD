@@ -42,7 +42,11 @@ const previousDataDir = process.env.OFFGRID_DATA_DIR
 
 function installLlamaBoundary(source: string): string {
   const binRoot = path.join(TMP_DIR, 'test-bin')
-  const executable = path.join(binRoot, process.platform === 'linux' ? 'llama-cpu' : 'llama', 'llama-server')
+  const executable = path.join(
+    binRoot,
+    process.platform === 'linux' ? 'llama-cpu' : 'llama',
+    'llama-server'
+  )
   fs.mkdirSync(path.dirname(executable), { recursive: true })
   fs.writeFileSync(executable, `#!/usr/bin/env node\n${source}\n`)
   fs.chmodSync(executable, 0o755)
@@ -505,6 +509,63 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)))`
         transcription: plan.items.find((item) => item.kind === 'transcription')?.id,
         speech: plan.items.find((item) => item.kind === 'voice')?.id
       })
+    } finally {
+      llm.stop()
+      vi.unstubAllGlobals()
+      if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
+      else process.env.OFFGRID_BIN_DIR = previousBinDir
+    }
+  })
+
+  it('brings the working engine back when a launch setting fails, unset values included (item 4)', async () => {
+    const previousBinDir = process.env.OFFGRID_BIN_DIR
+    // The engine refuses 64 threads, as llama-server does when the value cannot be honoured.
+    process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
+      String.raw`const http = require('node:http')
+const args = process.argv.slice(2)
+const threads = args.indexOf('-t')
+if (threads >= 0 && args[threads + 1] === '64') {
+  process.stderr.write('error: thread count 64 is not supported on this machine\n')
+  process.exit(1)
+}
+const port = Number(args[args.indexOf('--port') + 1])
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  if (req.url === '/health') return res.end(JSON.stringify({status:'ok'}))
+  if (req.url === '/v1/models') return res.end(JSON.stringify({data:[{id:'fixture-chat'}]}))
+  if (req.url === '/props') return res.end(JSON.stringify({}))
+  res.statusCode=404; res.end('{}')
+})
+server.listen(port, '127.0.0.1')
+process.on('SIGTERM', () => server.close(() => process.exit(0)))`
+    )
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      return url.startsWith('http://127.0.0.1:')
+        ? hostFetch(input, init)
+        : Promise.resolve(fixtureDownload(url))
+    })
+
+    const [{ llm }, setup] = await Promise.all([import('../llm'), import('../setup')])
+    try {
+      // The lightweight baseline, as in the setup journey above, keeps this rig deterministic.
+      await llm.setSettings({ performanceMode: 'conservative' }).catch(() => {})
+      const configured = await setup.autoConfigure(() => {})
+      expect(configured).toMatchObject({ success: true })
+      await llm.init()
+      expect(llm.isReady()).toBe(true)
+      expect(llm.getSettings().threads).toBeUndefined()
+
+      await expect(llm.setSettings({ threads: 64 })).rejects.toThrow()
+
+      // The engine runs again with the setting it had, unset rather than the 64 that failed,
+      // and the failed value is not what was saved.
+      await vi.waitFor(() => expect(llm.isReady()).toBe(true), { timeout: 10_000 })
+      expect(llm.getSettings().threads).toBeUndefined()
+      const saved = JSON.parse(
+        fs.readFileSync(path.join(TMP_DIR, 'models', 'llm-settings.json'), 'utf8')
+      ) as { threads?: number }
+      expect(saved.threads).toBeUndefined()
     } finally {
       llm.stop()
       vi.unstubAllGlobals()

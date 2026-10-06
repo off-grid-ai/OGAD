@@ -1,4 +1,3 @@
-import { ChatList } from './components/ChatList'
 import { ChatDetail } from './components/ChatDetail'
 import { CommandPalette } from './components/CommandPalette'
 import logo from './assets/logo.png'
@@ -390,7 +389,7 @@ function AppContent(): React.JSX.Element {
       return !pinned
     })
   }
-  const rec = useMeetingRecorder()
+  const rec = useMeetingRecorder(isPro && proReady)
 
   const setTaskDetailSidebarMode = useCallback((detailOpen: boolean): void => {
     if (detailOpen) setSidebarHovered(false)
@@ -496,7 +495,6 @@ function AppContent(): React.JSX.Element {
       '/connectors': 'connectors',
       '/meetings': 'meetings',
       '/chat': CHAT_VIEW,
-      '/chats': 'chats',
       '/memories': 'memories',
       '/entities': 'entities',
       '/models': 'models',
@@ -1367,8 +1365,6 @@ function AppContent(): React.JSX.Element {
                       ) : (
                         <UpgradeScreen feature={getProFeature(viewMode)} />
                       )
-                    ) : viewMode === 'chats' ? (
-                      <ChatList onSelectSession={setSelectedSessionId} />
                     ) : viewMode === 'models' ? (
                       <ModelsScreen
                         navigationSubroute={navigationSubroute}

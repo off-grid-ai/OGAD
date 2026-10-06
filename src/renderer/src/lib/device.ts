@@ -2,6 +2,7 @@ import {
   deviceNoun as nounForPlatform,
   isMac as isMacForPlatform,
   primaryModifier as modifierForPlatform,
+  shortcutLabel as shortcutLabelForPlatform,
   type DevicePlatform
 } from '@offgrid/core/shared/device'
 
@@ -30,4 +31,13 @@ export function isMac(): boolean {
 /** The primary modifier label for shortcut copy ('Cmd' on macOS, else 'Ctrl'). */
 export function primaryModifier(): string {
   return modifierForPlatform(currentPlatform())
+}
+
+/**
+ * A registered Electron accelerator as the user reads it: 'Alt+Space' shows as 'Option+Space' on
+ * macOS. Naming only - it never changes which keys are registered, and a customized chord keeps
+ * its own tokens and their order.
+ */
+export function shortcutLabel(accelerator: string): string {
+  return shortcutLabelForPlatform(accelerator, currentPlatform())
 }

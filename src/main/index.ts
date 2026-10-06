@@ -1,5 +1,5 @@
 import { restoreCanonicalProductName } from './bootstrap/user-data'
-import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
+import { app, shell, BrowserWindow, Menu, protocol, session, desktopCapturer, screen } from 'electron'
 import { tmpdir } from 'os'
 
 // Electron 39 needs the portal to register global shortcuts on Wayland.
@@ -68,6 +68,7 @@ import { installMediaPermissionHandler } from './media-permission'
 import { localMediaRoots } from './media-roots'
 import { resourceDirs } from './runtime-env'
 import {
+  flushDiagnosticLog,
   installDiagnosticConsoleCapture,
   installIpcDiagnostics,
   writeDiagnosticLog
@@ -238,9 +239,46 @@ async function createWindow(): Promise<void> {
     if (nextZoomLevel === null) return
 
     event.preventDefault()
-    mainWindow.webContents.setZoomLevel(nextZoomLevel)
-    saveSetting('windowZoomLevel', nextZoomLevel)
+    setWindowZoom(mainWindow, nextZoomLevel)
   })
+
+  // The default macOS menu owns Cmd+- ("Zoom Out") and handles it before the window sees the key,
+  // and its zoom items do not save the level. Own the View menu's zoom items so every zoom key and
+  // menu click runs the same persisted zoom. The rest of the menu keeps the standard roles.
+  // The menu outlives a closed window (macOS keeps the app running), so zoom the window the click
+  // came from, and only while it is still alive.
+  const setWindowZoom = (window: BrowserWindow, level: number): void => {
+    window.webContents.setZoomLevel(level)
+    saveSetting('windowZoomLevel', level)
+  }
+  const stepWindowZoom =
+    (delta: number) =>
+    (_item: unknown, window: unknown): void => {
+      if (!(window instanceof BrowserWindow) || window.isDestroyed()) return
+      setWindowZoom(window, delta === 0 ? 0 : window.webContents.getZoomLevel() + delta)
+    }
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: stepWindowZoom(0.5) },
+          { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: stepWindowZoom(-0.5) },
+          { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: stepWindowZoom(0) },
+          { type: 'separator' },
+          { role: 'togglefullscreen' }
+        ]
+      },
+      { role: 'windowMenu' }
+    ])
+  )
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -676,6 +714,9 @@ app.on('before-quit', (event) => {
       /* best-effort — quit regardless so the app never hangs on exit */
     }
     engineUnloaded = true
+    // Buffered diagnostics are written now rather than lost with the process. Bounded, so a
+    // stalled disk delays quit by at most the flush timeout.
+    await flushDiagnosticLog()
     commitApplicationRelaunch(app)
     app.quit()
   })()

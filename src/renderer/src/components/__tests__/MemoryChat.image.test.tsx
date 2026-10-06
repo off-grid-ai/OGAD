@@ -133,6 +133,8 @@ type InstallApiOptions = {
   ragAnswer?: string
   /** Main-owned image job snapshot that imageGenJobStatus() reports on mount (reattach path). */
   jobStatus?: ImageGenerationJobContract
+  /** Settings the store refuses to write once, as a full or locked disk would. */
+  refuseFirstSaveOf?: string[]
   /** Seed per-conversation persisted messages (getRagMessages), keyed by conversation id. */
   messages?: Record<string, unknown[]>
   toolResult?: {
@@ -264,7 +266,9 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     context: { unified: [] as never[] }
   }))
   const listGeneratedImages = vi.fn(async () => generatedGallery.map((image) => ({ ...image })))
+  const refusedOnce = new Set(opts.refuseFirstSaveOf ?? [])
   const saveSetting = vi.fn(async (k: string, v: unknown) => {
+    if (refusedOnce.delete(k)) throw new Error(`could not write ${k}: disk full`)
     settings[k] = v
   })
   const api = {
@@ -854,6 +858,24 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     // Switching to the few-step model with no user override resolves to THAT model's
     // default (10), not a leftover value — proving the [imgModel] effect re-resolves.
     expect(payload.steps).toBe(10)
+  })
+
+  it('keeps a seed whose save failed and writes it when the composer closes (item 38)', async () => {
+    installApi({ active: FULL, models: [FULL], refuseFirstSaveOf: ['imgSeed'] })
+    const user = userEvent.setup()
+    const chat = renderChat()
+    await openImageComposer(user)
+    const seedInput = screen.getByLabelText('Seed') as HTMLInputElement
+    seedInput.focus()
+    await user.type(seedInput, '777', { skipClick: true })
+    // The save after the typing pause is refused by the settings store.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)))
+
+    chat.unmount()
+
+    const api = (window as unknown as { api: { getSettings: () => Promise<Record<string, unknown>> } })
+      .api
+    await waitFor(async () => expect((await api.getSettings()).imgSeed).toBe('777'))
   })
 
   it('applies every existing image setting at the native boundary and reloads persisted values (#64)', async () => {

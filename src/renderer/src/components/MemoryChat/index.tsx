@@ -553,9 +553,16 @@ export function MemoryChat({
     imageParams: imgParamStore
   })
   const persistChangedPreference = useCallback((key: string, value: unknown): void => {
-    if (Object.is(persistedPreferenceValues.current[key], value)) return
+    const previous = persistedPreferenceValues.current[key]
+    if (Object.is(previous, value)) return
     persistedPreferenceValues.current[key] = value
-    void window.api.saveSetting(key, value)
+    // A failed save must not count as saved, or the close-time flush would skip the retry.
+    window.api.saveSetting(key, value).catch((error: unknown) => {
+      if (Object.is(persistedPreferenceValues.current[key], value)) {
+        persistedPreferenceValues.current[key] = previous
+      }
+      console.error(`[chat] could not save ${key}:`, error)
+    })
   }, [])
   useEffect(() => {
     console.log('MemoryChat effect: hydrate composer preferences')
@@ -659,14 +666,31 @@ export function MemoryChat({
   }, [])
   // Persist the global image-composer params only when they differ from the latest
   // main-owned values. Hydration and settings invalidations update the snapshot first.
+  // Seed and negative prompt are typed, so they are written once typing pauses rather than on
+  // every character.
   useEffect(() => {
     console.log('MemoryChat effect: persist image seed')
-    persistChangedPreference('imgSeed', imgSeed)
+    const timer = setTimeout(() => persistChangedPreference('imgSeed', imgSeed), 400)
+    return () => clearTimeout(timer)
   }, [imgSeed, persistChangedPreference])
   useEffect(() => {
     console.log('MemoryChat effect: persist negative prompt')
-    persistChangedPreference('imgNegative', imgNegative)
+    const timer = setTimeout(() => persistChangedPreference('imgNegative', imgNegative), 400)
+    return () => clearTimeout(timer)
   }, [imgNegative, persistChangedPreference])
+  // Leaving the composer within the pause must not drop the last edit: write what is pending.
+  const typedImageParams = useRef({ imgSeed, imgNegative })
+  // Committed values only: a render React discards must not reach the close-time save.
+  useEffect(() => {
+    typedImageParams.current = { imgSeed, imgNegative }
+  }, [imgSeed, imgNegative])
+  useEffect(
+    () => () => {
+      persistChangedPreference('imgSeed', typedImageParams.current.imgSeed)
+      persistChangedPreference('imgNegative', typedImageParams.current.imgNegative)
+    },
+    [persistChangedPreference]
+  )
   useEffect(() => {
     console.log('MemoryChat effect: persist image enhancement preference')
     persistChangedPreference('enhanceImagePrompts', enhanceImg)

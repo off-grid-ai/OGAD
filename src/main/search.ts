@@ -21,41 +21,13 @@ import {
   type SearchResult,
   type SearchSort
 } from './search-ranking'
+import { PENDING_COUNT_SQL, PENDING_SOURCE_SQL } from './search-backfill-queries'
 
 export type { SearchResult, SearchSort } from './search-ranking'
 
 // ---------------------------------------------------------------------------
 // Backfill: embed the backlog into LanceDB (keys tracked in SQLite to skip work)
 // ---------------------------------------------------------------------------
-
-// One row per indexable item across all surfaces. frames.text is the raw OCR
-// (richest for "find what I saw"); observations.summary is the distilled line.
-const SOURCES_SQL = `
-  SELECT 'frame:'||id AS key, 'screen' AS kind, id AS refId, text AS text,
-         COALESCE(surface,'') AS surface, COALESCE(url,'') AS url,
-         ${epochMsSql('ts')} AS ts
-    FROM frames WHERE text IS NOT NULL
-  UNION ALL
-  SELECT 'obs:'||id, 'screen', id, summary, COALESCE(surface,''), COALESCE(url,''),
-         ${epochMsSql('ts')}
-    FROM observations WHERE summary IS NOT NULL
-  UNION ALL
-  SELECT 'sum:'||rowid, 'meeting', rowid, summary, 'Meeting', '', 0
-    FROM chat_summaries WHERE summary IS NOT NULL
-  UNION ALL
-  SELECT 'mtg:'||id, 'meeting', id,
-         COALESCE(title,'Meeting')||'. '||COALESCE(summary, substr(transcript,1,2000)),
-         'Meeting', '', COALESCE(started_at,0)
-    FROM meetings WHERE COALESCE(summary, transcript) IS NOT NULL
-  UNION ALL
-  SELECT 'mem:'||id, 'memory', id, content, COALESCE(source_app,''), '', 0
-    FROM memories WHERE content IS NOT NULL
-  UNION ALL
-  SELECT 'ent:'||id, 'entity', id, name||' '||COALESCE(summary,''), 'Entity', '', 0
-    FROM entities WHERE hidden = 0
-  UNION ALL
-  SELECT 'fact:'||id, 'fact', entity_id, fact, 'Fact', '', 0
-    FROM entity_facts`
 
 interface PendingRow {
   key: string
@@ -73,23 +45,24 @@ function ensureIndexTable(): void {
 
 function pendingCount(): number {
   ensureIndexTable()
-  const row = getDB()
-    .prepare(
-      `SELECT COUNT(*) AS c FROM (${SOURCES_SQL}) s WHERE s.key NOT IN (SELECT key FROM vec_indexed)`
-    )
-    .get() as { c: number }
+  const row = getDB().prepare(PENDING_COUNT_SQL).get() as { c: number }
   return row.c
+}
+
+function pendingRows(limit: number): PendingRow[] {
+  const db = getDB()
+  for (const sql of PENDING_SOURCE_SQL) {
+    const rows = db.prepare(sql).all(limit) as PendingRow[]
+    if (rows.length) return rows
+  }
+  return []
 }
 
 /** Embed one batch of un-indexed items into LanceDB. Returns progress. */
 async function indexBatch(limit = 48): Promise<{ indexed: number; remaining: number }> {
   ensureIndexTable()
   const db = getDB()
-  const rows = db
-    .prepare(
-      `SELECT * FROM (${SOURCES_SQL}) s WHERE s.key NOT IN (SELECT key FROM vec_indexed) LIMIT ?`
-    )
-    .all(limit) as PendingRow[]
+  const rows = pendingRows(limit)
   if (!rows.length) return { indexed: 0, remaining: 0 }
 
   const chunks: VecChunk[] = []
@@ -441,6 +414,8 @@ export async function universalSearch(
     collapseScreenMoments?: boolean
     sort?: SearchSort
     excludeChatId?: string
+    /** Aborted when a newer search supersedes this one; the remaining stages are skipped. */
+    signal?: AbortSignal
   } = {}
 ): Promise<SearchResult[]> {
   ensureRagStoreSchema()
@@ -451,12 +426,14 @@ export async function universalSearch(
   const perSource = opts.sources?.length ? 80 : Math.min(40, limit + 10)
 
   const lists = keywordHits(q, perSource)
+  opts.signal?.throwIfAborted()
   if (opts.semantic !== false) {
     try {
       lists.push(await semanticHits(q, perSource))
     } catch {
       /* embedding model not ready — keyword results still fine */
     }
+    opts.signal?.throwIfAborted()
   }
 
   // Reciprocal-rank fusion across all lists, keyed by the unique chunk key.
@@ -475,6 +452,7 @@ export async function universalSearch(
     excludeChatId: opts.excludeChatId,
     sort: opts.sort
   })
+  opts.signal?.throwIfAborted()
   for (const r of ordered)
     r.imagePath = thumbFor({ key: r.key, kind: r.kind, refId: r.refId } as RawHit)
 

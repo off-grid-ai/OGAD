@@ -8,7 +8,8 @@ export {
   rankBySimilarity,
   estimateCharBudget,
   selectWithinBudget,
-  formatForPrompt
+  formatForPrompt,
+  sanitizePromptExcerpt
 } from './retrieval'
 export {
   detectKind,

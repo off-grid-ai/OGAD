@@ -13,6 +13,7 @@ import {
   deactivateProFeaturesMain,
   loadProFeaturesMain,
   proEnabled,
+  proMainActivationFailed,
   proEntitlementBootstrapEnabled
 } from './bootstrap/loadProFeaturesMain'
 import { requestApplicationRelaunch } from './shutdown'
@@ -45,7 +46,13 @@ export function setupLicenseIpc(): void {
     if (effectiveInfo.isPro) {
       licenseChangeTask = loadProFeaturesMain()
         .then(() => {
-          if (revision === licenseChangeRevision) publish()
+          if (revision !== licenseChangeRevision) return
+          // Unlocking Pro screens whose main handlers never registered would leave them broken.
+          if (proMainActivationFailed()) {
+            console.error('[pro] entitlement is valid but paid features failed to start')
+            return
+          }
+          publish()
         })
         .catch(console.error.bind(console, '[pro] entitlement activation failed'))
       return
@@ -58,8 +65,11 @@ export function setupLicenseIpc(): void {
 
   // SYNC: preload reads this once to seed window.api.isPro. Must be registered
   // before the first window loads (it is — setupLicenseIpc runs before createWindow).
+  // Pro reads as enabled only when its main-process features started: a failed activation must
+  // not unlock screens whose handlers never registered, on any status path.
+  const proReady = (): boolean => proEnabled() && !proMainActivationFailed()
   ipcMain.on('pro:is-enabled', (e) => {
-    e.returnValue = proEnabled()
+    e.returnValue = proReady()
   })
   ipcMain.on('pro:entitlement-bootstrap-enabled', (e) => {
     e.returnValue = proEntitlementBootstrapEnabled()
@@ -67,7 +77,7 @@ export function setupLicenseIpc(): void {
 
   ipcMain.handle('license:status', () => {
     const info = getProLicenseInfo()
-    return effectiveProLicenseInfo(info, proEnabled())
+    return effectiveProLicenseInfo(info, proReady())
   })
   ipcMain.handle('license:activate', async (_e, key: string) => {
     const result = await activateProByKey(key)

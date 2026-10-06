@@ -8,7 +8,11 @@
 import { llm } from './llm'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import type { ResponseCutoffContract } from '../shared/ipc-contracts'
-import { SEARCH_KB_TOOL, makeSearchKnowledgeBaseHandler } from '@offgrid/rag'
+import {
+  SEARCH_KB_TOOL,
+  makeSearchKnowledgeBaseHandler,
+  sanitizePromptExcerpt
+} from '@offgrid/rag'
 import { stripChatControlTokens } from '@offgrid/sync'
 import { isMemoryToolAllowed } from './tools/memory-scope'
 import { parseToolCallsFromText, stripQwenToolCallMarkup } from './tools/tool-call-parse'
@@ -391,7 +395,7 @@ const TOOLS: ToolDef[] = [
           ? conversations
               .map(
                 (message, index) =>
-                  `[C${index + 1}] ${message.title || 'Project conversation'} · ${message.role}: ${message.content.slice(0, 1500)}`
+                  `[C${index + 1}] ${sanitizePromptExcerpt(message.title || 'Project conversation')} · ${message.role}: ${sanitizePromptExcerpt(message.content.slice(0, 1500))}`
               )
               .join('\n\n')
           : 'No matching project conversations found.'
