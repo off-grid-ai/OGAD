@@ -27,6 +27,8 @@ export interface AssistantContextExtras {
   metrics?: GenerationMetrics
   /** Optional for older replies, which keep their original thinking-then-tools layout. */
   timeline?: AssistantTimelineEntry[]
+  /** Every answer the turn has had (Regenerate, Resend), and which one is shown. */
+  versions?: { variants: string[]; variantIndex: number }
 }
 
 /**
@@ -47,7 +49,8 @@ export function buildAssistantContext(
     reasoning === undefined &&
     extras.cutoff === undefined &&
     extras.metrics === undefined &&
-    !extras.timeline?.length
+    !extras.timeline?.length &&
+    !extras.versions
   ) {
     return undefined
   }
@@ -56,7 +59,29 @@ export function buildAssistantContext(
   if (extras.cutoff !== undefined) ctx.cutoff = extras.cutoff
   if (extras.metrics !== undefined) ctx.metrics = extras.metrics
   if (extras.timeline?.length) ctx.timeline = extras.timeline
+  if (extras.versions && extras.versions.variants.length > 1) {
+    ctx.variants = extras.versions.variants
+    ctx.variantIndex = extras.versions.variantIndex
+  }
   return ctx
+}
+
+/** Restore an answer's versions, or nothing for a malformed or single-version blob. */
+export function readAnswerVersions(
+  ctx: unknown
+): { variants: string[]; variantIndex: number } | undefined {
+  if (!ctx || typeof ctx !== 'object') return undefined
+  const { variants, variantIndex } = ctx as { variants?: unknown; variantIndex?: unknown }
+  if (!Array.isArray(variants) || !variants.every((v) => typeof v === 'string')) return undefined
+  if (variants.length < 2) return undefined
+  const index =
+    typeof variantIndex === 'number' &&
+    Number.isInteger(variantIndex) &&
+    variantIndex >= 0 &&
+    variantIndex < variants.length
+      ? variantIndex
+      : variants.length - 1
+  return { variants: variants as string[], variantIndex: index }
 }
 
 /** Ignore malformed durable entries instead of passing them to the chat timeline. */

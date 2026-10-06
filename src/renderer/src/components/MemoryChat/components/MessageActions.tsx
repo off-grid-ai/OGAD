@@ -81,7 +81,6 @@ function UserMessageActionsComponent({
   onEdit: () => void
   onRegenerate: () => void
 }>): React.JSX.Element {
-  console.log('MemoryChat UserMessageActions rendered')
   return (
     <MessageActionsMenu>
       <CopyAction copied={copied} onCopy={onCopy} />

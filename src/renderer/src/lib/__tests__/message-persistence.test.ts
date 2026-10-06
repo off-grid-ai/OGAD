@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { buildAssistantContext, readReasoning, readResponseCutoff } from '../message-persistence'
+import {
+  buildAssistantContext,
+  readAnswerVersions,
+  readReasoning,
+  readResponseCutoff
+} from '../message-persistence'
 
 describe('message-persistence carrier', () => {
   it('round-trips reasoning through the context blob', () => {
@@ -72,5 +77,25 @@ describe('message-persistence carrier', () => {
     expect(
       readResponseCutoff({ cutoff: { reason: 'max_tokens', maxTokens: '4096' } })
     ).toBeUndefined()
+  })
+
+  it('round-trips every version of an answer and the one shown, so they survive reopening', () => {
+    const ctx = buildAssistantContext(undefined, {
+      versions: { variants: ['first', 'second'], variantIndex: 0 }
+    })
+    expect(readAnswerVersions(ctx)).toEqual({ variants: ['first', 'second'], variantIndex: 0 })
+  })
+
+  it('stores nothing for a single version, and reads a bad index as the newest', () => {
+    expect(
+      buildAssistantContext(undefined, { versions: { variants: ['only'], variantIndex: 0 } })
+    ).toEqual({})
+    expect(readAnswerVersions({ variants: ['a', 'b'], variantIndex: 7 })).toEqual({
+      variants: ['a', 'b'],
+      variantIndex: 1
+    })
+    expect(readAnswerVersions({ variants: ['a', 3] })).toBeUndefined()
+    expect(readAnswerVersions({ variants: ['a'] })).toBeUndefined()
+    expect(readAnswerVersions(null)).toBeUndefined()
   })
 })

@@ -247,6 +247,22 @@ export class ChatBoundary {
       if (context !== undefined) message.context = context
       return true
     },
+    // As the store does it (database.ts showRagMessageVersion): the version's text, and its
+    // versions merged into the context the answer already has.
+    showRagMessageVersion: vi.fn(
+      async (
+        conversationId: string,
+        messageId: string,
+        versions: { variants: string[]; variantIndex: number }
+      ) => {
+        const message = this.messages[conversationId]?.find((entry) => entry.id === messageId)
+        const content = versions.variants[versions.variantIndex]
+        if (!message || content === undefined) return false
+        message.content = content
+        message.context = { ...(message.context as object | undefined), ...versions }
+        return true
+      }
+    ),
     truncateRagMessages: this.truncateRagMessages,
     saveArtifact: this.saveArtifact,
     artifactRuntime: async () => ({}),

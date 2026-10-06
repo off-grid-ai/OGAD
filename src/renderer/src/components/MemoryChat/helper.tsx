@@ -6,6 +6,7 @@ import {
   type ProjectedSyncedTool
 } from '@offgrid/sync'
 import {
+  readAnswerVersions,
   readAssistantTimeline,
   readGenerationMetrics,
   readReasoning,
@@ -141,6 +142,8 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     context,
     reasoning: turn.reasoning ?? readReasoning(context),
     timeline: readAssistantTimeline(context),
+    // Every answer the turn has had, as saved with it (Regenerate, Resend).
+    ...readAnswerVersions(context),
     cutoff: readResponseCutoff(context),
     metrics: readGenerationMetrics(context),
     toolsOffered: turn.toolsOffered,

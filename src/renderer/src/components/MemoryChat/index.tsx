@@ -67,6 +67,7 @@ import {
 } from '@renderer/lib/voice-preferences'
 import { shouldAutoRouteImage, cleanImagePrompt } from '@renderer/lib/image-intent'
 import { buildAssistantContext, type AssistantTimelineEntry } from '../../lib/message-persistence'
+import { answerAfter, priorVersions, showVersion } from '../../lib/answer-versions'
 import type { GenerationMetrics } from '../../../../shared/generation-metrics'
 import { withGeneratedImageReference } from '../../../../shared/generated-image-reference'
 import type {
@@ -1905,7 +1906,11 @@ export function MemoryChat({
           }
         }
         if (comicPageTotal) await updateComicReader()
-        const tr = await window.api.toolChat(modelQuery, fullHistory.slice(0, -1), {
+        // The versions this turn's answer joins (Regenerate, Resend), taken now: a turn that is
+      // stopped or fails must not leave them to attach to the next, unrelated answer.
+      const priorVariants = pendingVariantsRef.current
+      pendingVariantsRef.current = null
+      const tr = await window.api.toolChat(modelQuery, fullHistory.slice(0, -1), {
           assistantOnly: assistantForTurn,
           connectors: connectorsOn,
           conversationId: convId,
@@ -1944,8 +1949,6 @@ export function MemoryChat({
           return
         }
         const answer = tr?.answer || 'No response returned.'
-        const priorVariants = pendingVariantsRef.current
-        pendingVariantsRef.current = null
         const allVariants = priorVariants ? [...priorVariants, answer] : undefined
         let imageRequests = tr?.imageRequests ?? []
         if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
@@ -2003,7 +2006,11 @@ export function MemoryChat({
           reasoning: toolReasoning,
           timeline: toolTimeline,
           metrics: tr?.metrics,
-          cutoff: tr?.cutoff
+          cutoff: tr?.cutoff,
+          // Saved with the answer, so its earlier versions are still there on reopening.
+          ...(allVariants
+            ? { versions: { variants: allVariants, variantIndex: allVariants.length - 1 } }
+            : {})
         })
         const artifact = parseArtifact(answer)
         if (artifact) {
@@ -2914,12 +2921,12 @@ export function MemoryChat({
       if (activeConversationId && generatingRef.current.has(activeConversationId)) return
       const idx = messages.findIndex((m) => m.id === messageId)
       if (idx < 0) return
-      // Regenerating an assistant answer keeps prior answers as navigable variants.
+      // Regenerate (on an answer) and Resend (on the question) both keep the answer they
+      // replace as an earlier version (‹ 1/2 ›), as the browser extension does.
       const target = messages[idx]! // idx >= 0 checked above
-      if (target.role === 'assistant' && target.content.trim()) {
-        pendingVariantsRef.current =
-          target.variants && target.variants.length ? target.variants : [target.content]
-      }
+      pendingVariantsRef.current = priorVersions(
+        target.role === 'user' ? answerAfter(messages, idx) : target
+      )
       // Walk back to the user turn that produced this answer.
       for (let i = idx; i >= 0; i--) {
         const mi = messages[i]! // 0 <= i <= idx
@@ -3257,14 +3264,22 @@ export function MemoryChat({
     speak: speakMessage,
     voicePlaybackChange: handleVoicePlaybackChange,
     selectVariant: (messageId, direction) => {
+      // The chosen version's own text is shown (the counter alone used to change), is what the
+      // model sees next, and is saved with its place among the versions.
+      const message = messages.find((m) => m.id === messageId)
+      const shown = message ? showVersion(message, direction) : null
+      if (!message?.variants || !shown) return
       setMessages((previous) =>
-        previous.map((message) => {
-          if (message.id !== messageId || !message.variants?.length) return message
-          const current = message.variantIndex ?? 0
-          const last = message.variants.length - 1
-          return { ...message, variantIndex: Math.max(0, Math.min(last, current + direction)) }
-        })
+        previous.map((m) => (m.id === messageId ? { ...m, ...shown } : m))
       )
+      if (activeConversationId) {
+        void window.api
+          .showRagMessageVersion(activeConversationId, messageId, {
+            variants: message.variants,
+            variantIndex: shown.variantIndex
+          })
+          .catch((error: unknown) => console.error('Failed to save the version shown:', error))
+      }
     }
   }
   const messageActionsRef = useRef(currentMessageActions)

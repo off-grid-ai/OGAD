@@ -1,3 +1,4 @@
+import { parseAnswerVersions } from './answer-version-context'
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
 import { listBridgeBrowsers } from './extension-bridge/bridge-electron'
 import { setupAIRequestLogIPC } from './ai-request-log-ipc'
@@ -1306,6 +1307,16 @@ export function setupIPC(): void {
     async (_e, conversationId: string, messageId: string, content: string, context?: unknown) => {
       const { updateRagMessage } = await import('./database')
       return updateRagMessage(conversationId, messageId, content, context)
+    }
+  )
+
+  ipcMain.handle(
+    'rag:show-message-version',
+    async (_e, conversationId: string, messageId: string, versions: unknown) => {
+      const parsed = parseAnswerVersions(versions)
+      if (!parsed) return false
+      const { showRagMessageVersion } = await import('./database')
+      return showRagMessageVersion(conversationId, messageId, parsed)
     }
   )
 

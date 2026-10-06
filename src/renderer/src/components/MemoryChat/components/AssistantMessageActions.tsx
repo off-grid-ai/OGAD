@@ -94,15 +94,16 @@ function VariantNavigationComponent({
   message: ChatMessage
   onSelect: (direction: -1 | 1) => void
 }>): React.JSX.Element | null {
-  console.log('MemoryChat VariantNavigation rendered')
   if (!message.variants || message.variants.length <= 1) return null
-  const index = message.variantIndex ?? 0
+  const index = message.variantIndex ?? message.variants.length - 1
   return (
     <span className="flex items-center gap-1 text-[11px] text-neutral-500">
       <button
         type="button"
         onClick={() => onSelect(-1)}
         disabled={index <= 0}
+        aria-label="Previous version"
+        title="Previous version"
         className="transition-colors hover:text-green-500 disabled:opacity-30"
       >
         ‹
@@ -114,6 +115,8 @@ function VariantNavigationComponent({
         type="button"
         onClick={() => onSelect(1)}
         disabled={index >= message.variants.length - 1}
+        aria-label="Next version"
+        title="Next version"
         className="transition-colors hover:text-green-500 disabled:opacity-30"
       >
         ›

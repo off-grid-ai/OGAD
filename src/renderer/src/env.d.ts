@@ -335,6 +335,12 @@ interface RendererAPIOverrides {
     content: string,
     context?: unknown
   ) => Promise<boolean>
+  /** Shows another version of an answer, keeping the rest of its stored context. */
+  showRagMessageVersion: (
+    conversationId: string,
+    messageId: string,
+    versions: { variants: string[]; variantIndex: number }
+  ) => Promise<boolean>
   truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
   updateRagConversationTitle: (id: string, title: string) => Promise<RagConversation>
   deleteRagConversation: (id: string) => Promise<void>

@@ -1,5 +1,6 @@
 // better-sqlite3-multiple-ciphers is a drop-in superset of better-sqlite3 that
 // adds SQLCipher-style `PRAGMA key` encryption. Same API surface + types.
+import { withShownVersion, type AnswerVersions } from './answer-version-context'
 import Database from 'better-sqlite3-multiple-ciphers'
 import { safeStorage } from 'electron'
 import path from 'path'
@@ -1474,6 +1475,32 @@ export function addRagMessage(
 }
 
 /** Replace one saved message without removing the turns that follow it. */
+/**
+ * Shows another version of an answer: the version's text becomes the message, and its versions
+ * and index are merged into the context it already has (answer-version-context.ts).
+ */
+export function showRagMessageVersion(
+  conversationId: string,
+  messageId: string,
+  versions: AnswerVersions
+): boolean {
+  const content = versions.variants[versions.variantIndex]
+  if (content === undefined) return false
+  const existing = getDB()
+    .prepare(
+      `SELECT context FROM rag_messages
+       WHERE conversation_id = ? AND (uuid = ? OR CAST(id AS TEXT) = ?)`
+    )
+    .get(conversationId, messageId, messageId) as { context: string | null } | undefined
+  if (!existing) return false
+  return updateRagMessage(
+    conversationId,
+    messageId,
+    content,
+    JSON.parse(withShownVersion(existing.context, versions))
+  )
+}
+
 export function updateRagMessage(
   conversationId: string,
   messageId: string,
