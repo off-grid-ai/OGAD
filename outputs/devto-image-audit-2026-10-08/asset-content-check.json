@@ -1,0 +1,242 @@
+[
+  {
+    "url": "https://getoffgridai.co/assets/cover.png",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/actions-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/artifacts-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/artifacts-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/chat-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/clipboard-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/day-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/day-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/entities-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/entities-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/gateway-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/gateway-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/god-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/god-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/imagegen-chat-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/integrations-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/meetings-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/meetings-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-image-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-image-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-text-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-text-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-transcription-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-transcription-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-vision-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/models-voice-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/projects-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/projects-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/reflect-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/reflect-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/replay-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/search-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/vault-open-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/voice-dark-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/voice-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/app/web-plan-light-1760.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/gen-dreamshaper.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/gen-illustrious.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/gen-juggernaut.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/gen-realvis-lightning.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/gen-realvis.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/mobile/chat-ios-1-light-640.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/mobile/imagegen-2-light-640.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/mobile/imagegen-ios-1-light-640.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/mobile/models-ios-1-light-640.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/mobile/other-1-light-640.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/mobile/project-ios-2-light-640.webp",
+    "image": true,
+    "same_as_local": true
+  },
+  {
+    "url": "https://getoffgridai.co/assets/img/home/mobile/remote-ios-1-light-640.webp",
+    "image": true,
+    "same_as_local": true
+  }
+]

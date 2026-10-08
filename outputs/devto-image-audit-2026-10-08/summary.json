@@ -1,0 +1,14 @@
+{
+  "website_articles_with_dev_ids_audited": 382,
+  "website_files_corrected": 77,
+  "dev_articles_updated_and_verified": 214,
+  "existing_covers_checked": 381,
+  "body_image_urls_checked": 53,
+  "dev_rehosted_image_copies_checked": 30,
+  "visual_review": "The three recompressed generated-image examples show the correct source subjects. Dimensions match.",
+  "rendered_image_issues": 0,
+  "live_readback_issues": 0,
+  "tracked_series_drafts_synced": 150,
+  "workbook_updated": true,
+  "website_deployed": false
+}
