@@ -452,7 +452,11 @@ export class LLMService {
       ? MTP_COMPANIONS['unsloth/Qwen3.8-27B-GGUF']
       : /^tencent_UI-Mate-9B-(?:Q|IQ)[A-Z0-9_]+(?:\+MTP)?\.gguf$/i.test(selected)
         ? MTP_COMPANIONS['bartowski/tencent_UI-Mate-9B-GGUF+MTP']
-        : undefined
+        : /^gemma-4-E4B-it-(?:UD-)?(?:Q|IQ)[A-Z0-9_]+\.gguf$/i.test(selected)
+          ? MTP_COMPANIONS['unsloth/gemma-4-E4B-it-GGUF']
+          : /^gemma-4-12b-it-(?:UD-)?(?:Q|IQ)[A-Z0-9_]+\.gguf$/i.test(selected)
+            ? MTP_COMPANIONS['unsloth/gemma-4-12b-it-GGUF']
+            : undefined
     if (!companion) return undefined
     const candidate = path.join(getModelsDir(), companion.name)
     return readGgufMtpSupport(candidate, fs, undefined, companion.sizeBytes) ? candidate : undefined

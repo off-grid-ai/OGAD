@@ -24,9 +24,12 @@ function gguf(file: string, embeddedMtp: boolean, size = 1024, metadataPadding =
   }
   const str = (value: string): Buffer =>
     Buffer.concat([u64(Buffer.byteLength(value)), Buffer.from(value)])
-  const values = [Buffer.concat([str('general.architecture'), u32(8), str('qwen35')])]
+  const architecture = /gemma-4/i.test(file)
+    ? path.basename(file).startsWith('mtp-') ? 'gemma4-assistant' : 'gemma4'
+    : 'qwen35'
+  const values = [Buffer.concat([str('general.architecture'), u32(8), str(architecture)])]
   if (metadataPadding) values.push(Buffer.concat([str('tokenizer.chat_template'), u32(8), str('x'.repeat(metadataPadding))]))
-  if (embeddedMtp) values.push(Buffer.concat([str('qwen35.nextn_predict_layers'), u32(4), u32(1)]))
+  if (embeddedMtp) values.push(Buffer.concat([str(`${architecture}.nextn_predict_layers`), u32(4), u32(1)]))
   fs.writeFileSync(
     file,
     Buffer.concat([Buffer.from('GGUF'), u32(3), u64(0), u64(values.length), ...values])
@@ -167,6 +170,39 @@ describe('MTP installation and persisted launch contract', () => {
     expect(service.getSettings()).toMatchObject({ supportsMtp: false, speculativeDecoding: 'off' })
     expect(service.launchArgs()).not.toContain('--spec-type')
     expect(service.launchArgs()).not.toContain('--spec-draft-model')
+  })
+
+  it.each([
+    ['unsloth/gemma-4-E4B-it-GGUF', 'gemma-4-E4B-it-Q4_K_M.gguf'],
+    ['unsloth/gemma-4-12b-it-GGUF', 'gemma-4-12b-it-Q4_K_M.gguf']
+  ] as const)('offers %s MTP only after its matching companion is installed', async (id, selected) => {
+    const { desktopCatalog } = await import('../../models-manager')
+    const { LLMService } = await import('../../llm')
+    const service = await load(selected, false, 'off')
+    const file = MTP_COMPANIONS[id]
+    const entry = (await desktopCatalog()).find((model) => model.id === id)
+    expect(entry?.files).toContainEqual(file)
+    expect(visionStatus(entry!, (name) => fs.existsSync(path.join(profile, 'models', name))))
+      .toMatchObject({ supportsMtp: true, mtpInstalled: false })
+    expect(service.getSettings()).toMatchObject({ supportsMtp: false, speculativeDecoding: 'off' })
+
+    // Real, sparse metadata files exercise installation readiness without downloading weights.
+    const wrong = MTP_COMPANIONS[id.includes('E4B')
+      ? 'unsloth/gemma-4-12b-it-GGUF' : 'unsloth/gemma-4-E4B-it-GGUF']
+    gguf(path.join(profile, 'models', wrong.name), true, wrong.sizeBytes)
+    expect(service.getSettings().supportsMtp).toBe(false)
+    const sidecar = path.join(profile, 'models', file.name)
+    gguf(sidecar, true, file.sizeBytes - 1)
+    expect(service.getSettings().supportsMtp).toBe(false)
+    gguf(sidecar, true, file.sizeBytes)
+    expect(visionStatus(entry!, (name) => fs.existsSync(path.join(profile, 'models', name))))
+      .toMatchObject({ mtpInstalled: true })
+    await service.pause()
+    await service.setSettings({ speculativeDecoding: 'mtp' }, { emitSync: false })
+    expect(new LLMService().getSettings()).toMatchObject({ supportsMtp: true, speculativeDecoding: 'mtp' })
+
+    fs.unlinkSync(sidecar)
+    expect(new LLMService().getSettings()).toMatchObject({ supportsMtp: false, speculativeDecoding: 'off' })
   })
 
   it.each([primary, 'Ternary-Bonsai-2-27B-PQ2_0.gguf'])(

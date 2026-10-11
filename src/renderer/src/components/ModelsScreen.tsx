@@ -1091,7 +1091,7 @@ export function ModelsScreen({
             }
             className="flex items-center gap-1 rounded border border-amber-400/50 px-2 py-1 text-[10px] text-amber-300 transition-all duration-150 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95"
           >
-            <IconDownload className="h-3 w-3" /> Repair
+            <IconDownload className="h-3 w-3" /> {mtpMissing ? 'Add MTP' : 'Repair'}
           </button>
         )}
 
