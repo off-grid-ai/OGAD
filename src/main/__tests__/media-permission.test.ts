@@ -2,8 +2,7 @@ import type { Session } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 import { installMediaPermissionHandler } from '../media-permission'
 
-vi.mock('electron', () => ({ app: { getAppPath: () => '/app' } }))
-vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
+vi.mock('electron', () => ({ app: { getAppPath: () => '/app', isPackaged: true } }))
 
 type PermissionHandler = NonNullable<Parameters<Session['setPermissionRequestHandler']>[0]>
 

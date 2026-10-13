@@ -1,13 +1,21 @@
 import { vi } from 'vitest'
 import type { VideoGenerationResultContract } from '../../../../../shared/video-generation-contract'
 
-export function createVideoBoundary() {
+export function createVideoBoundary(): Record<string, unknown> {
   return {
     videoGenStatus: vi.fn(async () => ({ available: false, models: [], active: null })),
     videoGenJobStatus: vi.fn(async () => ({
-      id: null, phase: 'idle' as const, conversationId: null, projectId: null,
-      stage: null, enhancedPrompt: '', progress: null, outputPath: null,
-      error: null, startedAt: null, finishedAt: null
+      id: null,
+      phase: 'idle' as const,
+      conversationId: null,
+      projectId: null,
+      stage: null,
+      enhancedPrompt: '',
+      progress: null,
+      outputPath: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null
     })),
     onVideoGenJobState: vi.fn(() => () => {}),
     onVideoGenConversationUpdated: vi.fn(() => () => {}),

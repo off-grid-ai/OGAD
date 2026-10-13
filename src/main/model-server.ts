@@ -49,7 +49,7 @@ import { whisperModel } from './rag/extractors'
 import { getActiveModal } from './active-models'
 import { embeddings } from './embeddings'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
-import { handleMcpRequest } from './mcp-server'
+import { handleMcpRequest, registerMcpVideoJobs } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
@@ -172,7 +172,7 @@ function loadVideoRequests(): void {
   if (videoRequestsLoaded) return
   videoRequestsLoaded = true
   try {
-    const saved = JSON.parse(fs.readFileSync(videoRequestPath(), 'utf8')) as ApiRequest[]
+    const saved = JSON.parse(fs.readFileSync(videoRequestPath(), 'utf8')) as (ApiRequest | null)[]
     if (!Array.isArray(saved)) return
     let recoveredInterruptedJob = false
     for (const item of saved.slice(-REQUESTS_MAX)) {
@@ -202,8 +202,7 @@ function loadVideoRequests(): void {
 function createRequest(id: string, kind: string, collection: string): ApiRequest {
   if (requests.size >= REQUESTS_MAX) {
     const oldest = [...requests.values()].find(
-      (item) =>
-        item.status === 'completed' || item.status === 'failed'
+      (item) => item.status === 'completed' || item.status === 'failed'
     )?.id
     if (oldest) requests.delete(oldest)
   }
@@ -290,7 +289,12 @@ function handlePoll(res: http.ServerResponse, id: string): void {
   if (r.status === 'completed') body.result = r.result
   if (r.status === 'failed') body.error = r.error
   if (r.stage) body.stage = r.stage
-  if (r.preview) body.preview = { url: `/v1/videos/${id}/preview`, width: r.preview.width, height: r.preview.height }
+  if (r.preview)
+    body.preview = {
+      url: `/v1/videos/${id}/preview`,
+      width: r.preview.width,
+      height: r.preview.height
+    }
   if (r.progress) body.progress = r.progress
   json(res, 200, body)
 }
@@ -1116,7 +1120,10 @@ export function startGatewayVideoJob(
   rid: string = randomUUID(),
   options: { useRemote?: boolean } = {}
 ): ApiRequest {
-  if (options.useRemote && getActiveRemoteVisionServerForModality('video')?.provider !== 'openrouter')
+  if (
+    options.useRemote &&
+    getActiveRemoteVisionServerForModality('video')?.provider !== 'openrouter'
+  )
     throw new Error('Select an OpenRouter video model before using remote generation.')
   resolveVideoRequest(input)
   loadVideoRequests()
@@ -1168,13 +1175,23 @@ export function gatewayVideoJob(id: string, cancel = false): Record<string, unkn
     request_id: request.id,
     status: request.status,
     stage: request.stage,
-    ...(request.preview ? { preview: { url: `/v1/videos/${id}/preview`, width: request.preview.width, height: request.preview.height } } : {}),
+    ...(request.preview
+      ? {
+          preview: {
+            url: `/v1/videos/${id}/preview`,
+            width: request.preview.width,
+            height: request.preview.height
+          }
+        }
+      : {}),
     progress: request.progress,
     result: request.result,
     error: request.error,
     poll_url: `/v1/videos/${id}`
   }
 }
+
+registerMcpVideoJobs({ start: startGatewayVideoJob, status: gatewayVideoJob })
 
 async function handleVideoGeneration(
   req: http.IncomingMessage,
@@ -1555,13 +1572,19 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         return
       }
       if (videoResource[2] === 'preview' && method === 'GET') {
-        const owned = request.status === 'running' && request.preview &&
+        const owned =
+          request.status === 'running' &&
+          request.preview &&
           resolveExistingOwnedPath(generatedVideosDir(), request.preview.path)
         if (!owned) {
           json(res, 404, errBody('Video preview is not available.'))
           return
         }
-        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'Content-Length': fs.statSync(owned).size })
+        res.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'no-store',
+          'Content-Length': fs.statSync(owned).size
+        })
         const stream = fs.createReadStream(owned)
         res.once('close', () => stream.destroy())
         stream.on('error', () => res.destroy())

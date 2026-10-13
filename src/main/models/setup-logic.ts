@@ -35,7 +35,9 @@ export const STT_MODEL_BY_MODE: Record<RecMode, string> = {
 export const TTS_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX' // text-to-speech, ~82M
 export const IMAGE_MODEL_ID = 'offgrid-ai/juggernaut-xl-v9-GGUF' // image gen, ~4.35GB
 
-export type SetupItemKind = 'chat' | 'transcription' | 'voice' | 'image' | 'video' | 'embedding'
+import type { SetupItemKind } from '../../shared/setup-contract'
+export type { SetupItemKind } from '../../shared/setup-contract'
+export { totalDownloadGb } from '../../shared/setup-contract'
 
 /** A baseline extra (non-chat) the setup plan lists for a mode, in order:
  *  speech-to-text, text-to-speech, then image. The chat
@@ -59,13 +61,6 @@ export function baselineExtras(
     fallbackName: 'Juggernaut XL v9'
   })
   return items
-}
-
-/** Sum the download size (GB) of a plan's not-yet-installed items. */
-export function totalDownloadGb(
-  items: { sizeGb: number; downloadSizeGb?: number; installed: boolean }[]
-): number {
-  return items.filter((i) => !i.installed).reduce((s, i) => s + (i.downloadSizeGb ?? i.sizeGb), 0)
 }
 
 export type FitLevel = 'ok' | 'tight' | 'risky'

@@ -93,7 +93,11 @@ it('blocks Resend during engine shutdown and a still-pending cancel acknowledgem
     ctrlKey: false
   })
   await user.click(await screen.findByRole('menuitem', { name: 'Resend' }))
-  await waitFor(() => expect(boundary.messages['conversation-a']).toEqual([before![0]]))
+  // Once the engine has stopped, Resend replaces the turns after the earlier question: the
+  // stopped video prompt is gone and the earlier answer is kept as a version to regenerate.
+  await waitFor(() =>
+    expect(boundary.messages['conversation-a']).toEqual([before![0], before![1]])
+  )
 })
 
 it('opens saved video details after remount when the old row has no metrics object', async () => {

@@ -5,12 +5,13 @@ import path from 'node:path'
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'og-embedding-setup-'))
 process.env.OFFGRID_EMBEDDING_SETUP_TEST_DIR = profile
-vi.mock('../runtime-env', () => ({
-  dataDir: () => process.env.OFFGRID_EMBEDDING_SETUP_TEST_DIR,
-  modelsDir: () => path.join(process.env.OFFGRID_EMBEDDING_SETUP_TEST_DIR!, 'models')
-}))
+import { configureRuntime } from '../runtime-env'
 import { getEmbeddingSetupModel, downloadEmbeddingModel } from '../embedding-setup-download'
 import { saveEmbeddingModelId } from '../embedding-model-choice'
+
+// The real runtime paths, pointed at a synthetic profile.
+fs.mkdirSync(path.join(profile, 'models'))
+configureRuntime({ dataDir: profile, modelsDir: path.join(profile, 'models') })
 
 afterAll(() => {
   fs.rmSync(profile, { recursive: true, force: true })

@@ -42,26 +42,15 @@ import {
   recommendBudgetFraction,
   baselineExtras,
   totalDownloadGb,
-  fitMessage,
-  type SetupItemKind
+  fitMessage
 } from './models/setup-logic'
 
 export type ComponentStatus = SystemHealthComponentStatusContract
 export type HealthComponent = SystemHealthComponentContract
 export type SystemHealth = SystemHealthContract
 
-export interface SetupProgress {
-  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error'
-  message: string
-  modelId?: string
-  modelName?: string
-  percent?: number
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
-  totalBytes?: number
-  bytesPerSecond?: number
-}
+import type { SetupItem, SetupPlan, SetupProgress } from '../shared/setup-contract'
+export type { SetupItem, SetupPlan, SetupProgress } from '../shared/setup-contract'
 export type SetupProgressCb = (p: SetupProgress) => void
 
 /** GET a localhost endpoint, parse JSON, with a short timeout. null on any failure. */
@@ -316,26 +305,6 @@ export async function getRecommendation(mode?: RecMode): Promise<Recommendation 
 }
 
 export type { SetupItemKind } from './models/setup-logic'
-export interface SetupItem {
-  kind: SetupItemKind
-  capability: string // user-facing: "Chat & vision", "Speech-to-text", …
-  id: string
-  name: string
-  sizeGb: number
-  installed: boolean
-  downloadSizeGb?: number
-  files?: { name: string; sizeBytes?: number }[]
-  required: boolean // legacy default-plan priority; explicit selections can omit chat
-}
-export interface SetupPlan {
-  mode: RecMode
-  ramGb: number
-  items: SetupItem[]
-  totalDownloadGb: number
-  videoNote?: string
-  videoRuntimeIssue?: string
-  embeddingNote?: string
-}
 
 /** The full set of models "Configure for me" will set up for a mode: the chat/vision
  *  model plus speech-to-text, text-to-speech, and optional image/video packs. Pure
@@ -532,7 +501,15 @@ export async function autoConfigure(
     return fail('The setup plan changed. Select a resource mode to refresh it, then try again.')
   }
   const selected = selectedModelIds === undefined ? null : new Set(selectedModelIds)
-  const items = plan.items.filter((item) => !selected || selected.has(item.id))
+  // Without an explicit selection, Configure for me installs the baseline it always has:
+  // chat, speech-to-text and text-to-speech, plus image outside Conservative. The heavier
+  // extras the plan lists (embedding, video) download only when someone picks them.
+  const baseline = (item: SetupItem): boolean =>
+    item.kind === 'chat' ||
+    item.kind === 'transcription' ||
+    item.kind === 'voice' ||
+    (item.kind === 'image' && plan.mode !== 'conservative')
+  const items = plan.items.filter((item) => (selected ? selected.has(item.id) : baseline(item)))
   if (!items.length) return fail('Select at least one model to set up.')
 
   let activatedChat: SetupItem | undefined

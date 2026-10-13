@@ -343,7 +343,10 @@ export class DesktopBackupDataPort implements BackupDataPort<
     }
   }
 
-  private videos(scope?: { conversationId?: string; projectId?: string }) {
+  private videos(scope?: {
+    conversationId?: string
+    projectId?: string
+  }): { path: string; originalPath: string; metadata: Record<string, unknown> }[] {
     return listGeneratedVideos(scope).map((video) => ({
       path: video.path,
       originalPath: video.path,

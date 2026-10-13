@@ -27,7 +27,7 @@ import './ChatVideoPreview.css'
 const styleNonce = document.querySelector<HTMLMetaElement>('meta[property="csp-nonce"]')?.nonce
 if (styleNonce) {
   for (const exported of Object.values(MediaChromeElements)) {
-    const element = exported as { getTemplateHTML?: (...args: unknown[]) => string }
+    const element = exported as { getTemplateHTML?: (...args: unknown[]) => string } | null
     if (typeof element?.getTemplateHTML !== 'function') continue
     const template = element.getTemplateHTML
     element.getTemplateHTML = function (...args) {
@@ -43,22 +43,23 @@ export function ChatVideoPreview({
   className = ''
 }: Readonly<{ path: string; className?: string }>): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [url, setUrl] = useState('')
-  const [failed, setFailed] = useState(false)
+  // The URL belongs to the path it was resolved for; a new path reads as loading until it resolves.
+  const [loaded, setLoaded] = useState<{ path: string; url: string; failed: boolean } | null>(null)
+  const current = loaded?.path === path ? loaded : null
+  const url = current?.url ?? ''
+  const failed = current?.failed ?? false
   useEffect(() => {
     let active = true
-    setUrl('')
-    setFailed(false)
     void window.api
       .getMediaUrl(path)
       .then((next) => {
         if (active) {
-          setUrl(typeof next === 'string' ? next : '')
-          setFailed(typeof next !== 'string' || !next)
+          const resolved = typeof next === 'string' ? next : ''
+          setLoaded({ path, url: resolved, failed: !resolved })
         }
       })
       .catch(() => {
-        if (active) setFailed(true)
+        if (active) setLoaded({ path, url: '', failed: true })
       })
     return () => {
       active = false
@@ -144,7 +145,7 @@ export function ChatVideoPreview({
         playsInline
         preload="metadata"
         src={url}
-        onError={() => setFailed(true)}
+        onError={() => setLoaded({ path, url, failed: true })}
       />
       <MediaControlBar>
         <MediaPlayButton>

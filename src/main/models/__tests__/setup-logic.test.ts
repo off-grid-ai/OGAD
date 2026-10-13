@@ -47,12 +47,11 @@ describe('recommendBudgetBytes', () => {
 })
 
 describe('baselineExtras — set + ordering per mode', () => {
-  it('conservative: STT(tiny) then TTS, NO image', () => {
+  it('conservative: STT(tiny) then TTS, with image listed for the user to opt into', () => {
     const out = baselineExtras('conservative')
-    expect(out.map((i) => i.kind)).toEqual(['transcription', 'voice'])
+    expect(out.map((i) => i.kind)).toEqual(['transcription', 'voice', 'image'])
     expect(out[0]!.id).toBe(STT_MODEL_BY_MODE.conservative)
     expect(out[1]!.id).toBe(TTS_MODEL_ID)
-    expect(out.some((i) => i.kind === 'image')).toBe(false)
   })
   it('balanced: STT(base), TTS, then image', () => {
     const out = baselineExtras('balanced')

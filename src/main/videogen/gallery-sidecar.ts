@@ -16,17 +16,23 @@ export const generatedVideoSidecarPath = (videoPath: string): string => `${video
 
 export function readGeneratedVideoSidecar(videoPath: string): GeneratedVideoSidecar {
   try {
-    const value = JSON.parse(fs.readFileSync(generatedVideoSidecarPath(videoPath), 'utf8')) as Record<string, unknown>
+    const value = JSON.parse(
+      fs.readFileSync(generatedVideoSidecarPath(videoPath), 'utf8')
+    ) as Record<string, unknown> | null
     if (!value || typeof value !== 'object') return {}
     return {
       ...(typeof value.syncId === 'string' ? { syncId: value.syncId } : {}),
       ...(typeof value.conversationId === 'string' ? { conversationId: value.conversationId } : {}),
-      ...(typeof value.projectId === 'string' || value.projectId === null ? { projectId: value.projectId as string | null } : {}),
+      ...(typeof value.projectId === 'string' || value.projectId === null
+        ? { projectId: value.projectId as string | null }
+        : {}),
       ...(typeof value.messageId === 'string' ? { messageId: value.messageId } : {}),
       ...(typeof value.createdAt === 'string' ? { createdAt: value.createdAt } : {}),
       ...(typeof value.width === 'number' ? { width: value.width } : {}),
       ...(typeof value.height === 'number' ? { height: value.height } : {}),
-      ...(typeof value.durationSeconds === 'number' ? { durationSeconds: value.durationSeconds } : {}),
+      ...(typeof value.durationSeconds === 'number'
+        ? { durationSeconds: value.durationSeconds }
+        : {}),
       ...(typeof value.metadataJson === 'string' ? { metadataJson: value.metadataJson } : {})
     }
   } catch {
@@ -38,7 +44,10 @@ export function writeGeneratedVideoSidecar(videoPath: string, facts: GeneratedVi
   const destination = generatedVideoSidecarPath(videoPath)
   const temporary = `${destination}.tmp`
   try {
-    fs.writeFileSync(temporary, JSON.stringify({ ...readGeneratedVideoSidecar(videoPath), ...facts }))
+    fs.writeFileSync(
+      temporary,
+      JSON.stringify({ ...readGeneratedVideoSidecar(videoPath), ...facts })
+    )
     fs.renameSync(temporary, destination)
   } finally {
     fs.rmSync(temporary, { force: true })

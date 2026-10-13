@@ -648,7 +648,9 @@ export async function searchModels(query: string, kind?: string): Promise<unknow
   }
 }
 
-export async function getModelFiles(modelId: string): Promise<import('@offgrid/models').ModelFileVariant[]> {
+export async function getModelFiles(
+  modelId: string
+): Promise<import('@offgrid/models').ModelFileVariant[]> {
   const { getModelFiles: listFiles } = await import('@offgrid/models')
   const repo = modelId === 'bartowski/tencent_UI-Mate-9B-GGUF+MTP' ? modelId.slice(0, -4) : modelId
   return (await listFiles(repo)).filter(
@@ -717,15 +719,20 @@ async function downloadModelInner(
     // primary file can pair a Wan 2.2 variant with a Wan 2.1 default's VAE.
     const selectedPack = await resolveHuggingFaceModel(modelId, { kind: 'video', fileName })
     if (!selectedPack)
-      return publishRefusal(modelId, 'Selected video model file is no longer available.', onProgress)
+      return publishRefusal(
+        modelId,
+        'Selected video model file is no longer available.',
+        onProgress
+      )
     entry = { ...entry, files: selectedPack.files, minRamGb: selectedPack.minRamGb }
   } else if (fileName && entry) {
     const variant = (await getModelFiles(modelId)).find((file) => file.fileName === fileName)
     if (!variant)
       return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
     const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
-    const catalogAuxFiles =
-      entry.files.filter((file) => file.role !== 'primary' && file.role !== 'mmproj') ?? []
+    const catalogAuxFiles = entry.files.filter(
+      (file) => file.role !== 'primary' && file.role !== 'mmproj'
+    )
     const projectorFiles = variant.mmproj
       ? [
           {
@@ -1137,7 +1144,8 @@ async function installedVideoFileNames(excludeWeight?: string): Promise<Set<stri
 
 /** Delete a model's files from disk. Clears it as active if it was selected. */
 export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
-  if (modelId.startsWith('external:')) return { success: false, error: 'External models are read only.' }
+  if (modelId.startsWith('external:'))
+    return { success: false, error: 'External models are read only.' }
   const dir = llm.getModelsDir()
   // Imported local model: remove its files + registry entry, clear if active.
   if (modelId.startsWith('local:')) {
@@ -1189,13 +1197,15 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   ) {
     return {
       success: false,
-      error: 'This model uses files in another model folder. Remove the folder reference to hide it. Files are kept in place.'
+      error:
+        'This model uses files in another model folder. Remove the folder reference to hide it. Files are kept in place.'
     }
   }
   let freed = 0
-  const retainedVideoFiles = entry.kind === 'video'
-    ? await installedVideoFileNames(primaryFileName(entry as unknown as CatalogEntry))
-    : new Set<string>()
+  const retainedVideoFiles =
+    entry.kind === 'video'
+      ? await installedVideoFileNames(primaryFileName(entry as unknown as CatalogEntry))
+      : new Set<string>()
 
   if (entry.runtime === 'mflux') {
     try {
@@ -1547,13 +1557,20 @@ export async function setActiveModalChoice(
         const CATALOG = await desktopCatalog()
         const e = CATALOG.find((m) => m.id === modelId)
         const downloaded = downloadedVariant(
-          reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG as unknown as CatalogEntry[]),
+          reconcileDownloadedModelRegistry(
+            llm.getModelsDir(),
+            CATALOG as unknown as CatalogEntry[]
+          ),
           modelId
         )
         const { isSupportedVideoWeight } = await import('@offgrid/models')
         const fname = downloaded
-          ? modal === 'video' ? downloaded.files.find(isSupportedVideoWeight) : downloadedPrimary(downloaded)
-          : e ? primaryFileName(e as unknown as CatalogEntry) : undefined
+          ? modal === 'video'
+            ? downloaded.files.find(isSupportedVideoWeight)
+            : downloadedPrimary(downloaded)
+          : e
+            ? primaryFileName(e as unknown as CatalogEntry)
+            : undefined
         if (fname) stored = fname
       } catch {
         /* keep modelId as-is */
@@ -1673,7 +1690,14 @@ export function getLocalModels(dir = llm.getModelsDir()): LocalModel[] {
 }
 function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
   try {
-    fs.writeFileSync(localRegistryFile(dir), JSON.stringify(list.filter((model) => !model.id.startsWith('external:')), null, 2))
+    fs.writeFileSync(
+      localRegistryFile(dir),
+      JSON.stringify(
+        list.filter((model) => !model.id.startsWith('external:')),
+        null,
+        2
+      )
+    )
   } catch {
     /* best effort */
   }

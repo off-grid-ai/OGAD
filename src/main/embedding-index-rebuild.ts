@@ -35,6 +35,8 @@ let status: EmbeddingRebuildStatus = { phase: 'idle', model: '', done: 0, total:
 let listener: ((status: EmbeddingRebuildStatus) => void) | null = null
 let rebuild: Promise<void> | null = null
 let cancelRequested = false
+/** Read through a call: cancellation arrives from another task while this one awaits. */
+const isCancelRequested = (): boolean => cancelRequested
 
 /** Approximate work shown before a person confirms a model switch. */
 export function estimateEmbeddingRebuildItems(): number {
@@ -82,7 +84,7 @@ function indexedModel(): string {
 
 function readPrevious(): PreviousChoice | null {
   try {
-    const value = JSON.parse(fs.readFileSync(previousFile(), 'utf8')) as PreviousChoice
+    const value = JSON.parse(fs.readFileSync(previousFile(), 'utf8')) as PreviousChoice | null
     return value && typeof value.id === 'string' && Number.isInteger(value.dimensions)
       ? value
       : null
@@ -163,7 +165,7 @@ export async function prepareEmbeddingIndexRebuild(): Promise<boolean> {
   }
   setEmbeddingIndexRebuilding(true)
   await waitForSearchBackfill()
-  if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
+  if (isCancelRequested()) throw new Error('Embedding index rebuild canceled.')
   if (!readPrevious())
     fs.writeFileSync(previousFile(), JSON.stringify({ id: indexed, dimensions: 384 }), {
       mode: 0o600
@@ -216,9 +218,9 @@ export async function rebuildEmbeddingIndexes(): Promise<void> {
         .all(cursor) as Array<{ id: number; text: string }>
       if (!rows.length) break
       for (const row of rows) {
-        if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
+        if (isCancelRequested()) throw new Error('Embedding index rebuild canceled.')
         const vector = await embeddings.generateEmbedding(row.text)
-        if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
+        if (isCancelRequested()) throw new Error('Embedding index rebuild canceled.')
         db.prepare(`UPDATE ${source.table} SET embedding = ? WHERE id = ?`).run(
           JSON.stringify(vector),
           row.id
@@ -241,7 +243,7 @@ export async function rebuildEmbeddingIndexes(): Promise<void> {
     },
     () => cancelRequested
   )
-  if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
+  if (isCancelRequested()) throw new Error('Embedding index rebuild canceled.')
   await commitVectorRebuild()
   fs.writeFileSync(markerFile(), JSON.stringify(getEmbeddingModelId()), { mode: 0o600 })
   setEmbeddingIndexRebuilding(false)
@@ -277,7 +279,7 @@ export function startEmbeddingIndexRebuild(): Promise<void> {
         })
         return
       }
-      if (cancelRequested) throw new Error('Embedding index rebuild canceled.')
+      if (isCancelRequested()) throw new Error('Embedding index rebuild canceled.')
       if (await prepareEmbeddingIndexRebuild()) await rebuildEmbeddingIndexes()
       else {
         await finishVectorRebuild().catch(() => undefined)
@@ -300,7 +302,7 @@ export function startEmbeddingIndexRebuild(): Promise<void> {
         })
         throw rollbackError
       }
-      if (cancelRequested) {
+      if (isCancelRequested()) {
         publish({ phase: 'restored', model: getEmbeddingModelId(), done: 0, total: 0 })
         return
       }

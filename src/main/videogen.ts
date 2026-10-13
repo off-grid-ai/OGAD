@@ -44,6 +44,8 @@ import { emitSharedFileMutation } from './sync-shared-file'
 const VIDEO_DIR = 'generated-videos'
 const CANCELLED = 'Video generation stopped.'
 let cancelRequested = false
+/** Read through a call: cancellation arrives from another task while this one awaits. */
+const isCancelRequested = (): boolean => cancelRequested
 let activeJob = false
 let jobAbort: AbortController | null = null
 
@@ -204,7 +206,7 @@ function runProcess(
     })
     child.once('close', (code, signal) => {
       cleanup()
-      if (cancelRequested) reject(new Error(CANCELLED))
+      if (isCancelRequested()) reject(new Error(CANCELLED))
       else if (code === 0) resolve()
       else
         reject(
@@ -213,7 +215,7 @@ function runProcess(
           )
         )
     })
-    if (cancelRequested) stop()
+    if (isCancelRequested()) stop()
   })
 }
 
@@ -250,7 +252,7 @@ export async function generateVideo(
         prompt: await enhanceVideoPrompt(request.prompt, onUpdate, jobAbort.signal)
       }
     }
-    if (cancelRequested) throw new Error(CANCELLED)
+    if (isCancelRequested()) throw new Error(CANCELLED)
     onUpdate?.({ stage: 'preparing', enhancedPrompt: request.prompt })
     fs.mkdirSync(generatedVideosDir(), { recursive: true })
   } catch (error) {
@@ -303,11 +305,13 @@ export async function generateVideo(
       await modalityQueue.run(
         VIDEO_JOB,
         async () => {
-          if (cancelRequested) throw new Error(CANCELLED)
+          if (isCancelRequested()) throw new Error(CANCELLED)
           // Linux's redistributable FFmpeg uses OpenH264; other bundles can use x264.
           // Check before sampling so a missing encoder cannot waste a full generation.
           let encoders = ''
-          await runProcess(ffmpeg, ['-hide_banner', '-encoders'], (text) => { encoders += text })
+          await runProcess(ffmpeg, ['-hide_banner', '-encoders'], (text) => {
+            encoders += text
+          })
           const encoder = ['libx264', 'libopenh264'].find((name) =>
             new RegExp(`\\b${name}\\b`).test(encoders)
           )
@@ -335,7 +339,7 @@ export async function generateVideo(
             if (runtime) attempts.push({ runtime, cpu: true })
           }
           for (const [index, { runtime, cpu }] of attempts.entries()) {
-            if (cancelRequested) throw new Error(CANCELLED)
+            if (isCancelRequested()) throw new Error(CANCELLED)
             const backend = beginRuntimeBackend('video', pack!.name)
             let log = initialVideoEngineLog()
             try {
@@ -390,7 +394,7 @@ export async function generateVideo(
               backend.stop()
               break
             } catch (error) {
-              if (cancelRequested) {
+              if (isCancelRequested()) {
                 backend.stop()
                 throw new Error(CANCELLED)
               }
@@ -427,7 +431,7 @@ export async function generateVideo(
         },
         jobAbort.signal
       )
-    if (cancelRequested) throw new Error(CANCELLED)
+    if (isCancelRequested()) throw new Error(CANCELLED)
     return {
       path: output,
       prompt: request.prompt,

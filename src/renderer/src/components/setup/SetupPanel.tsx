@@ -7,7 +7,7 @@ import { Button } from '../ui/button'
 import { OFF_GRID_DESKTOP_RELEASES_URL } from '../../constants/links'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
-import { totalDownloadGb } from '../../../../main/models/setup-logic'
+import { totalDownloadGb } from '../../../../shared/setup-contract'
 import { formatStorageBytes } from './storage-format'
 import { modelSetupErrorMessage } from '@renderer/lib/download-label'
 
@@ -17,7 +17,7 @@ import type {
   SetupItem,
   SetupItemKind as ItemKind,
   SetupProgress
-} from '../../../../main/setup'
+} from '../../../../shared/setup-contract'
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   {
@@ -92,6 +92,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [mode, setMode] = useState<Mode>('balanced')
+  const [savingMode, setSavingMode] = useState(false)
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const [selectedKinds, setSelectedKinds] = useState<Partial<Record<ItemKind, boolean>>>({
@@ -147,16 +148,17 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   }, [api, onConfigured])
 
   const pickMode = async (m: Mode): Promise<void> => {
-    if (loadingPlan || m === mode) return
-    setLoadingPlan(true)
+    if (savingMode || loadingPlan || m === mode) return
+    setSavingMode(true)
     try {
-      // This control previews downloads; it must not update or reload the live LLM.
+      // The choice is saved first; a failed save keeps the previous mode and its plan.
+      await api.setLlmSettings({ performanceMode: m })
       setMode(m)
       await loadPlan(m)
     } catch (error) {
-      reportSetupFailure('resource-mode preview', error)
+      reportSetupFailure('resource-mode persistence', error)
     } finally {
-      setLoadingPlan(false)
+      setSavingMode(false)
     }
   }
 
@@ -330,8 +332,10 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
                         {it.capability}
                       </span>
                       <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-neutral-400">
-                        {(it.installed ? it.sizeGb : it.downloadSizeGb ?? it.sizeGb)
-                          ? formatStorageBytes((it.installed ? it.sizeGb : it.downloadSizeGb ?? it.sizeGb) * 1e9)
+                        {(it.installed ? it.sizeGb : (it.downloadSizeGb ?? it.sizeGb))
+                          ? formatStorageBytes(
+                              (it.installed ? it.sizeGb : (it.downloadSizeGb ?? it.sizeGb)) * 1e9
+                            )
                           : 'size unknown'}
                       </span>
                       <span className="flex w-20 shrink-0 items-center justify-end gap-1 text-[10px]">

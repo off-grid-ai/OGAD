@@ -38,7 +38,11 @@ vi.mock('../vectors', () => ({
   abortVectorRebuild: state.abort,
   finishVectorRebuild: vi.fn()
 }))
-vi.mock('../search', () => ({ runBackfill: async () => {} }))
+vi.mock('../search', () => ({
+  runBackfill: async () => {},
+  waitForSearchBackfill: async () => {},
+  searchIndexableCount: () => 0
+}))
 
 import { getEmbeddingRebuildStatus, prepareEmbeddingIndexRebuild, savePreviousEmbeddingChoice, startEmbeddingIndexRebuild } from '../embedding-index-rebuild'
 import { isEmbeddingIndexRebuilding } from '../embedding-rebuild-state'
@@ -109,5 +113,6 @@ it('restores the old choice after an interrupted rebuild on the next launch', as
   expect(state.abort).toHaveBeenCalledOnce()
   expect(state.model).toBe('Xenova/all-MiniLM-L6-v2')
   expect(state.db!.prepare('SELECT embedding FROM memories WHERE id = 1').get()).toEqual({ embedding: '[1,0]' })
-  expect(getEmbeddingRebuildStatus().phase).toBe('error')
+  // The next launch rolls the interrupted rebuild back and says the old index is restored.
+  expect(getEmbeddingRebuildStatus().phase).toBe('restored')
 })

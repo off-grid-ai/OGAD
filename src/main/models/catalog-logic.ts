@@ -98,7 +98,7 @@ export type FilePresent = (name: string) => boolean
 /** Missing bytes, using the same presence probe as the downloader. */
 export function remainingDownloadBytes(entry: Pick<CatalogEntry, 'files'>, sizeOf: SizeOf): number {
   return entry.files.reduce(
-    (bytes, file) => bytes + (sizeOf(file.name) > 0 ? 0 : file.sizeBytes ?? 0),
+    (bytes, file) => bytes + (sizeOf(file.name) > 0 ? 0 : (file.sizeBytes ?? 0)),
     0
   )
 }
@@ -155,7 +155,8 @@ export function downloadedForCatalog(
         files: m.files.map((name) => ({
           name,
           url: '',
-          sizeBytes: sizeOf(name) || family?.files.find((file) => file.name === name)?.sizeBytes || 0,
+          sizeBytes:
+            sizeOf(name) || family?.files.find((file) => file.name === name)?.sizeBytes || 0,
           role: isProjectorFileName(name) ? 'mmproj' : isMtpFileName(name) ? 'aux' : 'primary'
         }))
       }
@@ -189,7 +190,12 @@ export function mergeCatalog(opts: {
   )
   return [
     ...localsForCatalog(opts.locals, opts.present),
-    ...downloadedForCatalog(opts.downloaded, opts.installedDownloadedIds, opts.catalog, opts.sizeOf),
+    ...downloadedForCatalog(
+      opts.downloaded,
+      opts.installedDownloadedIds,
+      opts.catalog,
+      opts.sizeOf
+    ),
     ...opts.catalog.filter((entry) => !representedFamilies.has(entry.id))
   ]
 }
@@ -329,7 +335,10 @@ export function buildDiskEntry(opts: {
   sizeOf: SizeOf
 }): { id: string; name: string; kind?: string; bytes: number; active: boolean } {
   const { id, sizeOf } = opts
-  const lm = id.startsWith('local:') || id.startsWith('external:') ? opts.locals.find((m) => m.id === id) : undefined
+  const lm =
+    id.startsWith('local:') || id.startsWith('external:')
+      ? opts.locals.find((m) => m.id === id)
+      : undefined
   if (lm) {
     const bytes = [lm.primary, lm.mmproj]
       .filter(Boolean)
@@ -351,10 +360,7 @@ export function buildDiskEntry(opts: {
   if (dl && (!opts.isCatalogId(id) || opts.catalogById(id)?.kind === 'video')) {
     const bytes = dl.files.reduce((s, n) => s + sizeOf(n), 0)
     const primary = dl.files.find((name) => !isProjectorFileName(name)) ?? dl.files[0]
-    const kind =
-      (dl.familyId ? opts.catalogById(dl.familyId)?.kind : undefined) ??
-      dl.kind ??
-      opts.catalogById(id)?.kind
+    const kind = (dl.familyId ? opts.catalogById(dl.familyId)?.kind : undefined) ?? dl.kind
     return {
       id,
       name: dl.name,
@@ -439,7 +445,11 @@ export function modalityForModel(kind?: string | null): Modality | null {
  *  the chat LLM. Mirrors the guard in setActiveModalChoice. */
 export function isModalKind(kind: string): kind is Modality {
   return (
-    kind === 'computer_use' || kind === 'image' || kind === 'video' || kind === 'speech' || kind === 'transcription'
+    kind === 'computer_use' ||
+    kind === 'image' ||
+    kind === 'video' ||
+    kind === 'speech' ||
+    kind === 'transcription'
   )
 }
 

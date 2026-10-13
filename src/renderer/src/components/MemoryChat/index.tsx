@@ -9,11 +9,7 @@ import {
   failedAnswerVersion
 } from '@renderer/lib/chat-versions'
 import { replaceChatTurn, type ReplacementDependencies } from '@renderer/lib/chat-turn-replacement'
-import {
-  getChatQueueStore,
-  type ChatQueues,
-  type QueuedTurn
-} from '@renderer/lib/chat-queue-store'
+import { getChatQueueStore, type ChatQueues, type QueuedTurn } from '@renderer/lib/chat-queue-store'
 import {
   captureStopTarget,
   unownedTerminal,
@@ -3162,7 +3158,7 @@ export function MemoryChat({
           : undefined
     try {
       setGallery((await window.api.listGeneratedImages(scope)) || [])
-      setVideoGallery((await window.api.listGeneratedVideos(scope)) || [])
+      setVideoGallery(await window.api.listGeneratedVideos(scope))
     } catch (e) {
       console.error(e)
     }
@@ -3437,7 +3433,8 @@ export function MemoryChat({
         for (const stream of streams) {
           // Video jobs restore through their own job-state subscription. Their sync
           // stream has no text-stream completion event to settle a restored row.
-          if (stream.phase === 'loading_video_model' || stream.phase === 'generating_video') continue
+          if (stream.phase === 'loading_video_model' || stream.phase === 'generating_video')
+            continue
           attachRendererRun(stream.conversationId)
           streamConvRef.current.set(stream.streamId, stream.conversationId)
           reasoningByStream.current[stream.streamId] = stream.reasoning

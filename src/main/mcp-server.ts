@@ -72,6 +72,24 @@ const TEXT = (t: string): { content: { type: 'text'; text: string }[] } => ({
 /** Build a fresh MCP server. Model/inference tools are always registered (open);
  *  the ACTION tools are registered ONLY when the request is authorized with the
  *  desktop's action token, so an unpaired LAN device can't see or run them. */
+
+/** The gateway's video jobs, handed in by model-server, which also serves this MCP endpoint.
+ *  Registration keeps the two modules from importing each other. */
+export interface McpVideoJobs {
+  start(input: import('../shared/video-generation-contract').VideoGenerationRequestContract): {
+    id: string
+  }
+  status(id: string, cancel?: boolean): Record<string, unknown>
+}
+let videoJobs: McpVideoJobs | null = null
+export function registerMcpVideoJobs(jobs: McpVideoJobs | null): void {
+  videoJobs = jobs
+}
+function requireVideoJobs(): McpVideoJobs {
+  if (!videoJobs) throw new Error('Video generation is not available on this server.')
+  return videoJobs
+}
+
 export function buildMcpServer(
   actionsAllowed: boolean,
   authenticatedDeviceId: string | null = null
@@ -180,9 +198,9 @@ export function buildMcpServer(
       }
     },
     async ({ negative_prompt, ...input }) => {
-      const { startGatewayVideoJob, gatewayVideoJob } = await import('./model-server')
-      const job = startGatewayVideoJob({ ...input, negativePrompt: negative_prompt })
-      return TEXT(JSON.stringify(gatewayVideoJob(job.id)))
+      const jobs = requireVideoJobs()
+      const job = jobs.start({ ...input, negativePrompt: negative_prompt })
+      return TEXT(JSON.stringify(jobs.status(job.id)))
     }
   )
   server.registerTool(
@@ -194,8 +212,7 @@ export function buildMcpServer(
       inputSchema: { job_id: z.string(), cancel: z.boolean().optional() }
     },
     async ({ job_id, cancel }) => {
-      const { gatewayVideoJob } = await import('./model-server')
-      return TEXT(JSON.stringify(gatewayVideoJob(job_id, cancel)))
+      return TEXT(JSON.stringify(requireVideoJobs().status(job_id, cancel)))
     }
   )
 

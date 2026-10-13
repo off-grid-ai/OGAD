@@ -1,5 +1,4 @@
-import type { Session } from 'electron'
-import { is } from '@electron-toolkit/utils'
+import { app, type Session } from 'electron'
 import { pathToFileURL } from 'node:url'
 import { getMainWindow, getMainWindowDocumentUrl } from './main-window'
 import { rendererHtmlPath } from './renderer-path'
@@ -21,7 +20,7 @@ export function installMediaPermissionHandler(target: PermissionSession): void {
       webContents === getMainWindow()?.webContents
     ) {
       const rendererUrl =
-        is.dev && process.env.ELECTRON_RENDERER_URL
+        !app.isPackaged && process.env.ELECTRON_RENDERER_URL
           ? process.env.ELECTRON_RENDERER_URL
           : pathToFileURL(rendererHtmlPath()).href
       callback(

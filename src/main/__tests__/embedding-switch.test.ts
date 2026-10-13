@@ -16,11 +16,19 @@ vi.mock('../embedding-model-choice', () => ({
     host.selected = id
   }
 }))
-vi.mock('../runtime-env', () => ({ modelsDir: () => '/synthetic/models' }))
 vi.mock('../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
 vi.mock('../runtime-residency', () => ({ getResidencyMode: () => 'resident' }))
 
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { configureRuntime } from '../runtime-env'
 import { embeddings } from '../embeddings'
+
+// The real runtime paths, pointed at a synthetic profile.
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'og-embedding-switch-'))
+fs.mkdirSync(path.join(profile, 'models'))
+configureRuntime({ dataDir: profile, modelsDir: path.join(profile, 'models') })
 
 it('waits for current inference, then uses the new model without a restart', async () => {
   let finish!: (value: number[]) => void
@@ -44,9 +52,10 @@ it('waits for current inference, then uses the new model without a restart', asy
   await expect(embeddings.generateEmbedding('second')).resolves.toEqual([2])
   expect(host.embed).toHaveBeenLastCalledWith(
     'second',
-    '/synthetic/models',
+    path.join(profile, 'models'),
     expect.any(Function),
     'auto',
-    'Xenova/all-MiniLM-L12-v2'
+    'Xenova/all-MiniLM-L12-v2',
+    [path.join(profile, 'models')]
   )
 })

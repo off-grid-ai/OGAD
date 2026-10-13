@@ -46,7 +46,8 @@ export class DesktopBackupFileMapper implements FileMapper<DesktopBackupData> {
       files.push({ key, sourcePath: video.path })
       return { ...video, path: key }
     })
-    return { files, keyed: { ...data, projects, videos } }
+    // A backup made before videos existed has no videos list; keep it that way.
+    return { files, keyed: { ...data, projects, ...(data.videos ? { videos } : {}) } }
   }
 
   listKeys(keyed: DesktopBackupData): string[] {
@@ -71,7 +72,7 @@ export class DesktopBackupFileMapper implements FileMapper<DesktopBackupData> {
     const paths = new Map(videos.map((video) => [video.originalPath, video.path]))
     return {
       ...keyed,
-      videos,
+      ...(keyed.videos ? { videos } : {}),
       conversations: keyed.conversations.map((conversation) => ({
         ...conversation,
         messages: conversation.messages.map((message) => {

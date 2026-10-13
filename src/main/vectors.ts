@@ -28,7 +28,7 @@ interface VectorPointer {
 const pointerFile = (): string => path.join(app.getPath('userData'), 'vector-active-table.json')
 function readPointer(): VectorPointer {
   try {
-    const value = JSON.parse(fs.readFileSync(pointerFile(), 'utf8')) as VectorPointer
+    const value = JSON.parse(fs.readFileSync(pointerFile(), 'utf8')) as VectorPointer | null
     return value && typeof value.active === 'string' ? value : { active: TABLE }
   } catch {
     return { active: TABLE }
