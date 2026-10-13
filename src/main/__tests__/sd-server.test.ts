@@ -58,6 +58,21 @@ describe('buildSdServerContextArgs', () => {
   })
 })
 
+describe('Qwen image server contract', () => {
+  it('loads the diffusion, language, vision, and VAE components together', () => {
+    const args = buildSdServerContextArgs({ modelPath: '/m/image.gguf', diffusionModel: true,
+      llmPath: '/m/text.gguf', llmVisionPath: '/m/vision.gguf', vaePath: '/m/vae.safetensors', port: 8440, threads: 4 })
+    expect(args).toEqual(['--diffusion-model', '/m/image.gguf', '--listen-port', '8440',
+      '--llm', '/m/text.gguf', '--llm_vision', '/m/vision.gguf', '--vae', '/m/vae.safetensors', '-t', '4'])
+  })
+  it('sends source images and explicit sampling settings in the native edit request', () => {
+    expect(buildImgGenRequest({ prompt: 'Make the circle blue', refImages: ['aW1hZ2U='],
+      width: 256, height: 256, steps: 1, cfgScale: 1, sampleMethod: 'euler', scheduler: 'default' }))
+      .toMatchObject({ ref_images: ['aW1hZ2U='], width: 256, height: 256,
+        sample_params: { sample_steps: 1, sample_method: 'euler', scheduler: 'default', guidance: { txt_cfg: 1 } } })
+  })
+})
+
 describe('contextKey', () => {
   it('changes when the model changes (forces a server restart)', () => {
     const a = contextKey({ modelPath: '/m/a.gguf', port: 8440 })

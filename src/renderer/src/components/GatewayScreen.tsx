@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { IconServer2, IconExternalLink } from '@tabler/icons-react'
 import { GATEWAY_HOST, GATEWAY_PORT } from '@offgrid/core/shared/ports'
 import { CopyButton } from './ui/CopyButton'
+import { GatewayApiKeysSettings } from './GatewayApiKeysSettings'
 
 // Explains the local OpenAI-compatible gateway with copyable quick-start snippets
 // and a link to the interactive playground the gateway serves. Core feature.
@@ -53,6 +54,7 @@ const SNIPPETS: { id: string; label: string; code: string }[] = [
     id: 'curl',
     label: 'curl',
     code: `curl ${BASE}/v1/chat/completions \\
+  -H "Authorization: Bearer $OGAD_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "local",
@@ -64,7 +66,7 @@ const SNIPPETS: { id: string; label: string; code: string }[] = [
     label: 'Python (openai)',
     code: `from openai import OpenAI
 
-client = OpenAI(base_url="${BASE}/v1", api_key="not-needed")
+client = OpenAI(base_url="${BASE}/v1", api_key="YOUR_API_KEY")
 resp = client.chat.completions.create(
     model="local",
     messages=[{"role": "user", "content": "Hello!"}],
@@ -76,7 +78,7 @@ print(resp.choices[0].message.content)`
     label: 'JavaScript',
     code: `import OpenAI from "openai";
 
-const client = new OpenAI({ baseURL: "${BASE}/v1", apiKey: "not-needed" });
+const client = new OpenAI({ baseURL: "${BASE}/v1", apiKey: "YOUR_API_KEY" });
 const resp = await client.chat.completions.create({
   model: "local",
   messages: [{ role: "user", content: "Hello!" }],
@@ -87,6 +89,7 @@ console.log(resp.choices[0].message.content);`
     id: 'image',
     label: 'Image',
     code: `curl ${BASE}/v1/images \\
+  -H "Authorization: Bearer $OGAD_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{ "prompt": "a misty mountain at dawn", "aspect_ratio": "16:9" }' --output out.png`
   }
@@ -134,10 +137,16 @@ export function GatewayScreen(): React.ReactElement {
             </button>
           </div>
           <p className="mt-3 text-xs leading-relaxed text-neutral-500">
-            Point any OpenAI client here — no API key needed. Run it headless with{' '}
-            <code className="text-neutral-300">--server-only</code> to deploy just the gateway.
+            Point any OpenAI client here. Supply a key when authentication is enabled. Run it
+            headless with <code className="text-neutral-300">--server-only</code> to deploy just the
+            gateway.
           </p>
         </div>
+
+        <section aria-label="API keys" className="rounded-md border border-neutral-800 p-5">
+          <h3 className="mb-3 text-sm text-neutral-200">API keys</h3>
+          <GatewayApiKeysSettings />
+        </section>
 
         {/* Quick start */}
         <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5">

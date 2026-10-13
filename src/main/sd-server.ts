@@ -26,6 +26,7 @@ import { isPackaged } from './runtime-env'
 import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
 import { findSdBinaries, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
 import { getBackendPreference } from './backend-preferences'
+import { getResidencyMode } from './runtime-residency'
 
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
  *  lingering LLM shouldn't block the image server's port either). */
@@ -38,6 +39,10 @@ export interface SdServerContext {
    *  handle the Z-Image 3-file stack or UNET-only+companions — those stay
    *  one-shot in imagegen.ts). */
   modelPath: string
+  diffusionModel?: boolean
+  llmPath?: string
+  llmVisionPath?: string
+  vaePath?: string
   threads?: number
   /** Flash attention in the diffusion model — faster, lower memory. */
   diffusionFa?: boolean
@@ -62,12 +67,22 @@ export interface SdGenRequest {
   sampleMethod?: string
   /** Denoiser sigma schedule (e.g. 'karras'). Essential for crisp few-step output. */
   scheduler?: string
+  /** Qwen editing uses reference images, not diffusion img2img strength. */
+  refImages?: string[]
 }
 
 /** Build the sd-server launch argv (context/model args only; generation params
  *  are sent per-request over HTTP). Pure. */
 export function buildSdServerContextArgs(ctx: SdServerContext): string[] {
-  const args = ['-m', ctx.modelPath, '--listen-port', String(ctx.port ?? SD_SERVER_PORT)]
+  const args = [
+    ctx.diffusionModel ? '--diffusion-model' : '-m',
+    ctx.modelPath,
+    '--listen-port',
+    String(ctx.port ?? SD_SERVER_PORT)
+  ]
+  if (ctx.llmPath) args.push('--llm', ctx.llmPath)
+  if (ctx.llmVisionPath) args.push('--llm_vision', ctx.llmVisionPath)
+  if (ctx.vaePath) args.push('--vae', ctx.vaePath)
   if (ctx.diffusionFa) args.push('--diffusion-fa')
   if (ctx.taesdPath) args.push('--taesd', ctx.taesdPath)
   args.push('-t', String(ctx.threads ?? Math.max(1, os.cpus().length - 2)))
@@ -79,6 +94,10 @@ export function buildSdServerContextArgs(ctx: SdServerContext): string[] {
 export function contextKey(ctx: SdServerContext): string {
   return JSON.stringify([
     ctx.modelPath,
+    ctx.diffusionModel ?? false,
+    ctx.llmPath ?? null,
+    ctx.llmVisionPath ?? null,
+    ctx.vaePath ?? null,
     ctx.diffusionFa ?? false,
     ctx.taesdPath ?? null,
     ctx.threads ?? null,
@@ -102,6 +121,7 @@ export function buildImgGenRequest(req: SdGenRequest): Record<string, unknown> {
       guidance: { txt_cfg: req.cfgScale ?? 2.0 }
     }
   }
+  if (req.refImages?.length) body.ref_images = req.refImages
   if (typeof req.seed === 'number' && req.seed >= 0) body.seed = req.seed
   return body
 }
@@ -235,7 +255,8 @@ class SdServerService {
 
   private async startWithFallback(ctx: SdServerContext, key: string, epoch: number): Promise<void> {
     const binaries = findSdBinaries('sd-server', getBackendPreference('image'))
-    if (!binaries.length) throw new Error('Image server binary (sd-server) not found in resources/bin/sd.')
+    if (!binaries.length)
+      throw new Error('Image server binary (sd-server) not found in resources/bin/sd.')
     for (const [index, binary] of binaries.entries()) {
       if (epoch !== this.startEpoch) throw new Error('Image server startup canceled.')
       try {
@@ -415,6 +436,7 @@ class SdServerService {
 
   private armIdleTimer(): void {
     this.clearIdleTimer()
+    if (getResidencyMode('image') === 'resident') return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
       this.stop()
@@ -439,7 +461,10 @@ class SdServerService {
     if (!ownBins.length) return
     reapOrphansOnPort(
       this.port,
-      (info) => (process.platform === 'win32' ? /sd-server/i.test(info) : ownBins.some((bin) => info.includes(bin))),
+      (info) =>
+        process.platform === 'win32'
+          ? /sd-server/i.test(info)
+          : ownBins.some((bin) => info.includes(bin)),
       'sd-server'
     )
   }

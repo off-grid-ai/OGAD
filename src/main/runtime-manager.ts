@@ -13,6 +13,10 @@
 
 import { modalityQueue, type ModalityQueue } from './modality-queue/queue'
 import { getResidencyMode, type Modality, type ResidencyMode } from './runtime-residency'
+import type { RuntimeBackend } from '../shared/runtime-backends'
+import { sdServer } from './sd-server'
+import { findSdBinaries, imageBackendForRuntime } from './imagegen/sd-runtime'
+import { getBackendPreference } from './backend-preferences'
 
 /** A model runtime the ModalityQueue can free + bring back. Every engine implements
  *  this identically — the queue never knows which concrete engine it holds. */
@@ -44,6 +48,7 @@ let shuttingDown = false
 export interface RegisterDeps {
   queue?: ModalityQueue
   readMode?: (m: Modality) => ResidencyMode
+  readChatBackend?: () => RuntimeBackend
 }
 
 /** Register a runtime into the queue through the ONE mode-aware policy. The queue
@@ -58,7 +63,27 @@ export function registerRuntime(rt: ManagedRuntime, deps: RegisterDeps = {}): vo
   const readMode = deps.readMode ?? getResidencyMode
   registry.set(rt.modality, rt)
   queue.registerEvictable(rt.modality, {
-    evict: () => rt.evict(),
+    evict: () => {
+      // Dedicated CUDA runtimes have their own allocation/auto-fit policy. Do not
+      // apply the unified-memory Mac's unconditional chat/image teardown there.
+      // Explicit Unload and shutdown still call rt.evict() directly.
+      if (
+        process.platform !== 'darwin' &&
+        readMode(rt.modality) === 'resident' &&
+        (rt.modality === 'llm' || rt.modality === 'image')
+      ) {
+        const imageBinary = rt.modality === 'image'
+          ? sdServer.getBinaryPath()
+          : findSdBinaries('sd-server', getBackendPreference('image'))[0]
+        const chat = rt.modality === 'llm' ? deps.readChatBackend?.() : undefined
+        if (
+          imageBinary && imageBackendForRuntime(process.platform, imageBinary) === 'CUDA' &&
+          (rt.modality === 'image' || (chat?.state === 'loaded' && chat.backend?.includes('CUDA')))
+        )
+          return
+      }
+      return rt.evict()
+    },
     recover: () => rt.release(),
     warm: () => (warmActionForMode(readMode(rt.modality)) === 'warm' ? rt.warm() : rt.release())
   })

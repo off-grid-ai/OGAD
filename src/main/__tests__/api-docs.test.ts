@@ -30,7 +30,7 @@ describe('docsText', () => {
     const out = docsText(8439)
     expect(out).toContain('http://127.0.0.1:8439/v1')
     expect(out).toContain('Off Grid AI — Local Model Gateway')
-    expect(out).toContain('no API key required')
+    expect(out).toContain('API keys: Gateway > API keys')
   })
 
   it('lists every modality endpoint', () => {

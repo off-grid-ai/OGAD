@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest'
-import { extractSystemText, sanitizeChatMessages } from '../chat-messages'
+import { extractSystemText, sanitizeChatMessages, parseDecisionChatMessages } from '../chat-messages'
+
+describe('Desktop remote decision requests', () => {
+  it('preserves multiline context and options for the pointer-head engine', () => {
+    expect(parseDecisionChatMessages([{ role: 'user', content: 'Context:\nA screen\nwith buttons\nQuestion: What next?\nOptions:\n0: Click Save\nKeep this choice\n1: Cancel' }])).toEqual({
+      context: 'A screen\nwith buttons', question: 'What next?', options: ['Click Save\nKeep this choice', 'Cancel']
+    })
+  })
+  it('accepts text content blocks used by OpenAI clients', () => {
+    expect(parseDecisionChatMessages([{ role: 'user', content: [{ type: 'text', text: 'Context:\nReady\nQuestion: Next?\nOptions:\n0: Go\n1: Stop' }] }]).options).toEqual(['Go', 'Stop'])
+  })
+  it('rejects ordinary chat and incomplete option numbering', () => {
+    expect(() => parseDecisionChatMessages([{ role: 'user', content: 'Hello' }])).toThrow('Decision requests')
+    expect(() => parseDecisionChatMessages([{ role: 'user', content: 'Context:\nReady\nQuestion: Next?\nOptions:\n0: Go\n2: Stop' }])).toThrow('consecutively')
+  })
+})
 
 describe('extractSystemText', () => {
   it('returns a plain string as-is', () => {

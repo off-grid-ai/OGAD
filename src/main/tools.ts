@@ -996,6 +996,7 @@ export async function toolChat(
   const imageRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   const videoRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   let finishAfterDeferredImages = false
+  const toolRoundAnswers: string[] = []
   const resultWithImages = (result: {
     answer: string
     toolCalls: ToolCall[]
@@ -1016,6 +1017,7 @@ export async function toolChat(
     const finalImageRequest = imageRequests.at(-1)
     return {
       ...result,
+      answer: [...toolRoundAnswers, result.answer].filter((text) => text.trim()).join('\n\n'),
       metrics: {
         ...result.metrics,
         contextWindowTokens: result.metrics?.contextWindowTokens ?? ctx,
@@ -1102,8 +1104,8 @@ export async function toolChat(
       if (typeof name === 'string' && name) offeredTools.add(name)
     }
     // Stream this round: reasoning + any answer text flow through onDelta live; tool_calls
-    // are accumulated and returned. A tool-calling round streams thinking (and no content);
-    // the final round streams the answer. tool temperature stays 0.3 (was the blocking path).
+    // are accumulated and returned. Tool-calling rounds can also contain visible prose;
+    // keep it in the returned answer as well as the live stream.
     const {
       content,
       toolCalls: calls,
@@ -1174,6 +1176,8 @@ export async function toolChat(
         : []
     const permitted = taskCall ? [...prerequisites, taskCall] : scopedEffective
     if (permitted.length) {
+      const roundAnswer = answerFrom(content)
+      if (roundAnswer.trim()) toolRoundAnswers.push(roundAnswer)
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
       let remainingImageRequests = requestedImageCount - imageRequests.length

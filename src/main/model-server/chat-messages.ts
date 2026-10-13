@@ -75,3 +75,20 @@ export function sanitizeChatMessages(body: unknown): boolean {
   }
   return true
 }
+
+export function parseDecisionChatMessages(messages: unknown): {
+  context: string
+  question: string
+  options: string[]
+} {
+  if (!Array.isArray(messages)) throw new Error('Decision requests require messages.')
+  const user = messages.filter((message) => message?.role === 'user').at(-1)
+  const text = extractSystemText(user?.content)
+  const match = /^Context:\n([\s\S]*)\nQuestion: ([\s\S]*)\nOptions:\n([\s\S]+)$/.exec(text)
+  if (!match) throw new Error('Decision requests require Context, Question, and numbered Options.')
+  const rows = [...match[3]!.matchAll(/^(\d+): ([\s\S]*?)(?=^\d+: |$(?![\s\S]))/gm)]
+  if (rows.length < 2 || rows.some((row, index) => Number(row[1]) !== index || !row[2]!.trim()))
+    throw new Error('Decision options must be numbered consecutively from zero.')
+  if (!match[3]!.startsWith('0: ')) throw new Error('Decision options must start at zero.')
+  return { context: match[1]!, question: match[2]!, options: rows.map((row) => row[2]!.trimEnd()) }
+}

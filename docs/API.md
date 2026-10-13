@@ -5,9 +5,23 @@ Off Grid AI Desktop runs **one local HTTP server that speaks the OpenAI API**, o
 speech-to-text, text-to-speech, and image generation/editing — is exposed through it.
 
 - **Base URL:** `http://127.0.0.1:7878/v1`
-- **Auth:** none. The server is bound to loopback only (never exposed off the machine).
-- **Compatibility:** OpenAI API surface. Point any OpenAI SDK at the base URL and drop the key.
+- **Auth:** optional Bearer API keys, managed in Gateway > API keys.
+- **Compatibility:** OpenAI API surface. Point any OpenAI SDK at the base URL and supply an issued key when authentication is enabled.
 - **Privacy:** everything runs on the bundled local models. Nothing leaves the device.
+
+## API keys
+
+In **Gateway > API keys**, create a named key for each client. Choose 7, 30, or 90 days, a custom expiry time, or no expiry. Copy the full key when it is created; it cannot be retrieved later. Only a SHA-256 digest is retained, in the OS-encrypted secret store.
+
+Creating a key enables authentication. Send `Authorization: Bearer <key>` on every model request, including model discovery, streaming, async polling, cancellation, and model management. Missing, wrong, expired, or revoked keys return `401`. Locked or unreadable key storage returns `503`; it never disables the check. Keys are not accepted in query strings.
+
+Gateway lists key names, prefixes, creation and expiry times, status, and last use (updated at most once per minute). Revoke a key to block its next request. Replace a key to revoke it and issue a new one in one operation. Already accepted requests can finish; subsequent polls require a valid key. Revoking or expiring all keys leaves authentication enabled. Turn authentication off explicitly in Gateway if you want keyless requests again.
+
+Keys allow all model API operations. Existing localhost-only restrictions remain. Key management is available only in the desktop UI, not through the HTTP API. Health and docs stay accessible. MCP and paired browser connections retain separate credentials; these keys do not grant MCP action access. Use a trusted private network or TLS when connecting over a network.
+
+```bash
+curl http://127.0.0.1:7878/v1/models -H "Authorization: Bearer $OGAD_API_KEY"
+```
 
 Check it's up:
 

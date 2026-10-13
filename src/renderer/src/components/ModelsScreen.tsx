@@ -746,7 +746,10 @@ export function ModelsScreen({
   const displayed = useMemo(
     () =>
       filterAndSort(
-        hfResults.map((r) => ({
+        [...list.filter((model) => {
+          const name = `${model.name} ${model.id}`.toLowerCase()
+          return deferredQuery.trim().toLowerCase().split(/\s+/).every((term) => name.includes(term))
+        }).map((model) => ({ id: model.id, name: model.name, org: model.org ?? '', downloads: undefined, likes: undefined, lastModified: undefined, credibility: undefined })), ...hfResults.filter((result) => !list.some((model) => model.id === result.id))].map((r) => ({
           id: r.id,
           name: r.name,
           org: r.org,
@@ -758,7 +761,7 @@ export function ModelsScreen({
         })),
         filterState
       ),
-    [hfResults, filterState]
+    [hfResults, filterState, list, deferredQuery]
   )
 
   // Tags offered as filter chips — every tag present in this tab's models.
@@ -1463,7 +1466,7 @@ export function ModelsScreen({
                     )
                     .map((r) =>
                       renderCard(
-                        {
+                        list.find((model) => model.id === r.id) ?? {
                           id: r.id,
                           name: r.name,
                           kind: activeKind as ModelKind,
@@ -1472,7 +1475,7 @@ export function ModelsScreen({
                           params: r.params ?? undefined,
                           credibility: r.credibility
                         },
-                        true
+                        !list.some((model) => model.id === r.id)
                       )
                     )}
                 </div>

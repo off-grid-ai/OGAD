@@ -13,7 +13,7 @@ import { GATEWAY_HOST } from '../shared/ports'
 export function docsText(port: number): string {
   const b = `http://${GATEWAY_HOST}:${port}`
   return `Off Grid AI — Local Model Gateway
-OpenAI-compatible. Base URL: ${b}/v1  (no API key required)
+OpenAI-compatible. Base URL: ${b}/v1  (API keys: Gateway > API keys)
 
 TEXT -> TEXT          POST ${b}/v1/chat/completions   {model, messages, stream?}
 IMAGE -> TEXT         POST ${b}/v1/chat/completions   (image_url part: data URL or http(s) URL)
@@ -123,13 +123,13 @@ export function openApiSpec(
     info: {
       title: 'Off Grid AI — Local Model Gateway',
       version: '1.0.0',
-      description: `One **OpenAI-compatible** API for every on-device modality. **No API key** — the server is bound to loopback and nothing leaves the machine.
+      description: `One **OpenAI-compatible** API for every on-device modality. API keys can be required in Gateway > API keys.
 
 **Live status:** text: ${ready('text')} · vision: ${ready('vision_understanding')} · embeddings: ${ready('embeddings')} · STT: ${ready('transcription')} · TTS: ${ready('speech')} · image gen: ${ready('image_generation')} · MCP: ready
 
 ## Authentication
 
-None. The gateway listens only on \`127.0.0.1\`. Base URL: \`${b(port)}/v1\`. Pass any value (or none) where an SDK expects an API key.
+Create named keys in **Gateway > API keys**. Each key can expire or be revoked independently. Creating the first key requires authentication. Send \`Authorization: Bearer <key>\` on every model request, including list, poll, and cancel calls. Missing, expired, or revoked keys return 401. Locked key storage returns 503. Revoking all keys does not turn authentication off. Health, docs, MCP, and the paired extension retain their existing access rules. API keys do not grant MCP action access.
 
 ## SDKs
 
@@ -137,13 +137,13 @@ The gateway speaks the OpenAI wire format, so the **universal SDK is the OpenAI 
 
 \`\`\`python
 from openai import OpenAI
-client = OpenAI(base_url="${b(port)}/v1", api_key="not-needed")
+client = OpenAI(base_url="${b(port)}/v1", api_key="YOUR_API_KEY")
 client.chat.completions.create(model="local", messages=[{"role":"user","content":"hi"}])
 \`\`\`
 
 \`\`\`javascript
 import OpenAI from "openai";
-const client = new OpenAI({ baseURL: "${b(port)}/v1", apiKey: "not-needed" });
+const client = new OpenAI({ baseURL: "${b(port)}/v1", apiKey: "YOUR_API_KEY" });
 \`\`\`
 
 | Surface | SDK | Status |
@@ -703,6 +703,7 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
       },
       '/mcp': {
         post: {
+          security: [],
           tags: ['MCP'],
           summary: 'MCP server (JSON-RPC over Streamable HTTP)',
           description:
@@ -739,11 +740,20 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
         get: {
           tags: ['Chat'],
           summary: 'Gateway health & live modality status',
+          security: [],
           responses: { '200': { description: 'OK' } }
         }
       }
     },
+    security: [{ bearerAuth: [] }],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          description: 'Required when API key authentication is enabled in Gateway.'
+        }
+      },
       schemas: {
         Error: {
           type: 'object',

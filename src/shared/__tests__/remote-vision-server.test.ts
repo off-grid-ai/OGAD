@@ -115,3 +115,35 @@ describe('remote model inventory ids', () => {
     expect(decider?.tags).toEqual(['Remote', 'Decision'])
   })
 })
+
+describe('remote model display names', () => {
+  it.each([
+    [
+      '/workspace/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf',
+      undefined,
+      'Qwen3.8 Flash Next GSQ RCO IQ3_XXS'
+    ],
+    ['/workspace/models/Qwen-Q4_K.gguf', '/workspace/models/Qwen-Q4_K.gguf', 'Qwen Q4_K'],
+    ['C:\\models\\Qwen-Q4_K.gguf', undefined, 'Qwen Q4_K'],
+    ['/workspace/models/Qwen-Q4_K.gguf', 'My Qwen model', 'My Qwen model'],
+    ['vendor/model-name', undefined, 'vendor/model-name'],
+    ['vendor/model-name', '  ', 'vendor/model-name']
+  ])('shows a name for %s while preserving its routing ID', (id, name, expected) => {
+    const [model] = remoteVisionInventoryModels([
+      {
+        id: 'server',
+        name: 'GPU server',
+        provider: 'ogad',
+        endpoint: 'http://localhost:7878/v1',
+        model: id,
+        hasApiKey: false,
+        screenFramesAllowed: false,
+        modelCatalog: name === undefined ? [] : [{ id, name, kind: 'text' }]
+      }
+    ])
+    if (!model) throw new Error('Remote model is missing')
+    expect(model.name).toBe(expected)
+    expect(model.remoteModelId).toBe(id)
+    expect(parseRemoteVisionModelId(model.id)).toEqual({ serverId: 'server', modelId: id })
+  })
+})

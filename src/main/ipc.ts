@@ -1394,6 +1394,22 @@ export function setupIPC(): void {
     return deleteRagConversation(id)
   })
 
+  // API credentials can be managed only through the trusted desktop IPC surface.
+  ipcMain.handle('gateway:keys:list', async () =>
+    (await import('./model-server')).gatewayApiKeySettings()
+  )
+  ipcMain.handle('gateway:keys:required', async (_, enabled: boolean) =>
+    (await import('./model-server')).setGatewayApiKeyRequired(enabled)
+  )
+  ipcMain.handle(
+    'gateway:keys:create',
+    async (_, name: string, expiresAt: number | null, replaceId?: string) =>
+      (await import('./model-server')).createGatewayApiKey(name, expiresAt, replaceId)
+  )
+  ipcMain.handle('gateway:keys:revoke', async (_, id: string) =>
+    (await import('./model-server')).revokeGatewayApiKey(id)
+  )
+
   // === SETTINGS HANDLERS ===
 
   ipcMain.handle('settings:get', () => {

@@ -466,6 +466,7 @@ else { __ogShow('No React component found — define a component named App or a 
 
   return (
     <SidePanel
+      modal={false}
       ariaLabel={artifact.title || KIND_LABEL[artifact.kind]}
       onClose={onClose}
       className="min-w-[360px] max-w-[90vw]"

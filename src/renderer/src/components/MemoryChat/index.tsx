@@ -2625,7 +2625,12 @@ export function MemoryChat({
           }
           if (comicPageTotal && comicPages.length > 0) {
             const finalHtml = buildComicBookReader(comicPages, comicPageTotal, comicTitle)
-            const finalContent = `Comic book reader: ${comicPages.length} of ${comicPageTotal} pages ready.\n\n\`\`\`html\n${finalHtml}\n\`\`\``
+            const finalContent = [
+              visibleToolAnswer,
+              `Comic book reader: ${comicPages.length} of ${comicPageTotal} pages ready.\n\n\`\`\`html\n${finalHtml}\n\`\`\``
+            ]
+              .filter((text) => text.trim())
+              .join('\n\n')
             try {
               const stored = comicReaderPersistence.saved
                 ? await window.api.updateRagMessage(

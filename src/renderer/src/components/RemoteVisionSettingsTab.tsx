@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { isGrounderModel } from '@offgrid/models'
 import {
   remoteVisionApiBase,
   remoteVisionProviderForEndpoint,
@@ -161,6 +162,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       .filter(
         (model) =>
           model.kind === 'text' &&
+          !model.outputModalities?.includes('decisions') && !isGrounderModel(model.id) &&
           (!query || `${model.name} ${model.id}`.toLowerCase().includes(query))
       )
       .slice(0, 75)
@@ -621,7 +623,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                   options={[
                     { value: '', label: `No remote ${role} model` },
                     ...models
-                      .filter((model) => model.kind === 'text')
+                      .filter((model) => {
+                        if (model.kind !== 'text') return false
+                        const decision = model.outputModalities?.includes('decisions') === true
+                        return role === 'decision' ? decision : !decision && isGrounderModel(model.id)
+                      })
                       .map((model) => ({ value: model.id, label: model.name }))
                   ]}
                   onValueChange={(value) => {

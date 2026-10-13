@@ -180,10 +180,6 @@ describe('<RemoteVisionSettingsTab/>', () => {
     fireEvent.click(screen.getByText('New vision model'))
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: /^Other models/ }))
-    await user.click(screen.getByRole('button', { name: 'grounding model' }))
-    await user.click(screen.getByRole('menuitemradio', { name: 'New vision model' }))
-    await user.click(screen.getByRole('button', { name: 'decision model' }))
-    await user.click(screen.getByRole('menuitemradio', { name: 'Vision model' }))
     fireEvent.click(screen.getByRole('switch', { name: 'Allow screen images' }))
     expect(
       screen.getByText(/can send screen images with visible text, apps, and other content/i)
@@ -202,10 +198,7 @@ describe('<RemoteVisionSettingsTab/>', () => {
         endpoint: 'https://models.example/v1',
         model: 'new-vision-model',
         mediaModels: { text: 'new-vision-model' },
-        roleModels: {
-          grounding: 'new-vision-model',
-          decision: 'vision-model'
-        },
+        roleModels: {},
         modelCatalog: [
           { id: 'vision-model', name: 'Vision model', kind: 'text' },
           { id: 'new-vision-model', name: 'New vision model', kind: 'text' }

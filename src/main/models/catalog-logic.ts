@@ -22,6 +22,29 @@ interface CatalogFile {
   sizeBytes?: number
   role?: string
 }
+/** A selected GGUF shard represents the whole matching set, in loader order. */
+export function selectedGgufParts<T extends { fileName: string }>(
+  files: readonly T[],
+  fileName: string
+): T[] {
+  const selected = files.find((file) => file.fileName === fileName)
+  if (!selected) throw new Error('Selected model file is no longer available.')
+  const split = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i.exec(fileName)
+  if (!split) return [selected]
+  const count = Number(split[3])
+  const selectedIndex = Number(split[2])
+  if (count < 1 || selectedIndex < 1 || selectedIndex > count)
+    throw new Error('The split model has an invalid part number.')
+  const parts: T[] = []
+  for (let index = 1; index <= count; index += 1) {
+    const name = `${split[1]}-${String(index).padStart(5, '0')}-of-${split[3]}${fileName.slice(-5)}`
+    const part = files.find((file) => file.fileName === name)
+    if (!part) throw new Error(`The split model is incomplete: missing ${name}.`)
+    parts.push(part)
+  }
+  return parts
+}
+
 export interface CatalogEntry {
   id: string
   sourceModelId?: string

@@ -8,6 +8,7 @@ import {
   type CacheCleanupResultContract,
   type RagChatResultContract,
   type SystemHealthComponentContract,
+  type GatewayApiKeySettingsContract,
   type SystemHealthContract
 } from '../shared/ipc-contracts'
 import type {
@@ -359,6 +360,18 @@ const offGridApi = {
     ipcRenderer.invoke('db:save-user-profile', profile),
 
   // App Settings
+  gatewayApiKeys: (): Promise<GatewayApiKeySettingsContract> =>
+    ipcRenderer.invoke('gateway:keys:list'),
+  setGatewayApiKeyRequired: (enabled: boolean): Promise<GatewayApiKeySettingsContract> =>
+    ipcRenderer.invoke('gateway:keys:required', enabled),
+  createGatewayApiKey: (
+    name: string,
+    expiresAt: number | null,
+    replaceId?: string
+  ): Promise<{ key: string; settings: GatewayApiKeySettingsContract }> =>
+    ipcRenderer.invoke('gateway:keys:create', name, expiresAt, replaceId),
+  revokeGatewayApiKey: (id: string): Promise<GatewayApiKeySettingsContract> =>
+    ipcRenderer.invoke('gateway:keys:revoke', id),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   aiLogsList: (
     query: import('../shared/ai-request-log').AILogQuery = {}
@@ -635,7 +648,8 @@ const offGridApi = {
   restartForModelDirectory: () => ipcRenderer.invoke('models:restart-for-directory'),
   getModelScanFolders: () => ipcRenderer.invoke('models:scan-folders'),
   addModelScanFolder: () => ipcRenderer.invoke('models:add-scan-folder'),
-  removeModelScanFolder: (directory: string) => ipcRenderer.invoke('models:remove-scan-folder', directory),
+  removeModelScanFolder: (directory: string) =>
+    ipcRenderer.invoke('models:remove-scan-folder', directory),
   onModelInventoryChanged: (callback: () => void) => {
     const listener = (): void => callback()
     ipcRenderer.on('models:inventory-changed', listener)
