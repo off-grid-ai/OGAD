@@ -32,6 +32,7 @@ let activationRequests: Array<[string, string?]> = []
   downloadModel: async () => new Promise(() => {}),
   cancelModelDownload: async () => true,
   searchModels: async () => [],
+  getModelScanFolders: async () => [],
   onModelProgress: () => () => {},
   // Main's task projections: the Tasks tab draws them as lineups, and cards name their roles.
   getComputerUseActiveModels: async () => ({

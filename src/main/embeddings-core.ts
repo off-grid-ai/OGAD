@@ -8,6 +8,28 @@ import { requireModelStorage } from './runtime-env'
 import { configureTransformersEnv } from './embeddings-env'
 import { loadWithOnnxFallback, onnxDeviceCandidates } from './onnx-device'
 import type { BackendPreference } from '../shared/backend-preferences'
+import { DEFAULT_EMBEDDING_MODEL, type EmbeddingModelId } from './embedding-model-choice'
+
+export async function probeEmbeddingModel(
+  modelId: EmbeddingModelId,
+  modelsDir: string
+): Promise<number> {
+  configureTransformersEnv(modelsDir)
+  const candidate = await pipeline('feature-extraction', modelId, { device: 'cpu' })
+  try {
+    const output = await candidate('Off Grid AI embedding check', {
+      pooling: 'mean',
+      normalize: true
+    })
+    const vector = Array.from(output.data)
+    if (!vector.length || vector.length > 4096 || vector.some((value) => !Number.isFinite(value))) {
+      throw new Error('This model returned an invalid embedding.')
+    }
+    return vector.length
+  } finally {
+    await candidate.dispose()
+  }
+}
 
 /**
  * Text -> vector. The actual inference, owned in ONE place.
@@ -41,19 +63,20 @@ export async function embedText(
   modelsDir: string,
   onReady?: (device: string, reason?: string) => void,
   backendPreference: BackendPreference = 'auto',
+  modelId: EmbeddingModelId = DEFAULT_EMBEDDING_MODEL,
   readDirectories = modelReadDirectories()
 ): Promise<number[]> {
   if (!pipe) {
-    const id = 'Xenova/all-MiniLM-L6-v2'
-    const fp32 = resolveTransformersPackage(id, 'model.onnx', readDirectories)
-    const cached = fp32 ?? resolveTransformersPackage(id, 'model_quantized.onnx', readDirectories)
+    const fp32 = resolveTransformersPackage(modelId, 'model.onnx', readDirectories)
+    const cached =
+      fp32 ?? resolveTransformersPackage(modelId, 'model_quantized.onnx', readDirectories)
     // Local-only reads must not require writable storage. Guard only an explicit
     // folder choice when the pipeline can download; default storage is created lazily.
     if (!cached && process.env.OFFGRID_EMBEDDINGS_OFFLINE !== '1') requireModelStorage()
     configureTransformersEnv(modelsDir, !!cached)
     loading ??= loadWithOnnxFallback(
       (device) =>
-        pipeline('feature-extraction', cached ?? 'Xenova/all-MiniLM-L6-v2', {
+        pipeline('feature-extraction', cached ?? modelId, {
           device,
           ...(cached ? { local_files_only: true, ...(fp32 ? {} : { dtype: 'q8' as const }) } : {})
         }),

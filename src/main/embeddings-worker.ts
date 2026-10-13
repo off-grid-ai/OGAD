@@ -15,6 +15,7 @@ import { parentPort, workerData } from 'worker_threads'
 import { embedText, embeddingDevice } from './embeddings-core'
 import { configureRuntime } from './runtime-env'
 import type { BackendPreference } from '../shared/backend-preferences'
+import type { EmbeddingModelId } from './embedding-model-choice'
 
 if (!parentPort) throw new Error('embeddings-worker must be started as a worker thread')
 const port = parentPort
@@ -25,12 +26,14 @@ const {
   modelsDir,
   chosenModelsDir,
   modelReadDirectories = [modelsDir],
-  backendPreference = 'auto'
+  backendPreference = 'auto',
+  modelId
 } = workerData as {
   modelsDir: string
   chosenModelsDir?: string
   modelReadDirectories?: string[]
   backendPreference?: BackendPreference
+  modelId: EmbeddingModelId
 }
 
 // Preserve the host's explicit choice without treating its default path as chosen.
@@ -64,6 +67,7 @@ port.on('message', (request: EmbeddingRequest) => {
           } satisfies EmbeddingResponse)
         },
         backendPreference,
+        modelId,
         modelReadDirectories
       )
       port.postMessage({

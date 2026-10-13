@@ -89,7 +89,24 @@ function installApi(): void {
       onRagStream: () => () => undefined,
       onImageGenProgress: () => () => undefined,
       onImageGenJobState: () => () => undefined,
-      onImageGenConversationUpdated: () => () => undefined
+      onImageGenConversationUpdated: () => () => undefined,
+      videoGenStatus: async () => ({ available: false, models: [], active: null }),
+      videoGenJobStatus: async () => ({
+        id: null,
+        phase: 'idle',
+        conversationId: null,
+        projectId: null,
+        stage: null,
+        enhancedPrompt: '',
+        progress: null,
+        preview: null,
+        outputPath: null,
+        error: null,
+        startedAt: null,
+        finishedAt: null
+      }),
+      onVideoGenJobState: () => () => undefined,
+      onVideoGenConversationUpdated: () => () => undefined
     }
   })
 }

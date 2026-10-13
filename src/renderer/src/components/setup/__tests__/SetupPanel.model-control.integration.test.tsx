@@ -48,7 +48,7 @@ describe('rendered Desktop setup model journey', () => {
     render(<SetupPanel hideHealth />)
     expect(await screen.findByText('Local Chat')).toBeTruthy()
     expect(screen.getByText('Control from Mobile')).toBeTruthy()
-    expect(screen.getByText(/Installed models can handle Chat, images, transcription, voice/)).toBeTruthy()
+    expect(screen.getByText(/Installed models can handle Chat, images, videos, transcription, voice/)).toBeTruthy()
     expect(screen.getByText(/Server API keys stay on this Desktop/)).toBeTruthy()
 
     failNextSave = true

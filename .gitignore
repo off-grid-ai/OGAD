@@ -88,6 +88,16 @@ coverage-db/
 coverage-e2e-raw/
 coverage-e2e/
 
+# Pinned macOS image/video runtime source and build cache
+/build/image-macos/
+
+# Local visitor analytics, marketing research, and verification artifacts
+/outputs/
+/docs/COMPETITOR_MARKET_REPORT_*.md
+
+# New screenshot captures stay local; existing documentation assets remain tracked
+/docs/screenshots/
+/e2e/screenshots/
 # Pinned Linux desktop tools staged by the packaging script
 resources/linux-desktop/bin/
 resources/linux-desktop/__pycache__/

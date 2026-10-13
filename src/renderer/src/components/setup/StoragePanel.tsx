@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { HardDrives, Trash, ArrowsClockwise, X, Broom, FolderOpen } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
-import { companionDownloadLabel } from '@renderer/lib/download-label'
+import { companionDownloadLabel, modelSetupErrorMessage } from '@renderer/lib/download-label'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -50,7 +50,7 @@ interface DownloadEntry {
 
 // Group order for the by-type storage layout. Display labels come from the shared
 // model-kind-labels source (single source of truth with the Models screen).
-const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'voice', 'transcription', 'other']
+const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'video', 'voice', 'transcription', 'embedding', 'other']
 
 /** Disk usage for downloaded models, orphan cleanup, and a download manager
  *  (active / failed / interrupted downloads with retry + cancel). */
@@ -449,7 +449,9 @@ export function StoragePanel(): React.ReactElement {
             <div key={d.modelId} className="flex items-center gap-3 py-1.5">
               <div className="min-w-0 flex-1">
                 <div className="truncate font-mono text-[11px] text-neutral-300">{d.modelId}</div>
-                <div className="truncate text-[10px] text-neutral-500">{d.error ?? d.status}</div>
+                <div className="text-[10px] text-neutral-500">
+                  {d.error ? modelSetupErrorMessage(d.error) : d.status}
+                </div>
               </div>
               <button
                 onClick={() => retry(d.modelId)}

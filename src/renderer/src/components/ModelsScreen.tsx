@@ -164,6 +164,7 @@ interface ModelEntry {
   isNew?: boolean
   files: ModelFile[]
   imageModes?: string[]
+  videoModes?: string[]
   tags?: string[]
   releaseDate?: string
   quant?: string
@@ -388,6 +389,10 @@ export function ModelsScreen({
   const [switchError, setSwitchError] = useState<string | null>(null)
   const [ramGb, setRamGb] = useState<number | null>(null)
   const [importing, setImporting] = useState(false)
+  const [embeddingChoices, setEmbeddingChoices] = useState<{
+    active: string
+    models: Array<{ id: string; name: string; detail: string; badge?: string }>
+  } | null>(null)
   const [useCase, setUseCase] = useState('all')
   // Capability-tag filter (Light / Photoreal / Fast / Anime …). A model must carry
   // every selected tag. Reset when the tab changes so stale tags don't hide the list.
@@ -395,6 +400,47 @@ export function ModelsScreen({
   useEffect(() => {
     setSelectedTags([])
   }, [activeKind])
+  useEffect(() => {
+    if (activeKind === 'embedding') {
+      void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
+      const unsubscribe = api.onEmbeddingRebuildStatusChanged?.((status: { phase: string; error?: string }) => {
+        if (status.phase === 'done' || status.phase === 'error' || status.phase === 'restored') {
+          void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
+          // The app-wide rebuild notice owns terminal recovery errors.
+          setSwitchError(null)
+        }
+      })
+      return () => unsubscribe?.()
+    }
+    return undefined
+  }, [activeKind])
+  const chooseEmbedding = async (id: string): Promise<void> => {
+    setSwitching(id)
+    setSwitchError(null)
+    const reportError = (error: unknown): void => {
+      console.error('Embedding model change failed:', error)
+      const message = error instanceof Error ? error.message : String(error)
+      setSwitchError(
+        /^(Another embedding model change is in progress\.|Index rebuild is in progress\.)$/.test(message)
+          ? message
+          : 'Could not change the embedding model. Choose another embedding model, then try again.'
+      )
+    }
+    try {
+      const result = await api.chooseEmbeddingModel(id) as { success?: boolean; error?: string }
+      if (result.success) setEmbeddingChoices((current) => {
+        if (!current) return current
+        const found = hfResults.find((item) => item.id === id)
+        return { active: id, models: current.models.some((model) => model.id === id)
+          ? current.models : [...current.models, { id, name: found?.name ?? id.split('/').pop() ?? id, detail: id, badge: 'Your model' }] }
+      })
+      else if (result.error) reportError(result.error)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      setSwitching(null)
+    }
+  }
   const [detail, setDetail] = useState<ModelEntry | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -450,7 +496,7 @@ export function ModelsScreen({
       !detail ||
       detail.id === KEV_4B_ID ||
       detail.id.startsWith('local:') ||
-      !['text', 'vision', 'computer_use'].includes(detail.kind)
+      !['text', 'vision', 'computer_use', 'video'].includes(detail.kind)
     ) {
       setDetailFilesLoading(false)
       return
@@ -472,7 +518,10 @@ export function ModelsScreen({
     setDetailFilesLoading(true)
     void Promise.resolve(api.getModelFiles?.(detail.id))
       .then((files: DownloadableModelFile[] | undefined) => {
-        if (!cancelled) setDetailFiles((files ?? []).filter(isModelWeightFile))
+        if (!cancelled)
+          setDetailFiles(
+            detail.kind === 'video' ? (files ?? []) : (files ?? []).filter(isModelWeightFile)
+          )
       })
       .catch((error: unknown) => {
         if (!cancelled)
@@ -560,6 +609,7 @@ export function ModelsScreen({
     setProgress((p) => withoutProgressEntry(p, id))
   }
   const download = (id: string, fileName?: string): void => {
+    setChosenVariants((current) => ({ ...current, [id]: fileName ?? '' }))
     // 'queued', not 'downloading': nothing has been downloaded yet, and claiming otherwise is what
     // left a refused request showing a spinner at 0% forever. The main process moves it to
     // 'downloading' when bytes actually start, and to 'failed' if it never gets that far.
@@ -590,8 +640,10 @@ export function ModelsScreen({
     setVariantError(null)
     setVariants([])
     try {
-      const files = (await api.getModelFiles?.(model.id))?.filter(isModelWeightFile)
-      if (!files?.length) throw new Error('No GGUF files found in this repository.')
+      const available = await api.getModelFiles?.(model.id)
+      // Video packs are not single GGUF weights; the main process returns only usable pack files.
+      const files = model.kind === 'video' ? available : available?.filter(isModelWeightFile)
+      if (!files?.length) throw new Error('No compatible model files found in this repository.')
       setVariants(files)
     } catch (error) {
       setVariantError(error instanceof Error ? error.message : 'Could not load model files.')
@@ -661,10 +713,15 @@ export function ModelsScreen({
     // the request is abandoned the moment a newer query supersedes it.
     let live = true
     const t = setTimeout(async () => {
-      const res = await api.searchModels?.(q, activeKind)
-      if (!live) return
-      setHfResults(res ?? [])
-      setSearching(false)
+      try {
+        const res = await api.searchModels?.(q, activeKind)
+        if (!live) return
+        setHfResults(res ?? [])
+      } catch {
+        if (live) setHfResults([])
+      } finally {
+        if (live) setSearching(false)
+      }
     }, 400)
     return () => {
       live = false
@@ -1179,7 +1236,7 @@ export function ModelsScreen({
             )}
           </button>
         ))}
-        {ramGb && activeKind !== 'storage' && (
+        {ramGb && activeKind !== 'storage' && activeKind !== 'embedding' && (
           <span className="ml-auto pb-2 text-[9px] text-neutral-700">
             {ramGb}GB RAM · fits ≤{Math.round(ramGb * FIT_OK_FRAC)}GB
           </span>
@@ -1193,8 +1250,66 @@ export function ModelsScreen({
         </div>
       )}
 
+      {activeKind === 'embedding' && (
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <p className="mb-4 text-xs text-neutral-500">
+            The embedding model powers semantic search and project knowledge. Changing it rebuilds saved indexes now. This can take time.
+          </p>
+          <div className="mb-4 flex max-w-md items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 focus-within:border-neutral-600">
+            <IconSearch className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search Hugging Face embedding models" aria-label="Search embedding models"
+              className="min-w-0 flex-1 bg-transparent text-xs text-neutral-200 placeholder-neutral-600 outline-none" />
+            {searching && <IconLoader2 className="h-3.5 w-3.5 animate-spin text-neutral-500" />}
+          </div>
+          {switchError && <div role="alert" className="mb-3 text-xs text-neutral-300">{switchError}</div>}
+          <div className="mb-2 text-[10px] uppercase tracking-widest text-neutral-500">Recommended models</div>
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+            {embeddingChoices?.models.map((model) => (
+              <div key={model.id} className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm text-neutral-200">{model.name}{model.badge && <span className="rounded border border-neutral-700 px-1.5 py-0.5 text-[9px] text-neutral-400">{model.badge}</span>}</div>
+                    <div className="mt-1 text-[11px] text-neutral-500">{model.detail}</div>
+                  </div>
+                  {embeddingChoices.active === model.id ? (
+                    <span className="text-[10px] text-green-500">Active</span>
+                  ) : (
+                    <button type="button" onClick={() => void chooseEmbedding(model.id)} disabled={switching !== null}
+                      className="shrink-0 rounded-md border border-neutral-700 px-2.5 py-1 text-[11px] text-neutral-300 transition-colors hover:border-green-500 hover:text-white focus-visible:outline focus-visible:outline-green-500">
+                      {switching === model.id ? 'Changing...' : 'Use'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {query.trim().length >= 2 && (
+            <div className="mt-5">
+              <div className="mb-2 text-[10px] uppercase tracking-widest text-neutral-500">Hugging Face results</div>
+              {!searching && hfResults.length === 0 && <p className="text-xs text-neutral-500">No compatible text embedding models found.</p>}
+              <div role="list" aria-label="Embedding model search results" className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                {hfResults.map((model) => <div role="listitem" key={model.id} className="rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-neutral-200" title={model.id}>{model.name}</div>
+                      <div className="mt-1 truncate text-[11px] text-neutral-500" title={model.id}>{model.id}</div>
+                    </div>
+                    {embeddingChoices?.active === model.id ? <span className="text-[10px] text-green-500">Active</span> :
+                      <button type="button" onClick={() => void chooseEmbedding(model.id)} disabled={switching !== null}
+                        className="shrink-0 rounded-md border border-neutral-700 px-2.5 py-1 text-[11px] text-neutral-300 transition-colors hover:border-green-500 hover:text-white focus-visible:outline focus-visible:outline-green-500 disabled:opacity-50">
+                        {switching === model.id ? 'Checking...' : 'Use'}
+                      </button>}
+                  </div>
+                </div>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Catalog tab */}
-      {activeKind !== 'storage' && (
+      {activeKind !== 'storage' && activeKind !== 'embedding' && (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Filter bar */}
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-neutral-800/60 px-6 py-2">
@@ -1546,6 +1661,18 @@ export function ModelsScreen({
                       ))}
                     </div>
                   )}
+                  {m.videoModes && m.videoModes.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {m.videoModes.map((mode) => (
+                        <span
+                          key={mode}
+                          className="rounded-sm border border-green-500/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-green-500"
+                        >
+                          Text to video
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {hfUrl && (
                     <button
                       onClick={() =>
@@ -1599,9 +1726,10 @@ export function ModelsScreen({
                         )}
                         {!detailFilesLoading &&
                           !detailFilesError &&
-                          detailFileGuidance.size === 0 && (
+                          (m.kind === 'video' ? detailFiles.length : detailFileGuidance.size) ===
+                            0 && (
                             <p className="text-xs text-neutral-500">
-                              No GGUF files found in this repository.
+                              No compatible model files found in this repository.
                             </p>
                           )}
                         <div className="space-y-2">
@@ -1778,7 +1906,7 @@ export function ModelsScreen({
               )}
               <div className="space-y-2">
                 {variants
-                  .filter(isModelWeightFile)
+                  .filter((variant) => variantModel.kind === 'video' || isModelWeightFile(variant))
                   .sort(
                     (a, b) =>
                       Number(!!variantGuidance.get(b.fileName)?.labels.length) -

@@ -15,6 +15,11 @@ import type {
   ImageGenerationRequestContract,
   ImageGenerationResultContract
 } from '../shared/image-generation-contract'
+import type {
+  VideoGenerationRequestContract,
+  VideoGenerationResultContract,
+  VideoGenerationJobContract
+} from '../shared/video-generation-contract'
 import {
   BACKUP_EXPORT_ALL_CHANNEL,
   BACKUP_IMPORT_CHANNEL,
@@ -631,7 +636,9 @@ const offGridApi = {
   setupPlan: (mode?: string) => ipcRenderer.invoke('setup:plan', mode),
   chatVisionAvailable: () => ipcRenderer.invoke('model:chat-vision'),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
-  autoConfigure: () => ipcRenderer.invoke('setup:auto-configure'),
+  cancelSetupDownload: (modelId: string) => ipcRenderer.invoke('setup:cancel-download', modelId),
+  autoConfigure: (selectedModelIds?: string[], mode?: 'conservative' | 'balanced' | 'extreme') =>
+    ipcRenderer.invoke('setup:auto-configure', selectedModelIds, mode),
   restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
   estimateModelFit: (modelId: string) => ipcRenderer.invoke('system:estimate-fit', modelId),
 
@@ -647,6 +654,19 @@ const offGridApi = {
     const listener = (): void => callback()
     ipcRenderer.on('models:inventory-changed', listener)
     return () => ipcRenderer.removeListener('models:inventory-changed', listener)
+  },
+  getEmbeddingModelChoices: () => ipcRenderer.invoke('models:embedding-choices'),
+  chooseEmbeddingModel: (id: string) => ipcRenderer.invoke('models:choose-embedding', id),
+  cancelEmbeddingRebuild: () =>
+    ipcRenderer.invoke('models:cancel-embedding-rebuild') as Promise<{
+      canceled?: boolean
+      error?: string
+    }>,
+  getEmbeddingRebuildStatus: () => ipcRenderer.invoke('models:embedding-rebuild-status'),
+  onEmbeddingRebuildStatusChanged: (callback: (status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus): void => callback(status)
+    ipcRenderer.on('models:embedding-rebuild-status-changed', listener)
+    return () => ipcRenderer.removeListener('models:embedding-rebuild-status-changed', listener)
   },
   deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
   listDownloads: () => ipcRenderer.invoke('models:downloads'),
@@ -688,6 +708,7 @@ const offGridApi = {
       allMemory?: boolean
       images?: string[]
       imageAvailable?: boolean
+      videoAvailable?: boolean
       streamId?: string
       thinking?: boolean
       context?: string
@@ -869,6 +890,35 @@ const offGridApi = {
       projectId?: string | null
     }
   ) => ipcRenderer.invoke('imagegen:generate', params) as Promise<ImageGenerationResultContract>,
+
+  videoGenStatus: () => ipcRenderer.invoke('videogen:status') as Promise<{
+    available: boolean; models: string[]; active: string | null; reason?: string
+  }>,
+  videoGenJobStatus: () => ipcRenderer.invoke('videogen:job-status') as Promise<VideoGenerationJobContract>,
+  generateVideo: (request: VideoGenerationRequestContract & {
+    conversationId?: string; projectId?: string | null
+  }) => ipcRenderer.invoke('videogen:generate', request) as Promise<VideoGenerationResultContract>,
+  cancelVideoGen: () => ipcRenderer.invoke('videogen:cancel') as Promise<boolean>,
+  videoGenConversationPersisted: (conversationId: string, messageId?: string) =>
+    ipcRenderer.invoke('videogen:conversation-persisted', conversationId, messageId) as Promise<boolean>,
+  listGeneratedVideos: (scope?: { conversationId?: string; projectId?: string | null }) =>
+    ipcRenderer.invoke('videogen:list', scope) as Promise<Array<{
+      path: string; name: string; mtime: number; syncId?: string;
+      conversationId?: string; projectId?: string | null; durationSeconds?: number
+    }>>,
+  deleteGeneratedVideo: (videoPath: string) => ipcRenderer.invoke('videogen:delete', videoPath) as Promise<boolean>,
+  exportGeneratedVideo: (videoPath: string, name?: string) =>
+    ipcRenderer.invoke('videogen:export', videoPath, name) as Promise<boolean>,
+  onVideoGenJobState: (callback: (state: VideoGenerationJobContract) => void) => {
+    const listener = (_event: unknown, state: VideoGenerationJobContract): void => callback(state)
+    ipcRenderer.on('videogen:job-state', listener)
+    return unsubscribe('videogen:job-state', listener)
+  },
+  onVideoGenConversationUpdated: (callback: (conversationId: string) => void) => {
+    const listener = (_event: unknown, conversationId: string): void => callback(conversationId)
+    ipcRenderer.on('videogen:conversation-updated', listener)
+    return unsubscribe('videogen:conversation-updated', listener)
+  },
 
   // --- Projects + RAG (knowledge bases) + project chat ---
   listProjects: () => ipcRenderer.invoke('projects:list'),

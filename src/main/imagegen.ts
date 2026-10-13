@@ -16,7 +16,11 @@ import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
 import { getSetting } from './database'
-import { resolveImageParameters, type ImageParameterStore } from '@offgrid/models'
+import {
+  QWEN_IMAGE_21_COMPANIONS,
+  resolveImageParameters,
+  type ImageParameterStore
+} from '@offgrid/models'
 import {
   generatedImageSidecarPath,
   readGeneratedImageSidecar,
@@ -784,7 +788,7 @@ async function runImageGen(
         path: outPath,
         seed: params.seed ?? -1,
         model: def.label,
-        computeBackend: 'Metal'
+        computeBackend: 'MLX runtime (device unknown)'
       }
     } finally {
       generationLifecycle.finish()
@@ -856,12 +860,12 @@ async function runImageGen(
     zEncoderGb: zImageStack ? safeSizeGb(findInModels(/qwen3-4b-instruct.*\.gguf$/i)) : 0,
     zVaeGb: zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0,
     qwenImageStack,
-    qwenEncoderGb: qwenImageStack ? safeSizeGb(findInModels(/^Qwen3VL-8B-Instruct-.*\.gguf$/i)) : 0,
+    qwenEncoderGb: qwenImageStack ? safeSizeGb(findInModels(QWEN_IMAGE_21_COMPANIONS.llm)) : 0,
     qwenVisionGb: qwenImageStack
-      ? safeSizeGb(findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i))
+      ? safeSizeGb(findInModels(QWEN_IMAGE_21_COMPANIONS.llmVision))
       : 0,
     qwenVaeGb: qwenImageStack
-      ? safeSizeGb(findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i))
+      ? safeSizeGb(findInModels(QWEN_IMAGE_21_COMPANIONS.vae))
       : 0
   })
   if (guard.overBudget && !params.allowUnsafeMemoryOverride) {
@@ -945,8 +949,10 @@ async function runImageGen(
       await fs.promises.writeFile(outPath, png)
       return {
         dataUrl: `data:image/png;base64,${png.toString('base64')}`,
-        path: outPath, seed: usedSeed, model: base,
-        computeBackend: imageBackendForRuntime(process.platform, residentBinary)
+        path: outPath,
+        seed: usedSeed,
+        model: base,
+        computeBackend: `SD runtime (${imageBackendForRuntime(process.platform, residentBinary)} build; device unknown)`
       }
     } finally {
       generationLifecycle.finish()
@@ -1003,9 +1009,9 @@ async function runImageGen(
       previewArgs
     })
   } else if (isQwenImage21) {
-    const llm = findInModels(/^Qwen3VL-8B-Instruct-(?!mmproj).*\.gguf$/i)
-    const llmVision = findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i)
-    const vae = findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i)
+    const llm = findInModels(QWEN_IMAGE_21_COMPANIONS.llm)
+    const llmVision = findInModels(QWEN_IMAGE_21_COMPANIONS.llmVision)
+    const vae = findInModels(QWEN_IMAGE_21_COMPANIONS.vae)
     if (!llm)
       throw new Error(
         'Qwen-Image 2.1 text encoder (Qwen3-VL-8B-Instruct) not found — download the complete model from Models.'
@@ -1240,8 +1246,8 @@ async function runImageGen(
       seed: finalSeed,
       model: path.basename(model),
       computeBackend: coreml
-        ? 'Core ML (ANE)'
-        : imageBackendForRuntime(process.platform, completedRuntime)
+        ? 'Core ML runtime (device unknown)'
+        : `SD runtime (${imageBackendForRuntime(process.platform, completedRuntime)} build; device unknown)`
     }
   } finally {
     generationLifecycle.finish()

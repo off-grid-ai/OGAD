@@ -111,3 +111,50 @@ describe('downloaded-models registry (real temp dir)', () => {
     ).toMatchObject({ id: transferred.id, familyId: MINICPM.id, kind: 'computer_use' })
   })
 })
+
+describe('copied video variants', () => {
+  const WAN22 = {
+    id: 'wan22-family',
+    name: 'Wan 2.2 5B',
+    kind: 'video',
+    files: ['Wan2.2-TI2V-5B-Q4_K_M.gguf', 'wan2.2_vae.safetensors', 'umt5-xxl-encoder-Q4_K_M.gguf'].map(
+      (name) => ({ name })
+    )
+  }
+  const gguf = (name: string, bytes = 2048): void =>
+    fs.writeFileSync(path.join(dir, name), Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(bytes - 4, 1)]))
+
+  it('adopts a complete copied variant under the family, with its quantization in the name', () => {
+    gguf('Wan2.2-TI2V-5B-Q5_K_M.gguf')
+    gguf('umt5-xxl-encoder-Q4_K_M.gguf')
+    writeFiles(['wan2.2_vae.safetensors'])
+
+    const [adopted] = reconcileDownloadedModelRegistry(dir, [WAN22])
+    expect(adopted).toMatchObject({
+      familyId: WAN22.id,
+      kind: 'video',
+      name: 'Wan 2.2 5B · Q5_K_M',
+      files: ['Wan2.2-TI2V-5B-Q5_K_M.gguf', 'wan2.2_vae.safetensors', 'umt5-xxl-encoder-Q4_K_M.gguf']
+    })
+    expect(adopted!.id).toBe(adopted!.packageIdentity)
+    // Adopted once: a second pass keeps the same single entry.
+    expect(reconcileDownloadedModelRegistry(dir, [WAN22])).toHaveLength(1)
+  })
+
+  it('leaves the catalog default, incomplete packs, and broken weights alone', () => {
+    // The exact default pack already has catalog controls.
+    gguf('Wan2.2-TI2V-5B-Q4_K_M.gguf')
+    gguf('umt5-xxl-encoder-Q4_K_M.gguf')
+    writeFiles(['wan2.2_vae.safetensors'])
+    // A different quant whose weight is not a real GGUF.
+    writeFiles(['Wan2.2-TI2V-5B-Q8_0.gguf'])
+    // A weight with no catalog family.
+    gguf('ltx-2.3-22b-dev-Q4_K_M.gguf')
+    expect(reconcileDownloadedModelRegistry(dir, [WAN22])).toEqual([])
+
+    // Without its VAE the copied variant is not adopted.
+    fs.rmSync(path.join(dir, 'wan2.2_vae.safetensors'))
+    gguf('Wan2.2-TI2V-5B-Q5_K_M.gguf')
+    expect(reconcileDownloadedModelRegistry(dir, [WAN22])).toEqual([])
+  })
+})

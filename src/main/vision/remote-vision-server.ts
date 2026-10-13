@@ -224,7 +224,9 @@ export function getActiveRemoteVisionServerForModality(
     (server) => server.id === stored.activeServerId && server.enabled !== false
   )
   const selectedModel = active?.mediaModels?.[modality]
-  return active && selectedModel
+  return active &&
+    selectedModel &&
+    (modality !== 'video' || ['ogad', 'openrouter'].includes(active.provider))
     ? { ...active, apiKey: serverApiKey(active.id), selectedModel }
     : null
 }
@@ -276,7 +278,7 @@ export function setRemoteVisionServerSettings(
 ): RemoteVisionServerSettings {
   const stored = readStored()
   if (update.provider === 'local') {
-    for (const modality of ['text', 'image', 'voice', 'transcription'] as const) {
+    for (const modality of ['text', 'image', 'video', 'voice', 'transcription'] as const) {
       setRemoteModelSelected(modality, false)
     }
     writeStored({
@@ -323,6 +325,7 @@ export function setRemoteVisionServerSettings(
   if (isNewServer) {
     setRemoteModelSelected('text', Boolean(mediaModels.text))
     setRemoteModelSelected('image', false)
+    setRemoteModelSelected('video', false)
     setRemoteModelSelected('voice', false)
     setRemoteModelSelected('transcription', false)
   }
@@ -333,7 +336,7 @@ export function removeRemoteVisionServer(serverId: string): RemoteVisionServerSe
   const stored = readStored()
   deleteSecret(secretKey(serverId))
   if (stored.activeServerId === serverId) {
-    for (const modality of ['text', 'image', 'voice', 'transcription'] as const) {
+    for (const modality of ['text', 'image', 'video', 'voice', 'transcription'] as const) {
       setRemoteModelSelected(modality, false)
     }
   }
@@ -384,6 +387,7 @@ export async function testRemoteVisionServer(
         name?: unknown
         model?: unknown
         kind?: unknown
+        video_api?: unknown
         supported_parameters?: unknown
         reasoning?: unknown
         architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -393,6 +397,7 @@ export async function testRemoteVisionServer(
         name?: unknown
         model?: unknown
         kind?: unknown
+        video_api?: unknown
         supported_parameters?: unknown
         reasoning?: unknown
         architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -411,6 +416,7 @@ export async function testRemoteVisionServer(
       name?: unknown
       model?: unknown
       kind?: unknown
+      video_api?: unknown
       supported_parameters?: unknown
       reasoning?: unknown
       architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -421,11 +427,22 @@ export async function testRemoteVisionServer(
           .map((entry) => [String(entry.id ?? entry.model ?? ''), entry] as const)
       ).values()
     ]
+    // An OGAD server can use a custom port or sit behind a reverse proxy.
+    const provider = update.provider === 'custom' &&
+      entries.some((entry) => entry.video_api === 'offgrid-video-v1')
+      ? 'ogad' : update.provider
     const models = entries.flatMap((entry) => {
       const id =
         typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
       if (!id) return []
       const kind = entry.kind
+      if (
+        (kind === 'video' ||
+          (Array.isArray(entry.architecture?.output_modalities) &&
+            entry.architecture.output_modalities.includes('video'))) &&
+        !['ogad', 'openrouter'].includes(provider)
+      )
+        return []
       const outputs = Array.isArray(entry.architecture?.output_modalities)
         ? entry.architecture.output_modalities
         : []
@@ -436,27 +453,29 @@ export async function testRemoteVisionServer(
         ? entry.supported_parameters.filter((value): value is string => typeof value === 'string')
         : []
       const modality: RemoteVisionModality =
-        kind === 'image'
-          ? 'image'
-          : kind === 'transcription'
-            ? 'transcription'
-            : kind === 'speech'
-              ? 'voice'
-              : kind === 'chat' || kind === 'vision' || kind === 'text'
-                ? 'text'
-                : outputs.includes('image')
-                  ? 'image'
-                  : outputs.includes('transcription')
-                    ? 'transcription'
-                    : outputs.includes('speech') || outputs.includes('audio')
-                      ? 'voice'
-                      : update.provider !== 'openrouter' &&
-                          inputs.includes('audio') &&
-                          outputs.includes('text')
-                        ? 'transcription'
-                        : update.provider !== 'openrouter' && outputs.includes('audio')
-                          ? 'voice'
-                          : 'text'
+        kind === 'video' || outputs.includes('video')
+          ? 'video'
+          : kind === 'image'
+            ? 'image'
+            : kind === 'transcription'
+              ? 'transcription'
+              : kind === 'speech'
+                ? 'voice'
+                : kind === 'chat' || kind === 'vision' || kind === 'text'
+                  ? 'text'
+                  : outputs.includes('image')
+                    ? 'image'
+                    : outputs.includes('transcription')
+                      ? 'transcription'
+                      : outputs.includes('speech') || outputs.includes('audio')
+                        ? 'voice'
+                        : update.provider !== 'openrouter' &&
+                            inputs.includes('audio') &&
+                            outputs.includes('text')
+                          ? 'transcription'
+                          : update.provider !== 'openrouter' && outputs.includes('audio')
+                            ? 'voice'
+                            : 'text'
       return [
         {
           id,
@@ -472,7 +491,7 @@ export async function testRemoteVisionServer(
         }
       ]
     })
-    return { ok: true, latencyMs: Date.now() - startedAt, models }
+    return { ok: true, latencyMs: Date.now() - startedAt, models, provider }
   } catch (error) {
     return {
       ok: false,

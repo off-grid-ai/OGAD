@@ -177,6 +177,13 @@ try {
 # three CUDA DLLs and previously made the installer too large to build.
 # Keep this release pinned: Qwen-Image 2.1 needs the current runtime and a moving
 # latest release can change the packaged DLL contract without review.
+if ($env:OFFGRID_BUILD_IMAGE_FROM_SOURCE -eq '1') {
+  $backends = @('cpu', 'vulkan')
+  if ($IncludeCuda) { $backends += 'cuda' }
+  foreach ($backend in $backends) {
+    & (Join-Path $PSScriptRoot 'build-image-windows.ps1') -Backend $backend
+  }
+} else {
 $SdRef = 'master-920-2f88688'
 Write-Host "== stable-diffusion.cpp (pinned $SdRef): CUDA + Vulkan + CPU =="
 if ($IncludeCuda) {
@@ -205,6 +212,8 @@ try {
   $sd = Join-Path $dest 'sd.exe'
   if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
 } catch { Write-Warning "stable-diffusion.cpp CPU fetch failed: $_" }
+
+}
 
 # --- ffmpeg (GPL, win64) — single ffmpeg.exe flat in resources/bin -----------
 Write-Host '== ffmpeg =='

@@ -1,6 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+if ($env:OFFGRID_BUILD_IMAGE_FROM_SOURCE -eq '1') {
+  & (Join-Path $PSScriptRoot 'build-image-windows.ps1') -Backend cuda
+  return
+}
+
 $root = Split-Path $PSScriptRoot -Parent
 $destination = Join-Path $root 'resources\bin\sd-cuda'
 $temporary = Join-Path $env:TEMP "offgrid-sd-cuda-$([guid]::NewGuid().ToString('N'))"

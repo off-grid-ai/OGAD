@@ -6,6 +6,7 @@ const unavailable = (): RuntimeBackend[] =>
     [
       'chat',
       'image',
+      'video',
       'speech',
       'transcription',
       'embeddings',

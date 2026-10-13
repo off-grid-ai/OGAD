@@ -99,6 +99,7 @@ function installApi(): { requestedUrls: string[] } {
     }),
     getModelCatalog: manager.getCatalog,
     getInstalledModels: manager.listInstalled,
+    getModelScanFolders: async () => [],
     getActiveModelIds: manager.getActiveModelIds,
     activateModel: manager.activateModel,
     estimateModelFit: setup.estimateModelFit,
@@ -140,6 +141,7 @@ function installApi(): { requestedUrls: string[] } {
   const api = new Proxy(values, {
     get(target, property: string) {
       if (property in target) return target[property]
+      if (/^on[A-Z]/.test(property)) return eventSubscription
       return async () => undefined
     }
   })

@@ -1,0 +1,62 @@
+diff --git a/examples/cli/main.cpp b/examples/cli/main.cpp
+index dc79b8c..1be3420 100644
+--- a/examples/cli/main.cpp
++++ b/examples/cli/main.cpp
+@@ -46,6 +46,7 @@ struct SDCliParams {
+     preview_t preview_method = PREVIEW_NONE;
+     int preview_interval     = 1;
+     std::string preview_path = "preview.png";
++    std::string decode_preview_path;
+     int preview_fps          = 16;
+     bool taesd_preview       = false;
+     bool preview_noisy       = false;
+@@ -83,6 +84,11 @@ struct SDCliParams {
+              "path to write preview image to (default: ./preview.png). For image generation, the filename can have %03d placeholder for sequential numbering. Multi-frame previews support .avi, .webm, and animated .webp",
+              0,
+              &preview_path},
++            {"",
++             "--decode-preview-path",
++             "write the first final decoded video frame as PNG without an extra decode",
++             0,
++             &decode_preview_path},
+             {"",
+              "--imat-out",
+              "compute the imatrix for this run and save it to the provided path",
+@@ -419,6 +425,26 @@ void step_callback(int step, int frame_count, sd_image_t* image, bool is_noisy,
+     }
+ }
+ 
++static void video_decode_progress(int completed, int total, void*) {
++    fprintf(stderr, "OFFGRID_VIDEO_DECODE %d %d\n", completed, total);
++    fflush(stderr);
++}
++
++static void video_decoded_frame(const sd_image_t* frame, void* data) {
++    auto* params = static_cast<SDCliParams*>(data);
++    if (params->decode_preview_path.empty() || frame == nullptr || frame->data == nullptr) return;
++    const auto temporary = params->decode_preview_path + ".tmp.png";
++    if (write_image_to_file(temporary, frame->data, frame->width, frame->height,
++                            frame->channel, "", params->compression_quality)) {
++        std::error_code error;
++        fs::rename(temporary, params->decode_preview_path, error);
++        if (!error) {
++            fprintf(stderr, "OFFGRID_VIDEO_FRAME %u %u\n", frame->width, frame->height);
++            fflush(stderr);
++        }
++    }
++}
++
+ static fs::path get_video_audio_sidecar_path(const SDCliParams& cli_params) {
+     fs::path out_path     = cli_params.output_path;
+     fs::path base_path    = out_path;
+@@ -694,6 +720,10 @@ int main(int argc, const char* argv[]) {
+                             cli_params.preview_noisy,
+                             (void*)&cli_params);
+ 
++    if (cli_params.mode == VID_GEN) {
++        sd_set_video_decode_callback(video_decode_progress, video_decoded_frame, &cli_params);
++    }
++
+     LOG_VERBOSE("version: %s", version_string().c_str());
+     LOG_VERBOSE("%s", sd_get_system_info());
+     LOG_VERBOSE("%s", cli_params.to_string().c_str());

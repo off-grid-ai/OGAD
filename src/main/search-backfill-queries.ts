@@ -71,3 +71,14 @@ export const PENDING_COUNT_SQL = `SELECT
       AND e.hidden = 0) +
   (SELECT COUNT(*) FROM entity_facts f
     WHERE NOT EXISTS (SELECT 1 FROM vec_indexed v WHERE v.key = 'fact:'||f.id)) AS c`
+
+/** Every indexable source row, indexed or not: the work a new embedding model must redo. */
+export const INDEXABLE_COUNT_SQL = `SELECT
+  (SELECT COUNT(*) FROM frames f WHERE f.text IS NOT NULL) +
+  (SELECT COUNT(*) FROM observations o
+    WHERE o.summary IS NOT NULL AND length(o.summary) > 0) +
+  (SELECT COUNT(*) FROM chat_summaries s WHERE s.summary IS NOT NULL) +
+  (SELECT COUNT(*) FROM meetings m WHERE COALESCE(m.summary, m.transcript) IS NOT NULL) +
+  (SELECT COUNT(*) FROM memories m WHERE m.content IS NOT NULL) +
+  (SELECT COUNT(*) FROM entities e WHERE e.hidden = 0) +
+  (SELECT COUNT(*) FROM entity_facts f) AS c`

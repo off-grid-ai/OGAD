@@ -37,6 +37,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { initializeAIRequestLogs } from './ai-request-log-store'
+import { activateInstalledPerformancePack } from './performance-pack'
 import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
 import { registerToolExtension } from './tools'
@@ -334,6 +335,8 @@ if (!windowPresentation.showWindow) {
 
 function startServerOnlyMode(): void {
   writeDiagnosticLog('gateway', 'server-only.started', { port: 7878 })
+  // Headless startup skips setupIPC, which activates the pack for the desktop UI.
+  activateInstalledPerformancePack()
   if (process.platform === 'darwin' && app.dock) {
     try {
       app.dock.hide()
@@ -359,6 +362,12 @@ app.whenReady().then(async () => {
   const { modelsDir } = await import('./runtime-env')
   restoreCanonicalProductName()
   initializeAIRequestLogs()
+  try {
+    const { startEmbeddingIndexRebuild } = await import('./embedding-index-rebuild')
+    void startEmbeddingIndexRebuild().catch((error) => console.error('[embeddings] index rebuild failed', error))
+  } catch (error) {
+    console.error('[embeddings] index preparation failed', error)
+  }
 
   // Server-only (headless) mode: boot just the multimodal gateway + LLM runtime,
   // no window / tray / capture / CRM loops. Lets the gateway be deployed on its

@@ -1,13 +1,38 @@
-import type { Session } from 'electron'
+import { app, type Session } from 'electron'
+import { pathToFileURL } from 'node:url'
+import { getMainWindow, getMainWindowDocumentUrl } from './main-window'
+import { rendererHtmlPath } from './renderer-path'
+import { fullscreenOriginAllowed } from './fullscreen-origin'
 
 type PermissionSession = Pick<Session, 'setPermissionRequestHandler'>
 
-/**
- * Admit renderer microphone/media requests while rejecting unrelated Chromium
- * permissions. macOS still owns the actual microphone grant through TCC.
- */
+/** Admit media and the app player's fullscreen requests. Other permissions stay denied. */
 export function installMediaPermissionHandler(target: PermissionSession): void {
-  target.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(permission === 'media')
+  target.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (permission === 'media') {
+      // macOS still owns the actual microphone grant through TCC.
+      callback(true)
+      return
+    }
+    if (
+      permission === 'fullscreen' &&
+      details.isMainFrame &&
+      webContents === getMainWindow()?.webContents
+    ) {
+      const rendererUrl =
+        !app.isPackaged && process.env.ELECTRON_RENDERER_URL
+          ? process.env.ELECTRON_RENDERER_URL
+          : pathToFileURL(rendererHtmlPath()).href
+      callback(
+        fullscreenOriginAllowed(
+          rendererUrl,
+          getMainWindowDocumentUrl() ?? '',
+          webContents.getURL(),
+          details.requestingUrl
+        )
+      )
+      return
+    }
+    callback(false)
   })
 }

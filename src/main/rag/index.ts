@@ -12,6 +12,7 @@ import type {
   RagDocument
 } from '@offgrid/rag'
 import { embeddings } from '../embeddings'
+import { getEmbeddingDimensions } from '../embedding-model-choice'
 import {
   desktopVectorStore,
   getRagDocument,
@@ -26,7 +27,9 @@ import {
 } from '../sync-knowledge-document'
 
 const embeddingProvider: EmbeddingProvider = {
-  dimension: 384,
+  get dimension() {
+    return getEmbeddingDimensions()
+  },
   embed: (text) => embeddings.generateEmbedding(text)
 }
 

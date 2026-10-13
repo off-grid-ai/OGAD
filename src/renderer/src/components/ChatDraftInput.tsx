@@ -24,7 +24,7 @@ export interface ChatDraftInputHandle {
 interface ChatDraftInputProps {
   store: ChatDraftStore
   skills: readonly SkillOption[]
-  mode: 'ask' | 'image'
+  mode: 'ask' | 'image' | 'video'
   activeProjectName?: string
   attachmentPending: boolean
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void
@@ -159,9 +159,11 @@ export const ChatDraftInput = forwardRef<ChatDraftInputHandle, ChatDraftInputPro
               ? `${offeredSuggestion} (Tab)`
               : mode === 'image'
                 ? 'Describe an image to generate…'
-                : activeProjectName
-                  ? `Ask about “${activeProjectName}”…`
-                  : 'Ask anything…'
+                : mode === 'video'
+                  ? 'Describe a video to generate…'
+                  : activeProjectName
+                    ? `Ask about “${activeProjectName}”…`
+                    : 'Ask anything…'
           }
           className="min-h-0 max-h-52 w-full resize-none overflow-y-auto rounded-none border-0 bg-transparent px-3.5 pt-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:outline-none"
         />

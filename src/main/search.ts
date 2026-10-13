@@ -4,6 +4,7 @@
 // observation/frame/transcript backlog (using the in-app MiniLM model) so the
 // semantic half actually covers your captured life. All local, all offline.
 import { getDB } from './database'
+import { isEmbeddingIndexRebuilding } from './embedding-rebuild-state'
 import { embeddings } from './embeddings'
 import { ensureRagStoreSchema } from './rag/store'
 import { addChunks, searchVectors, vectorCount, type VecChunk } from './vectors'
@@ -21,7 +22,11 @@ import {
   type SearchResult,
   type SearchSort
 } from './search-ranking'
-import { PENDING_COUNT_SQL, PENDING_SOURCE_SQL } from './search-backfill-queries'
+import {
+  INDEXABLE_COUNT_SQL,
+  PENDING_COUNT_SQL,
+  PENDING_SOURCE_SQL
+} from './search-backfill-queries'
 
 export type { SearchResult, SearchSort } from './search-ranking'
 
@@ -58,6 +63,12 @@ function pendingRows(limit: number): PendingRow[] {
   return []
 }
 
+/** Count the source rows that a new embedding model must re-index. */
+export function searchIndexableCount(): number {
+  const row = getDB().prepare(INDEXABLE_COUNT_SQL).get() as { c: number }
+  return row.c
+}
+
 /** Embed one batch of un-indexed items into LanceDB. Returns progress. */
 async function indexBatch(limit = 48): Promise<{ indexed: number; remaining: number }> {
   ensureIndexTable()
@@ -92,18 +103,27 @@ async function indexBatch(limit = 48): Promise<{ indexed: number; remaining: num
 }
 
 let backfilling = false
+/** Wait for an in-flight search batch before replacing the embedding index. */
+export async function waitForSearchBackfill(): Promise<void> {
+  while (backfilling) await new Promise((resolve) => setTimeout(resolve, 50))
+}
+
 /** Drain the backlog in the background, one throttled batch at a time. */
 export async function runBackfill(
-  onProgress?: (p: { done: number; remaining: number }) => void
+  onProgress?: (p: { done: number; remaining: number }) => void,
+  shouldStop?: () => boolean
 ): Promise<void> {
   if (backfilling) return
   backfilling = true
   try {
     let done = 0
     for (;;) {
+      if (shouldStop?.()) throw new Error('Embedding index rebuild canceled.')
+      if (!shouldStop && isEmbeddingIndexRebuilding()) break
       const { indexed, remaining } = await indexBatch()
       done += indexed
       onProgress?.({ done, remaining })
+      if (shouldStop?.()) throw new Error('Embedding index rebuild canceled.')
       if (remaining === 0) break
       await new Promise((r) => setTimeout(r, 50)) // breathe — don't starve the LLM/UI
     }
@@ -360,6 +380,7 @@ function semanticSourceExists(hit: VecChunk): boolean {
  * Stale vectors are harmless cache entries and never become user-visible hits.
  */
 export async function searchSemanticSources(vector: number[], limit: number): Promise<RawHit[]> {
+  if (isEmbeddingIndexRebuilding()) return []
   const hits = await searchVectors(vector, limit)
   return hits.filter(semanticSourceExists).map((h) => ({
     key: h.key,
@@ -427,7 +448,7 @@ export async function universalSearch(
 
   const lists = keywordHits(q, perSource)
   opts.signal?.throwIfAborted()
-  if (opts.semantic !== false) {
+  if (opts.semantic !== false && !isEmbeddingIndexRebuilding()) {
     try {
       lists.push(await semanticHits(q, perSource))
     } catch {

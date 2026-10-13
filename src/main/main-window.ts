@@ -13,9 +13,22 @@
 import type { BrowserWindow } from 'electron'
 
 let mainWin: BrowserWindow | null = null
+let mainDocumentUrl: string | null = null
 
 export function setMainWindow(win: BrowserWindow): void {
   mainWin = win
+  mainDocumentUrl = null
+  // History routes change getURL(), but do not replace the trusted app document.
+  win.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+    if (mainWin === win && mainFrame && !inPlace) mainDocumentUrl = null
+  })
+  win.webContents.on('did-navigate', (_event, url) => {
+    if (mainWin === win) mainDocumentUrl = url
+  })
+}
+
+export function getMainWindowDocumentUrl(): string | null {
+  return getMainWindow() ? mainDocumentUrl : null
 }
 
 /** The main window, or null before it exists / after it is destroyed. */

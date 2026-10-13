@@ -180,7 +180,8 @@ export default defineConfig({
         'src/main/updater.ts',
         'src/main/dev-seed.ts',
         'src/main/ocr.ts',
-        'src/main/embeddings.ts',
+        // embeddings.ts and vectors.ts are no longer excluded: the embedding switch and the vector
+        // table swap are tested against real files and a real LanceDB store.
         // permissions.ts is no longer excluded: it is unit-tested now, including the multicast probe's four
         // outcomes (delivered, refused, socket error, silent) - the socket-error case is the one that would
         // otherwise be an uncaught exception in main during setup, so it is worth measuring rather than
@@ -198,7 +199,6 @@ export default defineConfig({
         'src/main/tools.ts', // agentic loop (tools-stream.test.ts) + parsers (tools-parsers.ts)
         'src/main/files.ts', // upload IO; classifyUpload → files-classify.ts (tested)
         'src/main/tts.ts', // engine spawn; chooseVoice/parseServeLine → tts-logic.ts (tested)
-        'src/main/vectors.ts', // LanceDB shell; predicates → vectors-predicates.ts (tested)
         'src/main/data-privacy.ts',
         'src/main/artifacts.ts',
         'src/main/secrets.ts',

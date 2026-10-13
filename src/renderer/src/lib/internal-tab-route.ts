@@ -31,9 +31,11 @@ const ROUTES: Record<InternalTabView, readonly InternalTabRoute[]> = {
   models: [
     { id: 'text', slug: null, label: modelKindLabel('text') },
     { id: 'image', slug: 'image', label: modelKindLabel('image') },
+    { id: 'video', slug: 'video', label: modelKindLabel('video') },
     { id: 'computer_use', slug: 'computer-use', label: modelKindLabel('computer_use') },
     { id: 'voice', slug: 'voice', label: modelKindLabel('voice') },
     { id: 'transcription', slug: 'transcription', label: modelKindLabel('transcription') },
+    { id: 'embedding', slug: 'embedding', label: modelKindLabel('embedding') },
     { id: 'storage', slug: 'storage', label: 'Storage' }
   ],
   notifications: [

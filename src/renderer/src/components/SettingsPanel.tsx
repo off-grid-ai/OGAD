@@ -25,6 +25,7 @@ import {
   type ModelSettingsPanelTab as Tab
 } from '@renderer/lib/model-settings-panel'
 import { ImageSettingsTab } from './ImageSettingsTab'
+import { VideoSettingsTab } from './VideoSettingsTab'
 import { SidePanel } from './SidePanel'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
 import { BestSettingsCard } from './BestSettingsCard'
@@ -130,7 +131,7 @@ const TOOL_GROUPS = [
   },
   {
     label: 'Media',
-    matches: (name: string): boolean => name === 'generate_image'
+    matches: (name: string): boolean => name === 'generate_image' || name === 'generate_video'
   },
   {
     label: 'Utilities',
@@ -414,6 +415,7 @@ export function SettingsPanel({
           [
             'model',
             'image',
+            'video',
             'voice',
             'transcription',
             'remote',
@@ -903,6 +905,7 @@ export function SettingsPanel({
         )}
 
         {tab === 'image' && <ImageSettingsTab />}
+        {tab === 'video' && <VideoSettingsTab />}
 
         {tab === 'remote' && <RemoteVisionSettingsTab />}
 

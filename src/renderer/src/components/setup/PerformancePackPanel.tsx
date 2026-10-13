@@ -13,7 +13,7 @@ interface PerformancePackPanelProps {
 
 const GPU_COMPONENTS = [
   { name: 'Chat and vision', detail: 'NVIDIA chat engine' },
-  { name: 'Image generation', detail: 'NVIDIA image engine' },
+  { name: 'Image and video generation', detail: 'NVIDIA image and video engine' },
   { name: 'Transcription', detail: 'NVIDIA speech-to-text engine' },
   { name: 'Computer Use', detail: 'NVIDIA grounding and decision engines' }
 ] as const

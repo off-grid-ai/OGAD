@@ -15,14 +15,27 @@ fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
-if [ -n "${OFFGRID_SD_ARCHIVE_CACHE_DIR:-}" ] &&
-  [ -f "$OFFGRID_SD_ARCHIVE_CACHE_DIR/$ARCHIVE" ]; then
-  cp "$OFFGRID_SD_ARCHIVE_CACHE_DIR/$ARCHIVE" "$WORK/$ARCHIVE"
+if [ "${OFFGRID_BUILD_IMAGE_FROM_SOURCE:-0}" = 1 ]; then
+  node "$ROOT/scripts/prepare-image-runtime.mjs" "$WORK/src"
+  cmake -S "$WORK/src" -B "$WORK/build" -DCMAKE_BUILD_TYPE=Release \
+    -DSD_VULKAN=ON -DSD_BUILD_EXAMPLES=ON -DSD_SERVER_BUILD_FRONTEND=OFF \
+    -DSD_BUILD_SHARED_LIBS=OFF -DSD_BUILD_SHARED_GGML_LIB=OFF -DGGML_NATIVE=OFF
+  cmake --build "$WORK/build" --target sd-cli sd-server --parallel 4
+  mkdir -p "$WORK/sd"
+  install -m 755 "$WORK/build/bin/sd-cli" "$WORK/build/bin/sd-server" "$WORK/sd/"
+  install -m 644 "$WORK/src/LICENSE" "$WORK/sd/LICENSE"
+  help="$("$WORK/sd/sd-cli" --help 2>&1)"
+  grep -q -- '--decode-preview-path' <<< "$help"
 else
-  curl --fail --location --retry 3 --silent --show-error "$URL" --output "$WORK/$ARCHIVE"
+  if [ -n "${OFFGRID_SD_ARCHIVE_CACHE_DIR:-}" ] &&
+    [ -f "$OFFGRID_SD_ARCHIVE_CACHE_DIR/$ARCHIVE" ]; then
+    cp "$OFFGRID_SD_ARCHIVE_CACHE_DIR/$ARCHIVE" "$WORK/$ARCHIVE"
+  else
+    curl --fail --location --retry 3 --silent --show-error "$URL" --output "$WORK/$ARCHIVE"
+  fi
+  printf '%s  %s\n' "$SHA256" "$WORK/$ARCHIVE" | sha256sum --check --status
+  unzip -q "$WORK/$ARCHIVE" -d "$WORK/sd"
 fi
-printf '%s  %s\n' "$SHA256" "$WORK/$ARCHIVE" | sha256sum --check --status
-unzip -q "$WORK/$ARCHIVE" -d "$WORK/sd"
 test -x "$WORK/sd/sd-cli"
 test -x "$WORK/sd/sd-server"
 

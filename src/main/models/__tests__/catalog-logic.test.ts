@@ -91,6 +91,22 @@ describe('localsForCatalog', () => {
   it('returns [] for no locals', () => {
     expect(localsForCatalog([], presentAll)).toEqual([])
   })
+  it('shows an external vision model with its projector and source', () => {
+    const models = localsForCatalog([{
+      ...local,
+      id: 'external:vision',
+      kind: 'vision',
+      source: 'LM Studio',
+      mmproj: '/models/mmproj.gguf'
+    }], presentAll)
+    expect(models).toMatchObject([{
+      id: 'external:vision',
+      kind: 'vision',
+      org: 'LM Studio',
+      tags: ['External'],
+      files: [{ role: 'primary' }, { name: '/models/mmproj.gguf', role: 'mmproj' }]
+    }])
+  })
 })
 
 describe('downloadedForCatalog', () => {

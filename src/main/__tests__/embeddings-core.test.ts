@@ -18,7 +18,7 @@ vi.mock('../onnx-device', () => ({
   })
 }))
 
-import { disposeEmbeddingModel, embedText } from '../embeddings-core'
+import { disposeEmbeddingModel, embedText, probeEmbeddingModel } from '../embeddings-core'
 
 let profile: string
 let selected: string
@@ -46,6 +46,19 @@ it('retries an embedding model load after a temporary provider failure', async (
   await expect(embedText('first', selected)).rejects.toThrow('provider unavailable')
   await expect(embedText('second', selected)).resolves.toEqual([0.25, 0.5])
   expect(host.pipeline).toHaveBeenCalledTimes(2)
+})
+
+it('checks a new model vector before changing the active pipeline', async () => {
+  const runtime = Object.assign(
+    vi.fn(async () => ({ data: new Float32Array(768).fill(0.25) })),
+    { dispose: vi.fn() }
+  )
+  host.pipeline.mockResolvedValue(runtime)
+  await expect(probeEmbeddingModel('org/embedding-model', '/synthetic/models')).resolves.toBe(768)
+  expect(host.pipeline).toHaveBeenCalledWith('feature-extraction', 'org/embedding-model', {
+    device: 'cpu'
+  })
+  expect(runtime.dispose).toHaveBeenCalledOnce()
 })
 
 it('loads embeddings from a scan folder while the chosen folder is offline', async () => {

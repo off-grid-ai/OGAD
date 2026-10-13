@@ -39,6 +39,68 @@ if (typeof window !== 'undefined' && typeof Element.prototype.scrollTo === 'unde
   Element.prototype.scrollTo = function scrollTo(): void {}
 }
 
+// media-chrome checks display mode while loading. jsdom has no media-query
+// engine; the harness represents an ordinary browser window, not standalone PiP.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  const matchMedia = (query: string): MediaQueryList =>
+    Object.assign(new EventTarget(), {
+      media: query,
+      matches: false,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {}
+    }) as MediaQueryList
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: matchMedia
+  })
+  Object.defineProperty(globalThis, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: matchMedia
+  })
+}
+
+// Chromium exposes a TextTrackList EventTarget; jsdom returns a plain array.
+// Keep track events functional so the real media-chrome store can subscribe.
+if (typeof HTMLMediaElement !== 'undefined') {
+  const tracks = new WeakMap<HTMLMediaElement, TextTrackList>()
+  Object.defineProperty(HTMLMediaElement.prototype, 'textTracks', {
+    configurable: true,
+    get(this: HTMLMediaElement): TextTrackList {
+      let list = tracks.get(this)
+      if (!list) {
+        list = Object.assign(new EventTarget(), {
+          length: 0,
+          onchange: null,
+          onaddtrack: null,
+          onremovetrack: null,
+          getTrackById: () => null,
+          [Symbol.iterator]: () => [][Symbol.iterator]()
+        }) as unknown as TextTrackList
+        tracks.set(this, list)
+      }
+      return list
+    }
+  })
+  const audioTracks = new WeakMap<HTMLMediaElement, EventTarget>()
+  Object.defineProperty(HTMLMediaElement.prototype, 'audioTracks', {
+    configurable: true,
+    get(this: HTMLMediaElement): EventTarget {
+      let list = audioTracks.get(this)
+      if (!list) {
+        list = Object.assign(new EventTarget(), {
+          length: 0,
+          [Symbol.iterator]: () => [][Symbol.iterator]()
+        })
+        audioTracks.set(this, list)
+      }
+      return list
+    }
+  })
+}
+
 // Web Storage: Node 25 and later define their own global `localStorage` and `sessionStorage`,
 // which are undefined unless Node starts with --localstorage-file. That global shadows the one
 // jsdom provides, so `localStorage.clear()` in a test throws before it runs. Chromium always has

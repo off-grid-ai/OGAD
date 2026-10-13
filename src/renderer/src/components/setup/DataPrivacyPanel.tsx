@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Trash, Warning } from '@phosphor-icons/react'
 
 interface DataCategory {
-  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
+  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images' | 'videos'
   label: string
   detail: string
   count?: number

@@ -5,7 +5,7 @@ import { nativeLibraryEnv } from '../native-library-env'
 import { hasLinuxNvidiaDriver } from '../transcription/whisper-runtime'
 import { prioritizeBackend, type BackendPreference } from '../../shared/backend-preferences'
 
-/** The backend selected by the native image binary that completed the run. */
+/** Build backend used for runtime selection; this does not report the compute device. */
 export function imageBackendForRuntime(
   platform: NodeJS.Platform,
   binaryPath: string

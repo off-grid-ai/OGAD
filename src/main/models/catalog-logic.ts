@@ -118,6 +118,14 @@ export type SizeOf = (name: string) => number
 /** True when a filename exists on disk with size > 0. */
 export type FilePresent = (name: string) => boolean
 
+/** Missing bytes, using the same presence probe as the downloader. */
+export function remainingDownloadBytes(entry: Pick<CatalogEntry, 'files'>, sizeOf: SizeOf): number {
+  return entry.files.reduce(
+    (bytes, file) => bytes + (sizeOf(file.name) > 0 ? 0 : (file.sizeBytes ?? 0)),
+    0
+  )
+}
+
 export const isProjectorFileName = (name: string): boolean =>
   /(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(name.split(/[\\/]/).at(-1) ?? name)
 
@@ -170,7 +178,8 @@ export function downloadedForCatalog(
         files: m.files.map((name) => ({
           name,
           url: '',
-          sizeBytes: sizeOf(name) || family?.files.find((file) => file.name === name)?.sizeBytes || 0,
+          sizeBytes:
+            sizeOf(name) || family?.files.find((file) => file.name === name)?.sizeBytes || 0,
           role: isProjectorFileName(name) ? 'mmproj' : isMtpFileName(name) ? 'aux' : 'primary'
         }))
       }
@@ -204,7 +213,12 @@ export function mergeCatalog(opts: {
   )
   return [
     ...localsForCatalog(opts.locals, opts.present),
-    ...downloadedForCatalog(opts.downloaded, opts.installedDownloadedIds, opts.catalog, opts.sizeOf),
+    ...downloadedForCatalog(
+      opts.downloaded,
+      opts.installedDownloadedIds,
+      opts.catalog,
+      opts.sizeOf
+    ),
     ...opts.catalog.filter((entry) => !representedFamilies.has(entry.id))
   ]
 }
@@ -340,11 +354,14 @@ export function buildDiskEntry(opts: {
   catalogById: (id: string) => CatalogEntry | undefined
   isCatalogId: (id: string) => boolean
   activeChatId: string | null
-  modals: Record<Modality, string | null>
+  modals: Partial<Record<Modality, string | null>>
   sizeOf: SizeOf
 }): { id: string; name: string; kind?: string; bytes: number; active: boolean } {
   const { id, sizeOf } = opts
-  const lm = id.startsWith('local:') || id.startsWith('external:') ? opts.locals.find((m) => m.id === id) : undefined
+  const lm =
+    id.startsWith('local:') || id.startsWith('external:')
+      ? opts.locals.find((m) => m.id === id)
+      : undefined
   if (lm) {
     const bytes = [lm.primary, lm.mmproj]
       .filter(Boolean)
@@ -363,7 +380,7 @@ export function buildDiskEntry(opts: {
     }
   }
   const dl = opts.downloaded.find((m) => m.id === id)
-  if (dl && !opts.isCatalogId(id)) {
+  if (dl && (!opts.isCatalogId(id) || opts.catalogById(id)?.kind === 'video')) {
     const bytes = dl.files.reduce((s, n) => s + sizeOf(n), 0)
     const primary = dl.files.find((name) => !isProjectorFileName(name)) ?? dl.files[0]
     const kind = (dl.familyId ? opts.catalogById(dl.familyId)?.kind : undefined) ?? dl.kind
@@ -430,7 +447,7 @@ export function scanModelDir(opts: {
   let totalBytes = 0
   const orphans: { name: string; bytes: number }[] = []
   for (const name of opts.entries) {
-    if (!name.endsWith('.gguf') && !name.endsWith('.part')) continue
+    if (!opts.known.has(name) && !/\.(gguf|safetensors|part)$/i.test(name)) continue
     const st = opts.statFile(name)
     if (!st || !st.isFile) continue
     totalBytes += st.size
@@ -451,7 +468,11 @@ export function modalityForModel(kind?: string | null): Modality | null {
  *  the chat LLM. Mirrors the guard in setActiveModalChoice. */
 export function isModalKind(kind: string): kind is Modality {
   return (
-    kind === 'computer_use' || kind === 'image' || kind === 'speech' || kind === 'transcription'
+    kind === 'computer_use' ||
+    kind === 'image' ||
+    kind === 'video' ||
+    kind === 'speech' ||
+    kind === 'transcription'
   )
 }
 

@@ -1,76 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  MagicWand,
-  CheckCircle,
-  WarningCircle,
-  ChatCircle,
-  Image as ImageIcon,
-  SpeakerHigh,
-  Microphone,
-  DownloadSimple,
-  DesktopTower,
-  Devices
-} from '@phosphor-icons/react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { MagicWand, CheckCircle, WarningCircle, DesktopTower, Devices } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { deviceNoun } from '@renderer/lib/device'
 import { HealthPanel } from './HealthPanel'
+import { Button } from '../ui/button'
+import { OFF_GRID_DESKTOP_RELEASES_URL } from '../../constants/links'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
+import { totalDownloadGb } from '../../../../shared/setup-contract'
 import { formatStorageBytes } from './storage-format'
+import { modelSetupErrorMessage } from '@renderer/lib/download-label'
 
-type Mode = 'conservative' | 'balanced' | 'extreme'
+import type {
+  RecMode as Mode,
+  SetupPlan,
+  SetupItem,
+  SetupItemKind as ItemKind,
+  SetupProgress
+} from '../../../../shared/setup-contract'
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   {
     id: 'conservative',
     label: 'Conservative',
-    hint: 'Lightest - small, fast, low memory (skips the image model)'
+    hint: 'Smaller chat and speech models. Image and video are optional.'
   },
   {
     id: 'balanced',
     label: 'Balanced',
-    hint: 'Recommended - capable vision model within a safe share of RAM'
+    hint: 'Recommended chat model for this device. Other models are optional.'
   },
-  { id: 'extreme', label: 'Extreme', hint: 'Largest model and context your RAM allows' }
+  {
+    id: 'extreme',
+    label: 'Extreme',
+    hint: 'Larger chat and speech recommendations. Other models are optional.'
+  }
 ]
 
-type ItemKind = 'chat' | 'transcription' | 'voice' | 'image'
-const KIND_ICON: Record<
-  ItemKind,
-  React.ComponentType<{ className?: string; weight?: 'fill' | 'regular' }>
-> = {
-  chat: ChatCircle,
-  transcription: Microphone,
-  voice: SpeakerHigh,
-  image: ImageIcon
-}
-
-interface SetupProgress {
-  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error'
-  message: string
-  modelId?: string
-  modelName?: string
-  percent?: number
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
-  totalBytes?: number
-  bytesPerSecond?: number
-}
-interface SetupItem {
-  kind: ItemKind
-  capability: string
-  id: string
-  name: string
-  sizeGb: number
-  installed: boolean
-  required: boolean
-}
-interface SetupPlan {
-  mode: Mode
-  ramGb: number
-  items: SetupItem[]
-  totalDownloadGb: number
+// Cached embeddings have no activation step in Auto Setup.
+function canSetUpItem(item: SetupItem): boolean {
+  return !(item.kind === 'embedding' && item.installed)
 }
 
 interface SetupPanelProps {
@@ -82,15 +51,56 @@ function reportSetupFailure(operation: string, error: unknown): void {
   console.error(`[setup] ${operation} failed`, error)
 }
 
+function VideoRuntimeRecovery({
+  issue,
+  disabled,
+  onRecheck
+}: {
+  issue?: string
+  disabled: boolean
+  onRecheck: () => void
+}): React.ReactElement | null {
+  if (!issue) return null
+  return (
+    <div className="mt-2 space-y-1.5 text-[11px] text-neutral-400" role="status">
+      <p>{issue}</p>
+      <div className="flex gap-2">
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => {
+            void window.api
+              .openExternal(OFF_GRID_DESKTOP_RELEASES_URL)
+              .catch((error: unknown) => reportSetupFailure('installer link', error))
+          }}
+        >
+          Open app downloads
+        </Button>
+        <Button size="xs" variant="outline" disabled={disabled} onClick={onRecheck}>
+          Check again
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 /** The reusable setup surface: pick a resource mode, see exactly which model it'll
  *  install, then one-click Configure. Used on the first-run gate and in Settings. */
 export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React.ReactElement {
   const api = window.api
+  const selectionId = useId()
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [mode, setMode] = useState<Mode>('balanced')
   const [savingMode, setSavingMode] = useState(false)
+  const [loadingPlan, setLoadingPlan] = useState(false)
   const [plan, setPlan] = useState<SetupPlan | null>(null)
+  const [selectedKinds, setSelectedKinds] = useState<Partial<Record<ItemKind, boolean>>>({
+    chat: true
+  })
+  const selectedItems =
+    plan?.items.filter((item) => selectedKinds[item.kind] && canSetUpItem(item)) ?? []
+  const downloadGb = totalDownloadGb(selectedItems)
   const firedConfigured = useRef(false)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
 
@@ -138,9 +148,10 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   }, [api, onConfigured])
 
   const pickMode = async (m: Mode): Promise<void> => {
-    if (savingMode || m === mode) return
+    if (savingMode || loadingPlan || m === mode) return
     setSavingMode(true)
     try {
+      // The choice is saved first; a failed save keeps the previous mode and its plan.
       await api.setLlmSettings({ performanceMode: m })
       setMode(m)
       await loadPlan(m)
@@ -152,14 +163,22 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   }
 
   const configure = async (): Promise<void> => {
-    if (running) return
+    if (running || loadingPlan || !selectedItems.length) return
     firedConfigured.current = false
     setRunning(true)
-    setProgress({ phase: 'select', message: `Picking a model that fits your ${deviceNoun()}...` })
+    setProgress({ phase: 'select', message: 'Checking selected local models...' })
     try {
-      await api.autoConfigure()
+      const result = await api.autoConfigure(
+        selectedItems.map((item) => item.id),
+        mode
+      )
+      if (!result.success) {
+        setProgress({ phase: 'error', message: result.error ?? 'Setup failed.' })
+      }
+      await loadPlan(mode)
     } catch (e) {
       setProgress({ phase: 'error', message: e instanceof Error ? e.message : 'Setup failed.' })
+    } finally {
       setRunning(false)
     }
   }
@@ -168,7 +187,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
     const id = progress?.modelId
     if (id) {
       api
-        .cancelModelDownload(id)
+        .cancelSetupDownload(id)
         .catch((error: unknown) => reportSetupFailure('model-download cancellation', error))
     }
   }
@@ -195,13 +214,13 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
           </div>
           <button
             onClick={configure}
-            disabled={running}
+            disabled={running || loadingPlan || !selectedItems.length}
             className={cn(
               'shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-xs font-medium transition-colors',
               'bg-green-600 text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-60'
             )}
           >
-            {running ? 'Setting up...' : done ? 'Run again' : 'Configure'}
+            {running ? 'Setting up...' : 'Set up selected'}
           </button>
         </div>
 
@@ -212,8 +231,8 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               Local and remote
             </div>
             <p className="mt-2 text-[11px] leading-5 text-neutral-500">
-              Installed models can handle Chat, images, transcription, voice, and Computer Use on
-              this {deviceNoun()}. A saved model server is an optional Chat source.
+              Installed models can handle Chat, images, videos, transcription, voice, and Computer
+              Use on this {deviceNoun()}. A saved model server is an optional Chat source.
             </p>
           </div>
           <div className="bg-neutral-950/70 p-3">
@@ -237,8 +256,10 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
             {MODES.map((m) => (
               <button
                 key={m.id}
-                onClick={() => { void pickMode(m.id) }}
-                disabled={savingMode}
+                onClick={() => {
+                  void pickMode(m.id)
+                }}
+                disabled={loadingPlan || running}
                 aria-pressed={mode === m.id}
                 className={cn(
                   'flex-1 px-2 py-1.5 text-xs transition-colors',
@@ -260,52 +281,118 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
         {plan && (
           <div className="mt-3">
             <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-widest text-neutral-600">
-              <span>Will set up</span>
+              <span>Choose local models</span>
               <span className="normal-case tracking-normal text-neutral-500">
-                {plan.totalDownloadGb > 0
-                  ? `~${plan.totalDownloadGb.toFixed(1)} GB to download`
-                  : 'all installed'}
-                {' · sized for your '}
+                {downloadGb > 0
+                  ? `~${formatStorageBytes(downloadGb * 1e9)} to download`
+                  : selectedItems.length
+                    ? 'selected models installed'
+                    : 'no models selected'}
+                {' · device RAM: '}
                 {plan.ramGb} GB {deviceNoun()}
               </span>
             </div>
-            <ul className="divide-y divide-neutral-800/70 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950/40">
+            <ul className="divide-y divide-neutral-800/70 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/40">
               {plan.items.map((it) => {
-                const Icon = KIND_ICON[it.kind]
+                const selectable = canSetUpItem(it)
+                const Row = selectable ? 'label' : 'div'
                 return (
-                  <li key={it.id} className="flex items-center gap-3 px-3 py-2">
-                    <Icon className="h-4 w-4 shrink-0 text-green-500" weight="regular" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs text-white">
+                  <li key={it.id}>
+                    <Row
+                      htmlFor={selectable ? `${selectionId}-${it.kind}` : undefined}
+                      className={cn(
+                        'flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2',
+                        selectable &&
+                          'transition-colors hover:bg-neutral-800/40 focus-within:bg-neutral-800/40',
+                        !selectable || running || loadingPlan ? 'cursor-default' : 'cursor-pointer'
+                      )}
+                    >
+                      {selectable ? (
+                        <input
+                          type="checkbox"
+                          id={`${selectionId}-${it.kind}`}
+                          aria-label={`Set up ${it.name} for ${it.capability}`}
+                          checked={!!selectedKinds[it.kind]}
+                          disabled={running || loadingPlan}
+                          onChange={(event) =>
+                            setSelectedKinds((current) => ({
+                              ...current,
+                              [it.kind]: event.target.checked
+                            }))
+                          }
+                          className="h-4 w-4 shrink-0 accent-primary"
+                        />
+                      ) : (
+                        <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-xs text-white" title={it.name}>
                         {it.name}
-                        {it.kind === 'chat' && (
-                          <span className="ml-1.5 text-[10px] text-neutral-500">
-                            {' / chat + vision'}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] uppercase tracking-wider text-neutral-600">
+                      </span>
+                      <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-500">
                         {it.capability}
-                      </div>
-                    </div>
-                    {it.installed ? (
-                      <span className="flex shrink-0 items-center gap-1 text-[10px] text-green-500">
-                        <CheckCircle weight="fill" className="h-3.5 w-3.5" /> installed
                       </span>
-                    ) : (
-                      <span className="flex shrink-0 items-center gap-1 text-[10px] text-neutral-500">
-                        <DownloadSimple className="h-3.5 w-3.5" />{' '}
-                        {it.sizeGb ? `${it.sizeGb.toFixed(1)} GB` : 'size unknown'}
+                      <span className="w-16 shrink-0 text-right text-[11px] tabular-nums text-neutral-400">
+                        {(it.installed ? it.sizeGb : (it.downloadSizeGb ?? it.sizeGb))
+                          ? formatStorageBytes(
+                              (it.installed ? it.sizeGb : (it.downloadSizeGb ?? it.sizeGb)) * 1e9
+                            )
+                          : 'size unknown'}
                       </span>
-                    )}
+                      <span className="flex w-20 shrink-0 items-center justify-end gap-1 text-[10px]">
+                        {it.installed ? (
+                          <>
+                            <CheckCircle weight="fill" className="h-3.5 w-3.5 text-green-500" />
+                            <span className="text-green-500">
+                              {selectable ? 'installed' : 'Included'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-neutral-500">download</span>
+                        )}
+                      </span>
+                    </Row>
                   </li>
                 )
               })}
             </ul>
+            {plan.items.some((item) => item.files?.length) && (
+              <details className="mt-1.5 text-[10px] text-neutral-500">
+                <summary className="w-fit cursor-pointer transition-colors hover:text-foreground">
+                  Required files
+                </summary>
+                <div className="mt-1 space-y-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-2">
+                  {plan.items
+                    .filter((item) => item.files?.length)
+                    .map((item) => (
+                      <div key={item.id}>
+                        <div className="text-neutral-300">{item.name}</div>
+                        {item.files?.map((file) => (
+                          <div key={file.name} className="break-all">
+                            {file.name} ({formatStorageBytes(file.sizeBytes ?? 0)})
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                </div>
+              </details>
+            )}
+            {plan.embeddingNote && (
+              <div className="mt-1.5 text-[11px] text-neutral-500">{plan.embeddingNote}</div>
+            )}
+            {plan.videoNote && (
+              <div className="mt-1.5 text-[11px] text-neutral-500">{plan.videoNote}</div>
+            )}
+            <VideoRuntimeRecovery
+              issue={plan.videoRuntimeIssue}
+              disabled={running || loadingPlan}
+              onRecheck={() => {
+                setLoadingPlan(true)
+                void loadPlan(mode).finally(() => setLoadingPlan(false))
+              }}
+            />
             <div className="mt-1.5 text-[11px] text-neutral-600">
-              Chat is ready first. Transcription, voice
-              {plan.items.some((i) => i.kind === 'image') ? ', and image' : ''} finish in the
-              background.
+              Only checked models download. Each video model includes all required files. Your saved
+              active choices stay unchanged.
             </div>
             <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1.5 text-[11px] text-neutral-500">
               For solid reasoning and tool use,{' '}
@@ -322,7 +409,9 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
             <div className="flex items-center gap-2 text-xs">
               {done && <CheckCircle weight="fill" className="h-4 w-4 text-green-500" />}
               {errored && <WarningCircle weight="fill" className="h-4 w-4 text-neutral-300" />}
-              <span className={progressTextClass}>{progress.message}</span>
+              <span className={progressTextClass} role={errored ? 'alert' : undefined}>
+                {errored ? modelSetupErrorMessage(progress.message) : progress.message}
+              </span>
             </div>
             {running && progress.phase === 'download' && (
               <div className="mt-2">

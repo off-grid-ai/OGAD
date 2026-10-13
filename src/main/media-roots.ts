@@ -14,6 +14,7 @@ const LOCAL_MEDIA_DIRS = [
   'entity-photos',
   'voice',
   'generated-images',
+  'generated-videos',
   'style-thumbs',
   'task-run-snapshots'
 ] as const

@@ -171,7 +171,8 @@ describe('rendered storage usage', () => {
     render(<StoragePanel />)
 
     expect(await screen.findByText('synthetic/text-model')).toBeTruthy()
-    expect(screen.getByText(diskFullMessage)).toBeTruthy()
+    // The raw system error becomes an instruction the user can act on.
+    expect(screen.getByText('Not enough free space. Free some storage, then retry.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(api.retryDownload).toHaveBeenCalledWith('synthetic/text-model')
   })

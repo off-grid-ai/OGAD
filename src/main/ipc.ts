@@ -41,6 +41,7 @@ import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
 import { setWebUseSettings } from './web-use-settings'
 import { WEB_USE_SETTINGS_KEY } from '../shared/web-use-settings'
 import { embeddings } from './embeddings'
+import { isEmbeddingIndexRebuilding } from './embedding-rebuild-state'
 import {
   getResidency,
   setResidencyMode,
@@ -115,12 +116,15 @@ async function regenerateMasterMemory(): Promise<string | null> {
 import {
   activeChatStreamSnapshots,
   beginChatImageStream,
+  beginChatVideoStream,
   bindChatStream,
   continueChatStreamWithImage,
+  continueChatStreamWithVideo,
   currentChatStreamMessageId,
   endChatStream,
   endChatStreamForConversation,
   noteChatStreamImageProgress,
+  noteChatStreamVideoProgress,
   noteChatStreamDelta,
   resetChatStreamPartial,
   noteChatStreamToolCompleted,
@@ -669,6 +673,7 @@ export function setupIPC(): void {
 
   ipcMain.handle('db:search-memories', async (_, query: string) => {
     try {
+      if (isEmbeddingIndexRebuilding()) throw new Error('Embedding index is rebuilding')
       const queryVector = await embeddings.generateEmbedding(query)
       const vecStr = JSON.stringify(queryVector)
 
@@ -925,6 +930,7 @@ export function setupIPC(): void {
         score?: number
       }> = []
       try {
+        if (isEmbeddingIndexRebuilding()) throw new Error('Embedding index is rebuilding')
         const queryVector = await embeddings.generateEmbedding(query)
         const vecStr = JSON.stringify(queryVector)
         const params: unknown[] = [vecStr]
@@ -1915,6 +1921,108 @@ export function setupIPC(): void {
     }
   })
   ipcMain.handle('models:restart-for-directory', () => requestApplicationRelaunch(app))
+  ipcMain.handle('models:embedding-choices', async () => {
+    const { EMBEDDING_MODELS, getEmbeddingModelId } = await import('./embedding-model-choice')
+    const active = getEmbeddingModelId()
+    const models: Array<{ id: string; name: string; detail: string; badge?: string }> = [
+      ...EMBEDDING_MODELS
+    ]
+    return {
+      models: models.some((model) => model.id === active)
+        ? models
+        : [
+            ...models,
+            {
+              id: active,
+              name: active.split('/').pop() ?? active,
+              detail: active,
+              badge: 'Your model'
+            }
+          ],
+      active
+    }
+  })
+  ipcMain.handle('models:embedding-rebuild-status', async () => {
+    const { getEmbeddingRebuildStatus } = await import('./embedding-index-rebuild')
+    return getEmbeddingRebuildStatus()
+  })
+  ipcMain.handle('models:cancel-embedding-rebuild', async () => {
+    const { cancelEmbeddingIndexRebuild } = await import('./embedding-index-rebuild')
+    try {
+      return { canceled: await cancelEmbeddingIndexRebuild() }
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : 'Could not restore the previous model.'
+      }
+    }
+  })
+  void import('./embedding-index-rebuild').then(({ onEmbeddingRebuildStatus }) => {
+    onEmbeddingRebuildStatus((status) => {
+      for (const window of BrowserWindow.getAllWindows())
+        window.webContents.send('models:embedding-rebuild-status-changed', status)
+    })
+  })
+  let embeddingChoiceInProgress = false
+  ipcMain.handle('models:choose-embedding', async (_, id: string) => {
+    if (embeddingChoiceInProgress)
+      return { error: 'Another embedding model change is in progress.' }
+    embeddingChoiceInProgress = true
+    try {
+      const { dialog } = await import('electron')
+      const { EMBEDDING_MODELS, getEmbeddingModelId, isEmbeddingModelId } =
+        await import('./embedding-model-choice')
+      if (!isEmbeddingModelId(id)) return { error: 'Unknown embedding model.' }
+      const {
+        cancelPendingEmbeddingChoice,
+        getEmbeddingRebuildStatus,
+        savePreviousEmbeddingChoice,
+        startEmbeddingIndexRebuild
+      } = await import('./embedding-index-rebuild')
+      if (['preparing', 'rebuilding'].includes(getEmbeddingRebuildStatus().phase))
+        return { error: 'Index rebuild is in progress.' }
+      if (id === getEmbeddingModelId()) return { canceled: true }
+      if (!EMBEDDING_MODELS.some((model) => model.id === id)) {
+        try {
+          await import('./embedding-hub').then((hub) => hub.verifyEmbeddingModel(id))
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : 'Could not check this model.' }
+        }
+      }
+      let itemCount: number | null = null
+      try {
+        itemCount = (await import('./embedding-index-rebuild')).estimateEmbeddingRebuildItems()
+      } catch (error) {
+        console.warn('[embeddings] could not estimate rebuild size', error)
+      }
+      const result = await dialog.showMessageBox({
+        type: 'question',
+        title: 'Change embedding model',
+        message: 'Use this embedding model?',
+        detail: `${itemCount === null ? 'Saved search and project knowledge indexes' : `About ${itemCount.toLocaleString()} search and knowledge entries`} will be indexed now. This can take a long time on large profiles. You can cancel during indexing and restore your previous model and indexes. The model may download on first use.`,
+        buttons: ['Use and rebuild', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1
+      })
+      if (result.response !== 0) return { canceled: true }
+      try {
+        const { embeddings } = await import('./embeddings')
+        const dimensions = await embeddings.probeModel(id)
+        savePreviousEmbeddingChoice()
+        await embeddings.switchModel(id, dimensions)
+        void startEmbeddingIndexRebuild().catch((error) =>
+          console.error('[embeddings] index rebuild failed', error)
+        )
+        return { success: true }
+      } catch (error) {
+        cancelPendingEmbeddingChoice()
+        return {
+          error: error instanceof Error ? error.message : 'Could not load this embedding model.'
+        }
+      }
+    } finally {
+      embeddingChoiceInProgress = false
+    }
+  })
   ipcMain.handle('models:scan-folders', () =>
     import('./model-storage-choice').then((m) => m.readModelScanFolders(app.getPath('userData')))
   )
@@ -2007,10 +2115,15 @@ export function setupIPC(): void {
   })
   // "Configure for me": pick a RAM-appropriate model, download, activate, start,
   // verify. Streams progress back to all windows via 'setup:progress'.
-  ipcMain.handle('setup:auto-configure', async () => {
+  ipcMain.handle('setup:cancel-download', (_e, modelId: string) =>
+    import('./setup').then((setup) => setup.cancelSetupDownload(modelId))
+  )
+  ipcMain.handle('setup:auto-configure', async (_e, selectedModelIds?: string[], mode?: string) => {
     const { autoConfigure } = await import('./setup')
-    return autoConfigure((p) =>
-      BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p))
+    return autoConfigure(
+      (p) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('setup:progress', p)),
+      selectedModelIds,
+      mode === 'conservative' || mode === 'balanced' || mode === 'extreme' ? mode : undefined
     )
   })
   // Restart a component. We only ever stop OUR OWN processes — never SIGKILL an
@@ -2058,7 +2171,7 @@ export function setupIPC(): void {
   ipcMain.handle('data:clear', (_e, id: string, olderThanDays?: number) =>
     import('./data-privacy').then((m) =>
       m.clearCategory(
-        id as 'chats' | 'memories' | 'captures' | 'meetings' | 'images',
+        id as 'chats' | 'memories' | 'captures' | 'meetings' | 'images' | 'videos',
         olderThanDays
       )
     )
@@ -2202,6 +2315,78 @@ export function setupIPC(): void {
     return true
   })
 
+  // --- Local video generation ----------------------------------------------
+  const videoJobPublisherReady = import('./videogen/job-service').then(
+    ({ videoGenerationJobs }) => {
+      videoGenerationJobs.onChange((snapshot) => {
+        if (snapshot.phase === 'running') {
+          noteChatStreamVideoProgress(
+            snapshot.conversationId,
+            snapshot.progress?.step,
+            snapshot.progress?.total
+          )
+        } else if (snapshot.phase === 'succeeded') {
+          endChatStreamForConversation(snapshot.conversationId, 'record_pending')
+        } else if (snapshot.phase === 'failed' || snapshot.phase === 'cancelled') {
+          endChatStreamForConversation(snapshot.conversationId, 'discarded')
+        }
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) window.webContents.send('videogen:job-state', snapshot)
+        }
+      })
+      videoGenerationJobs.onConversationUpdated((conversationId) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed())
+            window.webContents.send('videogen:conversation-updated', conversationId)
+        }
+      })
+      return videoGenerationJobs
+    }
+  )
+  ipcMain.handle('videogen:status', async () => (await import('./videogen')).videoGenStatus())
+  ipcMain.handle('videogen:job-status', async () => (await videoJobPublisherReady).status())
+  ipcMain.handle(
+    'videogen:generate',
+    async (_event, request: import('./videogen/job-service').VideoJobRequest) => {
+      const jobs = await videoJobPublisherReady
+      jobs.assertCanStart()
+      beginChatVideoStream(request.conversationId)
+      try {
+        const messageId = currentChatStreamMessageId(request.conversationId)
+        return await jobs.start({ ...request, ...(messageId ? { messageId } : {}) })
+      } catch (error) {
+        endChatStreamForConversation(request.conversationId, 'discarded')
+        throw error
+      }
+    }
+  )
+  ipcMain.handle('videogen:cancel', async () => (await videoJobPublisherReady).cancel())
+  ipcMain.handle(
+    'videogen:conversation-persisted',
+    async (_event, conversationId: string, messageId?: string) =>
+      (await videoJobPublisherReady).acknowledgeConversation(conversationId, messageId)
+  )
+  ipcMain.handle(
+    'videogen:list',
+    async (_event, scope?: { conversationId?: string; projectId?: string | null }) =>
+      (await import('./videogen')).listGeneratedVideos(scope)
+  )
+  ipcMain.handle('videogen:delete', async (_event, candidate: string) =>
+    (await import('./videogen')).deleteGeneratedVideo(candidate)
+  )
+  ipcMain.handle('videogen:export', async (event, source: string, suggestedName?: string) => {
+    const { dialog } = await import('electron')
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Save video',
+      defaultPath: suggestedName || 'off-grid-video.mp4',
+      filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
+    })
+    if (result.canceled || !result.filePath) return false
+    await (await import('./videogen')).exportGeneratedVideo(source, result.filePath)
+    return true
+  })
+
   // --- Agentic tool-calling (isolated, opt-in) ----------------------------
   ipcMain.handle('tools:list', async () => {
     const { listTools } = await import('./tools')
@@ -2226,6 +2411,7 @@ export function setupIPC(): void {
         allMemory?: boolean
         images?: string[]
         imageAvailable?: boolean
+        videoAvailable?: boolean
         streamId?: string
         thinking?: boolean
         /** What the user is doing now (God's context), added to the system prompt. */
@@ -2252,7 +2438,7 @@ export function setupIPC(): void {
       const controller = new AbortController()
       streamControllers.set(streamId, controller)
       bindChatStream(streamId, opts.conversationId, opts.thinking ? 'thinking' : 'waiting')
-      let continuesAsImage = false
+      let continuesAsMedia = false
       let toolStarted = false
       try {
         const { result, modelName } = await modalityQueue.run(CHAT_JOB, () =>
@@ -2319,12 +2505,14 @@ export function setupIPC(): void {
           )
         )
         if (result.imageRequests.length > 0) {
-          continuesAsImage = continueChatStreamWithImage(streamId)
+          continuesAsMedia = continueChatStreamWithImage(streamId)
+        } else if (result.videoRequests?.length) {
+          continuesAsMedia = continueChatStreamWithVideo(streamId)
         }
         return modelName ? { ...result, metrics: { ...result.metrics, modelName } } : result
       } finally {
         streamControllers.delete(streamId)
-        if (!continuesAsImage) {
+        if (!continuesAsMedia) {
           endChatStream(streamId, controller.signal.aborted ? 'discarded' : 'record_pending')
           try {
             sender.send('rag:stream', { streamId, type: 'done' })

@@ -8,20 +8,28 @@ import { runtimeBackendSnapshot } from './runtime-backends'
 //
 // Everything here is on-device; no network except the model download itself.
 import os from 'os'
+import { videoPackError } from '@offgrid/models'
+import { totalBytes } from './model-sizing'
+import { findSdBinary } from './imagegen/sd-runtime'
+import { ffmpegBin } from './transcription/whisper-cli'
+import { getEmbeddingSetupModel, downloadEmbeddingModel } from './embedding-setup-download'
+import { modalityForKind } from './active-models-logic'
 import * as http from 'http'
 import { llm } from './llm'
 import { decideChatStatus } from './chat-health'
 import {
   getActiveModel,
+  getActiveModalities,
   downloadModel,
+  cancelDownload,
   listInstalled,
   setActiveModel,
   setActiveModalChoice,
   BONSAI_2,
-  desktopCatalog
+  desktopCatalog,
+  remainingModelDownloadBytes
 } from './models-manager'
 import { getGatewayPort } from './model-server'
-import { deviceNoun } from '../shared/device'
 import type {
   SystemHealthComponentContract,
   SystemHealthComponentStatusContract,
@@ -34,26 +42,15 @@ import {
   recommendBudgetFraction,
   baselineExtras,
   totalDownloadGb,
-  fitMessage,
-  type SetupItemKind
+  fitMessage
 } from './models/setup-logic'
 
 export type ComponentStatus = SystemHealthComponentStatusContract
 export type HealthComponent = SystemHealthComponentContract
 export type SystemHealth = SystemHealthContract
 
-export interface SetupProgress {
-  phase: 'select' | 'download' | 'activate' | 'start' | 'verify' | 'done' | 'error'
-  message: string
-  modelId?: string
-  modelName?: string
-  percent?: number
-  downloadedMB?: string
-  totalMB?: string
-  downloadedBytes?: number
-  totalBytes?: number
-  bytesPerSecond?: number
-}
+import type { SetupItem, SetupPlan, SetupProgress } from '../shared/setup-contract'
+export type { SetupItem, SetupPlan, SetupProgress } from '../shared/setup-contract'
 export type SetupProgressCb = (p: SetupProgress) => void
 
 /** GET a localhost endpoint, parse JSON, with a short timeout. null on any failure. */
@@ -137,6 +134,9 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     /* imagegen unavailable */
   }
 
+  const { videoGenStatus } = await import('./videogen')
+  const video = videoGenStatus({ localOnly: true })
+
   const gw = (gatewayHealth ?? {}) as { modalities?: Record<string, string> }
   const modality = (k: string): ComponentStatus => {
     if (!gatewayHealth) return 'down'
@@ -168,15 +168,25 @@ export async function getSystemHealth(): Promise<SystemHealth> {
       status: image.available ? 'ready' : 'not_installed',
       detail: image.available ? undefined : (image.reason ?? 'No image model installed')
     },
+    {
+      id: 'video',
+      label: 'Video generation',
+      status: video.available ? 'ready' : 'not_installed',
+      detail: video.available ? undefined : video.reason
+    },
     ...(['grounding', 'decision'] as const).map((id): HealthComponent => {
       const runtime = runtimeBackendSnapshot().find((entry) => entry.id === id)
       return {
         id,
         label: id === 'grounding' ? 'Computer Use grounding' : 'Computer / Web Use decision',
         status:
-          runtime?.state === 'loaded' ? 'ready'
-            : runtime?.state === 'loading' ? 'starting'
-              : runtime?.state === 'error' ? 'down' : 'idle',
+          runtime?.state === 'loaded'
+            ? 'ready'
+            : runtime?.state === 'loading'
+              ? 'starting'
+              : runtime?.state === 'error'
+                ? 'down'
+                : 'idle',
         detail: runtime?.state === 'error' ? runtime.detail : undefined
       }
     }),
@@ -205,7 +215,7 @@ export async function recommendChatModel(
 ): Promise<{ id: string; name: string } | null> {
   const { recommendForRam } = await import('@offgrid/models')
   const CATALOG = await desktopCatalog()
-  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, totalBytes, modeBudget } =
+  const { chooseChatModel, recommendedParamCeiling, preferredModelIds, modeBudget } =
     await import('./model-sizing')
   const gb = ramGb()
   const tier = recommendForRam(gb)
@@ -295,24 +305,9 @@ export async function getRecommendation(mode?: RecMode): Promise<Recommendation 
 }
 
 export type { SetupItemKind } from './models/setup-logic'
-export interface SetupItem {
-  kind: SetupItemKind
-  capability: string // user-facing: "Chat & vision", "Speech-to-text", …
-  id: string
-  name: string
-  sizeGb: number
-  installed: boolean
-  required: boolean // chat is required; the rest are best-effort extras
-}
-export interface SetupPlan {
-  mode: RecMode
-  ramGb: number
-  items: SetupItem[]
-  totalDownloadGb: number
-}
 
 /** The full set of models "Configure for me" will set up for a mode: the chat/vision
- *  model plus speech-to-text, text-to-speech, and (outside Conservative) image. Pure
+ *  model plus speech-to-text, text-to-speech, and optional image/video packs. Pure
  *  preview — no downloads — so the UI can list everything before the user commits.
  *  autoConfigure() consumes the same plan, so the preview and the action never drift. */
 export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
@@ -333,6 +328,10 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
   }
   const nameOf = (id: string, fallback: string): string =>
     CATALOG.find((m) => m.id === id)?.name ?? fallback
+  const downloadSizeOf = (id: string): number => {
+    const entry = CATALOG.find((model) => model.id === id)
+    return entry ? remainingModelDownloadBytes(entry) / 1e9 : 0
+  }
 
   const items: SetupItem[] = []
   const chat = await recommendChatModel(effMode)
@@ -343,10 +342,11 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       id: chat.id,
       name: chat.name,
       sizeGb: sizeOf(chat.id),
+      downloadSizeGb: downloadSizeOf(chat.id),
       installed: installed.includes(chat.id),
       required: true
     })
-  // The non-chat baseline (STT, TTS, and image outside Conservative) - order + the
+  // The non-chat baseline (STT, TTS, and optional image models) - order + the
   // per-mode STT tier come from the single source of truth in setup-logic.
   for (const ex of baselineExtras(effMode)) {
     items.push({
@@ -355,17 +355,122 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
       id: ex.id,
       name: nameOf(ex.id, ex.fallbackName),
       sizeGb: sizeOf(ex.id),
+      downloadSizeGb: downloadSizeOf(ex.id),
       installed: installed.includes(ex.id),
       required: false
     })
   }
 
-  return { mode: effMode, ramGb: ramGb(), items, totalDownloadGb: totalDownloadGb(items) }
+  const embedding = getEmbeddingSetupModel()
+  if (embedding) {
+    items.push({
+      kind: 'embedding',
+      capability: 'Search embeddings',
+      id: embedding.id,
+      name: embedding.name,
+      sizeGb: embedding.totalBytes / 1e9,
+      downloadSizeGb: embedding.remainingBytes / 1e9,
+      files: embedding.files,
+      installed: embedding.installed,
+      required: false
+    })
+  }
+  const embeddingNote = embedding
+    ? 'Embedding setup downloads files only. It does not change the active model or rebuild search indexes.'
+    : 'Your custom embedding choice is kept. Its download size is not in the setup catalog; manage it in Models.'
+
+  // Pack bytes describe the download, not resident video memory. Catalog RAM
+  // guidance is advisory; Auto Setup does not verify runtime fit or output quality.
+  let videoNote: string | undefined
+  const video = CATALOG.filter(
+    (entry) =>
+      entry.kind === 'video' &&
+      entry.availability !== 'coming_soon' &&
+      !videoPackError(entry.files) &&
+      entry.files.every((file) => (file.sizeBytes ?? 0) > 0)
+  ).sort((a, b) => totalBytes(a) - totalBytes(b))[0]
+  if (video) {
+    items.push({
+      kind: 'video',
+      capability: 'Video generation',
+      id: video.id,
+      name: video.name,
+      sizeGb: totalBytes(video) / 1e9,
+      downloadSizeGb: remainingModelDownloadBytes(video) / 1e9,
+      files: video.files.map(({ name, sizeBytes }) => ({ name, sizeBytes })),
+      installed: installed.includes(video.id),
+      required: false
+    })
+    const guidance = video.minRamGb ? `Catalog RAM guidance: ${video.minRamGb} GB. ` : ''
+    videoNote = `${guidance}Video runtime memory and output quality are not checked by Auto Setup.`
+  } else {
+    videoNote = 'The catalog has no complete supported video model pack.'
+  }
+
+  const missingRuntime = [
+    !findSdBinary('sd-cli') ? 'video engine' : null,
+    !ffmpegBin() ? 'video encoder' : null
+  ].filter(Boolean)
+  const videoRuntimeIssue = missingRuntime.length
+    ? `This app installation is missing its ${missingRuntime.join(' and ')}. These files should be included. Reinstall or update the app package, then check again. Model downloads do not repair app files.`
+    : undefined
+
+  return {
+    mode: effMode,
+    ramGb: ramGb(),
+    items,
+    totalDownloadGb: totalDownloadGb(items),
+    videoNote,
+    videoRuntimeIssue,
+    embeddingNote
+  }
+}
+
+let embeddingDownload: { id: string; controller: AbortController } | null = null
+
+/** Cancel the current setup download through its owning downloader. */
+export function cancelSetupDownload(modelId: string): boolean {
+  if (embeddingDownload?.id === modelId) {
+    embeddingDownload.controller.abort()
+    return true
+  }
+  return cancelDownload(modelId)
+}
+
+async function downloadSetupEmbedding(item: SetupItem, emit: SetupProgressCb): Promise<void> {
+  if (embeddingDownload) throw new Error('An embedding download is already in progress.')
+  const controller = new AbortController()
+  embeddingDownload = { id: item.id, controller }
+  try {
+    emit({
+      phase: 'download',
+      message: `Downloading ${item.name}...`,
+      modelId: item.id,
+      percent: 0
+    })
+    await downloadEmbeddingModel(
+      item.id,
+      (p) =>
+        emit({
+          phase: 'download',
+          message: `Downloading ${item.name}...`,
+          modelId: item.id,
+          downloadedBytes: p.downloadedBytes,
+          totalBytes: p.totalBytes
+        }),
+      controller.signal
+    )
+    if (controller.signal.aborted) throw new Error('Download canceled.')
+  } finally {
+    embeddingDownload = null
+  }
 }
 
 /** "Configure for me": pick → download (if needed) → activate → start → verify. */
 export async function autoConfigure(
-  onProgress?: SetupProgressCb
+  onProgress?: SetupProgressCb,
+  selectedModelIds?: string[],
+  mode?: RecMode
 ): Promise<{ success: boolean; error?: string; modelId?: string; modelName?: string }> {
   const emit = (p: SetupProgress): void => {
     try {
@@ -374,109 +479,59 @@ export async function autoConfigure(
       /* ignore */
     }
   }
-
-  emit({
-    phase: 'select',
-    message: `Picking a model that fits your ${deviceNoun(process.platform)}…`
-  })
-  const model = await recommendChatModel()
-  if (!model) {
-    emit({ phase: 'error', message: 'No suitable model found.' })
-    return { success: false, error: 'no suitable model found' }
+  const fail = (
+    message: string,
+    modelId?: string
+  ): { success: false; error: string; modelId?: string } => {
+    emit({ phase: 'error', message, modelId })
+    return { success: false, error: message, modelId }
   }
 
-  const installed = await listInstalled()
-  if (!installed.includes(model.id)) {
-    emit({
-      phase: 'download',
-      message: `Downloading ${model.name}…`,
-      modelId: model.id,
-      modelName: model.name,
-      percent: 0
-    })
-    const res = await downloadModel(model.id, (p) =>
-      emit({
-        phase: 'download',
-        message: `Downloading ${model.name}…`,
-        modelId: model.id,
-        modelName: model.name,
-        percent: p.percent,
-        downloadedMB: p.downloadedMB,
-        totalMB: p.totalMB,
-        downloadedBytes: p.downloadedBytes,
-        totalBytes: p.totalBytes,
-        bytesPerSecond: p.bytesPerSecond
-      })
-    )
-    if (!res.success) {
-      emit({ phase: 'error', message: res.error ?? 'Download failed.', modelId: model.id })
-      return { success: false, error: res.error, modelId: model.id }
-    }
+  emit({ phase: 'select', message: 'Checking selected local models...' })
+  const plan = await getSetupPlan(mode)
+  // Accept only IDs from the current hardware-checked plan. A stale preview must
+  // be refreshed instead of silently downloading a different model.
+  if (
+    selectedModelIds !== undefined &&
+    (!Array.isArray(selectedModelIds) ||
+      selectedModelIds.some(
+        (id) => typeof id !== 'string' || !plan.items.some((item) => item.id === id)
+      ))
+  ) {
+    return fail('The setup plan changed. Select a resource mode to refresh it, then try again.')
   }
+  const selected = selectedModelIds === undefined ? null : new Set(selectedModelIds)
+  // Without an explicit selection, Configure for me installs the baseline it always has:
+  // chat, speech-to-text and text-to-speech, plus image outside Conservative. The heavier
+  // extras the plan lists (embedding, video) download only when someone picks them.
+  const baseline = (item: SetupItem): boolean =>
+    item.kind === 'chat' ||
+    item.kind === 'transcription' ||
+    item.kind === 'voice' ||
+    (item.kind === 'image' && plan.mode !== 'conservative')
+  const items = plan.items.filter((item) => (selected ? selected.has(item.id) : baseline(item)))
+  if (!items.length) return fail('Select at least one model to set up.')
 
-  emit({
-    phase: 'activate',
-    message: `Activating ${model.name}…`,
-    modelId: model.id,
-    modelName: model.name
-  })
-  const act = await setActiveModel(model.id)
-  if (!act.success) {
-    emit({ phase: 'error', message: act.error ?? 'Activation failed.', modelId: model.id })
-    return { success: false, error: act.error, modelId: model.id }
-  }
-
-  // A fresh install picks the fastest settings for this hardware before its first launch.
-  await import('./best-settings')
-    .then((m) => m.ensureBestSettings())
-    .catch((error: unknown) => console.warn('[best-settings] setup check failed', error))
-
-  emit({
-    phase: 'start',
-    message: 'Starting the local model server…',
-    modelId: model.id,
-    modelName: model.name
-  })
-  try {
-    await llm.restart()
-  } catch (e) {
-    emit({ phase: 'error', message: (e as Error).message, modelId: model.id })
-    return { success: false, error: (e as Error).message, modelId: model.id }
-  }
-
-  emit({ phase: 'verify', message: 'Verifying…', modelId: model.id, modelName: model.name })
-  const ok = !!(await pingJson(llm.getPort(), '/health', 3000))
-
-  // Chat is live — now set up the rest of the baseline (speech-to-text, text-to-
-  // speech, and image outside Conservative). These are best-effort: a failure here
-  // never fails setup, and the chat model being ready already lets the user in.
-  try {
-    const plan = await getSetupPlan()
-    const extras = plan.items.filter((i) => !i.required)
-    const installedNow = await listInstalled()
-    for (const ex of extras) {
-      if (installedNow.includes(ex.id)) {
-        try {
-          await setActiveModalChoice(ex.kind, ex.id)
-        } catch {
-          /* ignore */
-        }
+  let activatedChat: SetupItem | undefined
+  for (const item of items) {
+    try {
+      if (item.kind === 'embedding') {
+        await downloadSetupEmbedding(item, emit)
+        // Download-only: activation belongs to the explicit Models confirmation flow.
         continue
       }
-      try {
-        emit({
-          phase: 'download',
-          message: `Downloading ${ex.capability} (${ex.name})…`,
-          modelId: ex.id,
-          modelName: ex.name,
-          percent: 0
-        })
-        const r = await downloadModel(ex.id, (p) =>
+      if (!(await listInstalled()).includes(item.id)) {
+        const report = (p: Partial<SetupProgress>): void =>
           emit({
+            ...p,
             phase: 'download',
-            message: `Downloading ${ex.capability} (${ex.name})…`,
-            modelId: ex.id,
-            modelName: ex.name,
+            message: `Downloading ${item.name}...`,
+            modelId: item.id,
+            modelName: item.name
+          })
+        report({ percent: 0 })
+        const result = await downloadModel(item.id, (p) =>
+          report({
             percent: p.percent,
             downloadedMB: p.downloadedMB,
             totalMB: p.totalMB,
@@ -485,22 +540,47 @@ export async function autoConfigure(
             bytesPerSecond: p.bytesPerSecond
           })
         )
-        if (r.success) await setActiveModalChoice(ex.kind, ex.id)
-      } catch {
-        /* best-effort extra */
+        // Stop on cancellation or failure. Never continue into another large pack.
+        if (!result.success) return fail(result.error ?? 'Download failed.', item.id)
       }
+
+      if (item.kind === 'chat') {
+        // Preserve local and remote choices, including choices made during download.
+        if (getActiveModalities().text) continue
+        emit({ phase: 'activate', message: `Activating ${item.name}...`, modelId: item.id })
+        const result = await setActiveModel(item.id)
+        if (!result.success) return fail(result.error ?? 'Activation failed.', item.id)
+        // A fresh install picks the fastest settings for this hardware before its first launch.
+        await import('./best-settings')
+          .then((m) => m.ensureBestSettings())
+          .catch((error: unknown) => console.warn('[best-settings] setup check failed', error))
+        emit({ phase: 'start', message: 'Starting the local model server...', modelId: item.id })
+        await llm.restart()
+        emit({ phase: 'verify', message: 'Verifying...', modelId: item.id })
+        if (!(await pingJson(llm.getPort(), '/health', 3000))) {
+          return fail(`${item.name} is installed, but the local server is not ready.`, item.id)
+        }
+        activatedChat = item
+      } else {
+        const modality = modalityForKind(item.kind)
+        if (modality && !getActiveModalities()[modality]) {
+          const result = await setActiveModalChoice(item.kind, item.id)
+          if (!result.success) return fail(result.error ?? 'Activation failed.', item.id)
+        }
+      }
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : 'Setup failed.', item.id)
     }
-  } catch {
-    /* extras are optional */
   }
 
+  const activeIdentity = activatedChat && {
+    modelId: activatedChat.id,
+    modelName: activatedChat.name
+  }
   emit({
     phase: 'done',
-    message: ok
-      ? `Ready - ${model.name} is active. Optional model downloads are complete.`
-      : `${model.name} installed; the server is still warming up.`,
-    modelId: model.id,
-    modelName: model.name
+    message: 'Selected model files are installed. Saved active model choices are unchanged.',
+    ...activeIdentity
   })
-  return { success: ok, modelId: model.id, modelName: model.name }
+  return { success: true, ...activeIdentity }
 }

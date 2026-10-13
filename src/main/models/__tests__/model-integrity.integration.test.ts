@@ -387,6 +387,7 @@ describe('active model deletion', () => {
         text: null,
         computer_use: null,
         image: null,
+        video: null,
         speech: null,
         transcription: null
       })
@@ -400,6 +401,7 @@ describe('active model deletion', () => {
         text: null,
         computer_use: null,
         image: null,
+        video: null,
         speech: null,
         transcription: null
       })
