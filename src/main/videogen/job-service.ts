@@ -1,4 +1,11 @@
 import { randomUUID } from 'node:crypto'
+import {
+  endedVideoJob,
+  idleVideoJob,
+  startedVideoJob,
+  succeededVideoJob,
+  updatedVideoJob
+} from '@offgrid/models'
 import { generatedVideoMetadataJson } from '@offgrid/sync'
 import type { ChatHome } from '@offgrid/sync'
 import type {
@@ -21,23 +28,8 @@ export type VideoJobRequest = VideoGenerationRequestContract & {
 type JobListener = (snapshot: VideoGenerationJobContract) => void
 type ConversationListener = (conversationId: string) => void
 
-const idle = (): VideoGenerationJobContract => ({
-  id: null,
-  phase: 'idle',
-  conversationId: null,
-  projectId: null,
-  stage: null,
-  enhancedPrompt: '',
-  progress: null,
-  preview: null,
-  outputPath: null,
-  error: null,
-  startedAt: null,
-  finishedAt: null
-})
-
 export class VideoGenerationJobService {
-  private snapshot: VideoGenerationJobContract = idle()
+  private snapshot: VideoGenerationJobContract = idleVideoJob()
   private active = false
   private messageId: string | null = null
   private listeners = new Set<JobListener>()
@@ -66,15 +58,7 @@ export class VideoGenerationJobService {
     this.active = true
     this.messageId = request.messageId ?? null
     const id = randomUUID()
-    this.snapshot = {
-      ...idle(),
-      id,
-      phase: 'running',
-      conversationId: request.conversationId ?? null,
-      projectId: request.projectId ?? null,
-      stage: 'preparing',
-      startedAt: Date.now()
-    }
+    this.snapshot = startedVideoJob(id, request, Date.now())
     this.publish()
     try {
       const output = await generateVideo(request, (update) => this.update(id, update), {
@@ -104,27 +88,11 @@ export class VideoGenerationJobService {
       // The MP4 and its metadata are committed locally. Optional replication
       // must not hide a completed clip when it exceeds the transfer limit.
       shareGeneratedVideo(output.path)
-      this.snapshot = {
-        ...this.snapshot,
-        phase: 'succeeded',
-        stage: null,
-        progress: null,
-        preview: null,
-        outputPath: output.path,
-        finishedAt: Date.now()
-      }
+      this.snapshot = succeededVideoJob(this.snapshot, output.path, Date.now())
       this.publish()
       return { ...output, syncId: id, durationMs }
     } catch (error) {
-      this.snapshot = {
-        ...this.snapshot,
-        phase: error instanceof Error && /stopped/i.test(error.message) ? 'cancelled' : 'failed',
-        stage: null,
-        progress: null,
-        preview: null,
-        error: error instanceof Error ? error.message : String(error),
-        finishedAt: Date.now()
-      }
+      this.snapshot = endedVideoJob(this.snapshot, error, Date.now())
       this.publish()
       throw error
     } finally {
@@ -148,14 +116,9 @@ export class VideoGenerationJobService {
   }
 
   private update(id: string, update: VideoGenerationUpdateContract): void {
-    if (this.snapshot.id !== id || this.snapshot.phase !== 'running') return
-    this.snapshot = {
-      ...this.snapshot,
-      stage: update.stage,
-      ...(update.enhancedPrompt === undefined ? {} : { enhancedPrompt: update.enhancedPrompt }),
-      ...(update.progress === undefined ? {} : { progress: update.progress }),
-      ...(update.preview === undefined ? {} : { preview: update.preview })
-    }
+    const next = updatedVideoJob(this.snapshot, id, update)
+    if (next === this.snapshot) return
+    this.snapshot = next
     this.publish()
   }
 

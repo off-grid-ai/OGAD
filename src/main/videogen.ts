@@ -2,7 +2,16 @@ import { getBackendPreference } from './backend-preferences'
 import { beginRuntimeBackend, runtimeBackendSnapshot } from './runtime-backends'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { generateRemoteVideo } from './remote-media-runtime'
-import { resolveVideoRequest, isSupportedVideoWeight, videoPackFiles } from '@offgrid/models'
+import {
+  initialVideoEngineLog,
+  isSupportedVideoWeight,
+  readVideoEngineLog,
+  resolveVideoRequest,
+  videoCliArgs,
+  videoFramePublished,
+  videoPackFiles,
+  type VideoModelPack
+} from '@offgrid/models'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -27,7 +36,6 @@ import type {
   VideoGenerationRequestContract,
   VideoGenerationUpdateContract
 } from '../shared/video-generation-contract'
-import { videoArgs, type VideoModelPack } from './videogen/args'
 import { generatedVideoSidecarPath, readGeneratedVideoSidecar } from './videogen/gallery-sidecar'
 import { describeOwnGeneratedVideo } from './videogen/generated-video-share'
 import { emitSharedFileMutation } from './sync-shared-file'
@@ -326,11 +334,7 @@ export async function generateVideo(
           for (const [index, { runtime, cpu }] of attempts.entries()) {
             if (cancelRequested) throw new Error(CANCELLED)
             const backend = beginRuntimeBackend('video', pack!.name)
-            let progressText = ''
-            let decoding = false
-            let decodeMarker = ''
-            let framePublished = false
-            let lastStep = 0
+            let log = initialVideoEngineLog()
             try {
               // A failed engine can leave a partial file. Never accept it on retry.
               fs.rmSync(raw, { force: true })
@@ -356,45 +360,21 @@ export async function generateVideo(
               await runProcess(
                 runtime,
                 [
-                  ...videoArgs(pack!.pack, request, raw),
+                  ...videoCliArgs(pack!.pack, request, raw, process.platform),
                   ...decodedPreviewArgs,
                   ...(cpu ? ['--backend', 'cpu'] : [])
                 ],
                 (chunk) => {
                   backend.observe(chunk)
-                  progressText = `${progressText}${chunk}`.slice(-4096)
-                  const decoded = [
-                    ...progressText.matchAll(/OFFGRID_VIDEO_DECODE (\d+) (\d+)(?=\r?\n)/g)
-                  ].at(-1)
-                  if (decoded && decoded[0] !== decodeMarker) {
-                    decodeMarker = decoded[0]
-                    decoding = true
-                    const step = Number(decoded[1]),
-                      total = Number(decoded[2])
-                    onUpdate?.({ stage: 'decoding', progress: total > 0 ? { step, total } : null })
+                  const read = readVideoEngineLog(log, chunk, request.steps)
+                  log = read.state
+                  for (const update of read.updates) {
+                    if (update.stage === 'generating') backend.ready()
+                    onUpdate?.(update)
                   }
-                  const frame = /OFFGRID_VIDEO_FRAME (\d+) (\d+)(?=\r?\n)/.exec(progressText)
-                  if (!framePublished && frame && fs.existsSync(previewPath)) {
-                    framePublished = true
-                    onUpdate?.({
-                      stage: 'decoding',
-                      preview: {
-                        path: previewPath,
-                        width: Number(frame[1]),
-                        height: Number(frame[2])
-                      }
-                    })
-                  }
-
-                  const match = [...progressText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g)].at(-1)
-                  if (match && !decoding) {
-                    const step = Number(match[1])
-                    const total = Number(match[2])
-                    if (step > lastStep && step <= total && total <= request.steps) {
-                      lastStep = step
-                      backend.ready()
-                      onUpdate?.({ stage: 'generating', progress: { step, total } })
-                    }
+                  if (read.frame && fs.existsSync(previewPath)) {
+                    log = videoFramePublished(log)
+                    onUpdate?.({ stage: 'decoding', preview: { path: previewPath, ...read.frame } })
                   }
                 }
               )
