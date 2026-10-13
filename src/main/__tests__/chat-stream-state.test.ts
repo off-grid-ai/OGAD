@@ -3,12 +3,15 @@ import { registerHook, HOOKS } from '../bootstrap/hookRegistry'
 import {
   activeChatStreamSnapshots,
   beginChatImageStream,
+  beginChatVideoStream,
   bindChatStream,
   continueChatStreamWithImage,
+  continueChatStreamWithVideo,
   currentChatStreamMessageId,
   endChatStreamForConversation,
   noteChatStreamDelta,
   noteChatStreamImageProgress,
+  noteChatStreamVideoProgress,
   noteChatStreamToolCompleted,
   noteChatStreamToolStarted,
   takeChatStreamMessageId,
@@ -197,6 +200,83 @@ describe('the reply being generated, as published to anything that follows it', 
     expect(secondImageMessageId).toEqual(expect.any(String))
     expect(secondImageMessageId).not.toBe(firstImageMessageId)
     expect(takeChatStreamMessageId('conversation-1')).toBe(secondImageMessageId)
+  })
+
+  it('keeps one reply alive while its deferred video is generated', () => {
+    bindChatStream('stream-a', 'conversation-1')
+    noteChatStreamDelta('stream-a', 'I will make that clip.', 'content')
+    const messageId = published.at(-1)?.messageId
+
+    expect(continueChatStreamWithVideo('stream-a')).toBe(true)
+    expect(published.at(-1)).toEqual({
+      conversationId: 'conversation-1',
+      content: 'I will make that clip.',
+      reasoning: '',
+      phase: 'loading_video_model',
+      messageId
+    })
+
+    // Before the first sampling step the clip is still loading.
+    expect(noteChatStreamVideoProgress('conversation-1')).toBe(true)
+    expect(published.at(-1)?.phase).toBe('loading_video_model')
+
+    // A step past the total is held at the total.
+    expect(noteChatStreamVideoProgress('conversation-1', 30, 20)).toBe(true)
+    expect(published.at(-1)).toEqual({
+      conversationId: 'conversation-1',
+      content: 'I will make that clip.',
+      reasoning: '',
+      phase: 'generating_video',
+      progress: { current: 20, total: 20 },
+      messageId
+    })
+
+    expect(endChatStreamForConversation('conversation-1')).toBe(true)
+    expect(published.at(-1)).toEqual({ conversationId: 'conversation-1', completion: 'record_pending' })
+  })
+
+  it('starts a video phase with no text stream, and reserves a new row once the text was claimed', () => {
+    expect(beginChatVideoStream(null)).toBe(false)
+    expect(continueChatStreamWithVideo(undefined)).toBe(false)
+    expect(continueChatStreamWithVideo('unknown-stream')).toBe(false)
+    expect(noteChatStreamVideoProgress(undefined, 1, 2)).toBe(false)
+    expect(noteChatStreamVideoProgress('conversation-1', 1, 2)).toBe(false)
+
+    // Direct video mode: no text was streamed first.
+    expect(beginChatVideoStream('conversation-1')).toBe(true)
+    const directId = currentChatStreamMessageId('conversation-1')
+    expect(published.at(-1)).toEqual({
+      conversationId: 'conversation-1',
+      content: '',
+      reasoning: '',
+      phase: 'loading_video_model',
+      messageId: directId
+    })
+    expect(activeChatStreamSnapshots()).toEqual([
+      expect.objectContaining({ streamId: 'video:conversation-1', phase: 'loading_video_model' })
+    ])
+    endChatStream('video:conversation-1', 'discarded')
+
+    // Tool path: the text row is claimed, so the clip gets its own identity.
+    bindChatStream('stream-b', 'conversation-1')
+    noteChatStreamDelta('stream-b', 'Here is the clip.', 'content')
+    noteChatStreamToolStarted('stream-b', 'generate_video')
+    const textMessageId = takeChatStreamMessageId('conversation-1')
+    expect(beginChatVideoStream('conversation-1')).toBe(true)
+    const videoMessageId = currentChatStreamMessageId('conversation-1')
+    expect(videoMessageId).not.toBe(textMessageId)
+    expect(published.at(-1)).toEqual({
+      conversationId: 'conversation-1',
+      content: '',
+      reasoning: '',
+      phase: 'loading_video_model',
+      messageId: videoMessageId
+    })
+
+    // Starting again before that row is claimed keeps the same identity.
+    expect(beginChatVideoStream('conversation-1')).toBe(true)
+    expect(currentChatStreamMessageId('conversation-1')).toBe(videoMessageId)
+    endChatStream('stream-b', 'discarded')
   })
 
   it('publishes a tool when it starts, then completes the same row', () => {
