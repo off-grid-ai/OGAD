@@ -5,6 +5,7 @@ import { generateRemoteVideo } from './remote-media-runtime'
 import {
   initialVideoEngineLog,
   isSupportedVideoWeight,
+  isVideoWeightAvailableOn,
   readVideoEngineLog,
   resolveVideoRequest,
   videoCliArgs,
@@ -53,7 +54,9 @@ function availablePacks(): Array<{ name: string; pack: VideoModelPack }> {
   try {
     const entries = fs.readdirSync(directory)
     return entries
-      .filter((name) => isSupportedVideoWeight(name))
+      .filter(
+        (name) => isSupportedVideoWeight(name) && isVideoWeightAvailableOn(name, process.platform)
+      )
       .flatMap((name) => {
         const names = videoPackFiles(name)!
         const pack: Record<string, string> = {}
