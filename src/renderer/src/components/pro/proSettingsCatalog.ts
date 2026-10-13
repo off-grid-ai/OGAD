@@ -18,7 +18,7 @@ export interface ProSettingsSlot {
   delay: number
   /** Free-build teaser. null = render nothing when the slot isn't registered. */
   placeholder: { title: string; description: string } | null
-  /** Copy shown to an entitled user when a section is unavailable on Linux. */
+  /** Copy shown to an entitled user when a section is unavailable on this platform. */
   comingSoonDescription?: string
 }
 
@@ -28,8 +28,6 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
   {
     id: 'capture',
     delay: 0.14,
-    comingSoonDescription:
-      'Screen capture controls are coming soon to Linux. They are available on Windows and macOS.',
     placeholder: {
       title: 'Capture',
       description:
@@ -66,8 +64,6 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
   {
     id: 'proactive',
     delay: 0.18,
-    comingSoonDescription:
-      'Morning briefings and meeting alerts are coming soon to Linux. They are available on Windows and macOS.',
     placeholder: {
       title: 'Proactive delivery',
       description:
@@ -77,8 +73,6 @@ export const PRO_SETTINGS_SLOTS: ProSettingsSlot[] = [
   {
     id: 'secretary',
     delay: 0.22,
-    comingSoonDescription:
-      'Learned preferences are coming soon to Linux. They are available on Windows and macOS.',
     placeholder: {
       title: 'What Off Grid AI has learned',
       description:

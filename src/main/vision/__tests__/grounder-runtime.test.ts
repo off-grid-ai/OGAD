@@ -1,114 +1,111 @@
-import { EventEmitter } from 'node:events'
-vi.mock('../../llm/gpu-device-probe', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../llm/gpu-device-probe')>(),
-  gpuDeviceAvailable: vi.fn(async () => true)
-}))
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { configureRuntime, dataDir, binRoots } from '../../runtime-env'
 
-const mocks = vi.hoisted(() => ({
-  artifact: vi.fn(),
-  exists: vi.fn(),
-  pickPort: vi.fn(),
-  reap: vi.fn(),
-  spawn: vi.fn()
-}))
+const previousDataDir = dataDir()
+const previousBinRoots = binRoots()
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-grounder-runtime-'))
+const binaries = path.join(profile, 'bin')
+const engine = path.join(binaries, 'llama-cpu', 'llama-server')
+const modelId = 'bartowski/tencent_UI-Mate-9B-GGUF'
+configureRuntime({ dataDir: profile, binRoots: [binaries] })
+const { GrounderRuntime } = await import('../grounder-runtime')
+let runtime: InstanceType<typeof GrounderRuntime> | undefined
 
-vi.mock('node:child_process', async (importOriginal) => ({
-  ...await importOriginal<typeof import('node:child_process')>(), spawn: mocks.spawn
-}))
-vi.mock('node:fs', () => ({ default: { existsSync: mocks.exists } }))
-vi.mock('../../llm/settings-math', () => ({ buildLaunchArgs: vi.fn(() => ['--ground']) }))
-vi.mock('../../llm/spawn-env', () => ({ engineSpawnEnv: vi.fn(() => ({ TEST_ENGINE: '1' })) }))
-vi.mock('../../runtime-env', () => ({ binRoots: () => ['/bundle'], exe: (name: string) => name }))
-vi.mock('../../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
-vi.mock('../../free-port', () => ({ isPortFree: vi.fn(), pickFreePort: mocks.pickPort }))
-vi.mock('../../kill-orphan-port', () => ({ reapOrphanProcessesOnPort: mocks.reap }))
-vi.mock('../../models-manager', () => ({ resolveComputerUseModelArtifact: mocks.artifact }))
-
-import { GrounderRuntime } from '../grounder-runtime'
-
-class FakeProcess extends EventEmitter {
-  exitCode: number | null = null
-  stderr = new EventEmitter()
-  killed: NodeJS.Signals[] = []
-
-  kill(signal: NodeJS.Signals): boolean {
-    this.killed.push(signal)
-    this.exitCode = 0
-    this.emit('close', 0)
-    return true
+// The native engine is an external boundary. Run a small process that implements
+// its health and OpenAI HTTP contracts; keep model resolution, ports and shutdown real.
+function writeEngine(fail = false): void {
+  fs.mkdirSync(path.dirname(engine), { recursive: true })
+  fs.writeFileSync(
+    engine,
+    '#!/usr/bin/env node\n' +
+      (fail
+        ? "process.stderr.write('Metal allocation failed: out of memory\\n'); process.exit(1);\n"
+        : `const http = require('node:http');
+const args = process.argv.slice(2);
+const port = Number(args[args.indexOf('--port') + 1]);
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  if (req.url === '/health') return res.end(JSON.stringify({status: 'ok'}));
+  if (req.url === '/v1/chat/completions' && req.method === 'POST') {
+    req.resume();
+    req.on('end', () => res.end(JSON.stringify({
+      id: 'synthetic-grounding', object: 'chat.completion',
+      choices: [{index: 0, message: {role: 'assistant', content: 'Click the button.'}, finish_reason: 'stop'}]
+    })));
+    return;
   }
+  res.statusCode = 404; res.end('{}');
+});
+server.listen(port, '127.0.0.1');
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+`),
+    { mode: 0o755 }
+  )
 }
 
-beforeEach(() => {
-  mocks.artifact.mockResolvedValue({
-    primaryPath: '/models/grounder.gguf',
-    projectorPath: '/models/mmproj.gguf'
-  })
-  mocks.exists.mockImplementation((candidate: string) => !candidate.includes('llama-cuda'))
-  mocks.pickPort.mockResolvedValue(8490)
-  mocks.spawn.mockImplementation(() => new FakeProcess())
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true }))
-  )
+beforeAll(() => {
+  const models = path.join(profile, 'models')
+  fs.mkdirSync(models)
+  for (const name of ['tencent_UI-Mate-9B-Q4_K_M.gguf', 'mmproj-tencent_UI-Mate-9B-f16.gguf']) {
+    fs.writeFileSync(
+      path.join(models, name),
+      Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(2048)])
+    )
+  }
 })
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(async () => {
+  await runtime?.shutdown()
+  runtime = undefined
+})
+
+afterAll(() => {
+  configureRuntime({ dataDir: previousDataDir, binRoots: previousBinRoots })
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 
 describe('GrounderRuntime', () => {
-  it('starts one dedicated server, reuses it, and returns an OpenAI-compatible connection', async () => {
-    const runtime = new GrounderRuntime()
-    await expect(runtime.connection('offgrid/grounder')).resolves.toEqual({
-      id: 'local-grounder:offgrid/grounder',
-      name: 'Local grounding specialist',
-      provider: 'custom',
-      endpoint: 'http://127.0.0.1:8490/v1',
-      model: 'offgrid/grounder',
-      apiKey: ''
-    })
-    expect(runtime.running).toBe(true)
-    expect(mocks.reap).toHaveBeenCalled()
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/bundle/llama/llama-server',
-      ['--ground'],
-      expect.objectContaining({ stdio: ['ignore', 'ignore', 'pipe'] })
-    )
-
-    await runtime.connection('offgrid/grounder')
-    expect(mocks.spawn).toHaveBeenCalledTimes(1)
-    const child = mocks.spawn.mock.results[0]?.value as FakeProcess
-    await runtime.shutdown()
-    expect(child.killed).toEqual(['SIGTERM'])
-    expect(runtime.running).toBe(false)
-  })
-
-  it('rejects missing models, exhausted ports, and missing engines', async () => {
-    const runtime = new GrounderRuntime()
-    mocks.artifact.mockResolvedValueOnce(null)
-    await expect(runtime.connection('missing')).rejects.toThrow('not installed')
-
-    mocks.pickPort.mockResolvedValueOnce(null)
-    await expect(runtime.connection('no-port')).rejects.toThrow('No private port')
-
-    mocks.exists.mockReturnValue(false)
-    await expect(runtime.connection('no-engine')).rejects.toThrow('engine is missing')
-  })
-
-  it('adds memory guidance when the server exits during startup', async () => {
-    mocks.spawn.mockImplementationOnce(() => {
-      const child = new FakeProcess()
-      queueMicrotask(() => {
-        child.stderr.emit('data', 'Metal allocation failed: out of memory')
-        child.exitCode = 1
-        child.emit('close', 1)
+  it.skipIf(process.platform === 'win32')(
+    'serves grounding requests and closes its dedicated connection',
+    async () => {
+      writeEngine()
+      configureRuntime({ binRoots: [binaries] })
+      runtime = new GrounderRuntime()
+      const connection = await runtime.connection(modelId)
+      expect(connection.model).toBe(modelId)
+      expect(runtime.running).toBe(true)
+      const response = await fetch(`${connection.endpoint}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'Find the button.' }] })
       })
-      return child
-    })
-    vi.mocked(fetch).mockRejectedValue(new Error('not ready'))
+      expect(response.ok).toBe(true)
+      expect((await response.json()).choices[0].message.content).toBe('Click the button.')
+      expect((await runtime.connection(modelId)).endpoint).toBe(connection.endpoint)
+      await runtime.shutdown()
+      expect(runtime.running).toBe(false)
+      await expect(fetch(`${connection.endpoint}/models`)).rejects.toThrow()
+    }
+  )
 
-    await expect(new GrounderRuntime().connection('offgrid/grounder')).rejects.toThrow(
-      'does not have enough free memory'
-    )
+  it('rejects missing models and missing engines', async () => {
+    configureRuntime({ binRoots: [path.join(profile, 'missing-bin')] })
+    runtime = new GrounderRuntime()
+    await expect(runtime.connection('missing')).rejects.toThrow('not installed')
+    await expect(runtime.connection(modelId)).rejects.toThrow('engine is missing')
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'reports memory guidance when the engine exits during startup',
+    async () => {
+      writeEngine(true)
+      configureRuntime({ binRoots: [binaries] })
+      runtime = new GrounderRuntime()
+      await expect(runtime.connection(modelId)).rejects.toThrow('does not have enough free memory')
+      expect(runtime.running).toBe(false)
+    }
+  )
 })

@@ -2,19 +2,25 @@
 // chat tool loop via registerToolExtension. Exposes calendar / reminders / contacts /
 // messages / mail / open_url as model tools that run through the native actions helper.
 //
-// Chat is the source-policy owner for these tools: every mutation becomes a durable
+// Desktop Chat owns its direct actions: every mutation becomes a durable
 // Action through the @offgrid/use engine and runs without creating a second approval
 // owner. Outside-Chat proposals enter the engine through the Actions surface, whose gate
-// remains responsible for approval. Reads and navigation stay inline.
+// remains responsible for approval, including browser-origin actions. Reads stay inline.
 
-import { app, shell } from 'electron'
+import {
+  isToolAllowedForOrigin,
+  PAIRED_BROWSER_COMPUTER_USE_REFUSAL,
+  toolOriginOf
+} from './tool-origin'
+import { shell } from 'electron'
 import type { ToolCallStatus, ToolContext, ToolExtension, ToolResult } from '../tools'
-import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
+import { WEB_USE_ACTION_TYPE, type ProposeOutcome, type TickOutcome } from '@offgrid/use'
 import { shouldGate } from '../actions/approval'
 import { getActionsRuntime } from '../actions/use-runtime'
 import { makeWinInlineRunner } from '../actions/semantic-rail-win'
 import { runPowerShell } from '../actions/win-powershell'
 import { runNativeAction } from '../actions/native-helper'
+import { currentLinuxLocation } from '../actions/native-location'
 import type { NativeActionCommand, NativeActionResponse } from '../actions/native-helper-logic'
 import {
   actionTypeForTool,
@@ -24,15 +30,24 @@ import {
   specsForPlatform,
   systemHintForPlatform,
   taskSessionLimitMinutes,
+  withWebUseTarget,
   type NativeToolSpec
 } from './nativeActionToolExtension-logic'
 import { createHash } from 'node:crypto'
+import { getWebUseSettings } from '../web-use-settings'
+import { getBrowserLinks } from '../extension-bridge/bridge-electron'
 import { actionArgsWithTaskLaunch } from '../tasks/task-launch-identity'
+import { actionArgsWithStartTab } from '../browser/browser-start-tab'
+import {
+  TASK_GOAL_PREREQUISITES_LABEL,
+  TASK_GOAL_REQUEST_LABEL,
+  TASK_GOAL_SUMMARY_LABEL
+} from '../../shared/task-display-title'
 
 /** The engine port the extension needs - implemented by the actions runtime,
  *  faked in tests. Optional: absent means the legacy path only. */
 export interface ActionsPort {
-  propose(input: unknown, meta: { source: 'chat' }): Promise<ProposeOutcome>
+  propose(input: unknown, meta: { source: 'chat' | 'routine' }): Promise<ProposeOutcome>
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
   whenParked(actionId: string): Promise<void>
   kick(): void
@@ -42,6 +57,8 @@ export interface NativeActionToolBoundary {
   run: (cmd: NativeActionCommand) => Promise<NativeActionResponse>
   /** Allows a host or test boundary to disable long-running task tools. */
   taskUseEnabled: () => boolean
+  /** Web Use runs in the user's connected default browser (Tasks > Web Use > Browser). */
+  webUseInDefaultBrowser?: () => boolean
   actions?: ActionsPort
 }
 
@@ -54,12 +71,12 @@ function taskGoalWithConversation(goal: unknown, context: ToolContext | undefine
   const currentRequest = context?.userQuery?.trim() ?? ''
   const completedPrerequisites = context?.completedPrerequisites?.filter(Boolean) ?? []
   const sections = [
-    currentRequest ? `Current user request (authoritative):\n${currentRequest}` : '',
+    currentRequest ? `${TASK_GOAL_REQUEST_LABEL}\n${currentRequest}` : '',
     completedPrerequisites.length
-      ? `Completed prerequisites (already done; continue from this state):\n${completedPrerequisites.map((item) => `- ${item}`).join('\n')}`
+      ? `${TASK_GOAL_PREREQUISITES_LABEL}\n${completedPrerequisites.map((item) => `- ${item}`).join('\n')}`
       : '',
     summary && summary.toLowerCase() !== 'placeholder' && summary !== currentRequest
-      ? `Structured task summary:\n${summary}`
+      ? `${TASK_GOAL_SUMMARY_LABEL}\n${summary}`
       : ''
   ].filter(Boolean)
   return sections.join('\n\n') || summary
@@ -69,10 +86,16 @@ function engineResult(
   actionType: string,
   text: string,
   status: ToolCallStatus = 'completed',
-  authoritative = true
+  authoritative = true,
+  taskId?: string
 ): string | ToolResult {
   return isTaskAction(actionType)
-    ? { text, status, ...(authoritative ? { authoritative: true } : {}) }
+    ? {
+        text,
+        status,
+        ...(authoritative ? { authoritative: true } : {}),
+        ...(taskId ? { taskId } : {})
+      }
     : text
 }
 
@@ -90,6 +113,7 @@ export function inlineRunnerForPlatform(
   }
   if (platform === 'linux') {
     return async (cmd) => {
+      if (cmd.command === 'location.current') return currentLinuxLocation()
       if (cmd.command !== 'system.openURL') {
         return { ok: false, error: 'native actions are not available on this platform' }
       }
@@ -119,6 +143,14 @@ function currentCoordinates(result: unknown): { latitude: number; longitude: num
     : undefined
 }
 
+/** A browser's send, create or delete action waits for approval on Desktop. Its own web task and
+ *  opening a page keep the user-started Chat flow. */
+function browserApprovalFor(context: ToolContext | undefined, actionType: string): boolean {
+  return (
+    toolOriginOf(context).origin === 'bridge' && !isTaskAction(actionType) && actionType !== 'open'
+  )
+}
+
 function needsCurrentLocation(args: Record<string, unknown>, context?: ToolContext): boolean {
   const text = [typeof args.goal === 'string' ? args.goal : '', context?.userQuery ?? ''].join('\n')
   if (
@@ -132,6 +164,8 @@ function needsCurrentLocation(args: Record<string, unknown>, context?: ToolConte
 const productionBoundary: NativeActionToolBoundary = {
   run: inlineRun,
   taskUseEnabled: () => true,
+  webUseInDefaultBrowser: () =>
+    getWebUseSettings().browserTarget === 'default_browser' && getBrowserLinks().length > 0,
   get actions(): ActionsPort {
     // The import is static (the main bundle is one CJS chunk); the runtime
     // itself builds lazily on first access, once the DB exists.
@@ -146,8 +180,7 @@ export class NativeActionToolExtension implements ToolExtension {
   category = 'tool' as const
 
   private get linuxTaskUse(): boolean {
-    return this.platform === 'linux' && app.isPackaged === false &&
-      process.env.OFFGRID_LINUX_TASK_USE === '1'
+    return this.platform === 'linux'
   }
 
   constructor(
@@ -156,7 +189,9 @@ export class NativeActionToolExtension implements ToolExtension {
   ) {}
 
   schemas(): unknown[] {
-    return buildNativeToolSchemas(specsForPlatform(this.platform, this.boundary.taskUseEnabled(), this.linuxTaskUse))
+    return buildNativeToolSchemas(
+      specsForPlatform(this.platform, this.boundary.taskUseEnabled(), this.linuxTaskUse)
+    )
   }
 
   /** What the Tools settings tab lists and toggles. A getter, not a field: the set depends on the
@@ -165,10 +200,12 @@ export class NativeActionToolExtension implements ToolExtension {
    *  which is why every native action - web_use and computer_use included - was invisible and
    *  untoggleable in Settings even while the model could call it. */
   get settings(): readonly { name: string; description: string }[] {
-    return specsForPlatform(this.platform, this.boundary.taskUseEnabled(), this.linuxTaskUse).map((spec) => ({
-      name: spec.name,
-      description: spec.description
-    }))
+    return specsForPlatform(this.platform, this.boundary.taskUseEnabled(), this.linuxTaskUse).map(
+      (spec) => ({
+        name: spec.name,
+        description: spec.description
+      })
+    )
   }
 
   canHandle(name: string): boolean {
@@ -178,7 +215,10 @@ export class NativeActionToolExtension implements ToolExtension {
   }
 
   systemHint(): string {
-    return systemHintForPlatform(this.platform, this.boundary.taskUseEnabled(), this.linuxTaskUse)
+    return withWebUseTarget(
+      systemHintForPlatform(this.platform, this.boundary.taskUseEnabled(), this.linuxTaskUse),
+      this.boundary.webUseInDefaultBrowser?.() ?? false
+    )
   }
 
   async execute(
@@ -197,27 +237,36 @@ export class NativeActionToolExtension implements ToolExtension {
     if (!spec) {
       return `Error: unknown action ${name}`
     }
+    const origin = toolOriginOf(context)
+    if (!isToolAllowedForOrigin(name, origin.origin, origin)) {
+      return {
+        text:
+          name === 'computer_use' ? PAIRED_BROWSER_COMPUTER_USE_REFUSAL : 'Error: tool_unavailable',
+        status: 'failed',
+        authoritative: true
+      }
+    }
     if (name === 'computer_use' && args.sessionLimitMinutes === undefined) {
       const sessionLimitMinutes = taskSessionLimitMinutes(context?.userQuery)
       if (sessionLimitMinutes) args = { ...args, sessionLimitMinutes }
     }
     if (isTaskAction(name) && needsCurrentLocation(args, context)) {
       const location = context?.currentLocation
-      if (!location) {
-        return {
-          text: context?.currentLocationFailed
-            ? 'I could not get your current location. Provide a starting address or neighborhood before I start this nearby task.'
-            : 'I need your current coordinates before I start this nearby task. I did not start Web Use.',
-          status: 'failed',
-          authoritative: true
+      if (location) {
+        args = {
+          ...args,
+          goal: `${typeof args.goal === 'string' ? args.goal : ''}\n\nStart from latitude ${location.latitude}, longitude ${location.longitude}.`
         }
       }
-      args = {
-        ...args,
-        goal: `${typeof args.goal === 'string' ? args.goal : ''}\n\nStart from latitude ${location.latitude}, longitude ${location.longitude}.`
-      }
     }
-    if (shouldGate(spec.risk)) {
+    // A browser's own task (web_use) and opening a page stay the user-started Chat flow; sending,
+    // creating and deleting from the browser wait for approval on Desktop.
+    const browserApproval =
+      origin.origin === 'bridge' &&
+      spec.risk !== 'read' &&
+      !isTaskAction(name) &&
+      name !== 'open_url'
+    if (shouldGate(spec.risk) || browserApproval) {
       const actionType = actionTypeForTool(name)
       const actions = this.boundary.actions
       // This extension is a Chat surface. Every mapped mutation goes through the
@@ -270,11 +319,19 @@ export class NativeActionToolExtension implements ToolExtension {
       {
         type: actionType,
         intent: spec.title(args),
-        args: actionArgsWithTaskLaunch(cleanArgs, context?.taskLaunch),
-        risk: spec.risk
+        // A web task carries the tab its chat offered; no other action, and never a tab the
+        // model wrote into its own arguments.
+        args: actionArgsWithStartTab(
+          actionArgsWithTaskLaunch(cleanArgs, context?.taskLaunch),
+          actionType === WEB_USE_ACTION_TYPE ? context?.startTab : undefined
+        ),
+        // The engine otherwise auto-runs reversible mutations and navigation.
+        risk: browserApprovalFor(context, actionType) ? 'irreversible' : spec.risk
       },
       {
-        source: 'chat',
+        source: browserApprovalFor(context, actionType)
+          ? 'routine'
+          : (context?.actionSource ?? 'chat'),
         ...(context?.conversationId ? { sourceRef: context.conversationId } : {}),
         ...(context?.taskLaunch
           ? {
@@ -289,16 +346,28 @@ export class NativeActionToolExtension implements ToolExtension {
       return reply(`Error: the action was refused: ${proposed.reason}`, 'failed')
     }
     const taskReference = isTaskAction(actionType) ? `Task reference: ${proposed.id}. ` : ''
+    // A task's reply carries its accepted id: the one its run, progress and Stop use.
+    const taskReply = (text: string, status: ToolCallStatus): string | ToolResult =>
+      engineResult(actionType, text, status, true, proposed.id)
     if (proposed.deduped) {
-      return reply(
+      return taskReply(
         `${taskReference}A matching task is already in flight. No duplicate was started.`,
         'pending'
       )
     }
     actions.kick()
+    const unattendedRun =
+      context?.actionSource === 'routine' || browserApprovalFor(context, actionType)
+    if (isTaskAction(actionType) && unattendedRun) {
+      const label = actionType === 'computer_use' ? 'Computer Use' : 'Web Use'
+      return taskReply(
+        `${taskReference}${label}: Waiting for the user's approval in Off Grid AI Desktop (Action Approval); it runs once they approve. Tell the user it is waiting for them.`,
+        'pending'
+      )
+    }
     if (isTaskAction(actionType)) {
       const label = actionType === 'computer_use' ? 'Computer Use' : 'Web Use'
-      return reply(
+      return taskReply(
         `${taskReference}${label} started. Live progress and the final result will appear in this chat. Do not call ${actionType} again for this goal.`,
         'pending'
       )
@@ -309,6 +378,12 @@ export class NativeActionToolExtension implements ToolExtension {
         .then((outcome) => ({ kind: 'outcome' as const, outcome })),
       actions.whenParked(proposed.id).then(() => ({ kind: 'parked' as const }))
     ])
+    if (raced.kind === 'parked' && unattendedRun) {
+      return reply(
+        `${taskReference}"${spec.title(args)}": Waiting for the user's approval in Off Grid AI Desktop (Action Approval); it runs once they approve. Tell the user it is waiting for them.`,
+        'pending'
+      )
+    }
     if (raced.kind === 'parked') {
       return reply(
         `${taskReference}Error: the action engine held this Chat action instead of starting it. No approval was created.`,

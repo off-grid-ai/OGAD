@@ -42,7 +42,11 @@ const previousDataDir = process.env.OFFGRID_DATA_DIR
 
 function installLlamaBoundary(source: string): string {
   const binRoot = path.join(TMP_DIR, 'test-bin')
-  const executable = path.join(binRoot, 'llama', 'llama-server')
+  const executable = path.join(
+    binRoot,
+    process.platform === 'linux' ? 'llama-cpu' : 'llama',
+    'llama-server'
+  )
   fs.mkdirSync(path.dirname(executable), { recursive: true })
   fs.writeFileSync(executable, `#!/usr/bin/env node\n${source}\n`)
   fs.chmodSync(executable, 0o755)
@@ -332,6 +336,74 @@ describe('model gateway chat streaming', () => {
     }
   })
 
+  it('never switches off reasoning an OpenRouter model requires, as Chat does', async () => {
+    // Gemini 3.7 Flash on OpenRouter refuses "reasoning off" with HTTP 400 ("Reasoning is mandatory
+    // for this endpoint and cannot be disabled"). The browser's Agent asks with thinking off.
+    const remote = await import('../vision/remote-vision-server')
+    const codec = await import('../../shared/remote-vision-server')
+    const bodies: Record<string, unknown>[] = []
+    const provider = http.createServer((request, response) => {
+      if (request.method === 'GET' && request.url === '/v1/models') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(
+          JSON.stringify({
+            data: [
+              { id: 'google/gemini-3.7-flash', reasoning: { mandatory: true } },
+              { id: 'openai/gpt-5.6', reasoning: { mandatory: false } }
+            ]
+          })
+        )
+        return
+      }
+      let raw = ''
+      request.setEncoding('utf8')
+      request.on('data', (chunk) => {
+        raw += chunk
+      })
+      request.on('end', () => {
+        bodies.push(JSON.parse(raw) as Record<string, unknown>)
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }))
+      })
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    const port = (provider.address() as AddressInfo).port
+    const ask = async (serverId: string, model: string): Promise<Record<string, unknown>> => {
+      remote.setRemoteVisionServerSettings({
+        provider: 'openrouter',
+        endpoint: `http://127.0.0.1:${port}/v1`,
+        model,
+        serverId,
+        name: 'Synthetic OpenRouter',
+        apiKey: 'synthetic-key'
+      })
+      const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: codec.remoteVisionModelId(serverId, model),
+          stream: false,
+          chat_template_kwargs: { enable_thinking: false },
+          messages: [{ role: 'user', content: 'Reply with three words' }]
+        })
+      })
+      expect(response.status).toBe(200)
+      return bodies.at(-1)!
+    }
+
+    try {
+      const mandatory = await ask('or-mandatory', 'google/gemini-3.7-flash')
+      expect(mandatory).not.toHaveProperty('reasoning')
+      expect(mandatory).not.toHaveProperty('chat_template_kwargs')
+      const optional = await ask('or-optional', 'openai/gpt-5.6')
+      expect(optional).toMatchObject({ reasoning: { effort: 'none' } })
+    } finally {
+      remote.removeRemoteVisionServer('or-mandatory')
+      remote.removeRemoteVisionServer('or-optional')
+      await new Promise<void>((resolve) => provider.close(() => resolve()))
+    }
+  })
+
   it('rejects malformed input with a stable JSON envelope and remains healthy', async () => {
     const response = await fetch(`http://127.0.0.1:${gatewayPort}/v1/chat/completions`, {
       method: 'POST',
@@ -403,7 +475,18 @@ describe('model gateway chat streaming', () => {
   it('downloads only the manually chosen model, activates it, and answers (#11)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
     process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
-      "setInterval(() => {}, 1000); process.on('SIGTERM', () => process.exit(0))"
+      String.raw`const http = require('node:http')
+const args = process.argv.slice(2)
+const port = Number(args[args.indexOf('--port') + 1])
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  if (req.url === '/health') return res.end(JSON.stringify({status:'ok'}))
+  if (req.url === '/v1/models') return res.end(JSON.stringify({data:[{id:'fixture-chat'}]}))
+  if (req.url === '/v1/chat/completions') return res.end(JSON.stringify({choices:[{message:{content:'manual model ready'}}]}))
+  res.statusCode=404; res.end('{}')
+})
+server.listen(port, '127.0.0.1')
+process.on('SIGTERM', () => server.close(() => process.exit(0)))`
     )
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -445,7 +528,18 @@ describe('model gateway chat streaming', () => {
   it('configures the recommended local baseline and activates every chosen model (#10)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
     process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
-      "setInterval(() => {}, 1000); process.on('SIGTERM', () => process.exit(0))"
+      String.raw`const http = require('node:http')
+const args = process.argv.slice(2)
+const port = Number(args[args.indexOf('--port') + 1])
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  if (req.url === '/health') return res.end(JSON.stringify({status:'ok'}))
+  if (req.url === '/v1/models') return res.end(JSON.stringify({data:[{id:'fixture-chat'}]}))
+  if (req.url === '/v1/chat/completions') return res.end(JSON.stringify({choices:[{message:{content:'manual model ready'}}]}))
+  res.statusCode=404; res.end('{}')
+})
+server.listen(port, '127.0.0.1')
+process.on('SIGTERM', () => server.close(() => process.exit(0)))`
     )
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -462,9 +556,8 @@ describe('model gateway chat streaming', () => {
     try {
       // Conservative still installs the complete lightweight local baseline while
       // avoiding the heavyweight image-runtime download in this deterministic rig.
-      await expect(llm.setSettings({ performanceMode: 'conservative' })).rejects.toThrow(
-        'Models not downloaded'
-      )
+      // No model is downloaded yet, so the mode is saved for the first launch without a relaunch.
+      await expect(llm.setSettings({ performanceMode: 'conservative' })).resolves.toBeUndefined()
       const plan = await setup.getSetupPlan()
       expect(plan.mode).toBe('conservative')
       expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
@@ -491,6 +584,63 @@ describe('model gateway chat streaming', () => {
     }
   })
 
+  it('brings the working engine back when a launch setting fails, unset values included (item 4)', async () => {
+    const previousBinDir = process.env.OFFGRID_BIN_DIR
+    // The engine refuses 64 threads, as llama-server does when the value cannot be honoured.
+    process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
+      String.raw`const http = require('node:http')
+const args = process.argv.slice(2)
+const threads = args.indexOf('-t')
+if (threads >= 0 && args[threads + 1] === '64') {
+  process.stderr.write('error: thread count 64 is not supported on this machine\n')
+  process.exit(1)
+}
+const port = Number(args[args.indexOf('--port') + 1])
+const server = http.createServer((req, res) => {
+  res.setHeader('Content-Type', 'application/json')
+  if (req.url === '/health') return res.end(JSON.stringify({status:'ok'}))
+  if (req.url === '/v1/models') return res.end(JSON.stringify({data:[{id:'fixture-chat'}]}))
+  if (req.url === '/props') return res.end(JSON.stringify({}))
+  res.statusCode=404; res.end('{}')
+})
+server.listen(port, '127.0.0.1')
+process.on('SIGTERM', () => server.close(() => process.exit(0)))`
+    )
+    vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      return url.startsWith('http://127.0.0.1:')
+        ? hostFetch(input, init)
+        : Promise.resolve(fixtureDownload(url))
+    })
+
+    const [{ llm }, setup] = await Promise.all([import('../llm'), import('../setup')])
+    try {
+      // The lightweight baseline, as in the setup journey above, keeps this rig deterministic.
+      await llm.setSettings({ performanceMode: 'conservative' }).catch(() => {})
+      const configured = await setup.autoConfigure(() => {})
+      expect(configured).toMatchObject({ success: true })
+      await llm.init()
+      expect(llm.isReady()).toBe(true)
+      expect(llm.getSettings().threads).toBeUndefined()
+
+      await expect(llm.setSettings({ threads: 64 })).rejects.toThrow()
+
+      // The engine runs again with the setting it had, unset rather than the 64 that failed,
+      // and the failed value is not what was saved.
+      await vi.waitFor(() => expect(llm.isReady()).toBe(true), { timeout: 10_000 })
+      expect(llm.getSettings().threads).toBeUndefined()
+      const saved = JSON.parse(
+        fs.readFileSync(path.join(TMP_DIR, 'models', 'llm-settings.json'), 'utf8')
+      ) as { threads?: number }
+      expect(saved.threads).toBeUndefined()
+    } finally {
+      llm.stop()
+      vi.unstubAllGlobals()
+      if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
+      else process.env.OFFGRID_BIN_DIR = previousBinDir
+    }
+  })
+
   it('carries native engine stderr into the actionable System Health result (#14)', async () => {
     const previousBinDir = process.env.OFFGRID_BIN_DIR
     process.env.OFFGRID_BIN_DIR = installLlamaBoundary(
@@ -500,7 +650,7 @@ describe('model gateway chat streaming', () => {
 
     const [{ llm }, setup] = await Promise.all([import('../llm'), import('../setup')])
     try {
-      await expect(llm.restart()).rejects.toThrow(/did not come back up/i)
+      await expect(llm.restart()).rejects.toThrow(/engine.*too old/i)
       // The crash handler has a delayed retry. Pausing is the real lifecycle intent
       // that prevents that recovery timer from leaking work beyond this journey.
       llm.pause()

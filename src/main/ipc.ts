@@ -1,5 +1,9 @@
+import { withStorageDownload, storageDownloadsActive } from './model-storage-guard'
+import { moveModelStorage } from './model-storage-move'
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
+import { listBridgeBrowsers } from './extension-bridge/bridge-electron'
 import { setupAIRequestLogIPC } from './ai-request-log-ipc'
+import { setupChatNextActionIpc } from './chat-next-action'
 import { setupArtifactPreviewIpc } from './artifact-preview-ipc'
 import {
   getDB,
@@ -448,7 +452,7 @@ export async function evaluateAndStoreMemoryForMessage(params: {
     if (params.sessionId) {
       const existingMemories = getMemoryRecordsForSession(params.sessionId)
       const memLower = memoryText.toLowerCase()
-      const isDuplicate = existingMemories.some((m: any) => {
+      const isDuplicate = existingMemories.some((m) => {
         const existing = (m.content || '').toLowerCase()
         return existing === memLower || existing.includes(memLower) || memLower.includes(existing)
       })
@@ -475,7 +479,7 @@ async function extractEntitiesForSession(sessionId: string): Promise<void> {
   // Get strictness setting
   const strictness = getSetting<'lenient' | 'balanced' | 'strict'>('entityStrictness', 'balanced')
 
-  const memoryText = memories.map((m: any) => `- ${m.content}`).join('\n')
+  const memoryText = memories.map((m) => `- ${m.content}`).join('\n')
 
   const prompt = getPrompt(`entityExtraction.${strictness}`, { MEMORY_TEXT: memoryText })
 
@@ -556,9 +560,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   const memories = getMemoriesForSession(sessionId)
   if (memories.length === 0) return null
 
-  const conversationText = memories
-    .map((m: any) => `[${m.role || 'unknown'}]: ${m.content}`)
-    .join('\n')
+  const conversationText = memories.map((m) => `[${m.role || 'unknown'}]: ${m.content}`).join('\n')
   const prompt = getPrompt('sessionSummary', { CONVERSATION_TEXT: conversationText })
 
   try {
@@ -587,7 +589,7 @@ export async function summarizeSession(sessionId: string): Promise<string | null
   }
 }
 
-export function setupIPC() {
+export function setupIPC(): void {
   activateInstalledPerformancePack()
   onPerformancePackChanged((status) => {
     BrowserWindow.getAllWindows().forEach((window) =>
@@ -599,6 +601,7 @@ export function setupIPC() {
   ipcMain.handle('performance-pack:pause', pausePerformancePack)
   ipcMain.handle('performance-pack:restart', () => requestApplicationRelaunch(app))
   setupAIRequestLogIPC()
+  setupChatNextActionIpc()
   setupVoiceTranscriptionIpc()
   const db = getDB()
   setupTtsIpc()
@@ -611,7 +614,7 @@ export function setupIPC() {
 
   ipcMain.handle('db:get-memories', (_, limit: number = 50, appName?: string) => {
     let query = 'SELECT * FROM memories '
-    const params: any[] = []
+    const params: unknown[] = []
 
     const memFilter = appNameLikeClause(appName, 'source_app')
     if (memFilter) {
@@ -684,6 +687,8 @@ export function setupIPC() {
       return stmt.all(vecStr)
     } catch (e) {
       console.error('Vector search failed, falling back to FTS', e)
+      const match = ftsMatchExpression(query)
+      if (!match) return []
       const stmt = db.prepare(`
           SELECT memories.* 
           FROM memories 
@@ -691,7 +696,7 @@ export function setupIPC() {
           WHERE memory_fts MATCH ? 
           LIMIT 20
         `)
-      return stmt.all(query)
+      return stmt.all(match)
     }
   })
 
@@ -918,12 +923,17 @@ export function setupIPC() {
       // which failed the whole retrieval. Preserves the any-term (OR) recall the retrieval expects.
       const ftsQuery = ftsMatchExpression(query)
 
-      let memories: any[] = []
+      let memories: Array<{
+        source_app: string | null
+        created_at: string
+        content: string
+        score?: number
+      }> = []
       try {
         if (isEmbeddingIndexRebuilding()) throw new Error('Embedding index is rebuilding')
         const queryVector = await embeddings.generateEmbedding(query)
         const vecStr = JSON.stringify(queryVector)
-        const params: any[] = [vecStr]
+        const params: unknown[] = [vecStr]
         let memoryQuery = `
             SELECT *, cosine_similarity(embedding, ?) as score
             FROM memories
@@ -935,28 +945,30 @@ export function setupIPC() {
           params.push(vecFilter.param)
         }
         memoryQuery += ` ORDER BY score DESC LIMIT 12`
-        memories = db.prepare(memoryQuery).all(...params)
-        memories = memories.filter((m: any) => typeof m.score !== 'number' || m.score >= 0.2)
+        memories = db.prepare<unknown[], (typeof memories)[number]>(memoryQuery).all(...params)
+        memories = memories.filter((m) => typeof m.score !== 'number' || m.score >= 0.2)
       } catch (e) {
         console.error('[RAG] Vector search failed, falling back to FTS', e)
-        const params: any[] = []
+        const params: unknown[] = []
         let fallbackQuery = `
             SELECT memories.*
             FROM memories
             JOIN memory_fts ON memories.id = memory_fts.rowid
             WHERE memory_fts MATCH ?
           `
-        params.push(query)
+        params.push(ftsQuery)
         const ftsFilter = appNameLikeClause(appName, 'memories.source_app')
         if (ftsFilter) {
           fallbackQuery += ` AND ${ftsFilter.clause} `
           params.push(ftsFilter.param)
         }
         fallbackQuery += ` LIMIT 12`
-        memories = db.prepare(fallbackQuery).all(...params)
+        memories = ftsQuery
+          ? db.prepare<unknown[], (typeof memories)[number]>(fallbackQuery).all(...params)
+          : []
       }
 
-      const messageParams: any[] = [ftsQuery]
+      const messageParams: unknown[] = [ftsQuery]
       let messageQuery = `
                 SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title, c.app_name,
                              bm25(message_fts) as score
@@ -971,9 +983,22 @@ export function setupIPC() {
         messageParams.push(msgFilter.param)
       }
       messageQuery += ` ORDER BY score ASC LIMIT 12`
-      const messages = db.prepare(messageQuery).all(...messageParams)
+      const messages = ftsQuery
+        ? db
+            .prepare<
+              unknown[],
+              {
+                app_name: string | null
+                title: string | null
+                created_at: string
+                role: string
+                content: string
+              }
+            >(messageQuery)
+            .all(...messageParams)
+        : []
 
-      const summaryParams: any[] = [ftsQuery]
+      const summaryParams: unknown[] = [ftsQuery]
       let summaryQuery = `
                 SELECT cs.session_id, cs.summary, c.title, c.app_name, c.updated_at,
                              bm25(summary_fts) as score
@@ -988,9 +1013,16 @@ export function setupIPC() {
         summaryParams.push(sumFilter.param)
       }
       summaryQuery += ` ORDER BY score ASC LIMIT 8`
-      const summaries = db.prepare(summaryQuery).all(...summaryParams)
+      const summaries = ftsQuery
+        ? db
+            .prepare<
+              unknown[],
+              { app_name: string | null; title: string | null; summary: string }
+            >(summaryQuery)
+            .all(...summaryParams)
+        : []
 
-      const entityParams: any[] = [ftsQuery]
+      const entityParams: unknown[] = [ftsQuery]
       let entityQuery = `
                 SELECT e.id, e.name, e.type, e.summary, e.updated_at,
                              bm25(entity_fts) as score
@@ -1011,9 +1043,16 @@ export function setupIPC() {
         entityParams.push(entFilter.param)
       }
       entityQuery += ` ORDER BY score ASC LIMIT 8`
-      const entities = db.prepare(entityQuery).all(...entityParams)
+      const entities = ftsQuery
+        ? db
+            .prepare<
+              unknown[],
+              { type: string | null; name: string; summary: string | null }
+            >(entityQuery)
+            .all(...entityParams)
+        : []
 
-      const factParams: any[] = [ftsQuery]
+      const factParams: unknown[] = [ftsQuery]
       let factQuery = `
                 SELECT f.fact, f.created_at, f.source_session_id, e.name, e.type,
                              bm25(entity_fact_fts) as score
@@ -1028,22 +1067,25 @@ export function setupIPC() {
         factParams.push(factFilter.param)
       }
       factQuery += ` ORDER BY score ASC LIMIT 8`
-      const entityFacts = db.prepare(factQuery).all(...factParams)
+      const entityFacts = ftsQuery
+        ? db
+            .prepare<unknown[], { type: string | null; name: string; fact: string }>(factQuery)
+            .all(...factParams)
+        : []
 
       // Supplementary context (no bracket labels — the ONLY citeable tags are the
       // numbered [S#] SOURCES below, so the model can't invent uncited labels).
       const memoryLines = memories
         .slice(0, 6)
         .map(
-          (m: any) =>
-            `- (${m.source_app || 'Unknown'} | ${m.created_at}): ${clipText(m.content, 500)}`
+          (m) => `- (${m.source_app || 'Unknown'} | ${m.created_at}): ${clipText(m.content, 500)}`
         )
         .join('\n')
 
       const messageLines = messages
         .slice(0, 6)
         .map(
-          (m: any) =>
+          (m) =>
             `- (${m.app_name || 'Unknown'} | ${m.title || 'Untitled'} | ${m.created_at}) ${m.role}: ${clipText(m.content, 400)}`
         )
         .join('\n')
@@ -1051,19 +1093,19 @@ export function setupIPC() {
       const summaryLines = summaries
         .slice(0, 6)
         .map(
-          (s: any) =>
+          (s) =>
             `- (${s.app_name || 'Unknown'} | ${s.title || 'Untitled'}): ${clipText(s.summary, 600)}`
         )
         .join('\n')
 
       const entityLines = entities
         .slice(0, 6)
-        .map((e: any) => `- (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`)
+        .map((e) => `- (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`)
         .join('\n')
 
       const factLines = entityFacts
         .slice(0, 6)
-        .map((f: any) => `- (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`)
+        .map((f) => `- (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`)
         .join('\n')
 
       const contextBlock = `RELEVANT MEMORIES:\n${memoryLines || '(none)'}\n\nRELEVANT MESSAGES:\n${messageLines || '(none)'}\n\nRELEVANT SUMMARIES:\n${summaryLines || '(none)'}\n\nRELEVANT ENTITIES:\n${entityLines || '(none)'}\n\nRELEVANT ENTITY FACTS:\n${factLines || '(none)'}`
@@ -1162,8 +1204,8 @@ export function setupIPC() {
     }
   )
 
-  ipcMain.handle('db:get-chat-sessions', (_, appName?: string) => {
-    return getChatSessions(appName)
+  ipcMain.handle('db:get-chat-sessions', () => {
+    return getChatSessions()
   })
   ipcMain.handle('db:get-memories-for-session', (_, sessionId: string) => {
     // Need to export this from database.ts first or import it
@@ -1270,17 +1312,32 @@ export function setupIPC() {
 
   ipcMain.handle(
     'rag:create-conversation',
-    (_, id: string, title?: string, projectId?: string | null) => {
-      return createRagConversation(id, title, projectId)
+    (
+      _,
+      id: string,
+      title?: string,
+      projectId?: string | null,
+      surface?: import('../shared/ipc-contracts').ConversationSurface
+    ) => {
+      return createRagConversation(id, title, projectId, surface)
     }
   )
 
-  ipcMain.handle('rag:get-conversations', (_, projectId?: string | null) => {
-    return getRagConversations(projectId)
-  })
+  // Both reads are bounded at their owner. `page` and `limit` are optional: a caller that wants
+  // older conversations or more matches asks for them, and one that asks for nothing still gets a
+  // page rather than the whole table.
+  ipcMain.handle(
+    'rag:get-conversations',
+    (
+      _,
+      projectId?: string | null,
+      page?: import('./database').RagConversationPage,
+      surface?: import('../shared/ipc-contracts').ConversationSurface
+    ) => getRagConversations(projectId, page, surface)
+  )
 
-  ipcMain.handle('rag:search-conversation-ids', (_, query: string) =>
-    searchRagConversationIds(query)
+  ipcMain.handle('rag:search-conversation-ids', (_, query: string, limit?: number) =>
+    searchRagConversationIds(query, limit)
   )
 
   ipcMain.handle(
@@ -1315,7 +1372,7 @@ export function setupIPC() {
   })
   ipcMain.handle(
     'rag:add-message',
-    (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: any) => {
+    (_, conversationId: string, role: 'user' | 'assistant', content: string, context?: unknown) => {
       // A reply that was streamed is already named, and keeps that name: every paired device has been
       // rendering it under this id, so the arriving record retires their live preview instead of
       // standing beside it. Read from the one owner of "what this device is generating", so no caller
@@ -1343,32 +1400,49 @@ export function setupIPC() {
     return getSettings()
   })
 
-  // App version (for the Settings footer — so users know what build they're on).
-  ipcMain.handle('app:version', () => app.getVersion())
+  // Browsers paired through the extension bridge, and which are connected (Tasks > Web Use).
+  ipcMain.handle('extension-bridge:browsers', () => listBridgeBrowsers())
 
-  ipcMain.handle('settings:save', (_, key: string, value: any) => {
+  // App version (for the Settings footer — so users know what build they're on). A packaged app
+  // reads its own; an unpackaged launch of a script reports Electron's, so it uses the build's.
+  ipcMain.handle('app:version', () =>
+    !app.isPackaged && typeof __OFFGRID_APP_VERSION__ === 'string'
+      ? __OFFGRID_APP_VERSION__
+      : app.getVersion()
+  )
+
+  ipcMain.handle('settings:save', (_, key: string, value: unknown) => {
     if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
     else if (key === WEB_USE_SETTINGS_KEY) setWebUseSettings(value)
     else saveSetting(key, value)
-    console.log(`[IPC] Setting saved: ${key} =`, value)
     return true
   })
 
   // Per-modality runtime residency (on-demand vs in-memory/resident). The full map
   // drives the queue's mode-aware re-warm and each engine's job path.
   ipcMain.handle('runtime:residency:get', () => getResidency())
-  ipcMain.handle('runtime:residency:set', (_e, modality: Modality, mode: ResidencyMode) =>
-    setResidencyMode(modality, mode)
-  )
+  ipcMain.handle('runtime:residency:set', async (_e, modality: Modality, mode: ResidencyMode) => {
+    ;(await import('./best-settings')).markSpeedSettingsManual()
+    return setResidencyMode(modality, mode)
+  })
   ipcMain.handle('runtime:backend:get', () => getBackendPreferences())
   ipcMain.handle(
     'runtime:backend:set',
     async (_e, modality: BackendModality, preference: BackendPreference) => {
+      ;(await import('./best-settings')).markSpeedSettingsManual()
       const next = setBackendPreference(modality, preference)
       // A loaded engine keeps its present backend until its next load. The UI says so.
       return next
     }
   )
+  ipcMain.handle('runtime:best-settings:apply', async () => {
+    const { applyBestSettings } = await import('./best-settings')
+    return applyBestSettings()
+  })
+  ipcMain.handle('runtime:best-settings:status', async () => {
+    const { bestSettingsStatus } = await import('./best-settings')
+    return bestSettingsStatus()
+  })
   // Unload one modality's model from memory now (the "free RAM" button). Goes through
   // the same evict() seam as residency/shutdown; the engine reloads on next use.
   ipcMain.handle('runtime:unload', async (_e, modality: Modality) => {
@@ -1566,116 +1640,118 @@ export function setupIPC() {
     }
   })
 
-  ipcMain.handle('model:download', async () => {
-    const { llm } = await import('./llm')
-    const modelsDir = llm.getModelsDir()
-    const fs = await import('fs')
-    const path = await import('path')
-    const https = await import('https')
+  ipcMain.handle('model:download', () =>
+    withStorageDownload(async () => {
+      const { llm } = await import('./llm')
+      const modelsDir = llm.getModelsDir()
+      const fs = await import('fs')
+      const path = await import('path')
+      const https = await import('https')
 
-    // Ensure models directory exists
-    if (!fs.existsSync(modelsDir)) {
-      fs.mkdirSync(modelsDir, { recursive: true })
-    }
-
-    const models = [
-      {
-        name: 'Qwen3-VL-4B-Instruct-Q4_K_M.gguf',
-        url: 'https://huggingface.co/bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen_Qwen3-VL-4B-Instruct-Q4_K_M.gguf'
-      },
-      {
-        name: 'mmproj-Qwen3VL-4B-Instruct-F16.gguf',
-        url: 'https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf'
+      // Ensure models directory exists
+      if (!fs.existsSync(modelsDir)) {
+        fs.mkdirSync(modelsDir, { recursive: true })
       }
-    ]
 
-    const downloadFile = (url: string, destPath: string, modelName: string): Promise<void> => {
-      return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(destPath)
-        let rateSample: ProgressRateSample | undefined
+      const models = [
+        {
+          name: 'Qwen3-VL-4B-Instruct-Q4_K_M.gguf',
+          url: 'https://huggingface.co/bartowski/Qwen_Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen_Qwen3-VL-4B-Instruct-Q4_K_M.gguf'
+        },
+        {
+          name: 'mmproj-Qwen3VL-4B-Instruct-F16.gguf',
+          url: 'https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-F16.gguf'
+        }
+      ]
 
-        const request = (redirectUrl: string) => {
-          https
-            .get(redirectUrl, (response) => {
-              if (
-                response.statusCode &&
-                response.statusCode >= 300 &&
-                response.statusCode < 400 &&
-                response.headers.location
-              ) {
-                request(response.headers.location)
-                return
-              }
+      const downloadFile = (url: string, destPath: string, modelName: string): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          const file = fs.createWriteStream(destPath)
+          let rateSample: ProgressRateSample | undefined
 
-              if (response.statusCode !== 200) {
-                fs.unlink(destPath, () => {})
-                reject(new Error(`HTTP ${response.statusCode}`))
-                return
-              }
+          const request = (redirectUrl: string): void => {
+            https
+              .get(redirectUrl, (response) => {
+                if (
+                  response.statusCode &&
+                  response.statusCode >= 300 &&
+                  response.statusCode < 400 &&
+                  response.headers.location
+                ) {
+                  request(response.headers.location)
+                  return
+                }
 
-              const totalSize = parseInt(response.headers['content-length'] || '0', 10)
-              let downloaded = 0
+                if (response.statusCode !== 200) {
+                  fs.unlink(destPath, () => {})
+                  reject(new Error(`HTTP ${response.statusCode}`))
+                  return
+                }
 
-              response.pipe(file)
+                const totalSize = parseInt(response.headers['content-length'] || '0', 10)
+                let downloaded = 0
 
-              response.on('data', (chunk: Buffer) => {
-                downloaded += chunk.length
-                const percent = totalSize ? Math.round((downloaded / totalSize) * 100) : 0
-                const rate = sampleProgressRate(rateSample, {
-                  currentBytes: downloaded,
-                  sampledAtMs: Date.now()
-                })
-                rateSample = rate.sample
+                response.pipe(file)
 
-                // Send progress to renderer
-                BrowserWindow.getAllWindows().forEach((win) => {
-                  win.webContents.send('model:download-progress', {
-                    modelName,
-                    percent,
-                    downloadedBytes: downloaded,
-                    totalBytes: totalSize || undefined,
-                    bytesPerSecond: rate.bytesPerSecond,
-                    downloadedMB: (downloaded / 1024 / 1024).toFixed(1),
-                    totalMB: totalSize ? (totalSize / 1024 / 1024).toFixed(1) : '?'
+                response.on('data', (chunk: Buffer) => {
+                  downloaded += chunk.length
+                  const percent = totalSize ? Math.round((downloaded / totalSize) * 100) : 0
+                  const rate = sampleProgressRate(rateSample, {
+                    currentBytes: downloaded,
+                    sampledAtMs: Date.now()
+                  })
+                  rateSample = rate.sample
+
+                  // Send progress to renderer
+                  BrowserWindow.getAllWindows().forEach((win) => {
+                    win.webContents.send('model:download-progress', {
+                      modelName,
+                      percent,
+                      downloadedBytes: downloaded,
+                      totalBytes: totalSize || undefined,
+                      bytesPerSecond: rate.bytesPerSecond,
+                      downloadedMB: (downloaded / 1024 / 1024).toFixed(1),
+                      totalMB: totalSize ? (totalSize / 1024 / 1024).toFixed(1) : '?'
+                    })
                   })
                 })
+
+                file.on('finish', () => {
+                  file.close()
+                  resolve()
+                })
               })
-
-              file.on('finish', () => {
-                file.close()
-                resolve()
+              .on('error', (err) => {
+                fs.unlink(destPath, () => {})
+                reject(err)
               })
-            })
-            .on('error', (err) => {
-              fs.unlink(destPath, () => {})
-              reject(err)
-            })
-        }
+          }
 
-        request(url)
-      })
-    }
-
-    try {
-      for (const model of models) {
-        const destPath = path.join(modelsDir, model.name)
-
-        if (fs.existsSync(destPath)) {
-          console.log(`[Model] ${model.name} already exists, skipping`)
-          continue
-        }
-
-        console.log(`[Model] Downloading ${model.name}...`)
-        await downloadFile(model.url, destPath, model.name)
-        console.log(`[Model] ${model.name} downloaded`)
+          request(url)
+        })
       }
 
-      return { success: true }
-    } catch (err: any) {
-      console.error('[Model] Download failed:', err)
-      return { success: false, error: err.message }
-    }
-  })
+      try {
+        for (const model of models) {
+          const destPath = path.join(modelsDir, model.name)
+
+          if (fs.existsSync(destPath)) {
+            console.log(`[Model] ${model.name} already exists, skipping`)
+            continue
+          }
+
+          console.log(`[Model] Downloading ${model.name}...`)
+          await downloadFile(model.url, destPath, model.name)
+          console.log(`[Model] ${model.name} downloaded`)
+        }
+
+        return { success: true }
+      } catch (err: unknown) {
+        console.error('[Model] Download failed:', err)
+        return { success: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    })
+  )
 
   // === Off Grid AI MODEL CATALOG (text, vision, image, voice, transcription) ===
 
@@ -1693,7 +1769,7 @@ export function setupIPC() {
     import('./models-manager').then((m) => m.searchModels(query, kind))
   )
   ipcMain.handle('models:files', (_, modelId: string) =>
-    import('@offgrid/models').then((m) => m.getModelFiles(modelId))
+    import('./models-manager').then((m) => m.getModelFiles(modelId))
   )
 
   ipcMain.handle('models:download', async (_, modelId: string, fileName?: string) => {
@@ -1714,13 +1790,25 @@ export function setupIPC() {
     import('./models-manager').then((m) => m.deleteModel(modelId))
   )
 
-  ipcMain.handle('models:set-active', (_, modelId: string) =>
-    import('./models-manager').then((m) => m.setActiveModel(modelId))
-  )
+  // A new chat model can change MTP support and memory needs: refresh auto-managed settings.
+  const refreshBestSettings = (): void => {
+    void import('./best-settings')
+      .then((m) => m.ensureBestSettings())
+      .catch((error: unknown) => console.warn('[best-settings] refresh failed', error))
+  }
+  ipcMain.handle('models:set-active', async (_, modelId: string) => {
+    const result = await import('./models-manager').then((m) => m.setActiveModel(modelId))
+    refreshBestSettings()
+    return result
+  })
   // Single activation seam: route any model to the right backend by its kind.
-  ipcMain.handle('models:activate', (_, modelId: string, requestedKind?: string) =>
-    import('./models-manager').then((m) => m.activateModel(modelId, requestedKind))
-  )
+  ipcMain.handle('models:activate', async (_, modelId: string, requestedKind?: string) => {
+    const result = await import('./models-manager').then((m) =>
+      m.activateModel(modelId, requestedKind)
+    )
+    refreshBestSettings()
+    return result
+  })
   ipcMain.handle('models:get-active', () =>
     import('./models-manager').then((m) => m.getActiveModel())
   )
@@ -1742,6 +1830,13 @@ export function setupIPC() {
   ipcMain.handle('models:web-use-active', () =>
     import('./vision/vision-task-model-strategy').then((m) => m.getWebUseActiveModelProjection())
   )
+  // Every Models screen's view of the task models, and the one way to give a model a role.
+  ipcMain.handle('models:task-roles', () =>
+    import('./vision/vision-task-model-strategy').then((m) => m.getTaskRolesView())
+  )
+  ipcMain.handle('models:set-task-role', (_, task: unknown, role: unknown, modelId: unknown) =>
+    import('./task-role-requests').then((m) => m.setTaskRoleFromRequest({ task, role, modelId }))
+  )
 
   // Storage + download manager
   ipcMain.handle('models:storage', () => import('./models-manager').then((m) => m.getStorageInfo()))
@@ -1756,8 +1851,12 @@ export function setupIPC() {
     })
     if (result.canceled || !result.filePaths[0]) return { canceled: true }
     const directory = result.filePaths[0]
-    const downloads = await import('./models-manager').then((m) => m.listDownloads())
-    if (downloads.some((entry) => entry.status === 'queued' || entry.status === 'downloading')) {
+    const manager = await import('./models-manager')
+    const downloads = manager.listDownloads()
+    if (
+      storageDownloadsActive() ||
+      downloads.some((entry) => entry.status === 'queued' || entry.status === 'downloading')
+    ) {
       return { error: 'Wait for model downloads to finish or cancel them, then try again.' }
     }
     try {
@@ -1767,32 +1866,40 @@ export function setupIPC() {
       const sameFolder =
         fs.existsSync(current) && fs.realpathSync(current) === fs.realpathSync(directory)
       let moved = false
-      let warning: string | undefined
+      let left = false
+      let unknownEntriesLeft = 0
       if (!sameFolder && currentFiles.length) {
         const choice = await dialog.showMessageBox({
           type: 'question',
           title: 'Existing model files',
           message: 'Move your existing model files to the new folder?',
           detail:
-            'Move keeps your downloaded models in the new folder after restart. Leave keeps them in the old folder and adds it as a folder to scan.',
+            'Move copies Off Grid model files and uses the new folder now. Old copies are removed after the next restart if verified. Unknown files stay in place. Leave adds the old folder as a folder to scan.',
           buttons: ['Move files', 'Leave files', 'Cancel'],
           defaultId: 0,
           cancelId: 2
         })
         if (choice.response === 2) return { canceled: true }
         if (choice.response === 0) {
-          const result = await import('./model-storage-move').then((m) =>
-            m.moveModelStorage(profile, current, directory)
-          )
-          moved = result.moved > 0
-          warning = result.warning
+          const moveResult = await moveModelStorage(profile, current, directory, {
+            ownedFiles: [],
+            loadOwnedFiles: async () =>
+              (await manager.desktopCatalog()).flatMap((model) => model.files),
+            downloadsActive: () =>
+              manager
+                .listDownloads()
+                .some((entry) => entry.status === 'queued' || entry.status === 'downloading')
+          })
+          moved = true
+          unknownEntriesLeft = moveResult.unknownEntriesLeft
         } else {
-          const { addModelScanFolder } = await import('./model-storage-choice')
-          addModelScanFolder(profile, current)
+          const { leaveModelStorage } = await import('./model-storage-move')
+          leaveModelStorage(profile, current, directory)
+          left = true
         }
       }
-      if (!moved) saveModelStorageChoice(profile, directory)
-      return { directory, moved, warning, restartRequired: !sameFolder }
+      if (!moved && !left) saveModelStorageChoice(profile, directory)
+      return { directory, moved, unknownEntriesLeft, restartRequired: !sameFolder }
     } catch (error) {
       return { error: error instanceof Error ? error.message : 'Cannot use this folder.' }
     }
@@ -2281,6 +2388,7 @@ export function setupIPC() {
       history?: { role: string; content: string }[],
       opts?: {
         assistantOnly?: boolean
+        allTools?: boolean
         connectors?: boolean
         conversationId?: string
         projectId?: string
@@ -2290,6 +2398,10 @@ export function setupIPC() {
         videoAvailable?: boolean
         streamId?: string
         thinking?: boolean
+        /** What the user is doing now (God's context), added to the system prompt. */
+        context?: string
+        /** God's standing rules, which every reply follows. */
+        rules?: readonly string[]
       }
     ) => {
       const { toolChat } = await import('./tools')
@@ -2403,6 +2515,8 @@ export function setupIPC() {
   })
   ipcMain.handle('llm:set-settings', async (_e, s: import('./llm').LlmSettings) => {
     const { llm } = await import('./llm')
+    const { isSpeedSettingsPatch } = await import('../shared/best-settings')
+    if (isSpeedSettingsPatch(s)) (await import('./best-settings')).markSpeedSettingsManual()
     await llm.setSettings(s)
     return llm.getSettings()
   })
@@ -2532,37 +2646,9 @@ export function setupIPC() {
 
   // Which STT engine + model would run right now (provenance) + the installed transcription
   // models a picker can switch to (via the existing models:set-active-modal — this only lists).
-  ipcMain.handle('transcription:active-info', async () => {
-    const { getActiveTranscriptionInfo, transcriptionActiveInfo } =
-      await import('./transcription/select')
-    const { getCatalog } = await import('./models-manager')
-    const { getSetting } = await import('./database')
-    const catalog = await getCatalog()
-    const installed = (
-      catalog.models as Array<{
-        id: string
-        familyId?: string
-        name?: string
-        kind?: string
-        downloaded?: boolean
-        files?: Array<{ name: string; downloaded?: boolean }>
-      }>
-    ).filter(
-      (model) =>
-        model.kind === 'transcription' &&
-        (model.downloaded === true || model.files?.every((file) => file.downloaded === true))
-    )
-    return transcriptionActiveInfo(
-      getActiveTranscriptionInfo(),
-      installed.map((model) => ({
-        id: model.id,
-        familyId: model.familyId,
-        name: model.name,
-        files: model.files ?? []
-      })),
-      getSetting('sttLanguage', 'auto')
-    )
-  })
+  ipcMain.handle('transcription:active-info', async () =>
+    (await import('./transcription/select')).readTranscriptionInfo()
+  )
 
   /**
    * Keep the image a generation will be based on, and give it a name the mesh can use.

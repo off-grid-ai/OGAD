@@ -35,11 +35,7 @@ import { PromptEnhancementMessageRow } from './PromptEnhancementMessageRow'
 import { ToolMessageTimelineRow } from './ToolMessageTimelineRow'
 import { MessageThinkingHeader } from './MessageThinkingHeader'
 import { IncomingFileRows, MessageAttachments, MessageEditor } from './MessageContent'
-import {
-  GenerationMetricsRow,
-  ResponseCutoffNotice,
-  ToolsSentDisclosure
-} from './MessageMetadata'
+import { GenerationMetricsRow, ResponseCutoffNotice, ToolsSentDisclosure } from './MessageMetadata'
 import { ArtifactCard, AskCard, ImageMemoryRetryAction } from './MessageCards'
 import {
   CopyAction,
@@ -48,17 +44,60 @@ import {
   VoiceMessageActions
 } from './MessageActions'
 import { MessageMarkdown } from './MessageMarkdown'
-import {
-  AssistantMessageActions,
-  MessageTime,
-  speechControlState
-} from './AssistantMessageActions'
-import {
-  ContextDisclosure,
-  hasInlineMemorySources,
-  UnifiedContextSection
-} from './MessageContext'
+import { AssistantMessageActions, MessageTime, speechControlState } from './AssistantMessageActions'
+import { ContextDisclosure, hasInlineMemorySources, UnifiedContextSection } from './MessageContext'
 import { useStreamViewMessage } from '../stream-view-store'
+
+/** The pause before the first reaction on a message just sent: a beat, as a person takes, between
+ *  one and three seconds. Fixed per message (from its id), so it never jumps on a re-render. */
+function firstReactionPauseMs(messageId: string): number {
+  let hash = 0
+  for (const char of messageId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return 1_000 + (hash % 2_000)
+}
+
+/** One reaction. On a message just sent it waits its turn, then settles in; on an older one it is
+ *  simply there. The wait is set when it first shows, so later renders never move it. */
+function ReactionPill({
+  emoji,
+  dueAt
+}: Readonly<{ emoji: string; dueAt: number }>): React.JSX.Element {
+  const [delayMs] = useState(() => Math.max(0, dueAt - Date.now()))
+  return (
+    <span
+      role="img"
+      aria-label={`Reacted ${emoji}`}
+      title="Reacted"
+      style={delayMs > 0 ? { animationDelay: `${delayMs}ms` } : undefined}
+      className="og-reaction rounded-full border border-border bg-background px-1.5 py-0.5 text-sm leading-none shadow-sm"
+    >
+      {emoji}
+    </span>
+  )
+}
+
+/** God's reactions to your message, as tapbacks sit on a message in iMessage. They only add up:
+ *  each new one settles in beside the last, and none is replaced. */
+function Reactions({
+  emojis,
+  messageId,
+  sentAt
+}: Readonly<{
+  emojis?: readonly string[]
+  messageId: string
+  sentAt?: number
+}>): React.JSX.Element | null {
+  if (!emojis?.length) return null
+  const first = (sentAt ?? 0) + firstReactionPauseMs(messageId)
+  return (
+    <span className="-mt-2.5 mr-2 flex gap-1 self-end">
+      {emojis.map((emoji, index) => (
+        // Each one after the first a moment after the one before it.
+        <ReactionPill key={emoji} emoji={emoji} dueAt={first + index * 300} />
+      ))}
+    </span>
+  )
+}
 
 function VoiceMessageRow({
   message,
@@ -72,6 +111,7 @@ function VoiceMessageRow({
   copied,
   showTranscriptInitially,
   showGenerationDetails,
+  showToolsSent,
   regenerationDisabled,
   playbackSpeed,
   onPlaybackStateChange,
@@ -96,6 +136,7 @@ function VoiceMessageRow({
   copied: boolean
   showTranscriptInitially: boolean
   showGenerationDetails: boolean
+  showToolsSent?: boolean
   regenerationDisabled: boolean
   playbackSpeed: number
   onPlaybackStateChange: (messageId: string, active: boolean) => void
@@ -122,9 +163,9 @@ function VoiceMessageRow({
   const thinking =
     timelineThinking ??
     (message.role === 'assistant' &&
-      (!message.timeline?.some((entry) => entry.kind === 'thinking') || message.reasoningLabel) &&
-      (message.turnStatus !== 'cancelled' || Boolean(message.reasoning?.trim())) &&
-      (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
+    (!message.timeline?.some((entry) => entry.kind === 'thinking') || message.reasoningLabel) &&
+    (message.turnStatus !== 'cancelled' || Boolean(message.reasoning?.trim())) &&
+    (message.streaming || message.reasoning?.trim() || message.reasoningRequested) ? (
       <MessageThinkingHeader message={message} timeline />
     ) : undefined)
   const isFinalAssistantResponse =
@@ -135,9 +176,9 @@ function VoiceMessageRow({
     !isSupportingMessage(message)
   const memorySources = hasInlineMemorySources(message)
     ? {
-      count: message.context.unified.length,
-      content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
-    }
+        count: message.context.unified.length,
+        content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
+      }
     : undefined
   const transcribeAgain = useCallback(async (): Promise<void> => {
     if (!audioUrl || transcribing) return
@@ -149,7 +190,9 @@ function VoiceMessageRow({
       const bytes = new Uint8Array(await response.arrayBuffer())
       const source =
         message.attachments?.find(
-          (attachment) => attachment.kind === 'audio' || attachmentKindFor({ fileName: attachment.name }) === 'audio'
+          (attachment) =>
+            attachment.kind === 'audio' ||
+            attachmentKindFor({ fileName: attachment.name }) === 'audio'
         )?.path ?? audioUrl
       const extension = source.match(/\.([a-z0-9]+)(?:$|[?#])/i)?.[1] ?? 'webm'
       const transcript = (
@@ -315,6 +358,9 @@ function VoiceMessageRow({
   return (
     <div className={`my-2 flex flex-col gap-1.5 ${alignment}`}>
       {body}
+      {message.role === 'user' ? (
+        <Reactions emojis={message.reactions} messageId={message.id} sentAt={message.createdAt} />
+      ) : null}
       {continuation}
       {message.role === 'user' ? (
         <div className="flex items-center gap-2 pr-1">
@@ -345,11 +391,13 @@ function VoiceMessageRow({
       ) : null}
       {isFinalAssistantResponse ? (
         <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pr-1">
-          <ToolsSentDisclosure
-            names={message.toolsOffered}
-            open={openFooterDetail === 'tools'}
-            onOpenChange={(open) => setOpenFooterDetail(open ? 'tools' : null)}
-          />
+          {showToolsSent !== false ? (
+            <ToolsSentDisclosure
+              names={message.toolsOffered}
+              open={openFooterDetail === 'tools'}
+              onOpenChange={(open) => setOpenFooterDetail(open ? 'tools' : null)}
+            />
+          ) : null}
           {showGenerationDetails ? (
             <GenerationMetricsRow
               metrics={message.metrics}
@@ -424,8 +472,8 @@ function MessageBubble({
           onCancel={actions.cancelEdit}
           onSave={actions.saveEdit}
         />
-      ) : artifact ? null : (
-        <MessageMarkdown message={message} navigation={navigation} />
+      ) : (
+        <MessageMarkdown message={message} navigation={navigation} withoutArtifact={!!artifact} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
       {message.imageMemoryRetry ? (
@@ -487,9 +535,9 @@ function StandardMessageRow({
     !isSupportingMessage(message)
   const memorySources = hasInlineMemorySources(message)
     ? {
-      count: message.context.unified.length,
-      content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
-    }
+        count: message.context.unified.length,
+        content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
+      }
     : undefined
   return (
     <div className={standardMessageRowClass(message)} data-testid={`chat-message-${message.id}`}>
@@ -528,6 +576,9 @@ function StandardMessageRow({
       >
         <MessageBubble message={message} state={state} actions={actions} navigation={navigation} />
         {message.role === 'user' ? (
+          <Reactions emojis={message.reactions} messageId={message.id} sentAt={message.createdAt} />
+        ) : null}
+        {message.role === 'user' ? (
           <div className="mt-1.5 flex items-center justify-end gap-2 pr-1">
             <MessageTime message={message} />
             {message.context?.taskGuidance ? (
@@ -552,11 +603,13 @@ function StandardMessageRow({
       {continuation}
       {isFinalAssistantResponse ? (
         <div className="flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pr-1">
-          <ToolsSentDisclosure
-            names={message.toolsOffered}
-            open={openFooterDetail === 'tools'}
-            onOpenChange={(open) => setOpenFooterDetail(open ? 'tools' : null)}
-          />
+          {state.showToolsSent !== false ? (
+            <ToolsSentDisclosure
+              names={message.toolsOffered}
+              open={openFooterDetail === 'tools'}
+              onOpenChange={(open) => setOpenFooterDetail(open ? 'tools' : null)}
+            />
+          ) : null}
           {state.showGenerationDetails ? (
             <GenerationMetricsRow
               metrics={message.metrics}
@@ -661,6 +714,7 @@ function MessageRowComponent({
         copied={state.copiedKey === currentMessage.id}
         showTranscriptInitially={state.latestVoiceAssistantId === currentMessage.id}
         showGenerationDetails={state.showGenerationDetails}
+        showToolsSent={state.showToolsSent}
         regenerationDisabled={state.regenerationDisabled}
         playbackSpeed={state.ttsSpeed}
         onPlaybackStateChange={actions.voicePlaybackChange}
@@ -720,6 +774,7 @@ function sameMessageState(
     left.askSelections[messageId] === right.askSelections[messageId] &&
     sameIncomingFiles(left.incomingFiles, right.incomingFiles) &&
     left.showGenerationDetails === right.showGenerationDetails &&
+    left.showToolsSent === right.showToolsSent &&
     left.regenerationDisabled === right.regenerationDisabled
   )
 }

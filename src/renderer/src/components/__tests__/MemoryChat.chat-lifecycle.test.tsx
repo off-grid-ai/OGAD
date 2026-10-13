@@ -34,7 +34,7 @@ function openActionsFor(text: string): void {
 describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     globalThis.requestAnimationFrame = (callback: FrameRequestCallback): number => {
       callback(0)
       return 1
@@ -58,7 +58,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await send('Find the project plan', user)
     await waitFor(() => expect(boundary.toolQueries).toHaveLength(1))
     expect(boundary.toolQueries[0]!.options).toMatchObject({
-      projectId: 'project-alpha', allMemory: false
+      projectId: 'project-alpha',
+      allMemory: false
     })
     boundary.resolve(0, 'Project answer')
     await screen.findByText('Project answer')
@@ -131,7 +132,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
         role: 'user',
         content: '(1 attachment)',
         context: {
-          attachments: [{ name: 'Pasted text', kind: 'pasted', text: 'Find nearby beef ribs under $100' }]
+          attachments: [
+            { name: 'Pasted text', kind: 'pasted', text: 'Find nearby beef ribs under $100' }
+          ]
         }
       },
       { id: 'previous-reply', role: 'assistant', content: 'What is your starting address?' }
@@ -707,9 +710,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
     boundary.speechTurns[0]!.reject(new Error('native worker unavailable'))
 
-    expect((await screen.findByRole('alert')).textContent).toMatch(
-      /speech could not be generated.*text-to-speech is installed in settings/i
-    )
+    expect((await screen.findByRole('alert')).textContent).toBe('native worker unavailable')
     openActionsFor('Conversation B baseline')
     expect(screen.getByRole('menuitem', { name: 'Speak' })).toBeTruthy()
   })
@@ -1040,45 +1041,75 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await waitFor(() => expect(boundary.calls).toHaveLength(1))
     expect(await screen.findByRole('button', { name: /click to open in the canvas/i })).toBeTruthy()
 
-    view.rerender(<TooltipProvider><MemoryChat openTarget={{ conversationId: 'conversation-b' }} /></TooltipProvider>)
-    await waitFor(() => expect(screen.queryByRole('button', { name: /click to open in the canvas/i })).toBeNull())
-    view.rerender(<TooltipProvider><MemoryChat openTarget={{ conversationId: 'conversation-a' }} /></TooltipProvider>)
+    view.rerender(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'conversation-b' }} />
+      </TooltipProvider>
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /click to open in the canvas/i })).toBeNull()
+    )
+    view.rerender(
+      <TooltipProvider>
+        <MemoryChat openTarget={{ conversationId: 'conversation-a' }} />
+      </TooltipProvider>
+    )
     expect(await screen.findByRole('button', { name: /click to open in the canvas/i })).toBeTruthy()
 
     view.unmount()
     renderChat({ conversationId: 'conversation-a' })
     await user.click(await screen.findByRole('button', { name: /click to open in the canvas/i }))
     expect(await screen.findByTitle('artifact')).toBeTruthy()
-    expect(boundary.messages['conversation-a']!.filter((message) => message.content.startsWith('Comic book reader:'))).toHaveLength(1)
+    expect(
+      boundary.messages['conversation-a']!.filter((message) =>
+        message.content.startsWith('Comic book reader:')
+      )
+    ).toHaveLength(1)
   })
 
-  it.each([false, true])('keeps one saved comic message after image completion (failed: %s)', async (failed) => {
-    const boundary = new ChatBoundary()
-    installBoundary(boundary)
-    window.api.generateImage = async () => {
-      if (failed) throw new Error('Image runtime unavailable')
-      return { path: '/tmp/comic-page.png', dataUrl: 'data:image/png;base64,AA==', seed: 1, syncId: 'comic-page', model: 'test-image', prompt: 'A tree' }
+  it.each([false, true])(
+    'keeps one saved comic message after image completion (failed: %s)',
+    async (failed) => {
+      const boundary = new ChatBoundary()
+      installBoundary(boundary)
+      window.api.generateImage = async () => {
+        if (failed) throw new Error('Image runtime unavailable')
+        return {
+          path: '/tmp/comic-page.png',
+          dataUrl: 'data:image/png;base64,AA==',
+          seed: 1,
+          syncId: 'comic-page',
+          model: 'test-image',
+          prompt: 'A tree'
+        }
+      }
+      window.api.deleteArtifact = async () => true
+      const user = userEvent.setup()
+      const view = renderChat({ conversationId: 'conversation-a' })
+      await send('<!-- offgrid-action:comic-book -->\nQ: Story length\nA: 10 distinct images', user)
+      await waitFor(() => expect(boundary.calls).toHaveLength(1))
+      boundary.resolve(0, 'Comic response', {
+        imageRequests: [{ prompt: 'PAGE STORY: A test page\nILLUSTRATION: A tree' }]
+      })
+      await waitFor(() => {
+        const saved = boundary.messages['conversation-a']!.filter(
+          (message) => message.role === 'assistant'
+        )
+        expect(saved).toHaveLength(1)
+        expect(saved[0]!.content).toContain(failed ? 'Comic response' : '1 of 10 pages ready')
+      })
+      view.unmount()
+      renderChat({ conversationId: 'conversation-a' })
+      if (failed) {
+        expect(await screen.findByText('Comic response')).toBeTruthy()
+        expect(screen.queryByRole('button', { name: /click to open in the canvas/i })).toBeNull()
+      } else {
+        expect(
+          await screen.findByRole('button', { name: /click to open in the canvas/i })
+        ).toBeTruthy()
+      }
     }
-    window.api.deleteArtifact = async () => true
-    const user = userEvent.setup()
-    const view = renderChat({ conversationId: 'conversation-a' })
-    await send('<!-- offgrid-action:comic-book -->\nQ: Story length\nA: 10 distinct images', user)
-    await waitFor(() => expect(boundary.calls).toHaveLength(1))
-    boundary.resolve(0, 'Comic response', { imageRequests: [{ prompt: 'PAGE STORY: A test page\nILLUSTRATION: A tree' }] })
-    await waitFor(() => {
-      const saved = boundary.messages['conversation-a']!.filter((message) => message.role === 'assistant')
-      expect(saved).toHaveLength(1)
-      expect(saved[0]!.content).toContain(failed ? 'Comic response' : '1 of 10 pages ready')
-    })
-    view.unmount()
-    renderChat({ conversationId: 'conversation-a' })
-    if (failed) {
-      expect(await screen.findByText('Comic response')).toBeTruthy()
-      expect(screen.queryByRole('button', { name: /click to open in the canvas/i })).toBeNull()
-    } else {
-      expect(await screen.findByRole('button', { name: /click to open in the canvas/i })).toBeTruthy()
-    }
-  })
+  )
 
   it('keeps a result and its artifact attributed to the project captured at send time (#42)', async () => {
     const boundary = new ChatBoundary()
@@ -1136,12 +1167,15 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       projectId: 'project-alpha',
       conversationId: 'conversation-a'
     })
-    expect(boundary.truncateRagMessages).toHaveBeenCalledWith('conversation-a', 1)
     expect(screen.getAllByText('Explain the release gate')).toHaveLength(1)
 
     boundary.resolve(0, 'Updated explanation')
 
     expect(await screen.findByText('Updated explanation')).toBeTruthy()
+    expect(screen.getByText('2/2')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Previous response' }))
+    expect(await screen.findByText('Original explanation')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Next response' }))
     expect(screen.queryByText('Original explanation')).toBeNull()
     expect(screen.getAllByText('Explain the release gate')).toHaveLength(1)
     await waitFor(() =>
@@ -1324,5 +1358,408 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(
       screen.queryByText('Sorry, something went wrong while generating a response.')
     ).toBeNull()
+  })
+  it.each(['done', 'error', 'cancel'] as const)(
+    'settles a reload-mid-stream with no sender on %s and drains the restored queue',
+    async (type) => {
+      const boundary = new ChatBoundary()
+      boundary.messages['conversation-a'] = [
+        { id: 'q', role: 'user', content: 'Question before reload' }
+      ]
+      boundary.activeRagStreams.push({
+        streamId: 'orphan',
+        conversationId: 'conversation-a',
+        content: 'Partial after reload',
+        reasoning: 'Partial reasoning',
+        reasoningRequested: true,
+        phase: 'answering'
+      })
+      boundary.settings.chatQueuedMessages = {
+        'conversation-a': [
+          { text: 'Restored queued question', atts: [], projectId: null, mode: 'ask' }
+        ]
+      }
+      installBoundary(boundary)
+      renderChat({ conversationId: 'conversation-a' })
+      await screen.findByText('Partial after reload')
+      await screen.findByText('1 queued')
+      act(() => {
+        boundary.activeRagStreams.length = 0
+        boundary.emitStream({ streamId: 'orphan', type })
+      })
+      await waitFor(() => expect(boundary.calls).toHaveLength(1))
+      expect(boundary.calls[0]!.query).toBe('Restored queued question')
+      expect(boundary.messages['conversation-a']).toContainEqual(
+        expect.objectContaining({
+          role: 'assistant',
+          content: 'Partial after reload',
+          context: expect.objectContaining({ reasoning: 'Partial reasoning' })
+        })
+      )
+      expect(
+        boundary.messages['conversation-a']!.filter(
+          (message) => message.content === 'Partial after reload'
+        )
+      ).toHaveLength(1)
+      expect(
+        boundary.addRagMessage.mock.calls.filter(
+          ([, role, content]) => role === 'assistant' && content === 'Partial after reload'
+        )
+      ).toHaveLength(1)
+      act(() => boundary.emitStream({ streamId: 'orphan', type }))
+      expect(screen.getAllByText('Partial after reload')).toHaveLength(1)
+      boundary.resolve(0, 'Restored queue answer')
+      await screen.findByText('Restored queue answer')
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
+      )
+    }
+  )
+
+  it('ordinary Stop after remount saves one partial and discards both queued drafts', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    const view = renderChat({ conversationId: 'conversation-a' })
+    await send('Hold this reply open.', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    act(() => boundary.emit(0, 'The first reply is still running.'))
+    // Native cancellation resolves with the streamed partial instead of rejecting.
+    boundary.cancelRag.mockImplementation(() => {
+      boundary.activeRagStreams.length = 0
+      boundary.resolve(0, 'The first reply is still running.')
+    })
+    await send('Queue this first.', user)
+    await screen.findByText('1 queued')
+    boundary.activeRagStreams.push({
+      streamId: boundary.calls[0]!.streamId,
+      conversationId: 'conversation-a',
+      content: 'The first reply is still running.',
+      reasoning: '',
+      reasoningRequested: false,
+      phase: 'answering'
+    })
+    view.unmount()
+    renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('The first reply is still running.')
+    await screen.findByText('1 queued')
+    await send('Queue this second.', user)
+    await screen.findByText('2 queued')
+    await user.click(screen.getByRole('button', { name: /stop generating/i }))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
+    )
+    act(() => boundary.emitStream({ streamId: boundary.calls[0]!.streamId, type: 'done' }))
+    await send('Send this ahead of the queue.', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(2))
+    boundary.resolve(1, 'The urgent reply is complete.')
+    await screen.findByText('The urgent reply is complete.')
+    expect(boundary.calls.map(({ query }) => query)).toEqual([
+      'Hold this reply open.',
+      'Send this ahead of the queue.'
+    ])
+    expect(
+      boundary.messages['conversation-a']!.filter(
+        (message) => message.content === 'The first reply is still running.'
+      )
+    ).toHaveLength(1)
+    expect(
+      boundary.addRagMessage.mock.calls.filter(
+        ([, role, content]) =>
+          role === 'assistant' && content === 'The first reply is still running.'
+      )
+    ).toHaveLength(1)
+    expect(screen.getAllByText('The first reply is still running.')).toHaveLength(1)
+    expect(screen.queryByText(/\d queued/)).toBeNull()
+    cleanup()
+    renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('The first reply is still running.')
+    expect(screen.getAllByText('The first reply is still running.')).toHaveLength(1)
+  })
+
+  it('Stop during resend retains the earlier answer and one partial version', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+    await send('Question to resend', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    boundary.resolve(0, 'Earlier answer')
+    await screen.findByText('Earlier answer')
+    openActionsFor('Question to resend')
+    await user.click(screen.getByRole('menuitem', { name: 'Resend' }))
+    await waitFor(() => expect(boundary.calls).toHaveLength(2))
+    act(() => boundary.emit(1, 'Partial resend'))
+    await screen.findByText('Partial resend')
+    await user.click(screen.getByRole('button', { name: /stop generating/i }))
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
+    )
+    const saved = boundary.messages['conversation-a']!.filter(
+      (message) => message.role === 'assistant'
+    )
+    expect(saved).toHaveLength(1)
+    expect(saved[0]!.content).toBe('Partial resend')
+    expect(saved[0]!.context).toMatchObject({
+      variants: [
+        expect.objectContaining({ content: 'Earlier answer' }),
+        expect.objectContaining({ content: 'Partial resend' })
+      ]
+    })
+  })
+
+  it('Stop after remount saves an unclaimed partial once and clears both queued drafts', async () => {
+    const boundary = new ChatBoundary()
+    boundary.activeRagStreams.push({
+      streamId: 'orphan-stop',
+      conversationId: 'conversation-a',
+      content: 'Unclaimed partial',
+      reasoning: 'Unclaimed reasoning',
+      reasoningRequested: true,
+      phase: 'answering'
+    })
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    const view = renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('Unclaimed partial')
+    await send('Queue this first.', user)
+    await screen.findByText('1 queued')
+    view.unmount()
+    renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('Unclaimed partial')
+    await screen.findByText('1 queued')
+    await send('Queue this second.', user)
+    await screen.findByText('2 queued')
+    await user.click(screen.getByRole('button', { name: /stop generating/i }))
+    await waitFor(() =>
+      expect(boundary.messages['conversation-a']).toContainEqual(
+        expect.objectContaining({
+          content: 'Unclaimed partial',
+          context: expect.objectContaining({
+            status: 'cancelled',
+            reasoning: 'Unclaimed reasoning'
+          })
+        })
+      )
+    )
+    expect(boundary.cancelRag).toHaveBeenCalledWith('orphan-stop')
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
+    )
+    act(() => boundary.emitStream({ streamId: 'orphan-stop', type: 'cancel' }))
+    expect(boundary.calls).toHaveLength(0)
+    expect(
+      boundary.messages['conversation-a']!.filter(
+        (message) => message.content === 'Unclaimed partial'
+      )
+    ).toHaveLength(1)
+    expect(
+      boundary.addRagMessage.mock.calls.filter(
+        ([, role, content]) => role === 'assistant' && content === 'Unclaimed partial'
+      )
+    ).toHaveLength(1)
+    expect(screen.getAllByText('Unclaimed partial')).toHaveLength(1)
+    expect(screen.queryByText(/\d queued/)).toBeNull()
+    await send('Send ahead of the discarded queue.', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    boundary.resolve(0, 'Urgent completed')
+    await screen.findByText('Urgent completed')
+    expect(boundary.calls.map(({ query }) => query)).toEqual(['Send ahead of the discarded queue.'])
+  })
+
+  it('persists the selected answer and retains its full record after failed regeneration', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 'q', role: 'user', content: 'Original question' },
+      {
+        id: 'a',
+        role: 'assistant',
+        content: 'Original answer',
+        context: {
+          unified: [],
+          reasoning: 'Original reasoning',
+          metrics: { completionTokens: 7 },
+          toolCalls: [{ name: 'web_search', result: 'Original source', status: 'completed' }]
+        }
+      }
+    ]
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    const view = renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('Original answer')
+    openActionsFor('Original answer')
+    await user.click(screen.getByRole('menuitem', { name: 'Regenerate' }))
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    act(() => boundary.reject(0, new Error('Regenerate failed')))
+    await screen.findByText('Original answer')
+    await waitFor(() =>
+      expect(boundary.messages['conversation-a']![1]).toMatchObject({
+        content: 'Original answer',
+        context: {
+          reasoning: 'Original reasoning',
+          metrics: { completionTokens: 7 },
+          toolCalls: [{ result: 'Original source' }]
+        }
+      })
+    )
+    await user.click(screen.getByRole('button', { name: 'Next response' }))
+    await screen.findByText('Regenerate failed')
+    await user.click(screen.getByRole('button', { name: 'Previous response' }))
+    await waitFor(() =>
+      expect(boundary.messages['conversation-a']![1]!.content).toBe('Original answer')
+    )
+    view.unmount()
+    renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('Original answer')
+    await send('Follow up', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(2))
+    expect(vi.mocked(boundary.api.toolChat).mock.calls[1]![1]).toEqual(
+      expect.arrayContaining([
+        { role: 'user', content: 'Original question' },
+        { role: 'assistant', content: 'Original answer' }
+      ])
+    )
+    boundary.resolve(1, 'Follow up answer')
+  })
+
+  it('starts fresh versions on edit and sends matched question and answer pairs after selecting a version', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      { id: 'q', role: 'user', content: 'Old question' },
+      { id: 'a', role: 'assistant', content: 'Old branch answer' }
+    ]
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('Old question')
+    openActionsFor('Old question')
+    await user.click(screen.getByRole('menuitem', { name: 'Edit' }))
+    const editor = screen.getByDisplayValue('Old question')
+    await user.clear(editor)
+    await user.type(editor, 'Edited question')
+    await user.click(screen.getByRole('button', { name: 'Save & submit' }))
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    boundary.resolve(0, 'Edited first answer')
+    await screen.findByText('Edited first answer')
+    expect(screen.queryByRole('button', { name: 'Previous response' })).toBeNull()
+    expect(boundary.messages['conversation-a']![0]).toMatchObject({
+      content: 'Edited question',
+      context: {
+        branches: [{ question: 'Old question', answers: [{ content: 'Old branch answer' }] }]
+      }
+    })
+    openActionsFor('Edited first answer')
+    await user.click(screen.getByRole('menuitem', { name: 'Regenerate' }))
+    await waitFor(() => expect(boundary.calls).toHaveLength(2))
+    boundary.resolve(1, 'Edited second answer')
+    await screen.findByText('Edited second answer')
+    await user.click(screen.getByRole('button', { name: 'Previous response' }))
+    await screen.findByText('Edited first answer')
+    await send('Follow up after edit', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(3))
+    const history = vi.mocked(boundary.api.toolChat).mock.calls[2]![1]
+    expect(history).toEqual(
+      expect.arrayContaining([
+        { role: 'user', content: 'Edited question' },
+        { role: 'assistant', content: 'Edited first answer' }
+      ])
+    )
+    expect(JSON.stringify(history)).not.toContain('Old branch answer')
+    boundary.resolve(2, 'Matched follow up')
+  })
+
+  it('Send Now saves an unclaimed partial response and drains the urgent item', async () => {
+    const boundary = new ChatBoundary()
+    boundary.activeRagStreams.push({
+      streamId: 'orphan-urgent',
+      conversationId: 'conversation-a',
+      content: 'Urgent partial',
+      reasoning: 'Urgent reasoning',
+      reasoningRequested: true,
+      phase: 'answering'
+    })
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+    await screen.findByText('Urgent partial')
+    await screen.findByPlaceholderText('Ask about “Project Alpha”…')
+    const composer = screen.getByRole('textbox', { name: 'Message' })
+    await user.clear(composer)
+    await user.type(composer, 'Send this now')
+    expect((composer as HTMLTextAreaElement).value).toBe('Send this now')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    expect(boundary.calls[0]!.query).toBe('Send this now')
+    expect(boundary.cancelRag).toHaveBeenCalledWith('orphan-urgent')
+    expect(boundary.messages['conversation-a']).toContainEqual(
+      expect.objectContaining({
+        content: 'Urgent partial',
+        context: expect.objectContaining({ status: 'cancelled' })
+      })
+    )
+    boundary.resolve(0, 'Urgent answer')
+    await screen.findByText('Urgent answer')
+  })
+
+  it('does not cancel an urgent run that starts while task Stop is pending', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+    await send('Original run', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    act(() =>
+      boundary.emitTask({
+        taskId: 'task-stop-race',
+        journeyId: 'conversation-a',
+        kind: 'web_use',
+        title: 'Task',
+        status: 'running',
+        steps: [],
+        startedAt: 1,
+        updatedAt: 2
+      })
+    )
+    boundary.stopComputerTask.mockImplementation(async () => {
+      boundary.resolve(0, 'Original completed before Stop')
+      await waitFor(() => expect(boundary.calls).toHaveLength(2))
+      return true
+    })
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Urgent replacement')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await waitFor(() => expect(boundary.calls).toHaveLength(2))
+    await waitFor(() => expect(boundary.stopComputerTask).toHaveBeenCalled())
+    expect(boundary.cancelRag).not.toHaveBeenCalledWith(boundary.calls[1]!.streamId)
+    boundary.resolve(1, 'Urgent survives')
+    await screen.findByText('Urgent survives')
+  })
+  it('does not cancel the urgent send if the original settles during queue persistence', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+    await send('Original before queue save', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    let releaseSave: (() => void) | undefined
+    const save = new Promise<void>((resolve) => {
+      releaseSave = resolve
+    })
+    boundary.api.saveSetting.mockImplementationOnce(async (key, value) => {
+      await save
+      boundary.settings[key] = structuredClone(value)
+    })
+    const composer = screen.getByRole('textbox', { name: 'Message' })
+    await user.clear(composer)
+    await user.type(composer, 'Urgent after queue save')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    act(() => boundary.resolve(0, 'Original saved'))
+    await waitFor(() => expect(boundary.calls).toHaveLength(2))
+    await act(async () => {
+      releaseSave!()
+      await save
+    })
+    expect(boundary.cancelRag).not.toHaveBeenCalledWith(boundary.calls[1]!.streamId)
+    boundary.resolve(1, 'Urgent saved')
+    await screen.findByText('Urgent saved')
   })
 })

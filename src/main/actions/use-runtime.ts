@@ -32,7 +32,7 @@ import { runNativeAction } from './native-helper'
 import { gateHost, onActionParked, onGateParked, whenActionParked } from './gate-host'
 import { createActionWorker, type ActionWorker } from './use-worker'
 import { makeBrowserRailExecutor, registerBrowserRail } from '../browser/browser-rail'
-import { getBrowserRailHost } from '../browser/browser-host'
+import { getWebUseRailHost } from '../browser/web-use-host'
 import { makeVisionRailExecutor, registerVisionRail } from '../vision/vision-rail'
 import { getVisionRailHost } from '../vision/vision-host'
 import {
@@ -49,6 +49,7 @@ import { taskLaunchFromActionArgs } from '../tasks/task-launch-identity'
 import { taskKindForActionType } from '../tools/nativeActionToolExtension-logic'
 import { withTaskModelMemory } from '../model-memory'
 import { getComputerUseSettings } from '../computer-use-settings'
+import { isAutomationTaskTerminal } from '@offgrid/automation'
 
 export interface ActionsRuntime {
   propose(
@@ -190,8 +191,11 @@ function recordAcceptedTaskLaunch(
 
 /** Keep the durable task projection aligned with the action engine's terminal decision. */
 function recordTaskActionOutcome(outcome: TickOutcome): void {
+  // The task host already records Stop, failure, or verified completion. A later action
+  // engine outcome must not turn that finished run back into a waiting session.
+  const task = getTaskRun(outcome.id)
+  if (task && isAutomationTaskTerminal(task.status)) return
   if (outcome.outcome === 'poisoned') {
-    const task = getTaskRun(outcome.id)
     if (task) {
       recordTaskRun({
         taskId: task.taskId,
@@ -257,7 +261,8 @@ export function getActionsRuntime(): ActionsRuntime {
   // pane) is created lazily on first web_use so a session that never runs one
   // pays nothing for it.
   const rawBrowserExecute = makeBrowserRailExecutor({
-    runTask: (request) => getBrowserRailHost().runTask(request)
+    // In-app, or the user's default browser through the paired extension (web-use-host.ts).
+    runTask: (request) => getWebUseRailHost().runTask(request)
   })
   // BrowserHost owns the Web Use model lifecycle. It resolves the adapter and
   // records the model identity only after the specialist swap completes. A

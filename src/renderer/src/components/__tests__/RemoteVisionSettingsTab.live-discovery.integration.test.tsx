@@ -11,6 +11,7 @@ let server: Server | undefined
 
 afterEach(async () => {
   cleanup()
+  localStorage.clear()
   vi.restoreAllMocks()
   await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve())
   server = undefined
@@ -110,6 +111,7 @@ describe('remote model discovery from Settings', () => {
 
     expect(await screen.findByText(/7 models found/)).toBeTruthy()
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /^Other models/ }))
     await user.click(screen.getByRole('button', { name: 'image model' }))
     expect(screen.getByRole('menuitemradio', { name: 'picture' })).toBeTruthy()
     expect(screen.getByRole('menuitemradio', { name: 'inferred-picture' })).toBeTruthy()

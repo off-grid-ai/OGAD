@@ -229,7 +229,9 @@ describe('<App/> desktop navigation integration', () => {
     await screen.findByRole('heading', { name: 'Projects' })
     const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
     expect(navigation.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByText('Menu')).toBeNull()
+    // The Menu label keeps its row at both widths so hovering never shifts the items; it is
+    // hidden from assistive tech (and invisible) while the rail is collapsed.
+    expect(screen.getByText('Menu').getAttribute('aria-hidden')).toBe('true')
     const menu = navigation.querySelector<HTMLElement>('[aria-label="Menu sections"]')!
     const buttonNames = (): string[] =>
       within(menu)
@@ -245,12 +247,12 @@ describe('<App/> desktop navigation integration', () => {
     )
     expect(sectionIndexes).toEqual([...sectionIndexes].sort((a, b) => a - b))
     expect(screen.getByRole('button', { name: /Model server:/i })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Theme: System' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Theme: Dark' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Mobile app' })).toBeTruthy()
 
     await user.hover(navigation)
-    expect(await screen.findByText('Menu')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Menu').getAttribute('aria-hidden')).toBe('false'))
     expect(navigation.getAttribute('aria-expanded')).toBe('true')
     expect(buttonNames()).toEqual(collapsedDestinations)
 
@@ -260,7 +262,7 @@ describe('<App/> desktop navigation integration', () => {
 
     await user.unhover(navigation)
     await waitFor(() => expect(navigation.getAttribute('aria-expanded')).toBe('false'))
-    expect(screen.queryByText('Menu')).toBeNull()
+    expect(screen.getByText('Menu').getAttribute('aria-hidden')).toBe('true')
   })
 
   it('keeps a section toggle and destination order through hover collapse and expansion', async () => {
@@ -569,7 +571,7 @@ describe('<App/> desktop navigation integration', () => {
       routes: [
         ['Text', '/models'],
         ['Image', '/models/image'],
-        ['Computer Use', '/models/computer-use'],
+        ['Tasks', '/models/computer-use'],
         ['Voice', '/models/voice'],
         ['Transcription', '/models/transcription']
       ] as const
@@ -663,8 +665,10 @@ describe('<App/> desktop navigation integration', () => {
 
       render(<App />)
 
-      await screen.findAllByRole('button', { name: new RegExp(`^${defaultTab}`) })
-      expect(routedTabButton(defaultTab).getAttribute('aria-current')).toBe('page')
+      await waitFor(() => {
+        const buttons = screen.getAllByRole('button', { name: new RegExp(`^${defaultTab}`) })
+        expect(buttons.some((button) => button.getAttribute('aria-current') === 'page')).toBe(true)
+      }, { timeout: 10_000 })
       await waitFor(() => expect(window.location.pathname).toBe(canonicalPath))
     }
   )

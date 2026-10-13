@@ -20,7 +20,7 @@ const tool = (name: string, description: string): unknown => ({
   function: { name, description, parameters: { type: 'object', properties: {} } }
 })
 
-const CALENDAR = tool('calendar_events', 'Meetings, availability and scheduling on your calendar')
+const CALENDAR = tool('calendar_events', 'Availability, events and scheduling on your calendar')
 const SLACK = tool('slack_send', 'Post a message to a Slack channel or direct message')
 const GITHUB = tool('github_issue', 'Open an issue on a code repository')
 const BUILTIN = tool('web_search', 'Search the web')

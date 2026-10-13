@@ -13,9 +13,13 @@ export function shouldQueue(convId: string | null, generating: ReadonlySet<strin
 export function enqueue<T>(
   byConv: Record<string, T[]>,
   convId: string,
-  item: T
+  item: T,
+  first = false
 ): Record<string, T[]> {
-  return { ...byConv, [convId]: [...(byConv[convId] ?? []), item] }
+  return {
+    ...byConv,
+    [convId]: first ? [item, ...(byConv[convId] ?? [])] : [...(byConv[convId] ?? []), item]
+  }
 }
 
 /** Pop the next queued item for a conversation; returns it + the updated map. */

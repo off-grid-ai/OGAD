@@ -52,15 +52,18 @@ function installNativeRuntimeBoundary(): void {
 const fs = require('node:fs')
 const args = process.argv.slice(2)
 const value = (flag) => args[args.indexOf(flag) + 1]
+const slow = value('-p') === 'A slow green cabin under stars'
 const valid =
-  value('-p') === 'A green cabin under stars' &&
+  (value('-p') === 'A green cabin under stars' || slow) &&
   value('-W') === '640' &&
   value('-H') === '384' &&
   value('--steps') === '7' &&
   value('-s') === '314'
 if (!valid) process.exit(17)
-fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
 process.stderr.write('1/7 - 0.01s/it\\n')
+const finish = () => fs.writeFileSync(value('-o'), Buffer.from('${PNG_BASE64}', 'base64'))
+if (slow) setTimeout(finish, 10000)
+else finish()
 `
   )
   fs.chmodSync(CLI_PATH, 0o755)
@@ -174,5 +177,126 @@ describe('model gateway image generation', () => {
         type: 'not_installed'
       }
     })
+  })
+
+  it('stops synchronous image work when the client disconnects', async () => {
+    const base = `http://127.0.0.1:${String(gatewayPort)}`
+    const before = await (await fetch(`${base}/v1/requests`)).json()
+    const existing = new Set(before.data.map((entry: { request_id: string }) => entry.request_id))
+    const controller = new AbortController()
+    const response = fetch(`${base}/v1/images/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        prompt: 'A slow green cabin under stars',
+        width: 640,
+        height: 384,
+        steps: 7,
+        seed: 314,
+        model: MODEL_NAME
+      })
+    }).catch((error: unknown) => error)
+    const deadline = Date.now() + 8000
+    let running: { request_id: string; progress?: { step: number } } | undefined
+    while (Date.now() < deadline) {
+      const recent = await (await fetch(`${base}/v1/requests`)).json()
+      running = recent.data.find((entry: { request_id: string }) => !existing.has(entry.request_id))
+      if (running) {
+        running = await (await fetch(`${base}/v1/requests/${running.request_id}`)).json()
+      }
+      if (running?.progress?.step === 1) break
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    expect(running?.progress?.step).toBe(1)
+    controller.abort()
+    expect(await response).toMatchObject({ name: 'AbortError' })
+    let cancelled: unknown
+    const cancelDeadline = Date.now() + 2000
+    while (Date.now() < cancelDeadline) {
+      cancelled = await (await fetch(`${base}/v1/requests/${running!.request_id}`)).json()
+      if ((cancelled as { status: string }).status === 'failed') break
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    expect(cancelled).toMatchObject({ status: 'failed', error: { type: 'cancelled' } })
+  })
+
+  it('cancels queued and running image requests without stopping another request', async () => {
+    const base = `http://127.0.0.1:${String(gatewayPort)}`
+    const submit = async (prompt: string): Promise<string> => {
+      const response = await fetch(`${base}/v1/images/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          async: true,
+          prompt,
+          width: 640,
+          height: 384,
+          steps: 7,
+          seed: 314,
+          model: MODEL_NAME
+        })
+      })
+      expect(response.status).toBe(202)
+      return (await response.json()).request_id
+    }
+    const runningId = await submit('A slow green cabin under stars')
+    const deadline = Date.now() + 8000
+    let progress: { status: string; progress?: { step: number } } | undefined
+    while (Date.now() < deadline) {
+      progress = await (await fetch(`${base}/v1/requests/${runningId}`)).json()
+      if (progress?.progress?.step === 1) break
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    expect(progress).toMatchObject({ status: 'running', progress: { step: 1 } })
+
+    const queuedId = await submit('A green cabin under stars')
+    const cancelQueued = await fetch(`${base}/v1/requests/${queuedId}`, { method: 'DELETE' })
+    expect(cancelQueued.status).toBe(200)
+    expect(await cancelQueued.json()).toMatchObject({
+      request_id: queuedId,
+      status: 'failed',
+      cancelled: true
+    })
+    expect(await (await fetch(`${base}/v1/requests/${runningId}`)).json()).toMatchObject({
+      status: 'running'
+    })
+
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const cancelled = await fetch(`${base}/v1/requests/${runningId}`, { method: 'DELETE' })
+      expect(cancelled.status).toBe(200)
+      expect(await cancelled.json()).toMatchObject({
+        request_id: runningId,
+        status: 'failed',
+        cancelled: true
+      })
+    }
+    for (const id of [runningId, queuedId]) {
+      expect(await (await fetch(`${base}/v1/requests/${id}`)).json()).toMatchObject({
+        status: 'failed',
+        error: { type: 'cancelled', message: 'Image generation cancelled.' }
+      })
+    }
+
+    const completed = await fetch(`${base}/v1/images/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: 'A green cabin under stars',
+        width: 640,
+        height: 384,
+        steps: 7,
+        seed: 314,
+        model: MODEL_NAME
+      })
+    })
+    expect(completed.status).toBe(200)
+    const result = await completed.json()
+    expect(result.data[0].b64_json).toBe(PNG_BASE64)
+    const cancelCompleted = await fetch(`${base}/v1/requests/${result.request_id}`, {
+      method: 'DELETE'
+    })
+    expect(await cancelCompleted.json()).toMatchObject({ status: 'completed', cancelled: false })
+    expect((await fetch(`${base}/v1/requests/missing`, { method: 'DELETE' })).status).toBe(404)
   })
 })

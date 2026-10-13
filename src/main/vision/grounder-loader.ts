@@ -4,7 +4,7 @@
  * resident llama-server, so grounding never replaces the reasoning model. The
  * exported swap runner remains as a pure lifecycle seam for existing replay tests.
  */
-import { getActiveModal } from '../active-models'
+import { selectedGrounderModelId } from './grounder-selection'
 import { resolveGrounderPlan } from './grounder-plan'
 import { runRestoredModelSwap } from './grounder-swap'
 import { getComputerUseSettings } from '../computer-use-settings'
@@ -16,16 +16,8 @@ import {
 } from '../actions/remote-screen-session'
 import { grounderRuntime } from './grounder-runtime'
 
-const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
-
 /** The saved Computer Use choice, or the current catalog default. */
-export function selectedGrounderModelId(): string {
-  return (
-    getComputerUseSettings().groundingModelId ??
-    getActiveModal('computer_use') ??
-    DEFAULT_GROUNDER_MODEL_ID
-  )
-}
+export { selectedGrounderModelId }
 
 export interface GrounderTiming {
   /** True when a grounder was already loaded, so no swap was paid. */

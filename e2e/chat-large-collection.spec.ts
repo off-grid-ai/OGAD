@@ -73,10 +73,14 @@ test.afterAll(async () => {
 test('120 persisted chats keep search, scroll, and detail usable on desktop (#149)', async () => {
   const rail = page.locator('aside')
   const list = rail.locator('.overflow-y-auto')
-  const detail = rail.locator('xpath=following-sibling::div[1]')
+  // The list and detail are resizable panels with a separator between them.
+  const separator = page.getByRole('separator', { name: 'Resize conversation list' })
+  const detail = separator.locator('xpath=following-sibling::*[1]')
   const titles = rail.getByText(/^Synthetic chat \d{3}$/)
 
-  await expect(titles).toHaveCount(120)
+  // The list is virtualized: only rows near the viewport are in the DOM. All 120 are reachable by
+  // scrolling, which the oldest-chat step below proves.
+  await expect(titles.first()).toBeVisible()
   const railBox = await rail.boundingBox()
   const detailBox = await detail.boundingBox()
   expect(railBox).not.toBeNull()
@@ -86,7 +90,11 @@ test('120 persisted chats keep search, scroll, and detail usable on desktop (#14
   const railShare = railBox.width / (railBox.width + detailBox.width)
   expect(railShare).toBeGreaterThan(0.1)
   expect(railShare).toBeLessThan(0.25)
-  expect(Math.abs(detailBox.x - (railBox.x + railBox.width))).toBeLessThanOrEqual(2)
+  const separatorBox = await separator.boundingBox()
+  expect(separatorBox).not.toBeNull()
+  if (!separatorBox) return
+  expect(Math.abs(separatorBox.x - (railBox.x + railBox.width))).toBeLessThanOrEqual(2)
+  expect(Math.abs(detailBox.x - (separatorBox.x + separatorBox.width))).toBeLessThanOrEqual(2)
   expect(detailBox.width).toBeGreaterThan(railBox.width * 3)
 
   const search = page.getByPlaceholder('Search conversations…')
@@ -103,8 +111,12 @@ test('120 persisted chats keep search, scroll, and detail usable on desktop (#14
   ).toBeVisible()
 
   await search.fill('')
-  await expect(titles).toHaveCount(120)
+  await expect(titles.first()).toBeVisible()
   const oldest = rail.getByText('Synthetic chat 001', { exact: true })
+  await list.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  await expect(oldest).toBeVisible()
   await oldest.click()
 
   const listBox = await list.boundingBox()

@@ -19,11 +19,18 @@ vi.mock('../transcription/whisper-runtime', () => ({
 const version = 'test-v1'
 const url = `https://runtime.getoffgridai.co/desktop/cuda/linux/${version}.tar.gz`
 let originalPlatform: PropertyDescriptor | undefined
+const originalLibraryPath = process.env.LD_LIBRARY_PATH
 
-function archive(): Buffer {
+function archive(withSpeechLibraries = true): Buffer {
   const source = path.join(fixture.root, 'source', 'bin', 'llama-cuda')
   fs.mkdirSync(source, { recursive: true })
   fs.writeFileSync(path.join(source, 'llama-server'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  if (withSpeechLibraries) {
+    const onnx = path.join(fixture.root, 'source', 'bin', 'onnx-cuda')
+    fs.mkdirSync(onnx, { recursive: true })
+    fs.writeFileSync(path.join(onnx, 'libcublasLt.so.13'), 'test')
+    fs.writeFileSync(path.join(onnx, 'libcudnn.so.9'), 'test')
+  }
   const output = path.join(fixture.root, 'source.tar.gz')
   const result = spawnSync('tar', ['-czf', output, '-C', path.join(fixture.root, 'source'), 'bin'])
   expect(result.status).toBe(0)
@@ -58,6 +65,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   delete process.env.OFFGRID_PERFORMANCE_PACK_BIN
+  if (originalLibraryPath === undefined) delete process.env.LD_LIBRARY_PATH
+  else process.env.LD_LIBRARY_PATH = originalLibraryPath
   if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform)
   fs.rmSync(fixture.root, { recursive: true, force: true })
 })
@@ -97,6 +106,9 @@ describe('optional NVIDIA performance pack', () => {
     expect(status.restartRequired).toBe(true)
     expect(fetcher).toHaveBeenCalledOnce()
     expect(fs.existsSync(path.join(process.env.OFFGRID_PERFORMANCE_PACK_BIN!, 'llama-cuda', 'llama-server'))).toBe(true)
+    expect(pack.prepareInstalledOnnxCudaLibraries()).toBe(true)
+    expect(process.env.LD_LIBRARY_PATH).toContain('/bin/onnx-cuda')
+    expect(pack.prepareInstalledOnnxCudaLibraries()).toBe(false)
     expect(pack.startPerformancePack().phase).toBe('installed')
     vi.resetModules()
     const afterRestart = await import('../performance-pack')
@@ -113,6 +125,15 @@ describe('optional NVIDIA performance pack', () => {
     expect(status.error).toMatch(/hash check/)
     expect(process.env.OFFGRID_PERFORMANCE_PACK_BIN).toBeUndefined()
     expect(fs.readdirSync(path.join(fixture.root, 'performance-packs'))).toEqual([])
+  })
+
+  it('rejects a Linux pack without the CUDA speech libraries', async () => {
+    const bytes = archive(false)
+    manifest(bytes)
+    vi.stubGlobal('fetch', async () => new Response(new Uint8Array(bytes), { status: 200 }))
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('failed')).error).toMatch(/CUDA speech libraries/)
   })
 
   it('resumes a partial download only from the requested byte', async () => {

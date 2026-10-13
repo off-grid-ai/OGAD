@@ -6,7 +6,7 @@ describe('model backend choices', () => {
     expect(backendChoices('llm', 'darwin')).toEqual(['auto', 'metal', 'cpu'])
     expect(backendChoices('image', 'linux')).toEqual(['auto', 'cuda', 'vulkan', 'cpu'])
     expect(backendChoices('stt', 'win32')).toEqual(['auto', 'cuda', 'cpu'])
-    expect(backendChoices('tts', 'win32')).toEqual(['auto', 'cuda', 'directml', 'webgpu', 'cpu'])
+    expect(backendChoices('tts', 'win32')).toEqual(['auto', 'directml', 'webgpu', 'cpu'])
     expect(backendChoices('embeddings', 'linux')).toEqual(['auto', 'cuda', 'webgpu', 'cpu'])
   })
 

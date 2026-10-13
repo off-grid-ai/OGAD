@@ -12,7 +12,8 @@ import fs from 'fs'
 import { recordAIRequest } from '../ai-request-log'
 import os from 'os'
 import path from 'path'
-import { binRoots, modelsDir } from '../runtime-env'
+import { binRoots } from '../runtime-env'
+import { modelReadDirectories } from '../model-paths'
 import { getActiveModal } from '../active-models'
 import { ffmpegBin } from './whisper-cli'
 import { existing } from './bin-resolution'
@@ -98,7 +99,6 @@ export function activeMatchesEntry(
 /** A fully-downloaded Parakeet model from the catalog, in modelsDir. Prefers the entry
  *  the user selected as active (matched by catalog id OR primary filename). */
 function downloadedCatalogModel(): ParakeetModel | null {
-  const dir = modelsDir()
   // Partition the catalog by engine in ONE place (select.modelsByEngine), not a local
   // `m.engine === 'parakeet'` filter duplicated against whisper-cli's classification.
   const entries = modelsByEngine('parakeet')
@@ -110,21 +110,23 @@ function downloadedCatalogModel(): ParakeetModel | null {
       )
     : entries
   for (const e of ordered) {
-    const names = e.files.map((f) => f.name)
-    const matched = matchParakeetFiles(names)
-    if (!matched) continue
-    if (
-      ![matched.encoder, matched.decoder, matched.joiner, matched.tokens].every((n) =>
-        existsIn(dir, n)
+    for (const dir of modelReadDirectories()) {
+      const names = e.files.map((f) => f.name)
+      const matched = matchParakeetFiles(names)
+      if (!matched) continue
+      if (
+        ![matched.encoder, matched.decoder, matched.joiner, matched.tokens].every((n) =>
+          existsIn(dir, n)
+        )
       )
-    )
-      continue
-    return {
-      dir,
-      encoder: path.join(dir, matched.encoder),
-      decoder: path.join(dir, matched.decoder),
-      joiner: path.join(dir, matched.joiner),
-      tokens: path.join(dir, matched.tokens)
+        continue
+      return {
+        dir,
+        encoder: path.join(dir, matched.encoder),
+        decoder: path.join(dir, matched.decoder),
+        joiner: path.join(dir, matched.joiner),
+        tokens: path.join(dir, matched.tokens)
+      }
     }
   }
   return null

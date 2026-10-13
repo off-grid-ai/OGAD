@@ -10,6 +10,8 @@ import os from 'os'
 import path from 'path'
 import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
 
+// Embeddings are not under test: use only what is on disk instead of downloading the model.
+process.env.OFFGRID_EMBEDDINGS_OFFLINE = '1'
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-vision-it-'))
 vi.mock('electron', () => ({
   app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },

@@ -6,7 +6,7 @@ import { Button } from '@renderer/components/ui/button'
 import { chatMarkdownComponents } from '../../chat-markdown-components'
 import { presetForSkillName } from '../../explore/presetCatalog'
 import type { ChatMessage, ContextNavigation, RagContext } from '../types'
-import { renderedMessageContent } from '../utlis'
+import { renderedMessageContent, withoutArtifactFences } from '../utlis'
 import { openUnifiedContext } from './MessageContext'
 
 const markdownComponents = chatMarkdownComponents
@@ -162,10 +162,13 @@ function makeUserMessageComponents(navigation: ContextNavigation): Components {
 
 function MessageMarkdownComponent({
   message,
-  navigation
+  navigation,
+  withoutArtifact = false
 }: Readonly<{
   message: ChatMessage
   navigation: ContextNavigation
+  /** The artifact card shows the code; the markdown keeps the sentences around it. */
+  withoutArtifact?: boolean
 }>): React.JSX.Element {
   console.log('MemoryChat MessageMarkdown rendered')
   const components =
@@ -178,7 +181,9 @@ function MessageMarkdownComponent({
           renderedMessageContent(message),
           navigation.installedSkillNames ?? []
         )
-      : renderedMessageContent(message)
+      : withoutArtifact
+        ? withoutArtifactFences(renderedMessageContent(message))
+        : renderedMessageContent(message)
   return (
     <ReactMarkdown
       remarkPlugins={

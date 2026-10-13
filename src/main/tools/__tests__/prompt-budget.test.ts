@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { toolPromptChars as serializedToolPromptChars } from '@offgrid/models'
-import { toolPromptChars } from '../prompt-budget'
+import { toolPromptChars, toolPromptTokens } from '../prompt-budget'
 
 describe('vision-aware prompt budget', () => {
   it('keeps text-only estimates unchanged', () => {
@@ -47,5 +47,23 @@ describe('vision-aware prompt budget', () => {
     ]
 
     expect(toolPromptChars(two) - toolPromptChars(one)).toBeGreaterThan(2_048 * 4)
+  })
+})
+
+describe('toolPromptTokens', () => {
+  it('counts Japanese and Chinese text by script, so CJK chats compact in time', () => {
+    const english = [{ role: 'user', content: 'a'.repeat(4000) }]
+    const japanese = [{ role: 'user', content: 'あ'.repeat(4000) }]
+    const chinese = [{ role: 'user', content: '中'.repeat(4000) }]
+    // About 1,000 tokens of English text, but about 2,700 of the same length in CJK.
+    expect(toolPromptTokens(english)).toBeLessThan(1_100)
+    expect(toolPromptTokens(japanese)).toBeGreaterThan(2_600)
+    expect(toolPromptTokens(chinese)).toBeGreaterThan(2_600)
+  })
+
+  it('still charges an inline image as a fixed vision allowance', () => {
+    const image = 'data:image/png;base64,' + 'A'.repeat(500_000)
+    const messages = [{ role: 'user', content: [{ type: 'image_url', image_url: { url: image } }] }]
+    expect(toolPromptTokens(messages)).toBeLessThan(2_200)
   })
 })

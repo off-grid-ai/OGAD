@@ -166,6 +166,12 @@ export function needsApproval(action: Pick<ActionRecord, 'rail'>): boolean {
   )
 }
 
+/** A routine runs with nobody watching: anything it does beyond reading waits for approval,
+ *  including the native actions a person in Chat runs straight away. */
+export function unattended(action: Pick<ActionRecord, 'source' | 'risk'>): boolean {
+  return action.source === 'routine' && action.risk !== 'read'
+}
+
 /** The existing Chat that owns an action, or null for Action Approval.
  *  This is the routing SSOT for direct Chat execution. */
 export function approvalConversation(
@@ -179,7 +185,7 @@ export function approvalConversation(
 export async function gateHost({ action }: { action: ActionRecord }): Promise<GateDecision> {
   // Native semantic actions run straight through this gate. The env flag bypasses
   // source approval for headless testing.
-  if (approvalBypassed() || !needsApproval(action)) {
+  if (approvalBypassed() || (!needsApproval(action) && !unattended(action))) {
     return { kind: 'approve' }
   }
   const conversationId = approvalConversation(action)
@@ -204,6 +210,10 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
       pending.set(action.id, resolve)
       notifyParked(action.id)
     })
+  }
+  // Nobody is watching a routine: what it would change runs only once someone approved it.
+  if (unattended(action)) {
+    return { kind: 'reject', reason: 'Nothing could ask for approval, so this did not run.' }
   }
   // Nothing queued and no inline surface (tests, headless): the unchanged
   // behaviour is to run. The engine still verifies.

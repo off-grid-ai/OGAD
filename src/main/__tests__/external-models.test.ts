@@ -16,6 +16,18 @@ function gguf(file: string): void {
 }
 
 describe('external model discovery', () => {
+  it('finds added folders without listing draft weights as chat models', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'og-external-'))
+    roots.push(home)
+    const folder = path.join(home, 'added')
+    gguf(path.join(folder, 'chat.gguf'))
+    gguf(path.join(folder, 'mtp-chat-Q8_0.gguf'))
+    gguf(path.join(folder, 'chat-dflash.gguf'))
+    const models = discoverExternalModels(home, path.join(home, 'missing'), undefined, [folder])
+    expect(models.map((item) => item.name)).toEqual(['chat'])
+    expect(fs.readdirSync(folder)).toHaveLength(3)
+  })
+
   it('finds LM Studio GGUF files in place and skips projectors', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'og-external-'))
     roots.push(home)

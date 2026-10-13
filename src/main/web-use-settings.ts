@@ -1,4 +1,5 @@
 import { getSetting, saveSetting } from './database'
+import { announceTaskSettings } from './task-settings-events'
 import {
   DEFAULT_WEB_USE_SETTINGS,
   WEB_USE_SETTINGS_KEY,
@@ -19,6 +20,7 @@ export function setWebUseSettings(
 ): WebUseSettings {
   const normalized = normalizeWebUseSettings(value)
   saveSetting(WEB_USE_SETTINGS_KEY, normalized)
+  announceTaskSettings(WEB_USE_SETTINGS_KEY, normalized)
   if (options.emitSync !== false) {
     emitSyncMutation({
       entity: CORE_SYNC_ENTITIES.modelSetting,

@@ -138,13 +138,13 @@ async function sawIntermediateStorageProgress(): Promise<boolean> {
 
 async function enterChat(): Promise<void> {
   await page.getByRole('button', { name: 'Chat', exact: true }).click()
-  await expect(page.getByPlaceholder(/ask anything/i)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
 }
 
 async function sendPromptAndWaitForAssistant(prompt: string): Promise<Locator> {
   const replies = page.getByRole('button', { name: 'Regenerate', exact: true })
   const previousReplyCount = await replies.count()
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await composer.fill(prompt)
   await page.keyboard.press('Enter')
   await expect(replies).toHaveCount(previousReplyCount + 1, { timeout: 120_000 })

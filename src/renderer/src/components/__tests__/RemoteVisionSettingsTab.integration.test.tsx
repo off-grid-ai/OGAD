@@ -8,6 +8,7 @@ import { RemoteVisionSettingsTab } from '../RemoteVisionSettingsTab'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  localStorage.clear()
 })
 
 describe('<RemoteVisionSettingsTab/>', () => {
@@ -83,6 +84,7 @@ describe('<RemoteVisionSettingsTab/>', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
     await screen.findByText('Connected in 12 ms. 3 models found.')
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /^Other models/ }))
     await user.click(screen.getByRole('button', { name: 'image model' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'Image Maker' }))
     await user.click(screen.getByRole('button', { name: 'transcription model' }))
@@ -177,6 +179,7 @@ describe('<RemoteVisionSettingsTab/>', () => {
     expect(screen.queryByText('Vision model')).toBeNull()
     fireEvent.click(screen.getByText('New vision model'))
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /^Other models/ }))
     await user.click(screen.getByRole('button', { name: 'grounding model' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'New vision model' }))
     await user.click(screen.getByRole('button', { name: 'decision model' }))
@@ -214,6 +217,51 @@ describe('<RemoteVisionSettingsTab/>', () => {
       })
     )
     expect((screen.getByLabelText('API key (optional)') as HTMLInputElement).value).toBe('')
+  })
+
+  it('groups the remote settings into sections, and a closed section says what is set inside', async () => {
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getRemoteVisionServer: vi.fn(async () => ({
+        provider: 'custom',
+        endpoint: 'https://models.example/v1',
+        model: 'vision-model',
+        hasApiKey: false,
+        activeServerId: 'server-1',
+        servers: [
+          {
+            id: 'server-1',
+            name: 'Models example',
+            provider: 'custom',
+            endpoint: 'https://models.example/v1',
+            model: 'vision-model',
+            mediaModels: { text: 'vision-model', image: 'image-maker' },
+            modelCatalog: [
+              { id: 'vision-model', name: 'Vision model', kind: 'text' },
+              { id: 'image-maker', name: 'Image Maker', kind: 'image' }
+            ],
+            hasApiKey: false,
+            screenFramesAllowed: false
+          }
+        ]
+      })),
+      testRemoteVisionServer: vi.fn(),
+      setRemoteVisionServer: vi.fn(),
+      removeRemoteVisionServer: vi.fn()
+    }
+
+    render(<RemoteVisionSettingsTab />)
+
+    expect(await screen.findByText('1 saved · Models example active')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Saved servers/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Server/ })).toBeTruthy()
+    expect(screen.getByText('Models example · vision-model')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Other models/ })).toBeTruthy()
+    expect(screen.getByText('Image: Image Maker · Transcription: none · Voice: none')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'image model' })).toBeNull()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /^Other models/ }))
+    expect(screen.getByRole('button', { name: 'image model' }).textContent).toContain('Image Maker')
   })
 
   it('keeps local models active until the user enables a remote server', async () => {

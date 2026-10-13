@@ -66,7 +66,12 @@ const server = http.createServer((request, response) => {
   })
   request.on('end', () => {
     const payload = JSON.parse(body)
-    audit({ event: 'completion', stream: payload.stream === true })
+    audit({
+      event: 'completion',
+      stream: payload.stream === true,
+      // Tool names only: what the app offered the model on this turn.
+      tools: (payload.tools ?? []).map((tool) => tool?.function?.name).filter(Boolean)
+    })
     response.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',

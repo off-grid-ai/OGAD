@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { resolveModelName } from '@renderer/lib/model-summary'
+import { modelNameForFile } from '@renderer/lib/model-summary'
 import type { ImageGenerationMetadata, OpenImage } from '../types'
 
 function ImageMetadata({
@@ -13,7 +13,7 @@ function ImageMetadata({
     <p aria-label="Image generation metadata" className="mt-1.5 text-[10px] text-neutral-600">
       {metadata.width} × {metadata.height} · {metadata.steps} steps · CFG {metadata.cfgScale} · seed{' '}
       {metadata.seed}
-      {metadata.model ? ` · ${resolveModelName([], metadata.model)}` : ''}
+      {metadata.model ? ` · ${modelNameForFile(metadata.model)}` : ''}
     </p>
   )
 }

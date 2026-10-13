@@ -1,16 +1,16 @@
 import type { BrowserDriver } from './browser-driver'
-import type { PlaywrightMcpSession, PlaywrightToolResult } from './playwright-mcp-session'
+import type { PlaywrightToolResult, SemanticPageSession } from './playwright-mcp-session'
 import type { SemanticDecision } from './browser-playwright-policy'
 
 /** Translate one policy decision into the public Playwright MCP tool contract. */
 export async function executePlaywrightAction(
-  session: PlaywrightMcpSession,
+  session: SemanticPageSession,
   decision: SemanticDecision,
   signal?: AbortSignal
 ): Promise<PlaywrightToolResult> {
   switch (decision.action) {
     case 'click':
-      return session.call('browser_click', requiredRef(decision), signal)
+      return clickWithFallback(session, requiredRef(decision), signal)
     case 'type':
       return session.call(
         'browser_type',
@@ -56,10 +56,11 @@ export async function executePlaywrightAction(
 
 /** Keep the existing Off Grid pointer visible while Playwright performs the action. */
 export async function projectPlaywrightPointer(
-  driver: BrowserDriver,
+  driver: BrowserDriver | null,
   decision: SemanticDecision,
   snapshot: string
 ): Promise<void> {
+  if (!driver) return
   const refs = decision.action === 'drag' ? [decision.start_ref, decision.end_ref] : [decision.ref]
   for (const ref of refs) {
     if (ref) await driver.projectSemanticTarget(ref, snapshot)
@@ -67,11 +68,18 @@ export async function projectPlaywrightPointer(
 }
 
 /** Sensitive entry stays with the user even if the model fails to request HITL. */
+/** A human check: the user does it. Found live: the model set out to tick "I am human". */
+const HUMAN_CHECK =
+  /captcha|i am human|i'?m not a robot|not a robot|turnstile|verify (?:that )?you are human/i
+
 export function isPrivateSemanticTarget(decision: SemanticDecision, snapshot: string): boolean {
-  if (decision.action !== 'type' || !decision.ref) return false
+  if (!decision.ref) return false
   const line = snapshot.split('\n').find((candidate) => candidate.includes(`[ref=${decision.ref}]`))
-  return /password|passcode|one[- ]?time|verification code|otp|captcha|card number|cvv|cvc/i.test(
-    `${decision.element ?? ''} ${line ?? ''}`
+  const target = `${decision.element ?? ''} ${line ?? ''}`
+  if (HUMAN_CHECK.test(target)) return true
+  return (
+    decision.action === 'type' &&
+    /password|passcode|one[- ]?time|verification code|otp|card number|cvv|cvc/i.test(target)
   )
 }
 
@@ -96,4 +104,56 @@ function safeWebUrl(value: string | null): string {
     throw new Error('Web Use navigation accepts only HTTP or HTTPS URLs.')
   }
   return parsed.toString()
+}
+
+/**
+ * A navigate to the page that is already open. Found live: a plan began "Navigate to the sign-up
+ * page" while the user was on it, and the reload cleared what was filled. Same origin and path is
+ * the same page, so a URL without the page's own query token still counts.
+ */
+export function isNavigateToCurrentPage(decision: SemanticDecision, currentUrl: string): boolean {
+  if (decision.action !== 'navigate' || !decision.url) return false
+  try {
+    const to = new URL(decision.url)
+    const at = new URL(currentUrl)
+    return (
+      to.origin === at.origin && to.pathname.replace(/\/$/, '') === at.pathname.replace(/\/$/, '')
+    )
+  } catch {
+    return false
+  }
+}
+
+/** Playwright gave up waiting for the element to be visible, enabled and stable. */
+export function isActionabilityTimeout(result: PlaywrightToolResult): boolean {
+  return (
+    result.isError &&
+    /visible, enabled and stable|waiting for element to be/i.test(result.text) &&
+    /timeout/i.test(result.text)
+  )
+}
+
+/**
+ * A trusted click, and an in-page click when Playwright cannot prove the element stable: a
+ * window that is covered, minimized or on a sleeping display draws no frames, and the trusted
+ * click then waits out its timeout (found live on a plain radio button). Nanobrowser falls back
+ * the same way. The page's own handlers still run.
+ */
+export async function clickWithFallback(
+  session: SemanticPageSession,
+  ref: { element: string; target: string },
+  signal?: AbortSignal
+): Promise<PlaywrightToolResult> {
+  const trusted = await session.call('browser_click', ref, signal)
+  if (!isActionabilityTimeout(trusted)) return trusted
+  const inPage = await session.call(
+    'browser_evaluate',
+    {
+      ...ref,
+      function:
+        '(element) => { element.scrollIntoView({ block: "center" }); element.click(); return "clicked" }'
+    },
+    signal
+  )
+  return inPage.isError ? trusted : { text: `Clicked ${ref.element} in the page.`, isError: false }
 }

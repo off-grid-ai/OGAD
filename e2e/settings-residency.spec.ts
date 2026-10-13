@@ -92,12 +92,18 @@ test.afterEach(async () => {
 test('runtime residency controls persist across relaunch while chat stays required', async () => {
   await openModelMemory()
 
-  const { chat, unlocked } = residencyControls()
+  const { chat } = residencyControls()
   await expect(chat).toBeChecked()
   await expect(chat).toBeDisabled()
   await expect(page.getByText(residencyStatusText({ locked: true }, true))).toBeVisible()
 
-  for (const control of unlocked) {
+  // a89c70dc8 added grounding and embeddings with in-memory defaults.
+  // Check those defaults, then exercise off -> on for every editable control.
+  for (const row of unlockedResidencyRows()) {
+    const control = residencySwitch(row.label)
+    const startsResident = row.modality === 'grounding' || row.modality === 'embeddings'
+    await expect(control).toBeChecked({ checked: startsResident })
+    if (startsResident) await control.click()
     await expect(control).not.toBeChecked()
     await control.click()
     await expect(control).toBeChecked()

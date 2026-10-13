@@ -50,7 +50,7 @@ describe('<App/> shell navigation integration', () => {
     expect(localStorage.getItem('sidebar_pinned')).toBe('false')
   })
 
-  it('places locked Assistant directly after Chat and opens its Pro journey from Work', async () => {
+  it('places God directly after Chat, marked Pro, and shows a free build what it does', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -59,15 +59,21 @@ describe('<App/> shell navigation integration', () => {
 
     const work = within(navigation).getByRole('group', { name: 'Work' })
     const chat = within(work).getByRole('button', { name: 'Chat' })
-    const assistant = within(work).getByRole('button', { name: 'Assistant' })
+    const twin = within(work).getByRole('button', { name: 'God' })
     const workButtons = within(work).getAllByRole('button')
 
-    expect(workButtons.indexOf(assistant)).toBe(workButtons.indexOf(chat) + 1)
+    expect(workButtons.indexOf(twin)).toBe(workButtons.indexOf(chat) + 1)
+    // God is Pro: a free build marks it and opens its upgrade screen, never the chat.
+    expect(within(twin).queryByTitle('Pro')).toBeTruthy()
 
-    await user.click(assistant)
+    await user.click(twin)
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Assistant' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Get Pro/ })).toBeTruthy()
+    expect(await screen.findByRole('heading', { level: 1, name: 'God' })).toBeTruthy()
+    expect(
+      screen.getByText('Your assistant. It knows your day and asks before it acts.')
+    ).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: 'Ask God' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Talk to Ares' })).toBeNull()
     expect(window.location.pathname).toBe('/explore')
   }, 30_000)
 })

@@ -71,9 +71,28 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  localStorage.clear()
 })
 
 describe('<SettingsPanel/> speech languages', () => {
+  it('groups voice settings into sections, and a closed section says what is set inside', async () => {
+    render(<SettingsPanel onClose={() => {}} initialTab="voice" />)
+
+    expect(await screen.findByRole('button', { name: 'Voice selection' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Voice.*speaks at/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Conversation/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Processing/ })).toBeTruthy()
+    expect(screen.getByText('Chat · playback on · Auto turns')).toBeTruthy()
+    expect(await screen.findByText('Heart · English (US) · speaks at 1.0x')).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Interface mode' })).toBeTruthy()
+    expect(screen.getByText('The hardware that speaks replies on this device')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Speech backend' })).toBeNull()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /^Processing/ }))
+    expect(screen.getByRole('button', { name: 'Speech backend' })).toBeTruthy()
+  })
+
   it('saves playback speed after the slider loses focus', async () => {
     render(<SettingsPanel onClose={() => {}} initialTab="voice" />)
 
@@ -94,7 +113,9 @@ describe('<SettingsPanel/> speech languages', () => {
 
     render(<SettingsPanel onClose={vi.fn()} initialTab="voice" />)
 
-    expect(await screen.findByText('Speaker choices are not available for this remote model.')).toBeTruthy()
+    expect(
+      await screen.findByText('Speaker choices are not available for this remote model.')
+    ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Voice selection' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Language selection' })).toBeNull()
     expect(screen.queryByText('Sarah')).toBeNull()
@@ -102,10 +123,18 @@ describe('<SettingsPanel/> speech languages', () => {
 
   it('names the selected remote transcription model in Settings', async () => {
     getTranscriptionInfo.mockResolvedValue({
-      engine: 'remote', modelId: 'remote-vision:home:google%2Fgemini-3.7-flash',
-      label: 'Remote · google/gemini-3.7-flash', language: 'auto',
+      engine: 'remote',
+      modelId: 'remote-vision:home:google%2Fgemini-3.7-flash',
+      label: 'Remote · google/gemini-3.7-flash',
+      language: 'auto',
       languages: [{ code: 'auto', label: 'Auto-detect' }],
-      options: [{ id: 'remote-vision:home:google%2Fgemini-3.7-flash', name: 'Google: Gemini 3.7 Flash', active: true }]
+      options: [
+        {
+          id: 'remote-vision:home:google%2Fgemini-3.7-flash',
+          name: 'Google: Gemini 3.7 Flash',
+          active: true
+        }
+      ]
     })
 
     render(<SettingsPanel onClose={vi.fn()} initialTab="transcription" />)

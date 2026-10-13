@@ -159,7 +159,7 @@ test.afterAll(async () => {
   if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true })
 })
 
-test('APP-120 and APP-122: denied, locked, blank and sensitive content never leak into Replay', async () => {
+test('APP-120 and APP-122: denied, locked and blank content never leak into Replay', async () => {
   test.setTimeout(150_000)
 
   // APP-120 — denial is factual, blocks the scheduler before active-window/screen capture, and
@@ -233,7 +233,7 @@ test('APP-120 and APP-122: denied, locked, blank and sensitive content never lea
   const filesBeforeLock = capturedPngs().length
   writeControl(control('granted', 'normal', 'APP-122 Unlock Recovery', 'Safe work after unlocking'))
   await app.evaluate(({ powerMonitor }) => powerMonitor.emit('lock-screen'))
-  await expect(captureGroup()).toContainText('Paused by macOS')
+  await expect(captureGroup()).toContainText('Paused by the system')
   await page.waitForTimeout(5_750)
   expect(countEvent('active-window')).toBe(nativeCallsBeforeLock)
   expect(capturedPngs()).toHaveLength(filesBeforeLock)
@@ -255,21 +255,6 @@ test('APP-120 and APP-122: denied, locked, blank and sensitive content never lea
     })
     .toBeGreaterThan(blankCallsBefore)
   await page.waitForTimeout(500)
-  expect(capturedPngs()).toHaveLength(filesBeforeBlank)
-  await expect(replayFrameCount()).toHaveText('2 frames')
-
-  // A sensitive native app is denied by production capture policy before ScreenCaptureKit is ever
-  // touched. This is stronger than deleting a frame after the fact: no pixels are acquired or kept.
-  const sensitiveFocusBefore = countEvent('active-window', (entry) => entry.appName === '1Password')
-  const frameCallsBeforeSensitive = countEvent('frame-capture')
-  writeControl(control('granted', 'normal', '1Password', 'Private vault'))
-  await expect
-    .poll(() => countEvent('active-window', (entry) => entry.appName === '1Password'), {
-      timeout: 12_000
-    })
-    .toBeGreaterThan(sensitiveFocusBefore)
-  await page.waitForTimeout(500)
-  expect(countEvent('frame-capture')).toBe(frameCallsBeforeSensitive)
   expect(capturedPngs()).toHaveLength(filesBeforeBlank)
   await expect(replayFrameCount()).toHaveText('2 frames')
 

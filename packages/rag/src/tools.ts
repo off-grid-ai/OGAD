@@ -4,6 +4,7 @@
 // schema works with our local llama-server tool calling and remote providers.
 
 import type { SearchResult } from './types'
+import { sanitizePromptExcerpt } from './retrieval'
 
 export const SEARCH_KB_TOOL = {
   type: 'function' as const,
@@ -30,7 +31,10 @@ export function makeSearchKnowledgeBaseHandler(searcher: {
     const result = await searcher.searchProject(projectId, args.query)
     if (!result.chunks.length) return `No knowledge-base results found for "${args.query}".`
     return result.chunks
-      .map((c, i) => `[${i + 1}] ${c.name} (part ${c.position + 1}):\n${c.content}`)
+      .map(
+        (c, i) =>
+          `[${i + 1}] ${sanitizePromptExcerpt(c.name)} (part ${c.position + 1}):\n${sanitizePromptExcerpt(c.content)}`
+      )
       .join('\n\n---\n\n')
   }
 }

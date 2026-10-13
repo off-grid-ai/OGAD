@@ -8,6 +8,9 @@ copyright: © Off Grid AI
 # that schedules publishing. A truncated DMG therefore cannot reach GitHub.
 artifactBuildCompleted: scripts/verify-electron-builder-artifact.mjs
 afterPack: scripts/prune-onnx-runtime.mjs
+# Notarize + staple here, not with mac.notarize: the built-in staple gives Apple's ticket service only
+# seconds, and its connections from CI runners drop for longer (see scripts/notarize-mac.mjs).
+afterSign: scripts/notarize-mac.mjs
 # Electron-builder unpacks .node files, but not every shared library that the
 # native addon loads beside itself. Keep those runtime files together in
 # app.asar.unpacked for Sharp and ONNX Runtime on every platform.
@@ -99,7 +102,7 @@ mac:
     NSLocationUsageDescription: Off Grid AI uses your current location when you ask for nearby results. Your location stays on your Mac.
     NSLocationWhenInUseUsageDescription: Off Grid AI uses your current location when you ask for nearby results. Your location stays on your Mac.
     NSPhotoLibraryUsageDescription: Off Grid AI works with photos you ask it to, like picking one to send. Your photos never leave your Mac.
-  notarize: true
+  notarize: false
   icon: resources/icon.png
   extraResources:
     - from: resources/bin
@@ -108,11 +111,11 @@ mac:
       to: bin/executorch-speech
     - from: ../executorch-speech/generated/default-assets
       to: speech-assets
-  # NOTE: no afterSign re-sign hook. electron-builder already signs every nested
-  # binary (resources/bin/*) with hardenedRuntime + these entitlements and then
-  # notarizes + staples. A post-sign re-sign (the old resign.js) re-signed AFTER
-  # notarization → invalidated the staple → "Unnotarized Developer ID". Let
-  # electron-builder's signing stand.
+  # NOTE: no afterSign re-sign. electron-builder already signs every nested
+  # binary (resources/bin/*) with hardenedRuntime + these entitlements; the
+  # afterSign hook only notarizes + staples. A post-sign re-sign (the old resign.js)
+  # re-signed AFTER notarization → invalidated the staple → "Unnotarized Developer ID".
+  # Let electron-builder's signing stand.
 dmg:
   sign: true
   artifactName: ${name}-${version}.${ext}
@@ -163,6 +166,24 @@ deb:
     - libsecret-1-0
     - libasound2t64
     - libgbm1
+    - xdotool
+    - x11-utils
+    - wtype
+    - python3-gi
+    - geoclue-2.0
+    - gir1.2-atspi-2.0
+    - gir1.2-gstreamer-1.0
+    - gir1.2-gst-plugins-base-1.0
+    - gstreamer1.0-pipewire
+    - gstreamer1.0-plugins-base
+    - gstreamer1.0-plugins-good
+    - gstreamer1.0-plugins-bad
+    - gstreamer1.0-plugins-ugly
+    - gstreamer1.0-pulseaudio
+    - gstreamer1.0-libav
+    - xdg-desktop-portal
+    - grim
+    - kde-spectacle
 # Electron fuses (flipped at package time). ASAR integrity makes a tampered app.asar
 # refuse to load — the local-first anti-tamper lever (we don't phone home, so this is
 # the bar against cracking the offline license check). Only the integrity fuses are

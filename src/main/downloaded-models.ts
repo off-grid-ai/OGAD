@@ -11,6 +11,8 @@
 
 import fs from 'fs'
 import path from 'path'
+import { modelMetadataFile, modelReadDirectories, resolveModelReference } from './model-paths'
+import { modelsDir } from './runtime-env'
 import { modelPackageIdentity } from '@offgrid/sync'
 import { extractQuantization, videoArchitecture, videoPackFiles } from '@offgrid/models'
 import { isValidGgufFile } from './models/gguf'
@@ -35,7 +37,15 @@ function registryPath(dir: string): string {
 
 export function readDownloaded(dir: string): DownloadedModel[] {
   try {
-    const arr = JSON.parse(fs.readFileSync(registryPath(dir), 'utf-8'))
+    const arr = JSON.parse(
+      fs.readFileSync(
+        modelMetadataFile(
+          'downloaded-models.json',
+          dir === modelsDir() ? modelReadDirectories() : [dir]
+        ),
+        'utf-8'
+      )
+    )
     return Array.isArray(arr) ? (arr as DownloadedModel[]) : []
   } catch {
     return []
@@ -94,20 +104,24 @@ export function reconcileDownloadedModelRegistry(
       migrated.push(model)
       continue
     }
-    const expected = new Set(family.files.map((file) => file.name))
-    if (expected.size === model.files.length && model.files.every((name) => expected.has(name))) {
+    const roots = dir === modelsDir() ? modelReadDirectories() : [dir]
+    const expected = new Set(family.files.map((file) => resolveModelReference(file.name, roots)))
+    if (
+      expected.size === model.files.length &&
+      model.files.every((name) => expected.has(resolveModelReference(name, roots)))
+    ) {
       changed = true
       continue
     }
     const files = model.files.map((name) => {
       let sizeBytes = 0
       try {
-        sizeBytes = fs.statSync(path.join(dir, name)).size
+        sizeBytes = fs.statSync(resolveModelReference(name, roots)).size
       } catch {
         /* keep the legacy row until its package is complete */
       }
       return {
-        name,
+        name: path.isAbsolute(name) ? path.basename(name) : name,
         sizeBytes,
         role: isProjectorFileName(name) ? ('projector' as const) : ('primary' as const)
       }
@@ -200,7 +214,11 @@ export function installedDownloadedIds(dir: string): string[] {
         m.files.length > 0 &&
         m.files.every((f) => {
           try {
-            return fs.statSync(path.join(dir, f)).size > 0
+            return (
+              fs.statSync(
+                resolveModelReference(f, dir === modelsDir() ? modelReadDirectories() : [dir])
+              ).size > 0
+            )
           } catch {
             return false
           }

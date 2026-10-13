@@ -8,13 +8,13 @@ import {
   MagnifyingGlass,
   Broadcast,
   ClipboardText,
-  Robot,
   ListChecks,
   Waveform,
   ShieldCheck,
   Devices as DevicesIcon
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
+import { GodIcon } from '../GodIcon'
 import { deviceNoun, primaryModifier } from '@renderer/lib/device'
 import { isMac, type DevicePlatform } from '@offgrid/core/shared/device'
 import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
@@ -25,7 +25,7 @@ import { PRO_PURCHASE_URL } from '@offgrid/core/shared/product-links'
 // pro/ submodule is present and activated, the real screens (registered via
 // screenRegistry/navRegistry) take over these same routes.
 
-/** Buy Pro — live now, $49/year or $69 once, one license across up to 5 devices. */
+/** Buy Pro — live now, $119 once or $7.99/month, one license across up to 5 devices. */
 export const PRO_PAY_URL = PRO_PURCHASE_URL
 
 export interface ProFeature {
@@ -44,7 +44,7 @@ export interface ProFeature {
    * Platforms this feature is tested + supported on — the SINGLE SOURCE OF TRUTH
    * for per-feature availability. macOS (`'darwin'`) is the reference platform and
    * MUST be present on every feature (Pro was built Mac-first). As a feature is
-   * ported and verified on Windows, add `'win32'` here — that one edit flips the
+   * ported and verified on another platform, add it here — that one edit flips the
    * feature live everywhere (nav routing, the coming-soon gate, upsell copy), since
    * every surface reads this list through `featureSupportsPlatform`. Do not gate a
    * feature on the platform anywhere else; add the platform here instead.
@@ -55,13 +55,17 @@ export interface ProFeature {
 export const PRO_FEATURES: ProFeature[] = [
   {
     route: 'explore',
-    label: 'Assistant',
-    icon: Robot,
-    tagline: 'Start a prepared run.',
+    label: 'God',
+    icon: GodIcon,
+    tagline: 'Your assistant. It knows your day and asks before it acts.',
     description:
-      'Choose a workflow, add its details, and start it in Chat. The work stays on your device.',
-    highlights: ['Prepared workflows', 'One intake before the run', 'Starts in your local Chat'],
-    platforms: ['darwin', 'win32']
+      'Chat or talk with Ares. It answers from your memory, accounts and tools, raises what needs you, acts on websites and apps with your approval, and keeps you up to date on what is new in Off Grid AI. Wake-word audio is checked on your device and never saved.',
+    highlights: [
+      'Chat or voice, wake word "Ares"',
+      'Approvals and what needs you',
+      'Acts with Web Use and Computer Use'
+    ],
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'tasks',
@@ -71,7 +75,7 @@ export const PRO_FEATURES: ProFeature[] = [
     description:
       'Track running and completed work, open its live view, and respond when a task needs attention.',
     highlights: ['Live task status', 'Saved task history', 'Attention requests in one place'],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'day',
@@ -85,7 +89,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'Per-meeting prep: who’s in it and your open items',
       'Priorities surfaced from what you actually did'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'reflect',
@@ -99,7 +103,11 @@ export const PRO_FEATURES: ProFeature[] = [
       'Focus vs. distraction trends',
       'All computed locally — never uploaded'
     ],
-    platforms: ['darwin', 'win32']
+    // Ported to Windows: Reflect adds no capture of its own — it is pure aggregation
+    // over observations the capture pipeline already writes, which Replay's port put
+    // on Windows and Linux. The whole path (crm/reflect.ts, its IPC, ReflectScreen)
+    // carries no platform-native code and reaches SQLite through core getDB.
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'replay',
@@ -117,8 +125,8 @@ export const PRO_FEATURES: ProFeature[] = [
     // binary is no longer on the path. Screenshots come from Electron desktopCapturer
     // and the frame store, replay reader and screen carry no platform-native code.
     // Accessibility text is macOS-only enrichment that never gates analysis, so on
-    // Windows a vision model is what produces frame summaries.
-    platforms: ['darwin', 'win32']
+    // Windows and Linux use a vision model for frame summaries.
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'meetings',
@@ -132,7 +140,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'On-device transcription',
       'Searchable transcripts & summaries'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'actions',
@@ -146,7 +154,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'Secretary-proposed actions',
       'Approval-gated — you’re always in control'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'entities',
@@ -160,7 +168,7 @@ export const PRO_FEATURES: ProFeature[] = [
       'Cross-source narrative summaries',
       'Relationship graph'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'search',
@@ -170,7 +178,7 @@ export const PRO_FEATURES: ProFeature[] = [
     description:
       'One search bar across your captured activity, meetings, entities, and connectors — semantic + keyword, all on-device.',
     highlights: ['Unified semantic search', 'Across capture, meetings & connectors', 'Fully local'],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'notifications',
@@ -184,20 +192,20 @@ export const PRO_FEATURES: ProFeature[] = [
       'Approval queue for actions',
       'Auto-extracted to-dos'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'voice',
     label: 'Voice',
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
-    description: `Hold Option+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
+    description: `Hold ${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
     highlights: [
-      'Option+Space push-to-talk or toggle, anywhere',
+      `${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space push-to-talk or toggle, anywhere`,
       'Paste-at-cursor + a searchable recordings library',
       'Transcribe any audio/video file, all on-device'
     ],
-    platforms: ['darwin', 'win32']
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'vault',
@@ -213,8 +221,9 @@ export const PRO_FEATURES: ProFeature[] = [
     ],
     // First Pro feature ported to Windows: the vault engine is fully cross-platform
     // (KDBX4 via kdbxweb, Argon2id via hash-wasm WASM, BIP39 recovery, device key
-    // via node-machine-id) - no macOS-native code. Verified on Windows.
-    platforms: ['darwin', 'win32']
+    // via node-machine-id) - no macOS-native code. Linux uses the same KDBX4
+    // engine and a stable machine id, with the persisted fallback when unavailable.
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'clipboard',
@@ -227,10 +236,10 @@ export const PRO_FEATURES: ProFeature[] = [
       `${primaryModifier()}+Shift+C quick-paste popup anywhere`,
       'Stored locally in your encrypted database'
     ],
-    // Ported to Windows: the store + popup + global hotkey (CommandOrControl+Shift+C)
-    // are all cross-platform Electron; auto-paste is synthesized per-platform in
-    // pro text-injection (osascript on macOS, PowerShell SendKeys on Windows).
-    platforms: ['darwin', 'win32']
+    // The store, popup, and hotkey use Electron on all three desktop platforms.
+    // Pro synthesizes paste with osascript, PowerShell, xdotool (X11), or wtype
+    // (Wayland, where the compositor supports its virtual keyboard protocol).
+    platforms: ['darwin', 'win32', 'linux']
   },
   {
     route: 'devices',
@@ -244,12 +253,9 @@ export const PRO_FEATURES: ProFeature[] = [
       'Known devices reconnect when they return to the network',
       'Direct encrypted transfer on your local network'
     ],
-    // Both platforms: sync is cross-platform by construction. The transport is node:net and
-    // discovery is bonjour-service (pure JS mDNS), so a Windows install gets the LAN route with
-    // no native code. The single `process.platform === 'darwin'` branch in the activation path
-    // only ADDS the Apple proximity route on top - macOS ends up with LAN plus proximity,
-    // Windows with LAN. Gating this to darwin would dark-out a feature that works.
-    platforms: ['darwin', 'win32']
+    // LAN sync uses node:net and bonjour-service on all three desktop platforms.
+    // Apple proximity is an extra macOS route; Linux and Windows use LAN.
+    platforms: ['darwin', 'win32', 'linux']
   }
 ]
 
@@ -269,14 +275,11 @@ export function featureSupportsPlatform(feature: ProFeature, platform: DevicePla
 
 /**
  * The baseline rule for Pro surfaces that don't (yet) have their own per-feature
- * `platforms` declaration — today just the pro Settings sections (proactive
- * delivery, learned prefs), which aren't catalog routes. Linux subscribers see
- * a "coming soon" placeholder; free users see the upgrade screen. Catalog routes use
- * the per-feature `featureSupportsPlatform` seam via `proFeatureComingSoon`
- * instead — prefer that for anything backed by a ProFeature.
+ * `platforms` declaration. Registered Settings sections run on each supported
+ * desktop platform; an unknown platform keeps the placeholder.
  */
 export function proComingSoonHere(platform: DevicePlatform, isPro: boolean): boolean {
-  return isPro && platform !== 'darwin' && platform !== 'win32'
+  return isPro && platform === 'unknown'
 }
 
 /**
@@ -298,4 +301,24 @@ export function proFeatureComingSoon(
     return false
   }
   return !featureSupportsPlatform(feature, platform)
+}
+
+/**
+ * Which view the app should OPEN on. Free users land on Models (they need a model
+ * before anything else works); Pro users land on Day — but only where Day is
+ * actually available.
+ *
+ * This lives here, beside the seam, because it is a per-feature platform decision and
+ * `platforms` is the single source of truth for those. It previously sat in App.tsx as
+ * `isPro && isMac() ? 'day' : 'models'`, which was right only by accident: it agreed
+ * with the catalog while Day was macOS-only, and would have stranded a ported Day on
+ * Windows — nav and gating would light Day up from `platforms` while the landing
+ * screen still asked `isMac()`. Route the decision through the seam so porting a
+ * feature never leaves a second place to update.
+ *
+ * Never land on a locked or unavailable tab.
+ */
+export function landingView(platform: DevicePlatform, isPro: boolean): 'day' | 'models' {
+  const day = getProFeature('day')
+  return isPro && day && featureSupportsPlatform(day, platform) ? 'day' : 'models'
 }

@@ -1,3 +1,4 @@
+import { withStorageDownload } from './model-storage-guard'
 import { beginRuntimeBackend } from './runtime-backends'
 // Local text-to-speech through the pinned React Native ExecuTorch Kokoro runtime.
 // The runtime lives in its own repository and runs as a child process, so it does
@@ -11,6 +12,7 @@ import {
 } from '@offgrid/executorch-speech'
 import { kokoroVoiceLabel, speechLanguageLabel, type RuntimeSpeechVoice } from '@offgrid/speech'
 import fs from 'fs'
+import { createHash } from 'node:crypto'
 import { recordAIRequest } from './ai-request-log'
 import os from 'os'
 import path from 'path'
@@ -19,6 +21,7 @@ import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-s
 import { listRemoteVoices, synthesizeRemoteVoice } from './remote-media-runtime'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { modelsDir, requireModelStorage, resourceDirs } from './runtime-env'
+import { modelReadDirectories, resolveIndexedModelPackage } from './model-paths'
 import type { ManagedRuntime } from './runtime-manager'
 import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
 import { OnnxSpeechRuntime } from './tts-onnx'
@@ -49,20 +52,43 @@ function executablePath(): string {
   return executable
 }
 
-function cacheDirectory(): string {
+function cacheDirectory(voice: string): string {
+  const assets = Object.entries(
+    speechCapabilities.voices.find((entry) => entry.id === voice)?.assets ?? {}
+  )
+    .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    .map(([asset, url]) => ({
+      name: `${asset}-${createHash('sha256').update(url).digest('hex').slice(0, 12)}-${path.basename(new URL(url).pathname)}`,
+      url
+    }))
+  const bundled = bundledCacheDirectory()
+  const cached =
+    assets.length &&
+    resolveIndexedModelPackage(assets, [
+      ...modelReadDirectories().map((root) => path.join(root, '.cache', 'executorch-speech')),
+      ...(bundled ? [bundled] : [])
+    ])
+  if (cached) return cached
   requireModelStorage()
   return path.join(modelsDir(), '.cache', 'executorch-speech')
 }
 
 function bundledCacheDirectory(): string | undefined {
   return [
+    ...modelReadDirectories()
+      .filter((root) => root !== modelsDir())
+      .map((root) => path.join(root, '.cache', 'executorch-speech')),
     ...resourceDirs().map((root) => path.join(root, 'speech-assets')),
     path.resolve(process.cwd(), '../executorch-speech/generated/default-assets')
   ].find((candidate) => fs.existsSync(path.join(candidate, 'index.json')))
 }
 
-function runtime(): ExecutorchSpeechRuntime {
-  return new ExecutorchSpeechRuntime(cacheDirectory(), executablePath(), bundledCacheDirectory())
+function runtime(voice: string): ExecutorchSpeechRuntime {
+  return new ExecutorchSpeechRuntime(
+    cacheDirectory(voice),
+    executablePath(),
+    bundledCacheDirectory()
+  )
 }
 
 async function synthesizeExecutorch(input: Parameters<ExecutorchSpeechRuntime['synthesize']>[0]): Promise<void> {
@@ -71,7 +97,7 @@ async function synthesizeExecutorch(input: Parameters<ExecutorchSpeechRuntime['s
   try {
     // This bundled native target links the XNNPACK CPU backend only.
     status.ready('CPU (ExecuTorch)')
-    await runtime().synthesize(input)
+    await runtime(input.voiceId).synthesize(input)
   } catch (error) {
     status.fail(error)
     throw error
@@ -113,6 +139,13 @@ export async function prepareVoiceAssets(
   voice: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<void> {
+  return withStorageDownload(() => prepareVoiceAssetsInner(voice, onProgress))
+}
+
+async function prepareVoiceAssetsInner(
+  voice: string,
+  onProgress?: (progress: DownloadProgress) => void
+): Promise<void> {
   if (ONNX_VOICES.has(voice)) {
     try {
       await onnxSpeech.prepare(voice, onProgress)
@@ -121,19 +154,31 @@ export async function prepareVoiceAssets(
       writeDiagnosticLog('tts', 'onnx.prepare.failed', { error: messageOf(error) }, 'warn')
     }
   }
-  await prepareVoice(cacheDirectory(), voice, onProgress, undefined, bundledCacheDirectory())
+  await prepareVoice(cacheDirectory(voice), voice, onProgress, undefined, bundledCacheDirectory())
 }
 
 /** Synthesize speech for `text`; returns a WAV data URL. */
 export async function synthesize(
   text: string,
   voice?: string,
-  onProgress?: (progress: DownloadProgress) => void
+  onProgress?: (progress: DownloadProgress) => void,
+  options: { readonly local?: boolean } = {}
+): Promise<{ dataUrl: string }> {
+  // First synthesis can download assets even without an explicit Prepare request.
+  return withStorageDownload(() => synthesizeInner(text, voice, onProgress, options))
+}
+
+async function synthesizeInner(
+  text: string,
+  voice?: string,
+  onProgress?: (progress: DownloadProgress) => void,
+  /** This machine's own voices, even when a remote voice is chosen (a WAV, always). */
+  options: { readonly local?: boolean } = {}
 ): Promise<{ dataUrl: string }> {
   return recordAIRequest(
     { modality: 'tts', source: 'Speech synthesis', request: { text, voice } },
     async (log) => {
-      const remote = getActiveRemoteVisionServerForModality('voice')
+      const remote = options.local ? null : getActiveRemoteVisionServerForModality('voice')
       if (remote) {
         log.update({ model: remote.selectedModel, backend: 'Remote' })
         if (remote.provider !== 'openrouter') return synthesizeRemoteVoice(remote, text, voice)

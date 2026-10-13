@@ -1,3 +1,4 @@
+import type { ResponseVersion } from '../../../../shared/chat-versions'
 import type {
   ProjectedSyncedTool,
   RecordProvenance,
@@ -23,7 +24,12 @@ export type RagEntity = { id: number; name?: string }
 export type RagEntityFact = { fact?: string } | string
 
 export type RagContext = {
+  branches?: { question: string; answers: ResponseVersion[] }[]
+  variants?: ResponseVersion[]
+  variantIndex?: number
   notice?: boolean
+  /** On a compaction notice: the summary that stands in for every turn before it. */
+  compactionSummary?: string
   masterMemory?: string | null
   memories?: RagMemory[]
   messages?: unknown[]
@@ -74,9 +80,13 @@ export type ImageGenerationMetadata = {
 }
 
 export type ChatMessage = {
+  /** Saved response retained while this fresh stream generates its replacement. */
+  replacementMessageId?: string
   id: string
   role: SyncedMessageRole
   content: string
+  /** God's reactions to this message, oldest first (set by a variant through presentMessages). */
+  readonly reactions?: readonly string[]
   createdAt?: number
   context?: RagContext
   image?: string
@@ -112,7 +122,7 @@ export type ChatMessage = {
   streaming?: boolean
   activity?: { kind: string; counts?: Record<string, number>; name?: string }
   attachments?: { name: string; kind: string; text?: string; path?: string }[]
-  variants?: string[]
+  variants?: ResponseVersion[]
   variantIndex?: number
   audioUrl?: string
   audioDuration?: number
@@ -196,6 +206,8 @@ export type MessageRowState = Readonly<{
   askSelections: Readonly<Record<string, readonly string[]>>
   incomingFiles: readonly IncomingSharedFile[]
   showGenerationDetails: boolean
+  /** The tools offered to the model, under an answer. Off in God. */
+  showToolsSent?: boolean
   regenerationDisabled: boolean
 }>
 

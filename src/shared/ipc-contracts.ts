@@ -14,10 +14,15 @@ export interface UserProfileContract {
   completedAt?: string
 }
 
+/** Which screen a conversation belongs to: Chat, or God. */
+export type ConversationSurface = 'chat' | 'god'
+
 export interface RagConversationContract {
   id: string
   title: string | null
   project_id?: string | null
+  /** 'god' for a God conversation; null or absent for Chat. */
+  surface?: string | null
   origin_device_id?: string | null
   origin_device_name?: string | null
   created_at: string

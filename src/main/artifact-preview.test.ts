@@ -9,7 +9,7 @@ import {
   serveArtifactPreview
 } from './artifact-preview'
 import { createRendererContentSecurityPolicy } from '../shared/renderer-csp'
-import { MEDIA_PORT } from '../shared/ports'
+import { MEDIA_PORT, MEDIA_PORT_RANGE } from '../shared/ports'
 
 describe('renderer content security policy', () => {
   it('keeps executable artifact permissions out of the trusted renderer', () => {
@@ -22,6 +22,16 @@ describe('renderer content security policy', () => {
     expect(policy).toContain('frame-src')
     expect(policy).toContain('ogartifact:')
     expect(policy).toContain(`img-src 'self' data: blob: ogcapture: http://127.0.0.1:${MEDIA_PORT}`)
+  })
+
+  it('admits the media port a second instance falls back to', () => {
+    const policy = createRendererContentSecurityPolicy('test-nonce')
+    for (const directive of ['img-src', 'media-src', 'frame-src', 'connect-src']) {
+      const sources = policy.split('; ').find((part) => part.startsWith(directive)) ?? ''
+      expect(sources).toContain(`http://127.0.0.1:${MEDIA_PORT + 1}`)
+      expect(sources).toContain(`http://127.0.0.1:${MEDIA_PORT + MEDIA_PORT_RANGE - 1}`)
+      expect(sources).not.toContain(`http://127.0.0.1:${MEDIA_PORT + MEDIA_PORT_RANGE} `)
+    }
   })
 
   it('limits artifact network access to the exact package runtime host', () => {

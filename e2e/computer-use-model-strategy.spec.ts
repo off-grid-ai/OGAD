@@ -12,7 +12,6 @@ let page: Page
 let profileDir: string
 
 const CHAT_ID = 'unsloth/Qwen3.5-0.8B-GGUF'
-const CHAT_NAME = 'Qwen 3.5 0.8B'
 const SPECIALIST_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 // This journey starts the native model boundary, reopens Electron, and runs a complete visual
@@ -101,6 +100,7 @@ async function launch(): Promise<void> {
   page = await app.firstWindow()
   page.on('pageerror', (error) => console.error(`[renderer error] ${error.stack ?? error.message}`))
   await page.waitForLoadState('domcontentloaded')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await completeOnboarding(page)
   await expect(page.getByRole('button', { name: /Model server: model running/i })).toBeVisible({
     timeout: 60_000
@@ -110,7 +110,13 @@ async function launch(): Promise<void> {
 async function close(): Promise<void> {
   const running = app
   app = null
-  if (running) await running.close()
+  if (running) {
+    const child = running.process()
+    await Promise.all([
+      running.close(),
+      expect.poll(() => child.exitCode ?? child.signalCode, { timeout: 15_000 }).toBe(0)
+    ])
+  }
 }
 
 async function selectStrategy(label: string): Promise<void> {
@@ -128,7 +134,7 @@ async function gotoChat(): Promise<void> {
   await expect(palette).toBeVisible()
   await palette.getByPlaceholder(/^Search everything/).fill('Chat')
   await page.getByTestId('palette-screen-memory-chat-root').click()
-  await expect(page.getByPlaceholder(/ask anything/i)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
 }
 
 async function computerUseSummary(): Promise<string> {
@@ -150,14 +156,23 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
+  for (const name of [
+    'hybrid-model-requests.jsonl',
+    'hybrid-model-state.json',
+    'logs/off-grid-ai-desktop.log'
+  ]) {
+    const file = path.join(profileDir, name)
+    if (fs.existsSync(file)) await test.info().attach(name, { path: file })
+  }
   await close()
   fs.rmSync(profileDir, { recursive: true, force: true })
 })
 
-test('all strategies project their effective roles and Text + Specialist survives relaunch', async () => {
+test('all strategies project their effective roles and Reasoning + Specialist survives relaunch', async () => {
   await selectStrategy('Same as Chat')
   expect(await computerUseSummary()).toContain('Same as Chat')
-  expect(await computerUseSummary()).toContain(CHAT_NAME)
+  // Same as Chat names no second model: the panel says Computer Use runs on the Chat model.
+  expect(await computerUseSummary()).toContain('Computer Use uses the Chat model.')
 
   await selectStrategy('Specialist')
   const specialist = await computerUseSummary()
@@ -165,31 +180,39 @@ test('all strategies project their effective roles and Text + Specialist survive
   expect(specialist.toLowerCase()).toContain('grounding specialist')
   expect(specialist.toLowerCase()).not.toContain('reasoner')
 
-  await selectStrategy('Text + Specialist')
+  await selectStrategy('Reasoning + Specialist')
   const hybrid = await computerUseSummary()
-  expect(hybrid.toLowerCase()).toContain('reasoner')
+  // fc0f7ca46: the reasoner is shown with Text models, outside the task lineup.
+  expect(hybrid).toContain('Reasoning + Specialist')
+  await page.getByRole('button', { name: 'Active models' }).click()
+  await expect(page.getByRole('button', { name: /Qwen.*3.5.*0.8B/, pressed: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
   expect(hybrid.toLowerCase()).toContain('grounding specialist')
 
   await close()
   await launch()
-  expect(await computerUseSummary()).toContain('Text + Specialist')
+  expect(await computerUseSummary()).toContain('Reasoning + Specialist')
 })
 
 test('a Chat request runs the hybrid reasoner and specialist through one Computer Use task', async () => {
-  await selectStrategy('Text + Specialist')
+  await selectStrategy('Reasoning + Specialist')
   await gotoChat()
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await page.getByRole('button', { name: 'Composer options' }).click()
-  await page.getByRole('menuitem', { name: /^Tools/ }).click()
+  // The agentic turn is the God item (once Assistant); Tools is a separate switch, on by default.
+  await page.getByRole('menuitem', { name: /^God/ }).click()
   await page.keyboard.press('Escape')
   await composer.fill('Click the center of this test window.')
   await composer.press('Enter')
 
-  await expect(
-    page.getByRole('button', {
-      name: /Computer Use done Click the center of the visible Off Grid AI test window/
-    })
-  ).toBeVisible({ timeout: 120_000 })
+  await expect(page.getByRole('button', { name: 'Work done', exact: true })).toBeVisible({
+    timeout: 120_000
+  })
+  await page.getByRole('button', { name: 'Work done', exact: true }).click()
+  // The chat turn ends when the task starts; the task's own finished entry is in Task history.
+  await expect(page.getByRole('button', { name: /^Computer Use done / }).first()).toBeVisible({
+    timeout: 120_000
+  })
   expect(
     fs.existsSync(path.join(profileDir, 'hybrid-model-state.json')),
     'the scripted native model boundary must record hybrid reasoning'
@@ -202,8 +225,10 @@ test('a Chat request runs the hybrid reasoner and specialist through one Compute
     .readFileSync(path.join(profileDir, 'hybrid-model-requests.jsonl'), 'utf8')
     .trim()
     .split('\n')
-  expect(requests.some((request) => request.includes('delegate_grounded_action'))).toBe(true)
-  expect(requests.some((request) => request.includes('"max_tokens":200'))).toBe(true)
+  expect(requests.some((request) => request.includes('ground_pointer_target'))).toBe(true)
+  expect(
+    requests.some((request) => request.includes('ONE action in the UI-TARS action space'))
+  ).toBe(true)
 })
 
 for (const [strategy, counter] of [
@@ -213,18 +238,22 @@ for (const [strategy, counter] of [
   test(`a Chat request completes a real Computer Use task with ${strategy}`, async () => {
     await selectStrategy(strategy)
     await gotoChat()
-    const composer = page.getByPlaceholder(/ask anything/i)
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true })
     await page.getByRole('button', { name: 'Composer options' }).click()
-    await page.getByRole('menuitem', { name: /^Tools/ }).click()
+    // The agentic turn is the God item (once Assistant); Tools is a separate switch, on by default.
+    await page.getByRole('menuitem', { name: /^God/ }).click()
     await page.keyboard.press('Escape')
     await composer.fill('Click the center of this test window.')
     await composer.press('Enter')
 
-    await expect(
-      page.getByRole('button', {
-        name: /Computer Use done Click the center of the visible Off Grid AI test window/
-      })
-    ).toBeVisible({ timeout: 120_000 })
+    await expect(page.getByRole('button', { name: 'Work done', exact: true })).toBeVisible({
+      timeout: 120_000
+    })
+    await page.getByRole('button', { name: 'Work done', exact: true }).click()
+    // The chat turn ends when the task starts; the task's own finished entry is in Task history.
+    await expect(page.getByRole('button', { name: /^Computer Use done / }).first()).toBeVisible({
+      timeout: 120_000
+    })
     const state = JSON.parse(
       fs.readFileSync(path.join(profileDir, 'hybrid-model-state.json'), 'utf8')
     ) as Record<string, number>

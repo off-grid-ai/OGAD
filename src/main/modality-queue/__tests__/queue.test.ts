@@ -68,6 +68,28 @@ describe('ModalityQueue', () => {
     expect(order).toEqual(['evict', 'job', 'warm'])
   })
 
+  it('holds admission until an asynchronous eviction has finished', async () => {
+    const q = new ModalityQueue()
+    const closed = deferred<void>()
+    const order: string[] = []
+    q.registerEvictable('llm', {
+      evict: async () => {
+        order.push('stop-requested')
+        await closed.promise
+        order.push('process-closed')
+      }
+    })
+
+    const job = q.run({ tier: 2, label: 'image', evicts: ['llm'] }, async () => {
+      order.push('image-started')
+    })
+    await tick()
+    expect(order).toEqual(['stop-requested'])
+    closed.resolve()
+    await job
+    expect(order).toEqual(['stop-requested', 'process-closed', 'image-started'])
+  })
+
   it('always calls evict for a declared id (idempotent even if the engine is down)', async () => {
     // The queue does NOT track exact residency — it always evicts, so an engine that
     // lazily reloaded can't slip through and leave two models resident.

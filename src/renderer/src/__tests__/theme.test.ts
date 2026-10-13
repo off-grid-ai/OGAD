@@ -11,7 +11,7 @@ const listeners: Array<() => void> = []
 // jsdom does not expose a usable bare `localStorage` global (Node's experimental one
 // shadows it and throws), so stub an in-memory Store the module's bare `localStorage`
 // calls resolve against. `document` from jsdom is used as-is for the <html> dataset.
-function makeLocalStorage() {
+function makeLocalStorage(): { getItem: (k: string) => string | null; setItem: (k: string, v: string) => undefined; removeItem: (k: string) => undefined; clear: () => void; } {
   const map = new Map<string, string>()
   return {
     getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
@@ -22,7 +22,7 @@ function makeLocalStorage() {
 }
 let store = makeLocalStorage()
 
-function installMatchMedia() {
+function installMatchMedia(): void {
   vi.stubGlobal(
     'matchMedia',
     vi.fn((query: string) => ({
@@ -36,7 +36,7 @@ function installMatchMedia() {
 
 // Import fresh per test so the KEY-backed getThemeMode reads the current localStorage and
 // the module-load listener registration is deterministic.
-async function loadTheme() {
+async function loadTheme(): Promise<typeof import("../theme")> {
   vi.resetModules()
   installMatchMedia()
   vi.stubGlobal('localStorage', store)
@@ -61,15 +61,16 @@ describe('getThemeMode', () => {
     expect(getThemeMode()).toBe('light')
   })
 
-  it('defaults to system when nothing is stored', async () => {
+  // Off Grid is dark by default; System and Light are choices.
+  it('defaults to dark when nothing is stored', async () => {
     const { getThemeMode } = await loadTheme()
-    expect(getThemeMode()).toBe('system')
+    expect(getThemeMode()).toBe('dark')
   })
 
-  it('defaults to system when the stored value is invalid', async () => {
+  it('defaults to dark when the stored value is invalid', async () => {
     localStorage.setItem('og-theme', 'neon')
     const { getThemeMode } = await loadTheme()
-    expect(getThemeMode()).toBe('system')
+    expect(getThemeMode()).toBe('dark')
   })
 })
 

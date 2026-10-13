@@ -8,7 +8,7 @@ import { presetById } from '../presetCatalog'
 
 // Only three assistant examples are exposed in Explore today. Exercise the
 // connector recommendation on an exposed preset without resurrecting a hidden one.
-const gmailPreset = () => {
+const gmailPreset = (): NonNullable<ReturnType<typeof presetById>> => {
   const preset = presetById('best-nearby')!
   return { ...preset, intake: { ...preset.intake, recommendedConnector: 'Gmail' } }
 }

@@ -72,6 +72,12 @@ interface CapturedStep {
 }
 
 const MAX_CONSECUTIVE_RETHINKS = 3
+/**
+ * Unusable replies in a row before the task stops, as browser-use stops after five consecutive
+ * failures. Found live: a small model replied with an unsupported action again and again, and
+ * the task re-observed for forty minutes, holding every later web task in the queue.
+ */
+const MAX_CONSECUTIVE_INVALID = 5
 const VISUAL_FINGERPRINT_SIZE = 128
 const VISUAL_NOOP_MEAN_DELTA = 0.002
 const VISUAL_CONFIRMED_MEAN_DELTA = 0.01
@@ -343,6 +349,7 @@ class VisionTaskGraphRuntime {
   private equivalentClickRecoveries = 0
   private duplicateTypeRecoveries = 0
   private consecutiveRethinks = 0
+  private consecutiveInvalid = 0
   private consecutiveSuspectedNoops = 0
   private previousActionEffect?: VisionActionEffect
   private previousExpectedEffect?: string
@@ -660,10 +667,15 @@ class VisionTaskGraphRuntime {
     if (!hasNextPhase) {
       if (this.deps.repeatUntilSessionLimit && !this.deps.guard.isHalted) {
         const completed = this.deps.plan?.phases[this.phaseIndex]
-        this.note(`cycle ${this.sessionCycle} complete: ${completed?.title ?? this.decision.summary}`)
+        this.note(
+          `cycle ${this.sessionCycle} complete: ${completed?.title ?? this.decision.summary}`
+        )
         this.sessionCycle += 1
         this.policyHistory.length = 0
         this.pendingPolicyHistory = undefined
+        this.previousActionEffect = undefined
+        this.previousExpectedEffect = undefined
+        this.pendingExpectedEffect = undefined
         this.phaseIndex = 0
         const next = this.deps.plan?.phases[0]
         this.continuation = boundedContinuationCapsule(
@@ -695,6 +707,9 @@ class VisionTaskGraphRuntime {
     // completed milestone bias the first decision for the next milestone.
     this.policyHistory.length = 0
     this.pendingPolicyHistory = undefined
+    this.previousActionEffect = undefined
+    this.previousExpectedEffect = undefined
+    this.pendingExpectedEffect = undefined
     this.phaseIndex += 1
     const next = this.deps.plan?.phases[this.phaseIndex]
     this.continuation = boundedContinuationCapsule(
@@ -770,6 +785,7 @@ class VisionTaskGraphRuntime {
         return { route: 'end' }
       }
     }
+    if (decision.kind !== 'invalid') this.consecutiveInvalid = 0
     if (decision.kind === 'actions') {
       this.consecutiveRethinks = 0
       const repeatedType = decision.actions.find((action) =>
@@ -853,10 +869,22 @@ class VisionTaskGraphRuntime {
       return { route: 'gate' }
     }
     if (decision.kind === 'invalid') {
+      this.consecutiveInvalid += 1
       this.discardPendingPolicyHistory()
       this.observeDecision('parse_failed', decision.error)
       this.note(`${decision.error}; re-observing`)
       this.checkpoint()
+      if (
+        this.consecutiveInvalid >= MAX_CONSECUTIVE_INVALID &&
+        !this.deps.repeatUntilSessionLimit
+      ) {
+        const failure = `Stopped: the model gave ${MAX_CONSECUTIVE_INVALID} replies in a row that cannot run (${decision.error}).`
+        this.progress('failed', 'The model kept replying with actions that cannot run')
+        this.note(failure)
+        this.finish(false, failure)
+        return { route: 'end' }
+      }
+      if (this.consecutiveInvalid >= MAX_CONSECUTIVE_INVALID) this.consecutiveInvalid = 0
       return { route: 'gate' }
     }
     if (decision.kind === 'wait') {

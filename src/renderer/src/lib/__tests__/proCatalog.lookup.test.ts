@@ -35,6 +35,7 @@ const winPorted = (route: string): ProFeature => ({
 })
 
 const WIN_PORTED = new Set(PRO_FEATURES.map((feature) => feature.route))
+const LINUX_PORTED = new Set(PRO_FEATURES.map((feature) => feature.route))
 
 describe('getProFeature', () => {
   it('returns the matching feature for a known route', () => {
@@ -88,10 +89,8 @@ describe('featureSupportsPlatform (per-feature seam)', () => {
     }
   })
 
-  // Guards against a lazy `['darwin', ...allNonMac]` — a ported feature is win32
-  // only, never linux by implication.
-  it.each([...WIN_PORTED])('%s is win32-only, not linux by implication', (route) => {
-    expect(featureSupportsPlatform(getProFeature(route)!, 'linux')).toBe(false)
+  it.each([...WIN_PORTED])('%s has its own Linux support declaration', (route) => {
+    expect(featureSupportsPlatform(getProFeature(route)!, 'linux')).toBe(LINUX_PORTED.has(route))
   })
 })
 
@@ -107,9 +106,9 @@ describe('proFeatureComingSoon flips PER FEATURE (the seam works one at a time)'
 })
 
 describe('proComingSoonHere', () => {
-  it('gates Pro subscribers on Linux and unknown platforms', () => {
+  it('gates Pro subscribers only on unknown platforms', () => {
     expect(proComingSoonHere('win32', true)).toBe(false)
-    expect(proComingSoonHere('linux', true)).toBe(true)
+    expect(proComingSoonHere('linux', true)).toBe(false)
     expect(proComingSoonHere('unknown', true)).toBe(true)
   })
 
@@ -149,11 +148,17 @@ describe('proFeatureComingSoon', () => {
   // list, so ANY platform absent from it is coming-soon. Without a third platform
   // asserted here, a regression that special-cased win32 (rather than reading the
   // list) would still pass. Entitlement is orthogonal — free users are never gated.
-  it('gates a Pro route on linux too, and still never gates free users there', () => {
+  it('opens all Pro routes on Linux', () => {
     const route = PRO_FEATURES.at(0)?.route
     if (!route) throw new Error('Pro catalog must not be empty')
-    expect(proFeatureComingSoon(route, 'linux', true)).toBe(true)
+    expect(proFeatureComingSoon(route, 'linux', true)).toBe(false)
     expect(proFeatureComingSoon(route, 'linux', false)).toBe(false)
+  })
+
+  it('opens Vault for a Linux Pro subscriber', () => {
+    expect(proFeatureComingSoon('vault', 'linux', true)).toBe(false)
+    expect(proFeatureComingSoon('vault', 'linux', false)).toBe(false)
+    expect(proFeatureComingSoon('replay', 'linux', true)).toBe(false)
   })
 
   it('does not gate core or unknown routes', () => {

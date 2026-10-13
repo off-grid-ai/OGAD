@@ -1,10 +1,13 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
+import { assetPathPlugin } from './scripts/config/vitest-asset-plugin'
 
 // Dedicated config for core + Pro DB integration tests (*.dbtest.ts). Kept separate from the
 // default vitest run because they load the better-sqlite3 native module (see
 // scripts/test-db.sh). Run via `npm run test:db`.
 export default defineConfig({
+  // `?asset` imports resolve to the file's path, as electron-vite does in the app.
+  plugins: [assetPathPlugin()],
   resolve: {
     alias: {
       '@offgrid/core': resolve(__dirname, 'src'),

@@ -33,6 +33,7 @@ import {
   type ImageGenerationJobContract
 } from '../../../../shared/image-generation-contract'
 import { invalidateLlmSettings } from '../../lib/settings-invalidation'
+import { CHAT_QUEUE_SETTINGS_KEY, getChatQueueStore } from '../../lib/chat-queue-store'
 
 // The real app mounts MemoryChat inside a global TooltipProvider (App shell). Mirror
 // that here so the composer's tooltip-wrapped controls render — this wraps the REAL
@@ -134,6 +135,8 @@ type InstallApiOptions = {
   ragAnswer?: string
   /** Main-owned image job snapshot that imageGenJobStatus() reports on mount (reattach path). */
   jobStatus?: ImageGenerationJobContract
+  /** Settings the store refuses to write once, as a full or locked disk would. */
+  refuseFirstSaveOf?: string[]
   /** Seed per-conversation persisted messages (getRagMessages), keyed by conversation id. */
   messages?: Record<string, unknown[]>
   toolResult?: {
@@ -265,7 +268,9 @@ function installApi(opts: InstallApiOptions): InstalledApi {
     context: { unified: [] as never[] }
   }))
   const listGeneratedImages = vi.fn(async () => generatedGallery.map((image) => ({ ...image })))
+  const refusedOnce = new Set(opts.refuseFirstSaveOf ?? [])
   const saveSetting = vi.fn(async (k: string, v: unknown) => {
+    if (refusedOnce.delete(k)) throw new Error(`could not write ${k}: disk full`)
     settings[k] = v
   })
   const api = {
@@ -785,6 +790,279 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     expect(await screen.findByText('Generating image · Step 3 of 20')).toBeTruthy()
   })
 
+  it.each(['send-now', 'stop', 'complete'] as const)(
+    'drains a reattached image queue without a surviving sender (%s)',
+    async (ending) => {
+      const conv = conversation(`unowned-image-${ending}`, 'Reattached image')
+      let job: ImageGenerationJobContract = {
+        id: 'held-job',
+        phase: 'running',
+        conversationId: conv.id,
+        projectId: null,
+        stage: 'generating',
+        enhancedPrompt: '',
+        progress: null,
+        outputPath: null,
+        error: null,
+        startedAt: 1,
+        finishedAt: null
+      }
+      const urgent = deferred<ImageResult>()
+      const queued = deferred<ImageResult>()
+      const boundary = installApi({
+        active: FULL,
+        models: [FULL],
+        conversations: [conv],
+        jobStatus: job,
+        generate: (payload) => (payload.prompt === 'Urgent image' ? urgent.promise : queued.promise)
+      })
+      window.api.imageGenJobStatus = async () => job
+      boundary.cancelImageGen.mockImplementation(() => {
+        job = { ...job, phase: 'cancelled' }
+        boundary.emitJobState(job)
+      })
+      const user = userEvent.setup()
+      const view = renderChat({ conversationId: conv.id })
+      await screen.findByRole('button', { name: 'Stop generating' })
+      await openImageComposer(user)
+      const composer = screen.getByRole('textbox', { name: 'Message' })
+      fireEvent.change(composer, { target: { value: 'Queued image' } })
+      fireEvent.keyDown(composer, { key: 'Enter' })
+      await screen.findByText('1 queued')
+      view.unmount()
+      renderChat({ conversationId: conv.id })
+      await screen.findByRole('button', { name: 'Stop generating' })
+      await screen.findByText('1 queued')
+      await openImageComposer(user)
+      if (ending === 'complete') {
+        job = { ...job, phase: 'succeeded' }
+        act(() => boundary.emitJobState(job))
+      } else {
+        if (ending === 'stop') {
+          await user.click(screen.getByRole('button', { name: 'Stop generating' }))
+          await waitFor(() => expect(screen.queryByText('1 queued')).toBeNull())
+        }
+        const reopened = screen.getByRole('textbox', { name: 'Message' })
+        fireEvent.change(reopened, { target: { value: 'Urgent image' } })
+        fireEvent.keyDown(reopened, { key: 'Enter', ctrlKey: ending === 'send-now' })
+        await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
+        expect(boundary.generateImage.mock.calls[0]![0].prompt).toBe('Urgent image')
+        urgent.resolve({ dataUrl: 'data:image/png;base64,AAAA', path: '/urgent.png' })
+      }
+      if (ending !== 'stop') {
+        await waitFor(() =>
+          expect(boundary.generateImage).toHaveBeenCalledTimes(ending === 'complete' ? 1 : 2)
+        )
+        expect(boundary.generateImage.mock.calls.at(-1)![0].prompt).toBe('Queued image')
+        queued.resolve({ dataUrl: 'data:image/png;base64,AAAA', path: '/queued.png' })
+      }
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull()
+      )
+      expect(boundary.generateImage.mock.calls.map(([payload]) => payload.prompt)).toEqual(
+        ending === 'complete'
+          ? ['Queued image']
+          : ending === 'stop'
+            ? ['Urgent image']
+            : ['Urgent image', 'Queued image']
+      )
+      expect(screen.queryByText(/\d queued/)).toBeNull()
+    }
+  )
+
+  it.each(['send-now', 'stop', 'complete'] as const)(
+    'completes queued images after native stream restore and remount (%s)',
+    async (ending) => {
+      const held = deferred<ImageResult>()
+      const urgent = deferred<ImageResult>()
+      const queued = deferred<ImageResult>()
+      const conv = conversation(`c-image-queue-${ending}`, 'Image queue')
+      const job: ImageGenerationJobContract = {
+        id: 'held-job',
+        phase: 'running',
+        conversationId: conv.id,
+        projectId: null,
+        stage: 'generating',
+        enhancedPrompt: '',
+        progress: null,
+        outputPath: null,
+        error: null,
+        startedAt: 1,
+        finishedAt: null
+      }
+      let snapshot: ImageGenerationJobContract = {
+        ...job,
+        id: null,
+        phase: 'idle',
+        conversationId: null,
+        stage: null,
+        startedAt: null
+      }
+      let nativeActive = false
+      const completed: string[] = []
+      const boundary = installApi({
+        active: FULL,
+        models: [FULL],
+        generate: async (payload) => {
+          if (nativeActive)
+            throw new Error('An image is already generating - please wait for it to finish.')
+          nativeActive = true
+          snapshot = {
+            ...job,
+            id: payload.prompt!,
+            conversationId: payload.conversationId!,
+            phase: 'running',
+            stage: 'enhancing',
+            startedAt: Date.now(),
+            finishedAt: null
+          }
+          boundary.emitJobState(snapshot)
+          try {
+            const result = await (payload.prompt === 'Held image'
+              ? held.promise
+              : payload.prompt === 'Urgent image'
+                ? urgent.promise
+                : queued.promise)
+            completed.push(payload.prompt!)
+            snapshot = {
+              ...snapshot,
+              phase: 'succeeded',
+              stage: null,
+              outputPath: result.path,
+              finishedAt: Date.now()
+            }
+            boundary.emitJobState(snapshot)
+            return result
+          } catch (error) {
+            snapshot = {
+              ...snapshot,
+              phase: 'cancelled',
+              stage: null,
+              error: (error as Error).message,
+              finishedAt: Date.now()
+            }
+            boundary.emitJobState(snapshot)
+            nativeActive = false
+            // Main releases admission before the rejected invoke reaches the renderer.
+            if (payload.prompt === 'Held image')
+              await new Promise((resolve) => setTimeout(resolve, 80))
+            throw error
+          } finally {
+            if (snapshot.id === payload.prompt) nativeActive = false
+          }
+        }
+      })
+      // Main exposes direct image jobs in the active chat stream registry too.
+      // A remount restores this image:<conversation> placeholder through the real code.
+      window.api.getActiveRagStreams = vi.fn(async () =>
+        snapshot.phase === 'running'
+          ? [
+              {
+                streamId: `image:${snapshot.conversationId}`,
+                conversationId: snapshot.conversationId!,
+                messageId: 'reserved-image-message',
+                content: '',
+                reasoning: '',
+                reasoningRequested: false,
+                phase: 'generating_image' as const
+              }
+            ]
+          : []
+      )
+      window.api.cancelRag = vi.fn()
+      const getSettings = window.api.getSettings
+      window.api.getSettings = vi.fn(async () => structuredClone(await getSettings()))
+      const user = userEvent.setup()
+      const view = renderChat()
+      await openImageComposer(user)
+      await sendPrompt(user, 'Held image')
+      await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
+      conv.id = boundary.generateImage.mock.calls[0]![0].conversationId!
+      const queuedComposer = screen.getByPlaceholderText(/describe an image to generate/i)
+      await user.type(queuedComposer, 'Queued image')
+      fireEvent.keyDown(queuedComposer, { key: 'Enter' })
+      await screen.findByText('1 queued')
+      const queueStore = getChatQueueStore(window.api)
+      await queueStore.flush()
+      expect((await window.api.getSettings())[CHAT_QUEUE_SETTINGS_KEY]).toEqual({
+        [conv.id]: [expect.objectContaining({ text: 'Queued image', mode: 'image' })]
+      })
+      view.unmount()
+      window.api.imageGenJobStatus = async () => snapshot
+      // Navigation retains the same IPC bridge/store; it does not reload an old
+      // settings snapshot over the queue. The real mount restores native streams.
+      renderChat()
+      expect(getChatQueueStore(window.api)).toBe(queueStore)
+      await screen.findByRole('button', { name: 'Stop generating' })
+      await screen.findByText('1 queued')
+      await openImageComposer(user)
+      boundary.cancelImageGen.mockImplementation(() => {
+        snapshot = {
+          ...snapshot,
+          phase: 'cancelled',
+          stage: null,
+          progress: null,
+          finishedAt: Date.now()
+        }
+        boundary.emitJobState(snapshot)
+        setTimeout(() => held.reject(new Error('Image generation cancelled.')), 5)
+      })
+      if (ending === 'complete') {
+        held.resolve({ dataUrl: 'data:image/png;base64,AAAA', path: '/held.png' })
+      } else {
+        if (ending === 'stop') {
+          await user.click(screen.getByRole('button', { name: 'Stop generating' }))
+          await waitFor(() =>
+            expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull()
+          )
+        }
+        const composer = screen.getByPlaceholderText(/describe an image to generate/i)
+        fireEvent.change(composer, { target: { value: 'Urgent image' } })
+        fireEvent.keyDown(composer, { key: 'Enter', metaKey: ending === 'send-now' })
+        await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(2))
+        expect(boundary.generateImage.mock.calls[1]![0].prompt).toBe('Urgent image')
+        setTimeout(
+          () => urgent.resolve({ dataUrl: 'data:image/png;base64,AAAA', path: '/urgent.png' }),
+          160
+        )
+      }
+      if (ending !== 'stop') {
+        await waitFor(() =>
+          expect(boundary.generateImage).toHaveBeenCalledTimes(ending === 'complete' ? 2 : 3)
+        )
+        expect(boundary.generateImage.mock.calls.at(-1)![0].prompt).toBe('Queued image')
+        queued.resolve({ dataUrl: 'data:image/png;base64,AAAA', path: '/queued.png' })
+      }
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Stop generating' })).toBeNull()
+      )
+      await waitFor(() =>
+        expect(completed).toEqual(
+          ending === 'complete'
+            ? ['Held image', 'Queued image']
+            : ending === 'stop'
+              ? ['Urgent image']
+              : ['Urgent image', 'Queued image']
+        )
+      )
+      expect(boundary.generateImage.mock.calls.map(([payload]) => payload.prompt)).toEqual(
+        ending === 'complete'
+          ? ['Held image', 'Queued image']
+          : ending === 'stop'
+            ? ['Held image', 'Urgent image']
+            : ['Held image', 'Urgent image', 'Queued image']
+      )
+      expect(screen.queryByText(/\d queued/)).toBeNull()
+      expect(screen.getAllByAltText('Generated')).toHaveLength(completed.length)
+      await queueStore.flush()
+      const savedQueue = (await window.api.getSettings())[CHAT_QUEUE_SETTINGS_KEY] as Record<
+        string,
+        unknown[]
+      >
+      expect(savedQueue[conv.id] ?? []).toEqual([])
+    }
+  )
+
   it('shows finalization instead of a zero-second estimate after the last sampling step', async () => {
     const conv: TestConversation = {
       id: 'c-finalizing',
@@ -856,6 +1134,24 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     // Switching to the few-step model with no user override resolves to THAT model's
     // default (10), not a leftover value — proving the [imgModel] effect re-resolves.
     expect(payload.steps).toBe(10)
+  })
+
+  it('keeps a seed whose save failed and writes it when the composer closes (item 38)', async () => {
+    installApi({ active: FULL, models: [FULL], refuseFirstSaveOf: ['imgSeed'] })
+    const user = userEvent.setup()
+    const chat = renderChat()
+    await openImageComposer(user)
+    const seedInput = screen.getByLabelText('Seed') as HTMLInputElement
+    seedInput.focus()
+    await user.type(seedInput, '777', { skipClick: true })
+    // The save after the typing pause is refused by the settings store.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)))
+
+    chat.unmount()
+
+    const api = (window as unknown as { api: { getSettings: () => Promise<Record<string, unknown>> } })
+      .api
+    await waitFor(async () => expect((await api.getSettings()).imgSeed).toBe('777'))
   })
 
   it('applies every existing image setting at the native boundary and reloads persisted values (#64)', async () => {
@@ -970,7 +1266,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     })
     renderChat()
 
-    const assistant = screen.getByRole('button', { name: 'Assistant' })
+    const assistant = screen.getByRole('button', { name: 'God' })
     await user.click(assistant)
     expect(assistant.getAttribute('aria-pressed')).toBe('true')
     await sendChat(user, 'draw a dog')
@@ -1013,7 +1309,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const user = userEvent.setup()
     renderChat()
 
-    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    await user.click(screen.getByRole('button', { name: 'God' }))
     await sendChat(user, 'draw a Ferrari')
 
     expect(await screen.findByRole('button', { name: 'Generated image, running' })).toBeTruthy()
@@ -1030,7 +1326,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     expect(screen.getByRole('button', { name: 'Generated image, complete' })).toBeTruthy()
   })
 
-  it('passes the selected init image through an Assistant image-tool turn', async () => {
+  it('passes the selected init image through a God image-tool turn', async () => {
     const boundary = installApi({
       active: QWEN,
       models: [QWEN],
@@ -1049,7 +1345,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     await user.click(screen.getByRole('button', { name: /init image/i }))
     await screen.findByText('reference.png')
     await user.click(screen.getByRole('button', { name: /^image$/i }))
-    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    await user.click(screen.getByRole('button', { name: 'God' }))
     await sendChat(user, 'Make the model labels generic')
 
     await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
@@ -1082,7 +1378,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const user = userEvent.setup()
     renderChat()
 
-    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    await user.click(screen.getByRole('button', { name: 'God' }))
     await sendChat(
       user,
       '<!-- offgrid-action:comic-book -->\nQ: Story brief\nA: Mac builds local AI.\nQ: Story length\nA: 10 distinct images'
@@ -1167,7 +1463,7 @@ describe('<MemoryChat/> chat mode — image intent is decided in ONE place', () 
     const user = userEvent.setup()
     renderChat()
 
-    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    await user.click(screen.getByRole('button', { name: 'God' }))
     await sendChat(user, 'make two different scenes')
 
     await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(2))

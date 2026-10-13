@@ -100,3 +100,23 @@ if (typeof HTMLMediaElement !== 'undefined') {
     }
   })
 }
+
+// Web Storage: Node 25 and later define their own global `localStorage` and `sessionStorage`,
+// which are undefined unless Node starts with --localstorage-file. That global shadows the one
+// jsdom provides, so `localStorage.clear()` in a test throws before it runs. Chromium always has
+// storage, so put jsdom's own back where Node's is missing.
+if (typeof window !== 'undefined') {
+  const dom = (globalThis as { jsdom?: { window?: Window } }).jsdom?.window
+  for (const name of ['localStorage', 'sessionStorage'] as const) {
+    let current: Storage | undefined
+    try {
+      current = globalThis[name]
+    } catch {
+      current = undefined
+    }
+    const storage = dom?.[name]
+    if (!current && storage) {
+      Object.defineProperty(globalThis, name, { configurable: true, value: storage })
+    }
+  }
+}

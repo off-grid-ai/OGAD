@@ -90,4 +90,21 @@ describe('LLM settings sync contract', () => {
       }
     ])
   })
+  it('corrects nested budgets in the real settings owner and persists them', async () => {
+    const { LLMService } = await import('../../llm')
+    const settings = new LLMService()
+    vi.spyOn(settings, 'init').mockResolvedValue(undefined)
+    await settings.setSettings(
+      { ctxSize: 4096, maxTokens: 8192, reasoningBudget: 32768 },
+      { emitSync: false }
+    )
+    expect(settings.getSettings()).toMatchObject({
+      ctxSize: 4096,
+      maxTokens: 4096,
+      reasoningBudget: 4096
+    })
+    await settings.setSettings({ maxTokens: 512 }, { emitSync: false })
+    expect(settings.getSettings()).toMatchObject({ maxTokens: 512, reasoningBudget: 512 })
+    expect(new LLMService().getSettings()).toMatchObject({ maxTokens: 512, reasoningBudget: 512 })
+  })
 })

@@ -31,6 +31,8 @@ export const SLOTS = {
   /** Per-connector credential setup UI for `oauthClient: 'byo'` entries (e.g. the
    *  Google client_id/secret form). Receives the catalog entry as a prop. */
   connectorSetup: 'connectors.setup',
+  /** Optional provider-owned quick setup, used in onboarding and Integrations. */
+  quickConnectionProviders: 'connectors.quickProviders',
   /** Rows appended after the message list of the open conversation (e.g. a reply
    *  streaming live on another device). Receives `{ conversationId }`. */
   chatMessagesFooter: 'chat.messagesFooter',
@@ -43,5 +45,13 @@ export const SLOTS = {
   /** A running task, kept visible in a floating card after its workspace is left. Mounted at the
    *  app root, OUTSIDE the route switch: the whole point is to survive navigation, so anything
    *  route-scoped unmounts it exactly when it is needed. */
-  taskFloatingView: 'tasks.floatingView'
+  taskFloatingView: 'tasks.floatingView',
+  /** The God screen. Receives `{ onRunPreset, chat }`. */
+  godScreen: 'god.screen',
+  /** Always mounted at the app root while Pro runs. Receives `{ isOpen, open }`. */
+  godRoot: 'god.root',
+  /** Beside God's nav item: its "something new" dot. Receives `{ open, compact }`. */
+  godBadge: 'god.badge',
+  /** God's settings card body (its name, rules, wake word and Ares on the desktop). */
+  godSettings: 'god.settings'
 } as const

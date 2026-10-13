@@ -73,9 +73,22 @@ describe('gateHost', () => {
   it('a handler that declines to queue also lets the action run', async () => {
     registerHook(HOOKS.actionsProposeApproval, () => false)
     const decision = await gateHost({
-      action: record({ source: 'routine', sourceRef: undefined })
+      action: record({ source: 'reasoning', sourceRef: undefined })
     })
     expect(decision).toEqual({ kind: 'approve' })
+  })
+
+  it('a routine never runs a change that nothing could ask approval for', async () => {
+    // Review finding: with no approval queued, a routine's write ran unattended.
+    registerHook(HOOKS.actionsProposeApproval, () => false)
+    const routine = record({ source: 'routine', sourceRef: undefined })
+    expect(await gateHost({ action: routine })).toMatchObject({ kind: 'reject' })
+    unregisterHook(HOOKS.actionsProposeApproval)
+    expect(await gateHost({ action: routine })).toMatchObject({ kind: 'reject' })
+    // Reading is fine on its own.
+    expect(
+      await gateHost({ action: record({ source: 'routine', risk: 'read', rail: 'semantic' }) })
+    ).toEqual({ kind: 'approve' })
   })
 
   it('a non-chat queued action parks until Action Approval resolves it', async () => {
@@ -88,6 +101,36 @@ describe('gateHost', () => {
     expect(resolveActionGate('act_1', { kind: 'approve' })).toBe(true)
     await expect(parked).resolves.toEqual({ kind: 'approve' })
     expect(pendingActionGateCount()).toBe(0)
+  })
+
+  it('a routine waits for approval even for a native action Chat runs straight away', async () => {
+    const queued = vi.fn(() => true)
+    registerHook(HOOKS.actionsProposeApproval, queued)
+    const sendMail: Partial<ActionRecord> = {
+      type: 'mail_send' as ActionRecord['type'],
+      rail: 'semantic',
+      risk: 'mutate'
+    }
+
+    // Asked in Chat: runs.
+    await expect(gateHost({ action: record(sendMail) })).resolves.toEqual({ kind: 'approve' })
+    expect(queued).not.toHaveBeenCalled()
+
+    // From a routine, with nobody watching: waits for the approval card.
+    const parked = gateHost({
+      action: record({ ...sendMail, source: 'routine', sourceRef: 'god-1' })
+    })
+    expect(queued).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'native', source: 'routine' })
+    )
+    expect(pendingActionGateCount()).toBe(1)
+    resolveActionGate('act_1', { kind: 'approve' })
+    await expect(parked).resolves.toEqual({ kind: 'approve' })
+
+    // Reading needs no approval, from anywhere.
+    await expect(
+      gateHost({ action: record({ ...sendMail, risk: 'read', source: 'routine' }) })
+    ).resolves.toEqual({ kind: 'approve' })
   })
 
   it('the request carries what the card needs: id, type, hash, mapped kind, args', async () => {

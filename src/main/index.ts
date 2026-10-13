@@ -1,6 +1,25 @@
 import { restoreCanonicalProductName } from './bootstrap/user-data'
-import { app, shell, BrowserWindow, protocol, session, desktopCapturer, screen } from 'electron'
+import { createWindowAndScheduleModelStorageCleanup } from './bootstrap/model-storage-cleanup'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  Menu,
+  protocol,
+  session,
+  desktopCapturer,
+  screen
+} from 'electron'
 import { tmpdir } from 'os'
+
+// Electron 39 needs the portal to register global shortcuts on Wayland.
+// Clipboard's Ctrl+Shift+C depends on this before app ready.
+if (
+  process.platform === 'linux' &&
+  (process.env['XDG_SESSION_TYPE'] === 'wayland' || process.env['WAYLAND_DISPLAY'])
+) {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
+}
 
 // Custom scheme to serve local capture screenshots to the renderer (file:// is
 // blocked there). Registered before app 'ready'; handled after.
@@ -34,6 +53,7 @@ import { serveArtifactPreview } from './artifact-preview'
 import { ipcMain } from 'electron'
 import { loadProEntitlementProvider, loadProFeaturesMain } from './bootstrap/loadProFeaturesMain'
 import { resolveWindowPresentation } from './bootstrap/window-presentation'
+import { callHook, HOOKS } from './bootstrap/hookRegistry'
 import { mayUseIsolatedEvidenceInstance } from './bootstrap/isolated-evidence-instance'
 
 /**
@@ -60,6 +80,7 @@ import { installMediaPermissionHandler } from './media-permission'
 import { localMediaRoots } from './media-roots'
 import { resourceDirs } from './runtime-env'
 import {
+  flushDiagnosticLog,
   installDiagnosticConsoleCapture,
   installIpcDiagnostics,
   writeDiagnosticLog
@@ -70,10 +91,12 @@ import {
   applicationShutdown,
   commitApplicationRelaunch,
   installApplicationShutdown,
+  requestApplicationRelaunch,
   registerCoreShutdownOwners
 } from './shutdown'
 import { shutdownRuntimes } from './runtime-manager'
 import { shutdownModelDownloads } from './models/download-queue'
+import { prepareInstalledOnnxCudaLibraries } from './performance-pack'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -96,9 +119,6 @@ registerCoreShutdownOwners(applicationShutdown, {
   stopModelRuntimes: shutdownRuntimes,
   stopModelDownloads: shutdownModelDownloads
 })
-
-// FORCE UPDATE VERIFICATION: 3 - SHELL OVERWRITE
-console.log('MAIN PROCESS: LOADING CUSTOM ENTRY POINT (SHELL OVERWRITE)')
 
 async function createWindow(): Promise<void> {
   // Open filling the screen, because this is a desktop-first, dense app: multi-column grids, master
@@ -228,9 +248,46 @@ async function createWindow(): Promise<void> {
     if (nextZoomLevel === null) return
 
     event.preventDefault()
-    mainWindow.webContents.setZoomLevel(nextZoomLevel)
-    saveSetting('windowZoomLevel', nextZoomLevel)
+    setWindowZoom(mainWindow, nextZoomLevel)
   })
+
+  // The default macOS menu owns Cmd+- ("Zoom Out") and handles it before the window sees the key,
+  // and its zoom items do not save the level. Own the View menu's zoom items so every zoom key and
+  // menu click runs the same persisted zoom. The rest of the menu keeps the standard roles.
+  // The menu outlives a closed window (macOS keeps the app running), so zoom the window the click
+  // came from, and only while it is still alive.
+  const setWindowZoom = (window: BrowserWindow, level: number): void => {
+    window.webContents.setZoomLevel(level)
+    saveSetting('windowZoomLevel', level)
+  }
+  const stepWindowZoom =
+    (delta: number) =>
+    (_item: unknown, window: unknown): void => {
+      if (!(window instanceof BrowserWindow) || window.isDestroyed()) return
+      setWindowZoom(window, delta === 0 ? 0 : window.webContents.getZoomLevel() + delta)
+    }
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'toggleDevTools' },
+          { type: 'separator' },
+          { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: stepWindowZoom(0.5) },
+          { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: stepWindowZoom(-0.5) },
+          { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: stepWindowZoom(0) },
+          { type: 'separator' },
+          { role: 'togglefullscreen' }
+        ]
+      },
+      { role: 'windowMenu' }
+    ])
+  )
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -276,7 +333,33 @@ if (!windowPresentation.showWindow) {
   })
 }
 
+function startServerOnlyMode(): void {
+  writeDiagnosticLog('gateway', 'server-only.started', { port: 7878 })
+  // Headless startup skips setupIPC, which activates the pack for the desktop UI.
+  activateInstalledPerformancePack()
+  if (process.platform === 'darwin' && app.dock) {
+    try {
+      app.dock.hide()
+    } catch {
+      /* ignore */
+    }
+  }
+  // These asynchronous starts report failures through their promises.
+  startModelServer().catch((e) => console.error('[gateway] start failed', e))
+  void import('./llm').then(({ llm }) =>
+    llm.init().catch((err) => console.error('[gateway] LLM init failed', err))
+  )
+}
+
 app.whenReady().then(async () => {
+  // glibc reads LD_LIBRARY_PATH when Electron starts, before an ONNX worker runs.
+  // Restart once with the verified optional libraries if this launch lacks them.
+  if (app.isPackaged && prepareInstalledOnnxCudaLibraries()) {
+    requestApplicationRelaunch(app)
+    return
+  }
+  const { cleanupMovedModelStorage } = await import('./model-storage-move')
+  const { modelsDir } = await import('./runtime-env')
   restoreCanonicalProductName()
   initializeAIRequestLogs()
   try {
@@ -294,26 +377,11 @@ app.whenReady().then(async () => {
   const serverOnly =
     process.argv.includes('--server-only') || process.env.OFFGRID_SERVER_ONLY === '1'
   if (serverOnly) {
-    // Headless startup skips setupIPC, which activates the pack for the desktop UI.
-    activateInstalledPerformancePack()
-    console.log('[gateway] server-only mode — gateway on :7878, no UI/capture')
-    if (process.platform === 'darwin' && app.dock) {
-      try {
-        app.dock.hide()
-      } catch {
-        /* ignore */
-      }
-    }
-    // startModelServer is async (it scans for a free port); a try/catch can't catch its rejection,
-    // so handle it on the promise itself.
-    startModelServer().catch((e) => console.error('[gateway] start failed', e))
-    void import('./llm').then(({ llm }) =>
-      llm.init().catch((err) => console.error('[gateway] LLM init failed', err))
-    )
+    startServerOnlyMode()
     return // skip window, tray, IPC, capture, connectors — gateway only
   }
 
-  console.log('APP READY: Initializing Services...')
+  writeDiagnosticLog('app', 'services.initializing')
 
   // One-time, idempotent cleanup of the old "My Memories" AI-chat imports.
   try {
@@ -532,12 +600,17 @@ app.whenReady().then(async () => {
     run: () => loadProFeaturesMain()
   })
 
-  await createWindow()
+  await createWindowAndScheduleModelStorageCleanup(createWindow, () =>
+    cleanupMovedModelStorage(app.getPath('userData'), modelsDir())
+  )
 
   // loadURL/loadFile resolves after the renderer finishes loading. Give Electron
   // one more event-loop turn to present that frame before optional main-process
   // imports and local-model startup begin competing for CPU and memory.
   await new Promise<void>((resolve) => setImmediate(resolve))
+
+  // Features that show something beside the main window (Pro's desktop companion) start now.
+  if (windowPresentation.showWindow) callHook(HOOKS.mainWindowShown)
 
   // Network checks, model work, and optional services now run beside the visible shell.
   void runIndependentStartupStages([
@@ -603,13 +676,22 @@ app.whenReady().then(async () => {
     await new Promise<void>((resolve) => setImmediate(resolve))
     await runStartupStage({
       name: 'models.text.prepare',
-      deadlineMs: 180_000,
+      // A USB model load can stay quiet for ten minutes; allow setup time as well
+      // before the startup notice reports that preparation did not finish.
+      deadlineMs: 900_000,
       lateEffect: 'keep',
       run: async () => {
         const { llm } = await import('./llm')
         registerRuntime(llm.runtime)
         applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
-        if (llm.modelsExist()) await llm.init()
+        // A remote chat model needs no local engine: loading one anyway holds gigabytes of
+        // memory for nothing. Chat starts it on demand if the user switches back.
+        const { getActiveRemoteVisionServer } = await import('./vision/remote-vision-server')
+        // Before the first launch, so a fresh install starts on its fastest settings.
+        await import('./best-settings')
+          .then((m) => m.prepareBestSettingsOnStartup())
+          .catch((error: unknown) => console.warn('[best-settings] startup check failed', error))
+        if (llm.modelsExist() && !getActiveRemoteVisionServer()) await llm.init()
       }
     })
   })()
@@ -667,7 +749,16 @@ app.on('before-quit', (event) => {
     } catch {
       /* best-effort — quit regardless so the app never hangs on exit */
     }
+    try {
+      const { embeddings } = await import('./embeddings')
+      await embeddings.shutdown()
+    } catch {
+      /* best-effort — quit even if embedding cleanup fails */
+    }
     engineUnloaded = true
+    // Buffered diagnostics are written now rather than lost with the process. Bounded, so a
+    // stalled disk delays quit by at most the flush timeout.
+    await flushDiagnosticLog()
     commitApplicationRelaunch(app)
     app.quit()
   })()

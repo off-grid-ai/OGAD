@@ -131,7 +131,7 @@ export function ProjectsScreen({
   onOpenChat,
   selectedProjectId,
   onSelectProject
-}: ProjectsScreenProps) {
+}: ProjectsScreenProps): React.JSX.Element {
   const [projects, setProjects] = useState<Project[]>([])
   const [localActiveId, setLocalActiveId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -147,7 +147,7 @@ export function ProjectsScreen({
   }, [])
 
   useEffect(() => {
-    refreshProjects()
+    void Promise.resolve().then(refreshProjects)
   }, [refreshProjects])
 
   const activeId = selectedProjectId ?? localActiveId
@@ -325,7 +325,7 @@ function ProjectChats({
 }: {
   project: Project
   onOpenChat: (target: { conversationId?: string; projectId?: string }) => void
-}) {
+}): React.JSX.Element {
   const [chats, setChats] = useState<RagConvo[]>([])
 
   useEffect(() => {
@@ -402,7 +402,7 @@ function ProjectConfig({
   project: Project
   onSaved: () => void
   onDelete: () => void
-}) {
+}): React.JSX.Element {
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description)
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt)
@@ -516,7 +516,7 @@ function ProjectConfig({
   )
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }): React.JSX.Element {
   return (
     <div>
       <div className="mb-1.5 text-[11px] uppercase tracking-wide text-neutral-500">{label}</div>
@@ -528,7 +528,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 // --- Knowledge base manager -------------------------------------------------
 
-function KnowledgeBase({ projectId }: { projectId: string }) {
+function KnowledgeBase({ projectId }: { projectId: string }): React.JSX.Element {
   const [docs, setDocs] = useState<RagDoc[]>([])
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

@@ -8,7 +8,6 @@
  * entry after the visible vault has closed.
  */
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import type { ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -40,18 +39,16 @@ let app: ElectronApplication | null = null
 let page: Page
 let profileDir: string
 
-async function waitForExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return
-  await new Promise<void>((resolve) => child.once('exit', () => resolve()))
-}
-
 async function closeApp(): Promise<void> {
   const running = app
   if (!running) return
   app = null
   const child = running.process()
-  await running.close()
-  await waitForExit(child)
+  // A signal exit has no exitCode. Require a prompt, clean exit from the close request.
+  await Promise.all([
+    running.close(),
+    expect.poll(() => child.exitCode ?? child.signalCode, { timeout: 15_000 }).toBe(0)
+  ])
 }
 
 async function launchProfile(): Promise<void> {
@@ -76,9 +73,10 @@ async function openVault(): Promise<void> {
   const vault = nav.getByRole('button', { name: 'Vault', exact: true })
   await expect(vault).toBeVisible()
   await vault.click()
+  // The gate names the vault step (create or open); an unlocked vault offers Lock vault.
   await expect(
     page
-      .getByText('Off Grid AI Vault', { exact: true })
+      .getByRole('heading', { name: /^(Create|Open) Vault$/ })
       .or(page.getByRole('button', { name: 'Lock vault', exact: true }))
   ).toBeVisible()
 }
@@ -93,43 +91,45 @@ async function setTheme(mode: 'Light' | 'Dark'): Promise<void> {
 }
 
 async function createVault(): Promise<void> {
-  await page.getByPlaceholder('Master password').fill(MASTER_PASSWORD)
-  await page.getByPlaceholder('Confirm password').fill(MASTER_PASSWORD)
+  await expect(page.getByRole('heading', { name: 'Create Vault', exact: true })).toBeVisible()
+  await page.getByLabel('Master password', { exact: true }).fill(MASTER_PASSWORD)
+  await page.getByLabel('Confirm password', { exact: true }).fill(MASTER_PASSWORD)
   await page.getByRole('button', { name: 'Create Vault', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Save your recovery phrase' })).toBeVisible()
-  await page.getByRole('button', { name: "I've saved it — open vault" }).click()
+  // Pro cbc02a9 makes VaultScreen follow the unlocked status event from vault:init.
+  // The screen opens directly; the recovery-phrase gate is no longer a required step.
   await expect(page.getByRole('button', { name: 'Lock vault', exact: true })).toBeVisible()
 }
 
-async function beginEntry(type: 'Web Login' | 'API Key' | 'Secure Note'): Promise<void> {
-  await page.getByTitle('New entry').click()
+async function beginEntry(type: 'Login' | 'API Key' | 'Note'): Promise<void> {
+  // Both the list toolbar and the empty pane offer the same New entry action.
+  await page.getByRole('button', { name: 'New entry', exact: true }).first().click()
   await expect(page.getByText('New Entry', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: type, exact: true }).click()
+  await page.getByRole('combobox', { name: 'Kind', exact: true }).selectOption({ label: type })
 }
 
 async function addLogin(): Promise<void> {
-  await beginEntry('Web Login')
-  await page.getByPlaceholder('e.g. Web Login').fill(LOGIN.title)
-  await page.getByPlaceholder('you@example.com').fill(LOGIN.username)
-  await page.getByPlaceholder('••••••••').fill(LOGIN.password)
-  await page.getByPlaceholder('https://').fill(LOGIN.url)
+  await beginEntry('Login')
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill(LOGIN.title)
+  await page.getByRole('textbox', { name: 'Username / Email', exact: true }).fill(LOGIN.username)
+  await page.getByLabel('Password', { exact: true }).fill(LOGIN.password)
+  await page.getByRole('textbox', { name: 'Primary URL', exact: true }).fill(LOGIN.url)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByRole('heading', { name: LOGIN.title, exact: true })).toBeVisible()
 }
 
 async function addApiKey(): Promise<void> {
   await beginEntry('API Key')
-  await page.getByPlaceholder('e.g. API Key').fill(API_KEY.title)
-  await page.getByPlaceholder('e.g. production').fill(API_KEY.username)
-  await page.getByPlaceholder('••••••••').fill(API_KEY.password)
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill(API_KEY.title)
+  await page.getByRole('textbox', { name: 'Label / Name', exact: true }).fill(API_KEY.username)
+  await page.getByLabel('Key / Token', { exact: true }).fill(API_KEY.password)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByRole('heading', { name: API_KEY.title, exact: true })).toBeVisible()
 }
 
 async function addSecureNote(): Promise<void> {
-  await beginEntry('Secure Note')
-  await page.getByPlaceholder('e.g. Secure Note').fill(SECURE_NOTE.title)
-  await page.getByPlaceholder('Additional details...').fill(SECURE_NOTE.secret)
+  await beginEntry('Note')
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill(SECURE_NOTE.title)
+  await page.getByRole('textbox', { name: 'Notes', exact: true }).fill(SECURE_NOTE.secret)
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByRole('heading', { name: SECURE_NOTE.title, exact: true })).toBeVisible()
 }
@@ -139,8 +139,8 @@ async function selectEntry(title: string): Promise<void> {
   await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
 }
 
-function detailRow(label: string): ReturnType<Page['locator']> {
-  return page.getByText(label, { exact: true }).locator('..')
+function detailRow(label: string): ReturnType<Page['getByRole']> {
+  return page.getByRole('group', { name: label, exact: true })
 }
 
 async function expectClipboard(expected: string): Promise<void> {
@@ -151,8 +151,9 @@ async function expectClipboard(expected: string): Promise<void> {
 }
 
 async function unlock(): Promise<void> {
-  await page.getByPlaceholder('Master password').fill(MASTER_PASSWORD)
-  await page.getByRole('button', { name: 'Unlock', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Open Vault', exact: true })).toBeVisible()
+  await page.getByLabel('Master password', { exact: true }).fill(MASTER_PASSWORD)
+  await page.getByRole('button', { name: 'Open Vault', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Lock vault', exact: true })).toBeVisible()
 }
 
@@ -206,29 +207,29 @@ test.describe('APP-159 vault secret protection', () => {
     await username.getByRole('button', { name: 'Copy', exact: true }).click()
     await expectClipboard(LOGIN.username)
 
-    await loginPassword.getByTitle('Reveal').click()
+    await loginPassword.getByRole('button', { name: 'Reveal password', exact: true }).click()
     await expect(loginPassword.getByText(LOGIN.password, { exact: true })).toBeVisible()
     await expect(page.getByText(API_KEY.password, { exact: true })).toHaveCount(0)
     await loginPassword.getByRole('button', { name: 'Copy', exact: true }).click()
     await expectClipboard(LOGIN.password)
-    await loginPassword.getByTitle('Hide').click()
+    await loginPassword.getByRole('button', { name: 'Hide password', exact: true }).click()
     await expect(page.getByText(LOGIN.password, { exact: true })).toHaveCount(0)
 
-    const website = detailRow('Website')
+    const website = detailRow('Websites')
     await website.getByRole('button', { name: 'Copy', exact: true }).click()
     await expectClipboard(LOGIN.url)
 
     await selectEntry(API_KEY.title)
     const keyToken = detailRow('Key / Token')
     await expect(keyToken.getByText('••••••••••••', { exact: true })).toBeVisible()
-    await keyToken.getByTitle('Reveal').click()
+    await keyToken.getByRole('button', { name: 'Reveal password', exact: true }).click()
     await expect(keyToken.getByText(API_KEY.password, { exact: true })).toBeVisible()
     await expect(page.getByText(LOGIN.password, { exact: true })).toHaveCount(0)
     await keyToken.getByRole('button', { name: 'Copy', exact: true }).click()
     await expectClipboard(API_KEY.password)
 
     await page.getByRole('button', { name: 'Lock vault', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Unlock Vault' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Open Vault', exact: true })).toBeVisible()
     await expect(page.getByText(LOGIN.password, { exact: true })).toHaveCount(0)
     await expect(page.getByText(API_KEY.password, { exact: true })).toHaveCount(0)
 
@@ -301,16 +302,16 @@ test.describe('APP-159 vault secret protection', () => {
 
     const noteRow = detailRow('Notes')
     await expect(noteRow.getByText('••••••••••••', { exact: true })).toBeVisible()
-    await expect(noteRow.getByTitle('Reveal')).toBeVisible()
-    await noteRow.getByTitle('Reveal').click()
+    await expect(noteRow.getByRole('button', { name: 'Reveal notes', exact: true })).toBeVisible()
+    await noteRow.getByRole('button', { name: 'Reveal notes', exact: true }).click()
     await expect(noteRow.getByText(SECURE_NOTE.secret, { exact: true })).toBeVisible()
     await noteRow.getByRole('button', { name: 'Copy', exact: true }).click()
     await expectClipboard(SECURE_NOTE.secret)
 
-    await noteRow.getByTitle('Hide').click()
+    await noteRow.getByRole('button', { name: 'Hide notes', exact: true }).click()
     await expect(page.getByText(SECURE_NOTE.secret, { exact: true })).toHaveCount(0)
 
-    await noteRow.getByTitle('Reveal').click()
+    await noteRow.getByRole('button', { name: 'Reveal notes', exact: true }).click()
     await expect(noteRow.getByText(SECURE_NOTE.secret, { exact: true })).toBeVisible()
     const nav = page.getByRole('navigation', { name: 'Primary navigation' })
     await nav.getByRole('button', { name: 'Chat', exact: true }).click()
@@ -318,9 +319,11 @@ test.describe('APP-159 vault secret protection', () => {
     await openVault()
     await selectEntry(SECURE_NOTE.title)
     await expect(page.getByText(SECURE_NOTE.secret, { exact: true })).toHaveCount(0)
-    await expect(detailRow('Notes').getByTitle('Reveal')).toBeVisible()
+    await expect(
+      detailRow('Notes').getByRole('button', { name: 'Reveal notes', exact: true })
+    ).toBeVisible()
 
-    await detailRow('Notes').getByTitle('Reveal').click()
+    await detailRow('Notes').getByRole('button', { name: 'Reveal notes', exact: true }).click()
     await expect(page.getByText(SECURE_NOTE.secret, { exact: true })).toBeVisible()
 
     await page.getByRole('button', { name: 'Lock vault', exact: true }).click()
@@ -339,18 +342,22 @@ test.describe('APP-159 vault secret protection', () => {
     await unlock()
     await selectEntry(SECURE_NOTE.title)
     await expect(page.getByText(SECURE_NOTE.secret, { exact: true })).toHaveCount(0)
-    await expect(detailRow('Notes').getByTitle('Reveal')).toBeVisible()
+    await expect(
+      detailRow('Notes').getByRole('button', { name: 'Reveal notes', exact: true })
+    ).toBeVisible()
 
-    await detailRow('Notes').getByTitle('Reveal').click()
+    await detailRow('Notes').getByRole('button', { name: 'Reveal notes', exact: true }).click()
     await expect(page.getByText(SECURE_NOTE.secret, { exact: true })).toBeVisible()
     await closeApp()
     await launchProfile()
-    await expect(page.getByRole('heading', { name: 'Unlock Vault' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Open Vault', exact: true })).toBeVisible()
     await expect(page.getByText(SECURE_NOTE.secret, { exact: true })).toHaveCount(0)
     await unlock()
     await selectEntry(SECURE_NOTE.title)
     await expect(page.getByText(SECURE_NOTE.secret, { exact: true })).toHaveCount(0)
-    await expect(detailRow('Notes').getByTitle('Reveal')).toBeVisible()
+    await expect(
+      detailRow('Notes').getByRole('button', { name: 'Reveal notes', exact: true })
+    ).toBeVisible()
     await setTheme('Dark')
     await page.screenshot({
       path: testInfo.outputPath('app159-dark-secure-note-masked-after-relaunch.png'),

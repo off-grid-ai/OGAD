@@ -1,5 +1,6 @@
 import { beginRuntimeBackend, parseNativeBackend } from '../runtime-backends'
 import { spawn, type ChildProcess } from 'node:child_process'
+import fs from 'node:fs'
 import path from 'node:path'
 import { Mutex } from 'async-mutex'
 import { prepareModelMemory, registerModelEvictor } from '../model-memory'
@@ -11,6 +12,9 @@ import { getBackendPreference } from '../backend-preferences'
 import { isPortFree, pickFreePort } from '../free-port'
 import { reapOrphanProcessesOnPort } from '../kill-orphan-port'
 import { resolveComputerUseModelArtifact } from '../models-manager'
+import { llm } from '../llm'
+import { readGgufMtpSupport } from '../models/gguf-metadata'
+import { MTP_COMPANIONS } from '../models/catalog-logic'
 
 const GROUNDER_PORT = 8489
 
@@ -25,6 +29,7 @@ export class GrounderRuntime {
   private backend: string | undefined
   private backendState?: ReturnType<typeof beginRuntimeBackend>
   private readonly mutex = new Mutex()
+  private speculativeSettingsKey = ''
 
   get running(): boolean {
     return this.process !== null && this.process.exitCode === null
@@ -33,7 +38,10 @@ export class GrounderRuntime {
   async connection(modelId: string): Promise<RemoteTextModelConnection> {
     await prepareModelMemory('grounding')
     await this.mutex.runExclusive(async () => {
-      if (!this.running || this.modelId !== modelId) await this.start(modelId)
+      const settings = llm.getSettings()
+      const speculativeSettingsKey = `${settings.speculativeDecoding}:${settings.speculativeDraftMax ?? 0}`
+      if (!this.running || this.modelId !== modelId || this.speculativeSettingsKey !== speculativeSettingsKey)
+        await this.start(modelId)
       this.backendState?.recordRequest()
     })
     return {
@@ -61,6 +69,15 @@ export class GrounderRuntime {
     const serverPath = await selectLocalEngine(getBackendPreference('grounding'))
     if (!serverPath) throw new Error('The bundled grounding engine is missing.')
 
+    const settings = llm.getSettings()
+    const companion = MTP_COMPANIONS['bartowski/tencent_UI-Mate-9B-GGUF+MTP']
+    const companionPath = path.join(path.dirname(artifact.primaryPath), companion.name)
+    const matchingCompanion = /^tencent_UI-Mate-9B-(?:Q|IQ)[A-Z0-9_]+(?:\+MTP)?\.gguf$/i.test(path.basename(artifact.primaryPath)) &&
+      readGgufMtpSupport(companionPath, fs, undefined, companion.sizeBytes)
+    const useMtp = settings.speculativeDecoding === 'mtp' &&
+      (readGgufMtpSupport(artifact.primaryPath, fs) || matchingCompanion)
+    this.speculativeSettingsKey = `${settings.speculativeDecoding}:${settings.speculativeDraftMax ?? 0}`
+
     this.port = port
     this.modelId = modelId
     this.stderr = ''
@@ -78,7 +95,9 @@ export class GrounderRuntime {
         gpuLayers: getBackendPreference('grounding') === 'cpu' ? 0 : 99,
         flashAttn: true,
         kvCacheType: 'q8_0',
-        speculativeDecoding: 'off',
+        speculativeDecoding: useMtp ? 'mtp' : 'off',
+        speculativeDraftMax: settings.speculativeDraftMax,
+        draftModelPath: useMtp && matchingCompanion ? companionPath : undefined,
         threads: undefined,
         batchSize: 1_024,
         imageMinTokens: 1_024,

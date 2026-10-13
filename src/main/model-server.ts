@@ -66,6 +66,7 @@ import {
   toDataUrl
 } from './model-server/data-url'
 import { errBody, errMeta } from './model-server/errors'
+import { handleExtensionBridge, handleExtensionUpgrade } from './extension-bridge/bridge-http'
 import { isAsync, matchPollRoute } from './model-server/async-request'
 import { sanitizeChatMessages } from './model-server/chat-messages'
 import { applyThinkingPayload, requestedThinking } from './llm/chat-payload'
@@ -74,13 +75,18 @@ import { tagLlmEntries, modelEntry, ollamaMirror } from './model-server/models-l
 import { buildGatewayModalities, type GatewayModalities } from './model-server/health'
 import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
+import { IMAGE_CANCELLED_MESSAGE } from './imagegen/generation-lifecycle'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
 import {
   getActiveRemoteVisionServer,
   getActiveRemoteVisionServerForModality
 } from './vision/remote-vision-server'
-import { REASONING_BUDGET_AUTO, openRouterReasoningPayload } from '@offgrid/models'
-import { remoteReasoningCapability, remoteTextModelProviderError } from './llm/remote-chat'
+import { REASONING_BUDGET_AUTO } from '@offgrid/models'
+import {
+  remoteReasoningCapability,
+  remoteReasoningFields,
+  remoteTextModelProviderError
+} from './llm/remote-chat'
 
 const UPSTREAM_HOST = '127.0.0.1'
 // The upstream llama-server port is LIVE, not fixed: llm.getPort() moves off LLAMA_SERVER_PORT when
@@ -146,6 +152,7 @@ interface ApiRequest {
   stage?: VideoGenerationStage
   error?: { message: string; type: string }
   progress?: { step: number; total: number }
+  controller?: AbortController
 }
 
 const requests = new Map<string, ApiRequest>()
@@ -202,6 +209,7 @@ function createRequest(id: string, kind: string, collection: string): ApiRequest
   }
   const now = Date.now()
   const r: ApiRequest = { id, kind, collection, status: 'queued', created_at: now, updated_at: now }
+  if (kind === 'image') r.controller = new AbortController()
   requests.set(id, r)
   return r
 }
@@ -212,6 +220,7 @@ function settle<T>(r: ApiRequest, work: Promise<T>): Promise<T> {
   r.updated_at = Date.now()
   return work.then(
     (result) => {
+      if (r.controller?.signal.aborted) throw new Error(IMAGE_CANCELLED_MESSAGE)
       r.status = 'completed'
       r.result = result
       r.updated_at = Date.now()
@@ -221,12 +230,30 @@ function settle<T>(r: ApiRequest, work: Promise<T>): Promise<T> {
     (e) => {
       const { type, message } = errMeta(e)
       r.status = 'failed'
-      r.error = { message, type: r.error?.type === 'cancelled' ? 'cancelled' : type }
+      // Image cancellation aborts the controller; a video job records its cancellation first.
+      r.error = r.controller?.signal.aborted
+        ? { message: IMAGE_CANCELLED_MESSAGE, type: 'cancelled' }
+        : { message, type: r.error?.type === 'cancelled' ? 'cancelled' : type }
       r.updated_at = Date.now()
       if (r.kind === 'video') persistVideoRequests()
       throw e
     }
   )
+}
+
+/** Cancel only the named image request. Completed and previously cancelled requests are safe to repeat. */
+function handleCancel(res: http.ServerResponse, id: string): void {
+  const r = requests.get(id)
+  if (!r) return json(res, 404, errBody(`No request with id '${id}'.`, 'not_found'))
+  if (!r.controller)
+    return json(res, 409, errBody('This request cannot be cancelled.', 'not_cancellable'))
+  if (r.status === 'queued' || r.status === 'running') {
+    r.status = 'failed'
+    r.error = { message: IMAGE_CANCELLED_MESSAGE, type: 'cancelled' }
+    r.updated_at = Date.now()
+    r.controller.abort()
+  }
+  json(res, 200, { request_id: r.id, status: r.status, cancelled: r.error?.type === 'cancelled' })
 }
 
 /** 202 Accepted with the request resource + Location for polling. */
@@ -345,11 +372,23 @@ function proxyToSelectedRemote(
     return true
   }
 
+  void forwardToRemote(res, body, remote, activity)
+  return true
+}
+
+/** Send the request to the remote provider, with its reasoning control translated for it. */
+async function forwardToRemote(
+  res: http.ServerResponse,
+  body: Record<string, unknown>,
+  remote: NonNullable<ReturnType<typeof getActiveRemoteVisionServer>>,
+  activity?: AIRequestHandle
+): Promise<void> {
   const target = new URL(`${remote.endpoint.replace(/\/+$/, '')}/chat/completions`)
   const thinkingRequested = requestedThinking(body)
   const forwarded: Record<string, unknown> = { ...body, model: remote.model }
-  // The phone sends llama.cpp controls to this gateway. OpenRouter needs its
-  // reasoning control for both OFF and the selected thinking budget.
+  // The phone and the browser send llama.cpp controls to this gateway. OpenRouter needs its own
+  // reasoning control, built exactly as Chat builds it (remoteReasoningFields): a model whose
+  // reasoning is mandatory is never told to switch it off.
   if (remote.provider === 'openrouter' && thinkingRequested !== undefined) {
     const budget =
       typeof body.reasoning_budget_tokens === 'number' && body.reasoning_budget_tokens > 0
@@ -358,9 +397,11 @@ function proxyToSelectedRemote(
     delete forwarded.chat_template_kwargs
     delete forwarded.reasoning_format
     delete forwarded.reasoning_budget_tokens
-    forwarded.reasoning = thinkingRequested
-      ? openRouterReasoningPayload(true, budget).reasoning
-      : { effort: 'none' }
+    delete forwarded.reasoning
+    Object.assign(
+      forwarded,
+      remoteReasoningFields(thinkingRequested, budget, await remoteReasoningCapability(remote))
+    )
   }
   writeDiagnosticLog('gateway', 'remote_chat.thinking_control', {
     requestId: String(res.getHeader('X-Request-Id') ?? ''),
@@ -439,7 +480,6 @@ function proxyToSelectedRemote(
     }
   })
   proxyReq.end(payload)
-  return true
 }
 
 // Fetch an image reference into a Buffer. Accepts data: URLs, http(s):// URLs,
@@ -547,21 +587,27 @@ async function serve(
   kind: string,
   collection: string,
   asyncFlag: boolean,
-  run: () => Promise<unknown>,
+  run: (signal?: AbortSignal) => Promise<unknown>,
   syncRespond: (result: unknown) => void
 ): Promise<void> {
   const r = createRequest(rid, kind, collection)
   if (asyncFlag) {
-    settle(r, run()).catch(() => {}) // errors captured on the request resource
+    settle(r, run(r.controller?.signal)).catch(() => {}) // errors captured on the request resource
     dispatchAsync(res, r)
     return
   }
+  const cancelDisconnectedImage = (): void => {
+    if (!res.writableEnded) r.controller?.abort()
+  }
+  if (r.controller) res.once('close', cancelDisconnectedImage)
   try {
-    const result = await settle(r, run())
+    const result = await settle(r, run(r.controller?.signal))
     syncRespond(result)
   } catch (e) {
     const { status, type, message } = errMeta(e)
     json(res, status, errBody(message, type))
+  } finally {
+    res.off('close', cancelDisconnectedImage)
   }
 }
 
@@ -663,7 +709,7 @@ async function handleChat(
     // A client says WHETHER it wants thinking; this server decides HOW, because the second half
     // of the answer (reasoning_format) is a property of the model server running here, not of the
     // request. Without this a phone could ask for thinking and get a reply with nothing in it.
-    if (applyThinkingPayload(body)) changed = true
+    if (applyThinkingPayload(body, llm.currentThinkingDialect)) changed = true
     if (changed) forward = Buffer.from(JSON.stringify(body))
   } catch {
     // Image fetch failed — forward the original valid request unchanged so the
@@ -1023,7 +1069,8 @@ async function executeImage(
   params: ImageGenParams,
   responseFormat: string,
   cleanup?: () => void,
-  onProgress?: (progress: { step: number; total: number }) => void
+  onProgress?: (progress: { step: number; total: number }) => void,
+  signal?: AbortSignal
 ): Promise<unknown> {
   try {
     const status = imageGenStatus()
@@ -1034,11 +1081,15 @@ async function executeImage(
       err.status = 501
       throw err
     }
-    const out = await generateImage(params, (update) => {
-      if (update.stage === 'generating' && update.progress) {
-        onProgress?.({ step: update.progress.step, total: update.progress.total })
-      }
-    })
+    const out = await generateImage(
+      params,
+      (update) => {
+        if (update.stage === 'generating' && update.progress) {
+          onProgress?.({ step: update.progress.step, total: update.progress.total })
+        }
+      },
+      signal
+    )
     const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
     const datum =
       responseFormat === 'url'
@@ -1198,14 +1249,20 @@ async function handleImageGeneration(
     'image',
     '/v1/images/generations',
     isAsync(req, payload),
-    () =>
-      executeImage(params, fmt, undefined, (progress) => {
-        const request = requests.get(rid)
-        if (request) {
-          request.progress = progress
-          request.updated_at = Date.now()
-        }
-      }),
+    (signal) =>
+      executeImage(
+        params,
+        fmt,
+        undefined,
+        (progress) => {
+          const request = requests.get(rid)
+          if (request) {
+            request.progress = progress
+            request.updated_at = Date.now()
+          }
+        },
+        signal
+      ),
     (r) => jsonWithId(res, rid, r)
   )
 }
@@ -1279,7 +1336,7 @@ async function handleImagesUnified(
     'image',
     '/v1/images',
     isAsync(req, payload),
-    () => executeImage(params, fmt, cleanup),
+    (signal) => executeImage(params, fmt, cleanup, undefined, signal),
     (r) => jsonWithId(res, rid, r)
   )
 }
@@ -1345,12 +1402,29 @@ async function handleImageEdit(
     'image',
     '/v1/images/edits',
     isAsync(req, undefined, fields),
-    () => executeImage(params, fmt, cleanup),
+    (signal) => executeImage(params, fmt, cleanup, undefined, signal),
     (r) => jsonWithId(res, rid, r)
   )
 }
 
 // ─── Server ──────────────────────────────────────────────────────────────────
+/** Origins trusted with protected gateway routes: the packaged renderer, the gateway's own
+ *  loopback pages and, in development, electron-vite's loopback renderer. */
+function trustedGatewayOrigins(port: number): string[] {
+  const loopback = ['localhost', '127.0.0.1', '[::1]']
+  const origins = ['file://', ...loopback.map((host) => `http://${host}:${port}`)]
+  const renderer = process.env['ELECTRON_RENDERER_URL']
+  if (renderer) {
+    try {
+      const dev = new URL(renderer)
+      if (dev.protocol === 'http:' && loopback.includes(dev.hostname)) origins.push(dev.origin)
+    } catch {
+      // A malformed dev renderer URL adds no trusted origin.
+    }
+  }
+  return origins
+}
+
 /** The port the gateway actually bound. Falls back off GATEWAY_PORT when it's taken (a 2nd Off Grid AI Desktop
  *  instance); consumers (setup health ping, the Gateway UI) must read this LIVE value. */
 let boundGatewayPort = GATEWAY_PORT
@@ -1358,6 +1432,34 @@ export function getGatewayPort(): number {
   return boundGatewayPort
 }
 let startingGateway = false
+
+/** A request from this machine. The gateway listens on every interface (phones reach the models),
+ *  so a route that changes settings checks this itself: nothing else stands in front of it. */
+function isLocalCaller(req: http.IncomingMessage): boolean {
+  const remote = req.socket.remoteAddress
+  return remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
+}
+
+/** Routes a website must never reach: tool and file access over /mcp, settings writes, and model
+ *  management writes (download, cancel, activate, delete, task roles). The OpenAI-compatible
+ *  inference routes stay open to any origin, as in 0.0.54, so tools that call the gateway from a
+ *  browser or an Electron app keep working. A preflight is judged by the method it asks for. */
+export function protectedGatewayRoute(
+  method: string | undefined,
+  url: string | undefined,
+  requestedMethod?: string | string[]
+): boolean {
+  const effective = (
+    method === 'OPTIONS' && typeof requestedMethod === 'string'
+      ? requestedMethod
+      : (method ?? 'GET')
+  ).toUpperCase()
+  const pathname = new URL(url ?? '/', 'http://localhost').pathname
+  if (pathname === '/mcp' || pathname.startsWith('/mcp/')) return true
+  if (pathname === '/v1/settings') return effective !== 'GET'
+  if (pathname === '/v1/models' || pathname.startsWith('/v1/models/')) return effective !== 'GET'
+  return false
+}
 
 /** Start the unified local model gateway. Bound to loopback (local-only). Async because it scans
  *  for a free port when the preferred one is taken. */
@@ -1376,10 +1478,28 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
   }
 
   server = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*')
+    const origin = req.headers.origin
+    if (origin !== undefined) {
+      // Packaged renderers use file://; dev uses electron-vite. Other origins, including the
+      // opaque 'null' a sandboxed frame on any website sends, get the inference routes only.
+      const trustedOrigins = trustedGatewayOrigins(boundGatewayPort)
+      const trustedIndex = trustedOrigins.indexOf(origin)
+      const trusted = trustedIndex >= 0
+      if (
+        !trusted &&
+        protectedGatewayRoute(req.method, req.url, req.headers['access-control-request-method'])
+      ) {
+        json(res, 403, errBody('Origin is not allowed.', 'forbidden'))
+        return
+      }
+      // Trusted origins get their own origin back; any other origin gets the wildcard 0.0.54 sent,
+      // which opens the inference routes without reflecting an arbitrary origin.
+      res.setHeader('Access-Control-Allow-Origin', trusted ? trustedOrigins[trustedIndex]! : '*')
+      res.setHeader('Vary', 'Origin')
+      res.setHeader('Access-Control-Allow-Private-Network', 'true')
+    }
     res.setHeader('Access-Control-Allow-Headers', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Private-Network', 'true')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
       res.end()
@@ -1476,6 +1596,10 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       if (url.startsWith('/v1/requests/') && id) return handlePoll(res, id)
       if (id && isPollCollection && requests.has(id)) return handlePoll(res, id)
     }
+    if (method === 'DELETE' && url.startsWith('/v1/requests/')) {
+      const { prefix, id } = matchPollRoute(url)
+      if (prefix === '/v1/requests' && id) return handleCancel(res, id)
+    }
 
     if (url === '/' || url === '/health') {
       const img = imageGenStatus()
@@ -1494,6 +1618,9 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       })
       return
     }
+
+    // The browser extension's private, paired, end-to-end sealed link (extension-bridge/).
+    if (url.startsWith('/v1/extension/')) return void handleExtensionBridge(req, res, url, method)
 
     if (url === '/openapi.json') {
       const img = imageGenStatus()
@@ -1590,10 +1717,7 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       // Mutating launch-time LLM args triggers a llama-server respawn. The listener is
       // on every interface so a phone can reach the models, which makes this check the
       // ONLY thing standing between the LAN and a respawn - not defense in depth.
-      const remote = req.socket.remoteAddress
-      const isLocalhost =
-        remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
-      if (!isLocalhost) {
+      if (!isLocalCaller(req)) {
         json(res, 403, errBody('Settings mutations are restricted to localhost.', 'forbidden'))
         return
       }
@@ -1640,6 +1764,32 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
             return json(res, 200, { installed: await mm.listInstalled() })
           if (url === '/v1/models/active' && method === 'GET')
             return json(res, 200, mm.getActiveModalities())
+          // Every model this desktop counts active, as catalog ids (the Models screen's own
+          // answer): a kind can hold more than one, as Computer Use's specialist and decider do.
+          if (url === '/v1/models/active-ids' && method === 'GET')
+            return json(res, 200, { ids: await mm.getActiveModelIds() })
+          // The task models' lineups and roles, as the desktop's Models screen shows them, and the
+          // one way to give a model a role. Additive: no existing route changes.
+          if (url === '/v1/models/task-roles' && method === 'GET') {
+            const { getTaskRolesView } = await import('./vision/vision-task-model-strategy')
+            return json(res, 200, await getTaskRolesView())
+          }
+          if (url === '/v1/models/task-role' && method === 'POST') {
+            // A persistent settings change, on a gateway every interface can reach: this machine
+            // only, as /v1/settings. A paired browser changes roles over its sealed link instead.
+            if (!isLocalCaller(req)) {
+              return json(
+                res,
+                403,
+                errBody('Task role changes are restricted to localhost.', 'forbidden')
+              )
+            }
+            const { setTaskRoleFromRequest } = await import('./task-role-requests')
+            const result = await setTaskRoleFromRequest(
+              (await readJson(req)) as Record<string, unknown>
+            )
+            return json(res, result.success ? 200 : 400, result)
+          }
           if (url === '/v1/models/pull/status' && method === 'GET') {
             const id = (req.url || '').split('?')[1]?.match(/(?:^|&)id=([^&]+)/)?.[1]
             return json(
@@ -1670,20 +1820,11 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
             const { id, kind } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
             const modelId = String(id)
-            const r = await mm.activateModel(modelId, typeof kind === 'string' ? kind : undefined)
-            if (r.success && !parseRemoteVisionModelId(modelId)) {
-              void llm.init().catch((error) => {
-                writeDiagnosticLog(
-                  'gateway',
-                  'model_activation.start_failed',
-                  {
-                    model: modelId,
-                    error: error instanceof Error ? error.message : String(error)
-                  },
-                  'error'
-                )
-              })
-            }
+            const { activateModelFromRequest } = await import('./model-activation-request')
+            const r = await activateModelFromRequest(
+              modelId,
+              typeof kind === 'string' ? kind : undefined
+            )
             return json(res, r.success ? 200 : 400, r)
           }
           // DELETE /v1/models/{id}  (or POST /v1/models/delete {id})
@@ -1744,6 +1885,10 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
   server.requestTimeout = 0 // no cap on how long a request may take
   server.headersTimeout = 0 // no cap on time-to-headers
   server.keepAliveTimeout = 60_000
+  // The paired browser extension's live socket (extension-bridge/). Every other upgrade is refused.
+  server.on('upgrade', (req, socket, head) => {
+    if (!handleExtensionUpgrade(req, socket, head)) socket.destroy()
+  })
 
   // The gateway has no authentication. Bind the socket itself to loopback so no
   // route can become LAN-accessible through a missing per-handler authorization check.

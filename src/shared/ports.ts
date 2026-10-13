@@ -26,3 +26,11 @@ export const GATEWAY_HOST = '127.0.0.1'
 export const GATEWAY_BIND_HOST = '0.0.0.0'
 export const GATEWAY_PORT = 7878
 export const MEDIA_PORT = 7879
+/** How many ports from MEDIA_PORT upward the media server may bind when MEDIA_PORT is taken (for
+ *  example by a second instance). The renderer's build-time CSP admits exactly this window. */
+export const MEDIA_PORT_RANGE = 20
+
+/** Every origin the loopback media server can serve from. */
+export function mediaOrigins(): string[] {
+  return Array.from({ length: MEDIA_PORT_RANGE }, (_, i) => `http://127.0.0.1:${MEDIA_PORT + i}`)
+}

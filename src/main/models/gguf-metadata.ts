@@ -147,7 +147,7 @@ function skipArray(c: Cursor): void {
  * (so a caller still gets `architecture` even if the buffer ended before `context_length`).
  * Not a valid GGUF header → returns {}.
  */
-export function parseGgufMetadata(buf: Buffer): GgufMetadata {
+export function parseGgufMetadata(buf: Buffer, scanPastTokenizer = false): GgufMetadata {
   const result: GgufMetadata = {}
   if (buf.length < 8 || buf.subarray(0, 4).toString('ascii') !== 'GGUF') {
     return result
@@ -164,10 +164,13 @@ export function parseGgufMetadata(buf: Buffer): GgufMetadata {
     for (let i = 0; i < kvCount; i++) {
       const key = c.str()
       const type = c.u32()
-      // Model hyperparameters precede the tokenizer payload in modern GGUF files. Once that
-      // payload begins, an absent NextN field means the model has no embedded MTP heads. Do not
-      // synchronously walk megabytes of token strings each time Settings asks for capabilities.
-      if (key.startsWith('tokenizer.')) return result
+      // Context reads can stop here. MTP exports can put NextN metadata after
+      // the tokenizer, so capability reads must continue through its payload.
+      if (key.startsWith('tokenizer.')) {
+        if (!scanPastTokenizer) return result
+        readValue(c, type)
+        continue
+      }
       const value = readValue(c, type)
       if (value !== undefined) {
         scalars.set(key, value)
@@ -245,10 +248,14 @@ export function readGgufContextLength(
 export function readGgufMtpSupport(
   p: string,
   fs: GgufFs,
-  maxBytes = GGUF_METADATA_PREFIX_BYTES
+  // Some exports put prediction metadata after the tokenizer (about 11 MiB
+  // for UI-Mate 9B). Keep this read bounded while covering that ordering.
+  maxBytes = GGUF_METADATA_PREFIX_BYTES * 4,
+  expectedSize?: number
 ): boolean {
   try {
     const size = fs.statSync(p).size
+    if (expectedSize !== undefined && size !== expectedSize) return false
     const toRead = Math.min(size, maxBytes)
     if (toRead <= 0) return false
     const fd = fs.openSync(p, 'r')
@@ -258,7 +265,7 @@ export function readGgufMtpSupport(
     } finally {
       fs.closeSync(fd)
     }
-    return (parseGgufMetadata(buf).nextnPredictLayers ?? 0) > 0
+    return (parseGgufMetadata(buf, true).nextnPredictLayers ?? 0) > 0
   } catch {
     return false
   }

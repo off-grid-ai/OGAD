@@ -9,6 +9,7 @@ import { announceImageSettingsChanged } from '@renderer/lib/image-settings-event
 import { resolveModelName } from '@renderer/lib/model-summary'
 import { SettingsSelect } from './SettingsSelect'
 import { BackendPreferencesSection } from './ProcessingControls'
+import { SettingsSection } from './SettingsSection'
 
 type ImageSettings = {
   imageParams?: ImageParamStore
@@ -18,9 +19,7 @@ type ImageSettings = {
 }
 
 const modelLabel = (model: string): string =>
-  (resolveModelName([], model) ?? model)
-    .replace(/\.gguf$/i, '')
-    .replace(/-Q\d.*$/i, '')
+  (resolveModelName([], model) ?? model).replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')
 
 export function ImageSettingsTab(): React.JSX.Element {
   const [models, setModels] = useState<{ value: string; label: string }[]>([])
@@ -96,10 +95,20 @@ export function ImageSettingsTab(): React.JSX.Element {
     persist('imageParams', next)
   }
 
+  const processing = (
+    <SettingsSection
+      id="image.processing"
+      title="Processing"
+      summary="The hardware that generates images on this device"
+    >
+      <BackendPreferencesSection modalities={['image']} />
+    </SettingsSection>
+  )
+
   if (!model) {
     return (
       <>
-        <BackendPreferencesSection modalities={['image']} />
+        {processing}
         <div className="border border-neutral-800 bg-neutral-900/40 p-4 text-xs text-neutral-500">
           Download and activate an image model to configure image generation.
         </div>
@@ -107,129 +116,149 @@ export function ImageSettingsTab(): React.JSX.Element {
     )
   }
 
+  const modelName = models.find((item) => item.value === model)?.label ?? modelLabel(model)
+  const generationSummary = `${modelName} · ${effective.size} × ${effective.size}`
+  const tuningSummary = `${effective.steps} steps · guidance ${effective.cfgScale} · ${seed ? `seed ${seed}` : 'random seed'}`
+  const promptsSummary = `${enhance ? 'Enhanced by the chat model' : 'Sent as written'} · ${negativePrompt.trim() ? 'negative prompt set' : 'no negative prompt'}`
+
   return (
-    <div className="space-y-4">
-      <div>
-        <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
-          Active image model
-        </span>
-        <SettingsSelect
-          id="active-image-model"
-          label="Active image model"
-          value={model}
-          onValueChange={chooseModel}
-          options={models}
-        />
-      </div>
-
-      <BackendPreferencesSection modalities={['image']} />
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
-            Size
-          </span>
-          <SettingsSelect
-            id="image-size"
-            label="Image size"
-            value={String(effective.size)}
-            onValueChange={(value) => saveOverride('size', Number(value))}
-            options={[256, 512, 640, 768, 1024].map((size) => ({
-              value: String(size),
-              label: `${size} × ${size}`
-            }))}
-          />
+    <div>
+      <SettingsSection
+        id="image.generation"
+        title="Generation"
+        summary={generationSummary}
+        defaultOpen
+      >
+        <div className="space-y-4 pb-3">
+          <div>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
+              Active image model
+            </span>
+            <SettingsSelect
+              id="active-image-model"
+              label="Active image model"
+              value={model}
+              onValueChange={chooseModel}
+              options={models}
+            />
+          </div>
+          <div>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
+              Size
+            </span>
+            <SettingsSelect
+              id="image-size"
+              label="Image size"
+              value={String(effective.size)}
+              onValueChange={(value) => saveOverride('size', Number(value))}
+              options={[256, 512, 640, 768, 1024].map((size) => ({
+                value: String(size),
+                label: `${size} × ${size}`
+              }))}
+            />
+          </div>
         </div>
-        <label>
-          <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
-            Steps
-          </span>
-          <input
-            key={model}
-            aria-label="Image steps"
-            type="number"
-            min={4}
-            max={50}
-            defaultValue={effective.steps}
-            onBlur={(event) => {
-              const steps = Math.max(4, Math.min(50, Number(event.target.value) || 4))
-              event.target.value = String(steps)
-              saveOverride('steps', steps)
-            }}
-            className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-          />
-        </label>
-        <label>
-          <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
-            Guidance
-          </span>
-          <input
-            key={model}
-            aria-label="Image guidance"
-            type="number"
-            min={0}
-            max={20}
-            step={0.5}
-            defaultValue={effective.cfgScale}
-            onBlur={(event) => {
-              const guidance = Math.max(0, Math.min(20, Number(event.target.value) || 0))
-              event.target.value = String(guidance)
-              saveOverride('cfgScale', guidance)
-            }}
-            className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-          />
-        </label>
-        <label>
-          <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
-            Seed
-          </span>
-          <input
-            aria-label="Image seed"
-            value={seed}
-            onChange={(event) => {
-              const next = event.target.value.replace(/[^0-9]/g, '')
-              setSeed(next)
-            }}
-            onBlur={() => persist('imgSeed', seed)}
-            placeholder="random"
-            className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-700 outline-none focus:border-green-500"
-          />
-        </label>
-      </div>
+      </SettingsSection>
 
-      <label className="block">
-        <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
-          Negative prompt
-        </span>
-        <textarea
-          aria-label="Negative prompt"
-          value={negativePrompt}
-          onChange={(event) => {
-            setNegativePrompt(event.target.value)
-          }}
-          onBlur={() => persist('imgNegative', negativePrompt)}
-          rows={3}
-          className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
-        />
-      </label>
+      <SettingsSection id="image.tuning" title="Fine tuning" summary={tuningSummary}>
+        <div className="grid grid-cols-2 gap-3 pb-3">
+          <label>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
+              Steps
+            </span>
+            <input
+              key={model}
+              aria-label="Image steps"
+              type="number"
+              min={4}
+              max={50}
+              defaultValue={effective.steps}
+              onBlur={(event) => {
+                const steps = Math.max(4, Math.min(50, Number(event.target.value) || 4))
+                event.target.value = String(steps)
+                saveOverride('steps', steps)
+              }}
+              className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
+            />
+          </label>
+          <label>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
+              Guidance
+            </span>
+            <input
+              key={model}
+              aria-label="Image guidance"
+              type="number"
+              min={0}
+              max={20}
+              step={0.5}
+              defaultValue={effective.cfgScale}
+              onBlur={(event) => {
+                const guidance = Math.max(0, Math.min(20, Number(event.target.value) || 0))
+                event.target.value = String(guidance)
+                saveOverride('cfgScale', guidance)
+              }}
+              className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
+            />
+          </label>
+          <label>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
+              Seed
+            </span>
+            <input
+              aria-label="Image seed"
+              value={seed}
+              onChange={(event) => {
+                const next = event.target.value.replace(/[^0-9]/g, '')
+                setSeed(next)
+              }}
+              onBlur={() => persist('imgSeed', seed)}
+              placeholder="random"
+              className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 placeholder-neutral-700 outline-none focus:border-green-500"
+            />
+          </label>
+        </div>
+      </SettingsSection>
 
-      <label className="flex items-start gap-2 border border-neutral-800 bg-neutral-900/40 p-3">
-        <input
-          type="checkbox"
-          checked={enhance}
-          onChange={(event) => {
-            setEnhance(event.target.checked)
-            persist('enhanceImagePrompts', event.target.checked)
-          }}
-          className="mt-0.5 accent-green-500"
-        />
-        <span>
-          <span className="block text-xs text-neutral-200">Enhance prompts</span>
-          <span className="mt-0.5 block text-[10px] text-neutral-600">
-            Let the local chat model add useful visual detail before generation.
-          </span>
-        </span>
-      </label>
+      <SettingsSection id="image.prompts" title="Prompts" summary={promptsSummary}>
+        <div className="space-y-4 pb-3">
+          <label className="block">
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-neutral-400">
+              Negative prompt
+            </span>
+            <textarea
+              aria-label="Negative prompt"
+              value={negativePrompt}
+              onChange={(event) => {
+                setNegativePrompt(event.target.value)
+              }}
+              onBlur={() => persist('imgNegative', negativePrompt)}
+              rows={3}
+              className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-neutral-200 outline-none focus:border-green-500"
+            />
+          </label>
+
+          <label className="flex items-start gap-2 border border-neutral-800 bg-neutral-900/40 p-3">
+            <input
+              type="checkbox"
+              checked={enhance}
+              onChange={(event) => {
+                setEnhance(event.target.checked)
+                persist('enhanceImagePrompts', event.target.checked)
+              }}
+              className="mt-0.5 accent-green-500"
+            />
+            <span>
+              <span className="block text-xs text-neutral-200">Enhance prompts</span>
+              <span className="mt-0.5 block text-[10px] text-neutral-600">
+                Let the local chat model add useful visual detail before generation.
+              </span>
+            </span>
+          </label>
+        </div>
+      </SettingsSection>
+
+      {processing}
     </div>
   )
 }

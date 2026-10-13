@@ -83,27 +83,19 @@ if [ -n "$CHANGED_CODE" ]; then
   PROJECT_PATH="$PROJECT_NODE_PATH:$PATH"
   OFFGRID_HOOK_DATA_DIR=$(mktemp -d)
   restore_hook_state() {
-    if [ "${OFFGRID_NODE_NATIVE_REBUILT:-0}" = 1 ]; then
-      echo "[pre-push] restoring Electron native dependencies"
-      PATH="$PROJECT_PATH" ./node_modules/.bin/electron-rebuild \
-        -f -w better-sqlite3-multiple-ciphers >/dev/null 2>&1 \
-        || PATH="$PROJECT_PATH" ./node_modules/.bin/electron-builder \
-          install-app-deps >/dev/null 2>&1 \
-        || true
-      ./scripts/probe-electron-sqlite.sh '[pre-push]'
-    fi
     rm -rf -- "$OFFGRID_HOOK_DATA_DIR"
   }
   trap restore_hook_state EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   export OFFGRID_DATA_DIR="$OFFGRID_HOOK_DATA_DIR"
-  echo "[pre-push] preparing native dependencies for $($PROJECT_NODE -v)"
-  OFFGRID_NODE_NATIVE_REBUILT=1
-  PATH="$PROJECT_PATH" npm explore better-sqlite3-multiple-ciphers -- \
-    npm run build-release >/dev/null 2>&1
+  # The app may be open while pushing. Run tests with its Node ABI instead of
+  # replacing the SQLite addon in node_modules underneath the running app.
+  PROJECT_ELECTRON=$($PROJECT_NODE -p 'require("electron")')
+  echo "[pre-push] testing with Electron's Node runtime (native dependencies stay in place)"
+  ./scripts/probe-electron-sqlite.sh '[pre-push]'
   printf '%s\n' "$CHANGED_CODE" | tr '\n' '\0' | \
-    xargs -0 env PATH="$PROJECT_PATH" "$PROJECT_NODE" ./node_modules/vitest/vitest.mjs \
+    xargs -0 env PATH="$PROJECT_PATH" ELECTRON_RUN_AS_NODE=1 "$PROJECT_ELECTRON" ./node_modules/vitest/vitest.mjs \
       related --run --project product-integration --passWithNoTests --bail=1
 fi
 

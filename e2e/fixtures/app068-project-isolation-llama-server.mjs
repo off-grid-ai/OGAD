@@ -20,18 +20,40 @@ const NOT_FOUND = 'That identifier is not present in this project knowledge.'
 
 const delta = (payload) => `data: ${JSON.stringify({ choices: [{ delta: payload }] })}\n\n`
 
-function requestedTopic(body) {
-  // Project prompts can contain sibling-chat history with earlier questions.
-  // The final `User:` cue is the current turn; use only that cue to choose the
-  // requested fact while inspecting the whole body for leaked retrieval data.
-  const currentTurn = body.slice(body.lastIndexOf('User:')).toLowerCase()
-  if (currentTurn.includes('marine identifier')) return 'marine'
-  if (currentTurn.includes('celestial identifier')) return 'celestial'
+function textOf(content) {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map((part) => part?.text ?? '').join('')
+  return ''
+}
+
+function currentQuestion(messages) {
+  const user = [...messages].reverse().find((message) => message.role === 'user')
+  return textOf(user?.content).toLowerCase()
+}
+
+function requestedTopic(messages) {
+  const question = currentQuestion(messages)
+  if (question.includes('marine identifier')) return 'marine'
+  if (question.includes('celestial identifier')) return 'celestial'
   return 'unknown'
 }
 
-function answerFor(body) {
-  const topic = requestedTopic(body)
+// Like a small local model given the project tool: search the knowledge base first, then answer
+// only from what came back. The whole request is inspected so a leak from another project shows.
+function replyFor(payload, body) {
+  const messages = payload.messages ?? []
+  const offered = (payload.tools ?? []).some(
+    (tool) => tool?.function?.name === 'search_knowledge_base'
+  )
+  const lastUser = messages.map((message) => message.role).lastIndexOf('user')
+  const searched = messages.slice(lastUser + 1).some((message) => message.role === 'tool')
+  if (offered && !searched) {
+    return `<tool_call>${JSON.stringify({
+      name: 'search_knowledge_base',
+      arguments: { query: currentQuestion(messages) }
+    })}</tool_call>`
+  }
+  const topic = requestedTopic(messages)
   if (topic === 'celestial' && body.includes(ALPHA_FACT)) return ALPHA_FACT
   if (topic === 'marine' && body.includes(BETA_FACT)) return BETA_FACT
   return NOT_FOUND
@@ -68,11 +90,11 @@ const server = http.createServer((request, response) => {
     })
 
     if (!payload.stream) {
-      response.end(JSON.stringify({ choices: [{ message: { content: answerFor(body) } }] }))
+      response.end(JSON.stringify({ choices: [{ message: { content: replyFor(payload, body) } }] }))
       return
     }
 
-    response.write(delta({ content: answerFor(body) }))
+    response.write(delta({ content: replyFor(payload, body) }))
     response.write('data: [DONE]\n\n')
     response.end()
   })

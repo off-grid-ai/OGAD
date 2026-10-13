@@ -14,8 +14,11 @@ import { env } from '@huggingface/transformers'
  * Takes modelsDir as an argument rather than calling modelsDir(): the embedding pipeline runs in a
  * worker thread, where Electron's app paths are unavailable, so the host resolves it and passes it.
  */
-export function configureTransformersEnv(modelsDir: string): void {
+export function configureTransformersEnv(modelsDir: string, readOnly = false): void {
   env.localModelPath = modelsDir
-  env.allowRemoteModels = true // first run still downloads
+  // The first run still downloads. OFFGRID_EMBEDDINGS_OFFLINE=1 (tests that do not test embeddings)
+  // uses only what is already on disk, so a fresh temp folder fails fast instead of fetching ~23MB.
+  env.allowRemoteModels = !readOnly && process.env.OFFGRID_EMBEDDINGS_OFFLINE !== '1'
+  env.useFSCache = !readOnly
   env.cacheDir = path.join(modelsDir, '.cache')
 }

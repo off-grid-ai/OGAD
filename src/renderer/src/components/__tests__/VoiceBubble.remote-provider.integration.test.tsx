@@ -30,6 +30,40 @@ afterEach(() => {
 })
 
 describe('<VoiceBubble/> with a remote voice provider', () => {
+  it('shows the provider credit error instead of an installation error', async () => {
+    const provider = createServer((_request, response) => {
+      response.writeHead(402, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: { message: 'Insufficient credits. Add more credits to continue.' } }))
+    })
+    await new Promise<void>((resolve) => provider.listen(0, '127.0.0.1', resolve))
+    try {
+      const address = provider.address()
+      if (!address || typeof address === 'string') throw new Error('Test provider has no port')
+      const server: Parameters<typeof synthesizeRemoteVoice>[0] = {
+        id: 'voice-server', name: 'Voice provider', provider: 'custom',
+        endpoint: `http://127.0.0.1:${address.port}/v1`, model: '', enabled: true,
+        mediaModels: { voice: 'voice-maker' }, modelCatalog: [],
+        screenFramesAllowed: false, apiKey: '', selectedModel: 'voice-maker'
+      }
+      render(<VoiceBubble
+        messageId="credit-error"
+        transcript="A synthetic reply"
+        synthesize={async (text, voice) => {
+          try {
+            return await synthesizeRemoteVoice(server, text, voice)
+          } catch (error) {
+            // Electron preserves the provider message inside its IPC error wrapper.
+            throw new Error(`Error invoking remote method 'tts:speak': Error: ${(error as Error).message}`)
+          }
+        }}
+      />)
+      await userEvent.setup().click(screen.getByTitle('Play'))
+      expect(await screen.findByText('Insufficient credits. Add more credits to continue.')).toBeTruthy()
+    } finally {
+      await new Promise<void>((resolve) => provider.close(() => resolve()))
+    }
+  })
+
   it('does not read a missing user recording with an AI voice', async () => {
     const synthesize = vi.fn().mockResolvedValue({ dataUrl: 'data:audio/wav;base64,AAAA' })
     render(<VoiceBubble messageId="note" isUser transcript="My words" synthesize={synthesize} />)

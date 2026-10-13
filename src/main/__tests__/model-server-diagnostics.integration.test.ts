@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startModelServer, stopModelServer } from '../model-server'
+import { flushDiagnosticLog } from '../diagnostics-log'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-diagnostics-'))
 const logPath = path.join(root, 'desktop.log')
@@ -55,6 +56,8 @@ describe('gateway diagnostic lifecycle', () => {
     const requestId = response.headers.get('x-request-id')
     expect(requestId).toBeTruthy()
 
+    // The log is written off the main thread; wait for it to land before reading.
+    await flushDiagnosticLog()
     const log = fs.readFileSync(logPath, 'utf8')
     expect(log).toContain(
       `INFO [gateway] request.started requestId=${JSON.stringify(requestId)} method="GET" path="/v1"`

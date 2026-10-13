@@ -1,3 +1,4 @@
+import { withStorageDownload } from './model-storage-guard'
 // Central model management — the single source of truth for catalog, install
 // listing, download (pull), delete, and activation. Used by BOTH the desktop IPC
 // handlers (UI) AND the headless gateway HTTP admin endpoints, so the full
@@ -6,6 +7,7 @@ import fs from 'fs'
 import path from 'path'
 import { llm } from './llm'
 import { isValidGgufFile } from './models/gguf'
+import { readGgufMtpSupport } from './models/gguf-metadata'
 import { pumpToFile } from './models/download-pump'
 import { downloadIntegrityError, sha256IntegrityError } from './models/download-verify'
 import { downloadFailureMessage, isStorageCapacityError } from './models/download-error'
@@ -23,6 +25,7 @@ import {
   type Modality
 } from './active-models'
 import {
+  readDownloaded,
   recordDownloaded,
   removeDownloaded,
   findDownloaded,
@@ -32,6 +35,7 @@ import {
   type DownloadedModel
 } from './downloaded-models'
 import {
+  MTP_COMPANIONS,
   mergeCatalog,
   remainingDownloadBytes,
   installedIds,
@@ -55,7 +59,7 @@ import {
   type TransferredModelManifest
 } from '@offgrid/sync'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
-import type { ModelEntry } from '@offgrid/models'
+import { CATALOG as BASE_CATALOG, type ModelEntry } from '@offgrid/models'
 import {
   parseRemoteVisionModelId,
   remoteVisionInventoryModels,
@@ -67,9 +71,18 @@ import {
   deactivateRemoteVisionMediaModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
-import { getComputerUseSettings, setComputerUseSettings } from './computer-use-settings'
-import { binRoots, dataDir, modelStorageError } from './runtime-env'
+import { getComputerUseSettings } from './computer-use-settings'
+import { getWebUseSettings } from './web-use-settings'
+import { clearTaskRolesFor, setTaskRoleModel } from './task-role-models'
+import { strategyTaskRoles } from '../shared/computer-use-settings'
+import { binRoots, dataDir, modelStorageError, requireModelStorage } from './runtime-env'
 import { discoverExternalModels } from './external-models'
+import {
+  modelMetadataFile,
+  modelReadDirectories,
+  resolveModelAsset,
+  resolveModelReference
+} from './model-paths'
 import { readModelScanFolders } from './model-storage-choice'
 
 // Desktop ships the Prism llama.cpp engine required by these packed weights.
@@ -177,27 +190,27 @@ const KEV_4B: ModelEntry = {
   tags: ['Decision', 'Decider', 'Fast'],
   grounder: false,
   isNew: true,
-  releaseDate: '2026-09-21',
+  releaseDate: '2026-10-01',
   files: [
     {
-      name: 'kev-4b/checkpoint/head.pt',
-      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/485ace8703592fcf405488b262449990824cfed1/head.pt',
-      sizeBytes: 5248767,
-      sha256: 'd8f796da36ff7bd7c0fb9496b452139bb7851af4fc82b07b500b682d3f721d6a',
+      name: 'kev-4b/checkpoint-v1.0/head.pt',
+      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/591dcb5bd6d05eb0b5131ea6608f93f10243335c/head.pt',
+      sizeBytes: 5249791,
+      sha256: 'dd633435998ecc751ac538717a3742e32149500fabf7d7276287dbf0693f347c',
       role: 'primary'
     },
     {
-      name: 'kev-4b/checkpoint/adapter_config.json',
-      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/485ace8703592fcf405488b262449990824cfed1/adapter_config.json',
+      name: 'kev-4b/checkpoint-v1.0/adapter_config.json',
+      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/591dcb5bd6d05eb0b5131ea6608f93f10243335c/adapter_config.json',
       sizeBytes: 1271,
       sha256: '8a05dfd6c5e7f61a62e6db5d8de8093a8dbbd105aa7ee7b5e7b73f6249f45617',
       role: 'aux'
     },
     {
-      name: 'kev-4b/checkpoint/adapter_model.safetensors',
-      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/485ace8703592fcf405488b262449990824cfed1/adapter_model.safetensors',
+      name: 'kev-4b/checkpoint-v1.0/adapter_model.safetensors',
+      url: 'https://huggingface.co/jaredpalmer/kev-4b/resolve/591dcb5bd6d05eb0b5131ea6608f93f10243335c/adapter_model.safetensors',
       sizeBytes: 129924032,
-      sha256: '9797de69a42188e411b17b7b4fcb66a23374dcebc21d71a7a66f836b5d34df2b',
+      sha256: '90e817356246e7f18bfa7ca3d31794cd4fbeb3332a66a84cb51d9ceae925f2b2',
       role: 'aux'
     },
     {
@@ -278,8 +291,7 @@ export function resolveKevRuntimeArtifact(): KevRuntimeArtifact | null {
     return null
   }
   const modelRoot = path.join(llm.getModelsDir(), 'kev-4b')
-  const checkpoint =
-    reusableKevCheckpointDir(llm.getModelsDir()) ?? path.join(modelRoot, 'checkpoint')
+  const checkpoint = path.join(llm.getModelsDir(), KEV_CHECKPOINT_PREFIX)
   const base = reusableKevBaseDir(llm.getModelsDir()) ?? path.join(modelRoot, 'base')
   const pythonRelative =
     process.platform === 'win32'
@@ -317,12 +329,39 @@ export function resolveKevRuntimeArtifact(): KevRuntimeArtifact | null {
     : null
 }
 
+const DESKTOP_CATALOG = [BONSAI_2, DECIDER_2B, DECIDER_2B_VISION, KEV_4B]
+
 export async function desktopCatalog(): Promise<ModelEntry[]> {
   const { CATALOG } = await import('@offgrid/models')
-  const catalog = CATALOG.map((model) =>
-    model.grounder ? { ...model, tags: [...new Set(['Specialist', ...(model.tags ?? [])])] } : model
-  )
-  return [BONSAI_2, DECIDER_2B, DECIDER_2B_VISION, KEV_4B, ...catalog]
+  const catalog = CATALOG.map((model) => {
+    const companion = Object.entries(MTP_COMPANIONS).find(([id]) => id === model.id)?.[1]
+    const files =
+      companion && !model.files.some((file) => file.name === companion.name)
+        ? [...model.files, companion]
+        : model.files
+    return {
+      ...model,
+      files,
+      ...(model.grounder ? { tags: [...new Set(['Specialist', ...(model.tags ?? [])])] } : {})
+    }
+  })
+  const uiMate = catalog.find((model) => model.id === 'bartowski/tencent_UI-Mate-9B-GGUF')
+  const uiMateMtp = uiMate
+    ? [
+        {
+          ...uiMate,
+          id: `${uiMate.id}+MTP`,
+          name: `${uiMate.name} MTP`,
+          availability: 'coming_soon' as const,
+          availabilityNote:
+            'The separate UI-Mate MTP download is not yet verified. Installed models with built-in MTP heads remain supported.',
+          description:
+            'UI-Mate trained weights with a matching Qwen3.5 9B MTP draft. Includes the main model, vision projector, and prediction weights.',
+          files: [...uiMate.files, MTP_COMPANIONS['bartowski/tencent_UI-Mate-9B-GGUF+MTP']]
+        }
+      ]
+    : []
+  return [...DESKTOP_CATALOG, ...catalog, ...uiMateMtp]
 }
 
 export interface DownloadProgress {
@@ -353,16 +392,11 @@ function activeModelFile(): string {
 }
 
 const KEV_BASE_PREFIX = 'kev-4b/base/'
-const KEV_CHECKPOINT_PREFIX = 'kev-4b/checkpoint/'
+export const KEV_CHECKPOINT_PREFIX = 'kev-4b/checkpoint-v1.0/'
 const KEV_BASE_FILE_SIZES = new Map(
   KEV_4B.files
     .filter((file) => file.name.startsWith(KEV_BASE_PREFIX))
     .map((file) => [file.name.slice(KEV_BASE_PREFIX.length), file.sizeBytes ?? 0])
-)
-const KEV_CHECKPOINT_FILE_SIZES = new Map(
-  KEV_4B.files
-    .filter((file) => file.name.startsWith(KEV_CHECKPOINT_PREFIX))
-    .map((file) => [file.name.slice(KEV_CHECKPOINT_PREFIX.length), file.sizeBytes ?? 0])
 )
 
 function directoryHasExpectedFiles(directory: string, files: ReadonlyMap<string, number>): boolean {
@@ -378,33 +412,28 @@ function directoryHasExpectedFiles(directory: string, files: ReadonlyMap<string,
 
 /** A pre-catalog Kev install used this directory. Reuse its Qwen base instead of
  * downloading a second 9.34 GB copy. GGUF chat weights are not compatible: Kev
- * needs the original SafeTensors tensors for its LoRA merge. */
+ * needs the original SafeTensors tensors for its LoRA merge.
+ * Check the profile location too because the models folder can move. */
 function reusableKevBaseDir(modelsDirectory: string): string | null {
-  const candidate = path.join(path.dirname(modelsDirectory), 'decision-models', 'qwen3.5-4b-base')
-  return directoryHasExpectedFiles(candidate, KEV_BASE_FILE_SIZES) ? candidate : null
-}
-
-/** Preserve installs made before Kev moved into the Models catalog. */
-function reusableKevCheckpointDir(modelsDirectory: string): string | null {
-  const candidate = path.join(path.dirname(modelsDirectory), 'decision-models', 'kev-4b-qwen3.5')
-  return directoryHasExpectedFiles(candidate, KEV_CHECKPOINT_FILE_SIZES) ? candidate : null
+  const candidates = [
+    path.join(path.dirname(modelsDirectory), 'decision-models', 'qwen3.5-4b-base'),
+    path.join(dataDir(), 'decision-models', 'qwen3.5-4b-base')
+  ]
+  return (
+    candidates.find((candidate) => directoryHasExpectedFiles(candidate, KEV_BASE_FILE_SIZES)) ??
+    null
+  )
 }
 
 function modelFilePath(dir: string, name: string): string {
-  if (path.isAbsolute(name)) return name
-  const managed = path.join(dir, name)
-  if (fs.existsSync(managed)) return managed
+  if (path.isAbsolute(name)) return resolveModelReference(name)
+  const managed = resolveModelAsset(name, [dir])
+  if (managed) return managed
   if (name.startsWith(KEV_BASE_PREFIX)) {
     const reusableBase = reusableKevBaseDir(dir)
     if (reusableBase) return path.join(reusableBase, name.slice(KEV_BASE_PREFIX.length))
   }
-  if (name.startsWith(KEV_CHECKPOINT_PREFIX)) {
-    const reusableCheckpoint = reusableKevCheckpointDir(dir)
-    if (reusableCheckpoint) {
-      return path.join(reusableCheckpoint, name.slice(KEV_CHECKPOINT_PREFIX.length))
-    }
-  }
-  return managed
+  return resolveModelReference(name, [dir, ...modelReadDirectories()])
 }
 
 /** Size (bytes) of a file in the models dir; 0 when absent/unreadable. The single
@@ -500,7 +529,12 @@ export async function resolveModelIdentity(modelId: string): Promise<ModelIdenti
 export async function getVisionStatuses(): Promise<Record<string, VisionStatus>> {
   const CATALOG = await desktopCatalog()
   const dir = llm.getModelsDir()
-  const present = (name: string): boolean => fileSizeOf(dir, name) > 0
+  const present = (name: string): boolean => {
+    const mtp = Object.values(MTP_COMPANIONS).find((file) => file.name === name)
+    return mtp
+      ? readGgufMtpSupport(modelFilePath(dir, name), fs, undefined, mtp.sizeBytes)
+      : fileSizeOf(dir, name) > 0
+  }
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
   const merged = mergeCatalog({
     locals: getLocalModels(),
@@ -512,7 +546,23 @@ export async function getVisionStatuses(): Promise<Record<string, VisionStatus>>
   const out: Record<string, VisionStatus> = {}
   for (const m of merged) {
     const st = visionStatus(m, present)
-    if (st.supportsVision || st.supportsDflash) {
+    const primary = modelFilePath(dir, primaryFileName(m) ?? '')
+    const companion = Object.entries(MTP_COMPANIONS).find(
+      ([id]) => id === m.id || id === m.sourceModelId
+    )?.[1]
+    if (companion) {
+      st.mtpInstalled = readGgufMtpSupport(
+        resolveModelReference(companion.name, [path.dirname(primary)]),
+        fs,
+        undefined,
+        companion.sizeBytes
+      )
+    }
+    if (readGgufMtpSupport(primary, fs)) {
+      st.supportsMtp = true
+      st.mtpInstalled = true
+    }
+    if (st.supportsVision || st.supportsDflash || st.supportsMtp) {
       out[m.id] = st
     }
   }
@@ -562,8 +612,8 @@ export async function resolveComputerUseModelArtifact(
     ) {
       return {
         id: modelId,
-        primaryPath: path.join(directory, primary),
-        ...(projector ? { projectorPath: path.join(directory, projector) } : {})
+        primaryPath: modelFilePath(directory, primary),
+        ...(projector ? { projectorPath: modelFilePath(directory, projector) } : {})
       }
     }
   }
@@ -577,9 +627,9 @@ export async function resolveComputerUseModelArtifact(
   if (!primary || fileSizeOf(directory, primary) <= 0) return null
   return {
     id: downloaded.id,
-    primaryPath: path.join(directory, primary),
+    primaryPath: modelFilePath(directory, primary),
     ...(projector && fileSizeOf(directory, projector) > 0
-      ? { projectorPath: path.join(directory, projector) }
+      ? { projectorPath: modelFilePath(directory, projector) }
       : {})
   }
 }
@@ -596,6 +646,14 @@ export async function searchModels(query: string, kind?: string): Promise<unknow
     console.error('[models] HF search failed:', err)
     return []
   }
+}
+
+export async function getModelFiles(modelId: string): Promise<import('@offgrid/models').ModelFileVariant[]> {
+  const { getModelFiles: listFiles } = await import('@offgrid/models')
+  const repo = modelId === 'bartowski/tencent_UI-Mate-9B-GGUF+MTP' ? modelId.slice(0, -4) : modelId
+  return (await listFiles(repo)).filter(
+    (file) => !/^(?:mtp[-_.])|[-_.]mtp[-_.]only[-_.]/i.test(file.fileName)
+  )
 }
 
 export function downloadStatus(modelId: string): DownloadProgress | null {
@@ -631,6 +689,18 @@ export async function downloadModel(
   onProgress?: ProgressCb,
   fileName?: string
 ): Promise<{ success: boolean; error?: string }> {
+  try {
+    return await withStorageDownload(() => downloadModelInner(modelId, onProgress, fileName))
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function downloadModelInner(
+  modelId: string,
+  onProgress?: ProgressCb,
+  fileName?: string
+): Promise<{ success: boolean; error?: string }> {
   if (!downloadQueue.isAccepting()) {
     writeDiagnosticLog('models.download', 'request.rejected', {
       modelId,
@@ -638,7 +708,7 @@ export async function downloadModel(
     })
     return publishRefusal(modelId, DOWNLOAD_INTERRUPTED_ERROR, onProgress)
   }
-  const { getModelFiles, resolveHuggingFaceModel } = await import('@offgrid/models')
+  const { resolveHuggingFaceModel } = await import('@offgrid/models')
   const CATALOG = await desktopCatalog()
   const inCatalog = CATALOG.find((m) => m.id === modelId)
   let entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
@@ -679,6 +749,18 @@ export async function downloadModel(
         ...projectorFiles,
         ...catalogAuxFiles
       ]
+    }
+  }
+  // Full MTP exports often reuse the standard export's filename. Keep their
+  // weights distinct and record the actual local filename in the existing registry.
+  if (entry && /-MTP-GGUF$/i.test(modelId)) {
+    entry = {
+      ...entry,
+      files: entry.files.map((file) =>
+        file.role === 'primary'
+          ? { ...file, name: file.name.replace(/\.gguf$/i, '+MTP.gguf') }
+          : file
+      )
     }
   }
   if (!entry) {
@@ -770,7 +852,16 @@ export async function downloadModel(
         // is the set of files this run must actually fetch (a file already on disk is not work),
         // and one percent measures the whole of it.
         const pending = entry.files.filter((file) => {
-          const present = fileSizeOf(dir, file.name) > 0
+          const mtp = Object.values(MTP_COMPANIONS).find(
+            (companion) => companion.name === file.name
+          )
+          const nativeUiMate =
+            modelId === 'bartowski/tencent_UI-Mate-9B-GGUF+MTP' &&
+            readGgufMtpSupport(path.join(dir, primaryFileName(entry) ?? ''), fs)
+          const present = mtp
+            ? nativeUiMate ||
+              readGgufMtpSupport(path.join(dir, file.name), fs, undefined, mtp.sizeBytes)
+            : fileSizeOf(dir, file.name) > 0
           if (present) {
             writeDiagnosticLog('models.download', 'file.skipped', {
               modelId,
@@ -1090,6 +1181,17 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
 
   const entry = CATALOG.find((m) => m.id === modelId) ?? (await resolveHuggingFaceModel(modelId))
   if (!entry) return { success: false, error: 'unknown model' }
+  if (
+    entry.files.some((file) => {
+      const external = resolveModelAsset(file.name)
+      return external && !resolveModelAsset(file.name, [dir])
+    })
+  ) {
+    return {
+      success: false,
+      error: 'This model uses files in another model folder. Remove the folder reference to hide it. Files are kept in place.'
+    }
+  }
   let freed = 0
   const retainedVideoFiles = entry.kind === 'video'
     ? await installedVideoFileNames(primaryFileName(entry as unknown as CatalogEntry))
@@ -1140,6 +1242,7 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   ;(Object.keys(modals) as Modality[]).forEach((k) => {
     if (modalSelectionMatches(modals[k], modelId, primaryFile)) setModal(k, null)
   })
+  clearTaskRolesFor(modelId)
   return { success: true, freedFiles: freed }
 }
 
@@ -1156,6 +1259,7 @@ async function setActiveLlamaModel(
       llm.useRuntimeModel(model)
       return
     }
+    requireModelStorage()
     fs.writeFileSync(activeModelFile(), JSON.stringify(model, null, 2))
     llm.restoreSelectedModel()
   }
@@ -1227,7 +1331,7 @@ export function loadComputerUseModel(
 
 export function getActiveModel(): string | null {
   try {
-    return JSON.parse(fs.readFileSync(activeModelFile(), 'utf-8')).id ?? null
+    return JSON.parse(fs.readFileSync(modelMetadataFile('active-model.json'), 'utf-8')).id ?? null
   } catch {
     return null
   }
@@ -1244,7 +1348,7 @@ export function getActiveModel(): string | null {
 export async function reconcileActiveModelProjector(): Promise<boolean> {
   let cfg: { id?: string; primary?: string; mmproj?: string | null } | null = null
   try {
-    cfg = JSON.parse(fs.readFileSync(activeModelFile(), 'utf-8'))
+    cfg = JSON.parse(fs.readFileSync(modelMetadataFile('active-model.json'), 'utf-8'))
   } catch {
     return false // no active selection yet
   }
@@ -1292,37 +1396,49 @@ export async function getActiveModelIds(): Promise<string[]> {
   const settings = getRemoteVisionServerSettings()
   const remote = settings.servers.find((server) => server.id === settings.activeServerId)
   const activeChatId = getActiveModel()
+  // Computer Use models are active by the role Tasks gives them (below), not by a pick of their
+  // own: the Models screens then show exactly what Tasks > Computer Use and Web Use will run.
   const localIds = info.models
     .filter(
       (model) =>
-        model.active && (!remote || !remoteModelSelected('text') || model.id !== activeChatId)
+        model.active &&
+        model.kind !== 'computer_use' &&
+        (!remote || !remoteModelSelected('text') || model.id !== activeChatId)
     )
     .map((model) => model.id)
-  const computerUseSettings = getComputerUseSettings()
-  const decisionModelId =
-    computerUseSettings.decisionModelId ??
-    (computerUseSettings.modelStrategy === 'decision_plus_specialist' ||
-    computerUseSettings.modelStrategy === 'decision_plus_reasoning'
-      ? DECIDER_2B.id
-      : null)
-  const withDecision =
-    decisionModelId &&
-    (info.models.some((model) => model.id === decisionModelId) ||
-      (decisionModelId === KEV_4B_ID && Boolean(resolveKevRuntimeArtifact())))
-      ? [...new Set([...localIds, decisionModelId])]
-      : localIds
-  return remote && remote.enabled !== false
-    ? [
-        ...withDecision,
-        ...remoteVisionInventoryModels([remote])
-          .filter((model) =>
-            remoteModelSelected(
-              model.kind === 'vision' ? 'text' : model.kind === 'speech' ? 'voice' : model.kind
-            )
+  const remoteIds =
+    remote && remote.enabled !== false
+      ? remoteVisionInventoryModels([remote])
+          .filter(
+            (model) =>
+              model.kind !== 'computer_use' &&
+              remoteModelSelected(
+                model.kind === 'vision' ? 'text' : model.kind === 'speech' ? 'voice' : model.kind
+              )
           )
           .map((model) => model.id)
-      ]
-    : withDecision
+      : []
+  return [...new Set([...localIds, ...remoteIds, ...(await taskRoleModelIds())])]
+}
+
+/**
+ * The models Computer Use and Web Use run besides Chat: each one's decision model and grounding
+ * specialist, local or remote, by the roles its strategy uses (strategyTaskRoles, the same map
+ * the task projection reads). The reasoner is the Chat model, already active as text.
+ */
+async function taskRoleModelIds(): Promise<string[]> {
+  const { selectedGrounderModelId } = await import('./vision/grounder-selection')
+  const computer = getComputerUseSettings()
+  const web = getWebUseSettings()
+  const tasks = [
+    { strategy: computer.modelStrategy, decision: computer.decisionModelId },
+    { strategy: web.modelStrategy, decision: web.decisionModelId }
+  ]
+  return tasks.flatMap(({ strategy, decision }) =>
+    strategyTaskRoles(strategy).map((role) =>
+      role === 'grounding' ? selectedGrounderModelId() : (decision ?? DECIDER_2B.id)
+    )
+  )
 }
 
 /**
@@ -1331,6 +1447,20 @@ export async function getActiveModelIds(): Promise<string[]> {
  * transcription set that modality's default pick. Callers pass only the id and
  * never branch on kind. Adding a new modality needs zero caller changes.
  */
+/**
+ * "Use" on a task model, from any Models screen: a grounding specialist is shared by both tasks
+ * already; a decision model becomes the decision model of both Web Use and Computer Use. Tasks
+ * settings can still give each task its own.
+ */
+function useForTasks(role: 'decision' | 'grounding', modelId: string): void {
+  if (role === 'grounding') {
+    setTaskRoleModel('computer_use', 'grounding', modelId)
+    return
+  }
+  setTaskRoleModel('computer_use', 'decision', modelId)
+  setTaskRoleModel('web_use', 'decision', modelId)
+}
+
 export async function activateModel(
   modelId: string,
   requestedKind?: string
@@ -1344,12 +1474,25 @@ export async function activateModel(
     const modality = (['text', 'image', 'video', 'transcription', 'voice'] as const).find(
       (kind) => selected[kind] === remote.modelId
     )
+    // A server's Computer Use role model is activated as that role, as Tasks sets it.
+    const role = (['grounding', 'decision'] as const).find(
+      (candidate) => server?.roleModels?.[candidate] === remote.modelId
+    )
+    if (!modality && role) {
+      useForTasks(role, modelId)
+      return { success: true }
+    }
     const activated =
       modality === 'text'
         ? activateRemoteVisionModel(remote.serverId, remote.modelId)
         : modality
           ? activateRemoteVisionMediaModel(remote.serverId, modality, remote.modelId)
           : false
+    // Chat now runs remotely: the local chat engine lets go of its memory. Chat starts it again
+    // on demand if the user switches back to a local model.
+    if (activated && modality === 'text') {
+      void llm.unload().catch((error) => console.error('[models] local chat unload failed', error))
+    }
     return activated
       ? { success: true }
       : { success: false, error: 'Remote model is no longer available.' }
@@ -1377,7 +1520,7 @@ export async function activateModel(
       requestedKind === 'computer_use' &&
       catalogEntry?.tags?.some((tag) => tag.toLowerCase() === 'decision')
     ) {
-      setComputerUseSettings({ ...getComputerUseSettings(), decisionModelId: modelId })
+      useForTasks('decision', modelId)
       return { success: true }
     }
   }
@@ -1418,6 +1561,8 @@ export async function setActiveModalChoice(
     }
     setModal(modal, stored)
     if (modal === 'video') deactivateRemoteVisionMediaModel('video')
+    // A Computer Use pick, from any screen, is the grounding specialist both tasks share.
+    if (modal === 'computer_use' && modelId) setTaskRoleModel('computer_use', 'grounding', modelId)
     if (modal === 'image') deactivateRemoteVisionMediaModel('image')
     if (modal === 'speech') deactivateRemoteVisionMediaModel('voice')
     if (modal === 'transcription') deactivateRemoteVisionMediaModel('transcription')
@@ -1491,14 +1636,40 @@ function localRegistryFile(dir = llm.getModelsDir()): string {
 export function getLocalModels(dir = llm.getModelsDir()): LocalModel[] {
   let managed: LocalModel[] = []
   try {
-    const arr = JSON.parse(fs.readFileSync(localRegistryFile(dir), 'utf-8'))
+    const arr = JSON.parse(
+      fs.readFileSync(
+        modelMetadataFile(
+          'local-models.json',
+          dir === llm.getModelsDir() ? modelReadDirectories() : [dir]
+        ),
+        'utf-8'
+      )
+    )
     managed = Array.isArray(arr) ? (arr as LocalModel[]) : []
   } catch {
     /* no imported models */
   }
-  return dir === llm.getModelsDir()
-    ? [...managed, ...discoverExternalModels(undefined, undefined, dir, readModelScanFolders(dataDir()))]
-    : managed
+  if (dir !== llm.getModelsDir()) return managed
+  const known = new Set([
+    ...managed.map((model) => resolveModelReference(model.primary)),
+    ...readDownloaded(dir).flatMap((model) =>
+      model.files.map((name) => resolveModelReference(name))
+    ),
+    ...[...DESKTOP_CATALOG, ...BASE_CATALOG].flatMap((model) =>
+      model.files.flatMap((file) =>
+        modelReadDirectories().flatMap((root) => {
+          const asset = resolveModelAsset(file.name, [root])
+          return asset ? [asset] : []
+        })
+      )
+    )
+  ])
+  return [
+    ...managed,
+    ...discoverExternalModels(undefined, undefined, dir, readModelScanFolders(dataDir())).filter(
+      (model) => !known.has(model.primary)
+    )
+  ]
 }
 function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
   try {
@@ -1510,13 +1681,14 @@ function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
 
 function transferredFilesOnDisk(
   dir: string,
-  files: Array<{ name: string; sizeBytes: number }>
+  files: Array<{ name: string; sizeBytes: number }>,
+  readPaths?: Map<string, string>
 ): { error?: string; files?: TransferableModelFile[] } {
   const manifestError = modelTransferManifestFileError(files)
   if (manifestError) return { error: manifestError }
   const resolved: TransferableModelFile[] = []
   for (const file of files) {
-    const filePath = path.join(dir, file.name)
+    const filePath = readPaths?.get(file.name) ?? path.join(dir, file.name)
     let actualSize = 0
     try {
       const stat = fs.lstatSync(filePath)
@@ -1568,9 +1740,17 @@ export async function getTransferableModel(
     : downloaded
       ? downloaded.files
       : (catalog?.files.map((file) => file.name) ?? [])
+  // Registry references may point to a folder left in place. Transfer manifests
+  // still use relative filenames, while the read path comes from the shared lookup.
+  const references = names.map((name) => ({
+    name: path.isAbsolute(name) ? path.basename(name) : name,
+    path: modelFilePath(dir, name),
+    sizeBytes: fileSizeOf(dir, name)
+  }))
   const files = transferredFilesOnDisk(
     dir,
-    names.map((name) => ({ name, sizeBytes: fileSizeOf(dir, name) }))
+    references,
+    new Map(references.map((file) => [file.name, file.path]))
   ).files
   if (!files) return null
 
@@ -1991,5 +2171,32 @@ export async function clearInactiveDownloads(): Promise<{
     const r = await clearDownload(id)
     freedBytes += r.freedBytes
   }
-  return { success: true, count: ids.length, freedBytes }
+  let count = ids.length
+  // A transfer interrupted in an earlier session (quit, crash, power loss) has no entry above,
+  // but its .part file still holds disk space. With nothing downloading or queued, every
+  // remaining .part file is an incomplete transfer.
+  const transfers = downloadQueue.counts()
+  if (transfers.running === 0 && transfers.queued === 0) {
+    const dir = llm.getModelsDir()
+    let entries: string[] = []
+    try {
+      entries = fs.readdirSync(dir)
+    } catch {
+      /* no models folder yet */
+    }
+    for (const name of entries) {
+      if (!name.endsWith('.part')) continue
+      const part = path.join(dir, name)
+      try {
+        const st = fs.statSync(part)
+        if (!st.isFile()) continue
+        fs.rmSync(part, { force: true })
+        freedBytes += st.size
+        count++
+      } catch {
+        /* removal failed; leave it for the next cleanup */
+      }
+    }
+  }
+  return { success: true, count, freedBytes }
 }

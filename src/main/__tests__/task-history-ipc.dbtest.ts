@@ -12,10 +12,16 @@ const mocks = vi.hoisted(() => ({
   retryIpc: vi.fn(),
   viable: vi.fn(),
   visionRun: vi.fn(),
-  webRun: vi.fn()
+  webRun: vi.fn(),
+  inAppRun: vi.fn(),
+  forgetStop: vi.fn()
 }))
 
-vi.mock('electron', () => ({ ipcMain: { handle: mocks.handle } }))
+// Retries now run inside the screen-task gate, whose run telemetry writes under userData.
+vi.mock('electron', () => ({
+  ipcMain: { handle: mocks.handle },
+  app: { getPath: () => `/tmp/offgrid-task-history-ipc-${process.pid}` }
+}))
 vi.mock('../tasks/task-history', () => ({
   initializeTaskHistory: mocks.initialize,
   listTaskRuns: mocks.list,
@@ -24,9 +30,17 @@ vi.mock('../tasks/task-history', () => ({
 vi.mock('../tasks/task-retry-ipc', () => ({ registerTaskRetryIpc: mocks.retryIpc }))
 vi.mock('../tasks/task-guide-ipc', () => ({ registerTaskGuideIpc: mocks.guideIpc }))
 vi.mock('../tasks/task-retry', () => ({ configureTaskRetryRunner: mocks.configure }))
-vi.mock('../vision/vision-controller', () => ({ hasActiveVisionSession: vi.fn(() => false) }))
+vi.mock('../vision/vision-controller', () => ({
+  hasActiveVisionSession: vi.fn(() => false),
+  forgetVisionStopBeforeStart: mocks.forgetStop
+}))
+// The browser chooser (Tasks > Web Use), and Off Grid AI's own browser, which a retry must not
+// reach around it.
+vi.mock('../browser/web-use-host', () => ({
+  getWebUseRailHost: () => ({ runTask: mocks.webRun })
+}))
 vi.mock('../browser/browser-host', () => ({
-  getBrowserRailHost: () => ({ runTask: mocks.webRun })
+  getBrowserRailHost: () => ({ runTask: mocks.inAppRun })
 }))
 vi.mock('../vision/vision-host', () => ({
   getVisionRailHost: () => ({ runTask: mocks.visionRun })
@@ -70,9 +84,13 @@ describe('task history IPC composition', () => {
     const checkpoint = { taskId: 'task-1', steps: [], summary: 'retry', currentStep: 1 }
 
     await runner.web(task, 'task-1', checkpoint)
+    // A retry picks its browser as a new task does: review finding, it always used Off Grid AI's.
     expect(mocks.webRun).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 'task-1', checkpoint })
     )
+    expect(mocks.inAppRun).not.toHaveBeenCalled()
+    // And a Stop sent before an earlier run started does not carry over to it.
+    expect(mocks.forgetStop).toHaveBeenCalledWith('task-1')
 
     mocks.axRouting.mockResolvedValueOnce({
       app: 'Notes',

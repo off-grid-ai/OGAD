@@ -18,7 +18,8 @@
   <a href="https://github.com/off-grid-ai/OGAD/releases/latest">Download (macOS · Windows · Linux)</a> ·
   <a href="docs/FEATURES.md">Features</a> ·
   <a href="https://getoffgridai.co">getoffgridai.co</a> ·
-  <a href="https://getoffgridai.co/pro/#buy">Get Pro</a>
+  <a href="https://getoffgridai.co/pro/#buy">Get Pro</a> ·
+  <a href="https://join.slack.com/t/off-grid-mobile/shared_invite/zt-494gbuv5c-kj9tT7U0AS8Kq8UUO63_jw">Slack community</a>
 </p>
 
 <p align="center">
@@ -310,6 +311,10 @@ simply absent in this build, so the open app compiles and runs entirely on its o
 
 All model inference is local. Your conversations, documents, and models stay on your device
 — there's no cloud inference, no account, and no API key. You can run it fully offline.
+
+## Community
+
+[Join the Slack community](https://join.slack.com/t/off-grid-mobile/shared_invite/zt-494gbuv5c-kj9tT7U0AS8Kq8UUO63_jw) to ask questions and share feedback.
 
 ## License
 

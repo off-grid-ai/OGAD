@@ -125,7 +125,9 @@ export function parseToolCallsFromText(text: string): ParsedCall[] {
       calls.push(...jsonCalls)
       continue
     }
-    const named = /^(?:call:)?([A-Za-z_]\w*)\s*(?:\(\s*(\{[\s\S]*\})\s*\)|(\{[\s\S]*\}))?$/.exec(body)
+    const named = /^(?:call:)?([A-Za-z_]\w*)\s*(?:\(\s*(\{[\s\S]*\})\s*\)|(\{[\s\S]*\}))?$/.exec(
+      body
+    )
     if (named) {
       const args = parseLenient(named[2] ?? named[3] ?? '{}')
       if (args && typeof args === 'object' && !Array.isArray(args)) {

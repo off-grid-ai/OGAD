@@ -20,7 +20,7 @@ describe('lanAddresses', () => {
     const ifaces = {
       lo0: [ip('127.0.0.1', { internal: true })],
       en5: [ip('169.254.27.81')], // link-local - dropped
-      en0: [ip('192.168.1.18'), ip('fe80::1', { family: 'IPv6' } as any)],
+      en0: [ip('192.168.1.18'), ip('fe80::1', { family: 'IPv6' })],
       en1: [ip('10.0.0.4')],
       utun0: [ip('172.16.0.2')],
       eth9: [ip('203.0.113.7')] // routable - last

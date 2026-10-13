@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/bootstrap/slotRegistry', () => {
+vi.mock('@/bootstrap/slotRegistry', async (importOriginal) => {
   function ReadyGoogleClient({
     onReadyChange
   }: Readonly<{ onReadyChange: (ready: boolean) => void }>): React.ReactElement {
@@ -13,8 +13,9 @@ vi.mock('@/bootstrap/slotRegistry', () => {
     return <div>Your Google client</div>
   }
 
+  // The real registry, with every slot answering as the ready Google client.
   return {
-    SLOTS: { connectorSetup: 'connectors.setup' },
+    ...(await importOriginal<typeof import('@/bootstrap/slotRegistry')>()),
     getSlot: () => ReadyGoogleClient
   }
 })
@@ -24,7 +25,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Google browser authorization cancellation', () => {
+// Any OAuth connector in the gallery: Gmail and Google Calendar are offered as a direct Google
+// account instead when that is available, so the flow is exercised on another one.
+describe('browser authorization cancellation', () => {
   it('lets the user cancel a pending OAuth attempt and restores the Connect action', async () => {
     let finishTest: ((result: { ok: false; error: string }) => void) | undefined
     const mcpRemove = vi.fn(async () => {
@@ -47,7 +50,7 @@ describe('Google browser authorization cancellation', () => {
     const user = userEvent.setup()
     render(<ConnectorsScreen />)
 
-    const calendarCard = (await screen.findByText('Google Calendar')).closest('div.flex.flex-col')
+    const calendarCard = (await screen.findByText('Vercel')).closest('div.flex.flex-col')
     expect(calendarCard).toBeTruthy()
     await user.click(
       within(calendarCard as HTMLElement).getByRole('button', { name: /Connect with OAuth/i })

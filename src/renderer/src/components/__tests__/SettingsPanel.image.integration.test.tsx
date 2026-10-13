@@ -7,6 +7,7 @@ import { SettingsPanel } from '../SettingsPanel'
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
 })
 
 describe('<SettingsPanel/> image settings', () => {
@@ -49,6 +50,7 @@ describe('<SettingsPanel/> image settings', () => {
     const user = userEvent.setup()
     const model = await screen.findByRole('button', { name: 'Active image model' })
     expect(model.textContent).toContain('dreamshaper-xl-v2-turbo')
+    await user.click(screen.getByRole('button', { name: /^Fine tuning/ }))
     expect(
       (screen.getByRole('spinbutton', { name: 'Image steps' }) as HTMLInputElement).value
     ).toBe('12')
@@ -110,7 +112,8 @@ describe('<SettingsPanel/> image settings', () => {
     }
     const user = userEvent.setup()
     const panel = render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)
-    const steps = await screen.findByRole('spinbutton', { name: 'Image steps' })
+    await user.click(await screen.findByRole('button', { name: /^Fine tuning/ }))
+    const steps = screen.getByRole('spinbutton', { name: 'Image steps' })
 
     await user.clear(steps)
     await user.type(steps, '45')
@@ -133,5 +136,41 @@ describe('<SettingsPanel/> image settings', () => {
     expect(
       (screen.getByRole('spinbutton', { name: 'Image guidance' }) as HTMLInputElement).value
     ).toBe('1.5')
+  })
+
+  it('groups image settings into sections, and a closed section says what is set inside', async () => {
+    ;(window as unknown as { api: Record<string, unknown> }).api = {
+      getLlmSettings: async () => ({}),
+      getModelCatalog: async () => ({ models: [] }),
+      getActiveModel: async () => null,
+      imageGenStatus: async () => ({
+        available: true,
+        active: 'dreamshaper-xl-v2-turbo.gguf',
+        models: ['dreamshaper-xl-v2-turbo.gguf']
+      }),
+      getSettings: async () => ({
+        imageParams: { 'dreamshaper-xl-v2-turbo.gguf': { size: 768, steps: 12, cfgScale: 3 } },
+        imgSeed: '42',
+        imgNegative: 'blurry',
+        enhanceImagePrompts: true
+      }),
+      saveSetting: async () => {},
+      ttsVoices: async () => [],
+      prepareTtsVoice: async () => ({ ready: true }),
+      onTtsVoiceProgress: () => () => {},
+      listTools: async () => [],
+      mcpList: async () => []
+    }
+    render(<SettingsPanel embedded initialTab="image" onClose={() => {}} />)
+
+    expect(await screen.findByRole('button', { name: /^Generation/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Image size' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Fine tuning/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Prompts/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Processing/ })).toBeTruthy()
+    expect(await screen.findByText('12 steps · guidance 3 · seed 42')).toBeTruthy()
+    expect(screen.getByText('Enhanced by the chat model · negative prompt set')).toBeTruthy()
+    expect(screen.queryByRole('spinbutton', { name: 'Image steps' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'Negative prompt' })).toBeNull()
   })
 })

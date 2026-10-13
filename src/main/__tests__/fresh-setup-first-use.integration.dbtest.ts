@@ -262,11 +262,9 @@ describe('fresh setup to first use', () => {
       import('@offgrid/models')
     ])
 
-    // This is the real settings owner. Fresh setup cannot start the model yet, but
-    // the selected mode is persisted before that expected missing-model failure.
-    await expect(llm.setSettings({ performanceMode: 'conservative' })).rejects.toThrow(
-      'Models not downloaded'
-    )
+    // This is the real settings owner. Fresh setup has no model to relaunch yet, so choosing a
+    // mode saves it for the first launch instead of failing the choice.
+    await expect(llm.setSettings({ performanceMode: 'conservative' })).resolves.toBeUndefined()
     const plan = await setup.getSetupPlan()
     expect(plan.mode).toBe('conservative')
     // Exercise the desktop-only packed-weight recommendation through the same

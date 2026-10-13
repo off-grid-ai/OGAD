@@ -42,4 +42,43 @@ describe('<MemoryChat/> sent-message Markdown', () => {
       within(message).getByRole('link', { name: 'hello@example.com' }).getAttribute('href')
     ).toBe('mailto:hello@example.com')
   })
+
+  it('renders a reply table as a table with a header row', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      {
+        id: 2,
+        role: 'assistant',
+        content:
+          'Here are the plans:\n\n| Plan | Price |\n| --- | --- |\n| Team | $40 |\n| Solo | $4.99 |'
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const message = await screen.findByTestId('chat-message-2')
+    const table = within(message).getByRole('table')
+    expect(within(table).getByRole('columnheader', { name: 'Plan' })).toBeTruthy()
+    expect(within(table).getByRole('cell', { name: '$4.99' })).toBeTruthy()
+  })
+
+  it('keeps the sentences before and after a Mermaid diagram beside its artifact card', async () => {
+    const boundary = new ChatBoundary()
+    boundary.messages['conversation-a'] = [
+      {
+        id: 3,
+        role: 'assistant',
+        content:
+          'Here is the rollout flow.\n\n```mermaid\ngraph TD\n  A[Scope] --> B[Kickoff]\n```\n\nPriya owns the first step.'
+      }
+    ]
+    installBoundary(boundary)
+    renderChat({ conversationId: 'conversation-a' })
+
+    const message = await screen.findByTestId('chat-message-3')
+    expect(within(message).getByText('Here is the rollout flow.')).toBeTruthy()
+    expect(within(message).getByText('Priya owns the first step.')).toBeTruthy()
+    expect(within(message).getByText(/MERMAID artifact/i)).toBeTruthy()
+    expect(within(message).queryByText(/graph TD/)).toBeNull()
+  })
 })

@@ -3,6 +3,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+// The DB test compiler uses the classic JSX runtime.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import React from 'react'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

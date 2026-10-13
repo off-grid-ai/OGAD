@@ -7,11 +7,41 @@ import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-
 
 afterEach(cleanup)
 
+function answerWithOfferedTools(boundary: ChatBoundary, settings: Record<string, unknown>): void {
+  Object.assign(boundary.api, {
+    getSettings: async () => ({ composerConnectorsOn: true, ...settings }),
+    getLlmSettings: async () => ({ ctxSize: 4096 }),
+    listTools: async () => [],
+    mcpList: async () => [],
+    toolChat: async () => ({
+      answer: 'I can help with that.',
+      toolCalls: [],
+      unified: [],
+      imageRequests: [],
+      toolsOffered: ['web_use', 'calculator']
+    })
+  })
+}
+
+it('keeps the request tool list out of the answer unless generation details are shown', async () => {
+  ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
+  const boundary = new ChatBoundary()
+  answerWithOfferedTools(boundary, {})
+  installBoundary(boundary)
+
+  const user = userEvent.setup()
+  renderChat({ conversationId: 'conversation-b' })
+  await send('Which tools are available?', user)
+
+  expect(await screen.findByText('I can help with that.')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Tools sent in request (2)' })).toBeNull()
+})
+
 it('shows the tools offered to a model even when it calls none, and keeps them after reload', async () => {
   ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
   const boundary = new ChatBoundary()
   Object.assign(boundary.api, {
-    getSettings: async () => ({ composerConnectorsOn: true }),
+    getSettings: async () => ({ composerConnectorsOn: true, showGenerationDetails: true }),
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     listTools: async () => [],
     mcpList: async () => [],

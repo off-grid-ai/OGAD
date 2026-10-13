@@ -13,6 +13,7 @@
  */
 import { parentPort, workerData } from 'worker_threads'
 import { embedText, embeddingDevice } from './embeddings-core'
+import { configureRuntime } from './runtime-env'
 import type { BackendPreference } from '../shared/backend-preferences'
 import type { EmbeddingModelId } from './embedding-model-choice'
 
@@ -21,7 +22,22 @@ const port = parentPort
 
 // modelsDir() reads Electron's app paths, which do not exist in a worker thread — the host
 // resolves the directory and passes it in.
-const { modelsDir, backendPreference = 'auto', modelId } = workerData as { modelsDir: string; backendPreference?: BackendPreference; modelId: EmbeddingModelId }
+const {
+  modelsDir,
+  chosenModelsDir,
+  modelReadDirectories = [modelsDir],
+  backendPreference = 'auto',
+  modelId
+} = workerData as {
+  modelsDir: string
+  chosenModelsDir?: string
+  modelReadDirectories?: string[]
+  backendPreference?: BackendPreference
+  modelId: EmbeddingModelId
+}
+
+// Preserve the host's explicit choice without treating its default path as chosen.
+configureRuntime({ modelsDir: chosenModelsDir })
 
 export interface EmbeddingRequest {
   id: number
@@ -39,10 +55,26 @@ export interface EmbeddingResponse {
 port.on('message', (request: EmbeddingRequest) => {
   void (async () => {
     try {
-      const vector = await embedText(request.text, modelsDir, (device, fallbackReason) => {
-        port.postMessage({ id: request.id, ready: true, device, fallbackReason } satisfies EmbeddingResponse)
-      }, backendPreference, modelId)
-      port.postMessage({ id: request.id, vector, device: embeddingDevice() ?? undefined } as EmbeddingResponse)
+      const vector = await embedText(
+        request.text,
+        modelsDir,
+        (device, fallbackReason) => {
+          port.postMessage({
+            id: request.id,
+            ready: true,
+            device,
+            fallbackReason
+          } satisfies EmbeddingResponse)
+        },
+        backendPreference,
+        modelId,
+        modelReadDirectories
+      )
+      port.postMessage({
+        id: request.id,
+        vector,
+        device: embeddingDevice() ?? undefined
+      } as EmbeddingResponse)
     } catch (error) {
       port.postMessage({
         id: request.id,

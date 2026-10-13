@@ -40,13 +40,16 @@ const EMPTY: MeetingState = {
  * decisions and owns no timers that drive recording — so there are no stale closures
  * to leave a recording running (the old useEffect/captured-closure bug class is gone).
  */
-export function useMeetingRecorder(): MeetingRecorder {
+export function useMeetingRecorder(enabled = true): MeetingRecorder {
   const [st, setSt] = useState<MeetingState>(EMPTY)
   const [elapsed, setElapsed] = useState(0)
   const [warningSecondsLeft, setWarningSecondsLeft] = useState(0)
 
-  // Subscribe to the controller's broadcast + seed from current state on mount.
+  // Subscribe to the controller's broadcast + seed from current state. Re-seeds when meeting
+  // access opens (a newly activated Pro profile) and clears when it closes, so a Free profile
+  // never keeps a stale recording indicator.
   useEffect(() => {
+    if (!enabled) return undefined
     let alive = true
     api
       .meetingGetState?.()
@@ -58,16 +61,16 @@ export function useMeetingRecorder(): MeetingRecorder {
     return () => {
       alive = false
       off?.()
+      // Access closed (or the view unmounted): drop the last recording state with it.
+      setSt(EMPTY)
     }
-  }, [])
+  }, [enabled])
 
   // Display-only ticker derived from startedAt + warnUntil — drives nothing. The
   // controller polls every 10s, so the warning countdown is derived here so it actually
   // ticks down each second instead of showing a frozen "20s".
   useEffect(() => {
     if (!st.recording || !st.startedAt) {
-      setElapsed(0)
-      setWarningSecondsLeft(0)
       return
     }
     const tick = (): void => {
@@ -95,8 +98,8 @@ export function useMeetingRecorder(): MeetingRecorder {
   return {
     recording: st.recording,
     busy: st.busy,
-    elapsed,
-    warningSecondsLeft,
+    elapsed: st.recording ? elapsed : 0,
+    warningSecondsLeft: st.recording ? warningSecondsLeft : 0,
     platform: st.platform,
     error: st.error,
     start,

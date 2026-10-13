@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CATALOG, MODEL_KINDS, modelsByKind } from '@offgrid/models'
+import { withTaskRoles } from './harness/task-roles'
 
 const computerUseModels = modelsByKind('computer_use')
 const uiMate = computerUseModels.find((model) => model.id === 'bartowski/tencent_UI-Mate-9B-GGUF')
@@ -32,8 +33,26 @@ let activationRequests: Array<[string, string?]> = []
   cancelModelDownload: async () => true,
   searchModels: async () => [],
   getModelScanFolders: async () => [],
-  onModelProgress: () => () => {}
+  onModelProgress: () => () => {},
+  // Main's task projections: the Tasks tab draws them as lineups, and cards name their roles.
+  getComputerUseActiveModels: async () => ({
+    strategy: 'decision_plus_specialist',
+    strategyLabel: 'Decision + Reasoning + Specialist',
+    models: [
+      { role: 'decision', modelId: 'jaredpalmer/kev-4b', modelName: 'Kev 4B', remote: false },
+      { role: 'reasoner', modelId: 'remote/chat', modelName: 'Remote Chat Model', remote: true },
+      { role: 'grounding_specialist', modelId: uiMate.id, modelName: 'UI-Mate-9B', remote: false }
+    ]
+  }),
+  getWebUseActiveModels: async () => ({
+    strategy: 'separate_specialist',
+    strategyLabel: 'Specialist',
+    models: [
+      { role: 'grounding_specialist', modelId: uiMate.id, modelName: 'UI-Mate-9B', remote: false }
+    ]
+  })
 }
+withTaskRoles((globalThis as unknown as { window: { api: Record<string, unknown> } }).window.api)
 
 let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
 beforeAll(async () => {
@@ -54,12 +73,12 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     )
 
     expect(
-      (await screen.findByRole('button', { name: 'Computer Use' })).getAttribute('aria-current')
+      (await screen.findByRole('button', { name: 'Tasks' })).getAttribute('aria-current')
     ).toBe('page')
     for (const [label, subroute] of [
       ['Text', null],
       ['Image', 'image'],
-      ['Computer Use', 'computer-use'],
+      ['Tasks', 'computer-use'],
       ['Voice', 'voice'],
       ['Transcription', 'transcription'],
       ['Storage', 'storage']
@@ -73,16 +92,20 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     const user = userEvent.setup()
     render(<ModelsScreen />)
 
-    await user.click(await screen.findByRole('button', { name: 'Computer Use' }))
+    await user.click(await screen.findByRole('button', { name: 'Tasks' }))
 
-    const installed = await screen.findByRole('list', { name: 'Models on this device' })
-    const available = screen.getByRole('list', { name: 'Models available to download' })
+    const installed = await screen.findByRole('list', {
+      name: 'Grounding specialists on this device'
+    })
+    const available = screen.getByRole('list', {
+      name: 'Grounding specialists available to download'
+    })
     expect(within(installed).getByText('UI-Mate-9B')).toBeTruthy()
     expect(within(available).getByText('UI-TARS-1.5-7B')).toBeTruthy()
     expect(within(available).getByText('GUI-Owl-1.5-8B-Instruct')).toBeTruthy()
     expect(within(available).getByText('UI-Mate-27B')).toBeTruthy()
     expect(within(available).getByText('Holo3.1-4B')).toBeTruthy()
-    expect(screen.queryByRole('list', { name: 'Computer Use models coming soon' })).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Grounding specialists coming soon' })).toBeNull()
     expect(screen.getByText(`${computerUseModels.length} models`)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'All sources' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Any size' })).toBeTruthy()
@@ -95,7 +118,11 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     expect(screen.queryByText('UI-Mate-27B')).toBeNull()
 
     await user.click(screen.getByRole('button', { name: 'Clear' }))
-    expect(await screen.findByText('UI-Mate-9B')).toBeTruthy()
+    // The card, not the lineup above the cards, which names it too.
+    const onDevice = await screen.findByRole('list', {
+      name: 'Grounding specialists on this device'
+    })
+    expect(within(onDevice).getByText('UI-Mate-9B')).toBeTruthy()
     expect(screen.getByText('UI-TARS-1.5-7B')).toBeTruthy()
     expect(screen.getByText(`${computerUseModels.length} models`)).toBeTruthy()
 
@@ -104,7 +131,8 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     expect(within(holoCard as HTMLElement).getByRole('button', { name: 'Download' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Use' }))
-    expect(await screen.findByText('Active')).toBeTruthy()
+    // A task model names the role it now plays, not just "Active".
+    expect(await screen.findByText(/Grounding specialist · Web Use and Computer Use/)).toBeTruthy()
     expect(activationRequests.at(-1)).toEqual([uiMate.id, 'computer_use'])
 
     const uiTarsCard = screen.getByText('UI-TARS-1.5-7B').closest('[role="listitem"]')
@@ -122,10 +150,49 @@ describe('<ModelsScreen/> Computer Use catalog journey', () => {
     expect(screen.getByText('Qwen 3.8 9B Distill')).toBeTruthy()
     expect(screen.queryByText('GUI-Owl-1.5-8B-Instruct')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: 'Computer Use' }))
+    await user.click(screen.getByRole('button', { name: 'Tasks' }))
 
     expect(await screen.findByText('GUI-Owl-1.5-8B-Instruct')).toBeTruthy()
     expect(screen.queryByText('Qwen 3.8 4B Distill')).toBeNull()
     expect(screen.queryByText('Qwen 3.8 9B Distill')).toBeNull()
+  })
+
+  it('lists grounding specialists and decision models apart, each card saying its role', async () => {
+    activeIds = [uiMate.id]
+    // The desktop adds its decision models to the shared catalog; one stands in for them here.
+    const bridge = (globalThis as unknown as { window: { api: Record<string, unknown> } }).window.api
+    const catalog = bridge.getModelCatalog
+    bridge.getModelCatalog = async () => ({
+      kinds: MODEL_KINDS,
+      models: [
+        ...CATALOG,
+        {
+          id: 'synthetic/decider-2b',
+          name: 'Decider 2B',
+          kind: 'computer_use',
+          tags: ['Decision'],
+          files: [{ name: 'decider.gguf', role: 'primary', size: 1 }]
+        }
+      ]
+    })
+    const user = userEvent.setup()
+    render(<ModelsScreen />)
+    await user.click(await screen.findByRole('button', { name: 'Tasks' }))
+
+    const grounding = await screen.findByRole('region', { name: 'Grounding specialists' })
+    const decision = screen.getByRole('region', { name: 'Decision models' })
+    expect(within(grounding).queryByText('Decider 2B')).toBeNull()
+    expect(within(decision).getByText('Decider 2B')).toBeTruthy()
+    expect(within(decision).queryByText('UI-Mate-9B')).toBeNull()
+    // No lineup block here: the Tasks tab is cards, as the Text tab is.
+    expect(screen.queryByText('Working together now')).toBeNull()
+    // One model, two tasks: its card says so.
+    const installed = within(grounding).getByRole('list', {
+      name: 'Grounding specialists on this device'
+    })
+    expect(
+      within(installed).getByText(/Grounding specialist · Web Use and Computer Use/)
+    ).toBeTruthy()
+    bridge.getModelCatalog = catalog
   })
 })

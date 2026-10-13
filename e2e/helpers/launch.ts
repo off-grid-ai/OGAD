@@ -119,6 +119,9 @@ export interface LaunchOptions {
    *  fake helper in a temp dir and point the app at it. Ignored when
    *  packaged (resolution uses resourcesPath there). */
   cwd?: string
+  /** App entry for the DEV target, in place of the repo root (a fixture that patches a native
+   *  boundary and then starts out/main/index.js). Ignored when packaged. */
+  appEntry?: string
 }
 
 export const launchOffGrid = async (options: LaunchOptions = {}): Promise<ElectronApplication> => {
@@ -146,5 +149,9 @@ export const launchOffGrid = async (options: LaunchOptions = {}): Promise<Electr
   // assert free-tier UI stay unlicensed and deterministic.
   seedLicense(env)
   // The app path must stay absolute once a spec overrides cwd.
-  return electron.launch({ args: [path.resolve('.'), ...extraArgs], env, cwd: options.cwd })
+  return electron.launch({
+    args: [path.resolve(options.appEntry ?? '.'), ...extraArgs],
+    env,
+    cwd: options.cwd
+  })
 }

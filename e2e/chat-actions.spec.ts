@@ -77,7 +77,7 @@ async function enterChat(): Promise<void> {
     await setupBanner.locator('button').last().click()
   }
   await page.keyboard.press('Escape')
-  await expect(page.getByPlaceholder(/ask anything/i)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
 }
 
 async function seedRenameJourney(): Promise<void> {
@@ -148,15 +148,17 @@ test('renames through the UI, navigates back, and restores the title after relau
 
   const targetRow = conversationRow(RENAME_BEFORE)
   await targetRow.hover()
-  await targetRow.getByRole('button', { name: `Conversation actions for ${RENAME_BEFORE}` }).click()
+  await targetRow
+    .getByRole('button', { name: `Conversation actions for ${RENAME_BEFORE}`, exact: true })
+    .click()
   await page.getByRole('menuitem', { name: 'Rename' }).click()
   const renameInput = page.getByRole('textbox', { name: 'Rename conversation' })
   await expect(renameInput).toBeFocused()
   await renameInput.fill(`  ${RENAME_AFTER}  `)
-  await page.getByRole('button', { name: 'Save conversation name' }).click()
+  await page.getByRole('button', { name: 'Save conversation name', exact: true }).click()
 
   await expect(
-    page.getByRole('button', { name: `Conversation actions for ${RENAME_AFTER}` })
+    page.getByRole('button', { name: `Conversation actions for ${RENAME_AFTER}`, exact: true })
   ).toBeVisible()
   await expect(page.getByText(RENAME_BEFORE, { exact: true })).toHaveCount(0)
 
@@ -180,7 +182,7 @@ test('renames through the UI, navigates back, and restores the title after relau
   await enterChat()
 
   await expect(
-    page.getByRole('button', { name: `Conversation actions for ${RENAME_AFTER}` })
+    page.getByRole('button', { name: `Conversation actions for ${RENAME_AFTER}`, exact: true })
   ).toBeVisible()
   await conversationRow(RENAME_AFTER).click()
   await expect(page.getByText(RENAME_MESSAGE, { exact: true }).last()).toBeVisible()
@@ -207,12 +209,17 @@ test('copies an assistant reply through production IPC to the real OS clipboard 
   await expect(replyInTranscript).toBeVisible()
 
   await app!.evaluate(({ clipboard }) => clipboard.writeText('synthetic clipboard sentinel'))
+  // Copy lives in the reply's Message actions menu.
   const assistantTurn = replyInTranscript.locator(
-    'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " mb-5 ")][1]'
+    'xpath=ancestor::div[.//button[@aria-label="Message actions"]][1]'
   )
-  await assistantTurn.getByTitle('Copy').click()
+  const actionsMenu = assistantTurn.getByRole('button', { name: 'Message actions', exact: true })
+  await actionsMenu.click()
+  await page.getByRole('menuitem', { name: 'Copy', exact: true }).click()
 
-  await expect(assistantTurn.getByText('Copied', { exact: true })).toBeVisible()
+  await actionsMenu.click()
+  await expect(page.getByRole('menuitem', { name: 'Copied', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await expect
     .poll(() => app!.evaluate(({ clipboard }) => clipboard.readText()))
     .toBe(COPY_ASSISTANT_MESSAGE)

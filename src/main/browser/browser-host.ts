@@ -640,6 +640,9 @@ class BrowserHost implements BrowserRailHost {
         broadcast('browser:task-state', { sessionId: record.sessionId, ...record.task })
         return true
       }
+      // A live task without a local page may belong to the paired browser. Opening its
+      // details must not allocate a second browser view or navigate a duplicate page.
+      if (['running', 'paused', 'waiting', 'reconnecting'].includes(saved.status)) return false
       // A Chat journey can contain many tasks. Its live page belongs to the
       // newest task pointer, so never reuse it as evidence for an older task.
       // Historical fallback gets an isolated page keyed by task ID.
@@ -827,6 +830,7 @@ class BrowserHost implements BrowserRailHost {
       } satisfies BrowserTaskState)
       broadcast('browser:step', { sessionId: record.sessionId, taskId, journeyId, note })
     }
+    if (request.notice) recordStep(request.notice)
     releaseSession = registerVisionSession(
       taskId,
       guard,

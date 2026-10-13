@@ -1,6 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -11,8 +10,6 @@ const root = path.resolve(import.meta.dirname, '../../..')
 const electronVite = path.join(root, 'node_modules', '.bin', 'electron-vite')
 const tempRoots: string[] = []
 const execFileAsync = promisify(execFile)
-const require = createRequire(import.meta.url)
-const { getConfig: getEffectiveBuilderConfig } = require('app-builder-lib/out/util/config/config')
 const BUILD_TIMEOUT_MS = 90_000
 
 function tempDir(prefix: string): string {
@@ -185,6 +182,7 @@ printf '    /usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current ver
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
       LLAMA_REF: 'fixture-ref',
+      LLAMA_ARCH: 'arm64',
       MACOS_DEPLOYMENT_TARGET: '13.0',
       OFFGRID_BUILD_ROOT: sandbox
     },
@@ -264,60 +262,17 @@ describe.sequential('release packaging integration', () => {
     expect(pro).toContain('vault:status')
   })
 
-  it('keeps the helper payload hydrated and executable before electron-builder copies it', async () => {
-    const builder = fs.readFileSync(path.join(root, 'electron-builder.yml'), 'utf8')
-    expect(builder).toContain("- '!pro/**'")
-    expect(builder).toContain('extends: scripts/config/electron-builder-runtime.yml')
-
-    const effectiveConfig = (await getEffectiveBuilderConfig(
-      root,
-      path.join(root, 'electron-builder.yml'),
-      null
-    )) as {
-      extraResources?: Array<{ from?: string; filter?: string[] }>
-      mac?: { extraResources?: Array<{ from?: string; to?: string }> }
-      win?: { extraResources?: Array<{ from?: string; to?: string }> }
-      linux?: { extraResources?: Array<{ from?: string; to?: string }> }
-    }
-    expect(effectiveConfig.extraResources).toEqual([
-      {
-        from: 'resources',
-        filter: ['**/*', '!models/**', '!bin/**', '!tts-worker.mjs']
-      }
-    ])
-    expect(effectiveConfig.mac?.extraResources).toContainEqual({ from: 'resources/bin', to: 'bin' })
-    expect(effectiveConfig.win?.extraResources).toContainEqual({ from: 'resources/bin', to: 'bin' })
-    expect(effectiveConfig.linux?.extraResources).toContainEqual({
-      from: 'build/linux-bin',
-      to: 'bin'
-    })
-    expect(effectiveConfig.linux?.extraResources).toContainEqual({
-      from: '../executorch-speech/native/bin/executorch-speech',
-      to: 'bin/executorch-speech'
-    })
-    expect(effectiveConfig.linux?.extraResources).toContainEqual({
-      from: '../executorch-speech/generated/default-assets',
-      to: 'speech-assets'
-    })
-
-    const helpers = [
-      'bin/llama/llama-server',
-      'bin/ffmpeg',
-      'bin/whisper/whisper-cli',
-      'bin/llama/libggml.0.dylib'
-    ]
-    for (const relative of helpers) {
-      const file = path.join(root, 'resources', relative)
-      const stat = fs.statSync(file)
-      const prefix = fs.readFileSync(file).subarray(0, 200).toString('utf8')
-      expect(stat.isFile(), relative).toBe(true)
-      expect(stat.size, relative).toBeGreaterThan(200)
-      expect(prefix, relative).not.toContain('git-lfs.github.com/spec')
-    }
-
-    for (const relative of helpers.slice(0, 3)) {
-      expect(fs.statSync(path.join(root, 'resources', relative)).mode & 0o111, relative).not.toBe(0)
-    }
+  it('stages an executable helper payload before packaging', () => {
+    const result = runBuildLlama('healthy')
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
+    const helper = path.join(result.sandbox, 'resources', 'bin', 'llama', 'llama-server')
+    const stat = fs.statSync(helper)
+    expect(stat.isFile()).toBe(true)
+    expect(stat.size).toBeGreaterThan(0)
+    expect(stat.mode & 0o111).not.toBe(0)
+    expect(fs.readFileSync(helper, 'utf8')).not.toContain('git-lfs.github.com/spec')
+    const launched = spawnSync(helper, ['--help'], { encoding: 'utf8' })
+    expect(launched.status, launched.stderr).toBe(0)
   })
 
   it('stages exact dylib names as real files and accepts a closed llama dependency graph', () => {

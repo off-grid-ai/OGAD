@@ -24,12 +24,15 @@ import {
 import { SettingsRow } from './SettingsRow'
 import { SettingsSelect } from './SettingsSelect'
 import { BackendPreferencesSection } from './ProcessingControls'
+import { SettingsSection } from './SettingsSection'
 import { LoadingDots } from './ui/loading-dots'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { formatStorageBytes } from './setup/storage-format'
 
 type AssetsState = 'loading' | 'checking' | 'downloading' | 'ready' | 'error'
+/** A download that reports nothing for this long has stopped; offer Retry instead of waiting. */
+const VOICE_DOWNLOAD_STALL_MS = 30_000
 type TestState = 'idle' | 'generating' | 'playing' | 'error'
 interface VoiceAssetProgress {
   percentage: number | null
@@ -166,15 +169,31 @@ export function VoiceSettingsTab(): React.JSX.Element {
       })
   }, [remoteVoice, settingsLoaded, voice, voices])
 
+  // Every progress report restarts the clock, so only a download that has gone quiet times out,
+  // for example one that sits at 100% with 0 MB of 0 MB.
+  useEffect(() => {
+    if (assetsState !== 'downloading') return
+    const timer = window.setTimeout(() => {
+      setVoiceLoadError('The voice download stopped. Retry to download it again.')
+      setAssetsState('error')
+    }, VOICE_DOWNLOAD_STALL_MS)
+    return () => window.clearTimeout(timer)
+  }, [assetsState, progress])
+
   useEffect(() => {
     if (!settingsLoaded || !voices.length || voices.some(({ id }) => id === voice)) return
     if (assetsState !== 'ready' && (remoteVoice || assetsState !== 'loading')) return
-    const fallback = (remoteVoice
-      ? voices.find((candidate) => candidate.language === language)
-      : firstRuntimeVoiceForLanguage(voices, language)) ?? voices[0]
+    const fallback =
+      (remoteVoice
+        ? voices.find((candidate) => candidate.language === language)
+        : firstRuntimeVoiceForLanguage(voices, language)) ?? voices[0]
     if (!fallback) return
     setVoice(fallback.id)
-    setLanguage(remoteVoice && !fallback.language ? 'en-US' : runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
+    setLanguage(
+      remoteVoice && !fallback.language
+        ? 'en-US'
+        : (runtimeVoiceLanguage(fallback)?.code ?? 'en-US')
+    )
     void Promise.resolve(window.api.saveSetting('ttsVoice', fallback.id)).catch(() => {})
   }, [assetsState, language, remoteVoice, settingsLoaded, voice, voices])
 
@@ -199,23 +218,33 @@ export function VoiceSettingsTab(): React.JSX.Element {
   )
 
   const availableLanguages = useMemo(
-    () => runtimeSpeechLanguages(remoteVoice
-      ? voices.filter((candidate) => candidate.language)
-      : voices.length ? voices : [{ id: voice }]),
+    () =>
+      runtimeSpeechLanguages(
+        remoteVoice
+          ? voices.filter((candidate) => candidate.language)
+          : voices.length
+            ? voices
+            : [{ id: voice }]
+      ),
     [remoteVoice, voice, voices]
   )
   const showLanguage = !remoteVoice || availableLanguages.length > 1
   const filteredVoices = useMemo(
-    () => remoteVoice
-      ? showLanguage ? voices.filter((candidate) => !candidate.language || candidate.language === language) : voices
-      : runtimeVoicesForLanguage(voices.length ? voices : [{ id: voice }], language),
+    () =>
+      remoteVoice
+        ? showLanguage
+          ? voices.filter((candidate) => !candidate.language || candidate.language === language)
+          : voices
+        : runtimeVoicesForLanguage(voices.length ? voices : [{ id: voice }], language),
     [language, remoteVoice, showLanguage, voice, voices]
   )
 
   useEffect(() => {
     const selected = voices.find(({ id }) => id === voice)
-    const selectedLanguage = selected && (!remoteVoice || selected.language)
-      ? runtimeVoiceLanguage(selected)?.code : undefined
+    const selectedLanguage =
+      selected && (!remoteVoice || selected.language)
+        ? runtimeVoiceLanguage(selected)?.code
+        : undefined
     if (selectedLanguage && selectedLanguage !== language) setLanguage(selectedLanguage)
   }, [language, remoteVoice, voice, voices])
 
@@ -223,7 +252,11 @@ export function VoiceSettingsTab(): React.JSX.Element {
     const previous = { voice, language }
     const runtimeVoice = voices.find(({ id }) => id === nextVoice) ?? { id: nextVoice }
     setVoice(nextVoice)
-    setLanguage(remoteVoice && !runtimeVoice.language ? language : runtimeVoiceLanguage(runtimeVoice)?.code ?? language)
+    setLanguage(
+      remoteVoice && !runtimeVoice.language
+        ? language
+        : (runtimeVoiceLanguage(runtimeVoice)?.code ?? language)
+    )
     void Promise.resolve(window.api.saveSetting('ttsVoice', nextVoice)).catch(() => {
       setVoice(previous.voice)
       setLanguage(previous.language)
@@ -231,9 +264,11 @@ export function VoiceSettingsTab(): React.JSX.Element {
   }
 
   const pickLanguage = (nextLanguage: string): void => {
-    const matching = (remoteVoice
-      ? voices.find((candidate) => candidate.language === nextLanguage)
-      : firstRuntimeVoiceForLanguage(voices, nextLanguage))?.id
+    const matching = (
+      remoteVoice
+        ? voices.find((candidate) => candidate.language === nextLanguage)
+        : firstRuntimeVoiceForLanguage(voices, nextLanguage)
+    )?.id
     if (!matching) return
     setLanguage(nextLanguage)
     pickVoice(matching)
@@ -242,7 +277,10 @@ export function VoiceSettingsTab(): React.JSX.Element {
   const testVoice = async (): Promise<void> => {
     setTestState('generating')
     try {
-      const result = await window.api.speak('This is the Off Grid AI voice.', voices.length ? voice : undefined)
+      const result = await window.api.speak(
+        'This is the Off Grid AI voice.',
+        voices.length ? voice : undefined
+      )
       if (!result?.dataUrl) throw new Error('No audio returned')
       const audio = new Audio(result.dataUrl)
       testAudioRef.current = audio
@@ -258,218 +296,269 @@ export function VoiceSettingsTab(): React.JSX.Element {
 
   const turnDescription = VOICE_TURN_LABELS[preferences.turnMode].description
   const assetProgress = projectProgress(progress)
+  const turnLabel = VOICE_TURN_LABELS[preferences.turnMode].label
+  const conversationSummary = preferences.voiceMode
+    ? `Voice notes · ${turnLabel} turns`
+    : `Chat · playback ${preferences.ttsEnabled ? 'on' : 'off'} · ${turnLabel} turns`
+  const selectedVoice = voices.find(({ id }) => id === voice)
+  const voiceName =
+    remoteVoice && !voices.length
+      ? 'Remote model voice'
+      : (selectedVoice?.label ?? kokoroVoiceLabel(voice))
+  const languageName = availableLanguages.find((item) => item.code === language)?.label
+  const speechSummary = [
+    voiceName,
+    showLanguage ? languageName : undefined,
+    `speaks at ${preferences.speed.toFixed(1)}x`
+  ]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <>
-      <SettingsRow
-        label="Interface mode"
-        hint={
-          preferences.voiceMode
-            ? 'Responses appear as voice notes.'
-            : 'Responses appear as text with optional playback.'
-        }
+      <SettingsSection
+        id="voice.conversation"
+        title="Conversation"
+        summary={conversationSummary}
+        defaultOpen
       >
-        <PreferenceButtons
-          label="Interface mode"
-          options={[
-            { id: 'chat', label: 'Chat' },
-            { id: 'voice', label: 'Voice' }
-          ]}
-          selected={preferences.voiceMode ? 'voice' : 'chat'}
-          onSelect={(value) =>
-            persistPreference('voiceMode', value === 'voice', 'composerVoiceMode')
-          }
-        />
-      </SettingsRow>
-
-      {!preferences.voiceMode ? (
-        <SettingsRow label="Text-to-speech" hint="Show playback on assistant messages.">
-          <PreferenceButtons
-            label="Text-to-speech"
-            options={[
-              { id: 'on', label: 'On' },
-              { id: 'off', label: 'Off' }
-            ]}
-            selected={preferences.ttsEnabled ? 'on' : 'off'}
-            onSelect={(value) => persistPreference('ttsEnabled', value === 'on', 'ttsEnabled')}
-          />
-        </SettingsRow>
-      ) : null}
-
-      <SettingsRow label="Voice turns" hint={turnDescription}>
-        <PreferenceButtons
-          label="Voice turns"
-          options={TURN_ORDER.map((id) => ({ id, label: VOICE_TURN_LABELS[id].label }))}
-          selected={preferences.turnMode}
-          onSelect={(value) => persistPreference('turnMode', value, 'composerVoiceTurnMode')}
-        />
-      </SettingsRow>
-
-      {preferences.turnMode !== 'tap' ? (
         <SettingsRow
-          label={VOICE_DELAY_LABELS.silenceAfterSpeech.label}
-          hint={VOICE_DELAY_LABELS.silenceAfterSpeech.description}
+          label="Interface mode"
+          hint={
+            preferences.voiceMode
+              ? 'Responses appear as voice notes.'
+              : 'Responses appear as text with optional playback.'
+          }
         >
           <PreferenceButtons
-            label={VOICE_DELAY_LABELS.silenceAfterSpeech.label}
-            options={SILENCE_AFTER_SPEECH_CHOICES_MS.map((id) => ({ id, label: secondsLabel(id) }))}
-            selected={preferences.silenceAfterSpeechMs}
+            label="Interface mode"
+            options={[
+              { id: 'chat', label: 'Chat' },
+              { id: 'voice', label: 'Voice' }
+            ]}
+            selected={preferences.voiceMode ? 'voice' : 'chat'}
             onSelect={(value) =>
-              persistPreference('silenceAfterSpeechMs', value, 'voiceSilenceAfterSpeechMs')
+              persistPreference('voiceMode', value === 'voice', 'composerVoiceMode')
             }
           />
         </SettingsRow>
-      ) : null}
 
-      {preferences.turnMode === 'handsfree' ? (
-        <SettingsRow
-          label={VOICE_DELAY_LABELS.speakerDrain.label}
-          hint={VOICE_DELAY_LABELS.speakerDrain.description}
-        >
+        {!preferences.voiceMode ? (
+          <SettingsRow label="Text-to-speech" hint="Show playback on assistant messages.">
+            <PreferenceButtons
+              label="Text-to-speech"
+              options={[
+                { id: 'on', label: 'On' },
+                { id: 'off', label: 'Off' }
+              ]}
+              selected={preferences.ttsEnabled ? 'on' : 'off'}
+              onSelect={(value) => persistPreference('ttsEnabled', value === 'on', 'ttsEnabled')}
+            />
+          </SettingsRow>
+        ) : null}
+
+        <SettingsRow label="Voice turns" hint={turnDescription}>
           <PreferenceButtons
-            label={VOICE_DELAY_LABELS.speakerDrain.label}
-            options={SPEAKER_DRAIN_CHOICES_MS.map((id) => ({ id, label: secondsLabel(id) }))}
-            selected={preferences.speakerDrainMs}
-            onSelect={(value) => persistPreference('speakerDrainMs', value, 'voiceSpeakerDrainMs')}
+            label="Voice turns"
+            options={TURN_ORDER.map((id) => ({ id, label: VOICE_TURN_LABELS[id].label }))}
+            selected={preferences.turnMode}
+            onSelect={(value) => persistPreference('turnMode', value, 'composerVoiceTurnMode')}
           />
         </SettingsRow>
-      ) : null}
 
-      {showLanguage && <SettingsRow
-        label="Language"
-        controlId="tts-language"
-        hint={remoteVoice
-          ? 'Choose the language for spoken replies.'
-          : 'Choose the language for spoken replies. Audio files download once on first use.'}
-      >
-        <SettingsSelect
-          id="tts-language"
-          label="Language selection"
-          value={language}
-          onValueChange={pickLanguage}
-          disabled={assetsState === 'loading' || assetsState === 'downloading'}
-          options={availableLanguages.map((item) => ({
-            value: item.code,
-            label: item.label
-          }))}
-        />
-      </SettingsRow>}
+        {preferences.turnMode !== 'tap' ? (
+          <SettingsRow
+            label={VOICE_DELAY_LABELS.silenceAfterSpeech.label}
+            hint={VOICE_DELAY_LABELS.silenceAfterSpeech.description}
+          >
+            <PreferenceButtons
+              label={VOICE_DELAY_LABELS.silenceAfterSpeech.label}
+              options={SILENCE_AFTER_SPEECH_CHOICES_MS.map((id) => ({
+                id,
+                label: secondsLabel(id)
+              }))}
+              selected={preferences.silenceAfterSpeechMs}
+              onSelect={(value) =>
+                persistPreference('silenceAfterSpeechMs', value, 'voiceSilenceAfterSpeechMs')
+              }
+            />
+          </SettingsRow>
+        ) : null}
 
-      {miniMaxSpeech28 && !showLanguage && (
+        {preferences.turnMode === 'handsfree' ? (
+          <SettingsRow
+            label={VOICE_DELAY_LABELS.speakerDrain.label}
+            hint={VOICE_DELAY_LABELS.speakerDrain.description}
+          >
+            <PreferenceButtons
+              label={VOICE_DELAY_LABELS.speakerDrain.label}
+              options={SPEAKER_DRAIN_CHOICES_MS.map((id) => ({ id, label: secondsLabel(id) }))}
+              selected={preferences.speakerDrainMs}
+              onSelect={(value) =>
+                persistPreference('speakerDrainMs', value, 'voiceSpeakerDrainMs')
+              }
+            />
+          </SettingsRow>
+        ) : null}
+      </SettingsSection>
+
+      <SettingsSection id="voice.speech" title="Voice" summary={speechSummary} defaultOpen>
+        {showLanguage && (
+          <SettingsRow
+            label="Language"
+            controlId="tts-language"
+            hint={
+              remoteVoice
+                ? 'Choose the language for spoken replies.'
+                : 'Choose the language for spoken replies. Audio files download once on first use.'
+            }
+          >
+            <SettingsSelect
+              id="tts-language"
+              label="Language selection"
+              value={language}
+              onValueChange={pickLanguage}
+              disabled={assetsState === 'loading' || assetsState === 'downloading'}
+              options={availableLanguages.map((item) => ({
+                value: item.code,
+                label: item.label
+              }))}
+            />
+          </SettingsRow>
+        )}
+
+        {miniMaxSpeech28 && !showLanguage && (
+          <SettingsRow
+            label="Language"
+            value="Automatic"
+            hint="MiniMax can speak 40 languages. It uses the language of the reply text; OpenRouter lists English-named speakers for this model."
+          >
+            {null}
+          </SettingsRow>
+        )}
+
+        {assetsState === 'loading' || assetsState === 'checking' ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
+          >
+            <LoadingDots />
+            {assetsState === 'loading' ? 'Loading voices...' : 'Checking voice files...'}
+          </div>
+        ) : assetsState === 'downloading' ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
+          >
+            <LoadingDots />
+            Downloading {runtimeVoiceLanguage({ id: voice })?.label ?? language} audio
+            {assetProgress.determinate ? ` - ${Math.round(assetProgress.percentage ?? 0)}%` : '...'}
+            {assetProgress.totalBytes
+              ? ` · ${formatStorageBytes(assetProgress.currentBytes)} / ${formatStorageBytes(assetProgress.totalBytes)}`
+              : ''}
+            {assetProgress.bytesPerSecond !== undefined
+              ? ` · ${formatTransferSpeed(assetProgress.bytesPerSecond)}`
+              : ''}
+          </div>
+        ) : assetsState === 'error' ? (
+          <div
+            role="alert"
+            className="mb-4 flex items-center justify-between gap-3 text-xs text-red-400"
+          >
+            <span>{voiceLoadError}</span>
+            <button
+              type="button"
+              onClick={loadVoices}
+              className="rounded-md border border-red-500/50 px-2.5 py-1 text-red-300"
+            >
+              Retry
+            </button>
+          </div>
+        ) : remoteVoice && !voices.length ? (
+          <p role="status" className="mb-4 text-xs text-neutral-500">
+            Speaker choices are not available for this remote model.
+          </p>
+        ) : (
+          <p role="status" className="mb-4 text-xs text-neutral-500">
+            {remoteVoice
+              ? 'Speaker selected.'
+              : `${runtimeVoiceLanguage({ id: voice })?.label ?? language} voice ready.`}
+          </p>
+        )}
+
+        {(!remoteVoice || voices.length > 0) && (
+          <SettingsRow
+            label="Voice"
+            controlId="tts-voice"
+            hint={
+              showLanguage
+                ? 'Voices available for the selected language.'
+                : 'Speakers for the selected model.'
+            }
+          >
+            <SettingsSelect
+              id="tts-voice"
+              label="Voice selection"
+              value={voice}
+              onValueChange={pickVoice}
+              disabled={assetsState !== 'ready'}
+              options={filteredVoices.map(({ id, label }) => ({
+                value: id,
+                label: label ?? kokoroVoiceLabel(id)
+              }))}
+            />
+          </SettingsRow>
+        )}
+
         <SettingsRow
-          label="Language"
-          value="Automatic"
-          hint="MiniMax can speak 40 languages. It uses the language of the reply text; OpenRouter lists English-named speakers for this model."
+          label="Playback speed"
+          value={`${preferences.speed.toFixed(1)}x`}
+          controlId="tts-speed"
         >
-          {null}
+          <input
+            id="tts-speed"
+            type="range"
+            min={0.5}
+            max={2}
+            step={0.1}
+            value={preferences.speed}
+            onChange={(event) =>
+              setPreferences((current) => ({ ...current, speed: Number(event.target.value) }))
+            }
+            onBlur={(event) => persistPreference('speed', Number(event.target.value), 'ttsSpeed')}
+            className="w-full accent-green-500"
+          />
         </SettingsRow>
-      )}
 
-      {assetsState === 'loading' || assetsState === 'checking' ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
-        >
-          <LoadingDots />
-          {assetsState === 'loading' ? 'Loading voices...' : 'Checking voice files...'}
-        </div>
-      ) : assetsState === 'downloading' ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="mb-4 flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-3.5 py-2.5 text-xs text-neutral-400"
-        >
-          <LoadingDots />
-          Downloading {runtimeVoiceLanguage({ id: voice })?.label ?? language} audio
-          {assetProgress.determinate ? ` - ${Math.round(assetProgress.percentage ?? 0)}%` : '...'}
-          {assetProgress.totalBytes !== undefined
-            ? ` · ${formatStorageBytes(assetProgress.currentBytes)} / ${formatStorageBytes(assetProgress.totalBytes)}`
-            : ''}
-          {assetProgress.bytesPerSecond !== undefined
-            ? ` · ${formatTransferSpeed(assetProgress.bytesPerSecond)}`
-            : ''}
-        </div>
-      ) : assetsState === 'error' ? (
-        <div
-          role="alert"
-          className="mb-4 flex items-center justify-between gap-3 text-xs text-red-400"
-        >
-          <span>{voiceLoadError}</span>
+        <div className="pb-3">
           <button
             type="button"
-            onClick={loadVoices}
-            className="rounded-md border border-red-500/50 px-2.5 py-1 text-red-300"
+            onClick={() => void testVoice()}
+            disabled={testState === 'generating' || testState === 'playing'}
+            className="rounded-md bg-green-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-green-500 disabled:opacity-40"
           >
-            Retry
+            {testState === 'generating'
+              ? 'Generating...'
+              : testState === 'playing'
+                ? 'Playing...'
+                : 'Test voice'}
           </button>
+          {testState === 'error' ? (
+            <span className="ml-2 text-[11px] text-red-400">
+              Could not play this voice. Check your audio output and retry.
+            </span>
+          ) : null}
         </div>
-      ) : remoteVoice && !voices.length ? (
-        <p role="status" className="mb-4 text-xs text-neutral-500">
-          Speaker choices are not available for this remote model.
-        </p>
-      ) : (
-        <p role="status" className="mb-4 text-xs text-neutral-500">
-          {remoteVoice ? 'Speaker selected.' : `${runtimeVoiceLanguage({ id: voice })?.label ?? language} voice ready.`}
-        </p>
-      )}
+      </SettingsSection>
 
-      {(!remoteVoice || voices.length > 0) && <SettingsRow
-        label="Voice"
-        controlId="tts-voice"
-        hint={showLanguage ? 'Voices available for the selected language.' : 'Speakers for the selected model.'}
+      <SettingsSection
+        id="voice.processing"
+        title="Processing"
+        summary="The hardware that speaks replies on this device"
       >
-        <SettingsSelect
-          id="tts-voice"
-          label="Voice selection"
-          value={voice}
-          onValueChange={pickVoice}
-          disabled={assetsState !== 'ready'}
-          options={filteredVoices.map(({ id, label }) => ({
-            value: id,
-            label: label ?? kokoroVoiceLabel(id)
-          }))}
-        />
-      </SettingsRow>}
-
-      <BackendPreferencesSection modalities={['tts']} />
-
-      <SettingsRow
-        label="Playback speed"
-        value={`${preferences.speed.toFixed(1)}x`}
-        controlId="tts-speed"
-      >
-        <input
-          id="tts-speed"
-          type="range"
-          min={0.5}
-          max={2}
-          step={0.1}
-          value={preferences.speed}
-          onChange={(event) =>
-            setPreferences((current) => ({ ...current, speed: Number(event.target.value) }))
-          }
-          onBlur={(event) => persistPreference('speed', Number(event.target.value), 'ttsSpeed')}
-          className="w-full accent-green-500"
-        />
-      </SettingsRow>
-
-      <button
-        type="button"
-        onClick={() => void testVoice()}
-        disabled={testState === 'generating' || testState === 'playing'}
-        className="rounded-md bg-green-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-green-500 disabled:opacity-40"
-      >
-        {testState === 'generating'
-          ? 'Generating...'
-          : testState === 'playing'
-            ? 'Playing...'
-            : 'Test voice'}
-      </button>
-      {testState === 'error' ? (
-        <span className="ml-2 text-[11px] text-red-400">
-          Could not play this voice. Check your audio output and retry.
-        </span>
-      ) : null}
+        <BackendPreferencesSection modalities={['tts']} />
+      </SettingsSection>
     </>
   )
 }

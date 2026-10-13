@@ -9,6 +9,7 @@ type GenerationState = 'idle' | 'running' | 'cancelled'
  */
 export class ImageGenerationLifecycle {
   private state: GenerationState = 'idle'
+  private releaseAbortListener?: () => void
 
   isRunning(): boolean {
     return this.state !== 'idle'
@@ -18,11 +19,20 @@ export class ImageGenerationLifecycle {
     return this.state === 'cancelled'
   }
 
-  start(): void {
+  start(signal?: AbortSignal, cancelRuntime?: () => void): void {
+    if (signal?.aborted) throw new Error(IMAGE_CANCELLED_MESSAGE)
     if (this.isRunning()) {
       throw new Error('An image is already generating — please wait for it to finish.')
     }
     this.state = 'running'
+    if (signal) {
+      const abort = (): void => {
+        this.cancel()
+        cancelRuntime?.()
+      }
+      signal.addEventListener('abort', abort, { once: true })
+      this.releaseAbortListener = () => signal.removeEventListener('abort', abort)
+    }
   }
 
   cancel(): boolean {
@@ -32,6 +42,8 @@ export class ImageGenerationLifecycle {
   }
 
   finish(): void {
+    this.releaseAbortListener?.()
+    this.releaseAbortListener = undefined
     this.state = 'idle'
   }
 

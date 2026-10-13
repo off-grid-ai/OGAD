@@ -20,14 +20,14 @@ case "$VARIANT" in
     REF="${LLAMA_REF:-$(node -p "require('$ROOT/package.json').offgrid.llamaRef")}"
     REPO=ggml-org/llama.cpp
     DIR=llama
-    if [ "$REF" != b11056 ]; then
+    if [ "$REF" != b11532 ]; then
       echo '[build-llama-linux] update the pinned standard archive hashes for the new ref' >&2
       exit 1
     fi
     case "$ACCELERATOR" in
-      cuda) SHA256=bc44772a8186efa778d8ed8ccf74964d42afd04d5b032f6f3a9076820cd2de70 ;;
-      vulkan) SHA256=9edceb8555da0bb24fe4f7fa531954461a17c3ac32a674d96ecaf0a6321305c8 ;;
-      cpu) SHA256=74936888e975064d07e352745237508d4bef08d4b51843b01d011d58a4c4601a ;;
+      cuda) SHA256=7fb7cc87eba8ffedebc0fbe8acf0bacc628a9f6596260f7fa2aa28b387222e3b ;;
+      vulkan) SHA256=dfd641b1c69e0e9d4c232928f62dcfc2d681d62cf553ad7891468369383a1d81 ;;
+      cpu) SHA256=a3190cc22e1a0bab319c5eef1cedc8e346cfa690e173725ba97f92e4a150c4e2 ;;
       *) echo "[build-llama-linux] unknown accelerator: $ACCELERATOR" >&2; exit 1 ;;
     esac
     ;;
@@ -35,14 +35,14 @@ case "$VARIANT" in
     REF="${PRISM_LLAMA_REF:-$(node -p "require('$ROOT/package.json').offgrid.prismLlamaRef")}"
     REPO=PrismML-Eng/llama.cpp
     DIR=llama-prism
-    if [ "$REF" != prism-b10709-9a9394a ]; then
+    if [ "$REF" != prism-b10754-2459f68 ]; then
       echo '[build-llama-linux] update the pinned Prism archive hashes for the new ref' >&2
       exit 1
     fi
     case "$ACCELERATOR" in
-      cuda) SHA256=8aec67eb023b251712c7e6490f367b5671bf587eced1436a9b85f4a90c3b7d3d ;;
-      vulkan) SHA256=4d7f858539d0207cf64e90beb83fcb7e076580d52856580f223cbecdd3ef6d03 ;;
-      cpu) SHA256=48b487f00fd2b27bc3ef77c701b43c1c23a4af484d2a203ae87d0efc41506728 ;;
+      cuda) SHA256=f2c74401fc2425659588b4b52868c6d0dad5654b5ba2549ca34ef852312db9af ;;
+      vulkan) SHA256=32f871a8a2aae73c813255f0b72b64cc5e5aa6f7f6b764f173ce7332bd28c44d ;;
+      cpu) SHA256=348aeed3ef5ad801d460c9d41c2a18125438f8e5f058dfda5d0602f919ad098d ;;
       *) echo "[build-llama-linux] unknown accelerator: $ACCELERATOR" >&2; exit 1 ;;
     esac
     ;;

@@ -14,7 +14,7 @@ function systemPrefersDark(): boolean {
 
 export function getThemeMode(): ThemeMode {
   const v = localStorage.getItem(KEY) as ThemeMode | null
-  return v === 'light' || v === 'dark' || v === 'system' ? v : 'system'
+  return v === 'light' || v === 'dark' || v === 'system' ? v : 'dark'
 }
 
 export function resolveTheme(mode: ThemeMode): 'light' | 'dark' {

@@ -178,6 +178,11 @@ export function noteChatStreamToolCompleted(
   if (!stream) return
   stream.tools = completeChatStreamTool(stream.tools, name, result, status)
   publish(streamId)
+  try {
+    callHook(HOOKS.actionsObserveChatToolResult, stream.conversationId, { name, status, result })
+  } catch {
+    // An approval projection must not interrupt the Chat stream.
+  }
 }
 
 /**

@@ -573,6 +573,10 @@ export async function autoConfigure(
         emit({ phase: 'activate', message: `Activating ${item.name}...`, modelId: item.id })
         const result = await setActiveModel(item.id)
         if (!result.success) return fail(result.error ?? 'Activation failed.', item.id)
+        // A fresh install picks the fastest settings for this hardware before its first launch.
+        await import('./best-settings')
+          .then((m) => m.ensureBestSettings())
+          .catch((error: unknown) => console.warn('[best-settings] setup check failed', error))
         emit({ phase: 'start', message: 'Starting the local model server...', modelId: item.id })
         await llm.restart()
         emit({ phase: 'verify', message: 'Verifying...', modelId: item.id })

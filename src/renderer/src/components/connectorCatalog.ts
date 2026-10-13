@@ -186,7 +186,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     color: '#172B4D',
     letter: 'C',
     transport: 'http',
-    url: 'https://mcp.atlassian.com/v1/mcp',
+    url: 'https://mcp.atlassian.com/v2/mcp',
     auth: 'oauth',
     docsUrl: 'https://www.atlassian.com/blog/announcements/remote-mcp-server',
     ready: false
@@ -244,7 +244,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     color: '#0052CC',
     letter: 'J',
     transport: 'http',
-    url: 'https://mcp.atlassian.com/v1/mcp',
+    url: 'https://mcp.atlassian.com/v2/mcp',
     auth: 'oauth',
     docsUrl: 'https://www.atlassian.com/blog/announcements/remote-mcp-server',
     ready: true

@@ -28,7 +28,7 @@ export function usePermissionController(enabled: boolean = true): PermissionCont
       return next.allGranted
     } catch (cause) {
       console.error('[permissions] status check failed', cause)
-      setError('Permission status could not be checked. Retry to read the current macOS grants.')
+      setError('Permission status could not be checked. Retry to read the current access status.')
       return false
     } finally {
       setChecking(false)

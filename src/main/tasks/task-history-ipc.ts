@@ -3,24 +3,53 @@ import { ipcMain } from 'electron'
 import { initializeTaskHistory, listTaskRuns, removeTaskRuns } from './task-history'
 import { registerTaskRetryIpc } from './task-retry-ipc'
 import { registerTaskGuideIpc } from './task-guide-ipc'
-import { configureTaskRetryRunner } from './task-retry'
-import { hasActiveVisionSession } from '../vision/vision-controller'
+import { configureTaskRetryRunner, type TaskRetryRunResult } from './task-retry'
+import { runInRemoteScreenGate } from '../actions/remote-screen-gate'
+import { withTaskModelMemory } from '../model-memory'
+import type { ScreenTaskKind } from '../../shared/remote-screen-privacy'
+import { forgetVisionStopBeforeStart, hasActiveVisionSession } from '../vision/vision-controller'
+
+/** A retry runs in the same task context as a new run of its kind: the privacy gate, that task
+ *  kind's own model settings and the task's model memory. */
+function runRetryInTaskContext(
+  taskKind: ScreenTaskKind,
+  taskId: string,
+  goal: string,
+  run: () => Promise<TaskRetryRunResult>
+): Promise<TaskRetryRunResult> {
+  return runInRemoteScreenGate(taskKind, { id: taskId, goal }, () => withTaskModelMemory(run), {
+    outcome: (result) =>
+      result.ok
+        ? { ok: true, detail: result.summary, effectId: taskId }
+        : { ok: false, detail: result.summary },
+    refused: (detail) => ({ ok: false, summary: detail ?? '' })
+  })
+}
 
 export function registerTaskHistoryIpc(): void {
   initializeTaskHistory()
   configureTaskRetryRunner({
     isActive: hasActiveVisionSession,
     async web(task, taskId, checkpoint) {
-      const { getBrowserRailHost } = await import('../browser/browser-host')
-      return getBrowserRailHost().runTask({
-        goal: task.title,
-        url: task.lastUrl,
-        taskId,
-        journeyId: task.journeyId,
-        checkpoint
-      })
+      // A retry runs with the model-facing goal; the title is only the name a person reads.
+      const goal = task.goal ?? task.title
+      // Continue is a new run: a Stop sent to an earlier, never-started one does not apply.
+      forgetVisionStopBeforeStart(taskId)
+      // The same choice as a new task: Tasks > Web Use decides which browser a retry runs in.
+      const { getWebUseRailHost } = await import('../browser/web-use-host')
+      return runRetryInTaskContext('web_use', taskId, goal, () =>
+        getWebUseRailHost().runTask({
+          goal,
+          url: task.lastUrl,
+          taskId,
+          journeyId: task.journeyId,
+          checkpoint
+        })
+      )
     },
     async computer(task, taskId, checkpoint) {
+      const goal = task.goal ?? task.title
+      forgetVisionStopBeforeStart(taskId)
       const [{ getVisionRailHost }, { getAxRailHost }, { axRailViable }] = await Promise.all([
         import('../vision/vision-host'),
         import('../accessibility/ax-host'),
@@ -30,9 +59,9 @@ export function registerTaskHistoryIpc(): void {
         recoveryCheckpoint = checkpoint,
         continuation?: import('../vision/vision-agent').VisionTaskContinuation,
         targetLabel?: string
-      ) => {
+      ): Promise<import('../vision/vision-agent').VisionTaskResult> => {
         return getVisionRailHost().runTask(
-          task.title,
+          goal,
           taskId,
           task.journeyId,
           recoveryCheckpoint,
@@ -40,27 +69,29 @@ export function registerTaskHistoryIpc(): void {
           targetLabel
         )
       }
-      const axHost = getAxRailHost()
-      const routing = await axHost.routingSnapshot(task.title)
-      if (routing && axRailViable(routing.snapshot)) {
-        return axHost.runTask(task.title, taskId, routing.app, routing.snapshot, {
-          journeyId: task.journeyId,
-          checkpoint,
-          recoverWithVision: async (recoveryCheckpoint, continuation) => {
-            const result = await runVision(recoveryCheckpoint, continuation, routing.app)
-            return result.ok
-              ? {
-                  ok: true,
-                  effectId: taskId,
-                  ...(result.performedActions?.length
-                    ? { performedActions: result.performedActions }
-                    : {})
-                }
-              : { ok: false, detail: result.summary }
-          }
-        })
-      }
-      return runVision()
+      return runRetryInTaskContext('computer_use', taskId, goal, async () => {
+        const axHost = getAxRailHost()
+        const routing = await axHost.routingSnapshot(goal)
+        if (routing && axRailViable(routing.snapshot)) {
+          return axHost.runTask(goal, taskId, routing.app, routing.snapshot, {
+            journeyId: task.journeyId,
+            checkpoint,
+            recoverWithVision: async (recoveryCheckpoint, continuation) => {
+              const result = await runVision(recoveryCheckpoint, continuation, routing.app)
+              return result.ok
+                ? {
+                    ok: true,
+                    effectId: taskId,
+                    ...(result.performedActions?.length
+                      ? { performedActions: result.performedActions }
+                      : {})
+                  }
+                : { ok: false, detail: result.summary }
+            }
+          })
+        }
+        return runVision()
+      })
     }
   })
   ipcMain.handle('tasks:list', (_event, limit: unknown) =>

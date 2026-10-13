@@ -21,6 +21,9 @@ export interface Evictable {
    *  calls it for a declared id rather than tracking exact residency, so an engine
    *  that lazily reloaded can't slip through and leave two models resident). */
   evict: () => Promise<void> | void
+  /** Clear an eviction block if a later engine fails to evict. This must not
+   *  load a model while the failed engine may still hold memory. */
+  recover?: () => Promise<void> | void
   /** Warm the engine back up after the evicting job finishes. Called by the queue
    *  in run()'s finally. Make it MODE-AWARE: a 'resident' engine reloads here (low
    *  latency next use); an 'on-demand' engine should NOT reload — just clear any
@@ -76,6 +79,7 @@ interface Waiter {
   job: QueueJob
   request: QueueRequest
   admit: () => void
+  reject: (reason: unknown) => void
 }
 
 interface RunningEntry {
@@ -184,7 +188,11 @@ export class ModalityQueue {
         signal?.removeEventListener('abort', abort)
         resolve()
       }
-      this.waiting.push({ job, request, admit })
+      const refuse = (reason: unknown): void => {
+        signal?.removeEventListener('abort', abort)
+        reject(reason)
+      }
+      this.waiting.push({ job, request, admit, reject: refuse })
       signal?.addEventListener('abort', abort, { once: true })
       this.emitChange()
       this.pump()
@@ -252,6 +260,21 @@ export class ModalityQueue {
         entry.evicted.push(id)
       } catch (err) {
         console.error(`[ModalityQueue] evict '${id}' failed:`, err)
+        // An evictor can fail after it has set its pause block. Clear that block
+        // and those of earlier evictions without loading any model into memory.
+        for (const recoveryId of [id, ...[...entry.evicted].reverse()]) {
+          try {
+            await this.evictables.get(recoveryId)?.recover?.()
+          } catch (recoverError) {
+            console.error(`[ModalityQueue] recover '${recoveryId}' failed:`, recoverError)
+          }
+        }
+        // Do not start a competing heavy model while eviction may be incomplete.
+        this.running.delete(waiter.job.id)
+        this.emitChange()
+        waiter.reject(err)
+        this.pump()
+        return
       }
     }
     this.emitChange()

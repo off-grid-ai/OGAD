@@ -52,7 +52,7 @@ describe('<ModelsScreen/> remote inventory', () => {
     const user = userEvent.setup()
     render(<ModelsScreen />)
 
-    const installed = await screen.findByRole('list', { name: 'Models on this device' })
+    const installed = await screen.findByRole('list', { name: 'Remote models' })
     const card = within(installed).getByText('google/gemma-4').closest('[role="listitem"]')
     expect(card).toBeTruthy()
     expect(within(card as HTMLElement).getByText('Remote')).toBeTruthy()

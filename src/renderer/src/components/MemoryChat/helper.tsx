@@ -9,7 +9,8 @@ import {
   readAssistantTimeline,
   readGenerationMetrics,
   readReasoning,
-  readResponseCutoff
+  readResponseCutoff,
+  readResponseVariants
 } from '../../lib/message-persistence'
 import { readGeneratedImageReference } from '../../../../shared/generated-image-reference'
 import { readGeneratedVideoReference } from '../../../../shared/generated-video-reference'
@@ -135,10 +136,17 @@ function projectedTurnTools(turn: ProjectedTurn): Partial<ChatMessage> {
 function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMessage {
   const imageReference = readGeneratedImageReference(context)
   const videoReference = readGeneratedVideoReference(context)
+  const variants = readResponseVariants(context)
   return {
     id: turn.id,
     role: turn.role,
     content: projectedTurnContent(turn),
+    variants,
+    variantIndex: variants
+      ? Number.isInteger(context?.variantIndex) && context!.variantIndex! >= 0 && context!.variantIndex! < variants.length
+        ? context!.variantIndex
+        : variants.length - 1
+      : undefined,
     createdAt: turn.createdAt,
     context,
     reasoning: turn.reasoning ?? readReasoning(context),
@@ -168,7 +176,19 @@ function mapRagMessage(message: RawRagMessage): ChatMessage[] {
     (noticeText(message.content) === 'Compacted' || message.content.startsWith('Model changed: '))
   ) {
     const id = String(message.uuid ?? message.id ?? '')
-    return id ? [{ id, role: 'assistant', content: message.content, notice: true }] : []
+    const compactionSummary =
+      typeof context.compactionSummary === 'string' ? context.compactionSummary : undefined
+    return id
+      ? [
+          {
+            id,
+            role: 'assistant',
+            content: message.content,
+            notice: true,
+            ...(compactionSummary ? { context: { notice: true, compactionSummary } } : {})
+          }
+        ]
+      : []
   }
   const promptEnhancement = promptEnhancementMessage(message, provenance)
   if (promptEnhancement) return [promptEnhancement]
@@ -240,7 +260,9 @@ export function groupChatTurnWork(messages: ChatMessage[]): ChatMessage[] {
           name: entry.toolName || 'Tool result',
           result: entry.content,
           status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
-          ...(entry.generationTimeMs === undefined ? {} : { durationMs: entry.generationTimeMs })
+          ...(entry.generationTimeMs === undefined
+              ? {}
+              : { durationMs: entry.generationTimeMs })
         })
         continue
       }
@@ -354,11 +376,10 @@ export function mergeDurableAndStreaming(
   durable: ChatMessage[],
   current: ChatMessage[]
 ): ChatMessage[] {
-  const durableIds = new Set(durable.map((message) => message.id))
-  const active = current.filter(
-    (message) => message.streaming === true && !durableIds.has(message.id)
-  )
-  return [...durable, ...active]
+  const active = current.filter((message) => message.streaming === true)
+  const replacedIds = new Set(active.map((message) => message.replacementMessageId ?? message.id))
+  // Keep the live stream in place while storage still contains the prior answer.
+  return [...durable.filter((message) => !replacedIds.has(message.id)), ...active]
 }
 
 export async function stopLiveWebUseForConversation(

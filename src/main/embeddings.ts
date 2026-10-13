@@ -1,8 +1,10 @@
+import { withStorageDownload } from './model-storage-guard'
 import { beginRuntimeBackend, providerLabel } from './runtime-backends'
 import path from 'path'
 import { existsSync } from 'fs'
 import { Worker } from 'worker_threads'
-import { modelsDir, requireModelStorage } from './runtime-env'
+import { chosenModelsDir, modelsDir, requireModelStorage } from './runtime-env'
+import { modelReadDirectories } from './model-paths'
 import {
   embedText,
   embeddingDevice,
@@ -52,6 +54,26 @@ class EmbeddingService {
   /** Serializes requests: the tail of the queue, not a list, so memory does not grow with it. */
   private queue: Promise<unknown> = Promise.resolve()
   private reportedDevice: string | null = null
+  private shuttingDown = false
+
+  /** Stop the worker before Electron destroys its Node environment, including a cold model load. */
+  async shutdown(): Promise<void> {
+    this.shuttingDown = true
+    const worker = this.worker
+    this.worker = null
+    if (worker) {
+      for (const pending of this.waiting.values()) {
+        pending.reject(new Error('Embedding runtime is shutting down.'))
+      }
+      this.waiting.clear()
+      await worker.terminate()
+    }
+    // Queued requests see shuttingDown and cannot start another worker. The source-only
+    // fallback has no worker to terminate, so let its active inference finish before disposal.
+    await this.queue
+    if (!worker) await disposeEmbeddingModel()
+    this.reportedDevice = null
+  }
 
   private spawn(entry: string): Worker {
     if (this.worker) return this.worker
@@ -64,6 +86,8 @@ class EmbeddingService {
     const worker = new Worker(entry, {
       workerData: {
         modelsDir: modelsDir(),
+        chosenModelsDir: chosenModelsDir(),
+        modelReadDirectories: modelReadDirectories(),
         backendPreference: getBackendPreference('embeddings'),
         modelId
       }
@@ -177,6 +201,12 @@ class EmbeddingService {
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
+    // A cold worker may download its model while handling its first embedding.
+    return withStorageDownload(() => this.generateEmbeddingInner(text))
+  }
+
+  private async generateEmbeddingInner(text: string): Promise<number[]> {
+    if (this.shuttingDown) throw new Error('Embedding runtime is shutting down.')
     return recordAIRequest(
       {
         modality: 'embedding',
@@ -186,7 +216,7 @@ class EmbeddingService {
       },
       async (log) => {
         const run = (): Promise<number[]> => {
-          requireModelStorage()
+          if (this.shuttingDown) throw new Error('Embedding runtime is shutting down.')
           const entry = builtWorkerEntry()
           // No built worker means we are running from source. Embed here rather than failing: a failed
           // embedding silently demotes every search to the FTS fallback, which is a far worse outcome
@@ -203,7 +233,8 @@ class EmbeddingService {
                 )
               },
               getBackendPreference('embeddings'),
-              getEmbeddingModelId()
+              getEmbeddingModelId(),
+              modelReadDirectories()
             )
           return new Promise<number[]>((resolve, reject) => {
             const worker = this.spawn(entry)

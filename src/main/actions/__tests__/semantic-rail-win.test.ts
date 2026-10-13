@@ -22,7 +22,7 @@ import {
 import { makeReadBackVerifiers } from '../verification'
 import { makeSemanticRailExecutor } from '../semantic-rail'
 
-const action = (type: string, args: Record<string, unknown> = {}) =>
+const action = (type: string, args: Record<string, unknown> = {}): ActionRecord =>
   ({ type, args }) as ActionRecord
 
 const ok = { ok: true as const, result: {} }
@@ -225,7 +225,7 @@ describe('the DeviceController swap (DSP)', () => {
     const dispatch = async (
       execute: (a: ActionRecord) => Promise<{ ok: boolean; detail?: string }>,
       a: ActionRecord
-    ) => execute(a)
+    ): Promise<{ ok: boolean; detail?: string; }> => execute(a)
 
     const reminder = action('reminder', { title: 'Send the deck' })
     expect((await dispatch(macExecute, reminder)).ok).toBe(true)

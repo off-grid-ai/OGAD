@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { isValidGgufFile } from './models/gguf'
+import { isDflashFileName, isMtpFileName } from './models/catalog-logic'
 import { CATALOG } from '@offgrid/models'
 
 const knownPackages = CATALOG.filter((entry) =>
@@ -65,7 +66,12 @@ function scanGgufTree(
 ): ExternalModel[] {
   const grouped = new Map<string, string[]>()
   walk(root, 4, (file) => {
-    if (!/\.gguf$/i.test(file) || (nestedOnly && !path.relative(root, file).includes(path.sep)))
+    if (
+      !/\.gguf$/i.test(file) ||
+      isMtpFileName(path.basename(file)) ||
+      isDflashFileName(path.basename(file)) ||
+      (nestedOnly && !path.relative(root, file).includes(path.sep))
+    )
       return
     const directory = path.dirname(file)
     grouped.set(directory, [...(grouped.get(directory) ?? []), file])

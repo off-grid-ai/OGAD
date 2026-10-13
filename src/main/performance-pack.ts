@@ -25,7 +25,7 @@ function manifestAsset(): PerformancePackAsset | null {
   const manifestPath = resourceFile('performance-packs.json')
   if (!manifestPath) return null
   try {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as PerformancePackManifest
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Omit<PerformancePackManifest, 'schemaVersion'> & { schemaVersion?: number }
     if (manifest.schemaVersion !== 1 || !['win32', 'linux'].includes(process.platform)) return null
     const asset = manifest.cuda[process.platform as 'win32' | 'linux']
     if (
@@ -72,6 +72,21 @@ export function activateInstalledPerformancePack(): void {
   const bin = asset && installedBin(asset)
   if (bin) process.env.OFFGRID_PERFORMANCE_PACK_BIN = bin
   else delete process.env.OFFGRID_PERFORMANCE_PACK_BIN
+}
+
+/** ONNX loads CUDA with dlopen, so Linux must see these libraries at process start. */
+export function prepareInstalledOnnxCudaLibraries(): boolean {
+  if (process.platform !== 'linux') return false
+  const asset = manifestAsset()
+  const bin = asset && installedBin(asset)
+  if (!bin) return false
+  const libraries = path.join(bin, 'onnx-cuda')
+  if (!fs.existsSync(path.join(libraries, 'libcublasLt.so.13')) ||
+      !fs.existsSync(path.join(libraries, 'libcudnn.so.9'))) return false
+  const current = (process.env.LD_LIBRARY_PATH ?? '').split(':').filter(Boolean)
+  if (current.includes(libraries)) return false
+  process.env.LD_LIBRARY_PATH = [libraries, ...current].join(':')
+  return true
 }
 
 export function performancePackStatus(): PerformancePackStatus {
@@ -129,7 +144,7 @@ async function fetchPack(asset: PerformancePackAsset, signal: AbortSignal): Prom
   let lastProgressPublishedAt = Date.now()
   try {
     const reader = response.body.getReader()
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read()
       if (done) break
       if (signal.aborted) throw signal.reason
@@ -169,12 +184,22 @@ async function fetchPack(asset: PerformancePackAsset, signal: AbortSignal): Prom
     if (!fs.statSync(bin).isDirectory() || !fs.statSync(server).isFile()) {
       throw new Error('The performance pack is missing its CUDA chat engine.')
     }
+    if (process.platform === 'linux' &&
+        (!fs.existsSync(path.join(bin, 'onnx-cuda', 'libcublasLt.so.13')) ||
+         !fs.existsSync(path.join(bin, 'onnx-cuda', 'libcudnn.so.9')))) {
+      throw new Error('The performance pack is missing its CUDA speech libraries.')
+    }
     fs.writeFileSync(path.join(staging, 'verified.sha256'), `${asset.sha256.toLowerCase()}\n`)
     fs.rmSync(root, { recursive: true, force: true })
     fs.renameSync(staging, root)
     fs.rmSync(archive, { force: true })
     installedThisSession = true
     activateInstalledPerformancePack()
+    // The CUDA engine is now available: auto-managed installs move onto it.
+    void import('./best-settings').then((m) => {
+      m.forgetDetectedMachine()
+      return m.ensureBestSettings()
+    }).catch((error: unknown) => console.warn('[best-settings] CUDA refresh failed', error))
   } catch (error) {
     fs.rmSync(staging, { recursive: true, force: true })
     throw error

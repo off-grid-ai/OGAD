@@ -464,4 +464,30 @@ describe('active model persistence', () => {
     expect(await restartedManager.getActiveModelIds()).toEqual(expect.arrayContaining(selectedIds))
     expect(restartedManager.getActiveModalities()).toEqual(activeBeforeRestart)
   })
+
+  it('shows a Computer Use model active only in the role Tasks gives it', async () => {
+    // Review finding: the Models screens marked an old pick active while Tasks ran another model.
+    const fixture = activeSelectionFixtures.find(({ kind }) => kind === 'computer_use')
+    if (!fixture) throw new Error('Model catalog needs an installable computer use fixture')
+    const { entry } = fixture
+    for (const file of entry.files) {
+      fs.writeFileSync(path.join(dataDir, 'models', file.name), Buffer.alloc(2_048, 1))
+    }
+    const { getComputerUseSettings, setComputerUseSettings } =
+      await import('../../computer-use-settings')
+
+    // Activating it on the Models screen makes it the grounding specialist Tasks uses.
+    expect(await manager.activateModel(entry.id)).toEqual({ success: true })
+    expect(getComputerUseSettings().groundingModelId).toBe(entry.id)
+    expect(await manager.getActiveModelIds()).toContain(entry.id)
+
+    // Tasks picks another grounding specialist: this one is no longer active anywhere.
+    setComputerUseSettings({
+      ...getComputerUseSettings(),
+      groundingModelId: 'remote-vision:router:bytedance%2Fui-tars-7b'
+    })
+    const active = await manager.getActiveModelIds()
+    expect(active).not.toContain(entry.id)
+    expect(active).toContain('remote-vision:router:bytedance%2Fui-tars-7b')
+  })
 })

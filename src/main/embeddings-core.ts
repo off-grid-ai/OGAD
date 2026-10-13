@@ -3,6 +3,8 @@ import {
   type DeviceType,
   type FeatureExtractionPipeline
 } from '@huggingface/transformers'
+import { modelReadDirectories, resolveTransformersPackage } from './model-paths'
+import { requireModelStorage } from './runtime-env'
 import { configureTransformersEnv } from './embeddings-env'
 import { loadWithOnnxFallback, onnxDeviceCandidates } from './onnx-device'
 import type { BackendPreference } from '../shared/backend-preferences'
@@ -61,12 +63,23 @@ export async function embedText(
   modelsDir: string,
   onReady?: (device: string, reason?: string) => void,
   backendPreference: BackendPreference = 'auto',
-  modelId: EmbeddingModelId = DEFAULT_EMBEDDING_MODEL
+  modelId: EmbeddingModelId = DEFAULT_EMBEDDING_MODEL,
+  readDirectories = modelReadDirectories()
 ): Promise<number[]> {
   if (!pipe) {
-    configureTransformersEnv(modelsDir)
+    const fp32 = resolveTransformersPackage(modelId, 'model.onnx', readDirectories)
+    const cached =
+      fp32 ?? resolveTransformersPackage(modelId, 'model_quantized.onnx', readDirectories)
+    // Local-only reads must not require writable storage. Guard only an explicit
+    // folder choice when the pipeline can download; default storage is created lazily.
+    if (!cached && process.env.OFFGRID_EMBEDDINGS_OFFLINE !== '1') requireModelStorage()
+    configureTransformersEnv(modelsDir, !!cached)
     loading ??= loadWithOnnxFallback(
-      (device) => pipeline('feature-extraction', modelId, { device }),
+      (device) =>
+        pipeline('feature-extraction', cached ?? modelId, {
+          device,
+          ...(cached ? { local_files_only: true, ...(fp32 ? {} : { dtype: 'q8' as const }) } : {})
+        }),
       onnxDeviceCandidates(process.platform, backendPreference)
     )
       .then(({ runtime, device, fallbackReason }) => {

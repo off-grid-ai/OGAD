@@ -11,7 +11,9 @@ vi.mock('electron', () => ({
     isEncryptionAvailable: () => false,
     encryptString: (value: string) => Buffer.from(value),
     decryptString: (value: Buffer) => value.toString()
-  }
+  },
+  // Settings changes are announced to open windows: none in this test.
+  BrowserWindow: { getAllWindows: () => [] }
 }))
 
 import { deleteSetting, getDB } from '../database'
@@ -59,7 +61,7 @@ describe('Computer Use settings persistence', () => {
     setComputerUseSettings({ checkpointInterval: 2, screenshotSize: 'unknown' })
     expect(getComputerUseSettings()).toMatchObject({
       checkpointInterval: 8,
-      screenshotSize: 'large'
+      screenshotSize: 'balanced'
     })
   })
 

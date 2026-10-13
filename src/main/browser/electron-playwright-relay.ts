@@ -104,6 +104,11 @@ export class ElectronPlaywrightRelay {
     })
   }
 
+  /** MCP's tab index for a provider page, after syncPages has announced it. */
+  pageIndex(id: number): number {
+    return this.attachments.pageIndex(id)
+  }
+
   async stop(): Promise<void> {
     const errors: Error[] = []
     const client = this.client

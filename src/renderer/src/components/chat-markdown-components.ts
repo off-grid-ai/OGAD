@@ -84,13 +84,41 @@ export const chatMarkdownComponents: Components = {
     ),
   hr: () => element('hr', { className: 'my-3 border-neutral-800' }),
   a: ChatMarkdownLink,
-  code: ({ children, ...props }) =>
+  code: ({ children }) =>
     element(
       'code',
+      { className: 'font-mono text-[0.9em] bg-neutral-800/60 rounded px-1 py-0.5' },
+      children
+    ),
+  // The block draws one box; the code inside it must not box each line again.
+  pre: ({ children }) =>
+    element(
+      'pre',
       {
-        className: `font-mono text-[0.9em] bg-neutral-800/60 rounded ${'className' in props ? 'block px-2.5 py-2 overflow-x-auto' : 'px-1 py-0.5'}`
+        className:
+          'my-2 overflow-x-auto rounded bg-neutral-800/60 px-2.5 py-2 last:mb-0 [&>code]:block [&>code]:bg-transparent [&>code]:p-0'
       },
       children
     ),
-  pre: ({ children }) => element('pre', { className: 'my-2 overflow-x-auto last:mb-0' }, children)
+  table: ({ children }) =>
+    element(
+      'div',
+      { className: 'my-2 max-w-full overflow-x-auto last:mb-0' },
+      element('table', { className: 'w-full border-collapse text-left text-[0.95em]' }, children)
+    ),
+  th: ({ children, style }) =>
+    element(
+      'th',
+      {
+        className: 'border-b border-neutral-700 px-2.5 py-1.5 font-semibold text-neutral-100',
+        style: { fontWeight: 600, ...style }
+      },
+      children
+    ),
+  td: ({ children, style }) =>
+    element(
+      'td',
+      { className: 'border-b border-neutral-800 px-2.5 py-1.5 align-top', style },
+      children
+    )
 }

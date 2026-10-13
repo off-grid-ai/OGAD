@@ -18,6 +18,7 @@ resources/bin/kev-runtime/
 # Off Grid AI SD-GGUF conversion build dir
 build-sd-gguf/
 build/linux-bin/
+build/image-macos/
 
 # Swift build artifacts (embedded repos)
 electron/coreml-sd/.build/
@@ -53,7 +54,11 @@ resources/bin/location.node
 # Local env (telemetry/keys) — never commit
 .env
 .env.local
+.env.*.local
+# App registration credentials (scripts/oauth-build-config.mjs)
+.env.keygen
 test-results/
+outputs/video-verification/
 
 # Marketing material (dev.to drafts, emails, assets) — publishing, not app code
 /marketing/
@@ -93,3 +98,10 @@ coverage-e2e/
 # New screenshot captures stay local; existing documentation assets remain tracked
 /docs/screenshots/
 /e2e/screenshots/
+# Pinned Linux desktop tools staged by the packaging script
+resources/linux-desktop/bin/
+resources/linux-desktop/__pycache__/
+coverage-native-raw/
+coverage-native/
+coverage-native-desktop-raw/
+coverage-native-desktop/

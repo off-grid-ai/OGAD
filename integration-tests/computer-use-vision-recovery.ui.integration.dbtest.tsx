@@ -69,7 +69,7 @@ describe('Computer Use vision recovery', () => {
       steps: ['Opened Notes', 'The action model returned an invalid reply 3 times in a row.']
     })
 
-    const makeRecoveryExecutor = (tiers: Parameters<typeof makeComputerTaskExecutor>[0]) =>
+    const makeRecoveryExecutor = (tiers: Parameters<typeof makeComputerTaskExecutor>[0]): (action: ActionRecord) => Promise<ExecuteResult> =>
       makeComputerTaskExecutor(tiers, { enabledRails: ['ax', 'vision'] })
     const execute = makeRecoveryExecutor({
       routingSnapshot: async () => ({

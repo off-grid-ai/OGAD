@@ -14,6 +14,9 @@
 //      fits — but NEVER below the built-ins — and report how many went (never a
 //      silent cap; the caller logs it and tells the model).
 
+/** Shared ceiling for schemas sent by Desktop chat and browser tasks. */
+export const MAX_TOOL_TOKENS = 4000
+
 // Rough token estimate: ~4 chars/token for compact JSON. Good enough for a guard.
 function estTokens(v: unknown): number {
   return Math.ceil(JSON.stringify(v ?? '').length / 4)

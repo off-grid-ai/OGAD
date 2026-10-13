@@ -330,6 +330,7 @@ test('Search opens Replay at the selected captured moment instead of a timeline 
           limit: 8,
           semantic: false
         })) as {
+          key: string
           kind: string
           title: string
           snippet: string
@@ -367,15 +368,27 @@ test('Search opens Replay at the selected captured moment instead of a timeline 
   await page.keyboard.press('Meta+K')
   const search = page.getByRole('dialog', { name: 'Search Off Grid AI' })
   await expect(search).toBeVisible()
-  await search.getByPlaceholder('Search everything…').fill(expected.query)
-  const result = search.getByText(expected.hit.snippet, { exact: true })
+  await search.getByRole('combobox').fill(expected.query)
+  // Several synthetic moments share a summary; the option's value is the hit's own key.
+  const result = search
+    .getByRole('option')
+    .and(search.locator(`[data-value="${expected.hit.key}"]`))
+    .filter({ hasText: expected.hit.snippet })
   await expect(result).toBeVisible()
   await result.click()
 
   await expect(search).toBeHidden()
   await expect(page.getByRole('heading', { name: 'Replay', exact: true })).toBeVisible()
-  await expectFrameImage(expected.selected.path)
-  const commentary = page.locator('aside')
+  const frame = page.getByRole('img', { name: /^Captured / })
+  await expect(frame).toBeVisible()
+  await expect
+    .poll(async () => {
+      const src = await frame.getAttribute('src')
+      const encodedPath = src?.split('/').pop()?.split('?')[0] ?? ''
+      return path.basename(Buffer.from(encodedPath, 'base64url').toString('utf8'))
+    })
+    .toBe(path.basename(expected.selected.path))
+  const commentary = page.getByRole('complementary')
   await expect(
     commentary.getByText(expected.selected.app ?? 'Screen', { exact: true })
   ).toBeVisible()
@@ -392,14 +405,19 @@ test('Capture and processing share one actionable Settings detail with keyboard 
 
   await expect(page.getByText('Pipeline: Accessibility text + local vision')).toBeVisible()
   await expect(page.getByText('Frame queue', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Restart capture' })).toBeVisible()
+  // 5c41557b makes capture actions depend on state; this profile is paused.
+  await expect(page.getByRole('status').filter({ hasText: 'Paused' }).first()).toContainText(
+    'Paused'
+  )
+  await expect(page.getByRole('button', { name: 'Resume capture', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: /Re-process today/ })).toBeVisible()
   await expect(page.getByText('Proactive delivery', { exact: true })).toBeVisible()
   await expect(page.getByText('Model memory', { exact: true })).toBeVisible()
   await expect(page.getByText('Processing priority', { exact: true })).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/pro-capture-processing.png', fullPage: true })
 
-  await page.keyboard.press('Meta+]')
+  // Back (Cmd+[, App.tsx) drills out of the section detail; Cmd+] is Forward.
+  await page.keyboard.press('Meta+[')
   await expect(page.getByText(/All settings/i)).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Capture & processing/ })).toBeVisible()
 })
@@ -411,47 +429,72 @@ test('Clipboard is unlocked in the pro build', async () => {
 })
 
 test('Clipboard quick-open renders populated content on the first native hotkey press', async () => {
-  await nav('Clipboard')
-  const popupOpened = app.waitForEvent('window', {
-    predicate: (candidate) => candidate.url().includes('#clip-popup'),
-    timeout: 10_000
-  })
-  if (process.platform === 'darwin') {
-    // System Events delivers the keystroke to whatever app is FRONTMOST, so the app has to
-    // be it. Without this the spec only passed when an earlier spec happened to leave the
-    // window focused: it passed in a full-suite run and failed 3/3 with pro.spec.ts alone,
-    // because the keystroke went to the terminal instead. Order-dependent, not a product bug.
-    await app.evaluate(({ app: electronApp, BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.show()
-      electronApp.focus({ steal: true })
-    })
-    // Focus is asynchronous at the OS level — asking for it is not the same as having it, and
-    // sending the keystroke too early delivers it to the previously-frontmost app. Wait for
-    // the window to actually report focus.
-    await expect
-      .poll(
-        () =>
-          app.evaluate(
-            ({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isFocused() ?? false
-          ),
-        { timeout: 5_000 }
-      )
-      .toBe(true)
-    await execFileAsync('/usr/bin/osascript', [
-      '-e',
-      'tell application "System Events" to keystroke "c" using {command down, shift down}'
-    ])
-  } else {
-    await page.getByRole('button', { name: 'Open quick clipboard' }).click()
+  test.setTimeout(60_000)
+  // f33b197ff makes headless windows non-focusable. The native hotkey needs a
+  // normal launch; restore the suite's launch mode after this one test.
+  const needsHeadedRelaunch =
+    process.platform === 'darwin' &&
+    process.env.OFFGRID_E2E_HEADLESS === '1' &&
+    process.env.OFFGRID_E2E_HEADED !== '1'
+  const launchOptions = {
+    extraArgs: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+    env: {
+      ...process.env,
+      OFFGRID_USER_DATA: userDataDir,
+      OFFGRID_PRO: '1',
+      OFFGRID_BIN_DIR: binDir,
+      NODE_ENV: 'production'
+    }
   }
-  const popup = await popupOpened
-  await popup.waitForLoadState('domcontentloaded')
+  if (needsHeadedRelaunch) {
+    await app.close()
+    app = await launchOffGrid({
+      ...launchOptions,
+      env: { ...launchOptions.env, OFFGRID_E2E_HEADED: '1' }
+    })
+    page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+  }
 
-  await expect(popup.getByPlaceholder('Search content or tags…')).toBeVisible()
-  await expect(popup.getByText('Nothing copied yet')).toHaveCount(0)
-  await expect(popup.getByText('↑↓ navigate · ↵ paste · esc close')).toBeVisible()
-  await popup.screenshot({ path: 'e2e/screenshots/pro-clipboard-quick-open.png' })
-  await popup.keyboard.press('Escape')
+  try {
+    await nav('Clipboard')
+    if (process.platform === 'darwin') {
+      const mainWindow = await app.browserWindow(page)
+      await mainWindow.evaluate((window) => {
+        window.show()
+        window.focus()
+      })
+      await app.evaluate(({ app: electronApp }) => electronApp.focus({ steal: true }))
+      await expect.poll(() => mainWindow.evaluate((window) => window.isFocused())).toBe(true)
+    }
+
+    const [popup] = await Promise.all([
+      app.waitForEvent('window', {
+        predicate: (candidate) => candidate.url().includes('#clip-popup'),
+        timeout: 10_000
+      }),
+      process.platform === 'darwin'
+        ? execFileAsync('/usr/bin/osascript', [
+            '-e',
+            'tell application "System Events" to keystroke "c" using {command down, shift down}'
+          ])
+        : page.getByRole('button', { name: 'Open quick clipboard' }).click()
+    ])
+    await popup.waitForLoadState('domcontentloaded')
+
+    await expect(popup.getByRole('textbox', { name: 'Search clipboard history' })).toBeVisible()
+    await expect(popup.getByText('Nothing copied yet')).toHaveCount(0)
+    await expect(popup.getByText('↑↓ navigate · ↵ paste · esc close')).toBeVisible()
+    await popup.screenshot({ path: 'e2e/screenshots/pro-clipboard-quick-open.png' })
+    await popup.keyboard.press('Escape')
+  } finally {
+    if (needsHeadedRelaunch) {
+      await app.close()
+      app = await launchOffGrid(launchOptions)
+      page = await app.firstWindow()
+      await page.waitForLoadState('domcontentloaded')
+    }
+  }
 })
 
 test('Voice is unlocked in the pro build (renders the dictation library)', async () => {
@@ -517,17 +560,27 @@ test('Vault copy actions write username, revealed password, and URL to the OS cl
   await nav('Vault')
   await page.getByRole('button', { name: new RegExp(entry.title) }).click()
 
-  const usernameRow = page.getByText('Username / Email', { exact: true }).locator('..')
-  await usernameRow.getByRole('button', { name: 'Copy', exact: true }).click()
+  // Every field's Copy button is named "Copy"; each sits beside the value it copies. The detail
+  // pane comes after the list (which also shows the username), hence .last().
+  const copyBeside = (value: string): ReturnType<Page['getByRole']> =>
+    page
+      .getByText(value, { exact: true })
+      .last()
+      .locator('xpath=..')
+      .getByRole('button', { name: 'Copy', exact: true })
+
+  await copyBeside(entry.username).click()
   await expectSystemClipboardText(entry.username)
 
-  const passwordRow = page.getByText('Password', { exact: true }).locator('..')
-  await passwordRow.getByTitle('Reveal').click()
-  await passwordRow.getByRole('button', { name: 'Copy', exact: true }).click()
+  await page.getByRole('button', { name: 'Reveal password', exact: true }).click()
+  await copyBeside(entry.password).click()
   await expectSystemClipboardText(entry.password)
 
-  const websiteRow = page.getByText('Website', { exact: true }).locator('..')
-  await websiteRow.getByRole('button', { name: 'Copy', exact: true }).click()
+  await page
+    .getByRole('link', { name: entry.url, exact: true })
+    .locator('xpath=..')
+    .getByRole('button', { name: 'Copy', exact: true })
+    .click()
   await expectSystemClipboardText(entry.url)
 })
 

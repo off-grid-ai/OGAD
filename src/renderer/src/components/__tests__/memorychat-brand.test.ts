@@ -12,7 +12,8 @@ const src = readFileSync(join(__dirname, '../MemoryChat/index.tsx'), 'utf8')
 
 describe('MemoryChat brand mark — "Off Grid AI"', () => {
   it('renders the chat header as "Off Grid AI", not the bare "OFF GRID"', () => {
-    expect(src).toMatch(/>Off Grid AI<\/h2>/)
+    // Chat's header is the brand; God's chat shows the companion's name instead.
+    expect(src).toMatch(/(>|')Off Grid AI('\}\s*|)<\/h2>/)
     expect(src).not.toMatch(/>OFF GRID<\/h2>/)
   })
 

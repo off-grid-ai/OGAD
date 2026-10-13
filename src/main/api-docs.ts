@@ -196,6 +196,8 @@ On-device models behind the API (all local; none are cloud-hosted):
 
 Every response carries an \`X-Request-Id\`. Any POST can run async — \`?async=true\`, body \`"async": true\`, or header \`X-Async: true\` → \`202\` with a \`request_id\` and \`poll_url\`. Poll RESTfully with \`GET /v1/requests/{request_id}\` (canonical) or the per-collection resource (e.g. \`GET /v1/images/{id}\`). There is no \`/poll\` verb — you read the resource.
 
+Cancel an image request with \`DELETE /v1/requests/{request_id}\`. The response carries \`request_id\`, \`status\`, and \`cancelled\`. A stopped request polls as \`failed\` with \`error.type: cancelled\`. Repeating cancellation is safe. Completed work stays completed; unknown IDs return 404; other modalities return 409. Closing an async response does not cancel its work.
+
 ## Performance & memory
 
 Models swap in/out (Apple Silicon unified memory): image generation pauses the LLM, TTS runs in a killable subprocess, STT is one-shot. HTTP timeouts are disabled so long diffusion runs and first-run downloads complete — use a client timeout ≥120s for images/TTS (or just use async + polling). While the LLM reloads after image gen, chat may briefly return \`502\` — retry after a moment.`
@@ -645,6 +647,20 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
         }
       },
       '/v1/requests/{request_id}': {
+        delete: {
+          tags: ['Requests'],
+          summary: 'Cancel an image request',
+          description:
+            'Stops only the named queued or running image request. Repeated cancellation is safe. Polling reports failed with error.type cancelled. Completed requests stay completed.',
+          parameters: [
+            { name: 'request_id', in: 'path', required: true, schema: { type: 'string' } }
+          ],
+          responses: {
+            '200': { description: 'Cancellation result with request_id, status and cancelled.' },
+            '404': errorResponse,
+            '409': errorResponse
+          }
+        },
         get: {
           tags: ['Requests'],
           summary: 'Poll a request (RESTful)',

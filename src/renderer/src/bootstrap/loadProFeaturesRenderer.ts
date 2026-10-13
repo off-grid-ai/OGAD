@@ -89,3 +89,21 @@ const rendererApi: ProRendererApi = {
   registerHook,
   registerProView
 }
+
+/**
+ * Load only the account cards (Quick connections) Pro provides, for a screen that needs them
+ * before Pro's full activation (onboarding, Integrations). Resolves true once registered. The one
+ * place besides activation that loads the private package: core screens never import it.
+ */
+export async function loadProQuickConnections(): Promise<boolean> {
+  const pro: unknown = await import('@offgrid/pro/renderer')
+  if (!getRendererIsPro()) return false
+  const activate = (
+    pro as {
+      activateQuickConnectionRenderer?: (api: { registerSlot: typeof registerSlot }) => void
+    }
+  ).activateQuickConnectionRenderer
+  if (typeof activate !== 'function') return false
+  activate({ registerSlot })
+  return true
+}

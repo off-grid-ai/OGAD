@@ -6,7 +6,8 @@
 export const MODEL_KIND_LABELS: Record<string, string> = {
   text: 'Text',
   vision: 'Vision',
-  computer_use: 'Computer Use',
+  // Web Use and Computer Use models: the decision models and grounding specialists tasks run.
+  computer_use: 'Tasks',
   image: 'Image',
   video: 'Video',
   voice: 'Voice',

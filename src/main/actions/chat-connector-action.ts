@@ -2,7 +2,10 @@
 import type { ProposeOutcome, TickOutcome } from '@offgrid/use'
 
 export interface ChatConnectorActionsPort {
-  propose(input: unknown, meta: { source: 'chat'; sourceRef?: string }): Promise<ProposeOutcome>
+  propose(
+    input: unknown,
+    meta: { source: 'chat' | 'routine'; sourceRef?: string }
+  ): Promise<ProposeOutcome>
   waitForOutcome(actionId: string, timeoutMs: number): Promise<TickOutcome | undefined>
   onParked(actionId: string, listener: () => void): () => void
   kick(): void
@@ -26,6 +29,8 @@ export async function runChatConnectorAction(
     connector: string
     args: Record<string, unknown>
     sourceRef?: string
+    /** A routine's actions always wait for approval. */
+    source?: 'chat' | 'routine'
   }
 ): Promise<ChatConnectorExecution> {
   if (!actions) return { kind: 'unavailable' }
@@ -36,7 +41,10 @@ export async function runChatConnectorAction(
       args: { connectorId: request.connectorId, tool: request.tool, args: request.args },
       risk: 'mutate'
     },
-    { source: 'chat', ...(request.sourceRef ? { sourceRef: request.sourceRef } : {}) }
+    {
+      source: request.source ?? 'chat',
+      ...(request.sourceRef ? { sourceRef: request.sourceRef } : {})
+    }
   )
   if (!proposed.accepted) return { kind: 'refused', reason: proposed.reason }
   if (proposed.deduped) return { kind: 'deduped', actionId: proposed.id }

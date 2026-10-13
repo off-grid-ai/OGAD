@@ -9,15 +9,22 @@ import { parseToolCallsFromText, stripQwenToolCallMarkup } from '../tool-call-pa
 
 describe('parseToolCallsFromText', () => {
   it('recovers Qwen tool-call wrappers with JSON and named bodies', () => {
-    expect(parseToolCallsFromText('<|tool_call_start|>{"name":"web_search","arguments":{"query":"weather"}}<|tool_call_end|>'))
-      .toEqual([{ name: 'web_search', args: { query: 'weather' } }])
-    expect(parseToolCallsFromText('<|tool_call_start|>web_search({"query":"weather"})<|tool_call_end|>'))
-      .toEqual([{ name: 'web_search', args: { query: 'weather' } }])
+    expect(
+      parseToolCallsFromText(
+        '<|tool_call_start|>{"name":"web_search","arguments":{"query":"weather"}}<|tool_call_end|>'
+      )
+    ).toEqual([{ name: 'web_search', args: { query: 'weather' } }])
+    expect(
+      parseToolCallsFromText('<|tool_call_start|>web_search({"query":"weather"})<|tool_call_end|>')
+    ).toEqual([{ name: 'web_search', args: { query: 'weather' } }])
   })
 
   it('removes Qwen tool-call wrappers from user-facing answer text', () => {
-    expect(stripQwenToolCallMarkup('Checking. <|tool_call_start|>web_search({"query":"x"})<|tool_call_end|> Done.'))
-      .toBe('Checking.  Done.')
+    expect(
+      stripQwenToolCallMarkup(
+        'Checking. <|tool_call_start|>web_search({"query":"x"})<|tool_call_end|> Done.'
+      )
+    ).toBe('Checking.  Done.')
   })
   it('parses a <tool_call> block (qwen/hermes style)', () => {
     const out = parseToolCallsFromText(

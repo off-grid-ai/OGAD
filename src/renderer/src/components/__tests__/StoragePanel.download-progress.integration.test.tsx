@@ -18,6 +18,13 @@ const cancelModelDownload = vi.fn(async () => true)
     orphans: []
   }),
   listDownloads: async () => downloads,
+  readModelScanFolders: async () => [],
+  chooseModelDirectory: async () => ({
+    directory: '/new-models',
+    moved: true,
+    unknownEntriesLeft: 3,
+    restartRequired: true
+  }),
   onModelProgress: (next: ProgressListener) => {
     listeners.push(next)
     return () => {
@@ -73,6 +80,20 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('Models > Storage download rows', () => {
+  it('shows the active folder, delayed cleanup, and unknown entry count after Move', async () => {
+    const user = userEvent.setup()
+    render(<StoragePanel />)
+    await screen.findByText('No models installed yet.')
+    await user.click(screen.getByRole('button', { name: 'Choose folder' }))
+    expect(await screen.findByText(/The new folder is active/)).toBeTruthy()
+    expect(
+      screen.getByText(/Old copies are removed after the next restart if verified/)
+    ).toBeTruthy()
+    expect(screen.getByText(/3 unknown entries were left in place/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Restart now' })).toBeTruthy()
+    expect(document.body.textContent).not.toContain('Restart to use it')
+  })
+
   it('shows current, total, live rate, finite percentage, and cancel', async () => {
     downloads = [
       {

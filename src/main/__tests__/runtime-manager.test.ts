@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   warmActionForMode,
   registerRuntime,
@@ -56,6 +56,64 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
     })
 
     expect(log).toEqual(['evict', 'job', 'release'])
+  })
+
+  it('releases prior eviction blocks when a later eviction fails', async () => {
+    const q = new ModalityQueue()
+    const log: string[] = []
+    registerRuntime(recordingRuntime('llm', log), { queue: q, readMode: () => 'resident' })
+    registerRuntime(
+      {
+        modality: 'image',
+        evict: () => {
+          log.push('image-evict-failed')
+          throw new Error('image server still running')
+        },
+        warm: () => {
+          log.push('image-warm')
+        },
+        release: () => {
+          log.push('image-release')
+        }
+      },
+      { queue: q, readMode: () => 'resident' }
+    )
+
+    await expect(
+      q.run({ tier: 2, label: 'video', evicts: ['llm', 'image'] }, async () => {
+        log.push('video-started')
+      })
+    ).rejects.toThrow('image server still running')
+    expect(log).toEqual(['evict', 'image-evict-failed', 'image-release', 'release'])
+    expect(q.getState().running).toHaveLength(0)
+  })
+
+  it('clears the failed engine pause without warming it', async () => {
+    const q = new ModalityQueue()
+    let paused = false
+    const warm = vi.fn()
+    registerRuntime(
+      {
+        modality: 'llm',
+        evict: () => {
+          paused = true
+          throw new Error('chat port still occupied')
+        },
+        warm,
+        release: () => {
+          paused = false
+        }
+      },
+      { queue: q, readMode: () => 'resident' }
+    )
+
+    const run = vi.fn(async () => {})
+    await expect(q.run({ tier: 2, label: 'image', evicts: ['llm'] }, run)).rejects.toThrow(
+      'chat port still occupied'
+    )
+    expect(paused).toBe(false)
+    expect(warm).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
   })
 
   it('every modality flows through the SAME seam — mode alone changes behavior', async () => {

@@ -48,6 +48,8 @@ function safeAttachmentName(name: string): string {
       .replace(/\\/g, '/')
       .split('/')
       .at(-1)
+      // Attachment names must not carry terminal/control bytes.
+      // eslint-disable-next-line no-control-regex
       ?.replace(/[\u0000-\u001f\u007f]/g, '_')
       .slice(0, 180)
       .trim() ?? ''
@@ -63,7 +65,7 @@ async function attachmentGuidance(
   const accepted: Array<{ name: string; bytes: Uint8Array }> = []
   let totalBytes = 0
   for (const attachment of attachments) {
-    if (!attachment || typeof attachment.name !== 'string') {
+    if (!(attachment as TaskGuideAttachmentInput | undefined) || typeof attachment.name !== 'string') {
       return { reason: 'One attachment is not valid.' }
     }
     const name = safeAttachmentName(attachment.name)

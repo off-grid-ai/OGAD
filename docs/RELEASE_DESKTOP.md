@@ -1,8 +1,69 @@
 # Off Grid AI Desktop — Release Runbook
 
-How we ship Off Grid AI Desktop: two artifacts (**core** = free, **pro** =
-license-gated), signed + notarized, with Keygen license activation. Mirrors the
+How we ship Off Grid AI Desktop: one app per platform with Pro code bundled and
+locked until Keygen license activation. macOS is signed and notarized. Mirrors the
 mobile licensing model (same Keygen account/product — a key works on both).
+
+---
+
+## Release preparation — 8 October 2026
+
+Scope: [OGAD #176](https://github.com/off-grid-ai/OGAD/pull/176),
+[Desktop Pro #90](https://github.com/off-grid-ai/desktop-pro/pull/90), and
+[Shared #46](https://github.com/off-grid-ai/shared/pull/46).
+Other open PRs are outside this preparation scope.
+
+Support contact: `support@getoffgridai.co`. Author and package-maintainer metadata
+are separate from the support address.
+
+Merge Shared #46 first, then Desktop Pro #90, then OGAD #176. Pro uses the new lazy
+sync payload option from Shared. Release builds from `main` use Shared `main`.
+OGAD pins Pro commit `86a14b9528781120b3762497a3404ee3f44d035e`; Shared #46 is at
+`fde4f0b0d17add736e4da7fbccf76321cb3a300e`. Keep the pinned Pro commit available
+after merging. An empty `pro_ref` uses that pin; it does not use Pro `main`.
+
+Current release gates:
+
+- OGAD CI run `37763437151` failed in DB journeys and lint. The source fixes
+  remove the two invalid image-size fallbacks. Focused lint passes.
+- The Pro expiry/recovery test now expects the app to select another free port.
+  It verifies a real TCP connection to that port after paid features close.
+  All four service activation tests pass against a temporary SQLite profile.
+- All eleven guide tests pass, including a regression for nested markup removal.
+- Four image gateway journeys pass using real HTTP, SQLite, and a synthetic native
+  runtime. Image requests support `DELETE /v1/requests/{request_id}`. Cancelling a
+  queued request does not stop another running request. Mobile Stop must use this
+  endpoint, so record the paired Mobile and Desktop source commits together.
+- Synchronous image work stops on HTTP disconnect, which matches the browser's
+  existing Stop behavior. Desktop detaches CDP before releasing a browser tab and
+  waits for detach during task cleanup. Retained result tabs keep their chat mapping.
+- CodeQL alert 25 is closed after the iterative element-removal fix. SonarCloud
+  passes on cancellation source `f315a6ea1`. Check the final dependency-patch source
+  again before release.
+- CI run `37774358922` passes fast coverage, real SQLite DB journeys, and both
+  native recording jobs. Heavy integration and UI checks are still running.
+- Compatible dependency patches include `tar` 7.5.22, `proxy-addr` 2.0.8,
+  Electron 39.8.10, the MCP SDK, image libraries, and build tools. Two local native
+  archive install checks, a real HTTP proxy-address check, and native PNG
+  encode/decode pass. The built app starts with a fresh synthetic profile.
+- The candidate production audit has zero critical, three high, and fourteen
+  moderate findings. The remaining high paths include Electron, `extract-zip`,
+  and `@xmldom/xmldom`. Major-version or forced downgrade fixes need compatibility
+  evidence. These findings remain open; a green CI result does not resolve them.
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` secret names are present in OGAD.
+  Their values and provider consent remain unverified in the release artifact.
+
+After manual verification and required checks pass, use **Build and Release** on
+the selected source with `channel=beta`, empty `pro_ref`, and `artifact_only=true`
+for a signed macOS candidate without publishing or sending the Slack announcement.
+Verify the installed candidate with a fresh synthetic profile. Check launch, chat,
+locked Pro, activation, account consent, guide output, and pairing recovery.
+Record the source commits, workflow run, artifact checksum, OS, and manual results.
+Do not mark the release approved while required checks or manual evidence are missing.
+
+The latest stable release is `v0.0.54`; the latest listed beta is
+`v0.0.55-beta.114`. Let the workflow resolve the next version. Do not change the
+version solely to clear the checks.
 
 ---
 
@@ -87,9 +148,12 @@ fingerprint and reclaim their slot.
 
 ---
 
-## 3. Real release (signed + notarized, two artifacts)
+## 3. Real release (one app per platform)
 
-> Not yet wired into CI as two artifacts — see TODO at the bottom. The mechanics:
+The manual `.github/workflows/release.yml` builds macOS, Windows, and Linux from
+one resolved Core commit and its pinned Pro commit. `artifact_only=true` builds
+only the signed macOS candidate. A normal release can send a Slack announcement;
+obtain explicit authorization before dispatching that path.
 
 ### macOS (working today)
 
@@ -98,19 +162,18 @@ Signing uses the Apple Developer ID + notarization (`electron-builder.yml`
 `APPLE_API_KEY*`. Do **not** add an afterSign re-sign hook — it invalidates the
 notarization staple (this was a past bug).
 
-### Windows — PARKED
+### Windows
 
-Windows is on hold and owned elsewhere (the bundled llama-server doesn't start in
-the Windows binary; being fixed separately). Azure Trusted Signing setup (§4) is
-kept below for when Windows resumes, but it is **not** on the current path. Focus
-is macOS core + pro.
+The current workflow builds Windows and publishes its installer and update feed.
+The Azure Trusted Signing notes in §4 are historical setup guidance, not evidence
+that current Windows artifacts are signed or verified.
 
 ### Per-artifact config
 
-Core and pro differ only by `OFFGRID_FORCE_CORE`, `productName`, `appId`, and
-`artifactName` (see `scripts/build-mac-local.sh` for the exact overrides). They
-must publish to **separate update channels** so electron-updater never feeds a
-core user a pro binary (or vice versa).
+The separate Core and Pro variants in `scripts/build-mac-local.sh` are local
+diagnostic builds. Production ships the Pro-capable app locked by default.
+macOS publishes `latest-mac.yml` and a compatibility copy, `pro-mac.yml`, for
+older Pro installations. Stable and beta release paths are selected by the workflow.
 
 ---
 
@@ -167,8 +230,7 @@ quickly. No EV needed.
 
 ## TODO before first paid release (macOS)
 
-- [ ] Split `.github/workflows/release.yml` into **macOS** core + pro build jobs,
-      using `OFFGRID_FORCE_CORE` and the per-artifact overrides; separate update channels.
+- [x] Use one production app per platform with Pro bundled and locked until activation.
 - [ ] Confirm the RevenueCat offering/products issue desktop-valid keys (they're
       product-scoped, so likely already do) and the key email copy isn't mobile-only.
 - [ ] Device-management UI (list/deactivate machines) — backend is ready

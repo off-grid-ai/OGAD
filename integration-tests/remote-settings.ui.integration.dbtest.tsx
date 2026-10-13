@@ -94,6 +94,8 @@ describe('remote media choices in Desktop Settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
     await screen.findByText(/3 models found/)
     const user = userEvent.setup()
+    // The media choices sit in the Other models section, closed until opened.
+    await user.click(screen.getByRole('button', { name: /^Other models/ }))
     await user.click(screen.getByRole('button', { name: 'image model' }))
     await user.click(screen.getByRole('menuitemradio', { name: 'picture' }))
     await user.click(screen.getByRole('button', { name: 'transcription model' }))

@@ -120,6 +120,9 @@ test('capture Integrations — BYO Google OAuth client setup', async () => {
     }
   }
   await shot('integrations-byo-google-setup')
+  // Leave the screen as found: an open setup dialog blocks the sidebar for the next case.
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
 test('capture Replay — enable/disable capture control', async () => {

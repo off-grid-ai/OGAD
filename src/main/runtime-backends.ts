@@ -8,7 +8,7 @@ export function runtimeBackendSnapshot(): RuntimeBackend[] {
 }
 
 /** A process-scoped lease prevents late output/exit from replacing a newer model. */
-export function beginRuntimeBackend(id: RuntimeId, model: string) {
+export function beginRuntimeBackend(id: RuntimeId, model: string): { recordRequest: (request?: ReturnType<typeof currentAIRequest>) => void; ready: (backend?: string, device?: string, detail?: string) => void; observe: (chunk: string, loaded?: boolean) => void; stop: () => void; fail: (error: unknown) => void; } {
   const record: RuntimeBackend = { id, model, state: 'loading' }
   const startingRequest = currentAIRequest()
   live.set(id, record)

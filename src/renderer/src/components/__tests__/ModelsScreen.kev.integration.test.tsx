@@ -15,9 +15,9 @@ const kev = {
   tags: ['Decision'],
   files: [
     {
-      name: 'kev-4b/checkpoint/head.pt',
+      name: 'kev-4b/checkpoint-v1.0/head.pt',
       url: 'https://example.test/head.pt',
-      sizeBytes: 5_248_767,
+      sizeBytes: 5_249_791,
       role: 'primary'
     },
     {
@@ -58,6 +58,7 @@ describe('<ModelsScreen/> Kev details', () => {
     await user.click(within(card).getByRole('button', { name: 'Details' }))
 
     const details = await screen.findByRole('dialog', { name: 'Kev 4B details' })
+    expect(within(details).getByRole('button', { name: /^Download$/ })).toBeTruthy()
     const format = within(details).getByRole('region', { name: 'Kev model format' })
     expect(within(format).getByText(/GGUF contains quantized weights for llama.cpp/)).toBeTruthy()
     expect(within(format).getByText(/9.34 GB across two SafeTensors files/)).toBeTruthy()

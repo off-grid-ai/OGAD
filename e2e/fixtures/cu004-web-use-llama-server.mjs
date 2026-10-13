@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-/* eslint-disable @typescript-eslint/explicit-function-return-type -- executable JavaScript boundary */
 
 // CU-004 model boundary. The production Web Use host, screenshot capture,
 // canonical vision adapter, coordinate mapping, CDP driver, pointer injection,
 // takeover coordinator, IPC, task store, and renderer stay real. This process
 // returns deterministic strict visual decisions for the local QA page.
 import http from 'node:http'
-import { writeFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 const MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
@@ -66,26 +65,14 @@ const auditVisualRequest = (payload, prompt) => {
   if (payload.reasoning_format !== 'deepseek') {
     errors.push('visual reasoning was not separated')
   }
-  if (imageParts(payload).length !== 1) errors.push('visual request did not contain one screenshot')
-  for (const section of [
-    'Task brief:',
-    'Current milestone:',
-    'Recent verified actions:',
-    'Screenshot coordinate space:'
-  ]) {
+  if (imageParts(payload).length < 1) errors.push('visual request did not contain a screenshot')
+  if (!/Screenshot: \d+ pixels wide and \d+ pixels high/i.test(prompt)) {
+    errors.push('visual request omitted exact screenshot bounds')
+  }
+  for (const section of ['Task brief:', 'Current milestone:', 'Screenshot:']) {
     if (!prompt.includes(section)) errors.push(`visual request omitted ${section}`)
   }
   return { valid: errors.length === 0, errors }
-}
-
-const verifiedActions = (prompt) =>
-  prompt.match(
-    /Recent verified actions:\n([\s\S]*?)(?:\n\nPrior validated judge decisions:|\n\nRecent task events:|\n\nScreenshot coordinate space:)/
-  )?.[1] ?? ''
-
-const screenshotBounds = (prompt) => {
-  const match = prompt.match(/screenshot is (\d+) pixels wide and (\d+) pixels high/i)
-  return match ? { width: Number(match[1]), height: Number(match[2]) } : null
 }
 
 const toolDecision = (name, args) => ({ name, args })
@@ -94,7 +81,8 @@ const verdict = ({ summary, evidence, action = null, milestoneComplete = false }
   if (milestoneComplete) {
     return toolDecision('complete_milestone', {
       summary,
-      visible_evidence: evidence
+      visible_evidence: evidence,
+      continuation: { done: [summary], next: '', remember: '' }
     })
   }
   if (!action) {
@@ -109,7 +97,10 @@ const verdict = ({ summary, evidence, action = null, milestoneComplete = false }
     summary,
     visible_evidence: evidence,
     action,
-    action_reason: 'This one visible action advances the current milestone.'
+    action_reason: 'This one visible action advances the current milestone.',
+    intent: summary,
+    expected_state: 'The requested action is visible on the page.',
+    continuation: { done: [], next: 'Check the action result', remember: '' }
   })
 }
 
@@ -118,6 +109,7 @@ const decisionFor = (prompt) => {
     return {
       content: JSON.stringify({
         phases: [
+          'Focus the text field',
           'Enter the requested text',
           'Click the target',
           'Confirm the protected account step'
@@ -125,56 +117,37 @@ const decisionFor = (prompt) => {
       })
     }
   }
-  if (prompt.includes('resumed by the user')) return null
-  const actions = verifiedActions(prompt)
-  if (prompt.includes('Current milestone:\nEnter the requested text')) {
-    if (actions.includes('type text')) {
-      return verdict({
-        summary: 'The requested text is present.',
-        evidence: 'The focused text field visibly contains the requested text.',
-        milestoneComplete: true
-      })
-    }
-    if (actions.includes('click at (')) {
-      return verdict({
-        summary: 'Enter the requested text in the focused field.',
-        evidence: 'The Type target field is visible and focused.',
-        action: { type: 'type', content: 'cursor stays visible' }
-      })
-    }
-    const bounds = screenshotBounds(prompt)
-    if (!bounds) {
-      return verdict({
-        summary: 'The screenshot bounds are unavailable.',
-        evidence: 'No exact screenshot coordinate space is available.'
-      })
-    }
+  // 47159c74ab records this note for ordinary Pause/Resume as well as handoff.
+  // Resume must not turn a healthy model into a permanent HTTP 500 boundary.
+
+  // 9b3b476a0d requires the fresh observation to resolve each action before another action.
+  // Keep each phase atomic, as the current planner requests, and confirm it on the next frame.
+  const milestone = prompt.split('Current milestone:\n').at(-1)?.split('\n\n')[0]
+  const verifying = prompt.includes('Previous expected state:')
+  if (milestone === 'Focus the text field') {
     return verdict({
-      summary: 'Focus the visible text field.',
-      evidence: 'The Type target field is visible at the specified point.',
-      action: { type: 'click', point: { x: 260, y: 320 } }
+      summary: verifying ? 'The text field is focused.' : 'Focus the visible text field.',
+      evidence: 'The Type target field is visible.',
+      milestoneComplete: verifying,
+      action: verifying ? null : { type: 'click', point: { x: 260, y: 320 } }
     })
   }
-  if (prompt.includes('Current milestone:\nClick the target')) {
-    const clickCount = actions.match(/click at \(/g)?.length ?? 0
-    if (clickCount >= 2) {
-      return verdict({
-        summary: 'The click target was activated.',
-        evidence: 'The page visibly reports that the pointer click was recorded.',
-        milestoneComplete: true
-      })
-    }
-    const bounds = screenshotBounds(prompt)
-    if (!bounds) {
-      return verdict({
-        summary: 'The screenshot bounds are unavailable.',
-        evidence: 'No exact screenshot coordinate space is available.'
-      })
-    }
+  if (milestone === 'Enter the requested text') {
     return verdict({
-      summary: 'Activate the visible click target.',
-      evidence: 'The Click target button is visible at the specified point.',
-      action: { type: 'click', point: { x: 260, y: 580 } }
+      summary: verifying ? 'The requested text is present.' : 'Enter the requested text.',
+      evidence: 'The Type target field is visible and focused.',
+      milestoneComplete: verifying,
+      action: verifying ? null : { type: 'type', content: 'cursor stays visible' }
+    })
+  }
+  if (milestone === 'Click the target') {
+    return verdict({
+      summary: verifying ? 'The click target was activated.' : 'Activate the click target.',
+      evidence: verifying
+        ? 'The page reports that the pointer click was recorded.'
+        : 'The Click target button is visible.',
+      milestoneComplete: verifying,
+      action: verifying ? null : { type: 'click', point: { x: 260, y: 580 } }
     })
   }
   if (prompt.includes('Current milestone:\nConfirm the protected account step')) {
@@ -299,7 +272,30 @@ const server = http.createServer((request, response) => {
       response.end(JSON.stringify({ error: { message: 'CU-004 request JSON was malformed' } }))
       return
     }
+    if (profile)
+      appendFileSync(path.join(profile, 'model-requests.jsonl'), `${JSON.stringify(payload)}\n`)
     const prompt = textParts(payload).join('\n\n')
+    // a52569ed47: Web Use first tries a semantic Playwright decision. This journey exercises
+    // visual controls, so the external model asks the real host to use its visual fallback.
+    if (payload.response_format?.json_schema?.name === 'web_use_step') {
+      const fields = Object.fromEntries(
+        payload.response_format.json_schema.schema.required.map((key) => [key, null])
+      )
+      sendDecision(
+        response,
+        {
+          content: JSON.stringify({
+            ...fields,
+            action: 'fallback',
+            reason: 'Use the screenshot to target this visual test page.',
+            summary: 'Continue with visual controls.'
+          })
+        },
+        false,
+        { valid: true, errors: [] }
+      )
+      return
+    }
     const isPlan = prompt.includes('Create a short execution plan for a web agent.')
     if (isPlan) {
       const decision = decisionFor(prompt)

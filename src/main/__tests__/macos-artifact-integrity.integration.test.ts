@@ -364,6 +364,10 @@ describe('macOS artifact integrity', () => {
     )
     fs.writeFileSync(path.join(resources, 'bin', 'executorch-speech'), 'fixture')
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/kev-local-server.py'
+    )
+    fs.writeFileSync(path.join(resources, 'bin', 'kev-local-server.py'), 'fixture')
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
       'installer input is missing required runtime: speech-assets/index.json'
     )
     const assetsIndex = path.join(resources, 'speech-assets', 'index.json')

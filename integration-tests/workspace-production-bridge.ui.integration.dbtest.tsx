@@ -110,7 +110,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('@xenova/transformers', () => ({
+// The embedding model is the one boundary replaced: a real ONNX run cannot work inside jsdom.
+vi.mock('@huggingface/transformers', () => ({
   env: {},
   pipeline: async () => async () => ({ data: new Float32Array(384).fill(0.01) })
 }))
@@ -214,7 +215,10 @@ async function inTranscript(text: string | RegExp): Promise<HTMLElement> {
 
 describe('production workspace bridge', () => {
   it('sends a rendered chat turn through preload, IPC, the model socket, and SQLite', async () => {
-    fake.enqueue({ content: 'The production bridge persisted this answer.' })
+    fake.enqueue(
+      { content: 'The production bridge persisted this answer.' },
+      { content: 'Check the saved answer' }
+    )
     const user = userEvent.setup()
     renderChat()
 
@@ -234,7 +238,8 @@ describe('production workspace bridge', () => {
         ['assistant', 'The production bridge persisted this answer.']
       ])
     })
-    expect(fake.requests).toHaveLength(1)
+    expect(await screen.findByPlaceholderText('Check the saved answer (Tab)')).toBeTruthy()
+    expect(fake.requests).toHaveLength(2)
   })
 
   it('reads model-written web URLs with wrappers and rejects an unsupported scheme', async () => {
@@ -365,9 +370,16 @@ describe('production workspace bridge', () => {
     expect(await inTranscript('This reply is still in progress.')).toBeTruthy()
   })
 
-  it('shows and saves a compaction notice when the chat reaches 80% of its context', async () => {
+  it('shows and saves a compaction notice with its summary when the chat reaches 80% of its context', async () => {
     const longAnswer = `Stored answer ${'A'.repeat(54_000)}`
-    fake.enqueue({ content: longAnswer }, { content: 'The next answer still works.' })
+    const summary = '## Goal\nStart a long conversation.\n## Where we left off\nA long stored answer.'
+    fake.enqueue(
+      { content: longAnswer },
+      { content: 'Continue after the context fills' },
+      { content: summary },
+      { content: 'The next answer still works.' },
+      { content: 'Review the shorter conversation' }
+    )
     const user = userEvent.setup()
     renderChat()
 
@@ -376,6 +388,7 @@ describe('production workspace bridge', () => {
     fireEvent.change(composer, { target: { value: 'Start a long conversation' } })
     await user.click(screen.getByRole('button', { name: /^send$/i }))
     expect(await inTranscript(longAnswer)).toBeTruthy()
+    expect(await screen.findByPlaceholderText('Continue after the context fills (Tab)')).toBeTruthy()
 
     fireEvent.change(composer, { target: { value: 'Continue after the context fills' } })
     await user.click(screen.getByRole('button', { name: /^send$/i }))
@@ -383,8 +396,12 @@ describe('production workspace bridge', () => {
     expect(
       await screen.findByText('Compacted conversation to make room for more messages.')
     ).toBeTruthy()
-    const nextModelRequest = JSON.stringify(fake.requests.at(-1))
-    expect(nextModelRequest).toContain('Earlier chat excerpts')
+    expect(await screen.findByPlaceholderText('Review the shorter conversation (Tab)')).toBeTruthy()
+    const summaryRequest = JSON.stringify(fake.requests[2])
+    expect(summaryRequest).toContain('## Facts and preferences')
+    const nextModelRequest = JSON.stringify(fake.requests[3])
+    expect(nextModelRequest).toContain('Summary of the earlier conversation')
+    expect(nextModelRequest).toContain('Start a long conversation.')
     expect(nextModelRequest).not.toContain(longAnswer)
 
     const { getRagConversations, getRagMessages } = await import('../src/main/database')
@@ -392,9 +409,9 @@ describe('production workspace bridge', () => {
       ({ title }) => title === 'Start a long conversation'
     )
     expect(conversation).toBeTruthy()
-    expect(getRagMessages(conversation!.id)).toEqual(
-      expect.arrayContaining([expect.objectContaining({ content: '_Compacted_' })])
-    )
+    const notice = getRagMessages(conversation!.id).find(({ content }) => content === '_Compacted_')
+    expect(notice).toBeTruthy()
+    expect(JSON.parse(String(notice!.context))).toEqual({ notice: true, compactionSummary: summary })
   })
 
   it('uses the same chat Thinking control for remote provider requests', async () => {
@@ -406,7 +423,9 @@ describe('production workspace bridge', () => {
         await window.api.setRemoteVisionServer({ provider, endpoint, model: 'integration-model' })
         fake.enqueue(
           { content: `${provider} answered with Thinking on.` },
-          { content: `${provider} answered with Thinking off.` }
+          { content: 'Try with Thinking off' },
+          { content: `${provider} answered with Thinking off.` },
+          { content: 'Compare both answers' }
         )
         const user = userEvent.setup()
         renderChat()
@@ -416,7 +435,8 @@ describe('production workspace bridge', () => {
         fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking on` } })
         await user.click(screen.getByRole('button', { name: /^send$/i }))
         expect(await inTranscript(`${provider} answered with Thinking on.`)).toBeTruthy()
-        const onRequest = fake.requests.at(-1)
+        expect(await screen.findByPlaceholderText('Try with Thinking off (Tab)')).toBeTruthy()
+        const onRequest = fake.requests[0]
         if (provider === 'openrouter') {
           expect(onRequest?.reasoning).toEqual({ max_tokens: 1024 })
         } else if (provider === 'ollama') {
@@ -430,7 +450,8 @@ describe('production workspace bridge', () => {
         fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking off` } })
         await user.click(screen.getByRole('button', { name: /^send$/i }))
         expect(await inTranscript(`${provider} answered with Thinking off.`)).toBeTruthy()
-        const offRequest = fake.requests.at(-1)
+        expect(await screen.findByPlaceholderText('Compare both answers (Tab)')).toBeTruthy()
+        const offRequest = fake.requests[2]
         if (provider === 'openrouter') {
           expect(offRequest?.reasoning).toEqual({ effort: 'none' })
         } else if (provider === 'ollama') {

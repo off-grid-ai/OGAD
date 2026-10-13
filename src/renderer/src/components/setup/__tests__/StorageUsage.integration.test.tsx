@@ -121,7 +121,7 @@ describe('rendered storage usage', () => {
       const user = userEvent.setup()
       render(<StoragePanel />)
 
-      expect(await screen.findByText('Computer Use')).toBeTruthy()
+      expect(await screen.findByText('Tasks')).toBeTruthy()
       expect(screen.getByText('Decider 2B')).toBeTruthy()
       expect(screen.getByText('Decider 2B Vision')).toBeTruthy()
       expect(screen.getByText('2.0 GB')).toBeTruthy()

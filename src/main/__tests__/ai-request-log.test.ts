@@ -5,7 +5,8 @@ import {
   invalidateAIRequests,
   recordAIRequest,
   setAIRequestSink,
-  snapshotAIValue
+  snapshotAIValue,
+  withoutAIRequestLog
 } from '../ai-request-log'
 import type { AIRequestRecord } from '../../shared/ai-request-log'
 import { AI_LOG_POLICY } from '../../shared/ai-request-log'
@@ -20,6 +21,27 @@ function capture(): AIRequestRecord[] {
   return rows
 }
 describe('AI request recording does not own inference', () => {
+  it('keeps nothing of work run without the log, nested requests and audio included', async () => {
+    const rows = capture()
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'offgrid-unrecorded-'))
+    const clip = path.join(dir, 'clip.wav')
+    await writeFile(clip, Buffer.from('synthetic audio'))
+    try {
+      const text = await withoutAIRequestLog(() =>
+        recordAIRequest({ modality: 'stt', source: 'Whisper transcription' }, async (log) => {
+          await log.inputFile(clip)
+          return recordAIRequest({ modality: 'stt', source: 'Whisper attempt' }, async () => 'Ares')
+        })
+      )
+      expect(text).toBe('Ares')
+      expect(rows).toEqual([])
+      // Work after it is recorded as usual.
+      await recordAIRequest({ modality: 'stt', source: 'Dictation' }, async () => 'hello')
+      expect(rows.map((row) => row.source)).toEqual(['Dictation', 'Dictation'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
   it('preserves results, effective inputs, model identity and timing', async () => {
     const rows = capture()
     const result = { content: 'answer', metrics: { completionTokens: 7 } }

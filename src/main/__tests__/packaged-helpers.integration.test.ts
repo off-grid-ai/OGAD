@@ -16,6 +16,10 @@ const PACKAGE_TIMEOUT_MS = 120_000
 
 let sandbox = ''
 let resourcesDir = ''
+let stagedBin = ''
+const executableSuffix = process.platform === 'win32' ? '.exe' : ''
+const librarySuffix =
+  process.platform === 'darwin' ? '.dylib' : process.platform === 'win32' ? '.dll' : '.so'
 
 function yamlPath(value: string): string {
   return JSON.stringify(value)
@@ -66,6 +70,34 @@ describe.sequential('packaged helper artifact', () => {
     const bundleOut = path.join(sandbox, 'bundle')
     const packageOut = path.join(sandbox, 'package')
     const testConfig = path.join(sandbox, 'electron-builder.test.yml')
+    stagedBin =
+      process.platform === 'darwin'
+        ? path.join(root, 'resources', 'bin')
+        : path.join(sandbox, 'native-payload')
+    if (process.platform !== 'darwin') {
+      // The external engine payload is synthetic. Actual electron-builder must
+      // place it at the runtime's paths without fetching multi-GB native builds.
+      for (const helper of ['llama', 'whisper']) {
+        fs.mkdirSync(path.join(stagedBin, helper), { recursive: true })
+        fs.writeFileSync(
+          path.join(stagedBin, helper, `libfixture${librarySuffix}`),
+          Buffer.alloc(512, 7)
+        )
+      }
+      for (const relative of [
+        `llama/llama-server${executableSuffix}`,
+        `whisper/whisper-cli${executableSuffix}`,
+        `ffmpeg${executableSuffix}`
+      ]) {
+        fs.writeFileSync(
+          path.join(stagedBin, relative),
+          '#!/usr/bin/env node\n' +
+            '// Native CLI boundary payload\n'.repeat(12) +
+            "console.log('native helper fixture')\n",
+          { mode: 0o755 }
+        )
+      }
+    }
 
     await withElectronViteBuildLock(root, () =>
       execFileAsync(electronVite, ['build', '--outDir', bundleOut, '--logLevel', 'error'], {
@@ -98,7 +130,7 @@ files:
   - '!node_modules/**'
 mac:
   extraResources:
-    - from: ${yamlPath(path.join(root, 'resources', 'bin'))}
+    - from: ${yamlPath(stagedBin)}
       to: bin
     - from: ${yamlPath(path.join(root, '..', 'executorch-speech', 'native', 'bin', 'executorch-speech'))}
       to: bin/executorch-speech
@@ -107,7 +139,11 @@ mac:
   notarize: false
 win:
   extraResources:
-    - from: ${yamlPath(path.join(root, 'resources', 'bin'))}
+    - from: ${yamlPath(stagedBin)}
+      to: bin
+linux:
+  extraResources:
+    - from: ${yamlPath(stagedBin)}
       to: bin
 `
     )
@@ -138,9 +174,9 @@ win:
     const [binRoot] = binRoots()
     expect(binRoot).toBe(path.join(resourcesDir, 'bin'))
 
-    const llamaServer = path.join(binRoot!, 'llama', 'llama-server')
-    const whisperCli = path.join(binRoot!, 'whisper', 'whisper-cli')
-    const ffmpeg = path.join(binRoot!, 'ffmpeg')
+    const llamaServer = path.join(binRoot!, 'llama', `llama-server${executableSuffix}`)
+    const whisperCli = path.join(binRoot!, 'whisper', `whisper-cli${executableSuffix}`)
+    const ffmpeg = path.join(binRoot!, `ffmpeg${executableSuffix}`)
 
     assertPackagedExecutable(llamaServer)
     assertPackagedExecutable(whisperCli)
@@ -148,14 +184,14 @@ win:
     expect(ffmpegBin()).toBe(ffmpeg)
   })
 
-  it('copies every staged llama and Whisper dylib into the packaged runtime directories', () => {
+  it('copies every staged llama and Whisper native library into the packaged runtime directories', () => {
     for (const helper of ['llama', 'whisper']) {
-      const stagedDir = path.join(root, 'resources', 'bin', helper)
+      const stagedDir = path.join(stagedBin, helper)
       const packagedDir = path.join(resourcesDir, 'bin', helper)
-      const stagedDylibs = filesNamed(stagedDir, '.dylib')
+      const stagedDylibs = filesNamed(stagedDir, librarySuffix)
 
       expect(stagedDylibs.length, `${helper} staged dylibs`).toBeGreaterThan(0)
-      expect(filesNamed(packagedDir, '.dylib')).toEqual(stagedDylibs)
+      expect(filesNamed(packagedDir, librarySuffix)).toEqual(stagedDylibs)
       for (const name of stagedDylibs) {
         const packaged = fs.lstatSync(path.join(packagedDir, name))
         expect(packaged.isFile(), `${helper}/${name}`).toBe(true)

@@ -201,6 +201,15 @@ const offGridApi = {
     return unsubscribe(channel, sub)
   },
   proOff: (channel: string) => ipcRenderer.removeAllListeners(channel),
+  /** Web Use or Computer Use settings changed, here or from a paired browser. */
+  onTaskSettingsChanged: (
+    callback: (change: { key: string; value: unknown }) => void
+  ): (() => void) => {
+    const listener = (_event: unknown, change: { key: string; value: unknown }): void =>
+      callback(change)
+    ipcRenderer.on('task-settings:changed', listener)
+    return unsubscribe('task-settings:changed', listener)
+  },
   // Loopback HTTP URL for seekable local media (meeting recordings) — <video>
   // can't reliably stream large files over the custom protocol, so use real HTTP.
   getMediaUrl: (absPath: string) => ipcRenderer.invoke('media:url', absPath),
@@ -216,7 +225,7 @@ const offGridApi = {
   extractMemory: (text: string) => ipcRenderer.invoke('llm:extract', text),
 
   // Chat Summaries
-  getChatSessions: (appName?: string) => ipcRenderer.invoke('db:get-chat-sessions', appName),
+  getChatSessions: () => ipcRenderer.invoke('db:get-chat-sessions'),
   getMemoriesForSession: (sessionId: string) =>
     ipcRenderer.invoke('db:get-memories-for-session', sessionId),
   getEntitiesForSession: (sessionId: string) =>
@@ -254,6 +263,8 @@ const offGridApi = {
       thinking,
       images
     ) as Promise<RagChatResultContract>,
+  suggestNextChatMessage: (asked: string, answer: string): Promise<string | null> =>
+    ipcRenderer.invoke('chat:suggest-next', asked, answer),
   // Live token/reasoning/step events for an in-flight ragChat (matched by streamId).
   onRagStream: (
     callback: (data: {
@@ -283,10 +294,22 @@ const offGridApi = {
   cancelRag: (streamId: string) => ipcRenderer.send('rag:cancel', streamId),
 
   // RAG Conversation History
-  createRagConversation: (id: string, title?: string, projectId?: string | null) =>
-    ipcRenderer.invoke('rag:create-conversation', id, title, projectId),
-  getRagConversations: (projectId?: string | null) =>
-    ipcRenderer.invoke('rag:get-conversations', projectId),
+  createRagConversation: (
+    id: string,
+    title?: string,
+    projectId?: string | null,
+    surface?: 'chat' | 'god'
+  ) => ipcRenderer.invoke('rag:create-conversation', id, title, projectId, surface),
+  /**
+   * One bounded page of the conversation list, newest first. Omit `page` for the newest page;
+   * pass `updatedBefore` (the `updated_at` of the last row you hold) to continue.
+   */
+  getRagConversations: (
+    projectId?: string | null,
+    page?: { limit?: number; updatedBefore?: string },
+    /** 'chat' leaves out God's conversations; 'god' lists only them. */
+    surface?: 'chat' | 'god'
+  ) => ipcRenderer.invoke('rag:get-conversations', projectId, page, surface),
   onRagConversationsChanged: (
     callback: (data: { conversationId: string; projectId: string | null }) => void
   ) => {
@@ -297,8 +320,9 @@ const offGridApi = {
     ipcRenderer.on('rag:conversations-changed', subscription)
     return unsubscribe('rag:conversations-changed', subscription)
   },
-  searchRagConversationIds: (query: string) =>
-    ipcRenderer.invoke('rag:search-conversation-ids', query),
+  /** Conversation ids whose message content matches, bounded. */
+  searchRagConversationIds: (query: string, limit?: number) =>
+    ipcRenderer.invoke('rag:search-conversation-ids', query, limit),
   setRagConversationProject: (id: string, projectId: string | null) =>
     ipcRenderer.invoke('rag:set-conversation-project', id, projectId),
   getRagConversation: (id: string) => ipcRenderer.invoke('rag:get-conversation', id),
@@ -397,6 +421,9 @@ const offGridApi = {
   backendPreferencesGet: () => ipcRenderer.invoke('runtime:backend:get'),
   backendPreferenceSet: (modality: string, preference: string) =>
     ipcRenderer.invoke('runtime:backend:set', modality, preference),
+  // Detect this machine's processors and apply the fastest settings to every modality.
+  applyBestSettings: () => ipcRenderer.invoke('runtime:best-settings:apply'),
+  bestSettingsStatus: () => ipcRenderer.invoke('runtime:best-settings:status'),
   // Unload a modality's model from memory now (free RAM); reloads on next use.
   unloadRuntime: (modality: string) => ipcRenderer.invoke('runtime:unload', modality),
   // Pipeline queue config (serialize heavy jobs; let speech coexist) + live state.
@@ -523,6 +550,12 @@ const offGridApi = {
   getActiveModalities: () => ipcRenderer.invoke('models:active-modalities'),
   getComputerUseActiveModels: () => ipcRenderer.invoke('models:computer-use-active'),
   getWebUseActiveModels: () => ipcRenderer.invoke('models:web-use-active'),
+  getTaskRoles: () => ipcRenderer.invoke('models:task-roles'),
+  setTaskRole: (
+    task: 'computer_use' | 'web_use',
+    role: 'decision' | 'grounding',
+    modelId: string
+  ) => ipcRenderer.invoke('models:set-task-role', task, role, modelId),
   onModelProgress: (
     callback: (data: {
       modelId: string
@@ -579,7 +612,8 @@ const offGridApi = {
     pause: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:pause'),
     restart: (): Promise<void> => ipcRenderer.invoke('performance-pack:restart'),
     onChanged: (callback: (status: PerformancePackStatus) => void): (() => void) => {
-      const subscription = (_event: unknown, status: PerformancePackStatus): void => callback(status)
+      const subscription = (_event: unknown, status: PerformancePackStatus): void =>
+        callback(status)
       ipcRenderer.on('performance-pack:changed', subscription)
       return unsubscribe('performance-pack:changed', subscription)
     }
@@ -653,6 +687,7 @@ const offGridApi = {
     history?: { role: string; content: string }[],
     opts?: {
       assistantOnly?: boolean
+      allTools?: boolean
       connectors?: boolean
       conversationId?: string
       projectId?: string
@@ -662,6 +697,8 @@ const offGridApi = {
       videoAvailable?: boolean
       streamId?: string
       thinking?: boolean
+      context?: string
+      rules?: readonly string[]
     }
   ) => ipcRenderer.invoke('tools:chat', query, history, opts),
 
@@ -683,6 +720,7 @@ const offGridApi = {
     threads?: number
     batchSize?: number
     speculativeDecoding?: 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
+    speculativeDraftMax?: number
     draftModel?: string
     performanceMode?: 'conservative' | 'balanced' | 'extreme'
   }) => ipcRenderer.invoke('llm:set-settings', s),
@@ -961,11 +999,16 @@ const offGridApi = {
   crmDayJournalCached: (startSec: number) => ipcRenderer.invoke('crm:day-journal-cached', startSec),
   crmReplayFrames: (startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:replay-frames', startSec, endSec),
+  crmReplaySaveFrameEdit: (imagePath: string, caption: string, tags: string[]) =>
+    ipcRenderer.invoke('crm:replay-save-frame-edit', imagePath, caption, tags),
+  crmReplayReprocessFrame: (imagePath: string) =>
+    ipcRenderer.invoke('crm:replay-reprocess-frame', imagePath),
   crmReplayThreads: (startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:replay-threads', startSec, endSec),
   crmReplayEntityDay: (entityId: number, startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:replay-entity-day', entityId, startSec, endSec),
   crmReplayDefaultDay: () => ipcRenderer.invoke('crm:replay-default-day'),
+  crmMeetingFrames: (meetingId: number) => ipcRenderer.invoke('crm:meeting-frames', meetingId),
   crmDayReflection: (startSec: number, endSec: number) =>
     ipcRenderer.invoke('crm:day-reflection', startSec, endSec),
   crmWeekReflection: (anchorDayStartSec: number) =>
@@ -1010,11 +1053,19 @@ const offGridApi = {
     args?: string[]
     envKeys?: string[]
     url?: string
+    liveOnly?: boolean
   }) => ipcRenderer.invoke('mcp:add', c),
   mcpSetEnabled: (id: number, enabled: boolean) =>
     ipcRenderer.invoke('mcp:set-enabled', id, enabled),
+  mcpUpdate: (
+    id: number,
+    changes: { name?: string; url?: string; command?: string; args?: string[] }
+  ) => ipcRenderer.invoke('mcp:update', id, changes),
   mcpRemove: (id: number) => ipcRenderer.invoke('mcp:remove', id),
+  mcpCancel: (id: number) => ipcRenderer.invoke('mcp:cancel', id),
   mcpTest: (id: number) => ipcRenderer.invoke('mcp:test', id),
+  mcpSetSecrets: (id: number, values: Record<string, string>) =>
+    ipcRenderer.invoke('mcp:set-secrets', id, values),
   mcpIngest: (id: number, query?: string) => ipcRenderer.invoke('mcp:ingest', id, query),
   mcpItems: (surface: string) => ipcRenderer.invoke('mcp:items', surface),
 

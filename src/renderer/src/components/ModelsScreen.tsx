@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { modelShowsOnTab } from '../../../shared/model-settings-rules'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { isDecisionModel, useTaskRoles } from '../lib/task-roles'
 import { AnimatePresence } from 'motion/react'
+import { Button } from '@offgrid/operator-ui/operator/button'
+import '@offgrid/operator-ui/styles.css'
 import {
   IconDownload,
   IconCircleCheck,
@@ -25,6 +29,7 @@ import { companionDownloadLabel } from '@renderer/lib/download-label'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { downloadTimeRemaining } from '@renderer/lib/download-progress'
+import { formatParams, isModelWeightFile, modelFileGuidance } from '@renderer/lib/model-summary'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -40,7 +45,6 @@ import {
   determineCredibility,
   hasActiveFilters,
   initialFilterState,
-  modelSupportsKind,
   recommendedImageModelId,
   type FilterState,
   type Credibility,
@@ -125,6 +129,17 @@ function Sel({
   )
 }
 
+// Published full-model MTP exports. Do not redirect a fine-tune to its base model.
+const MTP_DOWNLOAD_REPOS: Readonly<Record<string, string>> = {
+  'bartowski/tencent_UI-Mate-9B-GGUF': 'bartowski/tencent_UI-Mate-9B-GGUF+MTP',
+  ...Object.fromEntries(
+    ['0.8B', '2B', '4B', '9B', '27B', '35B-A3B', '122B-A10B', '397B-A17B'].map((size) => [
+      `unsloth/Qwen3.5-${size}-GGUF`,
+      `unsloth/Qwen3.5-${size}-MTP-GGUF`
+    ])
+  )
+}
+
 interface ModelFile {
   name: string
   url: string
@@ -135,7 +150,7 @@ interface DownloadableModelFile {
   fileName: string
   quant: string
   sizeBytes: number
-  mmproj?: { fileName: string }
+  mmproj?: { fileName: string; sizeBytes?: number }
 }
 interface ModelEntry {
   id: string
@@ -327,6 +342,8 @@ export function ModelsScreen({
         supportsVision: boolean
         projectorInstalled: boolean
         supportsDflash?: boolean
+        supportsMtp?: boolean
+        mtpInstalled?: boolean
         dflashInstalled?: boolean
       }
     >
@@ -362,8 +379,11 @@ export function ModelsScreen({
   // one truth from the backend; the UI never re-derives "active" per kind.
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set())
   const isActive = (id: string): boolean => activeIds.has(id)
+  // The task models' lineups and each model's roles (Tasks tab), from the same view main builds.
+  const [taskRoles, reloadTaskRoles] = useTaskRoles()
   const refreshActive = (): void => {
     void api.getActiveModelIds?.().then((ids: string[]) => setActiveIds(new Set(ids)))
+    void reloadTaskRoles()
   }
   const [switching, setSwitching] = useState<string | null>(null)
   const [switchError, setSwitchError] = useState<string | null>(null)
@@ -424,6 +444,7 @@ export function ModelsScreen({
   const [detail, setDetail] = useState<ModelEntry | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [mtpDownloads, setMtpDownloads] = useState(false)
   const [hfResults, setHfResults] = useState<
     {
       id: string
@@ -440,7 +461,9 @@ export function ModelsScreen({
   const [variants, setVariants] = useState<DownloadableModelFile[]>([])
   const [variantLoading, setVariantLoading] = useState(false)
   const [variantError, setVariantError] = useState<string | null>(null)
+  const variantGuidance = useMemo(() => modelFileGuidance(variants, ramGb), [variants, ramGb])
   const [detailFiles, setDetailFiles] = useState<DownloadableModelFile[]>([])
+  const detailFileGuidance = useMemo(() => modelFileGuidance(detailFiles, ramGb), [detailFiles, ramGb])
   const [detailFilesLoading, setDetailFilesLoading] = useState(false)
   const [detailFilesError, setDetailFilesError] = useState<string | null>(null)
   const [chosenVariants, setChosenVariants] = useState<Record<string, string>>({})
@@ -455,11 +478,14 @@ export function ModelsScreen({
     setDetail(m)
   }, [])
 
-  useEffect(() => api.onModelInventoryChanged?.(() => {
-    api.getModelCatalog?.().then((catalog: { models: ModelEntry[] }) => setModels(catalog.models))
-    api.getInstalledModels?.().then(setInstalled)
-    refreshVision()
-  }), [])
+  useEffect(() => {
+    const unsubscribe = api.onModelInventoryChanged?.(() => {
+      api.getModelCatalog?.().then((catalog: { models: ModelEntry[] }) => setModels(catalog.models))
+      api.getInstalledModels?.().then(setInstalled)
+      refreshVision()
+    })
+    return typeof unsubscribe === 'function' ? unsubscribe : undefined
+  }, [])
 
   const closeDetail = useCallback(() => {
     setDetail(null)
@@ -475,22 +501,41 @@ export function ModelsScreen({
       setDetailFilesLoading(false)
       return
     }
+    if (
+      mtpDownloads &&
+      !/-MTP-GGUF$/i.test(detail.id) &&
+      !detail.id.endsWith('+MTP') &&
+      !visionSt[detail.id]?.supportsMtp
+    ) {
+      setDetailFiles([])
+      setDetailFilesError('MTP files are not available for this model.')
+      setDetailFilesLoading(false)
+      return
+    }
     let cancelled = false
     setDetailFiles([])
     setDetailFilesError(null)
     setDetailFilesLoading(true)
     void Promise.resolve(api.getModelFiles?.(detail.id))
       .then((files: DownloadableModelFile[] | undefined) => {
-        if (!cancelled) setDetailFiles(files ?? [])
+        if (!cancelled)
+          setDetailFiles(
+            detail.kind === 'video' ? (files ?? []) : (files ?? []).filter(isModelWeightFile)
+          )
       })
       .catch((error: unknown) => {
-        if (!cancelled) setDetailFilesError(error instanceof Error ? error.message : 'Could not load model files.')
+        if (!cancelled)
+          setDetailFilesError(
+            error instanceof Error ? error.message : 'Could not load model files.'
+          )
       })
       .finally(() => {
         if (!cancelled) setDetailFilesLoading(false)
       })
-    return () => { cancelled = true }
-  }, [detail])
+    return () => {
+      cancelled = true
+    }
+  }, [detail, mtpDownloads, visionSt])
 
   const importModel = async (): Promise<void> => {
     if (importing) return
@@ -595,7 +640,9 @@ export function ModelsScreen({
     setVariantError(null)
     setVariants([])
     try {
-      const files = await api.getModelFiles?.(model.id)
+      const available = await api.getModelFiles?.(model.id)
+      // Video packs are not single GGUF weights; the main process returns only usable pack files.
+      const files = model.kind === 'video' ? available : available?.filter(isModelWeightFile)
       if (!files?.length) throw new Error('No compatible model files found in this repository.')
       setVariants(files)
     } catch (error) {
@@ -646,88 +693,119 @@ export function ModelsScreen({
   }
 
   const searchEnabled = activeKind !== 'voice' && activeKind !== 'transcription'
-  const searchingMode = searchEnabled && query.trim().length >= 2
+  // The typed query paints immediately; everything derived from it - the remote search, the
+  // filtered grid - follows on the deferred value, so a keystroke never waits on the list.
+  const deferredQuery = useDeferredValue(query)
+  const searchingMode = searchEnabled && deferredQuery.trim().length >= 2
   const totalBytes = (m: { files?: { sizeBytes?: number }[] }): number =>
     (m.files || []).reduce((s, f) => s + (f.sizeBytes || 0), 0)
 
   useEffect(() => {
-    const q = query.trim()
+    const q = deferredQuery.trim()
     if (!searchEnabled || q.length < 2) {
       setHfResults([])
+      // A cleared query asks for no search, so a superseded or cancelled one must not keep spinning.
       setSearching(false)
       return
     }
-    let cancelled = false
     setSearching(true)
+    // A slow answer for an earlier query must never replace the results the user is looking at:
+    // the request is abandoned the moment a newer query supersedes it.
+    let live = true
     const t = setTimeout(async () => {
       try {
         const res = await api.searchModels?.(q, activeKind)
-        if (!cancelled) setHfResults(res ?? [])
+        if (!live) return
+        setHfResults(res ?? [])
       } catch {
-        if (!cancelled) setHfResults([])
+        if (live) setHfResults([])
       } finally {
-        if (!cancelled) setSearching(false)
+        if (live) setSearching(false)
       }
     }, 400)
-    return () => { cancelled = true; clearTimeout(t) }
-  }, [query, activeKind, searchEnabled])
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [deferredQuery, activeKind, searchEnabled])
 
-  const list = models.filter(
-    (model) =>
-      modelSupportsKind(model, activeKind as Parameters<typeof modelSupportsKind>[1]) ||
-      (activeKind === 'text' && modelSupportsKind(model, 'vision'))
+  const list = useMemo(
+    () => models.filter((model) => modelShowsOnTab(model, activeKind)),
+    [models, activeKind]
   )
 
   // The image model recommended for this machine's RAM (Light Q4 on <=16GB, full
   // Q8 above) — one pure rule, reused for both the badge and the top-of-list sort.
-  const recommendedImageId = recommendedImageModelId(models, ramGb)
+  const recommendedImageId = useMemo(() => recommendedImageModelId(models, ramGb), [models, ramGb])
   const bonsaiFits = (m: ModelEntry): boolean =>
     (m.sourceModelId ?? m.id) === BONSAI_2_ID &&
     ramGb !== null &&
     ramGb >= (m.minRamGb ?? 0) &&
     ['easy', 'fits'].includes(fitTier(totalBytes(m) / 1e9, ramGb))
 
-  const displayed = filterAndSort(
-    hfResults.map((r) => ({
-      id: r.id,
-      name: r.name,
-      org: r.org,
-      downloads: r.downloads,
-      likes: r.likes,
-      lastModified: r.lastModified,
-      credibility: r.credibility as Credibility | undefined,
-      params: parseParamCount(r.name) ?? parseParamCount(r.id)
-    })),
-    filterState
+  const displayed = useMemo(
+    () =>
+      filterAndSort(
+        hfResults.map((r) => ({
+          id: r.id,
+          name: r.name,
+          org: r.org,
+          downloads: r.downloads,
+          likes: r.likes,
+          lastModified: r.lastModified,
+          credibility: r.credibility as Credibility | undefined,
+          params: parseParamCount(r.name) ?? parseParamCount(r.id)
+        })),
+        filterState
+      ),
+    [hfResults, filterState]
   )
 
   // Tags offered as filter chips — every tag present in this tab's models.
-  const availableTags = collectTags(list)
+  const availableTags = useMemo(() => collectTags(list), [list])
 
-  const displayedCatalog = filterAndSort(
-    list.map((m) => ({
-      ...m,
-      org: m.org ?? '',
-      params: m.params ?? parseParamCount(m.name) ?? undefined,
-      credibility: determineCredibility((m.id || '').split('/')[0]!)
-    })),
-    filterState
-  )
-    .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
-    .filter(
-      (m) => activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true)
-    )
-    .filter((m) => matchesAllTags(m.tags, selectedTags))
-    .sort((a, b) => {
-      // Active first, then other installed, then available — within each tier keep feature rank.
-      const rank = (x: { id: string }): number =>
-        isActive(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
-      return (
-        rank(a) - rank(b) ||
-        featureRank(a, recommendedImageId, bonsaiFits(a)) -
-          featureRank(b, recommendedImageId, bonsaiFits(b))
+  const displayedCatalog = useMemo(
+    () =>
+      filterAndSort(
+        list.map((m) => ({
+          ...m,
+          org: m.org ?? '',
+          params: m.params ?? parseParamCount(m.name) ?? undefined,
+          credibility: determineCredibility((m.id || '').split('/')[0]!)
+        })),
+        filterState
       )
-    })
+        .filter((m) => sizeBucket == null || totalBytes(m) <= sizeBucket * 1e9)
+        .filter(
+          (m) =>
+            activeKind !== 'text' || (USE_CASES.find((u) => u.id === useCase)?.match(m) ?? true)
+        )
+        .filter((m) => matchesAllTags(m.tags, selectedTags))
+        .sort((a, b) => {
+          // Active first, then other installed, then available — within each tier keep feature rank.
+          const rank = (x: { id: string }): number =>
+            activeIds.has(x.id) ? 0 : installed.includes(x.id) ? 1 : 2
+          return (
+            rank(a) - rank(b) ||
+            featureRank(a, recommendedImageId, bonsaiFits(a)) -
+              featureRank(b, recommendedImageId, bonsaiFits(b))
+          )
+        }),
+    // bonsaiFits reads only ramGb, which is listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      list,
+      filterState,
+      sizeBucket,
+      activeKind,
+      useCase,
+      selectedTags,
+      activeIds,
+      installed,
+      recommendedImageId,
+      ramGb
+    ]
+  )
 
   const tabs = internalTabRoutes('models').filter(
     ({ id }) => id === 'storage' || kinds.includes(id)
@@ -755,7 +833,28 @@ export function ModelsScreen({
     m: ModelEntry & { credibility?: string; params?: number; org?: string },
     isHf = false
   ): React.JSX.Element => {
-    const isInstalled = installed.includes(m.id)
+    const useMtpDownloads = mtpDownloads && ['text', 'vision', 'computer_use'].includes(activeKind)
+    const mtpRepository = MTP_DOWNLOAD_REPOS[m.id]
+    if (useMtpDownloads && !visionSt[m.id]?.mtpInstalled && mtpRepository) {
+      const mtpEntry = models.find((model) => model.id === mtpRepository)
+      m = {
+        ...m,
+        id: mtpRepository,
+        name: `${m.name} MTP`,
+        files: mtpEntry?.files ?? [],
+        availability: mtpEntry?.availability ?? m.availability,
+        availabilityNote: mtpEntry?.availabilityNote ?? m.availabilityNote
+      }
+    }
+    const isInstalled =
+      installed.includes(m.id) &&
+      (!useMtpDownloads || !m.id.endsWith('+MTP') || !!visionSt[m.id]?.mtpInstalled)
+    const mtpUnavailable =
+      useMtpDownloads &&
+      !isInstalled &&
+      !/-MTP-GGUF$/i.test(m.id) &&
+      !m.id.endsWith('+MTP') &&
+      !visionSt[m.id]?.supportsMtp
     const isRemote = Boolean(m.remoteServerId)
     const active = isActive(m.id)
     const prog = progress[m.id]
@@ -768,18 +867,26 @@ export function ModelsScreen({
     const vs = visionSt[m.id]
     const projectorMissing = isInstalled && !!vs?.supportsVision && !vs.projectorInstalled
     const dflashMissing = isInstalled && !!vs?.supportsDflash && !vs.dflashInstalled
+    const mtpMissing = isInstalled && !!vs?.supportsMtp && !vs.mtpInstalled
     const bytes = totalBytes(m)
     const size = formatSize(bytes) || null
-    const meta = [m.org, m.params ? `${m.params}B` : null, size, fmtReleaseDate(m.releaseDate)]
+    const meta = [
+      m.org,
+      m.params ? formatParams(m.params) : null,
+      size,
+      fmtReleaseDate(m.releaseDate)
+    ]
       .filter(Boolean)
       .join(' · ')
     const tier: FitTier = isHf ? 'easy' : ramTier(m)
     const tags = (m.tags ?? []).filter((t) => !/tight|risky|fit/i.test(t))
     const comingSoon = m.availability === 'coming_soon'
-    const worksBest = bonsaiFits(m) || /(?:^|[\s/_-])UI[\s_-]?Mate(?:[\s/_-]|$)/i.test(`${m.id} ${m.name}`)
+    const worksBest =
+      bonsaiFits(m) || /(?:^|[\s/_-])UI[\s_-]?Mate(?:[\s/_-]|$)/i.test(`${m.id} ${m.name}`)
     // The single image pick best-suited to THIS machine's RAM (Light on <=16GB,
     // full above) — a prominent filled-emerald badge, distinct from the outlined tags.
-    const recommended = !isHf && (bonsaiFits(m) || (!!recommendedImageId && m.id === recommendedImageId))
+    const recommended =
+      !isHf && (bonsaiFits(m) || (!!recommendedImageId && m.id === recommendedImageId))
 
     return (
       <div
@@ -875,8 +982,8 @@ export function ModelsScreen({
                 }`}
                 title={
                   tier === 'tight'
-                    ? 'Fits, but context will be tight on this Mac'
-                    : "Past this Mac's comfortable ceiling — you can still Load anyway"
+                    ? `Fits, but context will be tight on this ${deviceNoun()}`
+                    : `Past this ${deviceNoun()}'s comfortable ceiling — you can still Load anyway`
                 }
               >
                 {tier === 'tight' ? 'Tight on RAM' : "Won't fit — Load anyway"}
@@ -897,7 +1004,9 @@ export function ModelsScreen({
             </span>
           ) : active ? (
             <span className="flex items-center gap-1 text-[11px] text-green-500">
-              <IconCircleCheck className="h-3.5 w-3.5" /> Active
+              <IconCircleCheck className="h-3.5 w-3.5 shrink-0" />{' '}
+              {/* A task model says the role it plays, and where: several are active at once. */}
+              {(m.kind === 'computer_use' && taskRoles?.badges[m.id]) || 'Active'}
             </span>
           ) : isInstalled ? (
             // Every installed model is activatable for its type — no kind branch.
@@ -923,7 +1032,7 @@ export function ModelsScreen({
             // The percent is NOT in the button: a control whose meaning is "Cancel" is the one place
             // the card's main number should not live.
             <>
-              <div className="flex min-w-0 items-baseline gap-1.5 text-[10px] text-neutral-500">
+              <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[10px] text-neutral-500">
                 <span className="text-neutral-300">
                   {prog.status === 'queued'
                     ? 'Queued'
@@ -985,10 +1094,11 @@ export function ModelsScreen({
             </>
           ) : (
             <button
-              onClick={() => (isHf ? void chooseVariant(m) : download(m.id))}
-              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95"
+              onClick={() => (isHf || useMtpDownloads ? void chooseVariant(m) : download(m.id))}
+              disabled={mtpUnavailable}
+              className="flex items-center gap-1 rounded border border-neutral-700 px-2.5 py-1 text-[10px] text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <IconDownload className="h-3 w-3" /> Download
+              <IconDownload className="h-3 w-3" /> {mtpUnavailable ? 'MTP unavailable' : 'Download'}
             </button>
           )}
           {isInstalled && (
@@ -1023,7 +1133,7 @@ export function ModelsScreen({
 
         {/* Vision-capable but projector not downloaded — offer to add it. Hidden while a
             download is in flight (the progress UI covers that). */}
-        {!comingSoon && projectorMissing && !dflashMissing && !downloading && (
+        {!comingSoon && projectorMissing && !dflashMissing && !mtpMissing && !downloading && (
           <button
             onClick={() => download(m.id)}
             title="Download the vision projector so this model can read images"
@@ -1032,13 +1142,17 @@ export function ModelsScreen({
             <IconEye className="h-3 w-3" /> Add vision support
           </button>
         )}
-        {!comingSoon && dflashMissing && !downloading && (
+        {!comingSoon && (dflashMissing || mtpMissing) && !downloading && (
           <button
             onClick={() => download(m.id)}
-            title="Download the missing DFlash model for speculative decoding"
+            title={
+              mtpMissing
+                ? 'Download the missing MTP file for speculative decoding'
+                : 'Download the missing DFlash model for speculative decoding'
+            }
             className="flex items-center gap-1 rounded border border-amber-400/50 px-2 py-1 text-[10px] text-amber-300 transition-all duration-150 hover:border-amber-400 hover:bg-amber-400/10 active:scale-95"
           >
-            <IconDownload className="h-3 w-3" /> Repair
+            <IconDownload className="h-3 w-3" /> {mtpMissing ? 'Add MTP' : 'Repair'}
           </button>
         )}
 
@@ -1211,6 +1325,22 @@ export function ModelsScreen({
                 {searching && <IconLoader2 className="h-3 w-3 animate-spin text-neutral-600" />}
               </div>
             )}
+            {['text', 'vision', 'computer_use'].includes(activeKind) && (
+              <Button
+                size="sm"
+                variant={mtpDownloads ? 'secondary' : 'outline'}
+                className="min-h-0 rounded px-2 py-1 text-[10px] leading-normal shadow-none"
+                aria-pressed={mtpDownloads}
+                onClick={() => {
+                  setMtpDownloads((enabled) => !enabled)
+                  setVariantModel(null)
+                  setDetail(null)
+                }}
+                title="Choose full models with Multi-Token Prediction weights"
+              >
+                MTP downloads: {mtpDownloads ? 'On' : 'Off'}
+              </Button>
+            )}
             <Sel
               value={filterState.source}
               onChange={(v) =>
@@ -1321,20 +1451,30 @@ export function ModelsScreen({
                   </p>
                 )}
                 <div role="list" aria-label="Model search results" className={GRID}>
-                  {displayed.map((r) =>
-                    renderCard(
-                      {
-                        id: r.id,
-                        name: r.name,
-                        kind: activeKind as ModelKind,
-                        org: r.org,
-                        files: [],
-                        params: r.params ?? undefined,
-                        credibility: r.credibility
-                      },
-                      true
+                  {displayed
+                    .filter(
+                      (result, index, results) =>
+                        !mtpDownloads ||
+                        results.findIndex(
+                          (other) =>
+                            (MTP_DOWNLOAD_REPOS[other.id] ?? other.id) ===
+                            (MTP_DOWNLOAD_REPOS[result.id] ?? result.id)
+                        ) === index
                     )
-                  )}
+                    .map((r) =>
+                      renderCard(
+                        {
+                          id: r.id,
+                          name: r.name,
+                          kind: activeKind as ModelKind,
+                          org: r.org,
+                          files: [],
+                          params: r.params ?? undefined,
+                          credibility: r.credibility
+                        },
+                        true
+                      )
+                    )}
                 </div>
               </>
             ) : (
@@ -1346,50 +1486,72 @@ export function ModelsScreen({
                     </p>
                   )
                 }
-                const installedModels = displayedCatalog.filter(
-                  (m) => installed.includes(m.id) && m.availability !== 'coming_soon'
-                )
-                const availableModels = displayedCatalog.filter(
-                  (m) => !installed.includes(m.id) && m.availability !== 'coming_soon'
-                )
-                const comingSoonModels = displayedCatalog.filter(
-                  (m) => m.availability === 'coming_soon'
-                )
+                // One group of cards, the same rows on every tab: on this device, remote (a saved
+                // server's models), available to download, coming soon. `group` names the lists
+                // when a tab shows more than one group.
+                const cardRows = (models: ModelEntry[], group?: string): React.ReactNode => {
+                  const installedModels = models.filter(
+                    (m) => installed.includes(m.id) && m.availability !== 'coming_soon'
+                  )
+                  const localModels = installedModels.filter((m) => !m.remoteServerId)
+                  const remoteModels = installedModels.filter((m) => m.remoteServerId)
+                  const availableModels = models.filter(
+                    (m) => !installed.includes(m.id) && m.availability !== 'coming_soon'
+                  )
+                  const comingSoonModels = models.filter((m) => m.availability === 'coming_soon')
+                  const rows: Array<[string, string, ModelEntry[]]> = [
+                    [
+                      'On this device',
+                      group ? `${group} on this device` : 'Models on this device',
+                      localModels
+                    ],
+                    [
+                      'Remote',
+                      group ? `Remote ${group.toLowerCase()}` : 'Remote models',
+                      remoteModels
+                    ],
+                    [
+                      'Available to download',
+                      group ? `${group} available to download` : 'Models available to download',
+                      availableModels
+                    ],
+                    [
+                      'Coming soon',
+                      group ? `${group} coming soon` : 'Computer Use models coming soon',
+                      comingSoonModels
+                    ]
+                  ]
+                  return rows.map(([heading, label, list]) =>
+                    list.length > 0 ? (
+                      <div key={label}>
+                        <div className="px-6 pt-3 text-[9px] uppercase tracking-widest text-neutral-600">
+                          {heading}
+                        </div>
+                        <div role="list" aria-label={label} className={GRID}>
+                          {list.map((m) => renderCard(m))}
+                        </div>
+                      </div>
+                    ) : null
+                  )
+                }
+                if (activeKind !== 'computer_use') return <>{cardRows(displayedCatalog)}</>
+                // Tasks: grounding specialists and decision models are different jobs, run side by
+                // side, so they are listed apart.
+                const groups: Array<[string, ModelEntry[]]> = [
+                  ['Grounding specialists', displayedCatalog.filter((m) => !isDecisionModel(m))],
+                  ['Decision models', displayedCatalog.filter((m) => isDecisionModel(m))]
+                ]
                 return (
                   <>
-                    {installedModels.length > 0 && (
-                      <>
-                        <div className="px-6 pt-3 text-[9px] uppercase tracking-widest text-neutral-600">
-                          On this device
-                        </div>
-                        <div role="list" aria-label="Models on this device" className={GRID}>
-                          {installedModels.map((m) => renderCard(m))}
-                        </div>
-                      </>
-                    )}
-                    {availableModels.length > 0 && (
-                      <>
-                        <div className="px-6 pt-2 text-[9px] uppercase tracking-widest text-neutral-600">
-                          Available to download
-                        </div>
-                        <div role="list" aria-label="Models available to download" className={GRID}>
-                          {availableModels.map((m) => renderCard(m))}
-                        </div>
-                      </>
-                    )}
-                    {comingSoonModels.length > 0 && (
-                      <>
-                        <div className="px-6 pt-2 text-[9px] uppercase tracking-widest text-neutral-600">
-                          Coming soon
-                        </div>
-                        <div
-                          role="list"
-                          aria-label="Computer Use models coming soon"
-                          className={GRID}
-                        >
-                          {comingSoonModels.map((m) => renderCard(m))}
-                        </div>
-                      </>
+                    {groups.map(([group, models]) =>
+                      models.length > 0 ? (
+                        <section key={group} aria-label={group} className="pt-2">
+                          <h3 className="px-6 pt-3 text-xs font-medium text-neutral-200">
+                            {group}
+                          </h3>
+                          {cardRows(models, group)}
+                        </section>
+                      ) : null
                     )}
                   </>
                 )
@@ -1417,7 +1579,7 @@ export function ModelsScreen({
             const downloadProgress = prog ? projectProgress(prog) : null
             const rows: [string, string | null][] = [
               ['Source', m.org || (isLocal ? 'Imported' : '—')],
-              ['Parameters', m.params ? `${m.params}B` : null],
+              ['Parameters', m.params ? formatParams(m.params) : null],
               ['Quantization', m.quant || null],
               ['Download', formatSize(bytes) || null],
               ['Released', fmtReleaseDate(m.releaseDate) || null],
@@ -1549,7 +1711,7 @@ export function ModelsScreen({
                       >
                         <h3 className="mb-2 text-[10px] uppercase tracking-wide text-neutral-400">
                           Available GGUF files
-                          {detailFiles.length > 0 ? ` · ${detailFiles.length}` : ''}
+                          {detailFileGuidance.size > 0 ? ` · ${detailFileGuidance.size}` : ''}
                         </h3>
                         {detailFilesLoading && (
                           <p className="text-xs text-neutral-500">Loading available files…</p>
@@ -1559,36 +1721,87 @@ export function ModelsScreen({
                             {detailFilesError}
                           </p>
                         )}
-                        {!detailFilesLoading && !detailFilesError && detailFiles.length === 0 && (
-                          <p className="text-xs text-neutral-500">
-                            No compatible model files found in this repository.
-                          </p>
-                        )}
+                        {!detailFilesLoading &&
+                          !detailFilesError &&
+                          (m.kind === 'video' ? detailFiles.length : detailFileGuidance.size) ===
+                            0 && (
+                            <p className="text-xs text-neutral-500">
+                              No compatible model files found in this repository.
+                            </p>
+                          )}
                         <div className="space-y-2">
-                          {detailFiles.map((file) => (
-                            <div
-                              key={file.fileName}
-                              className="flex items-start justify-between gap-2 rounded border border-neutral-800 px-3 py-2"
-                            >
-                              <div className="min-w-0">
-                                <p className="break-all text-[11px] text-neutral-200">
-                                  {file.fileName}
-                                </p>
-                                <p className="mt-1 text-[10px] text-neutral-500">
-                                  {file.quant} · {formatSize(file.sizeBytes)}
-                                  {file.mmproj ? ` · includes ${file.mmproj.fileName}` : ''}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => download(m.id, file.fileName)}
-                                disabled={comingSoon || !!downloading}
-                                aria-label={`Download ${file.fileName}`}
-                                className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                Download
-                              </button>
-                            </div>
-                          ))}
+                          {detailFiles
+                            .filter(isModelWeightFile)
+                            .sort(
+                              (a, b) =>
+                                Number(!!detailFileGuidance.get(b.fileName)?.labels.length) -
+                                Number(!!detailFileGuidance.get(a.fileName)?.labels.length)
+                            )
+                            .map((file) => {
+                              const guidance = detailFileGuidance.get(file.fileName)
+                              return (
+                                <div
+                                  key={file.fileName}
+                                  className="flex items-start justify-between gap-2 rounded border border-neutral-800 px-3 py-2"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="break-all text-[11px] text-neutral-200">
+                                      {file.fileName}
+                                    </p>
+                                    {guidance && guidance.labels.length > 0 && (
+                                      <div className="mt-1 flex flex-wrap gap-1">
+                                        {guidance.labels.map((label) => (
+                                          <span
+                                            key={label}
+                                            title={
+                                              label === 'Best balance'
+                                                ? 'Balances file size and precision within your estimated RAM budget.'
+                                                : label === 'Highest precision'
+                                                  ? 'Keeps the most weight precision among these files.'
+                                                  : 'The smallest complete model download, including its vision file.'
+                                            }
+                                            className={`rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${label.startsWith('Best balance') ? 'border-green-500 bg-green-500/10 text-green-500' : 'border-neutral-700 text-neutral-300'}`}
+                                          >
+                                            {label}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <p className="mt-1 text-[10px] text-neutral-500">
+                                      {guidance?.quant ?? file.quant} · {formatSize(file.sizeBytes)}
+                                      {file.mmproj ? ` · includes ${file.mmproj.fileName}` : ''}
+                                    </p>
+                                    {guidance?.fit === 'risky' && (
+                                      <p
+                                        className="mt-1 text-[10px] text-neutral-400"
+                                        title="Estimated from system RAM and file size. GPU memory and context size also affect memory use."
+                                      >
+                                        Large for this device
+                                      </p>
+                                    )}
+                                    {guidance?.split && (
+                                      <p
+                                        className="mt-1 text-[10px] text-neutral-400"
+                                        title="All model parts are required."
+                                      >
+                                        Split model /{' '}
+                                        {guidance.weightBytes !== null
+                                          ? `${formatSize(guidance.weightBytes)} total`
+                                          : 'Total size unavailable'}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <button
+                                    onClick={() => download(m.id, file.fileName)}
+                                    disabled={comingSoon || !!downloading || !!detailFilesError}
+                                    aria-label={`Download ${file.fileName}`}
+                                    className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-[10px] text-neutral-300 hover:border-green-500 hover:text-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Download
+                                  </button>
+                                </div>
+                              )
+                            })}
                         </div>
                       </section>
                     )}
@@ -1669,35 +1882,92 @@ export function ModelsScreen({
               <div>
                 <h2 className="text-sm font-medium text-white">Choose a model file</h2>
                 <p className="mt-1 text-[10px] text-neutral-500">{variantModel.name}</p>
+                <p className="mt-1 break-all text-[10px] text-neutral-500">{variantModel.id}</p>
               </div>
-              <button onClick={() => setVariantModel(null)} aria-label="Close file picker" className="text-neutral-500 hover:text-white"><IconX className="h-4 w-4" /></button>
+              <button
+                onClick={() => setVariantModel(null)}
+                aria-label="Close file picker"
+                className="text-neutral-500 hover:text-white"
+              >
+                <IconX className="h-4 w-4" />
+              </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-              {variantLoading && <p className="text-xs text-neutral-400">Loading available files…</p>}
-              {variantError && <p className="text-xs text-red-400" role="alert">{variantError}</p>}
+              {variantLoading && (
+                <p className="text-xs text-neutral-400">Loading available files…</p>
+              )}
+              {variantError && (
+                <p className="text-xs text-red-400" role="alert">
+                  {variantError}
+                </p>
+              )}
               <div className="space-y-2">
-                {variants.map((variant) => (
-                  <button
-                    key={variant.fileName}
-                    onClick={() => {
-                      download(variantModel.id, variant.fileName)
-                      setVariantModel(null)
-                    }}
-                    className="flex w-full flex-col gap-1 rounded border border-neutral-800 px-3 py-2 text-left transition-colors hover:border-green-500 hover:bg-green-500/5"
-                  >
-                    <span className="break-all text-[11px] text-neutral-200">
-                      {variant.fileName}
-                    </span>
-                    <span className="text-[10px] text-neutral-400">
-                      {formatSize(variant.sizeBytes)}
-                    </span>
-                    {variant.mmproj && (
-                      <span className="break-all text-[9px] text-neutral-500">
-                        Includes {variant.mmproj.fileName}
-                      </span>
-                    )}
-                  </button>
-                ))}
+                {variants
+                  .filter((variant) => variantModel.kind === 'video' || isModelWeightFile(variant))
+                  .sort(
+                    (a, b) =>
+                      Number(!!variantGuidance.get(b.fileName)?.labels.length) -
+                      Number(!!variantGuidance.get(a.fileName)?.labels.length)
+                  )
+                  .map((variant) => {
+                    const guidance = variantGuidance.get(variant.fileName)
+                    return (
+                      <Button
+                        variant="outline"
+                        key={variant.fileName}
+                        onClick={() => {
+                          setChosenVariants((current) => ({
+                            ...current,
+                            [variantModel.id]: variant.fileName
+                          }))
+                          download(variantModel.id, variant.fileName)
+                          setVariantModel(null)
+                        }}
+                        className="h-auto w-full flex-col items-start gap-1 whitespace-normal rounded px-3 py-2 text-left leading-normal shadow-none"
+                      >
+                        <span className="break-all text-[11px] text-neutral-200">
+                          {variant.fileName}
+                        </span>
+                        <span className="text-[10px] text-neutral-400">
+                          {formatSize(variant.sizeBytes)}
+                        </span>
+                        {guidance && (
+                          <>
+                            {guidance.labels.length > 0 && (
+                              <span className="text-[10px] uppercase tracking-wide text-neutral-200">
+                                {guidance.labels.join(' / ')}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-neutral-400">{guidance.quant}</span>
+                            {guidance.fit === 'risky' && (
+                              <span
+                                className="text-[10px] text-neutral-400"
+                                title="Estimated from system RAM and file size. GPU memory and context size also affect memory use."
+                              >
+                                Large for this device
+                              </span>
+                            )}
+                            {guidance.split && (
+                              <span
+                                className="text-[10px] text-neutral-400"
+                                title="All model parts are required."
+                              >
+                                Split model /{' '}
+                                {guidance.weightBytes !== null
+                                  ? `${formatSize(guidance.weightBytes)} total`
+                                  : 'Total size unavailable'}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {variant.mmproj && (
+                          <span className="break-all text-[9px] text-neutral-500">
+                            Includes {variant.mmproj.fileName}
+                          </span>
+                        )}
+                      </Button>
+                    )
+                  })}
               </div>
             </div>
           </SidePanel>

@@ -227,11 +227,21 @@ async function loadProFeaturesMainNow(): Promise<void> {
   try {
     await activateMain(session.api)
     activeProRuntime = session.runtime
+    lastMainActivationFailed = false
     console.log('[pro] main features activated')
   } catch (e) {
     await session.runtime.shutdown()
+    lastMainActivationFailed = true
     console.error('[pro] activateMain failed', e)
   }
+}
+
+let lastMainActivationFailed = false
+
+/** True when the latest attempt to start paid main features failed, so Pro must not be
+ * announced as active to the renderer. */
+export function proMainActivationFailed(): boolean {
+  return lastMainActivationFailed && !activeProRuntime
 }
 
 export function loadProFeaturesMain(): Promise<void> {

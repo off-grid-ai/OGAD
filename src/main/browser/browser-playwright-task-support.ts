@@ -118,3 +118,37 @@ export async function observeWithCurrentLease(
     return observation
   }
 }
+
+export const UNCERTAIN_ACTION_NOTE =
+  'The page did not confirm the last action. Checking the page before the next step.'
+
+/** All input can trigger page handlers, including typing without Enter. */
+export function isInputAction(decision: SemanticDecision): boolean {
+  return ['click', 'type', 'press_key', 'select_option', 'hover', 'drag'].includes(decision.action)
+}
+
+/** Only timeouts at the action/CDP boundary qualify; page sync failures do not. */
+export function isUncertainActionTimeout(decision: SemanticDecision, text: string): boolean {
+  if (!isInputAction(decision)) return false
+  return (
+    /The browser did not answer cdp\.send in time\./.test(text) ||
+    /(?:CDP|Input\.|Protocol error|Electron debugger).*timed out/i.test(text) ||
+    /Playwright (?:CDP command|MCP browser_(?:click|type|press_key|select_option|hover|drag)) timed out/i.test(
+      text
+    )
+  )
+}
+
+/** Page references can change after observation. Keep the action blocked across new refs. */
+export function uncertainActionKey(decision: SemanticDecision): string {
+  return JSON.stringify({
+    action: decision.action,
+    element: decision.element,
+    text: decision.text,
+    key: decision.key,
+    values: decision.values,
+    startElement: decision.start_element,
+    endElement: decision.end_element,
+    url: decision.url
+  })
+}

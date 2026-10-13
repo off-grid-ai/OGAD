@@ -110,7 +110,9 @@ describe('journey-scoped Electron Playwright relay', () => {
       'offgrid-page-7'
     )
     expect(allowed.error).toBeUndefined()
-    expect(page.debuggerApi.commands.filter((command) => command.method === 'Runtime.evaluate')).toEqual([
+    expect(
+      page.debuggerApi.commands.filter((command) => command.method === 'Runtime.evaluate')
+    ).toEqual([
       { method: 'Runtime.evaluate', params: { expression: 'document.title' }, sessionId: undefined }
     ])
 
@@ -118,7 +120,9 @@ describe('journey-scoped Electron Playwright relay', () => {
     expect(foreign.error?.message).toMatch(/outside this Web Use journey/)
     const root = await request(socket, 5, 'Runtime.evaluate', {})
     expect(root.error?.message).toMatch(/requires a journey target session/)
-    expect(page.debuggerApi.commands.filter((command) => command.method === 'Runtime.evaluate')).toHaveLength(1)
+    expect(
+      page.debuggerApi.commands.filter((command) => command.method === 'Runtime.evaluate')
+    ).toHaveLength(1)
   })
 
   it('removes debugger and WebContents listeners after a renderer failure', async () => {

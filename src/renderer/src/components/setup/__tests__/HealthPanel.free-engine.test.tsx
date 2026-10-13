@@ -72,6 +72,30 @@ afterEach(() => {
 })
 
 describe('<HealthPanel/> Free engine control', () => {
+  it('refreshes backend status on focus and removes stale GPU details after a failed read', async () => {
+    let unavailable = false
+    const api = {
+      systemHealth: async () => HEALTH,
+      runtimeBackends: async () => {
+        if (unavailable) throw new Error('IPC connection unavailable')
+        return [{ id: 'chat' as const, state: 'loaded' as const, backend: 'Vulkan', device: 'GPU 0' }]
+      }
+    }
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: api })
+    render(<HealthPanel />)
+    expect(await screen.findByText('Vulkan · GPU 0')).toBeTruthy()
+
+    unavailable = true
+    fireEvent.focus(window)
+    expect(await screen.findByText('Status unavailable')).toBeTruthy()
+    expect(screen.queryByText('Vulkan · GPU 0')).toBeNull()
+    expect(screen.getByRole('status', { name: 'Chat model (llama-server)' })).toBeTruthy()
+
+    unavailable = false
+    fireEvent.focus(window)
+    expect(await screen.findByText('Vulkan · GPU 0')).toBeTruthy()
+  })
+
   it('stays idle between lifecycle changes instead of polling full system health', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const api = installObservableHealthApi()

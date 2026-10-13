@@ -38,65 +38,88 @@ const productionDependencies: RemoteScreenGateDependencies = {
   }
 }
 
+/** The task a screen gate guards, as audit and telemetry name it. */
+export interface ScreenTaskIdentity {
+  readonly id: string
+  readonly goal: string
+}
+
 /** Stop a screen task before its host captures or sends the first frame. */
 export function withRemoteScreenGate(
   taskKind: ScreenTaskKind,
   execute: (action: ActionRecord) => Promise<ExecuteResult>,
   dependencies: RemoteScreenGateDependencies = productionDependencies
 ): (action: ActionRecord) => Promise<ExecuteResult> {
-  return async (action) => {
-    const modelStrategy = dependencies.modelStrategy(taskKind)
-    const activeServer = dependencies.activeServer()
-    const specialistServer = dependencies.specialistServer?.() ?? null
-    const decisionServer = dependencies.decisionServer?.(taskKind) ?? null
-    const activeServers = [
-      ...(modelStrategy === 'same_as_chat' ||
-      modelStrategy === 'text_plus_specialist' ||
-      modelStrategy === 'decision_plus_reasoning'
-        ? [activeServer]
-        : []),
-      ...(modelStrategy === 'separate_specialist' ||
-      modelStrategy === 'text_plus_specialist' ||
-      modelStrategy === 'decision_plus_specialist'
-        ? [specialistServer]
-        : [])
-    ].filter((server): server is NonNullable<typeof server> => server !== null)
-    const decision = remoteScreenDecision({
+  return (action) => {
+    const goal = (action.args as Record<string, unknown>).goal
+    return runInRemoteScreenGate(
       taskKind,
-      modelStrategy,
-      activeServer,
-      activeServers
-    })
-    if (!decision.allowed) return { ok: false, detail: decision.message }
-    const telemetry =
-      taskKind === 'computer_use'
-        ? createComputerUseRunTelemetry({
-            actionId: action.id,
-            task:
-              typeof (action.args as Record<string, unknown>).goal === 'string'
-                ? String((action.args as Record<string, unknown>).goal)
-                : action.intent,
-            strategy: modelStrategy,
-            reasoningServer: activeServer,
-            groundingServer: specialistServer,
-            deciderServer: decisionServer
-          })
-        : undefined
-    try {
-      const result = await runWithRemoteScreenTaskSession(
-        { taskKind, modelStrategy, activeServer, telemetry },
-        () => execute(action)
-      )
-      if (telemetry) await finishComputerUseRunTelemetry(telemetry, result)
-      return result
-    } catch (error) {
-      if (telemetry) {
-        await finishComputerUseRunTelemetry(telemetry, {
-          ok: false,
-          detail: error instanceof Error ? error.message : String(error)
+      { id: action.id, goal: typeof goal === 'string' ? goal : action.intent },
+      () => execute(action),
+      { outcome: (result) => result, refused: (detail) => ({ ok: false, detail }) },
+      dependencies
+    )
+  }
+}
+
+/** Run one screen task inside the gate: the privacy decision, the task kind's own model
+ *  settings for every rail, and run telemetry. New tasks and retries both enter here, so a
+ *  Continue uses the same Web Use or Computer Use selection as the run it continues. */
+export async function runInRemoteScreenGate<T>(
+  taskKind: ScreenTaskKind,
+  task: ScreenTaskIdentity,
+  run: () => Promise<T>,
+  result: { outcome(value: T): ExecuteResult; refused(detail: string | undefined): T },
+  dependencies: RemoteScreenGateDependencies = productionDependencies
+): Promise<T> {
+  const modelStrategy = dependencies.modelStrategy(taskKind)
+  const activeServer = dependencies.activeServer()
+  const specialistServer = dependencies.specialistServer?.() ?? null
+  const decisionServer = dependencies.decisionServer?.(taskKind) ?? null
+  const activeServers = [
+    ...(modelStrategy === 'same_as_chat' ||
+    modelStrategy === 'text_plus_specialist' ||
+    modelStrategy === 'decision_plus_reasoning'
+      ? [activeServer]
+      : []),
+    ...(modelStrategy === 'separate_specialist' ||
+    modelStrategy === 'text_plus_specialist' ||
+    modelStrategy === 'decision_plus_specialist'
+      ? [specialistServer]
+      : [])
+  ].filter((server): server is NonNullable<typeof server> => server !== null)
+  const decision = remoteScreenDecision({
+    taskKind,
+    modelStrategy,
+    activeServer,
+    activeServers
+  })
+  if (!decision.allowed) return result.refused(decision.message)
+  const telemetry =
+    taskKind === 'computer_use'
+      ? createComputerUseRunTelemetry({
+          actionId: task.id,
+          task: task.goal,
+          strategy: modelStrategy,
+          reasoningServer: activeServer,
+          groundingServer: specialistServer,
+          deciderServer: decisionServer
         })
-      }
-      throw error
+      : undefined
+  try {
+    const value = await runWithRemoteScreenTaskSession(
+      { taskKind, modelStrategy, activeServer, telemetry },
+      run
+    )
+    if (telemetry) await finishComputerUseRunTelemetry(telemetry, result.outcome(value))
+    return value
+  } catch (error) {
+    if (telemetry) {
+      await finishComputerUseRunTelemetry(telemetry, {
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error)
+      })
     }
+    throw error
   }
 }

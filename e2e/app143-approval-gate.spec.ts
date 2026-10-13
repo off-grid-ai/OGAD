@@ -2,10 +2,10 @@
  * APP-143 — a connector write cannot cross the external boundary before visible approval.
  *
  * The rendered app, preload, IPC handlers, encrypted SQLite connector repository, approval queue,
- * execution claim, lifecycle, audit log, and Actions UI are production code. The stdio MCP process
- * is the only fake: it stands in for an external provider and records the moment a write reaches it.
+ * execution claim, lifecycle, audit log, and Actions UI are production code. Fakes stand only at
+ * the native model server and external MCP provider boundaries.
  */
-import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test'
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -50,19 +50,32 @@ const externalExecutions = (): Array<{ title: string; project: string }> => {
     .map((line) => JSON.parse(line) as { title: string; project: string })
 }
 
-const approvalCard = (): Locator =>
-  page
-    .getByText(APPROVAL_TITLE, { exact: true })
-    .locator('xpath=ancestor::div[contains(@class, "flex flex-col self-start")][1]')
-
 test.beforeEach(async () => {
   test.skip(!PRO_PRESENT, 'pro package not present — approval execution is a Pro surface')
   profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-app143-'))
   executionLog = path.join(profileDir, 'external-executions.jsonl')
+  const modelsDir = path.join(profileDir, 'models')
+  const llamaDir = path.join(profileDir, 'bin', 'llama')
+  fs.mkdirSync(modelsDir, { recursive: true })
+  fs.mkdirSync(llamaDir, { recursive: true })
+  const gguf = Buffer.alloc(2048)
+  gguf.write('GGUF')
+  fs.writeFileSync(path.join(modelsDir, 'app143-local.gguf'), gguf)
+  fs.writeFileSync(
+    path.join(modelsDir, 'active-model.json'),
+    JSON.stringify({ id: 'app143-local-model', primary: 'app143-local.gguf', mmproj: null })
+  )
+  fs.copyFileSync(
+    path.resolve('e2e/fixtures/app143-approval-llama-server.mjs'),
+    path.join(llamaDir, 'llama-server')
+  )
+  fs.chmodSync(path.join(llamaDir, 'llama-server'), 0o755)
   app = await launchOffGrid({
     env: {
       ...process.env,
       OFFGRID_USER_DATA: profileDir,
+      OFFGRID_BIN_DIR: path.join(profileDir, 'bin'),
+      OFFGRID_APP143_MODEL_LOG: path.join(profileDir, 'model-requests.jsonl'),
       OFFGRID_PRO: '1',
       NODE_ENV: 'production'
     }
@@ -73,6 +86,14 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
+  for (const name of [
+    'model-requests.jsonl',
+    'external-executions.jsonl',
+    'logs/off-grid-ai-desktop.log'
+  ]) {
+    const file = path.join(profileDir, name)
+    if (fs.existsSync(file)) await test.info().attach(name, { path: file })
+  }
   await app?.close().catch(() => undefined)
   app = null
   fs.rmSync(profileDir, { recursive: true, force: true })
@@ -101,6 +122,13 @@ test('holds a connector write until approval, then executes it once with visible
     tools: expect.arrayContaining([expect.objectContaining({ name: 'create_external_task' })])
   })
 
+  // Connector tools are opt-in in Chat, including turns started by the approval form.
+  await page.getByRole('button', { name: 'Chat', exact: true }).click()
+  await page.getByRole('button', { name: 'Composer options', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Connectors Off', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'Connectors On', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+
   await page.getByRole('button', { name: 'Actions', exact: true }).click()
   await page.getByRole('button', { name: /^Approvals/ }).click()
   await expect(page.getByText('Nothing waiting for approval.')).toBeVisible()
@@ -127,13 +155,14 @@ test('holds a connector write until approval, then executes it once with visible
     }
   )
 
-  const pendingCard = approvalCard()
-  await expect(pendingCard).toBeVisible()
-  await expect(pendingCard.getByText('pending', { exact: true })).toBeVisible()
-  await expect(
-    pendingCard.getByText('APP-143 guarded connector · create_external_task')
-  ).toBeVisible()
-  await expect(pendingCard.getByRole('button', { name: 'Approve' })).toBeVisible()
+  // This fresh profile contains one proposal, so the visible controls are unique.
+  await expect(page.getByRole('paragraph').filter({ hasText: APPROVAL_TITLE })).toBeVisible()
+  const pendingLabels = page.getByText('pending', { exact: true })
+  // The pending filter and the proposal's status must both be visible.
+  await expect(pendingLabels).toHaveCount(2)
+  for (const label of await pendingLabels.all()) await expect(label).toBeVisible()
+  await expect(page.getByText('APP-143 guarded connector · create_external_task')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Review in Chat', exact: true })).toBeVisible()
 
   // The proposal has traversed production IPC and is visibly waiting in the real queue. Give the
   // external boundary time to expose any accidental eager execution before asserting it stayed shut.
@@ -144,18 +173,45 @@ test('holds a connector write until approval, then executes it once with visible
     fullPage: true
   })
 
-  await pendingCard.getByRole('button', { name: 'details' }).click()
-  await expect(pendingCard.getByText(`"title": "${EXTERNAL_TITLE}"`)).toBeVisible()
-  await expect(pendingCard.getByText(`"project": "${EXTERNAL_PROJECT}"`)).toBeVisible()
+  await page.getByRole('button', { name: 'details' }).click()
+  await expect(page.getByText(`"title": "${EXTERNAL_TITLE}"`)).toBeVisible()
+  await expect(page.getByText(`"project": "${EXTERNAL_PROJECT}"`)).toBeVisible()
 
-  await pendingCard.getByRole('button', { name: 'Approve' }).click()
-  await page.getByRole('button', { name: /^history/ }).click()
+  await page.getByRole('button', { name: 'Review in Chat', exact: true }).click()
+  // Pro 99146f6 and core ca04e4f8b route local approvals through this Chat form.
+  // ExecutionChatCard also opens this form; only remote cards still say Approve.
+  const review = page.getByRole('form', { name: 'Add the final details, then start it in Chat' })
+  await expect(review).toBeVisible()
+  await expect(
+    review.getByRole('textbox', { name: 'What should Off Grid AI do? *', exact: true })
+  ).toHaveValue(APPROVAL_TITLE)
+  await expect(review.getByRole('textbox', { name: 'title *', exact: true })).toHaveValue(
+    EXTERNAL_TITLE
+  )
+  await expect(review.getByRole('textbox', { name: 'project *', exact: true })).toHaveValue(
+    EXTERNAL_PROJECT
+  )
+  await page.waitForTimeout(750)
+  expect(externalExecutions()).toEqual([])
+  await review.getByRole('button', { name: 'Start in chat', exact: true }).click()
+  await expect(review).toBeHidden()
 
-  const executedCard = approvalCard()
-  await expect(executedCard.getByText('executed', { exact: true })).toBeVisible({ timeout: 10_000 })
-  const visibleOutcome = executedCard.getByText(/Created external task/)
+  await expect
+    .poll(externalExecutions, {
+      message: 'approved Chat turn reaches the connector',
+      timeout: 30_000
+    })
+    .toEqual([{ title: EXTERNAL_TITLE, project: EXTERNAL_PROJECT }])
+
+  await page.getByRole('button', { name: 'Actions', exact: true }).click()
+  await page.getByRole('button', { name: /^Approvals/ }).click()
+  await page.getByRole('button', { name: 'history', exact: true }).click()
+
+  await expect(page.getByRole('paragraph').filter({ hasText: APPROVAL_TITLE })).toBeVisible()
+  await expect(page.getByText('executed', { exact: true })).toBeVisible({ timeout: 10_000 })
+  const visibleOutcome = page.getByText(/Created external task/)
   if (!(await visibleOutcome.isVisible().catch(() => false))) {
-    await executedCard.getByRole('button', { name: 'details' }).click()
+    await page.getByRole('button', { name: 'details' }).click()
   }
   await expect(visibleOutcome).toBeVisible()
   await expect
@@ -168,6 +224,15 @@ test('holds a connector write until approval, then executes it once with visible
     (id) => (window as unknown as { api: App143RendererApi }).api.approvalsApprove(id),
     approvalId
   )
+  const repeatedChatApproval = await page.evaluate(
+    (id) =>
+      (window as unknown as { api: App143RendererApi }).api.proInvoke(
+        'approvals:approve-for-chat',
+        id
+      ),
+    approvalId
+  )
+  expect(repeatedChatApproval).toBe(false)
   await page.waitForTimeout(500)
   expect(externalExecutions()).toEqual([{ title: EXTERNAL_TITLE, project: EXTERNAL_PROJECT }])
 

@@ -27,7 +27,10 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers \
   libx11-dev libxext-dev libxfixes-dev libxi-dev libxtst-dev libxrandr-dev \
   libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libsecret-1-0 \
-  pipewire-audio pipewire-module-xrdp ubuntu-drivers-common
+  pipewire-audio pipewire-module-xrdp ubuntu-drivers-common \
+  python3-gi geoclue-2.0 gir1.2-atspi-2.0 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 \
+  gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-pulseaudio
 sudo systemctl start docker
 if ! command -v nvidia-smi >/dev/null || ! nvidia-smi >/dev/null 2>&1; then
   echo 'Installing the Ubuntu NVIDIA compute driver. A reboot is needed after this step.'

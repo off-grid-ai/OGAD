@@ -157,7 +157,10 @@ describe('OAuth loopback callback lifecycle', () => {
     const pending = blocked.awaitCode('blocked-state')
     const callbackFailure = expect(pending).rejects.toThrow('OAuth callback server unavailable')
 
-    await expect(blocked.start()).rejects.toMatchObject({ code: 'EADDRINUSE' })
+    await expect(blocked.start()).rejects.toMatchObject({
+      code: 'EADDRINUSE',
+      message: expect.stringContaining('If another Off Grid AI window is open, close it')
+    })
 
     await callbackFailure
     expect(observedErrors).toHaveLength(1)

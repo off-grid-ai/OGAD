@@ -289,4 +289,23 @@ describe('memory -> RAG -> scoped chat lifecycle', () => {
     expect(lastModelPrompt()).not.toContain(otherDocumentFact)
     expect(lastModelPrompt()).not.toContain(otherChatContext)
   })
+
+  it('includes saved memory in an All-memory answer through the public chat handler', async () => {
+    const fact = 'The Aurora release owner is Priya and the release code is obsidian.'
+    const saved = await invoke<{ id: number }>('db:add-memory', fact, 'integration-test')
+    expect(saved.id).toBeGreaterThan(0)
+    fake.enqueue(
+      { content: '{"intent":"chat","urls":[]}' },
+      { content: 'Priya owns the Aurora release, code obsidian.' }
+    )
+    const reply = await invoke<{
+      answer: string
+      context: { memories: Array<{ content: string }> }
+    }>('rag:chat', 'Who owns the Aurora release?', 'All', [], null, 'aurora-memory-chat', false, 'aurora-memory-turn', false, [])
+    expect(reply.answer).toBe('Priya owns the Aurora release, code obsidian.')
+    expect(reply.context.memories).toEqual(expect.arrayContaining([expect.objectContaining({ content: fact })]))
+    expect(lastModelPrompt()).toContain(fact)
+    await invoke('db:delete-memory', saved.id)
+  })
+
 })

@@ -31,7 +31,8 @@ export class OAuthLoopbackServer {
 
   constructor(private readonly options: OAuthLoopbackOptions) {
     this.host = options.host ?? '127.0.0.1'
-    this.authorizationTimeoutMs = options.authorizationTimeoutMs ?? 3 * 60 * 1000
+    // Account selection, MFA, and workspace approval can take several minutes.
+    this.authorizationTimeoutMs = options.authorizationTimeoutMs ?? 10 * 60 * 1000
   }
 
   get redirectUrl(): string {
@@ -51,7 +52,18 @@ export class OAuthLoopbackServer {
         this.startPromise = null
         this.rejectAll(new Error('OAuth callback server unavailable'))
         this.options.onError?.(error)
-        reject(error)
+        // The raw "listen EADDRINUSE" reaches the sign-in screen; say what to do instead.
+        reject(
+          (error as NodeJS.ErrnoException).code === 'EADDRINUSE'
+            ? Object.assign(
+                new Error(
+                  'Sign-in could not start: another app is using its port on this computer. If another Off Grid AI window is open, close it and try again.',
+                  { cause: error }
+                ),
+                { code: 'EADDRINUSE' }
+              )
+            : error
+        )
       }
 
       server.once('error', handleStartupError)

@@ -14,6 +14,20 @@ import { OFF_GRID_MOBILE_URL, OFF_GRID_WEBSITE_URL, openExternal } from '../../c
 import { deviceNoun, currentPlatform } from '@renderer/lib/device'
 import { projectPersonalMeshActivationFailure } from '@offgrid/sync'
 
+function availableOnLinux(feature?: ProFeature): boolean {
+  return !!feature && featureSupportsPlatform(feature, 'linux')
+}
+
+function linuxNoticeTitle(feature?: ProFeature): string {
+  return feature
+    ? 'This feature is coming soon to Linux.'
+    : 'Some Pro features are coming soon to Linux.'
+}
+
+function showComingSoonBadge(comingSoon: boolean, linux: boolean, feature?: ProFeature): boolean {
+  return comingSoon || (linux && !!feature && !availableOnLinux(feature))
+}
+
 // License-key activation. Only meaningful in a pro-capable build (__OFFGRID_PRO__);
 // a core build has no pro code bundled, so entering a key would unlock nothing.
 // Main and renderer lifecycle owners react to the saved entitlement, so activation
@@ -97,6 +111,10 @@ export function UpgradeScreen({
   const f = feature
   const comingSoon = variant === 'coming-soon'
   const linux = currentPlatform() === 'linux'
+  const linuxFeatureAvailable = availableOnLinux(f)
+  const linuxAvailable = PRO_FEATURES.filter(availableOnLinux)
+    .map((item) => item.label)
+    .join(', ')
   // Whether to warn a prospective buyer that Pro isn't fully live on their device
   // yet. Per-feature: if this writeup is for a specific feature, only warn when THAT
   // feature isn't ported here (so a Windows-ready feature like Vault shows no
@@ -116,13 +134,14 @@ export function UpgradeScreen({
       <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-x-12 gap-y-8 lg:grid-cols-[1.4fr_minmax(320px,1fr)]">
         {/* Left — the pitch (left-aligned, desktop reading column) */}
         <div className="flex flex-col gap-5">
-          {comingSoon || linux ? (
+          {showComingSoonBadge(comingSoon, linux, f) ? (
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-800/50 px-3 py-1 text-[11px] uppercase tracking-wide text-neutral-300">
               <Clock weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro · Coming soon
             </span>
           ) : (
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-emerald-400">
-              <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro · Available now
+              <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro ·{' '}
+              {linux && !f && platformNotice ? 'Available features' : 'Available now'}
             </span>
           )}
 
@@ -142,11 +161,7 @@ export function UpgradeScreen({
             </div>
             <div className="min-w-0">
               <h1 className="text-3xl font-semibold tracking-tight text-white">
-                {f
-                  ? f.label
-                  : linux
-                    ? 'Off Grid AI Pro is coming to Linux'
-                    : 'Off Grid AI Pro is here'}
+                {f ? f.label : linux ? 'Off Grid AI Pro on Linux' : 'Off Grid AI Pro is here'}
               </h1>
               {f && <p className="mt-1 text-base text-neutral-300">{f.tagline}</p>}
             </div>
@@ -202,7 +217,7 @@ export function UpgradeScreen({
               </div>
               <p className="text-sm leading-relaxed text-neutral-300">
                 {linux
-                  ? 'Pro features are coming soon to Linux. Your license works on Windows and macOS today.'
+                  ? `This feature is coming soon to Linux. ${linuxAvailable} are available now. Your license also works on Windows and macOS.`
                   : `Your license covers desktop and mobile - up to 5 devices. This feature is not on your ${deviceNoun()} yet.`}
               </p>
               <p className="text-[11px] leading-relaxed text-neutral-600">
@@ -221,10 +236,10 @@ export function UpgradeScreen({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs font-medium text-neutral-200">
-                    Use Pro on Windows or macOS
+                    Use Pro on Windows, Linux, or macOS
                   </span>
                   <span className="mt-0.5 block text-[11px] leading-tight text-neutral-500">
-                    Install Off Grid AI Desktop on Windows or Mac and use the same license.
+                    Install Off Grid AI Desktop on Windows, Linux, or macOS and use the same license.
                   </span>
                 </span>
                 <ArrowSquareOut weight="bold" className="h-4 w-4 shrink-0 text-neutral-500" />
@@ -238,17 +253,15 @@ export function UpgradeScreen({
                   <Clock weight="fill" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-400" />
                   <span>
                     <span className="font-medium text-neutral-200">
-                      {linux
-                        ? 'Pro features are coming soon to Linux.'
-                        : `Coming soon to your ${deviceNoun()}.`}
+                      {linux ? linuxNoticeTitle(f) : `Coming soon to your ${deviceNoun()}.`}
                     </span>{' '}
                     {linux
-                      ? 'Core features work on Linux now. Pro features are available on Windows and macOS.'
-                      : 'This feature is available on Windows and macOS.'}
+                      ? `${linuxAvailable} are available on Linux now. Other Pro features are available on Windows and macOS.`
+                      : 'This feature is available on Windows, Linux, and macOS.'}
                   </span>
                 </div>
               )}
-              {!linux && (
+              {(!linux || !f || linuxFeatureAvailable) && (
                 <>
                   <div className="text-[10px] uppercase tracking-widest text-neutral-500">
                     Unlock Pro
@@ -266,7 +279,7 @@ export function UpgradeScreen({
                 </>
               )}
 
-              {__OFFGRID_PRO__ && !linux ? (
+              {__OFFGRID_PRO__ && (!linux || !f || linuxFeatureAvailable) ? (
                 <>
                   <div className="border-t border-neutral-800" />
                   <LicenseActivation />

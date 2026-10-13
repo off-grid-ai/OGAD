@@ -47,6 +47,8 @@ export async function callHookAsync<R = unknown>(
 
 /** Known hook names, centralised so core and pro stay in sync. */
 export const HOOKS = {
+  /** The main window was shown at startup (not a hidden launch). */
+  mainWindowShown: 'app:mainWindowShown',
   /** (basePrompt: string, query: string) => Promise<string> — augment the chat
    *  system/context with captured memory + entity/observation context (pro). */
   chatAugmentContext: 'chat.augmentContext',
@@ -57,6 +59,16 @@ export const HOOKS = {
    * providers own verification, read-tool discovery, and execution through their supported protocol.
    */
   mcpConnectorToolSource: 'mcp:connectorToolSource',
+  /**
+   * (connectorId: number, url: string | null) => void - a connector is about to be removed, while
+   * its stored sign-in still exists: Pro revokes provider tokens that support it (Google).
+   */
+  mcpBeforeRemove: 'mcp:beforeRemove',
+  /**
+   * (connectorId: number) => { services: string[]; missing: string[] } | undefined - what an
+   * account can read and what was not granted, named for people (Gmail, Calendar). Pro.
+   */
+  accountAccess: 'accounts:access',
   /** (mutation: SyncMutation) => void - record a committed core data change in Pro sync. */
   syncRecordLocalMutation: 'sync.recordLocalMutation',
   /**
@@ -87,6 +99,17 @@ export const HOOKS = {
   /** (task: TaskRunSnapshot) => void - lets Pro project the normal task outcome onto the
    * approval that started the task. Core task state remains the single source of truth. */
   actionsObserveTaskResult: 'actions:observeTaskResult',
+  /** (conversationId: string, call: { name: string; status: ChatStreamToolResultStatus;
+   * result: string }) => void - lets Pro record an approved connector's Chat outcome. */
+  actionsObserveChatToolResult: 'actions:observeChatToolResult',
+  /**
+   * (request: unknown, browser: { deviceName: string; deviceId: string }) => Promise<unknown> -
+   * one vault request from a paired browser extension (extension-bridge/), answered per the
+   * extension's vault protocol. Pro registers it; free builds leave it inert and the bridge
+   * reports the vault as unavailable.
+   */
+  extensionChatRequest: 'chat.extensionRequest',
+  extensionVaultRequest: 'vault.extensionRequest',
   /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
    *  that has not yet migrated still gates connector writes; remove once
    *  desktop-pro registers actionsProposeApproval. */

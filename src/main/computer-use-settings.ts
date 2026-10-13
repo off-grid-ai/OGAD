@@ -1,4 +1,5 @@
 import { getSetting, saveSetting } from './database'
+import { announceTaskSettings } from './task-settings-events'
 import {
   COMPUTER_USE_SETTINGS_KEY,
   DEFAULT_COMPUTER_USE_SETTINGS,
@@ -19,6 +20,7 @@ export function setComputerUseSettings(
 ): ComputerUseSettings {
   const normalized = normalizeComputerUseSettings(value)
   saveSetting(COMPUTER_USE_SETTINGS_KEY, normalized)
+  announceTaskSettings(COMPUTER_USE_SETTINGS_KEY, normalized)
   if (options.emitSync !== false) {
     emitSyncMutation({
       entity: CORE_SYNC_ENTITIES.modelSetting,

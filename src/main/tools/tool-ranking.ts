@@ -35,12 +35,26 @@ const STOP = new Set([
   'please',
   'show',
   'get',
-  'find'
+  'find',
+  'all',
+  'tell',
+  'any',
+  'across'
 ])
 
-/** Lowercase word tokens, stop-words + 1-char noise removed. */
+/** One form for a word and its plural, so "emails" meets "email" and "calendars" meets
+ *  "calendar". Deliberately small: no stemming library, only the endings that decide routing. */
+function singular(word: string): string {
+  if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`
+  if (word.length > 3 && word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1)
+  return word
+}
+
+/** Lowercase word tokens, stop-words + 1-char noise removed, plurals folded. */
 export function terms(s: string): string[] {
-  return (s.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter((w) => w.length > 1 && !STOP.has(w))
+  return (s.toLowerCase().match(/[a-z0-9]+/g) ?? [])
+    .filter((w) => w.length > 1 && !STOP.has(w))
+    .map(singular)
 }
 
 /** A tool's name + description, tolerant of both the OpenAI `{function:{…}}` wire

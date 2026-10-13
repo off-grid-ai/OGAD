@@ -5,6 +5,7 @@
 import fs from 'fs'
 import path from 'path'
 import { modelsDir } from './runtime-env'
+import { modelReadDirectories, resolveModelAsset } from './model-paths'
 import type { Modality } from './active-models-logic'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
 export { isModelActive, modalityForKind, type Modality } from './active-models-logic'
@@ -17,11 +18,17 @@ export class ActiveModalityStore {
   }
 
   private readAll(): Record<string, string | null> {
-    try {
-      return JSON.parse(fs.readFileSync(this.storeFile(), 'utf-8'))
-    } catch {
-      return {}
+    const roots = this.directory() === modelsDir() ? modelReadDirectories() : [this.directory()]
+    const values: Record<string, string | null> = {}
+    for (const root of [...roots].reverse()) {
+      try {
+        const file = resolveModelAsset('active-modalities.json', [root])
+        if (file) Object.assign(values, JSON.parse(fs.readFileSync(file, 'utf-8')))
+      } catch {
+        /* Keep the next readable selection file. */
+      }
     }
+    return values
   }
 
   get(kind: Modality | `remote_${RemoteModelModality}`): string | null {

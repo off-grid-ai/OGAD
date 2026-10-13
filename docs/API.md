@@ -409,6 +409,16 @@ When `status` is `completed`, `result` holds the same payload the synchronous ca
 have returned; when `failed`, an `error` object is present. `GET /v1/requests` lists recent
 requests. (Sync calls behave exactly as documented above — async is purely opt-in.)
 
+Stop an image request with `DELETE /v1/requests/{request_id}`. It stops only the
+named request, including work waiting for the image runtime. The response is
+`{ "request_id": "…", "status": "failed", "cancelled": true }`. Polling then returns
+`status: "failed"` with `error.type: "cancelled"` and
+`error.message: "Image generation cancelled."`. Repeated cancellation is safe.
+A completed request stays completed and returns `cancelled: false`. Unknown IDs
+return 404. Other modalities return 409 because they do not support this endpoint.
+Closing the async POST response does not stop its background work. Disconnecting
+a synchronous image request stops its own image generation.
+
 ## Performance, memory & timeouts
 
 The gateway is built for a single machine running everything locally, so it manages

@@ -666,4 +666,46 @@ describe('task history persistence', () => {
     expect(durable).toContain('[redacted]')
     database.close()
   })
+
+  it('shows a plain title while a retry keeps the full model-facing goal, across a restart', () => {
+    const { db, store } = openStore(5_000)
+    const goal = [
+      'Current user request (authoritative):',
+      'Use Web Use to open https://getoffgridai.co/pricing and calculate Team pricing for 40 people.',
+      '',
+      'Structured task summary:',
+      'Select Team, enter 40 seats, read the total.'
+    ].join('\n')
+    store.upsert({ taskId: 'clean-title', kind: 'web_use', title: goal, status: 'running' })
+    // A later progress write from the browser repeats the goal; the first goal stays the goal.
+    store.upsert({ taskId: 'clean-title', kind: 'web_use', title: goal, status: 'done' })
+
+    const reopened = new TaskHistoryStore(db, () => 6_000)
+    reopened.migrate()
+    const task = reopened.get('clean-title')
+    expect(task?.title).toBe('Open getoffgridai.co/pricing and calculate Team pricing for 40 people')
+    expect(task?.goal).toBe(goal)
+    db.close()
+  })
+
+  it('reads a plain title from a task row written before titles were cleaned', () => {
+    const { db, store } = openStore(5_000)
+    db.prepare(
+      `INSERT INTO task_run_history (task_id, kind, title, status, steps_json, started_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'legacy-title',
+      'computer_use',
+      'Structured task summary:\nRename the Q3 deck in Finder to Q3-final.',
+      'done',
+      '[]',
+      1_000,
+      1_000
+    )
+
+    const task = store.get('legacy-title')
+    expect(task?.title).toBe('Rename the Q3 deck in Finder to Q3-final')
+    expect(task?.goal).toBe('Structured task summary:\nRename the Q3 deck in Finder to Q3-final.')
+    db.close()
+  })
 })

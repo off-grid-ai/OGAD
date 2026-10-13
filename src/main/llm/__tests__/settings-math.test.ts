@@ -10,6 +10,7 @@ import {
   samplingPayload,
   launchArgsChanged,
   buildLaunchArgs,
+  CHECKPOINT_MIN_STEP,
   type LaunchArgsInput,
   type LaunchState
 } from '../settings-math'
@@ -25,6 +26,16 @@ const baseArgs = (over: Partial<LaunchArgsInput> = {}): LaunchArgsInput => ({
   threads: undefined,
   batchSize: undefined,
   ...over
+})
+
+describe('buildLaunchArgs context checkpoints', () => {
+  it('spaces checkpoints 2048 tokens apart so an earlier edit re-reads at most ~2K tokens', () => {
+    const args = buildLaunchArgs(baseArgs())
+    const i = args.indexOf('--checkpoint-min-step')
+    expect(i).toBeGreaterThan(-1)
+    expect(args[i + 1]).toBe(String(CHECKPOINT_MIN_STEP))
+    expect(CHECKPOINT_MIN_STEP).toBe(2048)
+  })
 })
 
 describe('buildLaunchArgs image-min-tokens', () => {

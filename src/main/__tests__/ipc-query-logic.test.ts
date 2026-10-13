@@ -14,8 +14,20 @@ import {
 } from '../ipc-query-logic'
 
 describe('tokenizeQuery', () => {
-  it('lowercases, splits on whitespace, and strips punctuation', () => {
+  it('lowercases and splits on punctuation and whitespace', () => {
     expect(tokenizeQuery('Hello, World! Foobar')).toEqual(['hello', 'world', 'foobar'])
+  })
+
+  it('separates words at FTS punctuation and retains Unicode words', () => {
+    expect(tokenizeQuery('title:Aurora café 日本語 नमस्ते')).toEqual([
+      'title',
+      'aurora',
+      'café',
+      '日本語',
+      'नमस्ते'
+    ])
+    expect(ftsMatchExpression('?:()*^"')).toBe('')
+    expect(ftsMatchExpression('   ')).toBe('')
   })
 
   it('drops tokens shorter than 3 chars', () => {
@@ -59,15 +71,15 @@ describe('ftsMatchExpression', () => {
     expect(expr).not.toMatch(/(^|\s)best-reviewed(\s|$)/)
   })
 
-  it('falls back to the whole text as one quoted phrase when nothing tokenises', () => {
+  it('uses quoted words when the stopword filter removes all terms', () => {
     // all stopwords / too short → no tokens; the fallback must still be a quoted phrase, not raw text
-    expect(ftsMatchExpression('to of a')).toBe('"to of a"')
+    expect(ftsMatchExpression('to of a')).toBe('"to" OR "of" OR "a"')
   })
 
   it('escapes an embedded double-quote so the phrase literal stays well-formed', () => {
     expect(ftsMatchExpression('say "hey" now')).toBe('"say" OR "hey" OR "now"')
-    // a quote that survives into the fallback phrase is doubled per FTS5 escaping
-    expect(ftsMatchExpression('a "b')).toBe('"a ""b"')
+    // punctuation in the fallback is removed
+    expect(ftsMatchExpression('a "b')).toBe('"a" OR "b"')
   })
 
   // The real regression: run the built expression against a REAL FTS5 table (node:sqlite ships FTS5)

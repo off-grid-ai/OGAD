@@ -103,11 +103,15 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 async function bootApplicationModules(): Promise<void> {
   handlers.clear()
-  const [{ setupIPC }, { setupRagIPC }, { llm }] = await Promise.all([
+  const [{ setupIPC }, { setupRagIPC }, { llm }, { configureRuntime }] = await Promise.all([
     import('../ipc'),
     import('../rag-ipc'),
-    import('../llm')
+    import('../llm'),
+    import('../runtime-env')
   ])
+  // As the app does at every launch: a reopen after resetModules has a fresh runtime-env, which
+  // would otherwise fall back to the suite's default profile and find none of this one's data.
+  configureRuntime({ dataDir: PROFILE_DIR, binRoots: [BIN_DIR] })
   const service = llm as unknown as { port: number; initialized: boolean; paused: boolean }
   service.port = fake.port
   service.initialized = true
@@ -187,8 +191,6 @@ beforeAll(async () => {
     JSON.stringify({ primary: 'vision-model.gguf', mmproj: 'mmproj.gguf' })
   )
 
-  const { configureRuntime } = await import('../runtime-env')
-  configureRuntime({ dataDir: PROFILE_DIR, binRoots: [BIN_DIR] })
   fake = await startFakeLlamaServer()
   await bootApplicationModules()
 })

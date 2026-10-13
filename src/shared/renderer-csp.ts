@@ -1,8 +1,9 @@
-import { GATEWAY_HOST, GATEWAY_PORT, MEDIA_PORT } from './ports'
+import { GATEWAY_HOST, GATEWAY_PORT, mediaOrigins } from './ports'
 
 export function createRendererContentSecurityPolicy(styleNonce: string): string {
   const gatewayOrigin = `http://${GATEWAY_HOST}:${GATEWAY_PORT}`
-  const mediaOrigin = `http://127.0.0.1:${MEDIA_PORT}`
+  // The media server falls back up the port window when another instance holds its port.
+  const mediaOrigin = mediaOrigins().join(' ')
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${styleNonce}'`,
@@ -14,6 +15,6 @@ export function createRendererContentSecurityPolicy(styleNonce: string): string 
     // that already serves images from the same admitted roots. Without it the frame is blocked and
     // draws blank - which reads exactly like a broken file rather than a blocked one.
     `frame-src 'self' ogartifact: ${mediaOrigin} ${gatewayOrigin} http://localhost:${GATEWAY_PORT}`,
-    `connect-src 'self' ${gatewayOrigin} ${mediaOrigin}`
+    `connect-src 'self' blob: ${gatewayOrigin} ${mediaOrigin}`
   ].join('; ')
 }

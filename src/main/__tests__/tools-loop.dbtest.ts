@@ -14,6 +14,9 @@ import type { TickOutcome } from '@offgrid/use'
 import { startFakeLlamaServer, type FakeLlamaServer } from './harness/fake-llama-server'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-tools-it-'))
+// These cases test the tool loop, not embeddings: route by words at once instead of downloading
+// the embedding model into this fresh folder on every run.
+process.env.OFFGRID_EMBEDDINGS_OFFLINE = '1'
 vi.mock('electron', () => ({
   app: { getPath: () => TMP_DIR, isPackaged: false, getAppPath: () => process.cwd() },
   safeStorage: {
@@ -34,6 +37,7 @@ import {
   readUrlText
 } from '../tools'
 import { llm } from '../llm'
+import { toolPromptChars, toolPromptTokens } from '../tools/prompt-budget'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
 import { NativeActionToolExtension, type ActionsPort } from '../tools/nativeActionToolExtension'
 
@@ -105,6 +109,24 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
         .join('')
     ).toBe('Hi there')
     expect(steps).toEqual([]) // no tool call -> no step
+  })
+
+  it('asks once more when a turn ends with no answer, and says why if there is still none', async () => {
+    // Reported: God showed "No response returned." after its searches, with no reason given.
+    enqueueReactiveAfterEmptyPlan(
+      { content: '', finishReason: 'length' },
+      { content: 'Here is what I found.' }
+    )
+    expect((await toolChat('what did Morgan send me?', [])).answer).toBe('Here is what I found.')
+    expect(fake.requests).toHaveLength(2)
+
+    fake.reset()
+    enqueueReactiveAfterEmptyPlan(
+      { content: '', finishReason: 'length' },
+      { content: '', finishReason: 'length' }
+    )
+    const { answer } = await toolChat('and yesterday?', [])
+    expect(answer).toMatch(/whole output allowance \(\d+ tokens\)/)
   })
 
   it('sends the user Max-output setting to the model, not the old hardcoded 1024 cap (essay cut-off)', async () => {
@@ -420,6 +442,41 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     }
   })
 
+  it('in assistant mode, acting is always offered and the model is told when to use it', async () => {
+    // God's tools do not depend on the words of the message: the model decides from the prompt.
+    const extension = new NativeActionToolExtension(
+      { run: async () => ({ ok: true, result: undefined }), taskUseEnabled: () => true },
+      'darwin'
+    )
+    registerToolExtension(extension)
+    const first = (): {
+      tools?: { function?: { name?: string } }[]
+      messages?: { content?: unknown }[]
+    } => fake.requests[0] as never
+    const offered = (): string[] => (first().tools ?? []).map((t) => t.function?.name ?? '')
+    try {
+      fake.enqueue({ content: 'Pick one with good reviews.' })
+      const question = await toolChat('what is a good cooking video on youtube?', [], {
+        assistantOnly: true
+      })
+      expect(question.toolCalls).toEqual([])
+      expect(offered()).toContain('web_use')
+      expect(String(first().messages?.[0]?.content)).toContain(
+        'Answer questions directly. Call web_use only when the user asks you to do something on a website.'
+      )
+
+      // A request that shares no words with the tool still has it.
+      fake.reset()
+      fake.enqueue({ content: 'ok' })
+      await toolChat('can you do a sanity check of this entire website?', [], {
+        assistantOnly: true
+      })
+      expect(offered()).toContain('web_use')
+    } finally {
+      unregisterToolExtension(extension.id, extension)
+    }
+  })
+
   it('passes the tool schemas + tool_choice to the model on the first round', async () => {
     enqueueReactiveAfterEmptyPlan({ content: 'ok' })
     await toolChat('get_datetime: what time is it', [])
@@ -429,16 +486,48 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     expect(round1.tool_choice).toBe('auto')
   })
 
+  it('keeps the first message unchanged on the next turn so the engine reuses its prompt cache', async () => {
+    type Round = { tools?: { function?: { name?: string } }[]; messages?: { content?: unknown }[] }
+    const names = (round: Round): string[] => (round.tools ?? []).map((t) => t.function?.name ?? '')
+    const firstQuestion = 'calculator: what is (3+4)*2'
+    fake.enqueue({ content: 'It is 14.' })
+    await toolChat(firstQuestion, [], { conversationId: 'chat-prompt-cache' })
+    const turn1 = fake.requests[0] as Round
+
+    fake.reset()
+    fake.enqueue({ content: 'It is noon.' })
+    await toolChat(
+      'get_datetime: what time is it',
+      [
+        { role: 'user', content: firstQuestion },
+        { role: 'assistant', content: 'It is 14.' }
+      ],
+      { conversationId: 'chat-prompt-cache' }
+    )
+    const turn2 = fake.requests[0] as Round
+
+    // The earlier tools lead in the same order, the new pick follows, and the system text holds.
+    expect(names(turn2).slice(0, names(turn1).length)).toEqual(names(turn1))
+    expect(names(turn2)).toContain('get_datetime')
+    expect(turn2.messages?.[0]?.content).toEqual(turn1.messages?.[0]?.content)
+
+    // Another conversation starts from its own message, not this chat's tools.
+    fake.reset()
+    fake.enqueue({ content: 'It is noon.' })
+    await toolChat('get_datetime: what time is it', [], { conversationId: 'chat-fresh' })
+    expect(names(fake.requests[0] as Round)[0]).toBe('get_datetime')
+  })
+
   it('uses the configured tool-step budget beyond the old five-step cap', async () => {
     await llm.setSettings({ maxToolCalls: 7 })
     try {
       enqueueReactiveAfterEmptyPlan(
-        ...Array.from({ length: 7 }, () => ({
-          toolCalls: [{ name: 'get_datetime', args: {} }]
+        ...Array.from({ length: 7 }, (_, step) => ({
+          toolCalls: [{ name: 'calculator', args: { expression: `${String(step)}+1` } }]
         })),
         { content: 'Finished after seven tool calls.' }
       )
-      const r = await toolChat('get_datetime keep going', [])
+      const r = await toolChat('calculator: keep going', [])
 
       expect(r.toolCalls).toHaveLength(7)
       expect(r.answer).toBe('Finished after seven tool calls.')
@@ -494,12 +583,12 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
     await llm.setSettings({ maxToolCalls: 3 })
     try {
       enqueueReactiveAfterEmptyPlan(
-        ...Array.from({ length: 3 }, () => ({
-          toolCalls: [{ name: 'get_datetime', args: {} }]
+        ...Array.from({ length: 3 }, (_, step) => ({
+          toolCalls: [{ name: 'calculator', args: { expression: `${String(step)}+1` } }]
         })),
         { content: 'Based on the tools, here is your answer.' }
       )
-      const r = await toolChat('get_datetime keep going', [])
+      const r = await toolChat('calculator: keep going', [])
       expect(r.toolCalls).toHaveLength(3)
       expect(r.answer).toBe('Based on the tools, here is your answer.')
       expect(r.answer).not.toMatch(/too many tool steps/i)
@@ -542,15 +631,15 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       enqueueReactiveAfterEmptyPlan(
         {
           toolCalls: [
-            { name: 'get_datetime', args: {} },
-            { name: 'get_datetime', args: {} },
-            { name: 'get_datetime', args: {} }
+            { name: 'calculator', args: { expression: '1+1' } },
+            { name: 'calculator', args: { expression: '2+2' } },
+            { name: 'calculator', args: { expression: '3+3' } }
           ]
         },
         { content: 'Stopped after the configured two calls.' }
       )
 
-      const r = await toolChat('get_datetime use only the allowed calls', [])
+      const r = await toolChat('calculator: use only the allowed calls', [])
 
       expect(r.toolCalls).toHaveLength(2)
       expect(r.answer).toBe('Stopped after the configured two calls.')
@@ -564,6 +653,7 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
   it('does not save successful tool output as the answer when the final model turn is empty', async () => {
     enqueueReactiveAfterEmptyPlan(
       { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+      { content: '' },
       { content: '' }
     )
     const deltas: string[] = []
@@ -574,7 +664,9 @@ describe('agentic tool loop — real toolChat + real LLMService over a fake llam
       }
     })
 
-    expect(result.answer).toBe('')
+    // Never the tool's raw output: an empty turn is asked once more, then explained.
+    expect(result.answer).not.toContain('4')
+    expect(result.answer).toMatch(/without an answer/)
     expect(deltas.join('')).toBe('')
   })
 
@@ -924,5 +1016,236 @@ describe('web tools — real parsers over fetch faked at the network boundary', 
     expect(steps[0]!.args.query).toBe('tell me about achilles the hero')
     expect(decodeURIComponent(searchedUrl)).toContain('achilles the hero')
     expect(r.toolCalls[0]!.result).toContain('example.com')
+  })
+  // --- harness recovery: errors, misnamed tools, repeats, stale results -------------
+  it('feeds an unknown tool back to the model with the real tool names instead of ending the answer', async () => {
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'teleport', args: { to: 'Athens' } }] },
+      { content: 'I cannot teleport, but here is the answer.' }
+    )
+    const r = await toolChat('calculator: what is 2+2', [])
+
+    expect(r.answer).toBe('I cannot teleport, but here is the answer.')
+    expect(r.toolCalls[0]).toMatchObject({ name: 'teleport', status: 'failed' })
+    expect(r.toolCalls[0]!.result).toMatch(/no tool named "teleport"\. Available tools: .*calculator/)
+    expect(JSON.stringify(fake.requests[1])).toContain('no tool named')
+  })
+
+  it('runs the offered tool a small model meant when it calls it by another name', async () => {
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'calculate', args: { expression: '2+3' } }] },
+      { content: 'It is 5.' }
+    )
+    const steps: string[] = []
+    const r = await toolChat('calculator: what is 2+3', [], { onStep: (c) => steps.push(c.name) })
+
+    expect(steps).toEqual(['calculator'])
+    expect(r.toolCalls[0]).toMatchObject({ name: 'calculator', result: '5', status: 'completed' })
+    expect(r.answer).toBe('It is 5.')
+  })
+
+  it('lets the model recover after a tool throws, without claiming the failed call succeeded', async () => {
+    const extension = {
+      id: 'throwing-ext',
+      schemas: () => [
+        {
+          type: 'function',
+          function: {
+            name: 'flaky_lookup',
+            description: 'Look something up',
+            parameters: { type: 'object', properties: { id: { type: 'string' } } }
+          }
+        }
+      ],
+      canHandle: (name: string) => name === 'flaky_lookup',
+      execute: async (_name: string, args: Record<string, unknown>) => {
+        if (args.id === 'bad') throw new Error('record bad was not found')
+        return 'record good: active'
+      }
+    }
+    registerToolExtension(extension)
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        { toolCalls: [{ name: 'flaky_lookup', args: { id: 'bad' } }] },
+        { toolCalls: [{ name: 'flaky_lookup', args: { id: 'good' } }] },
+        { content: 'Record good is active.' }
+      )
+      const r = await toolChat('flaky_lookup: check the record', [], { connectors: true })
+
+      expect(r.answer).toBe('Record good is active.')
+      expect(r.toolCalls.map((c) => c.status)).toEqual(['failed', 'completed'])
+      expect(r.toolCalls[0]!.result).toMatch(/flaky_lookup failed: record bad was not found/)
+      expect(r.toolCalls[0]!.result).toMatch(/do not claim it succeeded/i)
+    } finally {
+      unregisterToolExtension(extension.id, extension)
+    }
+  })
+
+  it('does not rerun a repeated identical call, and ends tool use when the model keeps repeating', async () => {
+    enqueueReactiveAfterEmptyPlan(
+      { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+      { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+      { toolCalls: [{ name: 'calculator', args: { expression: '2+2' } }] },
+      { content: 'It is 4.' }
+    )
+    const steps: string[] = []
+    const r = await toolChat('calculator: what is 2+2', [], { onStep: (c) => steps.push(c.name) })
+
+    expect(steps).toEqual(['calculator']) // only the first call ran
+    expect(r.toolCalls).toHaveLength(1)
+    expect(r.answer).toBe('It is 4.')
+    expect(JSON.stringify(fake.requests[2])).toContain('already called calculator')
+    const finalRequest = fake.requests[3] as { tools?: unknown[]; messages?: unknown[] }
+    expect(finalRequest.tools ?? []).toHaveLength(0)
+    expect(JSON.stringify(finalRequest.messages)).toContain('kept repeating the same calculator call')
+  })
+
+  it('elides older bulky tool results once the window fills, keeping the latest two whole', async () => {
+    const pageText = (page: number): string => `page${String(page)} `.repeat(1_000)
+    const extension = {
+      id: 'big-page-ext',
+      schemas: () => [
+        {
+          type: 'function',
+          function: {
+            name: 'big_page',
+            description: 'Read one long page',
+            parameters: { type: 'object', properties: { page: { type: 'number' } } }
+          }
+        }
+      ],
+      canHandle: (name: string) => name === 'big_page',
+      execute: async (_name: string, args: Record<string, unknown>) => pageText(Number(args.page))
+    }
+    registerToolExtension(extension)
+    const service = llm as unknown as { ctxSize: number }
+    const previousContext = service.ctxSize
+    service.ctxSize = 8_192
+    try {
+      enqueueReactiveAfterEmptyPlan(
+        ...[1, 2, 3, 4].map((page) => ({ toolCalls: [{ name: 'big_page', args: { page } }] })),
+        { content: 'Compared all four pages.' }
+      )
+      const r = await toolChat('big_page: compare four pages', [], { connectors: true })
+
+      expect(r.answer).toBe('Compared all four pages.')
+      const finalRequest = fake.requests[4] as {
+        messages: { role: string; content: unknown }[]
+      }
+      const toolContents = finalRequest.messages
+        .filter((m) => m.role === 'tool')
+        .map((m) => String(m.content))
+      expect(toolContents).toHaveLength(4)
+      expect(toolContents[0]).toMatch(
+        /^\[big_page result elided to save context: \d+ characters\. Call big_page again/
+      )
+      expect(toolContents[2]).toBe(pageText(3))
+      expect(toolContents[3]).toBe(pageText(4))
+    } finally {
+      service.ctxSize = previousContext
+      unregisterToolExtension(extension.id, extension)
+    }
+  })
+  it('folds a conversation that fills the window into a structured summary the next round uses', async () => {
+    const history = [
+      { role: 'user', content: 'Plan a trip to Lisbon in May for two' },
+      { role: 'assistant', content: `Four-day plan ${'museum detail '.repeat(1_500)}OLD-PLAN-END` },
+      { role: 'user', content: 'Make it three days' },
+      { role: 'assistant', content: 'Here is the three-day plan.' }
+    ]
+    const summary =
+      '## Goal\nA three-day Lisbon trip in May for two.\n## Where we left off\nThe three-day plan.'
+    const service = llm as unknown as { ctxSize: number }
+    const previousContext = service.ctxSize
+    service.ctxSize = 4_096
+    try {
+      enqueueReactiveAfterEmptyPlan({ content: summary }, { content: 'Added a day trip to Sintra.' })
+      const activities: unknown[] = []
+      const deltas: string[] = []
+      const r = await toolChat('Add a day trip', history, {
+        onActivity: (activity) => activities.push(activity),
+        onDelta: (text, kind) => {
+          if (kind === 'content') deltas.push(text)
+        }
+      })
+
+      expect(r.answer).toBe('Added a day trip to Sintra.')
+      expect(deltas.join('')).toBe('Added a day trip to Sintra.') // the summary never streams
+      expect(activities).toContainEqual({ kind: 'compacted', label: 'Compacted', summary })
+      const summaryRequest = fake.requests[0] as {
+        tools?: unknown[]
+        messages: { role: string; content: string }[]
+      }
+      expect(summaryRequest.tools ?? []).toHaveLength(0)
+      expect(summaryRequest.messages[0]!.content).toContain('## Facts and preferences')
+      expect(summaryRequest.messages[1]!.content).toContain('User: Make it three days')
+      const answerRequest = JSON.stringify(fake.requests[1])
+      expect(answerRequest).toContain('Summary of the earlier conversation')
+      expect(answerRequest).toContain('A three-day Lisbon trip in May for two.')
+      expect(answerRequest).not.toContain('OLD-PLAN-END')
+    } finally {
+      service.ctxSize = previousContext
+    }
+  })
+
+  it('accepts an English summary of CJK history with more characters but fewer tokens', async () => {
+    const history = [{ role: 'user', content: '请安排旅行并保留所有偏好。'.repeat(230) }]
+    const summary =
+      `## Goal\nPlan the trip.\n## Facts and preferences\n${'Visit museums and allow time for rest. '.repeat(98)}`.trim()
+    const previousSettings = llm.getSettings()
+    await llm.setSettings({ ctxSize: 2_048 })
+    try {
+      fake.enqueue({ content: summary }, { content: 'The trip plan is ready.' })
+      const activities: unknown[] = []
+      const result = await toolChat('Continue the plan.', history, {
+        onActivity: (activity) => activities.push(activity)
+      })
+
+      expect(result.answer).toBe('The trip plan is ready.')
+      expect(activities).toContainEqual({ kind: 'compacted', label: 'Compacted', summary })
+      expect(fake.requests).toHaveLength(2)
+      const answer = fake.requests[1] as {
+        messages: { role: string; content: string }[]
+        tools?: unknown[]
+      }
+      const original = [answer.messages[0], ...history, answer.messages.at(-1)]
+      expect(toolPromptChars(answer.messages, answer.tools)).toBeGreaterThan(
+        toolPromptChars(original, answer.tools)
+      )
+      expect(toolPromptTokens(answer.messages, answer.tools)).toBeLessThan(
+        toolPromptTokens(original, answer.tools)
+      )
+      expect(toolPromptTokens(original, answer.tools)).toBeGreaterThanOrEqual(2_048 * 0.8)
+      expect(toolPromptTokens(answer.messages, answer.tools)).toBeLessThan(2_048 * 0.8)
+      expect(answer.messages[1]!.content).toContain(summary)
+      expect(answer.messages[1]!.content).not.toContain(history[0]!.content)
+    } finally {
+      await llm.setSettings(previousSettings)
+    }
+  })
+
+  it('falls back to short excerpts when the summary call returns nothing usable', async () => {
+    const history = [
+      { role: 'user', content: 'Plan a trip to Lisbon' },
+      { role: 'assistant', content: `Plan ${'museum detail '.repeat(1_500)}OLD-PLAN-END` }
+    ]
+    const service = llm as unknown as { ctxSize: number }
+    const previousContext = service.ctxSize
+    service.ctxSize = 4_096
+    try {
+      enqueueReactiveAfterEmptyPlan({ content: '' }, { content: 'Added a day trip.' })
+      const activities: unknown[] = []
+      const r = await toolChat('Add a day trip', history, {
+        onActivity: (activity) => activities.push(activity)
+      })
+
+      expect(r.answer).toBe('Added a day trip.')
+      expect(activities).toContainEqual({ kind: 'compacted', label: 'Compacted' })
+      const answerRequest = JSON.stringify(fake.requests[1])
+      expect(answerRequest).toContain('Earlier chat excerpts')
+      expect(answerRequest).not.toContain('OLD-PLAN-END')
+    } finally {
+      service.ctxSize = previousContext
+    }
   })
 })

@@ -100,10 +100,14 @@ export function requestedThinking(body: Record<string, unknown>): boolean | unde
  *
  * Returns whether the body changed.
  */
-export function applyThinkingPayload(body: Record<string, unknown>): boolean {
+export function applyThinkingPayload(
+  body: Record<string, unknown>,
+  dialect: ThinkingDialect = 'enable-thinking'
+): boolean {
   const asked = requestedThinking(body)
   if (asked === undefined) return false
-  const resolved = thinkingPayload(asked)
+  // The loaded model's own switch: enable_thinking sent to a reasoning_strength template is ignored.
+  const resolved = thinkingPayload(asked, dialect)
   body.chat_template_kwargs = resolved.chat_template_kwargs
   if (resolved.reasoning_format !== undefined) {
     body.reasoning_format = resolved.reasoning_format

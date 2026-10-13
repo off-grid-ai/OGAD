@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { chatListPreviewLine } from '@offgrid/sync'
 import { timeAgo } from '@renderer/lib/time'
@@ -29,6 +29,39 @@ function ConversationSidebarComponent({
   onDeleteConversation
 }: ConversationSidebarProps): React.JSX.Element {
   console.log('MemoryChat ConversationSidebar rendered')
+  // The text being typed lives here, so a keystroke re-renders this sidebar only. The chat screen
+  // receives the query once typing pauses, and a clear or an outside change applies at once.
+  const [draft, setDraft] = useState(search)
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [settledSearch, setSettledSearch] = useState(search)
+  if (search !== settledSearch) {
+    setSettledSearch(search)
+    setDraft(search)
+  }
+  useEffect(
+    () => () => {
+      if (settleTimer.current) clearTimeout(settleTimer.current)
+    },
+    []
+  )
+  // An outside change to the search wins: a draft still waiting to settle must not overwrite it.
+  useEffect(() => {
+    if (settleTimer.current) clearTimeout(settleTimer.current)
+    settleTimer.current = null
+  }, [search])
+  const changeDraft = (next: string, immediate = false): void => {
+    setDraft(next)
+    if (settleTimer.current) clearTimeout(settleTimer.current)
+    settleTimer.current = null
+    if (immediate) {
+      onSearchChange(next)
+      return
+    }
+    settleTimer.current = setTimeout(() => {
+      settleTimer.current = null
+      onSearchChange(next)
+    }, 150)
+  }
   const listRef = useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -74,14 +107,14 @@ function ConversationSidebarComponent({
                 />
               </svg>
               <input
-                value={search}
-                onChange={(event) => onSearchChange(event.target.value)}
+                value={draft}
+                onChange={(event) => changeDraft(event.target.value)}
                 placeholder="Search conversations…"
                 className="w-full bg-transparent text-xs text-neutral-200 placeholder-neutral-600 outline-none"
               />
-              {search && (
+              {draft && (
                 <button
-                  onClick={() => onSearchChange('')}
+                  onClick={() => changeDraft('', true)}
                   className="shrink-0 text-neutral-600 hover:text-neutral-300"
                 >
                   ✕

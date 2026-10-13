@@ -121,6 +121,10 @@ export class VisionController {
       session.deadline.unref()
     }
     this.sessions.set(taskId, session)
+    // Stopped while it waited to start: it ends here, through the same stop as a running task.
+    if (this.stoppedBeforeStart.delete(taskId)) {
+      this.stop(taskId, 'stopped before it started', 'Stopped before it started')
+    }
     return () => {
       if (this.sessions.get(taskId) !== session) return
       if (session.deadline) clearTimeout(session.deadline)
@@ -195,6 +199,21 @@ export class VisionController {
       state: current?.state ?? null,
       steps: [...(current?.steps ?? [])]
     }
+  }
+
+  /** Tasks stopped while queued, before any run registered: their run must not start. */
+  private readonly stoppedBeforeStart = new Set<string>()
+
+  /** A Stop that found no run in progress but did stop the task: the run already on its way, if
+   *  one comes, is stopped as it registers. A Continue clears it first (forgetStoppedBeforeStart),
+   *  so only a run that was waiting when Stop came can be stopped by it. */
+  markStoppedBeforeStart(taskId: string): void {
+    this.stoppedBeforeStart.add(taskId)
+  }
+
+  /** A deliberate Continue starts a new run of the task: no earlier Stop carries over to it. */
+  forgetStoppedBeforeStart(taskId: string): void {
+    this.stoppedBeforeStart.delete(taskId)
   }
 
   hasActiveSession(taskId: string): boolean {
@@ -331,6 +350,17 @@ export function registerVisionSession(
   return controller.registerSession(taskId, guard, request, project, sessionLimitMs)
 }
 
+/** Stop a task that has been accepted but has not started (queued, or waiting for approval):
+ *  it is stopped the moment its run begins. */
+export function stopVisionTaskBeforeStart(taskId: string): void {
+  controller.markStoppedBeforeStart(taskId)
+}
+
+/** Continue is starting a new run of `taskId`: it must not inherit a Stop meant for an earlier one. */
+export function forgetVisionStopBeforeStart(taskId: string): void {
+  controller.forgetStoppedBeforeStart(taskId)
+}
+
 export function emitVisionStep(taskId: string, note: string): void {
   controller.emitStep(taskId, note)
 }
@@ -367,11 +397,16 @@ export function controlVisionTask(
   command: 'stop' | 'pause' | 'takeover' | 'resume',
   taskId: string
 ): boolean {
+  const running = controller.hasActiveSession(taskId)
   const controlled = controller.control(command, taskId)
   // A Web Use process cannot survive an app restart. Its durable row can arrive
   // after startup recovery through sync, so Stop must also close that local row
   // when no browser controller remains in memory.
   const stoppedOrphan = command === 'stop' ? stopOrphanedLocalWebTask(taskId) : false
+  // Stopped before its run began (still queued): that run must not start later.
+  if (command === 'stop' && !running && (controlled || stoppedOrphan)) {
+    controller.markStoppedBeforeStart(taskId)
+  }
   return controlled || stoppedOrphan
 }
 

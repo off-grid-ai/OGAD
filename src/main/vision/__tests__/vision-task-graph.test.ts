@@ -187,6 +187,47 @@ describe('runVisionTaskGraph', () => {
     expect(w.phases).toEqual(['phase-1', 'phase-2'])
   })
 
+  it.each([false, true])(
+    'clears previous action evidence at the next milestone or activity cycle (repeat=%s)',
+    async (repeatUntilSessionLimit) => {
+      const expectedEffect = 'The result panel is visible.'
+      const w = workflow([
+        {
+          kind: 'actions',
+          actionText: 'Click the visible control',
+          actions: [{ type: 'click', point: { x: 100, y: 295 } }],
+          expectedEffect
+        },
+        complete('Site visible.'),
+        complete('Details visible.')
+      ])
+      const inputs: Array<{ expected?: string; effect?: string }> = []
+      const deps: VisionTaskGraphDeps = {
+        ...w.deps,
+        repeatUntilSessionLimit,
+        plan: repeatUntilSessionLimit ? { version: 1, phases: plan.phases.slice(0, 1) } : plan,
+        decide: async (input) => {
+          inputs.push({
+            expected: input.previousExpectedEffect,
+            effect: input.previousActionEffect
+          })
+          if (repeatUntilSessionLimit && inputs.length === 3) w.deps.guard.halt()
+          return { response: 'decision', modelInput: 'one visual request' }
+        }
+      }
+
+      const result = await runVisionTaskGraph('Complete the activity.', deps)
+
+      expect(result.ok).toBe(!repeatUntilSessionLimit)
+      expect(w.actuated).toEqual(['click:100,295'])
+      expect(inputs).toEqual([
+        { expected: undefined, effect: undefined },
+        { expected: expectedEffect, effect: 'unverifiable' },
+        { expected: undefined, effect: undefined }
+      ])
+    }
+  )
+
   it('does not let a model-level done verdict skip remaining execution-plan milestones', async () => {
     const w = workflow([
       done('Everything is complete.'),
@@ -399,6 +440,34 @@ describe('runVisionTaskGraph', () => {
       expect(result.steps).toContain(`${direction}: The proposed point is not verified.`)
     }
   )
+
+  it('stops after five unusable replies in a row instead of re-observing forever', async () => {
+    // Found live: an unsupported action, re-observed for forty minutes, blocked the task queue.
+    const w = workflow([])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
+
+    const result = await runVisionTaskGraph('Use the visible control.', w.deps)
+
+    expect(result.ok).toBe(false)
+    expect(result.summary).toContain('5 replies in a row that cannot run')
+    expect(w.decisionCalls).toBe(5)
+    expect(w.actuated).toEqual([])
+  })
+
+  it('keeps going after fewer than five unusable replies', async () => {
+    const bad = (): VisionPolicyDecision => ({
+      kind: 'invalid',
+      actionText: '',
+      error: 'The model command did not parse.'
+    })
+    const w = workflow([bad(), bad(), bad(), bad(), complete(), complete()])
+    w.deps.plan = { version: 1, phases: [{ id: 'only', title: 'Use the visible control' }] }
+
+    const result = await runVisionTaskGraph('Use the visible control.', w.deps)
+
+    expect(result.ok).toBe(true)
+    expect(w.decisionCalls).toBe(6)
+  })
 
   it('takes a fresh observation when a transition command is malformed', async () => {
     const w = workflow([

@@ -12,8 +12,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Microphone, Square } from '@phosphor-icons/react'
 import { voice } from '@renderer/lib/voiceApi'
+import { shortcutLabel } from '@renderer/lib/device'
 
 type Phase = 'recording' | 'transcribing'
+
+/** Fallback when the settings read returns no accelerator. Electron's REGISTRATION format, the
+ *  same shape the dictation controller registers, so one renderer turns it into per-platform copy
+ *  (macOS reads 'Option+Space'). */
+const DEFAULT_DICTATION_ACCELERATOR = 'Alt+Space'
 
 export function DictationOverlay(): React.JSX.Element | null {
   const [active, setActive] = useState(false)
@@ -23,7 +29,9 @@ export function DictationOverlay(): React.JSX.Element | null {
   const [interim, setInterim] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [mode, setMode] = useState<'hold' | 'toggle' | 'both'>('hold')
-  const [accelerator, setAccelerator] = useState('Option+Space')
+  // The accelerator as REGISTERED (Electron's vocabulary). What the hint prints is derived from
+  // it per platform, so the copy can never disagree with the key the app actually listens for.
+  const [accelerator, setAccelerator] = useState(DEFAULT_DICTATION_ACCELERATOR)
 
   const ctxRef = useRef<AudioContext | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -207,7 +215,7 @@ export function DictationOverlay(): React.JSX.Element | null {
     })
     void v.getSettings().then((s) => {
       setMode(s.mode)
-      setAccelerator(s.accelerator || 'Option+Space')
+      setAccelerator(s.accelerator || DEFAULT_DICTATION_ACCELERATOR)
     })
     const offs = [
       v.on('begin', begin),
@@ -264,8 +272,8 @@ export function DictationOverlay(): React.JSX.Element | null {
   const stop = (): void => {
     void voice()?.toggle()
   }
-  const hint =
-    mode === 'hold' ? `release ${accelerator} to stop` : `tap ${accelerator} or ■ to stop`
+  const keys = shortcutLabel(accelerator)
+  const hint = mode === 'hold' ? `release ${keys} to stop` : `tap ${keys} or ■ to stop`
 
   return (
     <div className="flex h-screen w-screen items-stretch justify-center bg-transparent p-2 font-mono">

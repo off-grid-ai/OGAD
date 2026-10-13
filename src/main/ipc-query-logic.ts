@@ -1,6 +1,8 @@
+import { escapeFtsMatch } from './fts-match'
+
 // Pure query/message helpers extracted from ipc.ts so the retrieval-gating logic
 // is unit-testable without Electron / the DB (mirrors search-ranking.ts,
-// model-sizing.ts). No imports, no side effects. ipc.ts re-imports these; the
+// model-sizing.ts). No side effects. ipc.ts re-imports these; the
 // ipcMain.handle registrations stay in ipc.ts. Behaviour-neutral move.
 
 /** Parse a model/LLM JSON reply into T, tolerating ```json fences; falls back on
@@ -49,36 +51,19 @@ export const STOPWORDS = new Set([
   'might'
 ])
 
-/** Tokenise a free-text query: lowercase, split on whitespace, strip punctuation
- *  (keep a-z0-9_-), drop tokens < 3 chars and STOPWORDS, de-dup, cap at maxTokens. */
+/** Extract lowercase Unicode words (keep internal hyphens/underscores),
+ *  drop tokens < 3 chars and STOPWORDS, de-dup, cap at maxTokens. */
 export function tokenizeQuery(query: string, maxTokens: number = 6): string[] {
-  const tokens = query
-    .toLowerCase()
-    .split(/\s+/)
-    .map((t) => t.replace(/[^a-z0-9_-]/g, ''))
+  const tokens = (query.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}\p{M}_-]*/gu) ?? [])
     .filter((t) => t.length >= 3)
     .filter((t) => !STOPWORDS.has(t))
   return Array.from(new Set(tokens)).slice(0, maxTokens)
 }
 
-/** Quote one term as an FTS5 phrase literal, doubling any embedded quote per FTS5 escaping.
- *  A phrase literal makes retained punctuation inert - the tokeniser inside FTS re-splits it. */
-function quoteFtsPhrase(term: string): string {
-  return `"${term.replace(/"/g, '""')}"`
-}
-
-/** Build a safe FTS5 MATCH expression from free text: tokenise, then quote each token as a phrase
- *  literal and OR-join (any-term recall). tokenizeQuery keeps `-`/`_`, so a bare token like
- *  `best-reviewed` reaches MATCH as invalid syntax and throws `no such column: reviewed`, failing the
- *  whole rag:chat retrieval; quoting removes that entire class of syntax error. When tokenisation
- *  yields nothing (all stopwords / too short), fall back to the whole text as one quoted phrase so
- *  the fallback can't throw either. */
+/** Any-term recall with the existing stopword filter, using the shared FTS escape. */
 export function ftsMatchExpression(query: string, maxTokens: number = 6): string {
   const tokens = tokenizeQuery(query, maxTokens)
-  if (tokens.length > 0) {
-    return tokens.map(quoteFtsPhrase).join(' OR ')
-  }
-  return quoteFtsPhrase(query.trim())
+  return escapeFtsMatch(tokens.length ? tokens : query, { maxTokens })
 }
 
 /** Clip text to maxLength, replacing the final char with an ellipsis when it

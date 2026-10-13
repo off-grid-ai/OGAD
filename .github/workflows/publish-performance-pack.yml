@@ -12,6 +12,10 @@ on:
         description: 'Immutable pack version (letters, numbers, dot, dash, underscore)'
         type: string
         required: true
+      source_run:
+        description: 'Build and Release run with the installer artifact (empty uses the pinned source run)'
+        type: string
+        required: false
 
 permissions:
   actions: read
@@ -28,6 +32,7 @@ jobs:
     env:
       PLATFORM: ${{ matrix.platform }}
       VERSION: ${{ inputs.version || '2026-09-29-v1' }}
+      SOURCE_RUN_INPUT: ${{ inputs.source_run }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -38,16 +43,20 @@ jobs:
       - name: Check input and source artifact
         run: |
           [[ "$VERSION" =~ ^[a-zA-Z0-9._-]+$ ]]
-          case "$PLATFORM" in
-            linux)
-              echo 'source_run=36450913791' >> "$GITHUB_ENV"
-              echo 'source_name=off-grid-ai-linux-deb' >> "$GITHUB_ENV"
-              ;;
-            win32)
-              echo 'source_run=36448396362' >> "$GITHUB_ENV"
-              echo 'source_name=off-grid-ai-windows' >> "$GITHUB_ENV"
-              ;;
-          esac
+          source_run="$SOURCE_RUN_INPUT"
+          if [ -n "$source_run" ]; then
+            [[ "$source_run" =~ ^[0-9]+$ ]]
+          elif [ "$PLATFORM" = linux ]; then
+            source_run=36450913791
+          else
+            source_run=36448396362
+          fi
+          echo "source_run=$source_run" >> "$GITHUB_ENV"
+          if [ "$PLATFORM" = linux ]; then
+            echo 'source_name=off-grid-ai-linux-deb' >> "$GITHUB_ENV"
+          else
+            echo 'source_name=off-grid-ai-windows' >> "$GITHUB_ENV"
+          fi
       - name: Download existing build artifact
         env:
           GH_TOKEN: ${{ github.token }}
@@ -81,6 +90,49 @@ jobs:
           test -n "$bin_root"
           echo "BIN_ROOT=$PWD/$bin_root" >> "$GITHUB_ENV"
           du -sh "$bin_root"/*
+      - name: Replace Windows Whisper engine with pinned CUDA 12.4 build
+        if: matrix.platform == 'win32'
+        run: |
+          curl -fL --retry 3 --silent --show-error \
+            'https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-cublas-12.4.0-bin-x64.zip' \
+            -o "$RUNNER_TEMP/whisper-cublas-12.4.0-bin-x64.zip"
+          python3 scripts/stage-win-whisper-cuda-pack.py \
+            "$RUNNER_TEMP/whisper-cublas-12.4.0-bin-x64.zip" \
+            "$BIN_ROOT/whisper"
+      - name: Add prebuilt ONNX CUDA libraries
+        if: matrix.platform == 'linux'
+        run: |
+          python3 -m pip install --no-cache-dir --no-deps --target "$RUNNER_TEMP/onnx-nvidia" \
+            'nvidia-cuda-runtime==13.2.86' 'nvidia-cublas==13.2.2.2' \
+            'nvidia-curand==10.4.2.66' 'nvidia-cudnn-cu13==9.23.1.3'
+          mkdir -p "$BIN_ROOT/onnx-cuda"
+          for folder in cu13 cudnn; do
+            find "$RUNNER_TEMP/onnx-nvidia/nvidia/$folder/lib" -maxdepth 1 -type f -name '*.so.*' \
+              -exec mv '{}' "$BIN_ROOT/onnx-cuda/" ';'
+          done
+          test -s "$BIN_ROOT/onnx-cuda/libcublasLt.so.13"
+          test -s "$BIN_ROOT/onnx-cuda/libcudnn.so.9"
+      - name: Add pinned Windows ONNX CUDA libraries
+        if: matrix.platform == 'win32'
+        run: |
+          git lfs pull --include="resources/bin/onnx-cuda/onnxruntime_binding.node" --exclude=""
+          mkdir -p "$RUNNER_TEMP/onnx-wheels"
+          curl -fL --retry 3 --silent --show-error \
+            'https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip' \
+            -o "$RUNNER_TEMP/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip"
+          python3 -m pip download --no-deps --only-binary=:all: \
+            --platform win_amd64 --python-version 3.12 --implementation cp --abi cp312 \
+            -d "$RUNNER_TEMP/onnx-wheels" \
+            'nvidia-cuda-runtime-cu12==12.8.90' \
+            'nvidia-cublas-cu12==12.8.5.5' \
+            'nvidia-cuda-nvrtc-cu12==12.8.93' \
+            'nvidia-cufft-cu12==11.3.3.83' \
+            'nvidia-cudnn-cu12==9.19.0.56'
+          python3 scripts/stage-win-onnx-cuda-pack.py \
+            "$RUNNER_TEMP/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip" \
+            "$RUNNER_TEMP/onnx-wheels" \
+            resources/bin/onnx-cuda/onnxruntime_binding.node \
+            "$BIN_ROOT/onnx-cuda"
       - name: Make and check versioned pack
         run: |
           node scripts/package-performance-pack.mjs "$PLATFORM" "$BIN_ROOT" "$RUNNER_TEMP/$VERSION.tar.gz" "$VERSION"

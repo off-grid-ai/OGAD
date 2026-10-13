@@ -2,12 +2,16 @@ import './assets/main.css'
 import './assets/onboarding.css'
 import { applyTheme } from './theme'
 import { initFocusModality } from './lib/focus-modality'
+import { initScrollActivity } from './lib/scroll-activity'
 
 // Apply the saved/system theme (dark default) before first paint.
 applyTheme()
 
 // Show the keyboard focus ring only for keyboard navigation, not on mouse click.
 initFocusModality()
+
+// Scroll bars appear only while something scrolls (main.css paints them on data-scrolling).
+initScrollActivity()
 
 import { StrictMode, type FC } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -20,6 +24,9 @@ import { AIRequestLogs } from './components/AIRequestLogs'
 // exports a no-op ClipboardPopup), and in free builds the popup window never opens.
 import * as ProRenderer from '@offgrid/pro/renderer'
 const ClipboardPopup: FC = (ProRenderer as { ClipboardPopup?: FC }).ClipboardPopup ?? (() => null)
+// Ares on the desktop (God, Pro): nothing in a free build, where its window never opens.
+const GodTwinCompanion: FC =
+  (ProRenderer as { GodTwinCompanion?: FC }).GodTwinCompanion ?? (() => null)
 const ComputerUseSupervisor: FC =
   (ProRenderer as { ComputerUseSupervisor?: FC }).ComputerUseSupervisor ?? (() => null)
 // DictationOverlay is a free-tier / open-core feature — lives in core, not pro.
@@ -34,10 +41,11 @@ const hash = window.location.hash
 const isClipPopup = hash === '#clip-popup'
 const isDictation = hash === '#dictation'
 const isCuSupervisor = hash === '#cu-supervisor'
+const isGodTwin = hash === '#god-twin'
 
 // The dictation overlay is a transparent floating panel — strip the app's opaque
 // theme background off <html>/<body> so only the pill shows (no white box).
-if (isDictation) {
+if (isDictation || isGodTwin) {
   document.documentElement.style.background = 'transparent'
   document.body.style.background = 'transparent'
   document.body.style.backgroundImage = 'none'
@@ -56,6 +64,8 @@ createRoot(document.getElementById('root')!).render(
       <DictationOverlay />
     ) : isCuSupervisor ? (
       <ComputerUseSupervisor />
+    ) : isGodTwin ? (
+      <GodTwinCompanion />
     ) : (
       <TooltipProvider delayDuration={300}>
         <App />

@@ -1,6 +1,6 @@
 # Off Grid AI Desktop — Design
 
-The desktop adaptation of the Off Grid AI design philosophy. The brand canon is the mobile docs (`../../mobile/docs/design/DESIGN_PHILOSOPHY_SYSTEM.md` + `VISUAL_HIERARCHY_STANDARD.md`); **this doc keeps the same soul and adapts it for a desktop app.** Where this conflicts with the mobile docs on _layout/interaction_, desktop wins; where it conflicts on _brand_ (font, color, voice), the brand wins.
+Read [DESIGN_PHILOSOPHY.md](DESIGN_PHILOSOPHY.md) before any Desktop UI change. It is synchronized from the canonical sibling `brand/DESIGN_PHILOSOPHY.md`. Shared brand principles follow that source; this document supplies Desktop layout and interaction details.
 
 ---
 

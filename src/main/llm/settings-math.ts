@@ -7,6 +7,9 @@ import type { KvCacheType, PerformanceMode } from '../model-sizing'
 
 export type SpeculativeDecodingMode = 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
 
+/** Minimum token spacing between llama.cpp context checkpoints (engine default 8192). */
+export const CHECKPOINT_MIN_STEP = 2048
+
 // Friendly presets that decide how much of the machine the local model uses.
 // Conservative leaves lots of headroom (safest on small / busy machines); Extreme
 // pushes context/memory for max capability. The RAM clamp still applies on top, so
@@ -89,6 +92,7 @@ export interface LaunchState {
   threads: number | undefined
   batchSize: number | undefined
   speculativeDecoding?: SpeculativeDecodingMode
+  speculativeDraftMax?: number
   draftModel?: string
 }
 
@@ -107,6 +111,7 @@ export interface LaunchArgsInput {
   threads: number | undefined
   batchSize: number | undefined
   speculativeDecoding?: SpeculativeDecodingMode
+  speculativeDraftMax?: number
   draftModelPath?: string
   // Floor on image tokens. GUI-grounding (Qwen-VL / UI-TARS) models need >=1024
   // or they ground inaccurately (llama.cpp warns); undefined = engine default.
@@ -136,6 +141,11 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     '-ngl',
     String(i.gpuLayers)
   )
+  // Hybrid models (Qwen3.5, Bonsai 2) cannot roll recurrent state back past a saved
+  // context checkpoint. At the 8192-token default spacing, any edit earlier in a shorter
+  // conversation (a dropped screenshot, a compacted turn) re-processes the whole prompt;
+  // 2048 caps that re-read at ~2K tokens. Full-attention models create no checkpoints.
+  args.push('--checkpoint-min-step', String(CHECKPOINT_MIN_STEP))
   // llama.cpp maps its model-allocation INFO messages to verbosity 4.
   if (i.reportModelPlacement) args.push('-lv', '4')
   // FlashAttention: faster + lower memory. Required for a quantized KV cache.
@@ -156,7 +166,13 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
   if (i.speculativeDecoding === 'ngram') {
     args.push('--spec-type', 'ngram-cache')
   } else if (i.speculativeDecoding === 'mtp') {
-    args.push('--spec-type', 'draft-mtp')
+    // A short draft limits rejected work on normal chat prompts. Larger
+    // user-selected limits remain available for more predictable output.
+    const draftMax = i.speculativeDraftMax ? String(i.speculativeDraftMax) : '2'
+    args.push('--spec-type', 'draft-mtp', '--spec-draft-n-max', draftMax)
+    if (i.draftModelPath) {
+      args.push('--spec-draft-model', i.draftModelPath, '--spec-draft-ngl', String(i.gpuLayers))
+    }
   } else if (
     i.draftModelPath &&
     (i.speculativeDecoding === 'draft' || i.speculativeDecoding === 'dflash')
@@ -167,6 +183,7 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
       '--spec-draft-model',
       i.draftModelPath
     )
+    if (i.speculativeDraftMax) args.push('--spec-draft-n-max', String(i.speculativeDraftMax))
   }
   // Grounding models (UI-TARS / Qwen-VL) need a minimum image-token budget or
   // clicks land in the wrong place; only set when a projector is present.
@@ -189,6 +206,7 @@ export function launchArgsChanged(
     threads?: number
     batchSize?: number
     speculativeDecoding?: SpeculativeDecodingMode
+    speculativeDraftMax?: number
     draftModel?: string
   },
   current: LaunchState,
@@ -204,6 +222,8 @@ export function launchArgsChanged(
     (typeof patch.batchSize === 'number' && patch.batchSize !== current.batchSize) ||
     (patch.speculativeDecoding !== undefined &&
       patch.speculativeDecoding !== current.speculativeDecoding) ||
+    (typeof patch.speculativeDraftMax === 'number' &&
+      patch.speculativeDraftMax !== (current.speculativeDraftMax ?? 0)) ||
     (typeof patch.draftModel === 'string' && patch.draftModel !== current.draftModel)
   )
 }

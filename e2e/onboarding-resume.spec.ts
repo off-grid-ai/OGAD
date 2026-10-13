@@ -68,13 +68,16 @@ test.afterEach(async () => {
 test('relaunch resumes onboarding progress and one interrupted transfer (#12)', async () => {
   await expect(page.getByRole('heading', { name: 'Off Grid AI' })).toBeVisible()
   await page.getByRole('button', { name: 'Continue' }).click()
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('onboarding_step'))).toBe('1')
+  // Steps are saved by id; Onboarding.tsx still reads the numeric steps older versions saved.
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('onboarding_step')))
+    .toBe('capabilities')
   for (const capability of ['Chat', 'Vision', 'Image', 'Voice', 'Speech', 'Projects']) {
     await expect(page.getByText(capability, { exact: true })).toBeVisible()
   }
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText('Replay', { exact: true })).toBeVisible()
-  expect(await page.evaluate(() => localStorage.getItem('onboarding_step'))).toBe('2')
+  expect(await page.evaluate(() => localStorage.getItem('onboarding_step'))).toBe('pro')
 
   await closeApp()
   await launchApp()

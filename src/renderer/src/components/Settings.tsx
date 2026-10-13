@@ -7,13 +7,14 @@ import { StoragePanel } from './setup/StoragePanel'
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel'
 import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
 import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
+import { getSlot, SLOTS } from '../bootstrap/slotRegistry'
 import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 // Shared card chrome, in its own light module so the pro package can reuse it without
 // importing this whole god-file (which pulls SetupPanel/etc. + their window.api types).
 import { SettingsCard, ProPlaceholder, SettingsCardsGroup } from './SettingsCard'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { currentPlatform } from '@renderer/lib/device'
-import { proComingSoonHere } from './pro/proCatalog'
+import { getProFeature, proComingSoonHere, featureSupportsPlatform } from './pro/proCatalog'
 import { SoftwareUpdateSection } from './SoftwareUpdateSection'
 import { ProcessingControls } from './ProcessingControls'
 import { BackupRestoreSection } from './BackupRestoreSection'
@@ -30,6 +31,7 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   'computer-use': 'Computer use',
   remote: 'Remote model server',
   'ai-activity': 'AI activity',
+  'god-twin': 'God',
   sync: 'Device sync',
   identity: 'You',
   secretary: 'What Off Grid AI has learned',
@@ -68,10 +70,15 @@ export function Settings({
   // subtitle copy.
   const { isPro } = useRendererEntitlement()
   const proComingSoon = proComingSoonHere(currentPlatform(), isPro)
+  const replayFeature = getProFeature('replay')
+  const captureAvailable =
+    !!replayFeature && featureSupportsPlatform(replayFeature, currentPlatform())
   // Pro sections registered by the pro renderer at activation (empty in free build).
   const registeredSections = getRegisteredSettingsSections()
   const captureSection = registeredSections.find((section) => section.id === 'capture')
   const CaptureContribution = captureSection?.component
+  // God is Pro: its settings card comes from Pro through a slot, looked up once per opening.
+  const [GodSettings] = useState(() => getSlot(SLOTS.godSettings))
   const [appVersion, setAppVersion] = useState('')
 
   useEffect(() => {
@@ -187,7 +194,7 @@ export function Settings({
               summary="See capture health, recover pending frames, and control model scheduling in one place."
               delay={0.14}
             >
-              {CaptureContribution && !(proComingSoon && currentPlatform() !== 'darwin') ? (
+              {CaptureContribution && captureAvailable ? (
                 <CaptureContribution />
               ) : (
                 <div className="mb-5 border border-neutral-800 bg-neutral-950/40 p-3 text-xs text-neutral-500">
@@ -195,8 +202,8 @@ export function Settings({
                     Pro
                   </span>
                   {currentPlatform() === 'linux'
-                    ? 'Pro capture controls are coming soon to Linux. Core processing controls work now.'
-                    : 'Screen capture, backlog recovery, and proactive delivery are available with Pro on Windows and macOS.'}
+                    ? 'Capture and Replay controls are available with Pro on Linux.'
+                    : 'Screen capture, backlog recovery, and proactive delivery are available with Pro on Windows, Linux, and macOS.'}
                 </div>
               )}
               <ProcessingControls />
@@ -209,6 +216,17 @@ export function Settings({
             >
               <RemoteVisionSettingsTab />
             </SettingsCard>
+
+            {/* God is Pro: its settings show only where God does. */}
+            {isPro && GodSettings && (
+              <SettingsCard
+                title="God"
+                summary="Your assistant's name, rules, wake word and Ares on the desktop."
+                delay={0.17}
+              >
+                <GodSettings />
+              </SettingsCard>
+            )}
 
             {/* Remaining Pro Settings sections (You / What Off Grid AI has learned /
               Your Pro plan). The pro package registers the real section
@@ -226,8 +244,7 @@ export function Settings({
                     delay={slot.delay}
                     title={slot.placeholder?.title ?? slot.id}
                     description={
-                      slot.comingSoonDescription ??
-                      'Pro features are coming soon to Linux. Core features work now.'
+                      slot.comingSoonDescription ?? 'This section is unavailable on this device.'
                     }
                     variant="coming-soon"
                   />
@@ -243,13 +260,8 @@ export function Settings({
                   key={slot.id}
                   delay={slot.delay}
                   title={slot.placeholder.title}
-                  description={
-                    currentPlatform() === 'linux'
-                      ? (slot.comingSoonDescription ??
-                        'Pro features are coming soon to Linux. Core features work now.')
-                      : slot.placeholder.description
-                  }
-                  variant={currentPlatform() === 'linux' ? 'coming-soon' : 'pro'}
+                  description={slot.placeholder.description}
+                  variant="pro"
                 />
               )
             })}

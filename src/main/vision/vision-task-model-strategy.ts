@@ -1,3 +1,4 @@
+import { taskRolesView, type TaskRolesView } from '../../shared/task-roles-view'
 import { llm } from '../llm'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { getWebUseSettings } from '../web-use-settings'
@@ -214,6 +215,15 @@ export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModel
       currentRemoteScreenTaskSession()?.modelStrategy ?? getWebUseSettings().modelStrategy,
     selectedDecisionId: () => getWebUseSettings().decisionModelId ?? DECIDER_2B.id
   })
+}
+
+/** Both tasks' model lineups and each model's roles, as every Models screen shows them. */
+export async function getTaskRolesView(): Promise<TaskRolesView> {
+  const [computerUse, webUse] = await Promise.all([
+    getComputerUseActiveModelProjection(),
+    getWebUseActiveModelProjection()
+  ])
+  return taskRolesView({ computerUse, webUse })
 }
 
 function activeChatSelection(

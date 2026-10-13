@@ -13,6 +13,7 @@
  * is the status) - the same double-fire protection sends already rely on.
  */
 import { WEB_USE_ACTION_TYPE, type ActionRecord, type HandlerRegistry } from '@offgrid/use'
+import { startTabFromActionArgs, type StartTab } from './browser-start-tab'
 import type { ExecuteResult } from '@offgrid/use'
 import type { TaskRetryCheckpoint } from '../tasks/task-retry'
 
@@ -30,6 +31,10 @@ export interface BrowserTaskRequest {
   taskId: string
   journeyId: string
   checkpoint?: TaskRetryCheckpoint
+  /** The paired browser's tab this task should run in (the chat that asked); absent otherwise. */
+  startTab?: StartTab
+  /** Shown as the task's first step: why it runs where it does, when that is not what was chosen. */
+  notice?: string
 }
 
 export interface BrowserRailHost {
@@ -62,11 +67,14 @@ export function makeBrowserRailExecutor(
     const goal = typeof args.goal === 'string' && args.goal.trim() ? args.goal : action.intent
     const url =
       typeof args.url === 'string' && /^https?:\/\//i.test(args.url) ? args.url : undefined
+    // The tab its chat offered travels with this task alone (browser-start-tab.ts).
+    const startTab = startTabFromActionArgs(args)
     const result = await host.runTask({
       goal,
       url,
       taskId: action.id,
-      journeyId: action.sourceRef ?? action.id
+      journeyId: action.sourceRef ?? action.id,
+      ...(startTab ? { startTab } : {})
     })
     if (!result.ok) {
       return { ok: false, detail: result.summary }

@@ -10,6 +10,7 @@ import os from 'os'
 import path from 'path'
 import { getActiveModal } from '../active-models'
 import { binRoots, modelsDir, exe } from '../runtime-env'
+import { modelEntryNames, resolveModelAsset } from '../model-paths'
 import { modelsByKind } from '@offgrid/models'
 import { existing } from './bin-resolution'
 import { catalogEngine } from './classify'
@@ -42,7 +43,7 @@ export function ffmpegBin(): string | null {
 /** List downloaded whisper ggml models (filenames) in the user's models dir. */
 function whisperModelFiles(): string[] {
   try {
-    return fs.readdirSync(modelsDir()).filter((f) => /^ggml-.*\.bin$/i.test(f))
+    return modelEntryNames().filter((f) => /^ggml-.*\.bin$/i.test(f) && resolveModelAsset(f))
   } catch {
     return []
   }
@@ -96,7 +97,7 @@ export function strongerMultilingualWhisperModel(
   const candidate = files
     .filter((file) => !/\.en\.bin$/i.test(file) && sizeRank(file) > currentRank)
     .sort((a, b) => sizeRank(b) - sizeRank(a))[0]
-  return candidate ? path.join(dir, candidate) : null
+  return candidate ? (resolveModelAsset(candidate, [dir]) ?? resolveModelAsset(candidate) ?? path.join(dir, candidate)) : null
 }
 
 /** Run the selected model first, then make one quality retry when Hindi text has the wrong
@@ -130,19 +131,21 @@ export async function transcribeWithHindiQualityRetry({
  *  MULTILINGUAL model (`.en` models are English-only) and a more capable size. */
 export function whisperModel(): string | null {
   try {
-    const dir = modelsDir()
     // User-chosen transcription model wins, when it's a whisper ggml file present on disk.
     // (The active-transcription slot is shared with Parakeet, whose ONNX files must never
     // be handed to whisper — hence the ggml guard.)
     const chosen = getActiveModal('transcription')
     const chosenFile = chosen ? activeWhisperFile(chosen) : null
-    if (chosenFile && fs.existsSync(path.join(dir, chosenFile))) return path.join(dir, chosenFile)
+    if (chosenFile) {
+      const selected = resolveModelAsset(chosenFile)
+      if (selected) return selected
+    }
     const files = whisperModelFiles()
     if (!files.length) return null
     const multi = files.filter((f) => !/\.en\.bin$/i.test(f))
     const pool = multi.length ? multi : files
     const pick = [...pool].sort((a, b) => sizeRank(b) - sizeRank(a))[0]! // pool non-empty (files.length checked)
-    return path.join(dir, pick)
+    return resolveModelAsset(pick)
   } catch {
     return null // transient fs/store error → "no model", not a thrown exception
   }
@@ -152,11 +155,13 @@ export function whisperModel(): string | null {
  *  ticks where latency matters more than accuracy. Respects the user's explicit
  *  transcription model choice (getActiveModal); otherwise picks the smallest. */
 export function smallWhisperModel(): string | null {
-  const dir = modelsDir()
   try {
     const chosen = getActiveModal('transcription')
     const chosenFile = chosen ? activeWhisperFile(chosen) : null
-    if (chosenFile && fs.existsSync(path.join(dir, chosenFile))) return path.join(dir, chosenFile)
+    if (chosenFile) {
+      const selected = resolveModelAsset(chosenFile)
+      if (selected) return selected
+    }
   } catch {
     /* fall through to size-based pick */
   }
@@ -165,15 +170,15 @@ export function smallWhisperModel(): string | null {
   const multi = files.filter((f) => !/\.en\.bin$/i.test(f))
   const pool = multi.length ? multi : files
   const pick = [...pool].sort((a, b) => sizeRank(a) - sizeRank(b))[0]! // smallest first; pool non-empty (files.length checked)
-  return path.join(dir, pick)
+  return resolveModelAsset(pick)
 }
 
 /** Resolve an opts.model (abs path or filename in modelsDir) to an absolute path. */
 function resolveModel(model?: string): string | null {
   if (!model) return whisperModel()
   if (path.isAbsolute(model) && fs.existsSync(model)) return model
-  const inDir = path.join(modelsDir(), model)
-  if (fs.existsSync(inDir)) return inDir
+  const inDir = resolveModelAsset(model)
+  if (inDir) return inDir
   return whisperModel()
 }
 

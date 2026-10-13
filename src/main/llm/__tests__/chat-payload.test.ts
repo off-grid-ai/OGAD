@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  applyThinkingPayload,
   buildContentParts,
   buildMessages,
   imageMime,
@@ -95,5 +96,33 @@ describe('thinkingPayload', () => {
 
   it('thinking OFF: enable_thinking false, no reasoning_format', () => {
     expect(thinkingPayload(false)).toEqual({ chat_template_kwargs: { enable_thinking: false } })
+  })
+})
+
+describe('applyThinkingPayload - the gateway speaks the loaded model\'s dialect', () => {
+  it('keeps the enable_thinking form by default', () => {
+    const body: Record<string, unknown> = { chat_template_kwargs: { enable_thinking: false } }
+    expect(applyThinkingPayload(body)).toBe(true)
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false })
+  })
+
+  it('turns a client\'s "thinking off" into reasoning_strength for a model that reads that', () => {
+    // Before, every request got enable_thinking, which this template ignores: "off" did nothing.
+    const body: Record<string, unknown> = { chat_template_kwargs: { enable_thinking: false } }
+    applyThinkingPayload(body, 'reasoning-strength')
+    expect(body.chat_template_kwargs).toEqual({ reasoning_strength: 'none' })
+    expect(body).not.toHaveProperty('reasoning_format')
+  })
+
+  it('sends no switch a template cannot read', () => {
+    const body: Record<string, unknown> = { chat_template_kwargs: { enable_thinking: true } }
+    applyThinkingPayload(body, 'none')
+    expect(body.chat_template_kwargs).toBeUndefined()
+  })
+
+  it('leaves a request that says nothing about thinking alone', () => {
+    const body: Record<string, unknown> = { messages: [] }
+    expect(applyThinkingPayload(body, 'reasoning-strength')).toBe(false)
+    expect(body).toEqual({ messages: [] })
   })
 })

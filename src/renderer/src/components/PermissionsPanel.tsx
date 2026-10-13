@@ -159,7 +159,7 @@ export function PermissionsPanel({
             ? 'Restart required'
             : checking
               ? 'Checking current grants'
-              : 'Current macOS status'}
+              : 'Current access status'}
         </span>
         <Button
           type="button"

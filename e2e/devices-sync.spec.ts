@@ -32,6 +32,7 @@ import {
 } from '@offgrid/sync'
 import { NodeTcpTransport } from '@offgrid/sync/node'
 import type { KnowledgeDocumentSnapshot } from '../src/main/sync-knowledge-document'
+import type { KeygenPersonalMeshRegistry } from '../pro/main/sync/keygen-personal-mesh-registry'
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 // Pro implementation modules load lazily behind PRO_PRESENT: a static import
@@ -52,9 +53,9 @@ let userDataDir: string
 let syntheticPeer: SyncEngine | null = null
 let syntheticState: StateSync | null = null
 let syntheticFiles: FileTransferManager | null = null
-let syntheticImportedEntitlement: unknown
-let syntheticEntitlementCommitted = false
 let syntheticClipboard: ClipboardSyncCoordinator | null = null
+let syntheticRegistry: KeygenPersonalMeshRegistry | null = null
+let syntheticInstallationId: string | null = null
 const syntheticClipboardRecords = new Map<string, ClipboardHistoryRecord>()
 /** The peer's pending clipboard deliveries, keyed the way the coordinator keys them: record × device. */
 const syntheticClipboardDeliveries = new Map<string, ClipboardPendingDelivery>()
@@ -87,9 +88,27 @@ const launch = async (pro: '0' | '1'): Promise<void> => {
         }
       ])
     )
+    // Index the received document with the real model, without downloading or copying it per run.
+    const embeddingCache =
+      process.env.OFFGRID_E2E_EMBEDDING_CACHE ??
+      path.join(
+        os.homedir(),
+        'Library/Application Support/Off Grid AI Desktop/models/.cache/Xenova'
+      )
+    test.skip(
+      !fs.existsSync(embeddingCache),
+      `Devices sync requires a local embedding cache at ${embeddingCache}`
+    )
+    fs.mkdirSync(path.join(modelsDir, '.cache'), { recursive: true })
+    fs.symlinkSync(embeddingCache, path.join(modelsDir, '.cache', 'Xenova'), 'dir')
   }
   app = await launchOffGrid({
-    env: { OFFGRID_USER_DATA: userDataDir, OFFGRID_PRO: pro, NODE_ENV: 'production' }
+    env: {
+      OFFGRID_USER_DATA: userDataDir,
+      OFFGRID_PRO: pro,
+      OFFGRID_EMBEDDINGS_OFFLINE: '1',
+      NODE_ENV: 'production'
+    }
   })
   page = await app.firstWindow()
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -97,16 +116,23 @@ const launch = async (pro: '0' | '1'): Promise<void> => {
   await completeOnboarding(page)
   const dismissSetup = page.getByRole('button', { name: 'Dismiss' })
   if (await dismissSetup.isVisible().catch(() => false)) await dismissSetup.click()
-  const expand = page.getByRole('button', { name: 'Expand sidebar' })
-  if (await expand.isVisible().catch(() => false)) await expand.click()
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  await navigation.hover()
+  await navigation.getByRole('button', { name: 'Pin sidebar', exact: true }).click()
 }
 
 /**
- * Open the sync-settings panel IDEMPOTENTLY. The header control is a toggle and the app instance is
- * shared across tests in this file, so a blind click can CLOSE a panel a previous test left open.
+ * Select the sharing view. The app instance is shared across tests in this file.
  */
 const openSyncSettings = async (): Promise<void> => {
-  const tab = page.getByRole('button', { name: 'Sync sharing' })
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('button', { name: 'Devices', exact: true })
+    .click()
+  await expect(page.getByRole('heading', { name: 'Devices', exact: true })).toBeVisible()
+  const tab = page
+    .getByRole('navigation', { name: 'Devices control center' })
+    .getByRole('button', { name: 'Sync sharing', exact: true })
   if ((await tab.getAttribute('aria-current')) !== 'page') await tab.click()
   await expect(tab).toHaveAttribute('aria-current', 'page')
 }
@@ -119,6 +145,7 @@ const teardown = async (): Promise<void> => {
   syntheticFiles = null
   syntheticClipboard = null
   syntheticClipboardRecords.clear()
+  syntheticClipboardDeliveries.clear()
   syntheticActiveMemberships.clear()
   syntheticProvisionalMemberships.clear()
   syntheticPendingRevocations.clear()
@@ -126,6 +153,14 @@ const teardown = async (): Promise<void> => {
   syntheticRecords.clear()
   await app?.close().catch(() => {})
   if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true })
+  if (syntheticRegistry && syntheticInstallationId) {
+    const installations = await syntheticRegistry.listInstallations()
+    if (installations.some(({ installationId }) => installationId === syntheticInstallationId)) {
+      await syntheticRegistry.deregisterInstallation(syntheticInstallationId)
+    }
+  }
+  syntheticRegistry = null
+  syntheticInstallationId = null
 }
 
 test.describe('Devices surface — unlicensed', () => {
@@ -152,15 +187,23 @@ test.describe('Devices surface — pro tier', () => {
   test('renders the real Devices screen with live sync status', async () => {
     await navButton(page, 'Devices').click()
     await expect(page.getByRole('heading', { name: 'Devices', exact: true })).toBeVisible()
-    // Per-ROUTE state, which is how the screen actually reports itself: one chip per transport reading
-    // "LAN: ready" or "LAN: <listen>/<advertise>/<browse>" (syncRouteDisplay + DevicesScreen). This asserted
-    // 'LAN + nearby ready' and 'Personal mesh', and neither string exists anywhere in the app - the first was
-    // never shipped and the second is now 'Licensed devices'. The spec was failing on its own stale copy, in
-    // CI and locally both, while the screen underneath was fine.
-    await expect(page.getByText(/^LAN:/)).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/\d+ nearby/)).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Licensed devices' })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Available on this network' })).toBeVisible()
+    // Pro a29f7a0 removed the per-route health chips. Discovery and the port remain visible.
+    await expect(page.getByRole('button', { name: 'Find nearby devices' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await expect(page.getByRole('heading', { name: 'Pairing code', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Saved', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Available', exact: true })).toBeVisible()
+    await expect(
+      page.getByRole('region', { name: 'Available', exact: true }).getByText(/^\d+$/)
+    ).toBeVisible()
+    await page.getByRole('button', { name: /^Connection settings\. Sync port \d+$/ }).click()
+    const connectionSettings = page.getByRole('dialog', { name: 'Connection settings' })
+    await expect(connectionSettings.getByRole('textbox', { name: 'Sync port' })).toHaveValue(
+      '37878'
+    )
+    await connectionSettings.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.screenshot({ path: 'e2e/screenshots/devices-pro.png' })
   })
 
@@ -168,15 +211,10 @@ test.describe('Devices surface — pro tier', () => {
     await navButton(page, 'Devices').click()
     await openSyncSettings()
 
-    await expect(page.getByRole('heading', { name: 'Data sent from this device' })).toBeVisible()
-    // One switch per user-facing category, plus the master switch.
-    await expect(page.getByRole('switch', { name: 'Sync enabled' })).toBeVisible()
-    for (const label of [
-      'Sync Chats',
-      'Sync Projects',
-      'Sync Model settings',
-      'Sync Copied text'
-    ]) {
+    await expect(page.getByRole('heading', { name: 'Sending', exact: true })).toBeVisible()
+    // Pro e58db26 removed Chats and Projects switches; those records always sync.
+    await expect(page.getByRole('switch', { name: 'Optional sending enabled' })).toBeVisible()
+    for (const label of ['Sync Model settings', 'Sync Copied text']) {
       await expect(page.getByRole('switch', { name: label })).toBeVisible()
     }
     await expect(page.getByRole('switch', { name: 'Sync Copied text' })).toHaveAttribute(
@@ -192,6 +230,14 @@ test.describe('Devices surface — pro tier', () => {
       .getByRole('navigation', { name: 'Devices control center' })
       .getByRole('button', { name: 'Devices', exact: true })
       .click()
+    const saved = page.getByRole('region', { name: 'Saved', exact: true })
+    const initialSeatLabel = await saved
+      .getByLabel(/^\d+ of \d+ licensed devices$/)
+      .getAttribute('aria-label')
+    const [, usedSeats, seatLimit] = initialSeatLabel!.match(/^(\d+) of (\d+) licensed devices$/)!
+    // This fixture must have room for the peer; pairing must not evict another installation.
+    expect(Number(seatLimit)).toBe(5)
+    expect(Number(usedSeats)).toBeLessThan(Number(seatLimit))
     const desktop = await page.evaluate(async () =>
       (
         window as unknown as {
@@ -206,12 +252,17 @@ test.describe('Devices surface — pro tier', () => {
       ).api.proInvoke('pro:sync:status')
     )
     expect(desktop.port).toBeGreaterThan(0)
-    // The code this Mac is SHOWING, not one the harness made up. A joining device is told the code by a
-    // person reading the other screen, and the engine refuses an attempt whose passphrase it cannot
-    // resolve - so an invented code is rejected before the prompt is ever raised, which is what made this
-    // spec look like a broken pairing flow.
+    // Open the code a person would read to the joining device.
     const desktopCode = desktop.pairingCode?.code
     expect(desktopCode, 'the desktop has to be showing a pairing code to pair against').toBeTruthy()
+    await page.getByRole('button', { name: 'Show QR Code', exact: true }).click()
+    const pairingCode = page.getByRole('dialog', { name: 'Pair a device', exact: true })
+    await expect(
+      pairingCode.getByText(
+        new RegExp(`^${desktopCode!.slice(0, 4)}[- ]?${desktopCode!.slice(4)}$`)
+      )
+    ).toBeVisible()
+    await pairingCode.getByRole('button', { name: 'Close pairing code' }).click()
     // A different REAL code for the refusal case: 8 characters from the same confusable-free alphabet, so
     // it fails for being wrong rather than for being malformed.
     const wrongCode = desktopCode === 'WRNGC2DE' ? 'WRNGC2DF' : 'WRNGC2DE'
@@ -320,16 +371,24 @@ test.describe('Devices surface — pro tier', () => {
         commitExport: async () => {},
         rollbackExport: async () => {},
         finalizeExport: async () => {},
-        prepareImport: async (credential) => {
-          syntheticImportedEntitlement = credential
+        prepareImport: async (credential, registration) => {
+          // The joining device must register its seat before trust is committed. Since Pro
+          // 73b5cb7, reconciliation retires paired devices missing from the licence registry.
+          // Use the real provider adapter; a successful no-op import loses the peer immediately.
+          const { KeygenPersonalMeshRegistry } =
+            await import('../pro/main/sync/keygen-personal-mesh-registry')
+          syntheticRegistry = new KeygenPersonalMeshRegistry(() => credential)
+          await syntheticRegistry.listInstallations()
+          const installation = await syntheticRegistry.registerInstallation(registration)
+          syntheticInstallationId = installation.installationId
           return { id: 'synthetic-entitlement-import' }
         },
-        commitImport: async () => {
-          syntheticEntitlementCommitted = true
-        },
+        commitImport: async () => {},
         rollbackImport: async () => {
-          syntheticImportedEntitlement = undefined
-          syntheticEntitlementCommitted = false
+          if (syntheticRegistry && syntheticInstallationId) {
+            await syntheticRegistry.deregisterInstallation(syntheticInstallationId)
+            syntheticInstallationId = null
+          }
         },
         finalizeImport: async () => {}
       },
@@ -476,14 +535,12 @@ test.describe('Devices surface — pro tier', () => {
       .toBe(true)
     releaseSecureStore?.()
     await pairing
-    // What the screen can honestly show for THIS peer. The Devices list renders two groups - devices in
-    // the licence registry, and devices discovered on the network - and the synthetic peer is in neither:
-    // its entitlement adapter is a stub, so no machine is ever registered for it, where a real phone is
-    // registered as part of pairing. Asserting a device ROW here would be asserting a registry
-    // side effect the harness deliberately does not have.
-    //
-    // The connection itself is what this step is about, and that IS visible: the header counts it.
-    await expect(page.getByText('1 connected', { exact: true })).toBeVisible()
+    // The Devices tab now carries the live connection count.
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Devices control center' })
+        .getByRole('button', { name: 'Devices · 1 connected', exact: true })
+    ).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/devices-after-pairing.png' })
     // And the facts underneath, from the app's own state rather than a label.
     const paired = await page.evaluate(async () => {
@@ -520,12 +577,12 @@ test.describe('Devices surface — pro tier', () => {
     await page.getByRole('switch', { name: 'Sync Copied text' }).click()
     await page
       .getByRole('navigation', { name: 'Devices control center' })
-      .getByRole('button', { name: 'Devices', exact: true })
+      .getByRole('button', { name: 'Devices · 1 connected', exact: true })
       .click()
     await page.getByRole('button', { name: 'Rescan network' }).click()
     await expect(page.getByRole('button', { name: 'Rescan network' })).toBeEnabled()
     await expect(page.getByText('Synthetic Android').first()).toBeVisible()
-    await expect(page.getByText('Scanning WiFi and Nearby routes.')).toHaveCount(0)
+    await expect(page.getByText('Scanning Wi-Fi and Nearby routes.')).toHaveCount(0)
     await expect(page.getByRole('alert')).toHaveCount(0)
 
     const timestamp = new Date().toISOString()
@@ -618,9 +675,10 @@ test.describe('Devices surface — pro tier', () => {
     ).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/devices-state-sync.png' })
 
-    await page.getByTitle('New project').click()
-    await page.getByPlaceholder('Project name…').fill('Created on desktop')
-    await page.getByPlaceholder('Project name…').press('Enter')
+    await page.getByRole('button', { name: 'New project', exact: true }).click()
+    const projectName = page.getByRole('textbox', { name: 'Project name…', exact: true })
+    await projectName.fill('Created on desktop')
+    await projectName.press('Enter')
     await expect(page.getByRole('button', { name: 'Created on desktop' })).toBeVisible()
     await expect
       .poll(() =>
@@ -638,49 +696,57 @@ test.describe('Devices surface — pro tier', () => {
     await expect(page.getByText('Synthetic Transfer Model')).toBeVisible()
     await expect(page.getByText('synthetic-transfer-q4.gguf')).toBeVisible()
     await page.screenshot({ path: 'e2e/screenshots/devices-model-transfer.png' })
-    await page.getByRole('button', { name: 'Close', exact: true }).first().click()
+    await page
+      .getByRole('dialog', { name: 'Send a model to Synthetic Android' })
+      .getByRole('button', { name: 'Close model transfer', exact: true })
+      .click()
 
     await syntheticPeer.stop()
     syntheticPeer = null
-    await expect(page.getByText('Offline', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Evict', exact: true }).click()
-    await expect(page.getByRole('heading', { name: 'Evict Synthetic Android?' })).toBeVisible()
-    await expect(
-      page.getByText(
-        'This removes the pairing from both devices. Either device must pair again before Sync can reconnect.'
-      )
-    ).toBeVisible()
-    await page.getByRole('button', { name: 'Evict device' }).click()
-    await expect(
-      page.getByRole('button', { name: 'Manage devices, 1 of 5 slots used' })
-    ).toBeVisible()
-    await expect(page.getByText('Could not reach Synthetic Android')).toBeVisible({
-      timeout: 15_000
+    const peer = page.getByRole('article').filter({
+      has: page.getByText('Synthetic Android', { exact: true })
     })
-    await expect(page.getByRole('button', { name: 'Retry eviction' })).toBeVisible()
-    const dismissEviction = page.getByRole('button', { name: 'Dismiss' })
-    await expect(dismissEviction).toBeVisible()
-    await dismissEviction.click()
+    await expect(peer.getByText('Offline', { exact: true })).toBeVisible()
+    await peer.getByRole('button', { name: 'Evict', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Evict Synthetic Android?' })).toBeVisible()
+    const eviction = page.getByRole('dialog', { name: 'Evict Synthetic Android?', exact: true })
+    // Shared 6b387de distinguishes immediate seat release from queued offline licence removal.
+    await expect(eviction).toContainText(
+      'This removes Synthetic Android from your licensed devices, frees its seat and ends its Sync trust.'
+    )
+    await expect(eviction).toContainText(
+      'Synthetic Android is offline, so removing its saved licence stays queued until it next connects.'
+    )
+    await expect(eviction).toContainText('Either device must pair again before Sync can reconnect.')
+    await page.getByRole('button', { name: 'Evict device' }).click()
+    await expect(saved.getByText(`${usedSeats} used`, { exact: true })).toBeVisible()
+    await expect(saved.getByLabel(initialSeatLabel!, { exact: true })).toBeVisible()
+    // Shared c88ccf0 removed evicted devices from both lists. Offline cleanup stays queued,
+    // but the former error row and its Retry/Dismiss controls no longer exist on this surface.
+    await expect(peer).toHaveCount(0)
     await expect(page.getByText('Could not reach Synthetic Android')).toHaveCount(0)
   })
 
   test('turning a category off persists across a screen change', async () => {
     await navButton(page, 'Devices').click()
     await openSyncSettings()
-    const chats = page.getByRole('switch', { name: 'Sync Chats' })
+    const modelSettings = page.getByRole('switch', { name: 'Sync Model settings' })
     const clipboard = page.getByRole('switch', { name: 'Sync Copied text' })
-    await expect(chats).toHaveAttribute('aria-checked', 'true')
+    // Model settings are optional and start off. Enable them before testing off-state persistence.
+    await expect(modelSettings).toHaveAttribute('aria-checked', 'false')
+    await modelSettings.click()
+    await expect(modelSettings).toHaveAttribute('aria-checked', 'true')
     await expect(clipboard).toHaveAttribute('aria-checked', 'false')
-    await chats.click()
+    await modelSettings.click()
     await clipboard.click()
-    await expect(chats).toHaveAttribute('aria-checked', 'false')
+    await expect(modelSettings).toHaveAttribute('aria-checked', 'false')
     await expect(clipboard).toHaveAttribute('aria-checked', 'true')
 
     // Leave and come back: the preference is persisted in main, not just React state.
     await navButton(page, 'Models').click()
     await navButton(page, 'Devices').click()
     await openSyncSettings()
-    await expect(page.getByRole('switch', { name: 'Sync Chats' })).toHaveAttribute(
+    await expect(page.getByRole('switch', { name: 'Sync Model settings' })).toHaveAttribute(
       'aria-checked',
       'false'
     )

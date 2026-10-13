@@ -242,6 +242,10 @@ interface RendererAPIOverrides {
   proInvoke?: (channel: string, ...args: unknown[]) => Promise<unknown>
   proOn?: (channel: string, cb: (...a: unknown[]) => void) => () => void
   proOff?: (channel: string) => void
+  /** Web Use or Computer Use settings changed, here or from a paired browser. */
+  onTaskSettingsChanged?: (
+    callback: (change: { key: string; value: unknown }) => void
+  ) => () => void
 
   // Keygen licensing (activation + status for the upgrade/settings UI)
   license?: {
@@ -274,7 +278,7 @@ interface RendererAPIOverrides {
   getDashboardStats: () => Promise<DashboardStats>
   extractMemory: (text: string) => Promise<{ summary: string; entities: string[]; topic: string }>
 
-  getChatSessions: (appName?: string) => Promise<ChatSessionRecord[]>
+  getChatSessions: () => Promise<ChatSessionRecord[]>
   getMemoriesForSession: (sessionId: string) => Promise<unknown[]>
   getEntitiesForSession: (sessionId: string) => Promise<SessionEntityRecord[]>
   getMemoryRecordsForSession: (sessionId: string) => Promise<SessionMemoryRecord[]>
@@ -312,8 +316,18 @@ interface RendererAPIOverrides {
   cancelRag: (streamId: string) => void
 
   // RAG Conversations
-  createRagConversation: (id: string, title?: string, projectId?: string | null) => Promise<string>
-  getRagConversations: (projectId?: string | null) => Promise<RagConversation[]>
+  createRagConversation: (
+    id: string,
+    title?: string,
+    projectId?: string | null,
+    surface?: 'chat' | 'god'
+  ) => Promise<string>
+  getRagConversations: (
+    projectId?: string | null,
+    page?: { limit?: number; updatedBefore?: string },
+    /** 'chat' leaves out God's conversations; 'god' lists only them. */
+    surface?: 'chat' | 'god'
+  ) => Promise<RagConversation[]>
   onRagConversationsChanged?: (
     callback: (data: { conversationId: string; projectId: string | null }) => void
   ) => () => void

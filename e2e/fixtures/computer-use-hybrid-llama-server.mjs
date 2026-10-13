@@ -36,13 +36,30 @@ const toolCall = (name, value) => ({
 })
 
 const responseFor = (body) => {
-  if (body.includes('delegate_grounded_action')) {
+  const payload = JSON.parse(body)
+  const names = (payload.tools ?? []).map((tool) => tool.function.name)
+  if (names.includes('confirm_action_result')) {
+    increment('verificationCalls')
+    return {
+      toolCalls: [
+        toolCall('confirm_action_result', {
+          summary: 'The test window was clicked.',
+          visible_evidence: 'The test window remains visible after the click.'
+        })
+      ]
+    }
+  }
+  // d94beace5f: the reasoner chooses the verb and target; the specialist supplies coordinates.
+  if (names.includes('ground_pointer_target')) {
     const count = increment('reasonerCalls')
     return count === 1
       ? {
           toolCalls: [
-            toolCall('delegate_grounded_action', {
-              instruction: 'Click the center of the visible test window.',
+            toolCall('ground_pointer_target', {
+              action: 'click',
+              target: 'the center of the visible test window',
+              expected_effect: 'The test window receives a click.',
+              continuation: { done: [], next: 'Verify the click', remember: '' },
               summary: 'Click the visible test window.',
               visible_evidence: 'The Off Grid AI test window is visible.'
             })
@@ -52,19 +69,19 @@ const responseFor = (body) => {
           toolCalls: [
             toolCall('complete_milestone', {
               summary: 'The test window was clicked.',
-              visible_evidence: 'The current screen remains visible after the click.'
+              visible_evidence: 'The current screen remains visible after the click.',
+              continuation: { done: ['Clicked the test window'], next: '', remember: '' }
             })
           ]
         }
   }
-  // The production UI-TARS adapter owns the specialist request budget. Match that native
-  // boundary instead of a presentation string that is not required to include the model name.
-  if (body.includes('"max_tokens":200')) {
+  // 5a72f8680 removed per-adapter token limits. Identify the native UI-TARS protocol.
+  if (body.includes('ONE action in the UI-TARS action space')) {
     return increment('specialistCalls') === 1
-      ? { content: "click(point='<point>500 500</point>')" }
+      ? { content: "click(point='<point>320 200</point>')" }
       : { content: 'subtask_complete()' }
   }
-  if (body.includes('"name":"perform_action"')) {
+  if (names.includes('perform_action')) {
     return increment('sameAsChatCalls') === 1
       ? {
           toolCalls: [
@@ -73,7 +90,10 @@ const responseFor = (body) => {
               summary: 'Click the visible test window.',
               visible_evidence: 'The Off Grid AI test window is visible.',
               action: { type: 'click', point: { x: 500, y: 500 } },
-              action_reason: 'The requested target is the center of the visible window.'
+              action_reason: 'The requested target is the center of the visible window.',
+              intent: 'Click the test window',
+              expected_state: 'The test window has received the click.',
+              continuation: { done: [], next: 'Verify the click', remember: '' }
             })
           ]
         }
@@ -81,12 +101,13 @@ const responseFor = (body) => {
           toolCalls: [
             toolCall('complete_milestone', {
               summary: 'The test window was clicked.',
-              visible_evidence: 'The current screen remains visible after the click.'
+              visible_evidence: 'The current screen remains visible after the click.',
+              continuation: { done: ['Clicked the test window'], next: '', remember: '' }
             })
           ]
         }
   }
-  if (body.includes('execution plan') || body.includes('Execution plan')) {
+  if (body.includes('Create a short execution plan for a computer-use agent.')) {
     return {
       content: JSON.stringify({
         version: 1,
@@ -94,7 +115,10 @@ const responseFor = (body) => {
       })
     }
   }
-  if (body.includes('computer_use') && !body.includes('The pointer moved to the test window.')) {
+  if (
+    names.includes('computer_use') &&
+    !payload.messages.some((message) => message.role === 'tool')
+  ) {
     return {
       content:
         '<tool_call>{"name":"computer_use","arguments":{"goal":"Click the center of the visible Off Grid AI test window."}}</tool_call>'

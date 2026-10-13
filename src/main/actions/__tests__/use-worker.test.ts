@@ -11,7 +11,7 @@ import { createActionWorker, type EngineLike, type ParkSignal } from '../use-wor
 const done = (id: string): TickOutcome =>
   ({ id, outcome: 'done', record: { id } as never }) as TickOutcome
 
-function makePark() {
+function makePark(): { signal: ParkSignal; fire: () => void; } {
   const listeners = new Set<() => void>()
   const signal: ParkSignal = {
     onParked(listener) {
@@ -22,7 +22,7 @@ function makePark() {
   return { signal, fire: () => listeners.forEach((l) => l()) }
 }
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 10))
+const flush = (): Promise<unknown> => new Promise((resolve) => setTimeout(resolve, 10))
 
 describe('createActionWorker', () => {
   it('drains outcomes to their waiters and stops when nothing is due', async () => {

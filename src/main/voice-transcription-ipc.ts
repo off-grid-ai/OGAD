@@ -16,6 +16,9 @@ export type TranscriptionServiceProvider = () => Promise<TranscriptionService>
 
 const active = new Map<string, AbortController>()
 
+/** A transcription that has not finished by this deadline is treated as stalled and ended. */
+export const TRANSCRIBE_TIMEOUT_MS = 5 * 60_000
+
 function requestKey(senderId: number, requestId: string): string {
   return `${senderId}:${requestId}`
 }
@@ -82,12 +85,23 @@ export function setupVoiceTranscriptionIpc(
     const abortOnDestroyed = (): void => controller.abort()
     active.set(key, controller)
     event.sender.once('destroyed', abortOnDestroyed)
+    // A stalled engine must not hold the request, its temp file or the engine lock forever.
+    // Held on an object: the flag is set only by the timer, which narrowing cannot see.
+    const timeout = { hit: false }
+    const deadline = setTimeout(() => {
+      timeout.hit = true
+      controller.abort()
+    }, TRANSCRIBE_TIMEOUT_MS)
     try {
       await fs.promises.writeFile(tmp, buf, { signal: controller.signal })
       const service = await getService()
       controller.signal.throwIfAborted()
       return (await service.transcribe({ path: tmp }, { signal: controller.signal })).text
+    } catch (error) {
+      if (timeout.hit) throw new Error('Transcription timed out. Try again with a shorter recording.')
+      throw error
     } finally {
+      clearTimeout(deadline)
       if (active.get(key) === controller) active.delete(key)
       event.sender.removeListener('destroyed', abortOnDestroyed)
       await unlinkTemp(tmp)

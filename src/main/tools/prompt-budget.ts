@@ -1,4 +1,4 @@
-import { toolPromptChars as serializedToolPromptChars } from '@offgrid/models'
+import { estimateTextTokens, toolPromptChars as serializedToolPromptChars } from '@offgrid/models'
 
 // llama.cpp accounts for an image as vision embeddings, not as the characters in
 // its base64 transport. Keep the existing conservative four-characters-per-token
@@ -34,5 +34,17 @@ export function toolPromptChars(messages: unknown, tools?: unknown): number {
   return serializedToolPromptChars(
     projectVisionPayload(messages) as Parameters<typeof serializedToolPromptChars>[0],
     projectVisionPayload(tools) as Parameters<typeof serializedToolPromptChars>[1]
+  )
+}
+
+/** Estimated prompt tokens, counting CJK text by script, with inline images charged as vision
+ *  tokens. Characters / 4 under-counts Japanese and Chinese by about 2.3x. */
+export function toolPromptTokens(messages: unknown, tools?: unknown): number {
+  const projectedTools = projectVisionPayload(tools)
+  return (
+    estimateTextTokens(JSON.stringify(projectVisionPayload(messages))) +
+    (Array.isArray(projectedTools) && projectedTools.length
+      ? estimateTextTokens(JSON.stringify(projectedTools))
+      : 0)
   )
 }

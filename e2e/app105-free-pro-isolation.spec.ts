@@ -46,7 +46,7 @@ const LOCKED_FEATURES: readonly LockedFeature[] = [
 const SETTINGS_PLACEHOLDERS = [
   {
     title: 'Device sync',
-    description: 'Pair your Mac and your phone and they stay in step'
+    description: 'Pair your computer and your phone and they stay in step'
   },
   {
     title: 'You',

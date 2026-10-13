@@ -43,7 +43,7 @@ function logoBytes(): Buffer | null {
 // least-privilege read scope + offline access (to get a refresh token).
 export interface StaticOAuthClient {
   client_id: string
-  client_secret: string
+  client_secret?: string
   scope: string
 }
 
@@ -84,7 +84,7 @@ export function makeOAuthProvider(
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
         // Google Desktop clients send the secret on token exchange; DCR uses none.
-        token_endpoint_auth_method: google ? 'client_secret_post' : 'none',
+        token_endpoint_auth_method: google?.client_secret ? 'client_secret_post' : 'none',
         ...(google ? { scope: google.scope } : {})
       }
     },
@@ -93,7 +93,11 @@ export function makeOAuthProvider(
     },
     clientInformation() {
       // Static (Google) client → skip DCR; otherwise use the registered one.
-      if (google) return { client_id: google.client_id, client_secret: google.client_secret }
+      if (google)
+        return {
+          client_id: google.client_id,
+          ...(google.client_secret ? { client_secret: google.client_secret } : {})
+        }
       return loadJson('client')
     },
     saveClientInformation(info: unknown): void {
@@ -123,12 +127,12 @@ export function makeOAuthProvider(
       // saved token is stale, the sync just fails quietly and the user can
       // reconnect from the UI. Only interactive connects open the browser.
       if (!interactive) return
-      if (google) {
+      if (google && url.hostname === 'accounts.google.com') {
         // Google needs these for a refresh token, and we pin the scope so we
         // only ever request the least-privilege read scope (not every scope the
         // MCP server advertises, which would exceed the consent screen).
         url.searchParams.set('access_type', 'offline')
-        url.searchParams.set('prompt', 'consent')
+        url.searchParams.set('prompt', 'consent select_account')
         url.searchParams.set('scope', google.scope)
       }
       // Register for the redirect (keyed by state) BEFORE opening the browser, so

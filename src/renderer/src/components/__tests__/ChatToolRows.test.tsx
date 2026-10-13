@@ -54,6 +54,29 @@ describe('<ChatToolRows/> work timeline', () => {
     expect(timeline.className).toContain('border-l')
   })
 
+  it('shows a started task as "Task started", never the launch note written for the model', async () => {
+    const user = userEvent.setup()
+    render(
+      <ChatToolRows
+        settled
+        tools={[
+          {
+            name: 'web_use',
+            status: 'pending',
+            result:
+              'Task reference: 4b1e2c9a-launch. Web Use started. Live progress and the final result will appear in this chat. Do not call web_use again for this goal.'
+          }
+        ]}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /^Work/ }))
+    await user.click(screen.getByRole('button', { name: /^Web Use,/ }))
+    expect(screen.getByText('Task started.')).toBeTruthy()
+    expect(screen.queryByText(/Do not call web_use/)).toBeNull()
+    expect(screen.queryByText(/Task reference/)).toBeNull()
+  })
+
   it('uses the meeting search result for the collapsed summary', async () => {
     const user = userEvent.setup()
     render(

@@ -31,7 +31,7 @@ afterEach(() => {
   }
 })
 
-function makeWorld() {
+function makeWorld(): { engine: UseEngine; executed: Record<string, unknown>[]; db: Database.Database; } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-gate-host-'))
   tempDirs.push(dir)
   const db = new Database(path.join(dir, 'app.db'))
@@ -85,7 +85,7 @@ async function until(condition: () => boolean): Promise<void> {
 }
 
 /** Narrow a tick outcome to the record-carrying variants, or fail the test. */
-function recordOutcome(result: Awaited<ReturnType<UseEngine['tick']>>) {
+function recordOutcome(result: Awaited<ReturnType<UseEngine['tick']>>): { id: string; outcome: "done" | "rejected" | "needs_help"; record: ActionRecord; } | { id: string; outcome: "edited"; record: ActionRecord; } {
   if (!result || result.outcome === 'poisoned') {
     throw new Error(`unexpected tick outcome: ${JSON.stringify(result)}`)
   }

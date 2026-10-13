@@ -35,6 +35,9 @@ interface ChatVoiceTurnOptions {
   cancelTranscription?: (requestId: string) => Promise<boolean>
   getTranscriptionLabel?: () => Promise<{ label: string }>
   onTranscript: (text: string, clip: ChatVoiceClip | null) => void
+  /** The chat a turn belongs to. A turn finishing after the user moved to another chat is not
+   *  delivered there: what was said in one chat never lands in another. */
+  ownerId?: string | null
 }
 
 interface CaptureResources {
@@ -47,6 +50,8 @@ interface CaptureResources {
 
 interface CompletedCapture {
   sequence: number
+  /** The chat that was open when the recording started. */
+  owner: string | null
   chunks: Blob[]
   mime: string
   duration: number
@@ -58,6 +63,7 @@ interface ChatVoiceTurns {
   microphoneDenied: boolean
   error: string | null
   transcriptionLabel: string
+  start: () => void
   toggle: () => void
   cancel: () => void
 }
@@ -210,7 +216,9 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
   )
 
   const transcribeRecording = useCallback(
-    async ({ sequence, chunks, mime, duration }: CompletedCapture): Promise<void> => {
+    async ({ sequence, owner, chunks, mime, duration }: CompletedCapture): Promise<void> => {
+      // After every wait: still the chat this turn was recorded in?
+      const sameChat = (): boolean => (optionsRef.current.ownerId ?? null) === owner
       const blob = new Blob(chunks, { type: mime })
       if (blob.size === 0) {
         if (sequence === sequenceRef.current) {
@@ -227,7 +235,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
         const requestId = crypto.randomUUID()
         transcriptionRequestRef.current = requestId
         const text = (await optionsRef.current.transcribeAudio(bytes, extension, requestId)).trim()
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         if (!text) {
           setError("Didn't catch that. Tap the microphone and try again.")
           updateSuspended(optionsRef.current.mode === 'handsfree')
@@ -255,11 +263,16 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
             setError('This voice note could not be saved for later playback.')
           }
         }
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
+        if (!sameChat()) {
+          setError('That voice note was recorded in another chat, so it was not sent here.')
+          updatePhase('idle')
+          return
+        }
         optionsRef.current.onTranscript(text, clip)
       } catch (cause) {
         console.error('Transcription failed', cause)
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         setError(
           transcriptionRecoveryMessage(cause) ??
             'Transcription failed. Check the speech-to-text model in Settings > Setup & health.'
@@ -295,6 +308,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
       setError(null)
       setMicrophoneDenied(false)
       const sequence = ++sequenceRef.current
+      const owner = current.ownerId ?? null
       updatePhase('starting')
       void refreshTranscriptionLabel(sequence)
 
@@ -307,7 +321,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
             autoGainControl: true
           }
         })
-        if (!mountedRef.current || sequence !== sequenceRef.current) {
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) {
           stream.getTracks().forEach((track) => track.stop())
           return
         }
@@ -342,6 +356,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           chunksRef.current = []
           void transcribeRecording({
             sequence,
+            owner,
             chunks,
             mime: mimeRef.current,
             duration: Math.max(0, (Date.now() - startedAtRef.current) / 1000)
@@ -380,7 +395,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           stopAnalysis(resources)
           stopTracks(resources)
         }
-        if (!mountedRef.current || sequence !== sequenceRef.current) return
+        if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
         const failure = microphoneFailure(cause)
         setError(failure.message)
         setMicrophoneDenied(failure.denied)
@@ -448,6 +463,10 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     }
     finishCapture(optionsRef.current.mode === 'handsfree')
   }, [finishCapture, startCapture])
+
+  const start = useCallback((): void => {
+    if (phaseRef.current === 'idle') void startCapture(true)
+  }, [startCapture])
 
   const cancel = useCallback((): void => {
     discardCapture()
@@ -561,6 +580,7 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
     microphoneDenied,
     error,
     transcriptionLabel,
+    start,
     toggle,
     cancel
   }

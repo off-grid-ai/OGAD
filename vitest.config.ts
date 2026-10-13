@@ -2,6 +2,7 @@ import { resolve } from 'path'
 import { existsSync } from 'fs'
 import { defineConfig } from 'vitest/config'
 import { createVitestProjects } from './src/main/__tests__/vitest-projects'
+import { assetPathPlugin } from './scripts/config/vitest-asset-plugin'
 
 // The pro/ submodule is present in the working tree when you have access, absent
 // otherwise (and in a fork CI without the cross-repo token). Only enforce the
@@ -34,6 +35,8 @@ const commonExcludes = ['e2e/**', 'node_modules/**', 'out/**']
 // The 85% floor is enforced here and on pre-push. `all: true` means a new pure module
 // with no test drags the number down, so untested logic cannot sneak in.
 export default defineConfig({
+  // `?asset` imports resolve to the file's path, as electron-vite does in the app.
+  plugins: [assetPathPlugin()],
   // Renderer path aliases, mirrored 1:1 from tsconfig.web.json `paths`. Without these
   // a .tsx render test cannot import any renderer module (electron-vite provides them
   // in the app build, but vitest has no tsconfig-paths plugin), so the *.test.tsx glob
@@ -42,6 +45,7 @@ export default defineConfig({
     alias: {
       '@renderer': resolve(__dirname, 'src/renderer/src'),
       '@offgrid/core': resolve(__dirname, 'src'),
+      '@offgrid/pro/main': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@offgrid/pro/renderer': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@offgrid/pro': resolve(__dirname, 'src/bootstrap/proStub.ts'),
       '@': resolve(__dirname, 'src/renderer/src')
@@ -100,6 +104,8 @@ export default defineConfig({
         '**/*.dbtest.ts',
         '**/__tests__/**',
         '**/*.d.ts',
+        // Pro's Playwright journeys (pro/e2e) drive the built app; they are not product source.
+        'pro/e2e/**',
         // Vendored / built - not our source (its own package builds + tests it).
         '**/dist/**',
         'packages/**',
@@ -173,7 +179,6 @@ export default defineConfig({
         'src/main/tools/mcpConnectorToolExtension.ts',
         'src/main/updater.ts',
         'src/main/dev-seed.ts',
-        'src/main/vision.ts',
         'src/main/ocr.ts',
         'src/main/embeddings.ts',
         // permissions.ts is no longer excluded: it is unit-tested now, including the multicast probe's four
@@ -197,7 +202,6 @@ export default defineConfig({
         'src/main/data-privacy.ts',
         'src/main/artifacts.ts',
         'src/main/secrets.ts',
-        'src/main/vision.ts',
         // Renderer .ts that are pure IPC passthrough (no logic) or React hooks (e2e-covered).
         'src/renderer/src/lib/voiceApi.ts',
         'src/renderer/src/useMeetingRecorder.ts',
@@ -219,10 +223,8 @@ export default defineConfig({
         'pro/main/**/ipc.ts',
         'pro/main/meeting-native.ts',
         'pro/main/meeting-detect.ts',
-        'pro/main/meeting-controller.ts',
         'pro/main/meeting-service.ts',
         'pro/main/meetings.ts',
-        'pro/main/text-injection.ts',
         'pro/main/console.ts',
         'pro/main/google-rest.ts',
         // Core settings composition; IdentityService rules are measured in identity.ts.

@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { Button } from '@renderer/components/ui/button'
+import { deviceNoun } from '@renderer/lib/device'
 import type { Artifact } from '../../ArtifactCanvas'
 import type { AskBlock, ChatMessage } from '../types'
 
@@ -18,7 +19,7 @@ function ImageMemoryRetryActionComponent({
   return (
     <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
       <p className="min-w-0 flex-1 text-[10px] text-muted-foreground">
-        Running this model may make your Mac unresponsive.
+        Running this model may make your {deviceNoun()} unresponsive.
       </p>
       <Button
         type="button"

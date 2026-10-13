@@ -22,6 +22,7 @@ import {
   type ComputerUsePhase,
   type ComputerUseStepDetail
 } from './task-step-details'
+import { taskDisplayTitle } from '../../shared/task-display-title'
 
 export type TaskRunKind = AutomationTaskKind
 export type TaskRunStatus = AutomationTaskReadStatus
@@ -34,7 +35,10 @@ export interface TaskRunSnapshot {
   modelId?: string
   modelName?: string
   kind: TaskRunKind
+  /** The short, plain name a person reads. */
   title: string
+  /** The model-facing goal a retry runs with (the stored title column). Never shown. */
+  goal?: string
   status: TaskRunStatus
   summary?: string
   steps: string[]
@@ -65,7 +69,9 @@ export interface TaskRunUpdate {
   modelId?: string
   modelName?: string
   kind: TaskRunKind
+  /** Writers pass the task's goal or a title; the store keeps a display title either way. */
   title?: string
+  goal?: string
   status?: TaskRunStatus
   summary?: string
   steps?: string[]
@@ -126,6 +132,11 @@ interface TaskRunRow {
   step_details_json?: string | null
 }
 
+/** The first goal a task was recorded with stays its goal; later writes only refresh the title. */
+function goalOf(update: TaskRunUpdate, previous: TaskRunSnapshot | undefined): string | undefined {
+  return update.goal?.trim() || previous?.goal || update.title?.trim() || undefined
+}
+
 export const TASK_HISTORY_LIMIT = 50
 export const ORPHANED_LOCAL_WEB_TASK_SUMMARY =
   'Stopped because the earlier local Web Use process is no longer active.'
@@ -162,7 +173,9 @@ function rowToSnapshot(row: TaskRunRow): TaskRunSnapshot | undefined {
     ...(row.model_id ? { modelId: row.model_id } : {}),
     ...(row.model_name ? { modelName: row.model_name } : {}),
     kind,
-    title: row.title,
+    // The title column keeps the goal the task was recorded with; a person reads its plain name.
+    title: taskDisplayTitle(row.title) || row.title,
+    ...(row.title ? { goal: row.title } : {}),
     status,
     ...(row.summary ? { summary: row.summary } : {}),
     steps: safeSteps(row.steps_json),
@@ -356,7 +369,8 @@ export class TaskHistoryStore {
       ...persistedModelIdentity(previous, update),
       ...persistedReasoning(previous, update, kind, status),
       kind,
-      title: update.title?.trim() || previous?.title || automationTaskKindLabel(kind),
+      title: taskDisplayTitle(update.title) || previous?.title || automationTaskKindLabel(kind),
+      ...(goalOf(update, previous) ? { goal: goalOf(update, previous) } : {}),
       status,
       ...(update.summary !== undefined
         ? { summary: update.summary }
@@ -470,7 +484,8 @@ export class TaskHistoryStore {
         snapshot.modelId ?? null,
         snapshot.modelName ?? null,
         snapshot.kind,
-        snapshot.title,
+        // Stored as before: the goal the task runs with. Reads derive the title from it.
+        snapshot.goal ?? snapshot.title,
         snapshot.status,
         snapshot.summary ?? null,
         JSON.stringify(snapshot.steps),

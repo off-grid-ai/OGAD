@@ -6,7 +6,7 @@
 // closed — we don't hold long-lived child processes.
 
 import { getDB } from './database'
-import { deleteSecretsByPrefix, getSecret } from './secrets'
+import { deleteSecret, deleteSecretsByPrefix, getSecret, setSecret } from './secrets'
 import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
 import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
@@ -27,6 +27,7 @@ export interface ConnectorToolDefinition {
   name: string
   description?: string
   inputSchema?: unknown
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean }
 }
 
 export interface ConnectorToolCallResult {
@@ -42,6 +43,8 @@ export interface ConnectorToolCallResult {
  */
 export interface ConnectorToolSource {
   tools: ConnectorToolDefinition[]
+  /** Optional direct authorization owned by the provider, without a remote MCP handshake. */
+  authorize?: () => Promise<void>
   verify: () => Promise<void>
   callTool: (tool: string, args: unknown) => Promise<ConnectorToolCallResult>
 }
@@ -90,6 +93,8 @@ export interface NewConnector {
   args?: string[]
   envKeys?: string[] // names of secrets to inject as env vars
   url?: string
+  /** Connect for live tools without background memory imports. */
+  liveOnly?: boolean
 }
 
 export function listConnectors(): Connector[] {
@@ -113,7 +118,88 @@ export function addConnector(c: NewConnector): number {
       c.url ?? null,
       Date.now()
     )
-  return Number(info.lastInsertRowid)
+  const id = Number(info.lastInsertRowid)
+  if (c.liveOnly && !setSecret(`connector:${id}:live-only`, 'true')) {
+    getDB().prepare('DELETE FROM connectors WHERE id = ?').run(id)
+    throw new Error('Could not protect the connection settings.')
+  }
+  if (c.liveOnly) setConnectorEnabled(id, false)
+  return id
+}
+
+export interface ConnectorChanges {
+  name?: string
+  url?: string
+  command?: string
+  args?: string[]
+}
+
+/**
+ * Change a connector's name or where it connects. A new address or command is a different
+ * server: its sign-in and discovered tools no longer apply, so they are cleared and the
+ * connector waits for a new test. Other saved secrets (an API token) are kept.
+ */
+export function updateConnector(id: number, changes: ConnectorChanges): Connector {
+  ensure()
+  const current = getConnector(id)
+  if (!current) throw new Error('This connection no longer exists.')
+  const name = changes.name === undefined ? current.name : changes.name.trim()
+  if (!name) throw new Error('Enter a name.')
+  const url = current.transport === 'http' ? (changes.url?.trim() ?? current.url) : null
+  const command =
+    current.transport === 'stdio' ? (changes.command?.trim() ?? current.command) : null
+  const args =
+    current.transport === 'stdio'
+      ? changes.args === undefined
+        ? current.args
+        : changes.args.length
+          ? JSON.stringify(changes.args)
+          : null
+      : null
+  if (current.transport === 'http' && !url) throw new Error('Enter the server address.')
+  if (current.transport === 'stdio' && !command) throw new Error('Enter the command.')
+  const moved = url !== current.url || command !== current.command || args !== current.args
+  const database = getDB()
+  if (moved) cancelOAuthAuthorization(id)
+  database.transaction(() => {
+    if (moved) {
+      deleteSecretsByPrefix(`connector:${id}:oauth:`)
+      // The secrets it handed the old server or command (API keys as environment variables)
+      // are not the new one's to receive.
+      for (const key of current.env_keys ? (JSON.parse(current.env_keys) as string[]) : []) {
+        deleteSecret(`connector:${id}:${key}`)
+      }
+      database
+        .prepare(
+          "UPDATE connectors SET name=?, url=?, command=?, args=?, env_keys=NULL, tools=NULL, status='unknown', status_detail=? WHERE id=?"
+        )
+        .run(name, url, command, args, 'Settings changed. Test the connection.', id)
+    } else {
+      database.prepare('UPDATE connectors SET name=? WHERE id=?').run(name, id)
+    }
+  })()
+  return getConnector(id)!
+}
+
+/** A secret's name as a connector receives it: an environment variable name. */
+const SECRET_KEY = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+
+/**
+ * Save a connector's credentials (a token, an API key) and record them as what it receives, so
+ * a connector whose command was changed (which cleared them) works again once they are entered.
+ */
+export function setConnectorSecrets(id: number, values: Record<string, string>): void {
+  const current = getConnector(id)
+  if (!current) throw new Error('This connection no longer exists.')
+  const entered = Object.entries(values).filter(([key, value]) => SECRET_KEY.test(key) && value)
+  for (const [key, value] of entered) {
+    if (!setSecret(`connector:${id}:${key}`, value)) throw new Error('Could not save the token.')
+  }
+  const known = current.env_keys ? (JSON.parse(current.env_keys) as string[]) : []
+  const keys = [...new Set([...known, ...entered.map(([key]) => key)])]
+  getDB()
+    .prepare('UPDATE connectors SET env_keys=? WHERE id=?')
+    .run(keys.length ? JSON.stringify(keys) : null, id)
 }
 
 export function setConnectorEnabled(id: number, enabled: boolean): void {
@@ -141,11 +227,21 @@ export function setConnectorStatus(
 export function removeConnector(id: number): void {
   ensure()
   cancelOAuthAuthorization(id)
+  // Before the stored sign-in goes: the provider may be told to forget it too.
+  try {
+    callHook(HOOKS.mcpBeforeRemove, id, getConnector(id)?.url ?? null)
+  } catch {
+    /* Removing locally never waits on, or fails for, the provider. */
+  }
   const database = getDB()
   database.transaction(() => {
     deleteSecretsByPrefix(`connector:${id}:`)
     database.prepare('DELETE FROM connectors WHERE id = ?').run(id)
   })()
+}
+
+export function cancelConnectorAuthorization(id: number): void {
+  cancelOAuthAuthorization(id)
 }
 
 function getConnector(id: number): Connector | undefined {
@@ -298,15 +394,26 @@ export async function testConnector(
       // A fresh account still needs the existing interactive OAuth handshake. Once tokens exist,
       // provider verification must not touch a preview-gated MCP endpoint.
       if (!hasOAuthTokens(c.id)) {
-        const session = await connect(c, true)
-        await session.close()
+        if (source.authorize) await source.authorize()
+        else {
+          const session = await connect(c, true)
+          await session.close()
+        }
       }
       await source.verify()
-      tools = source.tools
+      // Built again after sign-in: the services the user granted at consent decide its tools,
+      // not the ones it was created with before they chose.
+      tools = (connectorToolSource(c) ?? source).tools
     } else {
       const { client, close } = await connect(c, true) // user-initiated → allow browser OAuth
       try {
         const res = await client.listTools()
+        await callHook(
+          'mcp:identifyAccount',
+          id,
+          client,
+          res.tools.map((tool) => tool.name)
+        )
         tools = res.tools.map((tool) => ({
           name: tool.name,
           description: tool.description

@@ -41,7 +41,7 @@ const server = createServer((request, response) => {
   try {
     body = readFileSync(logPath, 'utf8')
     if (body.length > 5_000_000) body = body.slice(-5_000_000)
-  } catch {}
+  } catch { /* The child may have already exited. */ }
 
   response.writeHead(200, {
     'Content-Type': 'text/plain; charset=utf-8',

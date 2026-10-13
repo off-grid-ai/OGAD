@@ -1,12 +1,8 @@
 import type { ActionRisk } from '../actions/approval'
+import type { ConnectorToolDefinition } from '../mcp'
+export type { ConnectorToolDefinition } from '../mcp'
 
 export const MCP_TOOL_PREFIX = 'mcp__'
-
-export interface ConnectorToolDefinition {
-  name: string
-  description?: string
-  inputSchema?: unknown
-}
 
 export interface ConnectorToolSchema {
   type: 'function'

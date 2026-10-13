@@ -36,6 +36,42 @@ export interface CatalogEntry {
   availability?: 'ready' | 'coming_soon'
   availabilityNote?: string
 }
+// Desktop MTP companions use the existing aux-file download contract. Keep the
+// pinned file identity shared by catalog installation and engine launch.
+export const MTP_COMPANIONS = {
+  'unsloth/gemma-4-E4B-it-GGUF': {
+    name: 'mtp-gemma-4-E4B-it-Q8_0.gguf',
+    url: 'https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/bfc15c382204943c3a8fff0c750b94ae2364d7a3/MTP/mtp-gemma-4-E4B-it-Q8_0.gguf',
+    sizeBytes: 98653248,
+    sha256: 'b6a723115efa510d3b3215db1e26790dae84cd08c2134a764f3d194f1f0c3376',
+    role: 'aux' as const
+  },
+  'unsloth/gemma-4-12b-it-GGUF': {
+    name: 'mtp-gemma-4-12b-it-Q8_0.gguf',
+    url: 'https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/fc034cfff751157913579611efad8462ac1be606/MTP/mtp-gemma-4-12b-it-Q8_0.gguf',
+    sizeBytes: 465109248,
+    sha256: '145db9094bc0f85f1701e255a2ed216dcc9800fc8bc8631ad00905b456bd451b',
+    role: 'aux' as const
+  },
+  'bartowski/tencent_UI-Mate-9B-GGUF+MTP': {
+    name: 'Qwen3.5-9B-MTP-ONLY-Q4_K_M.gguf',
+    url: 'https://huggingface.co/a4lg/Qwen3.5-9B-MTP-ONLY-GGUF/resolve/b609b41c40921b0d1912f0d42347e53e28d22731/Qwen3.5-9B-MTP-ONLY-Q4_K_M.gguf',
+    sizeBytes: 1576551712,
+    sha256: '82f356f754e70172f474e70229153bb0fe7137f3a181af5bc5e6fe43d56876fa',
+    role: 'aux' as const
+  },
+  'unsloth/Qwen3.8-27B-GGUF': {
+    name: 'mtp-Qwen3.8-27B-Q4_0.gguf',
+    url: 'https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/4ca720788d1e01f1bff70c033e0d0028fd02e502/MTP/mtp-Qwen3.8-27B-Q4_0.gguf',
+    sizeBytes: 1369590656,
+    sha256: '50d9ce5a6da381bbcfb31061cf73df94a90e6faf8efeddee379a9cb8f1501c6e',
+    role: 'aux' as const
+  }
+}
+
+export const isMtpFileName = (name: string): boolean =>
+  /(?:^|[-_.])mtp(?:[-_.]|$)/i.test(name.split(/[\\/]/).at(-1) ?? name)
+
 export interface LocalModelLike {
   id: string
   name: string
@@ -68,10 +104,10 @@ export function remainingDownloadBytes(entry: Pick<CatalogEntry, 'files'>, sizeO
 }
 
 export const isProjectorFileName = (name: string): boolean =>
-  /(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(name)
+  /(?:^|[-_.])(mmproj|projector)(?:[-_.]|$)/i.test(name.split(/[\\/]/).at(-1) ?? name)
 
 export const isDflashFileName = (name: string): boolean =>
-  /(?:^|[-_.])d-?flash(?:[-_.]|$)/i.test(name)
+  /(?:^|[-_.])d-?flash(?:[-_.]|$)/i.test(name.split(/[\\/]/).at(-1) ?? name)
 
 /** A catalog-shaped view of an imported local model whose primary file is present
  *  (size > 0). Tagged "Imported" and surfaced at the top of the catalog. */
@@ -120,7 +156,7 @@ export function downloadedForCatalog(
           name,
           url: '',
           sizeBytes: sizeOf(name) || family?.files.find((file) => file.name === name)?.sizeBytes || 0,
-          role: isProjectorFileName(name) ? 'mmproj' : 'primary'
+          role: isProjectorFileName(name) ? 'mmproj' : isMtpFileName(name) ? 'aux' : 'primary'
         }))
       }
     })
@@ -159,14 +195,16 @@ export function mergeCatalog(opts: {
 }
 
 /** Whether a single catalog entry counts as installed. mflux entries defer to the
- *  runtime cache (`mfluxCached`); DFlash is an optional repairable companion. */
+ *  runtime cache (`mfluxCached`); DFlash and MTP are optional repairable companions. */
 export function catalogEntryInstalled(
   entry: CatalogEntry,
   present: FilePresent,
   mfluxCached: (id: string) => boolean
 ): boolean {
   if (entry.runtime === 'mflux') return mfluxCached(entry.id)
-  const required = entry.files.filter((file) => !isDflashFileName(file.name))
+  const required = entry.files.filter(
+    (file) => !isDflashFileName(file.name) && !isMtpFileName(file.name)
+  )
   return required.length > 0 && required.every((file) => present(file.name))
 }
 
@@ -232,6 +270,9 @@ export interface VisionStatus {
   supportsDflash?: boolean
   dflashInstalled?: boolean
   dflashFile?: string
+  /** Optional MTP companion readiness; native embedded MTP is checked by the engine owner. */
+  supportsMtp?: boolean
+  mtpInstalled?: boolean
 }
 
 /** Per-model vision capability + readiness, derived from files (does it ship a
@@ -243,7 +284,9 @@ export function visionStatus(
 ): VisionStatus {
   const projector = projectorFileName(entry)
   const dflash = dflashFileName(entry)
+  const mtp = entry.files.find((file) => isMtpFileName(file.name))?.name
   return {
+    ...(mtp ? { supportsMtp: true, mtpInstalled: present(mtp) } : {}),
     supportsVision: !!projector,
     projectorInstalled: !!projector && present(projector),
     ...(dflash

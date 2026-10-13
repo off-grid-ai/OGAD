@@ -94,6 +94,10 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
+  for (const name of ['p0-capture-native-ledger.jsonl', 'logs/off-grid-ai-desktop.log']) {
+    const file = path.join(userDataDir, name)
+    if (fs.existsSync(file)) await test.info().attach(name, { path: file })
+  }
   await app?.close().catch(() => {})
   // Keep the rendered evidence long enough for this process to inspect it, then leave no profile.
   if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true })
@@ -108,7 +112,7 @@ test('APP-119 and APP-121: capture requires opt-in, then pause stops it everywhe
   const settingsStatus = page.getByRole('status').filter({ hasText: 'Paused' }).first()
   await expect(settingsStatus).toBeVisible()
   await expect(page.getByRole('button', { name: 'Resume capture' })).toBeVisible()
-  await expect(page.getByText('Last frame').locator('..')).toContainText('none yet')
+  await expect(page.getByText(/^Last frame\s*none yet$/)).toBeVisible()
   await page.waitForTimeout(5_750)
   expect(eventCount('active-window')).toBe(0)
   expect(eventCount('frame-capture')).toBe(0)
@@ -122,7 +126,25 @@ test('APP-119 and APP-121: capture requires opt-in, then pause stops it everywhe
   await expect(page.getByRole('button', { name: 'Pause capture' })).toBeVisible()
   await expect.poll(() => eventCount('frame-capture'), { timeout: 12_000 }).toBeGreaterThan(0)
   await expect.poll(() => capturedPngs().length).toBeGreaterThan(0)
-  await expect(page.getByText('Last frame').locator('..')).not.toContainText('none yet')
+  // pro 40d21ef6 captures the image and reads AX together, then persists the frame.
+  // A file can exist while the native AX read is still in progress. Wait for the durable status.
+  await expect
+    .poll(async () => {
+      const status = await page.evaluate(() => window.api.proInvoke('capture:status'))
+      return (
+        (status as { pipeline: { stats: { lastCapturedAt: string | null } | null } }).pipeline.stats
+          ?.lastCapturedAt ?? null
+      )
+    })
+    .not.toBeNull()
+  // Capture status has one publisher (capture state), and a captured frame is content, not a state
+  // change (pro 0e5ce8d), so the open panel keeps its last reading. Reopening Settings reads it again.
+  // f2121f7ea6 keeps the old screen during its exit animation. Wait for Models before returning.
+  await page.getByRole('button', { name: 'Models', exact: true }).first().click()
+  await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeHidden()
+  await gotoCaptureSettings()
+  await expect(page.getByText(/^Last frame\s*\d/)).toBeVisible()
 
   // Replay consumes the same live production projection. Pausing there must update the visible
   // state immediately, then remain stopped for more than one scheduler interval.

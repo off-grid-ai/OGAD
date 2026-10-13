@@ -46,3 +46,16 @@ describe('chat-queue routing', () => {
     })
   })
 })
+
+it('sends a priority message before queued messages without losing their order', () => {
+  let queue = enqueue({}, 'a', 'first')
+  queue = enqueue(queue, 'a', 'second')
+  queue = enqueue(queue, 'b', 'other chat')
+  queue = enqueue(queue, 'a', 'send now', true)
+  for (const expected of ['send now', 'first', 'second']) {
+    const next = dequeue(queue, 'a')
+    expect(next.item).toBe(expected)
+    queue = next.next
+  }
+  expect(dequeue(queue, 'b').item).toBe('other chat')
+})

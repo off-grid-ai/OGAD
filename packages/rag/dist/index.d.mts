@@ -124,6 +124,13 @@ interface ExtractionBridges {
     captionImage?(imagePath: string): Promise<string>;
 }
 
+/**
+ * Make retrieved text safe to place inside a prompt as data. Angle brackets and ampersands are
+ * escaped (so excerpts cannot open or close prompt tags, but code and math stay readable), and
+ * lines that look like conversation turns or source headers are quoted so an excerpt cannot
+ * fake a new turn or a citation.
+ */
+declare function sanitizePromptExcerpt(text: string): string;
 /** Score every candidate by cosine similarity and return the top-k, desc. */
 declare function rankBySimilarity(queryVec: number[], candidates: ChunkCandidate[], topK?: number): RagSearchResult[];
 /** Characters of context to spend on retrieved KB excerpts for a given window.
@@ -217,4 +224,4 @@ declare function makeSearchKnowledgeBaseHandler(searcher: {
     query: string;
 }, projectId?: string) => Promise<string>;
 
-export { type Chunk, type ChunkCandidate, type ChunkOptions, type EmbeddingProvider, type ExtractOptions, type ExtractedContent, type ExtractionBridges, type IndexDocumentParams, type IndexResult, type IndexStage, type MediaKind, type Project, type RagDocument, type RagSearchResult, RagService, type RagServiceDeps, SEARCH_KB_TOOL, type SearchResult, type SimilarityResult, type VectorStore, chunkText, cosineSimilarity, detectKind, dotProduct, estimateCharBudget, extensionOf, extractContent, formatForPrompt, makeSearchKnowledgeBaseHandler, rankBySimilarity, selectWithinBudget, topKSimilar };
+export { type Chunk, type ChunkCandidate, type ChunkOptions, type EmbeddingProvider, type ExtractOptions, type ExtractedContent, type ExtractionBridges, type IndexDocumentParams, type IndexResult, type IndexStage, type MediaKind, type Project, type RagDocument, type RagSearchResult, RagService, type RagServiceDeps, SEARCH_KB_TOOL, type SearchResult, type SimilarityResult, type VectorStore, chunkText, cosineSimilarity, detectKind, dotProduct, estimateCharBudget, extensionOf, extractContent, formatForPrompt, makeSearchKnowledgeBaseHandler, rankBySimilarity, sanitizePromptExcerpt, selectWithinBudget, topKSimilar };

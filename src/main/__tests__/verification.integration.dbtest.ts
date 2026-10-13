@@ -36,7 +36,7 @@ afterEach(() => {
  * A scripted Reminders world: creates succeed or silently drop (the classic
  * false-ok), lists report what actually landed.
  */
-function makeWorld({ dropFirstCreates = 0 } = {}) {
+function makeWorld({ dropFirstCreates = 0 } = {}): { engine: UseEngine; landed: string[]; creates: () => number; } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-verify-'))
   tempDirs.push(dir)
   const db = new Database(path.join(dir, 'app.db'))

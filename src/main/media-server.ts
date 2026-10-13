@@ -17,7 +17,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { app } from 'electron'
 import { parseRange, isPathAllowed } from './media-range'
-import { MEDIA_PORT } from '../shared/ports'
+import { MEDIA_PORT, MEDIA_PORT_RANGE } from '../shared/ports'
 import { isPortFree, pickFreePort } from './free-port'
 import { mimeForExt } from './mime'
 import { localMediaRoots } from './media-roots'
@@ -73,7 +73,11 @@ export class LoopbackMediaServer {
     // for a free one. requestedPort 0 = let the OS assign (tests) — inherently free. urlFor() serves
     // the LIVE boundPort, so downstream links follow wherever it bound.
     const target = this.requestedPort > 0
-      ? await pickFreePort(this.requestedPort, (port) => isPortFree(port, '127.0.0.1'))
+      ? await pickFreePort(
+          this.requestedPort,
+          (port) => isPortFree(port, '127.0.0.1'),
+          MEDIA_PORT_RANGE
+        )
       : 0
     if (target === null) {
       this.startPromise = null

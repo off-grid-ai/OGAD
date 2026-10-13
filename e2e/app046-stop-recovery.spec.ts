@@ -82,7 +82,7 @@ async function launchApp(): Promise<void> {
   await page.waitForLoadState('domcontentloaded')
   await completeOnboarding(page)
   await page.getByRole('button', { name: 'Chat', exact: true }).click()
-  await expect(page.getByPlaceholder(/ask anything/i)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
   const dismiss = page.getByRole('button', { name: 'Dismiss', exact: true })
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click()
 }
@@ -120,7 +120,7 @@ test.describe('APP-046 streamed stop recovery', () => {
   // Playwright requires the first callback argument to use object destructuring.
   // eslint-disable-next-line no-empty-pattern
   test('keeps partial text after Stop and completes the next prompt once', async ({}, testInfo) => {
-    const composer = page.getByPlaceholder(/ask anything/i)
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true })
     await composer.fill(FIRST_PROMPT)
     await page.keyboard.press('Enter')
 

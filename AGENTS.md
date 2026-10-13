@@ -1,6 +1,6 @@
 # Off Grid Desktop
 
-- This is the macOS Electron app. Core is public (AGPL); paid feature code belongs in the private `pro/` submodule. Keep core integration inert and commit Pro changes in its own repo.
+- This is the Electron app for macOS, Windows and Linux. Core is public (AGPL); paid feature code belongs in the private `pro/` submodule. Keep core integration inert and commit Pro changes in its own repo.
 - For UI work that changes layout, styling, interaction behavior, or visual hierarchy, use `docs/DESIGN.md` and `@offgrid/design`. Use judgment for small copy or data-only changes to existing controls. Keep the Desktop layout dense and suited to a wide window. Reuse an existing component and use `@phosphor-icons/react`.
 - For customer-facing copy, read the applicable guide in `brand/`. Capture remains opt-in with a visible recording indicator. Do not publish private profile data.
 - Do not run end-to-end tests unless the user explicitly requests them. If the user requests screenshots or automated UI runs, use a fresh synthetic profile; `npm run demo` seeds both core and Pro data.

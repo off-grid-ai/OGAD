@@ -8,6 +8,7 @@ import {
   type KeyboardEvent
 } from 'react'
 import { Button } from '@renderer/components/ui/button'
+import { Textarea } from '@offgrid/operator-ui/operator/forms'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import type { ChatDraftStore } from './chat-draft-store'
 
@@ -28,6 +29,9 @@ interface ChatDraftInputProps {
   attachmentPending: boolean
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void
   onSubmit: () => void
+  onSendNow?: () => void
+  busy?: boolean
+  suggestion?: string
 }
 
 function useDraft(store: ChatDraftStore): string {
@@ -43,12 +47,25 @@ function matchingSkills(value: string, skills: readonly SkillOption[]): readonly
 
 export const ChatDraftInput = forwardRef<ChatDraftInputHandle, ChatDraftInputProps>(
   function DraftInput(
-    { store, skills, mode, activeProjectName, attachmentPending, onPaste, onSubmit },
+    {
+      store,
+      skills,
+      mode,
+      activeProjectName,
+      attachmentPending,
+      onPaste,
+      onSubmit,
+      onSendNow,
+      busy,
+      suggestion
+    },
     forwardedRef
   ): React.JSX.Element {
     const value = useDraft(store)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const matches = mode === 'ask' ? matchingSkills(value, skills) : []
+    const offeredSuggestion =
+      mode === 'ask' && !busy && !attachmentPending && !value ? suggestion : undefined
 
     useImperativeHandle(forwardedRef, () => ({
       focus: () => textareaRef.current?.focus()
@@ -67,7 +84,20 @@ export const ChatDraftInput = forwardRef<ChatDraftInputHandle, ChatDraftInputPro
     }
 
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-      if (matches.length > 0) {
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return
+      if (
+        offeredSuggestion &&
+        event.key === 'Tab' &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        event.preventDefault()
+        store.set(offeredSuggestion)
+        return
+      }
+      if (matches.length > 0 && !event.metaKey && !event.ctrlKey) {
         const query = value.slice(value.lastIndexOf('/') + 1).toLowerCase()
         const exact = skills.some((skill) => skill.name.toLowerCase() === query)
         if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && !exact)) {
@@ -78,7 +108,10 @@ export const ChatDraftInput = forwardRef<ChatDraftInputHandle, ChatDraftInputPro
       }
       if (event.key !== 'Enter' || event.shiftKey) return
       event.preventDefault()
-      if (!attachmentPending) onSubmit()
+      if (!attachmentPending) {
+        if ((event.metaKey || event.ctrlKey) && onSendNow) onSendNow()
+        else onSubmit()
+      }
     }
 
     return (
@@ -106,24 +139,39 @@ export const ChatDraftInput = forwardRef<ChatDraftInputHandle, ChatDraftInputPro
             ))}
           </div>
         ) : null}
-        <textarea
+        <Textarea
           ref={textareaRef}
           value={value}
           onChange={(event) => store.set(event.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={onPaste}
           rows={1}
-          placeholder={
-            mode === 'image'
-              ? 'Describe an image to generate…'
-              : mode === 'video'
-                ? 'Describe a video to generate…'
-              : activeProjectName
-                ? `Ask about “${activeProjectName}”…`
-                : 'Ask anything…'
+          aria-label="Message"
+          aria-description={
+            busy
+              ? 'Enter to queue. Command or Control plus Enter to send now. Shift plus Enter for a new line.'
+              : offeredSuggestion
+                ? 'Tab to use the suggested message. Enter to send. Shift plus Enter for a new line.'
+                : 'Enter to send. Shift plus Enter for a new line.'
           }
-          className="max-h-52 w-full resize-none overflow-y-auto bg-transparent px-3.5 pt-3 text-sm text-foreground placeholder:text-muted-foreground outline-none"
+          placeholder={
+            offeredSuggestion
+              ? `${offeredSuggestion} (Tab)`
+              : mode === 'image'
+                ? 'Describe an image to generate…'
+                : mode === 'video'
+                  ? 'Describe a video to generate…'
+                  : activeProjectName
+                    ? `Ask about “${activeProjectName}”…`
+                    : 'Ask anything…'
+          }
+          className="min-h-0 max-h-52 w-full resize-none overflow-y-auto rounded-none border-0 bg-transparent px-3.5 pt-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus-visible:outline-none"
         />
+        {busy ? (
+          <p className="px-3.5 pt-1 text-[10px] text-muted-foreground">
+            Enter to queue · ⌘/Ctrl+Enter to send now
+          </p>
+        ) : null}
       </>
     )
   }

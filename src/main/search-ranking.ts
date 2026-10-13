@@ -7,6 +7,7 @@
 //      thousands of ambient screen captures.
 //   3. "Match" sort — rank by literal term overlap in title/snippet.
 
+import { escapeFtsMatch } from './fts-match'
 import type { SearchKind, SearchResult, SearchSort } from '../shared/search-contract'
 
 export type { SearchKind, SearchResult, SearchSort } from '../shared/search-contract'
@@ -47,9 +48,7 @@ export function queryTerms(query: string, max: number): string[] {
 /** Sanitize a free-text query into an FTS5 MATCH expression: each token becomes a
  *  prefix-match term; punctuation is dropped so user input can't be a syntax error. */
 export function ftsExpr(query: string): string {
-  return queryTerms(query, 12)
-    .map((t) => `"${t}"*`)
-    .join(' ')
+  return escapeFtsMatch(queryTerms(query, 12), { join: ' ', prefix: true })
 }
 
 /**

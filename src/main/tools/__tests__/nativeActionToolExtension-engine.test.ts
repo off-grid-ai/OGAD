@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { TickOutcome } from '@offgrid/use'
 
 vi.mock('electron', () => ({ shell: { openExternal: vi.fn() } }))
+import { startTabFromActionArgs } from '../../browser/browser-start-tab'
+import { runTool, type ToolContext, type ToolResult } from '../../tools'
 
 import { NativeActionToolExtension, type ActionsPort } from '../nativeActionToolExtension'
 import {
@@ -106,6 +108,108 @@ describe('the spec table', () => {
 })
 
 describe('the engine path', () => {
+  describe.each(['execute', 'runTool'] as const)('%s context restrictions', (path) => {
+    it.each<{
+      label: string
+      context?: ToolContext
+      webAllowed: boolean
+      computerAllowed: boolean
+    }>([
+      { label: 'no context', webAllowed: true, computerAllowed: true },
+      {
+        label: 'desktop',
+        context: { origin: 'desktop' },
+        webAllowed: true,
+        computerAllowed: true
+      },
+      {
+        label: 'startTab only',
+        context: { startTab: { browserId: 'chrome-1', tabId: 42 } },
+        webAllowed: true,
+        computerAllowed: false
+      },
+      {
+        label: 'bridge with acting false',
+        context: { origin: 'bridge', acting: false },
+        webAllowed: false,
+        computerAllowed: false
+      },
+      {
+        label: 'bridge with acting true',
+        context: { origin: 'bridge', acting: true },
+        webAllowed: true,
+        computerAllowed: false
+      }
+    ])('$label', async ({ context, webAllowed, computerAllowed }) => {
+      const port = makePort()
+      const extension = makeExtension(port)
+      const execute = vi.spyOn(extension, 'execute')
+      const dispatch = (name: string): Promise<string | ToolResult> =>
+        path === 'execute'
+          ? extension.execute(name, { goal: 'Fill this page' }, context)
+          : runTool(name, { goal: 'Fill this page' }, context ?? {}, [extension])
+
+      expect(await dispatch('web_use')).toMatchObject({
+        status: webAllowed ? 'pending' : 'failed',
+        authoritative: true,
+        ...(!webAllowed ? { text: 'Error: tool_unavailable' } : {})
+      })
+      expect(await dispatch('computer_use')).toMatchObject({
+        status: computerAllowed ? 'pending' : 'failed',
+        authoritative: true,
+        ...(!computerAllowed ? { text: expect.stringMatching(/Use web_use/) } : {})
+      })
+      expect(port.proposed).toHaveLength(Number(webAllowed) + Number(computerAllowed))
+      if (path === 'runTool') {
+        expect(execute).toHaveBeenCalledTimes(Number(webAllowed) + Number(computerAllowed))
+      }
+      if (webAllowed && context?.startTab) {
+        expect(startTabFromActionArgs((port.proposed[0] as { args: unknown }).args)).toEqual(
+          context.startTab
+        )
+      }
+    })
+  })
+
+  it("reports the accepted task's id, and carries only the bridge's tab for a web task", async () => {
+    // Review findings: the bridge searched history for the id, and one tab offer served a whole
+    // browser. Now the id comes back with the result and the tab travels inside the task.
+    const port = makePort()
+    const extension = new NativeActionToolExtension(
+      { run, taskUseEnabled: proEntitled, actions: port },
+      'darwin'
+    )
+    const result = await extension.execute(
+      'web_use',
+      // A start tab written by the model is never kept.
+      { goal: 'Check the order page', __offgridStartBrowserId: 'other', __offgridStartTabId: 5 },
+      {
+        origin: 'bridge',
+        acting: true,
+        conversationId: 'browser:chrome-1',
+        startTab: { browserId: 'chrome-1', tabId: 42 }
+      }
+    )
+    expect(result).toMatchObject({ status: 'pending', taskId: 'act_1' })
+    expect(startTabFromActionArgs((port.proposed[0] as { args: unknown }).args)).toEqual({
+      browserId: 'chrome-1',
+      tabId: 42
+    })
+    const computer = await extension.execute(
+      'computer_use',
+      { goal: 'Open Notes' },
+      {
+        origin: 'bridge',
+        acting: true,
+        conversationId: 'browser:chrome-1',
+        startTab: { browserId: 'chrome-1', tabId: 42 }
+      }
+    )
+    expect(computer).toMatchObject({ status: 'failed', authoritative: true })
+    expect(computer).toMatchObject({ text: expect.stringMatching(/Use web_use/) })
+    expect(port.proposed).toHaveLength(1)
+  })
+
   it('starts the exact Web Use brief selected by the Chat model without a second gate', async () => {
     const port = makePort()
     const extension = new NativeActionToolExtension(

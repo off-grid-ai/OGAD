@@ -56,6 +56,12 @@ export function guardProxyStreams(
     // Client disconnected mid-stream: stop reading from llama-server too, else proxyRes.pipe(res)
     // keeps draining the upstream (wasted local inference + a held socket) after the client is gone.
     client.on('error', () => destroy(upstream))
+    // A client that simply goes away (a browser's Stop, a closed panel) ends with 'close' and
+    // no 'error'. Stop llama-server then too: dropping its connection is how it learns to stop
+    // generating, else a long or looping reply holds its only slot for every later request.
+    client.on('close', () => {
+      if (!(client as { writableEnded?: boolean }).writableEnded) destroy(upstream)
+    })
     n++
   }
   return n

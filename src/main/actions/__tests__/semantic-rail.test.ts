@@ -4,11 +4,12 @@
  * exactly its verb with args passed through, and everything unmapped is
  * refused before the helper is ever invoked.
  */
+import type { ActionRecord } from '@offgrid/use'
 import { describe, expect, it, vi } from 'vitest'
 import { effectIdFrom, mapActionToCommand, makeSemanticRailExecutor } from '../semantic-rail'
 import type { NativeActionCommand } from '../native-helper-logic'
 
-const action = (type: string, args: Record<string, unknown> = {}) =>
+const action = (type: string, args: Record<string, unknown> = {}): Pick<ActionRecord, 'type' | 'args'> =>
   ({ type, args }) as Parameters<typeof mapActionToCommand>[0]
 
 describe('mapActionToCommand', () => {
@@ -55,7 +56,7 @@ describe('mapActionToCommand', () => {
 })
 
 describe('makeSemanticRailExecutor', () => {
-  const record = (type: string, args: Record<string, unknown> = {}) =>
+  const record = (type: string, args: Record<string, unknown> = {}): ActionRecord =>
     ({ type, args }) as Parameters<ReturnType<typeof makeSemanticRailExecutor>>[0]
 
   it('executes a mapped action through the runner and reports ok', async () => {

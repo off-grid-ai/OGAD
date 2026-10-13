@@ -1,3 +1,4 @@
+import { budgetChange, speculativePatch, speculativeOptions } from '../shared/text-settings-rules'
 import type { RuntimeBackend } from '../shared/runtime-backends'
 import { parseNativeBackend } from './runtime-backends'
 import { spawn, execSync, ChildProcess } from 'child_process'
@@ -7,7 +8,14 @@ import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
 import { recordAIRequest, currentAIRequest } from './ai-request-log'
 import * as fs from 'fs'
-import { modelsDir as getModelsDir, binRoots, isPackaged, exe } from './runtime-env'
+import { modelMetadataFile, resolveModelReference } from './model-paths'
+import {
+  modelsDir as getModelsDir,
+  binRoots,
+  isPackaged,
+  exe,
+  requireModelStorage
+} from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
 import { loadAttempts, type KvCacheType, type PerformanceMode } from './model-sizing'
 import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from './llm/gen-params'
@@ -35,13 +43,19 @@ import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dial
 import { isValidGgufFile } from './models/gguf'
 import { CATALOG, isGrounderModel } from '@offgrid/models'
 import { readGgufContextLength, readGgufMtpSupport } from './models/gguf-metadata'
-import { dflashFileName, primaryFileName, type CatalogEntry } from './models/catalog-logic'
+import {
+  MTP_COMPANIONS,
+  dflashFileName,
+  primaryFileName,
+  type CatalogEntry
+} from './models/catalog-logic'
 import { pickFreePort, isPortFree } from './free-port'
 import { postCompletionOnce } from './llm/http-post'
 import { engineSpawnEnv } from './llm/spawn-env'
 import { gpuDeviceAvailable } from './llm/gpu-device-probe'
 import { shouldAutoRecover } from './llm/crash-policy'
 import { enginePriority } from './llm/engine-priority'
+import { modelStartupQuietLimit, startupStalled } from './llm/startup-timeout'
 import { getBackendPreference } from './backend-preferences'
 import { prioritizeBackend, type BackendPreference } from '../shared/backend-preferences'
 import { streamCompletion, type StreamResult } from './llm/stream'
@@ -86,6 +100,7 @@ export interface LlmSettings {
   threads?: number // CPU threads for inference
   batchSize?: number // -b: prompt batch size
   speculativeDecoding?: SpeculativeDecodingMode
+  speculativeDraftMax?: number // 0 = Auto, otherwise 1-16 draft tokens
   draftModel?: string // filename of an installed GGUF in the app's model directory
   supportsMtp?: boolean // read-only capability of the selected GGUF
   compatibleDraftModels?: string[] // read-only filenames with the same tokenizer/vocabulary
@@ -239,12 +254,6 @@ export class LLMService {
   // server — capture keeps running but its LLM distillation is deferred until
   // generation finishes (and the LLM warms back up).
   private paused = false
-  // Resolve lazily: the data dir can be set AFTER this class is constructed
-  // (e.g. an OFFGRID_USER_DATA / standalone-gateway override), so computing the
-  // path at construction would pin it to the wrong location and miss active-model.json.
-  private get activeModelFile(): string {
-    return path.join(getModelsDir(), 'active-model.json')
-  }
   // User-tunable inference settings (persisted). Context window needs a server
   // respawn to take effect (it's a launch arg); temperature is per-request.
   private temperature = 0.7
@@ -282,6 +291,7 @@ export class LLMService {
   private threads: number | undefined
   private batchSize: number | undefined
   private speculativeDecoding: SpeculativeDecodingMode = 'off'
+  private speculativeDraftMax = 0
   private draftModel = ''
   // Crash recovery: distinguish an intentional kill (stop/reload/settings respawn)
   // from an unexpected crash so we only auto-restart on real crashes.
@@ -290,19 +300,57 @@ export class LLMService {
   // a server that keeps dying (e.g. memory pressure on a too-large model) can NOT
   // thrash-respawn a multi-GB process forever.
   private restartTimes: number[] = []
+  // Launch-setting restarts are serialized and last-wins. A slider drag or a fast
+  // sequence of settings writes used to call stop()+init() once per change, so several
+  // spawns raced and an EARLIER one could win and leave the engine running arguments the
+  // user had already moved past. Each request takes the next id; a request whose id is no
+  // longer the latest is superseded and never spawns, and at most one spawn is ever in
+  // flight.
+  private launchRestartRequest = 0
+  private launchRestartQueue: Promise<void> = Promise.resolve()
+  // Launch changes still waiting in, or running through, the queue above.
+  private launchRestartsPending = 0
+  // The settings the engine last launched with successfully, kept across a chain of queued launch
+  // changes. A save that arrives mid-restart sees the engine stopped, so its own "before" is not a
+  // working launch; a failure at the end of the chain restores this instead.
+  private lastWorkingLaunch: { settings: LlmSettings; explicit: Set<PresetField> } | null = null
   // Last ~50 stderr lines from llama-server, so we can explain WHY it died on
   // load (unknown arch / OOM / OS-too-old) instead of a blank "Down".
   private stderrTail: string[] = []
+  // When the starting llama-server last wrote anything; waitForReady gives up only on silence.
+  private lastServerOutputAt = 0
   // Human, actionable reason the server failed to come up (null when healthy).
   private lastErrorMsg: string | null = null
   private get settingsFile(): string {
     return path.join(getModelsDir(), 'llm-settings.json')
   }
 
-  constructor() {
+  /** Whether the persisted state (active model + user settings) has been read yet. */
+  private loaded = false
+
+  /** Read persisted state ONCE, on first use — never from the constructor.
+   *
+   *  `llm` is a module-level singleton, so it is constructed while index.ts's IMPORTS
+   *  are still evaluating, which under ESM completes before index.ts's own body runs
+   *  `unifyUserDataPath()` → `app.setPath('userData', …)`. Resolving paths at
+   *  construction therefore reads the PRE-override profile: an OFFGRID_USER_DATA
+   *  harness dir is ignored, and in production the canonical-dir migration ("My
+   *  Memories" / "my-memories" → "Off Grid AI Desktop") has not happened yet, so the
+   *  user's active model and saved settings are silently missed and replaced by
+   *  defaults. Writes never had this bug — `persist()` goes through the settingsFile
+   *  getter, which resolves late. This is exactly the hazard the activeModelFile /
+   *  settingsFile getters were introduced to avoid; calling resolveModel() and reading
+   *  the settings file from the constructor defeated them. */
+  private ensureLoaded(): void {
+    if (this.loaded) return
+    this.loaded = true
     this.resolveModel()
+    this.loadPersistedSettings()
+  }
+
+  private loadPersistedSettings(): void {
     try {
-      const s = JSON.parse(fs.readFileSync(this.settingsFile, 'utf-8'))
+      const s = JSON.parse(fs.readFileSync(modelMetadataFile('llm-settings.json'), 'utf-8'))
       if (typeof s.temperature === 'number') this.temperature = s.temperature
       if (typeof s.ctxSize === 'number') this.ctxSize = s.ctxSize
       if (typeof s.topP === 'number') this.topP = s.topP
@@ -329,6 +377,8 @@ export class LLMService {
       )
         this.speculativeDecoding = s.speculativeDecoding
       if (typeof s.draftModel === 'string') this.draftModel = path.basename(s.draftModel)
+      if (Number.isInteger(s.speculativeDraftMax) && s.speculativeDraftMax >= 0 && s.speculativeDraftMax <= 16)
+        this.speculativeDraftMax = s.speculativeDraftMax
       if (
         s.performanceMode === 'conservative' ||
         s.performanceMode === 'balanced' ||
@@ -386,11 +436,62 @@ export class LLMService {
   /** The model's trained context window, or null if unknown — exposed so the UI can offer the
    *  slider up to the model's own maximum instead of a hardcoded cap. */
   modelMaxContext(): number | null {
+    this.ensureLoaded()
     return this.trainedContext()
   }
 
   private supportsMtp(): boolean {
-    return !!this.modelPath && readGgufMtpSupport(this.modelPath, fs)
+    return (
+      !!this.modelPath &&
+      isValidGgufFile(this.modelPath, fs) &&
+      (readGgufMtpSupport(this.modelPath, fs) || !!this.mtpModelPath())
+    )
+  }
+
+  /** True once settings were saved on this install; false on a fresh install. */
+  hasPersistedSettings(): boolean {
+    return fs.existsSync(this.settingsFile)
+  }
+
+  /** File name of the active local chat model, or '' when none is installed. */
+  localModelFile(): string {
+    if (!this.modelsExist()) return ''
+    this.ensureLoaded()
+    this.resolveModel()
+    return this.modelPath ? path.basename(this.modelPath) : ''
+  }
+
+  /** On-disk size of the chat model with its projector and MTP companion, in GB. */
+  localWeightsGb(): number {
+    if (!this.modelsExist()) return 0
+    this.ensureLoaded()
+    this.resolveModel()
+    const files = [this.modelPath, this.mmProjPath, this.mtpModelPath()]
+    const bytes = files.reduce((total, file) => {
+      if (!file) return total
+      try {
+        return total + fs.statSync(file).size
+      } catch {
+        return total
+      }
+    }, 0)
+    return bytes / 1024 ** 3
+  }
+
+  private mtpModelPath(): string | undefined {
+    const selected = path.basename(this.modelPath)
+    const companion = /^Qwen3\.8-27B-(?:UD-)?(?:Q|IQ)[A-Z0-9_]+\.gguf$/i.test(selected)
+      ? MTP_COMPANIONS['unsloth/Qwen3.8-27B-GGUF']
+      : /^tencent_UI-Mate-9B-(?:Q|IQ)[A-Z0-9_]+(?:\+MTP)?\.gguf$/i.test(selected)
+        ? MTP_COMPANIONS['bartowski/tencent_UI-Mate-9B-GGUF+MTP']
+        : /^gemma-4-E4B-it-(?:UD-)?(?:Q|IQ)[A-Z0-9_]+\.gguf$/i.test(selected)
+          ? MTP_COMPANIONS['unsloth/gemma-4-E4B-it-GGUF']
+          : /^gemma-4-12b-it-(?:UD-)?(?:Q|IQ)[A-Z0-9_]+\.gguf$/i.test(selected)
+            ? MTP_COMPANIONS['unsloth/gemma-4-12b-it-GGUF']
+            : undefined
+    if (!companion) return undefined
+    const candidate = resolveModelReference(companion.name, [path.dirname(this.modelPath)])
+    return readGgufMtpSupport(candidate, fs, undefined, companion.sizeBytes) ? candidate : undefined
   }
 
   private speculativeModelCapabilities(): {
@@ -402,7 +503,7 @@ export class LLMService {
       (entry) => primaryFileName(entry) === selectedFile
     )
     const dflash = selectedEntry ? dflashFileName(selectedEntry) : undefined
-    const installedDflash = dflash && isValidGgufFile(path.join(getModelsDir(), dflash), fs)
+    const installedDflash = dflash && isValidGgufFile(resolveModelReference(dflash), fs)
     return {
       // No ordinary draft pair is declared by the catalog. Do not guess from an arbitrary
       // installed GGUF: llama.cpp also requires an exact vocabulary contract.
@@ -412,11 +513,14 @@ export class LLMService {
   }
 
   private speculativeModeSupported(mode: SpeculativeDecodingMode, draftModel: string): boolean {
-    if (mode === 'off' || mode === 'ngram') return true
-    if (mode === 'mtp') return this.supportsMtp()
+    const capabilities = { ...this.speculativeModelCapabilities(), supportsMtp: this.supportsMtp() }
+    if (
+      speculativeOptions(capabilities).find((option) => option.value === mode)?.disabled !== false
+    )
+      return false
+    if (mode !== 'draft' && mode !== 'dflash') return true
     const candidate = path.basename(draftModel)
     if (!candidate || candidate !== draftModel) return false
-    const capabilities = this.speculativeModelCapabilities()
     return (
       mode === 'dflash' ? capabilities.compatibleDflashModels : capabilities.compatibleDraftModels
     ).includes(candidate)
@@ -431,6 +535,7 @@ export class LLMService {
 
   /** The selected app context cap for local and remote inference. */
   effectiveContextSize(): number {
+    this.ensureLoaded()
     return this.ctxSize
   }
 
@@ -459,6 +564,7 @@ export class LLMService {
   }
 
   getSettings(): LlmSettings {
+    this.ensureLoaded()
     const speculativeCapabilities = this.speculativeModelCapabilities()
     return {
       temperature: this.temperature,
@@ -477,6 +583,7 @@ export class LLMService {
       threads: this.threads,
       batchSize: this.batchSize,
       speculativeDecoding: this.speculativeDecoding,
+      speculativeDraftMax: this.speculativeDraftMax,
       draftModel: this.draftModel,
       supportsMtp: this.supportsMtp(),
       ...speculativeCapabilities,
@@ -497,12 +604,17 @@ export class LLMService {
   /** The exact argv handed to `llama-server` for the current settings.
    *  Both `_doInit` and tests use the same `buildLaunchArgs` path. */
   launchArgs(): string[] {
+    this.ensureLoaded()
     return this.launchArgsFor(this.ctxSize, this.gpuLayers)
   }
 
   /** Build argv for the selected context and a GPU-layer count. */
   private launchArgsFor(effectiveCtxSize: number, gpuLayers: number): string[] {
-    const useSelectedModelSpeculation = this.runtimeModelOverride === null
+    const useSelectedModelSpeculation =
+      this.runtimeModelOverride === null &&
+      this.speculativeModeSupported(this.speculativeDecoding, this.draftModel)
+    const useRuntimeMtp =
+      this.runtimeModelOverride !== null && this.speculativeDecoding === 'mtp' && this.supportsMtp()
     return buildLaunchArgs({
       modelPath: this.modelPath,
       mmProjPath: this.mmProjPath,
@@ -513,17 +625,29 @@ export class LLMService {
       kvCacheType: this.kvCacheType,
       threads: this.threads,
       batchSize: this.batchSize,
-      speculativeDecoding: useSelectedModelSpeculation ? this.speculativeDecoding : 'off',
-      draftModelPath: useSelectedModelSpeculation ? this.draftModelPath() : undefined,
+      speculativeDraftMax: this.speculativeDraftMax,
+      speculativeDecoding: useSelectedModelSpeculation
+        ? this.speculativeDecoding
+        : useRuntimeMtp
+          ? 'mtp'
+          : 'off',
+      draftModelPath: useSelectedModelSpeculation
+        ? this.draftModelPath()
+        : useRuntimeMtp
+          ? this.mtpModelPath()
+          : undefined,
       imageMinTokens: this.imageMinTokensForModel(),
       reportModelPlacement: true
     })
   }
 
   private draftModelPath(): string | undefined {
+    if (this.speculativeDecoding === 'mtp') {
+      return this.mtpModelPath()
+    }
     if (!this.speculativeModeSupported(this.speculativeDecoding, this.draftModel)) return undefined
     if (!this.draftModel || path.basename(this.draftModel) !== this.draftModel) return undefined
-    const candidate = path.join(getModelsDir(), this.draftModel)
+    const candidate = resolveModelReference(this.draftModel)
     return candidate !== this.modelPath && isValidGgufFile(candidate, fs) ? candidate : undefined
   }
 
@@ -538,6 +662,7 @@ export class LLMService {
    *  `userExplicit` pin-set (which fields the user set granularly), so a plain restart
    *  restores the pins and a mode preset can't reclobber an explicit KV/ctx choice. */
   private persist(): void {
+    requireModelStorage()
     fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true })
     const temporaryFile = `${this.settingsFile}.tmp-${process.pid}`
     try {
@@ -573,14 +698,17 @@ export class LLMService {
   /** Update inference settings; respawns the server if any launch-time arg changed
    *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
   async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
+    if (s.speculativeDraftMax !== undefined &&
+      (!Number.isInteger(s.speculativeDraftMax) || s.speculativeDraftMax < 0 || s.speculativeDraftMax > 16)) {
+      throw new Error('Draft token limit must be Auto (0) or a whole number from 1 to 16.')
+    }
+    this.ensureLoaded()
     this.resolveModel()
-    const requestedMode = s.speculativeDecoding ?? this.speculativeDecoding
-    const requestedDraft =
-      typeof s.draftModel === 'string' ? path.basename(s.draftModel) : this.draftModel
-    const compatibleSettings = this.speculativeModeSupported(requestedMode, requestedDraft)
-      ? s
-      : { ...s, speculativeDecoding: 'off' as const }
     const priorSettings = this.getSettings()
+    const compatibleSettings = {
+      ...s,
+      ...speculativePatch(priorSettings, s)
+    }
     const priorExplicit = new Set(this.userExplicit)
     const before = options.emitSync === false ? undefined : priorSettings
     // Granular launch-time fields the user sets in THIS patch become pinned: a mode
@@ -626,6 +754,7 @@ export class LLMService {
         threads: this.threads,
         batchSize: this.batchSize,
         speculativeDecoding: this.speculativeDecoding,
+        speculativeDraftMax: this.speculativeDraftMax,
         draftModel: this.draftModel
       },
       modeChanged
@@ -669,18 +798,31 @@ export class LLMService {
       this.speculativeDecoding = compatibleSettings.speculativeDecoding
     if (typeof compatibleSettings.draftModel === 'string')
       this.draftModel = path.basename(compatibleSettings.draftModel)
+    if (typeof compatibleSettings.speculativeDraftMax === 'number')
+      this.speculativeDraftMax = compatibleSettings.speculativeDraftMax
+    const budgets = budgetChange(
+      { ctxSize: this.ctxSize, maxTokens: this.maxTokens, reasoningBudget: this.reasoningBudget },
+      {}
+    )
+    this.maxTokens = budgets.maxTokens ?? this.maxTokens
+    this.reasoningBudget = budgets.reasoningBudget ?? this.reasoningBudget
     // Quantized KV cache requires FlashAttention — auto-enable it so the pair is valid.
     if (this.kvCacheType !== 'f16' && !this.flashAttn) this.flashAttn = true
-    try {
-      this.persist()
-    } catch (error) {
+    const restorePrior = (
+      snapshot: { settings: LlmSettings; explicit: Set<PresetField> } = {
+        settings: priorSettings,
+        explicit: priorExplicit
+      }
+    ): void => {
+      const priorSettings = snapshot.settings
+      const priorExplicit = snapshot.explicit
       this.performanceMode = priorSettings.performanceMode ?? this.performanceMode
       this.temperature = priorSettings.temperature ?? this.temperature
       this.ctxSize = priorSettings.ctxSize ?? this.ctxSize
-      this.topP = priorSettings.topP ?? this.topP
-      this.topK = priorSettings.topK ?? this.topK
-      this.minP = priorSettings.minP ?? this.minP
-      this.repeatPenalty = priorSettings.repeatPenalty ?? this.repeatPenalty
+      this.topP = priorSettings.topP
+      this.topK = priorSettings.topK
+      this.minP = priorSettings.minP
+      this.repeatPenalty = priorSettings.repeatPenalty
       this.maxTokens = priorSettings.maxTokens ?? this.maxTokens
       this.maxToolCalls = priorSettings.maxToolCalls ?? this.maxToolCalls
       this.reasoningBudget = priorSettings.reasoningBudget ?? this.reasoningBudget
@@ -688,12 +830,18 @@ export class LLMService {
       this.kvCacheType = priorSettings.kvCacheType ?? this.kvCacheType
       this.flashAttn = priorSettings.flashAttn ?? this.flashAttn
       this.gpuLayers = priorSettings.gpuLayers ?? this.gpuLayers
-      this.threads = priorSettings.threads ?? this.threads
-      this.batchSize = priorSettings.batchSize ?? this.batchSize
+      this.threads = priorSettings.threads
+      this.batchSize = priorSettings.batchSize
       this.speculativeDecoding = priorSettings.speculativeDecoding ?? this.speculativeDecoding
+      this.speculativeDraftMax = priorSettings.speculativeDraftMax ?? 0
       this.draftModel = priorSettings.draftModel ?? this.draftModel
       this.userExplicit.clear()
       priorExplicit.forEach((field) => this.userExplicit.add(field))
+    }
+    try {
+      this.persist()
+    } catch (error) {
+      restorePrior()
       throw error
     }
     if (before) {
@@ -702,29 +850,88 @@ export class LLMService {
         this.getSettings() as Record<string, unknown>
       )
     }
-    if (launchChanged && !this.paused) {
+    // With no model on disk there is nothing to relaunch: the saved settings apply to the first
+    // launch. Restarting here would fail and make a successful save look like an error.
+    if (launchChanged && !this.paused && this.modelsExist()) {
+      // A running model is only replaced once the new launch succeeds. If it fails, the
+      // previous settings are restored and the previous model is relaunched - unless a newer
+      // launch change is already queued, which then owns the engine and its settings.
+      if (this.launchRestartsPending === 0) {
+        this.lastWorkingLaunch = this.initialized
+          ? { settings: priorSettings, explicit: priorExplicit }
+          : null
+      }
+      // Held until this save's restart AND any recovery it triggers have settled, so a save that
+      // arrives meanwhile joins the chain and keeps the working checkpoint instead of clearing it.
+      this.launchRestartsPending += 1
+      try {
+        const restart = this.restartForLaunchChange()
+        const request = this.launchRestartRequest
+        try {
+          await restart
+        } catch (error) {
+          const working = this.lastWorkingLaunch
+          if (!working || request !== this.launchRestartRequest) throw error
+          const attempted = this.getSettings()
+          restorePrior(working)
+          try {
+            this.persist()
+          } catch (persistError) {
+            console.error('[llm] could not restore settings after a failed relaunch:', persistError)
+          }
+          if (before) {
+            emitChangedLlmSettings(
+              attempted as Record<string, unknown>,
+              this.getSettings() as Record<string, unknown>
+            )
+          }
+          // The relaunch is a queued restart too: one spawn at a time, and a newer save that
+          // arrives during recovery runs after it rather than racing it.
+          await this.restartForLaunchChange().catch((restartError: unknown) => {
+            console.error('[llm] could not relaunch the previous model:', restartError)
+          })
+          throw error
+        }
+      } finally {
+        this.launchRestartsPending -= 1
+      }
+    }
+  }
+
+  /** The engine owns restart policy: one spawn at a time, and the newest settings win. */
+  private async restartForLaunchChange(): Promise<void> {
+    const request = ++this.launchRestartRequest
+    const run = this.launchRestartQueue.then(async () => {
+      // A newer launch change is already queued and will spawn with the newest arguments,
+      // so this one has nothing left to do.
+      if (request !== this.launchRestartRequest) return
+      // A successful spawn records the settings its arguments were built from as the working
+      // launch (launchWithFallback), so a save made while this loads is never mistaken for it.
       this.stop()
       await this.init()
-    }
+    })
+    // The queue itself must never carry a rejection: a failed respawn is reported to the
+    // caller that asked for it, and the next request still gets its turn.
+    this.launchRestartQueue = run.catch(() => {})
+    await run
   }
 
   // Resolve the active model's files. The Models screen writes active-model.json
   // ({ id, primary, mmproj }) after resolving a catalog entry; default to the
   // bundled Qwen3-VL vision model when nothing is selected yet.
   private resolveModel(): void {
-    const modelsDir = getModelsDir()
     if (this.runtimeModelOverride) {
-      this.modelPath = path.join(modelsDir, this.runtimeModelOverride.primary)
+      this.modelPath = resolveModelReference(this.runtimeModelOverride.primary)
       this.mmProjPath = this.runtimeModelOverride.mmproj
-        ? path.join(modelsDir, this.runtimeModelOverride.mmproj)
+        ? resolveModelReference(this.runtimeModelOverride.mmproj)
         : ''
       return
     }
     try {
-      const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
+      const cfg = JSON.parse(fs.readFileSync(modelMetadataFile('active-model.json'), 'utf-8'))
       if (cfg?.primary) {
-        this.modelPath = path.resolve(modelsDir, cfg.primary)
-        this.mmProjPath = cfg.mmproj ? path.resolve(modelsDir, cfg.mmproj) : ''
+        this.modelPath = resolveModelReference(cfg.primary)
+        this.mmProjPath = cfg.mmproj ? resolveModelReference(cfg.mmproj) : ''
         return
       }
     } catch {
@@ -735,8 +942,8 @@ export class LLMService {
     // false and setup ("Configure for me") downloads + activates a fitting model.
     // (The old default named a non-existent Qwen3-VL-4B and dead-ended fresh
     // installs at a 502 — never auto-resolvable. Keep this aligned with the catalog.)
-    this.modelPath = path.join(modelsDir, 'gemma-4-E4B-it-Q4_K_M.gguf')
-    this.mmProjPath = path.join(modelsDir, 'mmproj-gemma-4-E4B-it-F16.gguf')
+    this.modelPath = resolveModelReference('gemma-4-E4B-it-Q4_K_M.gguf')
+    this.mmProjPath = resolveModelReference('mmproj-gemma-4-E4B-it-F16.gguf')
   }
 
   private applyModelReload(): void {
@@ -753,6 +960,7 @@ export class LLMService {
 
   /** Switch the active model without terminating a generation already using it. */
   reloadModel(): void {
+    this.ensureLoaded()
     if (this.activeGenerations > 0) {
       this.modelReloadPending = true
       return
@@ -762,6 +970,7 @@ export class LLMService {
 
   /** Load a Computer Use specialist without changing the saved Text model. */
   useRuntimeModel(model: { id: string; primary: string; mmproj: string | null }): void {
+    this.ensureLoaded()
     this.runtimeModelOverride = { ...model }
     this.reloadModel()
   }
@@ -793,6 +1002,7 @@ export class LLMService {
   // on mmproj wrongly kept "Setup Required" up for an activated vision model.)
   /** Whether the active chat model can read images (has a vision projector / mmproj). */
   hasVision(): boolean {
+    this.ensureLoaded()
     this.resolveModel()
     return !!this.mmProjPath && fs.existsSync(this.mmProjPath)
   }
@@ -808,6 +1018,7 @@ export class LLMService {
   }
 
   modelsExist(): boolean {
+    this.ensureLoaded()
     this.resolveModel()
     return fs.existsSync(this.modelPath)
   }
@@ -822,12 +1033,13 @@ export class LLMService {
    *  loaded it yet (otherwise an idle/headless gateway reports no chat model).
    *  Returns null when no model is downloaded. */
   activeModelInfo(): { id: string; vision: boolean } | null {
+    this.ensureLoaded()
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = this.runtimeModelOverride?.id ?? path.basename(this.modelPath)
     try {
       if (!this.runtimeModelOverride) {
-        const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
+        const cfg = JSON.parse(fs.readFileSync(modelMetadataFile('active-model.json'), 'utf-8'))
         if (cfg?.id) id = cfg.id
       }
     } catch {
@@ -838,12 +1050,13 @@ export class LLMService {
 
   /** Exact active artifacts for a model-family policy adapter. */
   activeModelArtifacts(): VisionModelArtifacts | null {
+    this.ensureLoaded()
     this.resolveModel()
     if (!fs.existsSync(this.modelPath)) return null
     let id = this.runtimeModelOverride?.id ?? path.basename(this.modelPath)
     try {
       if (!this.runtimeModelOverride) {
-        const cfg = JSON.parse(fs.readFileSync(this.activeModelFile, 'utf-8'))
+        const cfg = JSON.parse(fs.readFileSync(modelMetadataFile('active-model.json'), 'utf-8'))
         if (cfg?.id) id = cfg.id
       }
     } catch {
@@ -873,6 +1086,7 @@ export class LLMService {
   }
 
   async init(): Promise<void> {
+    this.ensureLoaded()
     await prepareModelMemory('chat')
     if (this.paused) {
       // A chat/tool turn needs the LLM NOW, but it's paused for a resident image
@@ -998,7 +1212,10 @@ export class LLMService {
     if (generation !== this.launchGeneration) return
     if (await this.launchWithFallback(serverPaths, generation)) return
     if (generation !== this.launchGeneration) return
-    this.lastErrorMsg = 'All model engines failed to load the model.'
+    this.lastErrorMsg =
+      classifyLlamaError(this.stderrTail.join('\n'))?.reason ??
+      this.lastErrorMsg ??
+      'All model engines failed to load the model.'
     this.invalidateHealth()
     throw new Error(this.lastErrorMsg)
   }
@@ -1029,10 +1246,6 @@ export class LLMService {
             .map((serverPath) => ({ serverPath, cpuOnly: true }))
         ]
     for (const { serverPath, cpuOnly } of candidates) {
-      const attempts = loadAttempts(
-        this.ctxSize,
-        cpuOnly || enginePriority(serverPath) === 2 ? 0 : this.gpuLayers
-      ).slice(0, 1)
       if (generation !== this.launchGeneration) return false
       if (!serverPath) continue
       const engineDir = path.basename(path.dirname(serverPath))
@@ -1051,6 +1264,12 @@ export class LLMService {
           continue
         }
       }
+      // Read after the device probe's wait, with no await before the launch arguments, so a save made
+      // during the probe cannot leave the checkpoint and the arguments describing different launches.
+      const attempts = loadAttempts(
+        this.ctxSize,
+        cpuOnly || enginePriority(serverPath) === 2 ? 0 : this.gpuLayers
+      ).slice(0, 1)
       for (let a = 0; a < attempts.length; a++) {
         if (generation !== this.launchGeneration) return false
         const at = attempts[a]
@@ -1059,7 +1278,18 @@ export class LLMService {
           console.warn(`[LLMService] out of memory — retrying load at ${at.reason}`)
         }
         const args = this.launchArgsFor(at.ctxSize, at.gpuLayers)
+        // The six-token Qwen3.5 9B gain was measured with stock llama.cpp on
+        // Metal. Preserve the existing limit for other engines and backends.
+        const draftMaxIndex = args.indexOf('--spec-draft-n-max')
+        if (draftMaxIndex >= 0 && this.speculativeDecoding === 'mtp' && this.speculativeDraftMax === 0 &&
+          (engineDir !== 'llama' || cpuOnly || process.platform !== 'darwin')) {
+          args[draftMaxIndex + 1] = '2'
+        }
+        // Captured in the same step as the arguments: a save can land during init's earlier awaits,
+        // so only this matches what actually ran. A successful spawn makes it the working launch.
+        const launchedWith = { settings: this.getSettings(), explicit: new Set(this.userExplicit) }
         if (await this.launchServer(serverPath, args)) {
+          this.lastWorkingLaunch = launchedWith
           if (a > 0) {
             console.warn(`[LLMService] model loaded via fallback: ${at.reason}`)
           }
@@ -1080,9 +1310,13 @@ export class LLMService {
           }
           await this.prepareModelPort()
           if (generation !== this.launchGeneration) return false
-          if (
-            await this.launchServer(serverPath, this.launchArgsFor(at.ctxSize, at.gpuLayers))
-          ) {
+          const retryArgs = this.launchArgsFor(
+            this.ctxSize,
+            cpuOnly || enginePriority(serverPath) === 2 ? 0 : this.gpuLayers
+          )
+          const retriedWith = { settings: this.getSettings(), explicit: new Set(this.userExplicit) }
+          if (await this.launchServer(serverPath, retryArgs)) {
+            this.lastWorkingLaunch = retriedWith
             return true
           }
         }
@@ -1141,6 +1375,7 @@ export class LLMService {
     this.backendModelPath = this.modelPath
     this.backendPlacement = undefined
     this.stderrTail = []
+    this.lastServerOutputAt = Date.now()
     this.invalidateHealth()
     let abandoned = false // set when we give up on this proc so its close handler is inert
     // True until waitForReady() confirms THIS engine. A close while probing is a failed
@@ -1155,7 +1390,11 @@ export class LLMService {
       console.error(`[LLMService] llama-server process error:`, e)
     })
 
+    proc.stdout?.on('data', () => {
+      this.lastServerOutputAt = Date.now()
+    })
     proc.stderr?.on('data', (data) => {
+      this.lastServerOutputAt = Date.now()
       const text = String(data)
       // Verbosity 4 also emits request traces. Read and log it only during model
       // load so user prompts cannot enter the app log or its diagnostic tail.
@@ -1200,7 +1439,9 @@ export class LLMService {
     })
 
     try {
-      await this.waitForReady()
+      // No total deadline: a large model loads for as long as llama-server keeps
+      // printing progress. Only a crash or a silent, stuck server moves to the next engine.
+      await this.waitForReady(modelStartupQuietLimit(path.basename(binDir)))
       if (this.server !== proc) throw new Error('Model load was cancelled')
       // Confirmed healthy: from here a close IS a crash worth recovering from.
       probing = false
@@ -1313,7 +1554,7 @@ export class LLMService {
       await this.init()
     } catch (error) {
       console.error('[LLMService] recovery startup failed:', error)
-      if (generation === this.launchGeneration && !this.server) await this.handleCrash(code)
+      if (generation === this.launchGeneration && !(this.server as ChildProcess | null)) await this.handleCrash(code)
     }
   }
 
@@ -1327,6 +1568,10 @@ export class LLMService {
    *  template llama-server publishes at /props; 'enable-thinking' until then, which is the
    *  behaviour every model got before this was resolved at all. */
   private thinkingDialect: ThinkingDialect = 'enable-thinking'
+  /** The loaded model's thinking dialect, for requests the gateway forwards. */
+  get currentThinkingDialect(): ThinkingDialect {
+    return this.thinkingDialect
+  }
   private mediaMarker: string | null = null
 
   /** Read the loaded model's properties and remember its request dialects.
@@ -1350,10 +1595,9 @@ export class LLMService {
     }
   }
 
-  private async waitForReady(timeout = 60000): Promise<void> {
-    const start = Date.now()
+  private async waitForReady(quietLimit = modelStartupQuietLimit('llama')): Promise<void> {
     let healthOk = false
-    while (Date.now() - start < timeout) {
+    while (!startupStalled(Date.now(), this.lastServerOutputAt, quietLimit)) {
       // The server died during startup (e.g. model load failure) — stop waiting.
       if (!this.server) throw new Error('llama-server exited during startup — model failed to load')
       try {
@@ -1374,9 +1618,9 @@ export class LLMService {
       } catch {
         /* not up yet */
       }
-      await new Promise((r) => setTimeout(r, 500))
+      await new Promise((r) => setTimeout(r, 500)) // NOSONAR: wait between sequential startup probes.
     }
-    throw new Error('Server started but no model was loaded within the timeout')
+    throw new Error('Server stopped responding while loading the model')
   }
 
   // Use Node http module instead of fetch to avoid undici's headersTimeout (300s)
@@ -1968,7 +2212,7 @@ export class LLMService {
     )
   }
 
-  async unload(): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
+  async unload(keepPaused = false): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
     this.launchGeneration++
     this.paused = true // stop the on-demand respawn path from warming a new server mid-teardown
     let outcome: TeardownOutcome = 'already-dead'
@@ -1990,7 +2234,7 @@ export class LLMService {
       if (pending === null) {
         break // no in-flight init to race with — done
       }
-      await pending.catch(() => {}) // let the in-flight spawn finish, then loop to kill it
+      await pending.catch(() => {}) // NOSONAR: finish this spawn before checking for another process.
     }
     this.initialized = false
     // Safety net: reap any llama-server WE own still holding the port (a forked/stuck child).
@@ -1998,7 +2242,7 @@ export class LLMService {
     const reap = this.reapOrphansOnPort(this.port)
     // Leave the engine down but allow a future explicit start; releasePause clears the block
     // without warming a server (on-demand — the next chat/tool turn respawns).
-    this.paused = false
+    if (!keepPaused) this.paused = false
     this.invalidateHealth()
     return { outcome, portFree: outcome !== 'stuck' && reap.liveOwners.length === 0 }
   }
@@ -2015,6 +2259,15 @@ export class LLMService {
   pause(): void {
     this.paused = true
     this.stop()
+  }
+
+  /** Eviction must finish before a competing model starts. pause() only signals the
+   *  child, while unload() waits for exit and handles an in-flight init. */
+  private async pauseAndWait(): Promise<void> {
+    const { portFree } = await this.unload(true)
+    if (!portFree) {
+      throw new Error('The chat model port is still occupied; image generation cannot start safely.')
+    }
   }
 
   /** Resume after image generation and warm the server back up (resident mode). */
@@ -2035,13 +2288,7 @@ export class LLMService {
   get runtime(): ManagedRuntime {
     return {
       modality: 'llm',
-      evict: () => {
-        try {
-          this.pause()
-        } catch {
-          /* ignore */
-        }
-      },
+      evict: () => this.pauseAndWait(),
       warm: () => {
         this.resume()
       },

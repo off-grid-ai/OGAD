@@ -142,7 +142,17 @@ function pruneSnapshots(): void {
   }
 }
 
+const ENDED: ReadonlySet<string> = new Set(['completed', 'done', 'failed', 'stopped'])
+const endedListeners = new Set<(task: TaskRunSnapshot) => void>()
+
+/** Hear once when a web or computer task ends (completed, failed or stopped). */
+export function onTaskRunEnded(listener: (task: TaskRunSnapshot) => void): () => void {
+  endedListeners.add(listener)
+  return () => endedListeners.delete(listener)
+}
+
 export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {
+  const before = latest.get(update.taskId)?.status
   const snapshot = taskHistoryStore().upsert(update)
   if (persistTaskResultInChat(getDB(), snapshot) && snapshot.journeyId) {
     notifyRagConversationChanged({ conversationId: snapshot.journeyId })
@@ -152,6 +162,15 @@ export function recordTaskRun(update: TaskRunUpdate): TaskRunSnapshot {
   live.delete(snapshot.taskId)
   latest.set(snapshot.taskId, snapshot)
   publishTaskRun(snapshot)
+  if (ENDED.has(snapshot.status) && !(before && ENDED.has(before))) {
+    for (const listener of endedListeners) {
+      try {
+        listener(snapshot)
+      } catch (error) {
+        console.error('[tasks] ended listener failed', error)
+      }
+    }
+  }
   return snapshot
 }
 

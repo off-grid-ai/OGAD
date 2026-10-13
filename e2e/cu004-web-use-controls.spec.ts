@@ -210,6 +210,10 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(async () => {
+  for (const name of ['model-requests.jsonl', 'logs/off-grid-ai-desktop.log']) {
+    const file = path.join(profileDir, name)
+    if (fs.existsSync(file)) await test.info().attach(name, { path: file })
+  }
   await app?.close().catch(() => undefined)
   await new Promise<void>((resolve) => localPage?.close(() => resolve()) ?? resolve())
   fs.rmSync(profileDir, { recursive: true, force: true })
@@ -228,7 +232,10 @@ test('runs Web Use through Pause, Take Over, HITL, Resume, and terminal Stop', a
 
   await page.evaluate((url) => window.api.browser.openUrl(url), localPageUrl)
   await page.getByRole('tab', { name: 'CU-004 Pointer Lab', exact: true }).last().click()
-  await page.getByRole('button', { name: 'Retry failed step' }).click()
+  await page
+    .getByRole('complementary', { name: 'Task history' })
+    .getByRole('button', { name: 'Retry', exact: true })
+    .click()
   await waitForTaskStatus('running')
   await waitForModelPort()
   await waitForPendingDecision()

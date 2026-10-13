@@ -1,3 +1,4 @@
+import { readVersions, type ResponseVersion } from '../../../shared/chat-versions'
 // Pure carrier logic for persisting assistant-turn metadata through the RAG
 // message `context` blob. The chat "Thinking"/reasoning block is held only in
 // React state while a turn streams; unless it rides in the persisted `context`
@@ -19,6 +20,9 @@ export type AssistantTimelineEntry =
 
 /** Extra assistant-turn fields that ride in the persisted `context` blob. */
 export interface AssistantContextExtras {
+  /** Earlier answers and the latest answer for resend, edit, and regenerate. */
+  variants?: ResponseVersion[]
+  variantIndex?: number
   /** The model's reasoning / "Thinking" text for the turn, if any. */
   reasoning?: string
   /** Why the model stopped before completing the response, if applicable. */
@@ -47,7 +51,8 @@ export function buildAssistantContext(
     reasoning === undefined &&
     extras.cutoff === undefined &&
     extras.metrics === undefined &&
-    !extras.timeline?.length
+    !extras.timeline?.length &&
+    !extras.variants?.length
   ) {
     return undefined
   }
@@ -56,6 +61,8 @@ export function buildAssistantContext(
   if (extras.cutoff !== undefined) ctx.cutoff = extras.cutoff
   if (extras.metrics !== undefined) ctx.metrics = extras.metrics
   if (extras.timeline?.length) ctx.timeline = extras.timeline
+  if (extras.variants?.length) ctx.variants = extras.variants
+  if (extras.variantIndex !== undefined) ctx.variantIndex = extras.variantIndex
   return ctx
 }
 
@@ -147,3 +154,6 @@ export function readGenerationMetrics(ctx: unknown): GenerationMetrics | undefin
   }
   return Object.keys(metrics).length ? (metrics as GenerationMetrics) : undefined
 }
+
+/** Restore response versions from the existing message context. */
+export const readResponseVariants = readVersions

@@ -102,7 +102,7 @@ test.afterEach(async () => {
 
 test('a chat ask becomes a created, read-back-verified reminder', async () => {
   await page.getByRole('button', { name: 'Chat', exact: true }).click()
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await expect(composer).toBeVisible()
   const captureDismiss = page.getByRole('button', { name: 'Dismiss', exact: true })
   if (await captureDismiss.isVisible().catch(() => false)) {
@@ -111,7 +111,8 @@ test('a chat ask becomes a created, read-back-verified reminder', async () => {
 
   // Enable Tools the way a user does: the composer's + menu.
   await page.getByRole('button', { name: 'Composer options' }).click()
-  await page.getByRole('menuitem', { name: /^Tools/ }).click()
+  // The agentic turn is the God item (once Assistant); Tools is a separate switch, on by default.
+  await page.getByRole('menuitem', { name: /^God/ }).click()
   await page.keyboard.press('Escape')
 
   await composer.fill('remind me to send the deck at 6pm today')
@@ -125,8 +126,13 @@ test('a chat ask becomes a created, read-back-verified reminder', async () => {
     timeout: 90_000
   })
 
-  // The tool activity row shows the engine's verified outcome, not a guess.
-  await expect(page.getByText('reminders_create → Created the reminder.')).toBeVisible()
+  // The tool activity row shows the engine's verified outcome, not a guess: a completed
+  // "Reminders create" step whose summary is the engine's result.
+  // Finished work folds under "Work done"; open it to see the step.
+  await page.getByRole('button', { name: 'Work done', exact: true }).last().click()
+  const reminderStep = page.getByRole('button', { name: 'Reminders create, complete', exact: true })
+  await expect(reminderStep).toBeVisible()
+  await expect(reminderStep.getByText('Created the reminder.', { exact: true })).toBeVisible()
 
   // The helper log pins the guarantee: exactly one create, and at least one
   // list AFTER it - the read-back verification actually observed the world.

@@ -12,6 +12,8 @@ extraResources:
       # The legacy worker is not a runtime input. Speech uses the packaged
       # ExecuTorch helper under Resources/bin.
       - '!tts-worker.mjs'
+      - '!linux-desktop/tests/**'
+      - '!linux-desktop/**/__pycache__/**'
 
 # Native modules are installed for Electron by postinstall/CI before packaging.
 npmRebuild: false

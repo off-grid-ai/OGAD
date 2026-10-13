@@ -46,11 +46,12 @@ export interface RemoteVisionModelReference {
 export interface RemoteVisionInventoryModel {
   id: string
   name: string
-  kind: 'vision' | 'image' | 'video' | 'transcription' | 'speech'
+  kind: 'vision' | 'image' | 'video' | 'transcription' | 'speech' | 'computer_use'
   org: string
   description: string
   files: []
-  tags: ['Remote']
+  /** 'Remote', plus 'Decision' for a server's decision model: the same tag local deciders carry. */
+  tags: readonly string[]
   remoteServerId: string
   remoteModelId: string
 }
@@ -83,31 +84,56 @@ export function remoteVisionInventoryModels(
   return servers.flatMap((server) => {
     if (server.enabled === false) return []
     const selections: RemoteVisionSelections = server.mediaModels ?? { text: server.model }
-    return (['text', 'image', 'video', 'transcription', 'voice'] as const).flatMap((modality) => {
+    const entry = (
+      modelId: string,
+      kind: RemoteVisionInventoryModel['kind'],
+      catalogKind: RemoteVisionModality,
+      tags: readonly string[] = ['Remote']
+    ): RemoteVisionInventoryModel => ({
+      id: remoteVisionModelId(server.id, modelId),
+      name:
+        server.modelCatalog?.find((model) => model.id === modelId && model.kind === catalogKind)
+          ?.name ?? modelId,
+      kind,
+      org: server.name,
+      description: `Runs through ${server.name}.`,
+      files: [] as [],
+      tags,
+      remoteServerId: server.id,
+      remoteModelId: modelId
+    })
+    const media = (['text', 'image', 'video', 'transcription', 'voice'] as const).flatMap((modality) => {
       const modelId = selections[modality]
       if (!modelId || (modality === 'video' && !['ogad', 'openrouter'].includes(server.provider)))
         return []
+      const kind =
+        modality === 'text'
+          ? ('vision' as const)
+          : modality === 'voice'
+            ? ('speech' as const)
+            : modality
+      return [entry(modelId, kind, modality)]
+    })
+    // A server's Computer Use roles (grounding, decision) are its Computer Use models, listed
+    // with them as the local ones are. One entry per model: a model already listed is not twice.
+    const listed = new Set(media.map((model) => model.id))
+    const roles = (['grounding', 'decision'] as const).flatMap((role) => {
+      const modelId = server.roleModels?.[role]
+      if (!modelId) return []
+      const id = remoteVisionModelId(server.id, modelId)
+      if (listed.has(id)) return []
+      listed.add(id)
+      // Tagged like local task models, so every list can tell a decider from a grounder.
       return [
-        {
-          id: remoteVisionModelId(server.id, modelId),
-          name:
-            server.modelCatalog?.find((model) => model.id === modelId && model.kind === modality)
-              ?.name ?? modelId,
-          kind:
-            modality === 'text'
-              ? ('vision' as const)
-              : modality === 'voice'
-                ? ('speech' as const)
-                : modality,
-          org: server.name,
-          description: `Runs through ${server.name}.`,
-          files: [] as [],
-          tags: ['Remote'] as ['Remote'],
-          remoteServerId: server.id,
-          remoteModelId: modelId
-        }
+        entry(
+          modelId,
+          'computer_use',
+          'text',
+          role === 'decision' ? ['Remote', 'Decision'] : ['Remote']
+        )
       ]
     })
+    return [...media, ...roles]
   })
 }
 

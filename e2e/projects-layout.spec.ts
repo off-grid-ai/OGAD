@@ -34,6 +34,7 @@ test.beforeAll(async () => {
   })
   page = await app.firstWindow()
   await page.setViewportSize({ width: 1600, height: 900 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.waitForLoadState('domcontentloaded')
   await finishOnboarding()
   await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible()
@@ -61,11 +62,11 @@ test.beforeAll(async () => {
     }
   })
 
-  // By role and name, not by title: the sidebar opens EXPANDED, and App.tsx sets
-  // title={!sidebarOpen ? item.label : undefined} - the title attribute belongs to the collapsed rail
-  // only. An expanded nav carries its label as visible text, so getByTitle waits 30s for an attribute
-  // the app is right not to render.
-  await page.getByRole('button', { name: 'Projects', exact: true }).click()
+  // c6a055a9f made the rail expand on hover. Pin it before measuring layout.
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  await navigation.hover()
+  await navigation.getByRole('button', { name: 'Pin sidebar', exact: true }).click()
+  await navigation.getByRole('button', { name: 'Projects', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible()
 })
 
@@ -76,10 +77,12 @@ test.afterAll(async () => {
 
 test('populated projects stay dense, adjacent, and reachable on a wide desktop (#59)', async () => {
   const heading = page.getByRole('heading', { name: 'Projects' })
-  const master = heading.locator('xpath=../..')
-  const projectList = master.locator('.overflow-y-auto')
-  const detail = master.locator('xpath=following-sibling::div[1]')
-  const lastProject = master.getByRole('button', { name: 'Synthetic Project 12' })
+  const lastProject = page.getByRole('button', { name: 'Synthetic Project 12', exact: true })
+  // ProjectsScreen has no list/detail landmarks. Use the closest containers from its heading
+  // and named controls; generic roles omit plain divs from the accessible tree.
+  const master = heading.locator('../..')
+  const projectList = lastProject.locator('..')
+  const detail = page.getByRole('button', { name: 'Chats', exact: true }).locator('../../..')
 
   await expect(master.getByRole('button', { name: /^Synthetic Project \d{2}$/ })).toHaveCount(12)
   await lastProject.click()
@@ -125,7 +128,7 @@ test('populated projects stay dense, adjacent, and reachable on a wide desktop (
     expect(box.y).toBeGreaterThanOrEqual(detailBox.y)
   }
 
-  const chatGrid = detail.locator('.grid').first()
+  const chatGrid = detail.getByRole('button', { name: /^Synthetic chat 01\b/ }).locator('..')
   await expect(chatGrid.getByRole('button', { name: /^Synthetic chat \d{2}/ })).toHaveCount(8)
   const columns = await chatGrid.evaluate(
     (element) => getComputedStyle(element).gridTemplateColumns.split(' ').length
@@ -133,7 +136,9 @@ test('populated projects stay dense, adjacent, and reachable on a wide desktop (
   expect(columns).toBeGreaterThanOrEqual(3)
 
   const gridBox = await chatGrid.boundingBox()
-  const firstCardBox = await chatGrid.getByRole('button').first().boundingBox()
+  const firstCardBox = await chatGrid
+    .getByRole('button', { name: /^Synthetic chat 01\b/ })
+    .boundingBox()
   expect(gridBox).not.toBeNull()
   expect(firstCardBox).not.toBeNull()
   if (!gridBox || !firstCardBox) return

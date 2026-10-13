@@ -138,11 +138,15 @@ async function startFreshProjectChat(project: string): Promise<void> {
   await page.getByText(project, { exact: true }).first().click()
   await page.getByRole('button', { name: 'Chats', exact: true }).click()
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
-  await expect(page.getByRole('textbox', { name: /Ask about/i })).toBeVisible()
+  // The composer is named Message; the project scope shows in its placeholder.
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveAttribute(
+    'placeholder',
+    /Ask about/i
+  )
 }
 
 async function ask(question: string): Promise<void> {
-  const composer = page.getByRole('textbox', { name: /Ask about/i })
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await composer.fill(question)
   await page.keyboard.press('Enter')
   await expect(page.getByText(question, { exact: true }).last()).toBeVisible()

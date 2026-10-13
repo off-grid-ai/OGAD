@@ -34,7 +34,7 @@ const expectedCaptureLabel = (status: CaptureStatusProjection): string => {
       return 'Paused'
     case 'temporarily-paused':
       if (status.pauseReason === 'batch') return 'Re-processing frames'
-      if (status.pauseReason === 'system') return 'Paused by macOS'
+      if (status.pauseReason === 'system') return 'Paused by the system'
       return 'Temporarily paused'
     case 'permission-required':
       return 'Permission required'

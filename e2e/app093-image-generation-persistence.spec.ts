@@ -37,24 +37,32 @@ const launch = async (): Promise<void> => {
       OFFGRID_PRO: '1',
       OFFGRID_BIN_DIR: boundaryBinDir,
       APP093_IMAGE_RUNTIME_LOG: runtimeLog,
+      OFFGRID_CHAT_CONTROLS_AUDIT_FILE: path.join(profileDir, 'chat-runtime.jsonl'),
       NODE_ENV: 'production'
     }
   })
   page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   await completeOnboarding(page)
+  // Let this profile own its model port before image eviction. Another running
+  // Desktop instance can keep its real model on the default port.
+  await expect
+    .poll(() => page.evaluate(async () => (await window.api.chatHealth()).status))
+    .toBe('ready')
 }
 
 const enterChat = async (newChat = false): Promise<void> => {
   const chat = page.getByRole('button', { name: /^Chat$/i }).first()
   await expect(chat).toBeVisible()
-  await chat.click()
-  await expect(page.locator('textarea')).toBeVisible()
+  await expect(async () => {
+    await chat.click()
+    await expect(page.locator('textarea')).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: 15_000 })
   const dismissSetup = page.getByRole('button', { name: 'Dismiss', exact: true })
   if (await dismissSetup.isVisible().catch(() => false)) await dismissSetup.click()
   if (newChat) {
     await page.getByRole('button', { name: 'New chat', exact: true }).click()
-    await expect(page.getByPlaceholder('Ask anything…')).toBeVisible()
+    await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
   }
 }
 
@@ -78,6 +86,7 @@ test.beforeEach(async () => {
   runtimeLog = path.join(profileDir, 'app093-image-runtime.jsonl')
   evidenceDir = path.join(os.tmpdir(), 'offgrid-app093-evidence')
   fs.mkdirSync(path.join(boundaryBinDir, 'sd'), { recursive: true })
+  fs.mkdirSync(path.join(boundaryBinDir, 'llama'), { recursive: true })
   fs.mkdirSync(path.join(profileDir, 'models'), { recursive: true })
   fs.mkdirSync(evidenceDir, { recursive: true })
 
@@ -85,6 +94,20 @@ test.beforeEach(async () => {
   const boundaryExecutable = path.join(boundaryBinDir, 'sd', 'sd-cli')
   fs.copyFileSync(boundarySource, boundaryExecutable)
   fs.chmodSync(boundaryExecutable, 0o755)
+  const chatExecutable = path.join(boundaryBinDir, 'llama', 'llama-server')
+  fs.copyFileSync(path.resolve('e2e/fixtures/chat-queue-versions-llama-server.mjs'), chatExecutable)
+  fs.chmodSync(chatExecutable, 0o755)
+  const chatModel = Buffer.alloc(2_048)
+  chatModel.write('GGUF')
+  fs.writeFileSync(path.join(profileDir, 'models', 'app093-chat.gguf'), chatModel)
+  fs.writeFileSync(
+    path.join(profileDir, 'models', 'active-model.json'),
+    JSON.stringify({
+      id: 'app093-chat',
+      primary: 'app093-chat.gguf',
+      mmproj: null
+    })
+  )
 
   // Installed-model/profile selection is the journey precondition. The model contains the
   // namespaces used by production to recognise a complete SDXL checkpoint.
@@ -99,8 +122,14 @@ test.beforeEach(async () => {
   await launch()
 })
 
-test.afterEach(async () => {
+// Playwright requires a destructured first parameter.
+// eslint-disable-next-line no-empty-pattern
+test.afterEach(async ({}, testInfo) => {
   await closeApp()
+  if (fs.existsSync(runtimeLog))
+    fs.copyFileSync(runtimeLog, testInfo.outputPath('image-runtime.jsonl'))
+  const appLog = path.join(profileDir, 'logs', 'off-grid-ai-desktop.log')
+  if (fs.existsSync(appLog)) fs.copyFileSync(appLog, testInfo.outputPath('desktop.log'))
   fs.rmSync(profileDir, { recursive: true, force: true })
 })
 
@@ -122,37 +151,20 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
 
   const composer = page.getByPlaceholder('Describe an image to generate…')
   await composer.fill(PROMPT)
-  await page.evaluate(() => {
-    const state = window as typeof window & {
-      __app093Progress?: string[]
-      __app093Observer?: MutationObserver
-    }
-    state.__app093Progress = []
-    state.__app093Observer = new MutationObserver(() => {
-      const step = document.body.innerText.match(/Step \d+\/4/)?.[0]
-      if (step && !state.__app093Progress?.includes(step)) state.__app093Progress?.push(step)
-    })
-    state.__app093Observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true
-    })
-  })
   await page.getByTitle('Send').click()
 
-  await expect(page.getByText('Loading model…')).toBeVisible()
   const generated = page.getByRole('img', { name: 'Generated', exact: true })
   await expect(generated).toHaveCount(1, { timeout: 15_000 })
-  const renderedProgress = await page.evaluate(() => {
-    const state = window as typeof window & {
-      __app093Progress?: string[]
-      __app093Observer?: MutationObserver
-    }
-    state.__app093Observer?.disconnect()
-    return state.__app093Progress ?? []
-  })
-  expect(renderedProgress).toContain('Step 1/4')
-  expect(renderedProgress).toContain('Step 4/4')
+  // The native process can finish between renderer frames. Check its actual progress
+  // emissions and the durable UI result instead of requiring each brief label to paint.
+  const progressEvents = fs
+    .readFileSync(runtimeLog, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { event: string })
+    .filter(({ event }) => event.startsWith('progress:'))
+    .map(({ event }) => event)
+  expect(progressEvents).toEqual(['progress:1', 'progress:2', 'progress:3', 'progress:4'])
   await expect(
     page.locator('p').getByText(`Generated for: ${PROMPT}`, { exact: true }).last()
   ).toBeVisible()
@@ -221,3 +233,188 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
   expect(afterRestart.images).toEqual(beforeRestart.images)
   expect(fs.existsSync(afterRestart.images[0]!.path)).toBe(true)
 })
+
+test('Send Now cancels the active image and saves urgent and queued images in order', async () => {
+  await enterChat(true)
+  await page.getByRole('button', { name: /^Image$/ }).click()
+  await page.getByRole('button', { name: /Image options/i }).click()
+  const imageOptions = page
+    .locator('div')
+    .filter({ has: page.getByText('Guidance', { exact: true }) })
+    .last()
+  await imageOptions.getByLabel('Size').selectOption('256')
+  await imageOptions.getByLabel('Steps').fill('4')
+  const enhance = imageOptions.getByLabel('Enhance')
+  if (await enhance.isChecked()) await enhance.uncheck()
+
+  const held = 'Hold this image for Send Now APP093'
+  const urgent = 'An urgent green lighthouse APP093'
+  const queued = 'A queued blue lighthouse APP093'
+  const events = (): Array<{ event: string; prompt: string; pid: number }> =>
+    fs.existsSync(runtimeLog)
+      ? fs
+          .readFileSync(runtimeLog, 'utf8')
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : []
+  const composer = page.getByPlaceholder('Describe an image to generate…')
+  await composer.fill(held)
+  await composer.press('Enter')
+  await expect
+    .poll(() =>
+      events()
+        .filter((entry) => entry.event === 'start')
+        .map((entry) => entry.prompt)
+    )
+    .toEqual([held])
+  await composer.fill(queued)
+  await composer.press('Enter')
+  await expect(page.getByText('1 queued', { exact: true })).toBeVisible()
+  await composer.fill(urgent)
+  await composer.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter')
+  await expect
+    .poll(() =>
+      events()
+        .filter((entry) => entry.event === 'complete')
+        .map((entry) => entry.prompt)
+    )
+    .toEqual([urgent, queued])
+  expect(
+    events()
+      .filter((entry) => entry.event === 'start')
+      .map((entry) => entry.prompt)
+  ).toEqual([held, urgent, queued])
+  const heldPid = events().find((entry) => entry.event === 'start' && entry.prompt === held)!.pid
+  // The native image owner stops sd-cli with SIGKILL, which the child cannot log.
+  expect(() => process.kill(heldPid, 0)).toThrow()
+  await expect(page.getByRole('button', { name: 'Stop generating', exact: true })).toBeHidden()
+  await expect(page.getByRole('img', { name: 'Generated', exact: true })).toHaveCount(2)
+  await expect(page.getByText('1 queued', { exact: true })).toBeHidden()
+
+  const before = await scopedImages()
+  expect(before.images).toHaveLength(2)
+  const stored = await page.evaluate(
+    async (conversationId) =>
+      (await window.api.getRagMessages(conversationId)).map((message) => ({
+        role: message.role,
+        content: message.content
+      })),
+    before.conversationId
+  )
+  expect(
+    stored.filter((message) => message.role === 'user').map((message) => message.content)
+  ).toEqual([held, urgent, queued])
+  const replies = stored.filter((message) => message.role === 'assistant')
+  expect(replies).toHaveLength(2)
+  expect(replies[0]?.content).toContain(urgent)
+  expect(replies[1]?.content).toContain(queued)
+
+  await closeApp()
+  await launch()
+  await enterChat()
+  await expect(page.getByRole('img', { name: 'Generated', exact: true })).toHaveCount(2)
+  const after = await scopedImages()
+  expect(after).toEqual(before)
+  expect(after.images.every((image) => fs.existsSync(image.path))).toBe(true)
+})
+
+for (const action of ['finish', 'send-now', 'stop']) {
+  const sendNow = action === 'send-now'
+  const stop = action === 'stop'
+  test(`reattached image chat drains queued images${sendNow ? ' with Send Now first' : stop ? ' with ordinary Stop clearing queued drafts' : ' after natural completion'}`, async () => {
+    await enterChat(true)
+    await page.getByRole('button', { name: /^Image$/ }).click()
+    await page.getByRole('button', { name: /Image options/i }).click()
+    const options = page
+      .locator('div')
+      .filter({ has: page.getByText('Guidance', { exact: true }) })
+      .last()
+    await options.getByLabel('Size').selectOption('256')
+    await options.getByLabel('Steps').fill('4')
+    if (await options.getByLabel('Enhance').isChecked())
+      await options.getByLabel('Enhance').uncheck()
+    const held =
+      sendNow || stop
+        ? 'Hold this image for Send Now APP093'
+        : 'Finish this image after reopen APP093'
+    const queued = 'A queued blue lighthouse APP093'
+    const urgent = 'An urgent green lighthouse APP093'
+    const events = (): Array<{ event: string; prompt: string }> =>
+      fs.existsSync(runtimeLog)
+        ? fs
+            .readFileSync(runtimeLog, 'utf8')
+            .trim()
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+        : []
+    let composer = page.locator('textarea')
+    await composer.fill(held)
+    await composer.press('Enter')
+    await expect
+      .poll(() =>
+        events()
+          .filter((entry) => entry.event === 'start')
+          .map((entry) => entry.prompt)
+      )
+      .toEqual([held])
+    await composer.fill(queued)
+    await composer.press('Enter')
+    await expect(page.getByText('1 queued', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Settings', exact: true }).first().click()
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
+    await enterChat()
+    await expect(page.getByRole('button', { name: 'Stop generating', exact: true })).toBeVisible()
+    await expect(page.getByText('1 queued', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: /^Image$/ }).click()
+    await page.getByRole('button', { name: /Image options/i }).click()
+    const reopenedOptions = page
+      .locator('div')
+      .filter({ has: page.getByText('Guidance', { exact: true }) })
+      .last()
+    await reopenedOptions.getByLabel('Size').selectOption('256')
+    await reopenedOptions.getByLabel('Steps').fill('4')
+    if (await reopenedOptions.getByLabel('Enhance').isChecked())
+      await reopenedOptions.getByLabel('Enhance').uncheck()
+    if (stop) {
+      await page.getByRole('button', { name: 'Stop generating', exact: true }).click()
+      await expect(page.getByRole('button', { name: 'Stop generating', exact: true })).toBeHidden()
+    }
+    if (sendNow || stop) {
+      composer = page.locator('textarea')
+      await composer.fill(urgent)
+      await composer.press(
+        stop ? 'Enter' : process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
+      )
+    }
+    const completed = stop ? [urgent] : sendNow ? [urgent, queued] : [held, queued]
+    await expect
+      .poll(() =>
+        events()
+          .filter((entry) => entry.event === 'complete')
+          .map((entry) => entry.prompt)
+      )
+      .toEqual(completed)
+    await expect(page.getByRole('button', { name: 'Stop generating', exact: true })).toBeHidden()
+    await expect(page.getByRole('img', { name: 'Generated', exact: true })).toHaveCount(
+      completed.length
+    )
+    const owned = await scopedImages()
+    const stored = await page.evaluate(
+      async (id) => window.api.getRagMessages(id),
+      owned.conversationId
+    )
+    expect(
+      stored.filter((message) => message.role === 'assistant').map((message) => message.content)
+    ).toEqual(completed.map((prompt) => `Generated for: ${prompt}`))
+    await closeApp()
+    await launch()
+    await enterChat()
+    await expect(page.getByRole('img', { name: 'Generated', exact: true })).toHaveCount(
+      completed.length
+    )
+    expect(await scopedImages()).toEqual(owned)
+  })
+}

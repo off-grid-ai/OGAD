@@ -7,10 +7,8 @@ import {
 import { shouldGate } from '../../actions/approval'
 
 describe('native tool specs', () => {
-  it('routes every website task (incl play/watch) to web_use in the built-in browser; open_url only opens', () => {
-    // Post-pivot: browser tasks run INSIDE Off Grid AI's built-in browser via
-    // web_use (play/watch included). open_url only opens a link and must point
-    // at web_use; web_use must own play/watch and name the built-in browser.
+  it('routes paired browser tasks to web_use, including existing login state', () => {
+    // The model-facing contract must preserve the supplied browser tab and its login.
     const openUrl = findNativeToolSpec('open_url')?.description ?? ''
     const webUse = findNativeToolSpec('web_use')?.description ?? ''
     expect(openUrl).toMatch(/only opens/i)
@@ -18,7 +16,8 @@ describe('native tool specs', () => {
     expect(webUse).toMatch(/play or watch a video|YouTube/i)
     expect(webUse).toMatch(/built-in browser/i)
     expect(webUse).toMatch(/not merely open it/i)
-    expect(webUse).toMatch(/explicitly requires their existing default-browser session/i)
+    expect(webUse).toMatch(/supplied tab's existing login/i)
+    expect(webUse).toMatch(/Do not switch a paired browser task to computer_use/i)
     expect(findNativeToolSpec('web_use')?.name).toBe('web_use')
   })
 

@@ -49,6 +49,25 @@ describe('guardProxyStreams', () => {
     expect(client.destroy).toHaveBeenCalledTimes(1)
   })
 
+  it('stops the model when a client goes away cleanly, not only on a socket error', () => {
+    // A browser's Stop, or a closed panel, ends the request with 'close' and no 'error'. The
+    // engine kept generating for nobody (a thinking loop held its only slot until the context
+    // filled) and every later request queued behind it.
+    const upstream = Object.assign(new EventEmitter(), { destroy: vi.fn() })
+    const client = Object.assign(new EventEmitter(), { writableEnded: false })
+    guardProxyStreams(upstream, client)
+    client.emit('close')
+    expect(upstream.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the upstream alone when the response finished normally', () => {
+    const upstream = Object.assign(new EventEmitter(), { destroy: vi.fn() })
+    const client = Object.assign(new EventEmitter(), { writableEnded: true })
+    guardProxyStreams(upstream, client)
+    client.emit('close')
+    expect(upstream.destroy).not.toHaveBeenCalled()
+  })
+
   it('makes a client disconnect non-fatal AND tears down the upstream (stops reading llama-server)', () => {
     const upstream = Object.assign(new EventEmitter(), { destroy: vi.fn() })
     const client = new EventEmitter()

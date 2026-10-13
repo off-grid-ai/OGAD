@@ -1,8 +1,6 @@
 /**
- * Explore surface - the capability-panel catalog renders on both of its placements
- * (the Explore screen and the chat empty state) and never leaks a preset's raw
- * prompt onto a card: cards show the label + blurb only, the prompt stays behind
- * the tap. Free build, fresh profile - the catalog needs no model and no seed.
+ * Explore catalog - the capability-panel catalog renders in the chat empty state and
+ * each card opens its intake form before anything runs. Free build, fresh profile - the catalog needs no model and no seed.
  *
  * Screenshots land in e2e/screenshots/ for PR evidence.
  */
@@ -46,51 +44,23 @@ test.afterAll(async () => {
   }
 })
 
-test('the Explore screen renders capability panels with labels, never the prompt', async () => {
-  await page.getByRole('button', { name: 'Explore', exact: true }).first().click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Explore' })).toBeVisible()
-
-  // Every capability panel is on screen.
-  for (const panel of [
-    'Browse the web for you',
-    'Drive your Mac',
-    'Build client-ready work',
-    "Remembers what you've seen",
-    "Your Mac's tools, from your phone"
-  ]) {
-    await expect(page.getByText(panel, { exact: true })).toBeVisible()
-  }
-
-  // A card carries its label + blurb - the seeded prompt never appears on the surface.
-  await expect(page.getByTestId('explore-preset-find-flight')).toBeVisible()
-  await expect(page.getByText('Find me a flight to book', { exact: false })).toHaveCount(0)
-
-  // A gated card says why it cannot just run.
-  await expect(page.getByTestId('explore-preset-phone-summarize')).toContainText(/paired phone/i)
-
-  await page.screenshot({ path: 'e2e/screenshots/explore-screen.png' })
-})
-
-test('every Explore card opens its intake form inside Chat before a run starts', async () => {
-  for (const presetId of [
-    'find-flight',
-    'best-nearby',
-    'price-compare',
-    'play-music',
-    'crop-screenshot',
-    'draft-reply',
-    'work-today',
-    'that-article',
-    'phone-summarize'
-  ]) {
-    await page.getByRole('button', { name: 'Explore', exact: true }).first().click()
-    await page.getByTestId(`explore-preset-${presetId}`).click()
+// The standalone Explore screen was removed when God replaced it (416cea1c6); the catalog now
+// lives in the chat empty state, so its cards are exercised there.
+test('catalog cards in the chat empty state open their intake form before a run starts', async () => {
+  for (const presetId of ['best-nearby', 'price-compare']) {
+    await page.getByRole('button', { name: 'Chat', exact: true }).first().click()
+    await page.getByRole('button', { name: 'New chat', exact: true }).click()
+    const card = page.getByTestId(`explore-preset-${presetId}`)
+    await expect(card).toBeVisible()
+    // A card carries its label + blurb; the seeded prompt stays behind the tap.
+    await card.click()
     await expect(page.getByTestId(`preset-intake-${presetId}`)).toBeVisible()
   }
 })
 
 test('the chat empty state reuses the same catalog with its compact intro', async () => {
   await page.getByRole('button', { name: 'Chat', exact: true }).first().click()
+  await page.getByRole('button', { name: 'New chat', exact: true }).click()
   await expect(page.getByText('Explore what Off Grid AI can do')).toBeVisible()
   await expect(page.getByTestId('explore-preset-best-nearby')).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/explore-chat-empty.png' })

@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { deviceNoun, isMac, primaryModifier } from '../device'
+import { deviceNoun, isMac, modifierLabel, primaryModifier, shortcutLabel } from '../device'
 
 describe('deviceNoun', () => {
   it('names macOS the Mac (brand proper noun)', () => {
     expect(deviceNoun('darwin')).toBe('Mac')
   })
 
-  it('names Windows the neutral "device"', () => {
-    expect(deviceNoun('win32')).toBe('device')
+  it('names Windows as "Windows PC"', () => {
+    expect(deviceNoun('win32')).toBe('Windows PC')
   })
 
-  it('names Linux the neutral "device"', () => {
-    expect(deviceNoun('linux')).toBe('device')
+  it('names Linux as "Linux computer"', () => {
+    expect(deviceNoun('linux')).toBe('Linux computer')
   })
 
   it('falls back to "device" for any other/unknown platform', () => {
@@ -21,9 +21,9 @@ describe('deviceNoun', () => {
   })
 
   describe('capitalize option', () => {
-    it('capitalizes "device" -> "Device" for sentence-initial use', () => {
-      expect(deviceNoun('win32', { capitalize: true })).toBe('Device')
-      expect(deviceNoun('linux', { capitalize: true })).toBe('Device')
+    it('keeps platform names capitalized for sentence-initial use', () => {
+      expect(deviceNoun('win32', { capitalize: true })).toBe('Windows PC')
+      expect(deviceNoun('linux', { capitalize: true })).toBe('Linux computer')
     })
 
     it('leaves "Mac" unchanged (already capitalized)', () => {
@@ -31,7 +31,7 @@ describe('deviceNoun', () => {
     })
 
     it('is a no-op when capitalize is false/omitted', () => {
-      expect(deviceNoun('win32', { capitalize: false })).toBe('device')
+      expect(deviceNoun('win32', { capitalize: false })).toBe('Windows PC')
       expect(deviceNoun('darwin')).toBe('Mac')
     })
   })
@@ -61,5 +61,36 @@ describe('primaryModifier', () => {
     expect(primaryModifier('linux')).toBe('Ctrl')
     expect(primaryModifier('unknown')).toBe('Ctrl')
     expect(primaryModifier('')).toBe('Ctrl')
+  })
+})
+
+describe('shortcutLabel', () => {
+  it('names the registered Alt+Space chord the way each keyboard labels it', () => {
+    expect(shortcutLabel('Alt+Space', 'darwin')).toBe('Option+Space')
+    expect(shortcutLabel('Alt+Space', 'win32')).toBe('Alt+Space')
+  })
+
+  it('resolves CommandOrControl through the platform primary modifier', () => {
+    expect(shortcutLabel('CommandOrControl+Shift+K', 'darwin')).toBe('Cmd+Shift+K')
+    expect(shortcutLabel('CmdOrCtrl+K', 'linux')).toBe('Ctrl+K')
+  })
+
+  it('keeps a custom chord token for token and in its own order', () => {
+    expect(shortcutLabel('Ctrl+Shift+K', 'darwin')).toBe('Ctrl+Shift+K')
+    expect(shortcutLabel('Super+F9', 'linux')).toBe('Super+F9')
+    expect(shortcutLabel('Meta+F9', 'darwin')).toBe('Cmd+F9')
+  })
+})
+
+describe('modifierLabel', () => {
+  it('reads either spelling of a modifier, in any case', () => {
+    expect(modifierLabel('command', 'darwin')).toBe('Cmd')
+    expect(modifierLabel('CONTROL', 'win32')).toBe('Ctrl')
+    expect(modifierLabel('Option', 'win32')).toBe('Alt')
+    expect(modifierLabel('AltGr', 'linux')).toBe('AltGr')
+  })
+
+  it('returns a non-modifier key untouched', () => {
+    expect(modifierLabel('Space', 'darwin')).toBe('Space')
   })
 })

@@ -8,7 +8,6 @@
  * executable are controlled boundaries.
  */
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import type { ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -26,18 +25,16 @@ let rootDir: string
 let backupPath: string
 let knowledgePath: string
 
-async function waitForExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return
-  await new Promise<void>((resolve) => child.once('exit', () => resolve()))
-}
-
 async function closeApp(): Promise<void> {
   const running = app
   if (!running) return
   app = null
   const child = running.process()
-  await running.close()
-  await waitForExit(child)
+  // A signal exit has no exitCode. Require a prompt, clean exit from the close request.
+  await Promise.all([
+    running.close(),
+    expect.poll(() => child.exitCode ?? child.signalCode, { timeout: 15_000 }).toBe(0)
+  ])
 }
 
 function installModelBoundary(profile: string): string {
@@ -149,7 +146,7 @@ async function createProjectWithKnowledge(): Promise<void> {
 async function askProjectQuestion(): Promise<void> {
   await page.getByRole('button', { name: 'Chats', exact: true }).click()
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
-  const composer = page.getByRole('textbox', { name: /Ask (anything|about)/i })
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await expect(composer).toBeVisible()
   await composer.fill(PROMPT)
   await page.keyboard.press('Enter')
@@ -205,7 +202,7 @@ test.describe('APP-242 portable backup', () => {
     await page.getByRole('button', { name: 'Chats', exact: true }).click()
     await expect(page.getByText('1 chat', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'New chat', exact: true }).click()
-    const composer = page.getByRole('textbox', { name: /Ask (anything|about)/i })
+    const composer = page.getByRole('textbox', { name: 'Message', exact: true })
     await composer.fill(PROMPT)
     await page.keyboard.press('Enter')
     await expect(page.getByText(ANSWER, { exact: true }).last()).toBeVisible({ timeout: 30_000 })

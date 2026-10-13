@@ -67,7 +67,7 @@ async function launchApp(): Promise<void> {
 
 async function enterChat(): Promise<void> {
   await page.getByRole('button', { name: 'Chat', exact: true }).click()
-  await expect(page.getByPlaceholder(/ask anything/i)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
 
   const captureDismiss = page.getByRole('button', { name: 'Dismiss', exact: true })
   if (await captureDismiss.isVisible().catch(() => false)) await captureDismiss.click()
@@ -110,7 +110,7 @@ test.afterEach(async () => {
 })
 
 test('renders an incremental local reply, completes it, and restores it after relaunch', async () => {
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await composer.fill(PROMPT)
   await page.keyboard.press('Enter')
 

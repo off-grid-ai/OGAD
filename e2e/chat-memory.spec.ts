@@ -104,7 +104,7 @@ test.afterEach(async () => {
 })
 
 test('navigates to the chat screen', async () => {
-  await expect(page.getByPlaceholder(/ask anything/i)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible()
   await page.screenshot({ path: 'e2e/screenshots/chat-screen.png', fullPage: false })
 })
 
@@ -164,7 +164,7 @@ test('memory toggle: All memory sticks after selection', async () => {
 })
 
 test('chat composer renders and accepts input', async () => {
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await expect(composer).toBeVisible()
   await composer.fill('Hello, test message')
   await page.screenshot({ path: 'e2e/screenshots/chat-composer-filled.png' })
@@ -185,7 +185,7 @@ test('streaming placeholder appears immediately after send', async () => {
   // placeholder bubble that appears instantly (before any model response).
   // It validates the fix — previously nothing appeared until the full response
   // resolved because stream tokens routed to the wrong conversation bucket.
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await expect(composer).toBeVisible()
   await composer.fill('What did I work on today?')
   await page.keyboard.press('Enter')
@@ -358,7 +358,7 @@ test('cancelling a tool-owned image keeps its text answer after a full relaunch'
   await enterChat()
   await dismissCapturePrompt()
 
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await composer.fill('Summarize my week and draw a chart')
   await page.keyboard.press('Enter')
 
@@ -411,7 +411,7 @@ test('cold relaunch after a forced quit boots cleanly and keeps committed chat d
     await window.api.createRagConversation('forced-quit-chat', 'Forced Quit Chat', null)
     await window.api.addRagMessage('forced-quit-chat', 'user', 'committed before forced quit')
   })
-  await page.getByPlaceholder(/ask anything/i).fill('uncommitted draft during forced quit')
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('uncommitted draft during forced quit')
 
   await forceCloseApp()
   await launchApp()
@@ -428,6 +428,6 @@ test('cold relaunch after a forced quit boots cleanly and keeps committed chat d
   ])
 
   await enterChat()
-  await expect(page.getByPlaceholder(/ask anything/i)).toBeEnabled()
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled()
   await expect(page.getByText('committed before forced quit', { exact: true })).toBeVisible()
 })

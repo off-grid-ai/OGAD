@@ -58,6 +58,9 @@ test('explains model location and named Desktop control before setup', async () 
   })
 
   await page.getByRole('button', { name: 'Continue' }).click()
+  // 3b38993e5 added optional connections before the model-location summary.
+  await expect(page.getByRole('region', { name: 'Quick connections' })).toBeVisible()
+  await page.getByRole('button', { name: 'Skip for now', exact: true }).click()
   await expect(page.getByText('You choose where each model runs.')).toBeVisible()
   await expect(body).toContainText('does not copy server API keys')
 })

@@ -29,6 +29,12 @@ import {
   type AxSnapshot
 } from './ax-elements'
 import { windowsAxBackend, type AxBackend } from './ax-win'
+import {
+  linuxAxBackend,
+  linuxNativeAppPlatform,
+  resolveLinuxDefaultBrowser,
+  setLinuxAccessibleValue
+} from './ax-linux'
 import { namesWebsite } from '../tools/planner-logic'
 import {
   ELEMENT_STEP_FORMAT,
@@ -168,12 +174,11 @@ const unsupportedAxBackend: AxBackend = {
   }
 }
 
-/** The accessibility backend for this platform - the ONE place the OS is chosen.
- *  macOS uses the Swift AX helper; Windows uses PowerShell + UI Automation.
- *  Linux has no native accessibility backend in this release. */
+/** The accessibility backend for this platform - the ONE place the OS is chosen. */
 function axBackend(): AxBackend {
   if (process.platform === 'win32') return windowsAxBackend
   if (process.platform === 'darwin') return macAxBackend
+  if (process.platform === 'linux') return linuxAxBackend
   return unsupportedAxBackend
 }
 
@@ -193,11 +198,16 @@ function nativeAppTargeter(): NativeAppTargeter | null {
       ? new NativeAppTargeter(createMacNativeAppPlatform(helper), { selfName: SELF_APP_NAME })
       : null
   }
+  if (process.platform === 'linux') {
+    return new NativeAppTargeter(linuxNativeAppPlatform, { selfName: SELF_APP_NAME })
+  }
   return null
 }
 
-async function defaultBrowserTarget(): Promise<InstalledNativeApp | null> {
+/** The default browser on this computer, or null when unknown. */
+export async function defaultBrowserTarget(): Promise<InstalledNativeApp | null> {
   if (process.platform === 'win32') return resolveWindowsDefaultBrowser()
+  if (process.platform === 'linux') return resolveLinuxDefaultBrowser()
   if (process.platform === 'darwin') {
     const helper = accessibilityHelperPath()
     return helper ? resolveMacDefaultBrowser(helper) : null
@@ -214,7 +224,9 @@ async function inferInstalledAppTarget(goal: string): Promise<InstalledNativeApp
             const helper = accessibilityHelperPath()
             return helper ? createMacNativeAppPlatform(helper) : null
           })()
-        : null
+        : process.platform === 'linux'
+          ? linuxNativeAppPlatform
+          : null
   if (!platform) return null
   const installed = await platform.listInstalled()
   const available = installed.filter(
@@ -375,6 +387,12 @@ function makeElementActuator(
     },
     async setValue(el, value) {
       const signal = await ensureLive()
+      if (process.platform === 'linux') {
+        onAction(`Set ${el.name || el.role} to ${value}`)
+        signal.throwIfAborted()
+        await setLinuxAccessibleValue(appName, el.cx, el.cy, Number(value))
+        return
+      }
       const helper = accessibilityHelperPath()
       if (!helper || process.platform !== 'darwin') {
         throw new Error('Native value control is unavailable.')
@@ -737,7 +755,7 @@ class AxRailHost {
                 scaleY
               },
               sources: {
-                ax: { available: process.platform === 'darwin' },
+                ax: { available: process.platform === 'darwin' || process.platform === 'linux' },
                 uia: { available: process.platform === 'win32' },
                 ocr: {
                   available: ocr.available,

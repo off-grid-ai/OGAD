@@ -54,42 +54,44 @@ try {
   const page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
 
-  const before = await page.evaluate(() => window.api.license.status())
+  // Only status reads can be repeated after a reload. Activation can consume a seat even
+  // when the renderer loses its reply as Pro starts in place.
+  const contextWasDestroyed = (error) =>
+    /Execution context was destroyed|Unable to retrieve content because the page is navigating and changing the content/i.test(
+      String(error)
+    )
+  const statusAcrossReload = async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await page.evaluate(() => window.api.license.status())
+      } catch (error) {
+        if (!contextWasDestroyed(error) || attempt >= 5) throw error
+        await page.waitForLoadState('domcontentloaded')
+      }
+    }
+  }
+
+  const before = await statusAcrossReload()
   console.log(`[seed-license] before: isPro=${before?.isPro}`)
 
-  // Activation waits up to 5s for pro's entitlement owner to register and, if it is not there yet,
-  // reports "network_unavailable" - a READINESS timeout wearing a network error's clothes. Activating the
-  // moment the window loads therefore fails on a cold start while the network is perfectly fine. So this
-  // retries, and treats that particular reason as "not ready yet" rather than as a verdict.
   let result
-  for (let attempt = 1; attempt <= 6; attempt += 1) {
-    result = await page.evaluate(async (licenceKey) => {
-      try {
-        return { ok: true, value: await window.api.license.activate(licenceKey) }
-      } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    }, key)
-    const reason = result.ok ? result.value?.reason : undefined
-    if (result.ok && result.value?.ok) break
-    console.log(
-      `[seed-license] attempt ${attempt}: ${result.ok ? (reason ?? 'refused') : result.error}`
-    )
-    if (result.ok && reason && reason !== 'network_unavailable') break
-    await new Promise((resolve) => setTimeout(resolve, 4000))
+  try {
+    result = await page.evaluate((licenceKey) => window.api.license.activate(licenceKey), key)
+  } catch (error) {
+    if (!contextWasDestroyed(error)) throw error
+    await page.waitForLoadState('domcontentloaded')
   }
-  if (!result.ok) fail(`activation threw: ${result.error}`)
 
   // Poll rather than assume: activation registers a machine over the network, and the cache is written
   // after that returns.
   let status = null
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    status = await page.evaluate(() => window.api.license.status())
+    status = await statusAcrossReload()
     if (status?.isPro) break
     await new Promise((resolve) => setTimeout(resolve, 1000))
   }
   if (!status?.isPro) {
-    fail(`activation did not take: ${JSON.stringify({ status, outcome: result.value })}`)
+    fail(`activation did not take: ${JSON.stringify({ status, outcome: result })}`)
   }
   console.log(`[seed-license] activated: tier=${status.tier ?? 'pro'}`)
 } finally {

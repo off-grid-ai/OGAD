@@ -21,6 +21,7 @@ type Sink = (record: AIRequestRecord) => void
 let sink: Sink | undefined
 let epoch = 0
 const context = new AsyncLocalStorage<AIRequestHandle>()
+const unrecorded = new AsyncLocalStorage<true>()
 
 /** No database, Electron, network, or synchronous disk access in inference paths. */
 export function setAIRequestSink(next: Sink | undefined): void {
@@ -29,6 +30,14 @@ export function setAIRequestSink(next: Sink | undefined): void {
 }
 export function invalidateAIRequests(): void {
   epoch++
+}
+/**
+ * Run work the request log must never keep: not its input, not its output, not that it happened.
+ * Every request started inside, however deeply nested, is left out. For audio the user never
+ * meant to send anywhere, such as the always-on wake word check.
+ */
+export function withoutAIRequestLog<T>(fn: () => T): T {
+  return unrecorded.run(true, fn)
 }
 export function currentAIRequest(): AIRequestHandle | undefined {
   return context.getStore()
@@ -82,7 +91,7 @@ export function snapshotAIValue(value: unknown): unknown {
 export class AIRequestHandle {
   readonly id = randomUUID()
   private readonly generation = epoch
-  private readonly enabled = !!sink
+  private readonly enabled = !!sink && unrecorded.getStore() !== true
   private done = false
   private content = ''
   private reasoning = ''

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const host = vi.hoisted(() => ({ embed: vi.fn() }))
 vi.mock('../embeddings-core', () => ({ embedText: host.embed, embeddingDevice: () => 'coreml' }))
-vi.mock('../runtime-env', () => ({ modelsDir: () => '/synthetic/models' }))
 vi.mock('../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
 vi.mock('../runtime-residency', () => ({ getResidencyMode: () => 'resident' }))
 import { embeddings } from '../embeddings'

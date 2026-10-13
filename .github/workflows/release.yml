@@ -43,7 +43,7 @@ concurrency:
 # app.asar refuse to load — our local-first anti-tamper lever (we don't phone home).
 # Actions are pinned to commit SHAs. macOS, Windows, and Linux share the one
 # `version` job and publish to the same release. Each platform stages its own
-# native engine; the Linux package currently contains the core product.
+# native engine. Linux also bundles the pinned Pro source and gates it by license.
 jobs:
   # Resolve the channel + version. STABLE (manual promote) bumps the patch and
   # commits it so main tracks the released version; BETA (every merge) stamps a
@@ -292,6 +292,29 @@ jobs:
           fi
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
+      - name: Let npm read the private UI package (Pro)
+        # @offgrid/operator-ui is a private Wednesday package that only Pro uses. Core lists it as an
+        # optional dependency, so without access npm skips it and core still installs; Pro needs it.
+        shell: bash
+        env:
+          UI_TOKEN: ${{ secrets.OPERATOR_UI_TOKEN || secrets.CI_CROSS_REPO_TOKEN }}
+        run: |
+          # A pasted secret can carry a newline or spaces, which break token authentication.
+          UI_TOKEN="$(printf '%s' "$UI_TOKEN" | tr -d '[:space:]')"
+          if [ -n "$UI_TOKEN" ]; then
+            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/wednesday-solutions/".insteadOf "ssh://git@github.com/wednesday-solutions/"
+            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
+            # and it overrides the token above. Clear it for wednesday-solutions only (the most specific
+            # address wins), so everything else keeps the checkout login.
+            if git rev-parse --git-dir >/dev/null 2>&1; then
+              git config --local http.https://github.com/wednesday-solutions/.extraheader ""
+            fi
+          fi
+          # npm skips an optional package it cannot read without saying so: say it here, plainly.
+          if ! git ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/wednesday-solutions/component-library-animations.git" HEAD >/dev/null 2>&1; then
+            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/wednesday-solutions/component-library-animations)"
+            echo "::error::CI cannot read wednesday-solutions/component-library-animations (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Pro will not build without it."
+          fi
       - name: Install dependencies
         run: npm ci
       # Stamp the resolved version into package.json so electron-builder picks the
@@ -302,6 +325,13 @@ jobs:
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Stage native files and bundle
+        env:
+          # Connect with Off Grid AI (scripts/oauth-build-config.mjs). The build fails without them.
+          OFFGRID_REQUIRE_OAUTH: '1'
+          GOOGLE_OAUTH_CLIENT_TYPE: desktop
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
         run: node scripts/stage-native.mjs && npx electron-vite build
       # The version job has already created this build's draft tag. Exclude it
       # when finding the previous release for the changelog.
@@ -352,9 +382,19 @@ jobs:
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER" \
             --wait
-          xcrun stapler staple -v "$DMG"
+          # stapler reaches Apple's CloudKit ticket service, whose connections from runners drop
+          # intermittently (stapler error 68). Retry those steps before failing the release.
+          with_ticket_retry() {
+            for attempt in 1 2 3 4; do
+              "$@" && return 0
+              [ "$attempt" = 4 ] && return 1
+              echo "Apple ticket service attempt $attempt failed; retrying in 20s"
+              sleep 20
+            done
+          }
+          with_ticket_retry xcrun stapler staple -v "$DMG"
           codesign --verify --strict --verbose=4 "$DMG"
-          xcrun stapler validate "$DMG"
+          with_ticket_retry xcrun stapler validate "$DMG"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
           # Stapling changes the DMG bytes. Refresh the blockmap and update feed before upload.
           node scripts/refresh-mac-dmg-update-info.mjs "$DMG" dist/latest-mac.yml
@@ -587,6 +627,29 @@ jobs:
           fi
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
+      - name: Let npm read the private UI package (Pro)
+        # @offgrid/operator-ui is a private Wednesday package that only Pro uses. Core lists it as an
+        # optional dependency, so without access npm skips it and core still installs; Pro needs it.
+        shell: bash
+        env:
+          UI_TOKEN: ${{ secrets.OPERATOR_UI_TOKEN || secrets.CI_CROSS_REPO_TOKEN }}
+        run: |
+          # A pasted secret can carry a newline or spaces, which break token authentication.
+          UI_TOKEN="$(printf '%s' "$UI_TOKEN" | tr -d '[:space:]')"
+          if [ -n "$UI_TOKEN" ]; then
+            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/wednesday-solutions/".insteadOf "ssh://git@github.com/wednesday-solutions/"
+            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
+            # and it overrides the token above. Clear it for wednesday-solutions only (the most specific
+            # address wins), so everything else keeps the checkout login.
+            if git rev-parse --git-dir >/dev/null 2>&1; then
+              git config --local http.https://github.com/wednesday-solutions/.extraheader ""
+            fi
+          fi
+          # npm skips an optional package it cannot read without saying so: say it here, plainly.
+          if ! git ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/wednesday-solutions/component-library-animations.git" HEAD >/dev/null 2>&1; then
+            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/wednesday-solutions/component-library-animations)"
+            echo "::error::CI cannot read wednesday-solutions/component-library-animations (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Pro will not build without it."
+          fi
       - name: Install dependencies
         run: npm ci
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
@@ -598,7 +661,14 @@ jobs:
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Stage native files and bundle
-        run: node scripts/stage-native.mjs && npx electron-vite build
+        env:
+          # Connect with Off Grid AI (scripts/oauth-build-config.mjs). The build fails without them.
+          OFFGRID_REQUIRE_OAUTH: '1'
+          GOOGLE_OAUTH_CLIENT_TYPE: desktop
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
+        run: node scripts/stage-native.mjs && npx electron-vite build && node scripts/check-windows-onnx-preload.mjs
       - name: Package Windows web installer, payload, and update metadata
         shell: bash
         env:
@@ -696,7 +766,7 @@ jobs:
               --notes "Rolling nightly build, auto-updated on every change. Pre-release - expect rough edges."
           gh release upload nightly dist/OffGrid-nightly-setup.exe --clobber
 
-  # Core Linux release. Upload AppImage, deb, and update metadata to the draft
+  # Linux release. Upload AppImage, deb, and update metadata to the draft
   # release created by the version job while macOS and Windows build in parallel.
   build-linux:
     needs: version
@@ -781,8 +851,37 @@ jobs:
           echo '11f57bddc8b7b4c5efa4b4c298b8a000aaf0f203567f6c18953a6aff7a4e4b54  '"$RUNNER_TEMP/linux-native.tar.gz" | sha256sum -c -
           mkdir -p build/linux-bin
           tar -xzf "$RUNNER_TEMP/linux-native.tar.gz" -C build/linux-bin
+          git lfs pull --include="resources/bin/kev-local-server.py" --exclude=""
+          if head -n 1 resources/bin/kev-local-server.py | grep -q '^version https://git-lfs.github.com/spec/'; then
+            echo 'Kev launcher is still an LFS pointer' >&2
+            exit 1
+          fi
+          install -Dm644 resources/bin/kev-local-server.py build/linux-bin/kev-local-server.py
           install -Dm755 build/linux-bin/executorch-speech \
             ../executorch-speech/native/bin/executorch-speech
+      - name: Let npm read the private UI package (Pro)
+        # @offgrid/operator-ui is a private Wednesday package that only Pro uses. Core lists it as an
+        # optional dependency, so without access npm skips it and core still installs; Pro needs it.
+        shell: bash
+        env:
+          UI_TOKEN: ${{ secrets.OPERATOR_UI_TOKEN || secrets.CI_CROSS_REPO_TOKEN }}
+        run: |
+          # A pasted secret can carry a newline or spaces, which break token authentication.
+          UI_TOKEN="$(printf '%s' "$UI_TOKEN" | tr -d '[:space:]')"
+          if [ -n "$UI_TOKEN" ]; then
+            git config --global url."https://x-access-token:${UI_TOKEN}@github.com/wednesday-solutions/".insteadOf "ssh://git@github.com/wednesday-solutions/"
+            # actions/checkout saves this repo's own GitHub login as a header for all of github.com,
+            # and it overrides the token above. Clear it for wednesday-solutions only (the most specific
+            # address wins), so everything else keeps the checkout login.
+            if git rev-parse --git-dir >/dev/null 2>&1; then
+              git config --local http.https://github.com/wednesday-solutions/.extraheader ""
+            fi
+          fi
+          # npm skips an optional package it cannot read without saying so: say it here, plainly.
+          if ! git ls-remote --exit-code "https://x-access-token:${UI_TOKEN}@github.com/wednesday-solutions/component-library-animations.git" HEAD >/dev/null 2>&1; then
+            status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${UI_TOKEN}" https://api.github.com/repos/wednesday-solutions/component-library-animations)"
+            echo "::error::CI cannot read wednesday-solutions/component-library-animations (GitHub answered ${status}: 401 bad token, 403 org policy or IP allow list, 404 no access to the repo). Pro will not build without it."
+          fi
       - name: Install dependencies
         run: npm ci
       - name: Install Linux GPU runtime dependencies
@@ -791,17 +890,31 @@ jobs:
         env:
           OFFGRID_FORCE_CORE: '0'
         run: npm run typecheck:node
+      - name: Check Linux Vault
+        run: |
+          npx vitest run --project product-integration \
+            src/renderer/src/lib/__tests__/proCatalog.lookup.test.ts \
+            src/renderer/src/components/pro/__tests__/UpgradeScreen.platform-availability.test.tsx \
+            pro/main/vault/__tests__/device-fingerprint.test.ts \
+            pro/main/vault/__tests__/vault-service.test.ts
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Build Linux packages
         env:
           OFFGRID_FORCE_CORE: '0'
+          # Connect with Off Grid AI (scripts/oauth-build-config.mjs). The build fails without them.
+          OFFGRID_REQUIRE_OAUTH: '1'
+          GOOGLE_OAUTH_CLIENT_TYPE: desktop
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
         run: npm run build:linux:pinned
       - name: Report Linux native payload sizes
         run: du -sh dist/linux-unpacked/resources/bin/* | sort -h | tail -25
       - name: Verify Linux package inputs
         run: |
           test -s dist/linux-unpacked/resources/performance-packs.json
+          cmp resources/bin/kev-local-server.py dist/linux-unpacked/resources/bin/kev-local-server.py
           for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper-cuda kev-runtime; do
             test ! -e "dist/linux-unpacked/resources/bin/$folder"
           done

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   formatDiagnosticLog,
+  flushDiagnosticLog,
   installIpcDiagnostics,
   writeDiagnosticLog,
   type IpcHandlerRegistrar
@@ -13,7 +14,8 @@ import { formatConsoleMessage } from '../diagnostics-log'
 const originalLogPath = process.env.OFFGRID_DIAGNOSTIC_LOG
 const roots: string[] = []
 
-afterEach(() => {
+afterEach(async () => {
+  await flushDiagnosticLog()
   if (originalLogPath === undefined) delete process.env.OFFGRID_DIAGNOSTIC_LOG
   else process.env.OFFGRID_DIAGNOSTIC_LOG = originalLogPath
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
@@ -44,7 +46,7 @@ describe('diagnostic log', () => {
     )
   })
 
-  it('writes consecutive events to the configured private log file', () => {
+  it('writes consecutive events to the configured private log file', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-diagnostics-'))
     roots.push(root)
     const logPath = path.join(root, 'nested', 'desktop.log')
@@ -52,6 +54,7 @@ describe('diagnostic log', () => {
 
     writeDiagnosticLog('tts', 'request.started', { requestId: 'tts-1', chars: 10 })
     writeDiagnosticLog('tts', 'request.completed', { requestId: 'tts-1', wavBytes: 100 })
+    await flushDiagnosticLog()
 
     const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n')
     expect(lines).toHaveLength(2)
@@ -88,6 +91,7 @@ describe('diagnostic log', () => {
       reply: 19
     })
     await expect(handlers.get('models:download')?.({})).rejects.toThrow('request failed')
+    await flushDiagnosticLog()
 
     const output = fs.readFileSync(logPath, 'utf8')
     const started = output.match(/request\.started requestId="([^"]+)" channel="chat:send"/)

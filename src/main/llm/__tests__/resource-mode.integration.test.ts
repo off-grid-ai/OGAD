@@ -56,11 +56,9 @@ describe('resource mode settings -> restart -> setup plan', () => {
     const recommendations = new Map<PerformanceMode, string>()
 
     for (const mode of ['conservative', 'balanced', 'extreme'] as const) {
-      // With no model installed, the launch-time change persists before init reports
-      // "Models not downloaded". That is the expected external-runtime boundary here.
-      await expect(llm.setSettings({ performanceMode: mode })).rejects.toThrow(
-        'Models not downloaded'
-      )
+      // With no model installed there is nothing to relaunch, so the choice is saved for the
+      // first launch instead of failing.
+      await expect(llm.setSettings({ performanceMode: mode })).resolves.toBeUndefined()
 
       const selected = llm.getSettings()
       expect(selected.performanceMode).toBe(mode)

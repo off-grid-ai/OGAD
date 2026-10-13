@@ -1,7 +1,7 @@
 import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
 import type { VisionGuard } from '../vision/vision-guard'
 import type { BrowserDriver } from './browser-driver'
-import type { PlaywrightMcpSession } from './playwright-mcp-session'
+import type { SemanticPageSession } from './playwright-mcp-session'
 
 export interface BrowserPlaywrightTaskResult {
   ok: boolean
@@ -19,9 +19,10 @@ export interface BrowserSemanticObservation {
 export interface BrowserPlaywrightTaskInput {
   goal: string
   plan: TaskExecutionPlan
-  session: PlaywrightMcpSession
+  session: SemanticPageSession
   guard: VisionGuard
-  activeDriver: () => BrowserDriver
+  /** The page's pointer overlay, where the session has one. Null: no pointer to show. */
+  activeDriver: () => BrowserDriver | null
   activeUrl: () => string
   waitForUser: (why: string, signal?: AbortSignal) => Promise<void>
   takeGuidance: () => readonly string[]

@@ -1,10 +1,10 @@
 /**
- * APP-106 — a real Pro activation survives the required production relaunch.
+ * APP-106 — a real Pro activation unlocks in place and survives a relaunch.
  *
  * This spec starts from a clean, visibly free profile, creates a project and a
  * local chat through the rendered product, activates the user's real licence
- * against the production entitlement service, clicks the rendered Restart now
- * action, and attaches to the replacement Electron renderer. No licensing code
+ * against the production entitlement service, sees Pro start without a restart,
+ * then quits and relaunches the same profile. No licensing code
  * or response is faked. The sole controlled boundary is the native local-model
  * executable used to create a deterministic pre-activation chat.
  */
@@ -21,7 +21,6 @@ import { navButton } from './helpers/settings'
 const PROJECT = 'APP-106 Existing Project'
 const PROMPT = 'Keep this chat through the Pro activation restart.'
 const ANSWER = 'APP-106 profile survives activation.'
-const ACTIVATED = 'Activated. Restart to finish unlocking Pro.'
 
 let appProcess: ChildProcess | null = null
 let browser: Browser | null = null
@@ -58,11 +57,6 @@ function collectSanitizedProviderOutput(stream: NodeJS.ReadableStream | null): v
     retainSafeLines(false)
   })
   flushProviderOutput.push(() => retainSafeLines(true))
-}
-
-async function waitForExit(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return
-  await new Promise<void>((resolve) => child.once('exit', () => resolve()))
 }
 
 const processIsAlive = (pid: number): boolean => {
@@ -182,7 +176,7 @@ async function createVisibleProject(): Promise<void> {
 
 async function createVisibleChat(): Promise<void> {
   await openSidebar('Chat')
-  const composer = page.getByPlaceholder(/ask anything/i)
+  const composer = page.getByRole('textbox', { name: 'Message', exact: true })
   await expect(composer).toBeVisible()
   await composer.fill(PROMPT)
   await page.keyboard.press('Enter')
@@ -261,15 +255,12 @@ async function launchActualElectron(): Promise<void> {
   expect(browserPid).toBe(appProcess.pid)
 }
 
-async function restartThroughRenderedUi(): Promise<void> {
+// Activation unlocks Pro in place (no Restart now), so the restart that proves the profile
+// survives is a normal quit and relaunch of the same profile.
+async function quitAndRelaunch(): Promise<void> {
   if (!appProcess) throw new Error('Electron app is not running')
-  const oldChild = appProcess
-  await page.getByRole('button', { name: 'Restart now', exact: true }).click()
-  await waitForExit(oldChild)
-  appProcess = null
-  browser = null
-  browserPid = null
-  await connectToRunningApp()
+  await closeApp()
+  await launchActualElectron()
 }
 
 test.describe('APP-106 real licence activation', () => {
@@ -310,7 +301,7 @@ test.describe('APP-106 real licence activation', () => {
 
   // Playwright requires the first callback argument to use object destructuring.
   // eslint-disable-next-line no-empty-pattern
-  test('unlocks Pro through the real service and keeps the existing profile after Restart now', async ({}, testInfo) => {
+  test('unlocks Pro through the real service and keeps the existing profile after a restart', async ({}, testInfo) => {
     await createVisibleProject()
     await createVisibleChat()
 
@@ -324,20 +315,22 @@ test.describe('APP-106 real licence activation', () => {
     expect(licenceKey.length).toBeGreaterThan(0)
     await keyInput.fill(licenceKey)
     licenceKey = ''
-    const activationPanel = keyInput.locator('xpath=../..')
-    const activationMessages = activationPanel.locator(':scope > div')
     await page.getByRole('button', { name: 'Activate', exact: true }).click()
     // Remove the credential from the DOM before any diagnostic or screenshot can run.
     await keyInput.fill('')
 
-    await expect(activationMessages).toHaveCount(2, { timeout: 90_000 })
-    const activationOutcome = await activationMessages.nth(1).innerText()
-    expect(activationOutcome).toContain(ACTIVATED)
+    // Pro starts in place: the upgrade offer goes away without a restart.
+    await expect(page.getByText('Off Grid AI Pro · Available now', { exact: true })).toHaveCount(
+      0,
+      {
+        timeout: 90_000
+      }
+    )
     expect(await page.evaluate(() => window.api.license?.status())).toEqual(
       expect.objectContaining({ isPro: true, tier: 'lifetime' })
     )
 
-    await restartThroughRenderedUi()
+    await quitAndRelaunch()
 
     await openSidebar('Projects')
     await expect(page.getByText(PROJECT, { exact: true }).first()).toBeVisible()
@@ -352,12 +345,13 @@ test.describe('APP-106 real licence activation', () => {
     expect(await page.evaluate(() => window.api.isPro)).toBe(true)
     expect((await page.evaluate(() => window.api.license?.status())).isPro).toBe(true)
 
-    const licensedDevices = page.getByRole('button', { name: /Manage licensed devices,/ })
-    await expect(licensedDevices).toBeVisible({ timeout: 60_000 })
-    await licensedDevices.click()
-    await expect(page.getByRole('heading', { name: 'Licensed devices' })).toBeVisible()
-    await expect(page.getByText('macOS · This device', { exact: true })).toBeVisible()
-    await expect(page.getByText('Local', { exact: true })).toBeVisible()
+    // The redesigned Devices screen shows licence slots in Saved: this Mac holds at least one.
+    await expect(page.getByLabel(/^[1-9]\d* of \d+ licensed devices$/)).toBeVisible({
+      timeout: 60_000
+    })
+    await expect(
+      page.getByRole('button', { name: 'Rename this device', exact: true })
+    ).toBeVisible()
     expect(await page.evaluate(() => window.api.platform)).toBe('darwin')
     await page.screenshot({ path: testInfo.outputPath('app106-licensed-macos-after-restart.png') })
   })

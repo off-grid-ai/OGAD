@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ModelPicker } from '../ModelPicker'
+import { withTaskRoles } from './harness/task-roles'
 import { OPEN_MODEL_SETTINGS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
 
 afterEach(() => {
@@ -45,6 +46,7 @@ function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
       ]
     })
   }
+  withTaskRoles((window as unknown as { api: Record<string, unknown> }).api)
   render(<ModelPicker onClose={onClose} />)
   return onClose
 }
@@ -77,6 +79,7 @@ function renderPickerWithRemote(): ReturnType<typeof vi.fn> {
     }),
     activateModel
   }
+  withTaskRoles((window as unknown as { api: Record<string, unknown> }).api)
   render(<ModelPicker onClose={vi.fn()} />)
   return activateModel
 }
@@ -92,9 +95,8 @@ describe('<ModelPicker/> dismissal', () => {
     expect(screen.queryByText(/swaps the chat model/i)).toBeNull()
     const computerUse = screen.getByRole('region', { name: 'Computer Use' })
     expect(computerUse.textContent).toContain('Text + Specialist')
-    expect(computerUse.textContent).toContain('Reasoner')
-    expect(computerUse.textContent).toContain('Qwen Reasoner')
-    expect(computerUse.textContent).toContain('Remote')
+    // The reasoner is the Text model, listed with Text: only task models here.
+    expect(computerUse.textContent).not.toContain('Qwen Reasoner')
     expect(computerUse.textContent).toContain('Grounding specialist')
     expect(computerUse.textContent).toContain('UI-TARS 1.5 7B')
     expect(computerUse.textContent).toContain('On device')
@@ -126,9 +128,11 @@ describe('<ModelPicker/> dismissal', () => {
       getWebUseActiveModels: async () => null
     }
 
+    withTaskRoles((window as unknown as { api: Record<string, unknown> }).api)
+
     render(<ModelPicker onClose={() => {}} />)
 
-    const picker = await screen.findByRole('button', { name: 'Active Computer Use model' })
+    const picker = await screen.findByRole('button', { name: 'Computer Use Grounding specialist' })
     expect(picker.textContent).toContain('UI-Mate 9B')
     expect(picker.textContent).not.toContain('model-package-v1:')
   })
@@ -149,7 +153,15 @@ describe('<ModelPicker/> dismissal', () => {
     const activateModel = vi.fn().mockResolvedValue({ success: true })
     ;(window as unknown as { api: Record<string, unknown> }).api = {
       getModelCatalog: vi.fn().mockResolvedValue({
-        models: [{ id: voiceId, name: 'Google: Lyria 3 Pro Preview', kind: 'speech', files: [], remoteServerId: 'home' }]
+        models: [
+          {
+            id: voiceId,
+            name: 'Google: Lyria 3 Pro Preview',
+            kind: 'speech',
+            files: [],
+            remoteServerId: 'home'
+          }
+        ]
       }),
       getInstalledModels: vi.fn().mockResolvedValue([voiceId]),
       getActiveModel: vi.fn().mockResolvedValue(null),
@@ -158,6 +170,8 @@ describe('<ModelPicker/> dismissal', () => {
       getComputerUseActiveModels: vi.fn().mockResolvedValue(null),
       activateModel
     }
+
+    withTaskRoles((window as unknown as { api: Record<string, unknown> }).api)
 
     render(<ModelPicker onClose={vi.fn()} />)
     const voice = (await screen.findByText('Google: Lyria 3 Pro Preview')).closest('button')

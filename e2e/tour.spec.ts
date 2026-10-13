@@ -42,13 +42,9 @@ test.beforeAll(async () => {
   await page.waitForLoadState('domcontentloaded')
   // Click through onboarding into the app shell.
   await completeOnboarding(page)
-  // Expand the sidebar so nav items have visible labels.
-  try {
-    await page.getByRole('button', { name: 'Expand sidebar' }).click({ timeout: 4000 })
-  } catch {
-    /* already open */
-  }
-  await page.waitForTimeout(500)
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  await navigation.hover()
+  await navigation.getByRole('button', { name: 'Pin sidebar', exact: true }).click()
 })
 
 test.afterAll(async () => {
@@ -109,18 +105,18 @@ test('every locked Pro navigation item renders its matching upgrade screen', asy
   // Discover the lock-bearing buttons rendered from the production Pro catalog. This
   // avoids duplicating its route list in the test and fails when a new locked item is
   // added without a working upgrade destination.
-  const lockedButtons = page.locator('button').filter({
-    has: page.locator('svg title').filter({ hasText: /^Pro$/ })
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  const lockedButtons = navigation.getByRole('button').filter({
+    has: page.getByRole('img', { name: 'Pro', exact: true })
   })
-  const count = await lockedButtons.count()
-  expect(count).toBeGreaterThan(2)
+  const labels = await lockedButtons.evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute('aria-label') ?? '')
+  )
+  expect(labels.length).toBeGreaterThan(2)
 
-  const labels: string[] = []
-  for (let index = 0; index < count; index += 1) {
-    const button = lockedButtons.nth(index)
-    const label = (await button.locator('span.flex-1').innerText()).trim()
-    labels.push(label)
-    await button.click()
+  for (const label of labels) {
+    expect(label).not.toBe('')
+    await navigation.getByRole('button', { name: label, exact: true }).click()
     await expect(page.getByText('Off Grid AI Pro · Available now')).toBeVisible()
     await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible()
   }
@@ -130,7 +126,10 @@ test('every locked Pro navigation item renders its matching upgrade screen', asy
 })
 
 test('purchase and product links open externally without navigating Electron', async () => {
-  await page.getByRole('button', { name: 'Replay Pro', exact: true }).click()
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('button', { name: 'Replay', exact: true })
+    .click()
   await expect(page.getByText('Off Grid AI Pro · Available now')).toBeVisible()
 
   const expectedPayUrl = await page.evaluate(() => window.api.license.payUrl())

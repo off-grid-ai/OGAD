@@ -1,13 +1,11 @@
 import { memo } from 'react'
+import { Button } from '@offgrid/operator-ui/operator/button'
+import { CaretLeft, CaretRight } from '@phosphor-icons/react'
 import { DropdownMenuItem } from '@renderer/components/ui/dropdown-menu'
 import type { Artifact } from '../../ArtifactCanvas'
 import type { ChatMessage } from '../types'
 import { isSupportingMessage } from '../utlis'
-import {
-  CopyAction,
-  MessageActionsMenu,
-  RegenerateAction
-} from './MessageActions'
+import { CopyAction, MessageActionsMenu, RegenerateAction } from './MessageActions'
 
 export type SpeechControlState = 'idle' | 'loading' | 'playing'
 
@@ -99,25 +97,29 @@ function VariantNavigationComponent({
   const index = message.variantIndex ?? 0
   return (
     <span className="flex items-center gap-1 text-[11px] text-neutral-500">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Previous response"
         onClick={() => onSelect(-1)}
         disabled={index <= 0}
-        className="transition-colors hover:text-green-500 disabled:opacity-30"
+        className="size-6"
       >
-        ‹
-      </button>
+        <CaretLeft aria-hidden="true" />
+      </Button>
       <span>
         {index + 1}/{message.variants.length}
       </span>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Next response"
         onClick={() => onSelect(1)}
         disabled={index >= message.variants.length - 1}
-        className="transition-colors hover:text-green-500 disabled:opacity-30"
+        className="size-6"
       >
-        ›
-      </button>
+        <CaretRight aria-hidden="true" />
+      </Button>
     </span>
   )
 }
@@ -171,7 +173,9 @@ function AssistantMessageActionsComponent({
   )
 }
 
-function MessageTimeComponent({ message }: Readonly<{ message: ChatMessage }>): React.JSX.Element | null {
+function MessageTimeComponent({
+  message
+}: Readonly<{ message: ChatMessage }>): React.JSX.Element | null {
   console.log('MemoryChat MessageTime rendered')
   if (message.createdAt === undefined) return null
   const time = new Date(message.createdAt).toLocaleTimeString(undefined, {

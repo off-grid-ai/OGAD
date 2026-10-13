@@ -1,9 +1,34 @@
-import type { WebContents } from 'electron'
 import type { CdpEvent } from './electron-playwright-relay-protocol'
+
+type DebuggerListener = (...args: [unknown, string, unknown, string?]) => void
+type LifecycleEvent = 'destroyed' | 'render-process-gone' | 'unresponsive'
+
+/** The debugger slice of a page the relay drives: Electron's WebContents.debugger, or a
+ *  browser tab reached through the paired extension (extension-bridge/). */
+export interface RelayDebugger {
+  isAttached(): boolean
+  attach(protocolVersion?: string): void
+  detach(): void
+  sendCommand(method: string, params?: unknown, sessionId?: string): Promise<unknown>
+  on(event: 'message', listener: DebuggerListener): unknown
+  once(event: 'detach', listener: () => void): unknown
+  off(event: 'message', listener: DebuggerListener): unknown
+  off(event: 'detach', listener: () => void): unknown
+}
+
+/** All the relay needs from a page. Electron's WebContents satisfies it as is. */
+export interface RelayContents {
+  readonly debugger: RelayDebugger
+  isDestroyed(): boolean
+  getTitle(): string
+  getURL(): string
+  once(event: LifecycleEvent, listener: () => void): unknown
+  off(event: LifecycleEvent, listener: () => void): unknown
+}
 
 export interface RelayPage {
   id: number
-  contents: WebContents
+  contents: RelayContents
 }
 
 export interface ElectronPlaywrightPageProvider {
@@ -75,7 +100,7 @@ export class ElectronPlaywrightAttachments {
       childSessions: new Set(),
       release: () => undefined
     }
-    type DebuggerMessage = [Electron.Event, string, unknown, string?]
+    type DebuggerMessage = [unknown, string, unknown, string?]
     const onMessage = (...[_event, method, params, childSessionId]: DebuggerMessage): void => {
       const nestedId = nestedSession(method, params)
       if (method === 'Target.attachedToTarget' && nestedId) attached.childSessions.add(nestedId)
@@ -146,6 +171,11 @@ export class ElectronPlaywrightAttachments {
     return [...this.attached.values()].find(
       (page) => page.sessionId === id || page.childSessions.has(id)
     )
+  }
+
+  /** Attachment order is the order Playwright receives page targets. */
+  pageIndex(id: number): number {
+    return [...this.attached.keys()].indexOf(id)
   }
 
   attachedPage(id: number): AttachedPage | undefined {

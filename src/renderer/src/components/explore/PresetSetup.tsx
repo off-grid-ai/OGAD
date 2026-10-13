@@ -359,7 +359,7 @@ export function PresetSetup({
             : `Rewrite the value so it is clear, specific, concise, and suitable for "${field.label}". Follow this field guidance: ${field.help}`
     const prompt = `${currentValue ? 'Edit this short form answer for clarity.' : 'Create a useful surprise answer for this empty form field.'}
 
-Assistant action: ${preset.title}
+God action: ${preset.title}
 Form purpose: ${preset.intake.title}
 Form question: ${field.label}
 Answer to edit: ${currentValue || '(empty)'}

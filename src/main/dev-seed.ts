@@ -15,13 +15,22 @@ import {
   getSetting,
   saveSetting
 } from './database'
-import { createProject, deleteProject } from './rag/store'
+import { createProject, deleteProject, listProjects } from './rag/store'
 import { saveArtifact, listArtifacts, deleteArtifact } from './artifacts'
 import { saveSkill } from './skills'
 import { addConnector, listConnectors } from './mcp'
 import { llm } from './llm'
 import { generateImage, listImageModels } from './imagegen'
 import { ragService } from './rag/index'
+import {
+  getTaskExecutionDevice,
+  getTaskRun,
+  recordTaskRun,
+  taskScreenshotPath
+} from './tasks/task-history'
+import { encodeTaskExecutionPlan, encodeTaskPhase } from '../shared/task-execution-plan'
+import sharp from 'sharp'
+import { getRemoteVisionServerSettings, setRemoteVisionServerSettings } from './vision/remote-vision-server'
 
 const PROJECT_ID = 'offgrid-demo'
 
@@ -122,7 +131,7 @@ async function seedKnowledge(): Promise<void> {
       write: () =>
         fs.writeFileSync(
           path.join(dir, 'offgrid-faq.txt'),
-          'Off Grid AI — FAQ\n\nQ: Does anything leave my device?\nA: No. All inference runs locally; no cloud, no accounts, no API keys.\n\nQ: What can it run?\nA: Open models for text, vision, image, voice and speech, via one OpenAI-compatible gateway on 127.0.0.1:7878.\n\nQ: What is Pro?\nA: The sees/remembers/acts layer — capture, unified search, a proactive secretary — live now, $49/year or $69 once.\n'
+          'Off Grid AI — FAQ\n\nQ: Does anything leave my device?\nA: No. All inference runs locally; no cloud, no accounts, no API keys.\n\nQ: What can it run?\nA: Open models for text, vision, image, voice and speech, via one OpenAI-compatible gateway on 127.0.0.1:7878.\n\nQ: What is Pro?\nA: The sees/remembers/acts layer — capture, unified search, a proactive secretary — live now, $119 once or $7.99/month.\n'
         )
     },
     {
@@ -160,6 +169,144 @@ function cleanup(): void {
 }
 
 export async function seedDemo(live = false): Promise<void> {
+  if (getRemoteVisionServerSettings().servers.length === 0) {
+    setRemoteVisionServerSettings({
+      serverId: 'demo-acme-private-models',
+      name: 'Acme private models',
+      provider: 'custom',
+      endpoint: 'https://models.acme.example/v1',
+      model: 'Qwen 3.5 9B',
+      mediaModels: { text: 'Qwen 3.5 9B', image: 'Qwen Image 3', voice: 'Kokoro' },
+      modelCatalog: [
+        { id: 'Qwen 3.5 9B', name: 'Qwen 3.5 9B', kind: 'text' },
+        { id: 'Qwen Image 3', name: 'Qwen Image 3', kind: 'image' },
+        { id: 'Kokoro', name: 'Kokoro', kind: 'voice' }
+      ]
+    })
+  }
+  // Marketing scenes use the normal data owners, so files, chats and task history also travel by Sync.
+  const acmeProjectId = 'demo-acme-pilot'
+  if (!listProjects().some((project) => project.id === acmeProjectId)) {
+    createProject({
+      id: acmeProjectId,
+      name: 'Acme Corp pilot',
+      description: 'Synthetic customer pilot for Alex at Off Grid AI.'
+    })
+  }
+  const acmeChats = [
+    [
+      'promises',
+      'What did I promise Sam?',
+      'What did I promise Sam?',
+      'You made three commitments to Sam:\n\n1. Send the pilot scope for 40 seats, starting on 14 November.\n2. Confirm the owners and checks: Priya owns the rollout, and Tom verifies the gateway policy.\n3. Arrange a kickoff call next Tuesday.'
+    ],
+    [
+      'owners',
+      'Acme pilot owners and kickoff',
+      'Who owns the rollout and when does the pilot start?',
+      'Priya Nair owns the rollout plan. Tom Reyes verifies the gateway policy before kickoff. The pilot starts on 14 November with 40 seats. Source: Acme_rollout_v3.pdf.'
+    ],
+    [
+      'translation',
+      'Translate the pilot email',
+      'Translate my pilot update into Spanish. Keep the names unchanged.',
+      'Hola Sam:\n\nEl piloto de Acme Corp comienza el 14 de noviembre con 40 plazas. Priya Nair se encarga del plan de despliegue y Tom Reyes verifica la política de la pasarela antes de la reunión inicial. Te enviaré el plan el viernes a las 10:00. Confirmemos la reunión inicial para el próximo martes.\n\nAlex'
+    ],
+    [
+      'reply',
+      'Reply to Sam',
+      'Draft a short reply to Sam confirming the pilot scope and next steps.',
+      'Hi Sam,\n\nThe Acme Corp pilot starts on 14 November with 40 seats. Priya owns the rollout plan, and Tom will verify the gateway policy before kickoff. I will send the rollout plan on Friday at 10 AM. Let us confirm the kickoff call for next Tuesday.\n\nAlex'
+    ]
+  ] as const
+  const conversations = getRagConversations()
+  for (const [slug, title, prompt, answer] of acmeChats) {
+    const id = `demo-acme-${slug}`
+    if (conversations.some((chat) => chat.id === id)) continue
+    createRagConversation(id, title, acmeProjectId)
+    addRagMessage(id, 'user', prompt)
+    addRagMessage(id, 'assistant', answer)
+  }
+  const rolloutPdf = path.join(app.getAppPath(), 'resources', 'demo', 'Acme_rollout_v3.pdf')
+  if (fs.existsSync(rolloutPdf)) {
+    const documents = await ragService.listDocuments(acmeProjectId)
+    if (!documents.some((document) => document.name === 'Acme_rollout_v3.pdf')) {
+      await ragService.indexDocument({
+        projectId: acmeProjectId,
+        path: rolloutPdf,
+        fileName: 'Acme_rollout_v3.pdf',
+        size: fs.statSync(rolloutPdf).size
+      })
+    }
+  }
+  const taskId = 'demo-acme-reminder'
+  const frame = path.join(app.getAppPath(), 'resources', 'demo', 'acme-reminder.png')
+  if (!getTaskRun(taskId) && fs.existsSync(frame)) {
+    const conversationId = 'demo-acme-computer-use'
+    if (!getRagConversations().some((chat) => chat.id === conversationId)) {
+      createRagConversation(conversationId, 'Send Sam the rollout plan', acmeProjectId, 'god')
+      addRagMessage(
+        conversationId,
+        'user',
+        'Create reminder: Send Sam the rollout plan, Friday 10 AM'
+      )
+    }
+    const device = getTaskExecutionDevice()
+    const screenshotPath = taskScreenshotPath(taskId, '4')
+    fs.copyFileSync(frame, screenshotPath)
+    const metadata = await sharp(frame).metadata()
+    const width = metadata.width
+    const height = metadata.height
+    const phases = [
+      'Open Reminders',
+      'Create the rollout reminder',
+      'Set Friday at 10 AM',
+      'Check the reminder'
+    ].map((title, index) => ({ id: String(index + 1), title }))
+    const at = Date.now()
+    // A completed synthetic history item. It must not claim that a live controller is running.
+    recordTaskRun({
+      taskId,
+      journeyId: conversationId,
+      kind: 'computer_use',
+      status: 'done',
+      title: 'Create reminder: Send Sam the rollout plan, Friday 10 AM',
+      summary: 'Created the reminder for Friday at 10 AM.',
+      executionDeviceId: device.id,
+      executionDeviceName: device.name,
+      phase: 'complete',
+      currentStep: 4,
+      screenshotPath,
+      screenshotDeviceId: device.id,
+      at,
+      steps: [
+        encodeTaskExecutionPlan({ version: 1, phases }),
+        ...phases.flatMap((phase) => [encodeTaskPhase(phase.id), phase.title])
+      ],
+      stepDetails: phases.map((phase, index) => ({
+        stepId: phase.id,
+        at: at - (3 - index) * 1000,
+        phase: 'complete',
+        decisionSummary: phase.title,
+        execution: { status: 'complete', result: phase.title },
+        ...(index === 3
+          ? {
+              screenshot: {
+                path: screenshotPath,
+                availability: 'device_local',
+                executionDeviceId: device.id,
+                executionDeviceName: device.name,
+                originalWidth: width,
+                originalHeight: height,
+                inferenceWidth: width,
+                inferenceHeight: height
+              }
+            }
+          : {})
+      }))
+    })
+  }
+
   if (!live && getSetting<boolean>('demo:seeded', false)) {
     console.log('[seed] already seeded — skipping')
     return

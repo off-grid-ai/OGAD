@@ -1,4 +1,9 @@
 import { extractJsonObject } from '../json-extract'
+import {
+  InvalidDecisionError,
+  keepValidCandidates,
+  NoSupportedActionError
+} from './semantic-candidates'
 import type { TaskExecutionPlan } from '../../shared/task-execution-plan'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
 import { getWebUseSettings } from '../web-use-settings'
@@ -129,6 +134,8 @@ export interface BrowserSemanticDecisionRequest {
   maxSteps: number
   recoveryNote: string
   guidance: readonly string[]
+  /** The task's recent steps and what each did, oldest first. */
+  history?: readonly string[]
   signal?: AbortSignal
 }
 
@@ -147,7 +154,8 @@ export async function decideBrowserSemanticAction(
 Goal: ${request.goal}
 Plan:\n${phases}
 Step: ${request.step} of ${request.maxSteps}
-${request.guidance.length ? `User guidance:\n${request.guidance.join('\n')}` : ''}
+${request.guidance.length ? `User guidance (follow it):\n${request.guidance.join('\n')}` : ''}
+${request.history?.length ? `What you did so far, oldest first:\n${request.history.map((h, i) => `${i + 1}. ${h}`).join('\n')}` : 'This is your first step on this page.'}
 ${request.recoveryNote ? `Recovery evidence: ${request.recoveryNote}` : ''}
 
 Rules:
@@ -157,18 +165,32 @@ Rules:
       ? 'Propose 1 to 3 distinct, safe next actions in a candidates array. The Decision model will select one. Do not invent alternatives when only one action is valid.'
       : "Choose exactly one action that advances the user's goal."
   }
+- First check what your last step did (above) against the snapshot. Do not redo a step that worked.
+- If the goal asks for information the snapshot already shows, return done with that exact text as
+  evidence_text. Do not click a link just to read it.
+- For done, the summary must give the answer itself (the title, the number, the fact), not say
+  that you found it.
+- When the goal says how many times to do something, count your matching steps above and stop
+  at that number.
+- The plan is a guide. If a plan step does not fit this page, skip it and act on what the page shows.
 - Keep reason and summary to one short sentence each.
 - Set fields that do not apply to the selected action to null.
 - For element actions, copy the exact ref and human-readable element text from the snapshot.
+- Click radio buttons and checkboxes. Use select_option only for a dropdown (combobox), with values.
+- To submit a search box or a one-field form, type the text, then press_key Enter. Do not click
+  the form itself.
+- For site navigation, prefer the page's visible links and buttons. Do not guess URL paths.
+- A page-not-found response is not a visual-control problem. Go back and use the site's visible navigation.
 - Use semantic controls first. Use fallback only when needed content is visual and has no usable ref.
 - Use human_required for passwords, one-time codes, CAPTCHA, payment, or irreversible confirmation.
 - Do not repeat an action that made no visible change.
+- If the page did not confirm an action, it may have run. Do not repeat it. Check the fresh page first.
 - Return done only when the latest snapshot visibly proves the goal. Copy the exact proving text
   into evidence_text, or its exact Playwright reference into evidence_ref. A completion claim without
   current-page evidence is invalid.
 
 <untrusted_page_snapshot>
-${boundedSnapshot(request.snapshot)}
+${boundedSnapshot(request.snapshot, request.goal)}
 </untrusted_page_snapshot>`
   const raw = await llm.chat(prompt, [], undefined, undefined, {
     disableThinking: true,
@@ -184,7 +206,7 @@ ${boundedSnapshot(request.snapshot)}
       hasObjectEnd: raw.includes('}'),
       endedWithObject: raw.trimEnd().endsWith('}')
     })
-    throw new Error('The text model did not finish its Web Use action.')
+    throw invalidDecision('the reply was cut off before it finished')
   }
   const parsed: unknown = JSON.parse(json)
   if (!useDecider) return parseSemanticDecision(parsed, request.snapshot)
@@ -197,7 +219,7 @@ ${boundedSnapshot(request.snapshot)}
   ) {
     throw invalidDecision('requires 1 to 3 candidate actions')
   }
-  const candidates = parsed.candidates.map((candidate) =>
+  const candidates = keepValidCandidates(parsed.candidates, (candidate) =>
     parseSemanticDecision(candidate, request.snapshot)
   )
   // Finish reasoning before acquiring the Decision model's memory lease. Kev
@@ -219,7 +241,7 @@ ${boundedSnapshot(request.snapshot)}
     selection.choice < 0 ||
     selection.choice >= candidates.length
   ) {
-    throw new Error('The Web Use Decision model did not select a supported action.')
+    throw new NoSupportedActionError()
   }
   return candidates[selection.choice]!
 }
@@ -281,32 +303,74 @@ export function parseSemanticDecision(value: unknown, snapshot: string): Semanti
     reason: requiredString(value.reason, 'reason', true),
     summary: requiredString(value.summary, 'summary', true)
   }
-  validateActionFields(decision, snapshot)
-  return decision
+  const repaired = repairDecision(decision, snapshot)
+  validateActionFields(repaired, snapshot)
+  return repaired
+}
+
+/**
+ * Small models pick the wrong tool for an obvious intent. Found live: select_option with no
+ * values on a radio button, five times, and the task stopped. Like Nanobrowser, repair what is
+ * unambiguous instead of rejecting it: a radio button or checkbox is clicked, and so is a
+ * select_option with nothing to select.
+ */
+export function repairDecision(decision: SemanticDecision, snapshot: string): SemanticDecision {
+  return repairToggleSelect(repairRef(decision, snapshot), snapshot)
+}
+
+/**
+ * A ref the page never printed, for an element the page names exactly once, is that element's
+ * ref. Found live: a model wrote its own sentence in the ref field. BrowserOS re-resolves a
+ * stale ref by role and name the same way. Ambiguous or unknown names are left to be refused.
+ */
+function repairRef(decision: SemanticDecision, snapshot: string): SemanticDecision {
+  const ref = decision.ref?.trim()
+  const element = decision.element?.trim().toLowerCase()
+  if (!ref || !element || snapshot.includes(`[ref=${ref}]`)) return decision
+  const matches = snapshot
+    .split('\n')
+    .map((line) => /^\s*-\s*[a-z]+\s+"([^"]+)"[^\n]*\[ref=([^\]]+)\]/.exec(line))
+    .filter((m): m is RegExpExecArray => m !== null && m[1]!.trim().toLowerCase() === element)
+  return matches.length === 1 ? { ...decision, ref: matches[0]![2]! } : decision
+}
+
+function repairToggleSelect(decision: SemanticDecision, snapshot: string): SemanticDecision {
+  if (decision.action !== 'select_option' || !decision.ref) return decision
+  const line =
+    snapshot.split('\n').find((candidate) => candidate.includes(`[ref=${decision.ref}]`)) ?? ''
+  const toggle = /^\s*-\s*(radio|checkbox|switch)\b/.test(line)
+  return toggle || !decision.values?.length
+    ? { ...decision, action: 'click', values: null }
+    : decision
 }
 
 function validateActionFields(decision: SemanticDecision, snapshot: string): void {
   switch (decision.action) {
     case 'click':
+      requireRefAndElement(decision, snapshot)
+      requireClickable(decision.ref, snapshot)
+      return
     case 'hover':
-      requireRefAndElement(decision)
+      requireRefAndElement(decision, snapshot)
       return
     case 'type':
-      requireRefAndElement(decision)
+      requireRefAndElement(decision, snapshot)
       if (decision.text === null) throw invalidDecision('type requires text')
       return
     case 'press_key':
       requireNonBlank(decision.key, 'press_key requires key')
       return
     case 'select_option':
-      requireRefAndElement(decision)
+      requireRefAndElement(decision, snapshot)
       if (!decision.values?.length) throw invalidDecision('select_option requires values')
       return
     case 'drag':
       requireNonBlank(decision.start_element, 'drag requires start_element')
       requireNonBlank(decision.start_ref, 'drag requires start_ref')
+      requireRefOnPage(decision.start_ref, snapshot)
       requireNonBlank(decision.end_element, 'drag requires end_element')
       requireNonBlank(decision.end_ref, 'drag requires end_ref')
+      requireRefOnPage(decision.end_ref, snapshot)
       return
     case 'navigate':
       validateWebUrl(decision.url)
@@ -321,28 +385,91 @@ function validateActionFields(decision: SemanticDecision, snapshot: string): voi
   }
 }
 
+/** For matching evidence: case, spacing and quotes do not count. */
+const normalized = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/["'`\u2018\u2019\u201c\u201d]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/** A ref however the model wrote it: e12, [ref=e12], ref=e12, or inside its evidence text. */
+function evidenceRefOf(
+  decision: Pick<SemanticDecision, 'evidence_ref' | 'evidence_text'>
+): string | null {
+  for (const value of [decision.evidence_ref, decision.evidence_text]) {
+    const ref = /(?:\[?ref=)?\b((?:f\d+)?e\d+)\]?/.exec(value?.trim() ?? '')?.[1]
+    if (ref && (value === decision.evidence_ref || /ref=/.test(value ?? ''))) return ref
+  }
+  return null
+}
+
 export function completionEvidenceMatches(
   decision: Pick<SemanticDecision, 'evidence_ref' | 'evidence_text'>,
   snapshot: string
 ): boolean {
-  const evidenceRef = decision.evidence_ref?.trim()
-  const evidenceText = decision.evidence_text?.trim()
-  const hasRef = Boolean(evidenceRef && snapshot.includes(`[ref=${evidenceRef}]`))
-  const hasText = Boolean(
-    evidenceText && evidenceText.length >= 3 && snapshot.includes(evidenceText)
-  )
-  return hasRef || hasText
+  const ref = evidenceRefOf(decision)
+  if (ref && snapshot.includes(`[ref=${ref}]`)) return true
+  const page = normalized(snapshot)
+  const text = normalized(decision.evidence_text ?? '')
+  if (text.length >= 3 && page.includes(text)) return true
+  // An answer with several values ("a, b and c"): each must be on the page. Found live: the
+  // three top repositories, each on the page, refused as one string.
+  const parts = (decision.evidence_text ?? '')
+    .split(/\s*(?:[,;\n|]|\band\b)\s*/)
+    .map(normalized)
+    .filter((part) => part.length > 0)
+  return parts.length > 1 && parts.every((part) => part.length >= 3 && page.includes(part))
 }
 
 function validateCompletionEvidence(decision: SemanticDecision, snapshot: string): void {
   if (!completionEvidenceMatches(decision, snapshot)) {
-    throw invalidDecision('done requires exact evidence from the current page snapshot')
+    // Found live: a model wrote "both checkboxes are checked", which no snapshot line says.
+    throw invalidDecision(
+      'done needs exact evidence from this snapshot: put the ref of the element that proves it in evidence_ref (for a state such as [checked]), or copy a few exact words from the snapshot into evidence_text'
+    )
   }
 }
 
-function requireRefAndElement(decision: SemanticDecision): void {
+function requireRefAndElement(decision: SemanticDecision, snapshot: string): void {
   requireNonBlank(decision.ref, `${decision.action} requires ref`)
   requireNonBlank(decision.element, `${decision.action} requires element`)
+  requireRefOnPage(decision.ref, snapshot)
+}
+
+/**
+ * The ref must be one this snapshot printed. Found live: a small model put a link's text where
+ * the ref goes, and the click failed on the page. browser-use refuses unknown element indexes.
+ */
+/** Page structure, not controls: clicking one does nothing unless the page made it clickable. */
+const NOT_CLICKABLE =
+  /^\s*-\s*(form|main|navigation|banner|contentinfo|region|article|paragraph|list|separator|document|table|rowgroup)\b/
+
+/**
+ * A click must land on something clickable. Found live: the model clicked a search <form>, the
+ * page did not change, and it tried again until the task stopped. browser-use only numbers
+ * interactive elements; Playwright marks a clickable container with [cursor=pointer].
+ */
+function requireClickable(ref: string | null, snapshot: string): void {
+  const line = snapshot.split('\n').find((candidate) => candidate.includes(`[ref=${ref}]`)) ?? ''
+  if (NOT_CLICKABLE.test(line) && !line.includes('[cursor=pointer]')) {
+    const role = line
+      .trim()
+      .replace(/^-\s*/, '')
+      .split(/[\s:[]/)[0]
+    throw invalidDecision(
+      `${role} ${ref} is part of the page layout, not a control; click a button or link inside it`
+    )
+  }
+}
+
+function requireRefOnPage(ref: string | null, snapshot: string): void {
+  const value = ref?.trim() ?? ''
+  if (!snapshot.includes(`[ref=${value}]`)) {
+    throw invalidDecision(
+      `ref "${value.slice(0, 40)}" is not on this page; copy the exact [ref=...] value from the snapshot`
+    )
+  }
 }
 
 function requireNonBlank(value: string | null, message: string): void {
@@ -395,30 +522,70 @@ function requiredEnum<const T extends readonly string[]>(
 }
 
 function invalidDecision(detail: string): Error {
-  return new Error(`The text model returned an invalid Web Use action: ${detail}.`)
+  return new InvalidDecisionError(detail)
 }
 
-function boundedSnapshot(snapshot: string): string {
+/** Words of the goal worth finding on a long page: no short or common words. */
+function goalTerms(goal: string): string[] {
+  const common = new Set([
+    'open',
+    'find',
+    'tell',
+    'what',
+    'which',
+    'with',
+    'from',
+    'that',
+    'this',
+    'page',
+    'shown',
+    'about',
+    'there',
+    'their',
+    'have',
+    'into',
+    'then',
+    'article',
+    'website',
+    'https',
+    'http',
+    'www'
+  ])
+  return [...new Set(goal.toLowerCase().match(/[a-z0-9][a-z0-9-]{3,}/g) ?? [])].filter(
+    (word) => !common.has(word)
+  )
+}
+
+/**
+ * A long snapshot cut to fit: lines that name what the goal asks about (with their neighbours),
+ * then controls with their labels, then the start and end of the page. Found live: a Wikipedia
+ * article cut to its controls lost the infobox line the goal asked for. browser-use and
+ * Nanobrowser keep what is in view; the snapshot has no positions, so the goal decides.
+ */
+export function boundedSnapshot(snapshot: string, goal = ''): string {
   if (snapshot.length <= MAX_SNAPSHOT_CHARS) return snapshot
   const lines = snapshot.split('\n')
-  const selected = new Set<number>()
-  const retain = (index: number): void => {
-    if (index >= 0 && index < lines.length) selected.add(index)
+  const terms = goalTerms(goal)
+  const picked = new Set<number>()
+  let used = 0
+  const take = (index: number): void => {
+    if (index < 0 || index >= lines.length || picked.has(index)) return
+    const cost = (lines[index] ?? '').length + 1
+    if (used + cost > MAX_SNAPSHOT_CHARS - 200) return
+    picked.add(index)
+    used += cost
   }
-  for (let index = 0; index < lines.length; index += 1) {
-    if (index < 30 || index >= lines.length - 30 || /\[ref=[^\]]+\]/.test(lines[index] ?? '')) {
-      retain(index - 1)
-      retain(index)
-      retain(index + 1)
-    }
+  const around = (index: number, reach: number): void => {
+    for (let offset = -reach; offset <= reach; offset += 1) take(index + offset)
   }
-  const compact = [...selected]
-    .sort((left, right) => left - right)
-    .map((index) => lines[index] ?? '')
-    .join('\n')
-  if (compact.length <= MAX_SNAPSHOT_CHARS) {
-    return `[Snapshot shortened. Interactive controls and nearby labels retained.]\n${compact}`
-  }
-  const half = Math.floor((MAX_SNAPSHOT_CHARS - 120) / 2)
-  return `[Snapshot shortened. Beginning and end retained.]\n${compact.slice(0, half)}\n…\n${compact.slice(-half)}`
+  lines.forEach((line, index) => {
+    const lower = line.toLowerCase()
+    if (terms.some((term) => lower.includes(term))) around(index, 2)
+  })
+  lines.forEach((line, index) => {
+    if (index < 30 || /\[ref=[^\]]+\]/.test(line)) around(index, 1)
+  })
+  for (let index = lines.length - 30; index < lines.length; index += 1) take(index)
+  const kept = [...picked].sort((left, right) => left - right).map((index) => lines[index] ?? '')
+  return `[Snapshot shortened. Lines about the goal, controls and their labels retained.]\n${kept.join('\n')}`
 }
