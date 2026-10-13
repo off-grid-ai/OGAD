@@ -57,7 +57,7 @@ export function estimateEmbeddingRebuildItems(): number {
 
 /** Cancel at the next batch boundary and restore the previous choice and indexes. */
 export async function cancelEmbeddingIndexRebuild(): Promise<boolean> {
-  if (!rebuild || !['preparing', 'rebuilding'].includes(status.phase)) return false
+  if (rebuild === null || !['preparing', 'rebuilding'].includes(status.phase)) return false
   cancelRequested = true
   await rebuild
   return status.phase === 'restored'
@@ -259,7 +259,7 @@ export async function rebuildEmbeddingIndexes(): Promise<void> {
 }
 
 export function startEmbeddingIndexRebuild(): Promise<void> {
-  if (rebuild) return rebuild
+  if (rebuild !== null) return rebuild
   cancelRequested = false
   publish({ phase: 'preparing', model: getEmbeddingModelId(), done: 0, total: 0 })
   rebuild = Promise.resolve().then(async () => {

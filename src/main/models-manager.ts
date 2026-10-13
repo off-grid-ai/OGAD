@@ -1566,7 +1566,7 @@ export async function setActiveModalChoice(
         const { isSupportedVideoWeight } = await import('@offgrid/models')
         const fname = downloaded
           ? modal === 'video'
-            ? downloaded.files.find(isSupportedVideoWeight)
+            ? downloaded.files.find((file) => isSupportedVideoWeight(file))
             : downloadedPrimary(downloaded)
           : e
             ? primaryFileName(e as unknown as CatalogEntry)
