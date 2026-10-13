@@ -248,7 +248,8 @@ describe('model gateway chat streaming', () => {
         text: codec.remoteVisionModelId(serverId, mediaModels.text),
         image: 'local-image',
         speech: 'local-voice',
-        transcription: 'local-transcription'
+        transcription: 'local-transcription',
+        video: null
       })
 
       await manager.activateModel(codec.remoteVisionModelId(serverId, mediaModels.voice))
@@ -560,16 +561,20 @@ process.on('SIGTERM', () => server.close(() => process.exit(0)))`
       await expect(llm.setSettings({ performanceMode: 'conservative' })).resolves.toBeUndefined()
       const plan = await setup.getSetupPlan()
       expect(plan.mode).toBe('conservative')
-      expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
+      // The plan offers the baseline first; anything after it is opt-in.
+      const baseline = plan.items.slice(0, 3)
+      expect(baseline.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
+      const optIn = plan.items.slice(3)
 
       const progress: import('../setup').SetupProgress[] = []
       const result = await setup.autoConfigure((event) => progress.push(event))
 
       expect(result).toMatchObject({ success: true, modelId: plan.items[0]?.id })
       expect(progress.at(-1)).toMatchObject({ phase: 'done', modelId: plan.items[0]?.id })
-      expect(await manager.listInstalled()).toEqual(
-        expect.arrayContaining(plan.items.map((item) => item.id))
-      )
+      const installed = await manager.listInstalled()
+      expect(installed).toEqual(expect.arrayContaining(baseline.map((item) => item.id)))
+      // With nothing chosen, Configure for me installs only the baseline.
+      for (const item of optIn) expect(installed).not.toContain(item.id)
       expect(manager.getActiveModel()).toBe(plan.items[0]?.id)
       expect(manager.getActiveModalities()).toMatchObject({
         text: plan.items[0]?.id,
