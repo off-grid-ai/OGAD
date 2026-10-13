@@ -682,7 +682,7 @@ app.whenReady().then(async () => {
       lateEffect: 'keep',
       run: async () => {
         const { llm } = await import('./llm')
-        registerRuntime(llm.runtime)
+        registerRuntime(llm.runtime, { readChatBackend: () => llm.runtimeBackend() })
         applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
         // A remote chat model needs no local engine: loading one anyway holds gigabytes of
         // memory for nothing. Chat starts it on demand if the user switches back.

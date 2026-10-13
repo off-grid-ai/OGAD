@@ -142,3 +142,19 @@ export interface CacheCleanupResultContract {
 export const CACHE_CLEANUP_CHANNEL = 'storage:clear-cache'
 
 export type ArtifactKindContract = 'html' | 'svg' | 'mermaid' | 'react' | 'text' | 'image'
+
+/** Public API credential metadata. The secret is returned only at creation. */
+export interface GatewayApiKeyContract {
+  id: string
+  name: string
+  prefix: string
+  createdAt: number
+  expiresAt: number | null
+  lastUsedAt: number | null
+  revokedAt: number | null
+}
+
+export interface GatewayApiKeySettingsContract {
+  enabled: boolean
+  keys: GatewayApiKeyContract[]
+}

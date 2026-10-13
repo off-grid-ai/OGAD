@@ -13,7 +13,7 @@ export function hasWindowsNvidiaDriver(
 
 /** Linux GPU device nodes are created by the active NVIDIA or DRM driver. */
 export function hasLinuxGpuDevice(): boolean {
-  if (fs.existsSync('/dev/nvidia0')) return true
+  if (hasLinuxNvidiaDriver()) return true
   try {
     return fs.readdirSync('/dev/dri').some((name) => name.startsWith('renderD'))
   } catch {
@@ -23,7 +23,12 @@ export function hasLinuxGpuDevice(): boolean {
 
 /** NVIDIA's Linux device node is available only when its driver is active. */
 export function hasLinuxNvidiaDriver(): boolean {
-  return fs.existsSync('/dev/nvidia0')
+  try {
+    // Containers can expose a GPU with a nonzero host device index.
+    return fs.readdirSync('/dev').some((name) => /^nvidia\d+$/.test(name))
+  } catch {
+    return false
+  }
 }
 
 /** Prefer accelerated Whisper, with a separate CPU runtime as the safe fallback. */

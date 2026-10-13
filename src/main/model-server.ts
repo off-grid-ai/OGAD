@@ -40,7 +40,10 @@ import https from 'https'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { randomUUID } from 'crypto'
+import { randomUUID, randomBytes, createHash } from 'crypto'
+import { getSecret, setSecret, listSecretKeys } from './secrets'
+import { authorizeBearer } from './mcp-auth-logic'
+import type { GatewayApiKeyContract, GatewayApiKeySettingsContract } from '../shared/ipc-contracts'
 import { getActiveTranscription } from './transcription/select'
 import { transcriptionRequestOptions } from './model-server/transcription-request'
 import * as tts from './tts'
@@ -68,13 +71,14 @@ import {
 import { errBody, errMeta } from './model-server/errors'
 import { handleExtensionBridge, handleExtensionUpgrade } from './extension-bridge/bridge-http'
 import { isAsync, matchPollRoute } from './model-server/async-request'
-import { sanitizeChatMessages } from './model-server/chat-messages'
+import { sanitizeChatMessages, parseDecisionChatMessages } from './model-server/chat-messages'
 import { applyThinkingPayload, requestedThinking } from './llm/chat-payload'
 import { parseMultipart } from './model-server/multipart'
-import { tagLlmEntries, modelEntry, ollamaMirror } from './model-server/models-list'
+import { tagLlmEntries, modelEntry, ollamaMirror, specialistModelEntries, installedTextModelEntries } from './model-server/models-list'
 import { buildGatewayModalities, type GatewayModalities } from './model-server/health'
 import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
+import { modalityQueue, CHAT_JOB } from './modality-queue/queue'
 import { IMAGE_CANCELLED_MESSAGE } from './imagegen/generation-lifecycle'
 import { parseRemoteVisionModelId, remoteVisionModelId } from '../shared/remote-vision-server'
 import {
@@ -96,6 +100,126 @@ const upstreamPort = (): number => llm.getPort()
 const MAX_UPLOAD = 200 * 1024 * 1024 // 200MB upload cap (audio / init image)
 
 let server: http.Server | null = null
+
+// The gateway owns its credentials. Reuse the OS-encrypted secret store; do not
+// put credentials in generic settings, return stored hashes to IPC, or log them.
+const GATEWAY_KEYS_SECRET = 'gateway:api-keys'
+type StoredGatewayKeys = { enabled: boolean; keys: (GatewayApiKeyContract & { digest: string })[] }
+
+function readGatewayKeys(): StoredGatewayKeys {
+  const raw = getSecret(GATEWAY_KEYS_SECRET)
+  if (raw === null) {
+    if (listSecretKeys().includes(GATEWAY_KEYS_SECRET))
+      throw new Error('API key storage is locked. Unlock system key storage and try again.')
+    return { enabled: false, keys: [] }
+  }
+  const value = JSON.parse(raw) as StoredGatewayKeys
+  if (
+    typeof value.enabled !== 'boolean' ||
+    !Array.isArray(value.keys) ||
+    value.keys.some(
+      (key) =>
+        typeof key.id !== 'string' ||
+        typeof key.name !== 'string' ||
+        typeof key.digest !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(key.digest) ||
+        (key.expiresAt !== null && !Number.isFinite(key.expiresAt)) ||
+        (key.revokedAt !== null && !Number.isFinite(key.revokedAt))
+    )
+  )
+    throw new Error('API key storage could not be read.')
+  return value
+}
+
+function writeGatewayKeys(value: StoredGatewayKeys): void {
+  if (!setSecret(GATEWAY_KEYS_SECRET, JSON.stringify(value))) {
+    throw new Error('API keys require system encryption. Unlock system key storage and try again.')
+  }
+}
+
+export function gatewayApiKeySettings(): GatewayApiKeySettingsContract {
+  const state = readGatewayKeys()
+  return { enabled: state.enabled, keys: state.keys.map(({ digest: _digest, ...key }) => key) }
+}
+
+export function setGatewayApiKeyRequired(enabled: boolean): GatewayApiKeySettingsContract {
+  if (typeof enabled !== 'boolean') throw new Error('Authentication must be on or off.')
+  const state = readGatewayKeys()
+  state.enabled = enabled
+  writeGatewayKeys(state)
+  return gatewayApiKeySettings()
+}
+
+export function createGatewayApiKey(
+  name: string,
+  expiresAt: number | null,
+  replaceId?: string
+): { key: string; settings: GatewayApiKeySettingsContract } {
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 80)
+    throw new Error('Enter a key name of 1 to 80 characters.')
+  const now = Date.now()
+  if (
+    expiresAt !== null &&
+    (!Number.isSafeInteger(expiresAt) || expiresAt <= now || expiresAt > 8640000000000000)
+  )
+    throw new Error('Choose an expiry date in the future.')
+  const state = readGatewayKeys()
+  if (replaceId !== undefined) {
+    const previous = state.keys.find((key) => key.id === replaceId)
+    if (!previous || previous.revokedAt !== null) throw new Error('This key is no longer active.')
+    previous.revokedAt = now
+  }
+  const key = `ogad_${randomBytes(32).toString('hex')}`
+  state.keys.push({
+    id: randomUUID(),
+    name: name.trim(),
+    prefix: key.slice(0, 13),
+    digest: createHash('sha256').update(key).digest('hex'),
+    createdAt: now,
+    expiresAt,
+    revokedAt: null,
+    lastUsedAt: null
+  })
+  state.enabled = true
+  writeGatewayKeys(state)
+  return { key, settings: gatewayApiKeySettings() }
+}
+
+export function revokeGatewayApiKey(id: string): GatewayApiKeySettingsContract {
+  const state = readGatewayKeys()
+  const key = state.keys.find((key) => key.id === id)
+  if (!key) throw new Error('API key not found.')
+  key.revokedAt ??= Date.now()
+  writeGatewayKeys(state)
+  return gatewayApiKeySettings()
+}
+
+function authorizeGateway(req: http.IncomingMessage): boolean {
+  const state = readGatewayKeys()
+  if (!state.enabled) return true
+  const header = req.headers.authorization
+  // Preserve the existing strict Bearer parser and constant-time comparison.
+  const credential = header?.match(/^Bearer[ \t]+([^\s]+)$/i)?.[1]
+  if (!credential) return false
+  const digest = createHash('sha256').update(credential).digest('hex')
+  const now = Date.now()
+  let match: StoredGatewayKeys['keys'][number] | undefined
+  for (const key of state.keys) {
+    if (
+      authorizeBearer(`Bearer ${digest}`, key.digest) &&
+      key.revokedAt === null &&
+      (key.expiresAt === null || now < key.expiresAt)
+    )
+      match = key
+  }
+  if (!match) return false
+  // Limit disk writes without caching credentials: revocation applies on the next request.
+  if (match.lastUsedAt === null || now - match.lastUsedAt >= 60_000) {
+    match.lastUsedAt = now
+    writeGatewayKeys(state)
+  }
+  return true
+}
 
 async function liveGatewayModalities(imageAvailable: boolean): Promise<GatewayModalities> {
   let installed: string[] = []
@@ -314,9 +438,11 @@ function proxyToLlama(
   res: http.ServerResponse,
   bodyOverride?: Buffer,
   retryUntil = 0,
-  activity?: AIRequestHandle
+  activity?: AIRequestHandle,
+  targetPort?: number
 ): void {
-  const headers = { ...req.headers, host: `${UPSTREAM_HOST}:${upstreamPort()}` }
+  const headers = { ...req.headers, host: `${UPSTREAM_HOST}:${targetPort ?? upstreamPort()}` }
+  delete headers.authorization
   if (bodyOverride) {
     headers['content-length'] = String(bodyOverride.length)
     delete headers['transfer-encoding']
@@ -328,7 +454,7 @@ function proxyToLlama(
       const proxyReq = http.request(
         {
           hostname: UPSTREAM_HOST,
-          port: upstreamPort(),
+          port: targetPort ?? upstreamPort(),
           path: req.url,
           method: req.method,
           headers
@@ -625,7 +751,7 @@ function jsonWithId(res: http.ServerResponse, rid: string, result: unknown): voi
 // via the shared `retryWithDeadline` helper. Only a connection error is
 // transient; an HTTP >= 400 answer (or a parse failure) is the engine's real
 // reply and is never retried - so those attempt-rejections are tagged fatal.
-function callLlamaJson(bodyObj: Record<string, unknown>, retryUntil: number): Promise<unknown> {
+function callLlamaJson(bodyObj: Record<string, unknown>, retryUntil: number, targetPort?: number): Promise<unknown> {
   const payload = Buffer.from(JSON.stringify({ ...bodyObj, stream: false }))
   // One attempt. A connection ('error') rejection is left un-tagged (transient);
   // an HTTP-error or parse rejection is tagged `fatal` so it is not replayed.
@@ -634,7 +760,7 @@ function callLlamaJson(bodyObj: Record<string, unknown>, retryUntil: number): Pr
       const upstream = http.request(
         {
           hostname: UPSTREAM_HOST,
-          port: upstreamPort(),
+          port: targetPort ?? upstreamPort(),
           path: '/v1/chat/completions',
           method: 'POST',
           headers: { 'content-type': 'application/json', 'content-length': String(payload.length) }
@@ -679,6 +805,93 @@ function callLlamaJson(bodyObj: Record<string, unknown>, retryUntil: number): Pr
   })
 }
 
+async function handleSpecialistChat(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  rid: string,
+  body: Record<string, unknown>
+): Promise<boolean> {
+  if (typeof body.model !== 'string') return false
+  const { desktopCatalog, listInstalled } = await import('./models-manager')
+  const model = (await desktopCatalog()).find((entry) => entry.id === body.model && entry.kind === 'computer_use')
+  if (!model) return false
+  if (!(await listInstalled()).includes(model.id)) {
+    json(res, 404, errBody('The requested specialist is not installed.', 'not_found'))
+    return true
+  }
+  res.setHeader('X-Request-Id', rid)
+  const activity = new AIRequestHandle({ modality: 'text', source: 'API specialist', model: model.id, request: body })
+  try {
+    if (model.tags?.includes('Decision')) {
+      let input: ReturnType<typeof parseDecisionChatMessages>
+      try {
+        input = parseDecisionChatMessages(body.messages)
+      } catch (error) {
+        activity.finish(undefined, error)
+        json(res, 400, errBody((error as Error).message, 'invalid_request_error'))
+        return true
+      }
+      const { decisionRuntime } = await import('./accessibility/decision-runtime')
+      const controller = new AbortController()
+      const abort = (): void => { if (!res.writableEnded) controller.abort() }
+      const asyncRequest = isAsync(req, body)
+      if (!asyncRequest) res.once('close', abort)
+      await serve(res, rid, 'chat', '/v1/chat/completions', asyncRequest, async () => {
+        try {
+          await decisionRuntime.start(model.id)
+          if (controller.signal.aborted) throw new Error('Decision request cancelled.')
+          if (decisionRuntime.activeModelId !== model.id) throw new Error('The requested decision model is not ready.')
+          const decision = await decisionRuntime.decide(input.context, input.question, input.options, controller.signal)
+          const result = {
+            id: `chatcmpl-${rid}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: model.id,
+            choices: [{ index: 0, message: { role: 'assistant', content: JSON.stringify(decision) }, finish_reason: 'stop' }]
+          }
+          activity.finish(result)
+          return result
+        } catch (error) {
+          activity.finish(undefined, error)
+          throw error
+        } finally {
+          res.off('close', abort)
+        }
+      }, (value) => {
+        if (res.destroyed) return
+        const result = value as { id: string; created: number; model: string; choices: { message: { content: string } }[] }
+        if (body.stream === true) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' })
+          const chunk = { id: result.id, object: 'chat.completion.chunk', created: result.created, model: result.model }
+          res.write(`data: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: { role: 'assistant', content: result.choices[0]!.message.content }, finish_reason: null }] })}\n\n`)
+          res.end(`data: ${JSON.stringify({ ...chunk, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
+        } else jsonWithId(res, rid, result)
+      })
+    } else {
+      const { grounderRuntime } = await import('./vision/grounder-runtime')
+      const connection = await grounderRuntime.connection(model.id)
+      if (res.destroyed) return true
+      await inlineChatImages(body)
+      sanitizeChatMessages(body)
+      activity.update({ backend: connection.computeBackend ?? 'Unknown', effectiveRequest: body })
+      const port = Number(new URL(connection.endpoint).port)
+      if (isAsync(req, body)) {
+        await serve(res, rid, 'chat', '/v1/chat/completions', true, async () => {
+          try {
+            const result = await callLlamaJson(body, Date.now() + 45_000, port)
+            activity.finish(result)
+            return result
+          } catch (error) { activity.finish(undefined, error); throw error }
+        }, () => {})
+      } else proxyToLlama(req, res, Buffer.from(JSON.stringify(body)), Date.now() + 45_000, activity, port)
+    }
+  } catch (error) {
+    activity.finish(undefined, error)
+    if (!res.headersSent && !res.destroyed) {
+      const failure = errMeta(error)
+      json(res, failure.status, errBody(failure.message, failure.type))
+    }
+  }
+  return true
+}
+
 async function handleChat(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -705,6 +918,27 @@ async function handleChat(
     return
   }
 
+  try {
+    if (await handleSpecialistChat(req, res, rid, body)) return
+  } catch (error) {
+    const failure = errMeta(error)
+    json(res, failure.status, errBody(failure.message, failure.type))
+    return
+  }
+  await modalityQueue.run(CHAT_JOB, async () => {
+    const requested = typeof body.model === 'string' ? body.model : ''
+    if (requested && !parseRemoteVisionModelId(requested)) {
+      const { getCatalog, listInstalled, setActiveModel } = await import('./models-manager')
+      const installed = await listInstalled()
+      const catalog = (await getCatalog()).models as { id: string; kind: string; remoteServerId?: string }[]
+      const selected = catalog.find((model) => model.id === requested && !model.remoteServerId &&
+        (model.kind === 'text' || model.kind === 'vision') && installed.includes(model.id))
+      if (selected && llm.activeModelInfo()?.id !== requested) {
+        const result = await setActiveModel(requested)
+        if (!result.success) { json(res, 400, errBody(result.error ?? 'Model could not be selected.')); return }
+      }
+      if (selected) await llm.init()
+    }
   try {
     let changed = await inlineChatImages(body)
     // Gemma 4 (and others) reject system messages that aren't at position 0.
@@ -735,13 +969,14 @@ async function handleChat(
   // Async chat: run a non-streaming completion in the background and poll for it.
   if (isAsync(req, body)) {
     const inlined = body
+    let completion: Promise<unknown> | undefined
     await serve(
       res,
       rid,
       'chat',
       '/v1/chat/completions',
       true,
-      async () => {
+      () => completion = (async () => {
         try {
           const result = await callLlamaJson(inlined, Date.now() + 45_000)
           activity.finish(result)
@@ -750,15 +985,26 @@ async function handleChat(
           activity.finish(undefined, error)
           throw error
         }
-      },
+      })(),
       () => {}
     )
+    await completion?.catch(() => {})
     return
   }
 
   // Sync: stream straight through. Retry for up to 45s if llama-server is mid-reload
   // (e.g. just after an image generation freed and is respawning it, ~16s).
-  proxyToLlama(req, res, forward, Date.now() + 45_000, activity)
+  await new Promise<void>((resolve) => {
+    res.once('close', resolve)
+    res.once('finish', resolve)
+    proxyToLlama(req, res, forward, Date.now() + 45_000, activity)
+  })
+  }).catch((error) => {
+    if (!res.headersSent && !res.destroyed) {
+      const failure = errMeta(error)
+      json(res, failure.status, errBody(failure.message, failure.type))
+    }
+  })
 }
 
 // ─── Embeddings (local MiniLM) ───────────────────────────────────────────────
@@ -929,8 +1175,17 @@ async function handleModelsList(
           })
         ]
       : []
+  const { desktopCatalog, listInstalled, getCatalog } = await import('./models-manager')
+  const installed = await listInstalled()
+  const catalog = (await getCatalog()).models as { id: string; name: string; kind: string; remoteServerId?: string }[]
+  if (!activeRemote) {
+    const downloaded = installedTextModelEntries(catalog, installed, now)
+    if (downloaded.length) text = downloaded
+  }
+  const specialists = specialistModelEntries(await desktopCatalog(), installed, now)
   const data: Record<string, unknown>[] = [
     ...text,
+    ...specialists.filter((model) => !text.some((entry) => entry.id === model.id)),
     ...images,
     ...videos,
     ...speech,
@@ -1515,7 +1770,7 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       res.setHeader('Vary', 'Origin')
       res.setHeader('Access-Control-Allow-Private-Network', 'true')
     }
-    res.setHeader('Access-Control-Allow-Headers', '*')
+    res.setHeader('Access-Control-Allow-Headers', '*, Authorization')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
@@ -1525,6 +1780,24 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
 
     const url = (req.url || '/').split('?')[0]! // split() always yields >= 1 element
     const method = req.method || 'GET'
+
+    // Check before reading bodies, starting work, serving results, or forwarding aliases.
+    // MCP and paired extension traffic use their existing, separate credentials.
+    const publicRoute =
+      ['/', '/health', '/docs', '/openapi.json', '/mcp'].includes(url) ||
+      url.startsWith('/v1/extension/')
+    if (!publicRoute) {
+      try {
+        if (!authorizeGateway(req)) {
+          res.setHeader('WWW-Authenticate', 'Bearer realm="Off Grid AI API"')
+          json(res, 401, errBody('A valid API key is required.', 'authentication_error'))
+          return
+        }
+      } catch {
+        json(res, 503, errBody('API key storage is unavailable.', 'server_error'))
+        return
+      }
+    }
 
     // Every request gets a stable id — returned as X-Request-Id and reused as the
     // poll id for async work, so any request can be tracked/polled by the same id.

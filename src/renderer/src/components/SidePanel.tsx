@@ -11,6 +11,7 @@ type SidePanelProps = {
   className?: string
   style?: CSSProperties
   restoreFocusRef?: RefObject<HTMLElement | null>
+  modal?: boolean
 }
 
 /**
@@ -25,7 +26,8 @@ export function SidePanel({
   onClose,
   className = '',
   style,
-  restoreFocusRef
+  restoreFocusRef,
+  modal = true
 }: SidePanelProps): React.JSX.Element {
   useEscapeToClose(onClose)
   const reduceMotion = useReducedMotion()
@@ -41,7 +43,7 @@ export function SidePanel({
     panel?.focus()
 
     const trapFocus = (event: KeyboardEvent): void => {
-      if (event.key !== 'Tab' || !panel) return
+      if (!modal || event.key !== 'Tab' || !panel) return
       const focusable = Array.from(
         panel.querySelectorAll<HTMLElement>(
           'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
@@ -75,27 +77,29 @@ export function SidePanel({
     panel?.addEventListener('keydown', trapFocus)
     return () => {
       panel?.removeEventListener('keydown', trapFocus)
-      previousFocus?.focus()
+      if (modal || panel?.contains(document.activeElement)) previousFocus?.focus()
     }
-  }, [restoreFocusRef])
+  }, [restoreFocusRef, modal])
 
   return createPortal(
     <div className="pointer-events-none" data-testid="side-panel-layer">
-      <motion.div
-        className="pointer-events-auto fixed inset-0 z-[2147483646] bg-black/30"
-        onClick={onClose}
-        aria-hidden="true"
-        data-testid="side-panel-backdrop"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: reduceMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
-      />
+      {modal && (
+        <motion.div
+          className="pointer-events-auto fixed inset-0 z-[2147483646] bg-black/30"
+          onClick={onClose}
+          aria-hidden="true"
+          data-testid="side-panel-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
+        />
+      )}
       <motion.div
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
-        aria-modal="true"
+        aria-modal={modal || undefined}
         aria-label={ariaLabel}
         className={`pointer-events-auto fixed inset-y-0 right-0 z-[2147483647] flex max-w-full flex-col border-l border-neutral-800 bg-neutral-950 font-mono shadow-2xl ${className}`}
         style={style}

@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { binRoots, exe } from '../runtime-env'
 import { nativeLibraryEnv } from '../native-library-env'
+import { hasLinuxNvidiaDriver } from '../transcription/whisper-runtime'
 import { prioritizeBackend, type BackendPreference } from '../../shared/backend-preferences'
 
 /** Build backend used for runtime selection; this does not report the compute device. */
@@ -29,7 +30,7 @@ export function hasWindowsVulkanLoader(
  */
 export function findSdBinaries(name: 'sd-cli' | 'sd-server', preference: BackendPreference = 'auto'): string[] {
   let directories =
-    process.platform === 'linux' && fs.existsSync('/dev/nvidia0')
+    process.platform === 'linux' && hasLinuxNvidiaDriver()
       ? ['sd-cuda', 'sd', 'sd-cpu']
       : ['sd', 'sd-cpu']
   if (process.platform === 'win32') {

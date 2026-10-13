@@ -36,6 +36,7 @@ import {
 } from './downloaded-models'
 import {
   MTP_COMPANIONS,
+  selectedGgufParts,
   mergeCatalog,
   remainingDownloadBytes,
   installedIds,
@@ -71,8 +72,8 @@ import {
   deactivateRemoteVisionMediaModel,
   getRemoteVisionServerSettings
 } from './vision/remote-vision-server'
-import { getComputerUseSettings } from './computer-use-settings'
-import { getWebUseSettings } from './web-use-settings'
+import { getComputerUseSettings, setComputerUseSettings } from './computer-use-settings'
+import { getWebUseSettings, setWebUseSettings } from './web-use-settings'
 import { clearTaskRolesFor, setTaskRoleModel } from './task-role-models'
 import { strategyTaskRoles } from '../shared/computer-use-settings'
 import { binRoots, dataDir, modelStorageError, requireModelStorage } from './runtime-env'
@@ -726,12 +727,18 @@ async function downloadModelInner(
       )
     entry = { ...entry, files: selectedPack.files, minRamGb: selectedPack.minRamGb }
   } else if (fileName && entry) {
-    const variant = (await getModelFiles(modelId)).find((file) => file.fileName === fileName)
+    const variants = await getModelFiles(modelId)
+    const variant = variants.find((file) => file.fileName === fileName)
     if (!variant)
       return publishRefusal(modelId, 'Selected model file is no longer available.', onProgress)
-    const catalogFile = inCatalog?.files.find((file) => file.name === variant.fileName)
+    let parts: typeof variants
+    try {
+      parts = selectedGgufParts(variants, fileName)
+    } catch (error) {
+      return publishRefusal(modelId, (error as Error).message, onProgress)
+    }
     const catalogAuxFiles = entry.files.filter(
-      (file) => file.role !== 'primary' && file.role !== 'mmproj'
+      (file) => file.role !== 'primary' && file.role !== 'mmproj' && !/-\d{5}-of-\d{5}\.gguf$/i.test(file.name)
     )
     const projectorFiles = variant.mmproj
       ? [
@@ -746,15 +753,15 @@ async function downloadModelInner(
     entry = {
       ...entry,
       files: [
-        {
-          name: variant.fileName,
-          url: variant.downloadUrl,
-          sizeBytes: variant.sizeBytes,
-          sha256: catalogFile?.sha256 ?? variant.sha256,
-          role: 'primary'
-        },
+        ...parts.map((part, index) => ({
+          name: part.fileName,
+          url: part.downloadUrl,
+          sizeBytes: part.sizeBytes,
+          sha256: inCatalog?.files.find((file) => file.name === part.fileName)?.sha256 ?? part.sha256,
+          role: index === 0 ? 'primary' as const : 'aux' as const
+        })),
         ...projectorFiles,
-        ...catalogAuxFiles
+        ...catalogAuxFiles.filter((file) => !parts.some((part) => part.fileName === file.name))
       ]
     }
   }
@@ -1467,8 +1474,24 @@ function useForTasks(role: 'decision' | 'grounding', modelId: string): void {
     setTaskRoleModel('computer_use', 'grounding', modelId)
     return
   }
-  setTaskRoleModel('computer_use', 'decision', modelId)
-  setTaskRoleModel('web_use', 'decision', modelId)
+  // "Use" must enable the role, not only save an unused preference. Keep each
+  // task's existing grounding choice and all settings outside its model strategy.
+  const computer = getComputerUseSettings()
+  setComputerUseSettings({
+    ...computer,
+    decisionModelId: modelId,
+    modelStrategy: strategyTaskRoles(computer.modelStrategy).includes('grounding')
+      ? 'decision_plus_specialist'
+      : 'decision_plus_reasoning'
+  })
+  const web = getWebUseSettings()
+  setWebUseSettings({
+    ...web,
+    decisionModelId: modelId,
+    modelStrategy: strategyTaskRoles(web.modelStrategy).includes('grounding')
+      ? 'decision_plus_specialist'
+      : 'decision_plus_reasoning'
+  })
 }
 
 export async function activateModel(

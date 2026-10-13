@@ -7,6 +7,124 @@ how to reproduce, and the fix direction. Close with evidence; never hide.
 
 ## OPEN
 
+### MODEL-REMOTE-20261013 (P1) - Serve grounding and decision specialists through the OGAD API
+
+**Status:** source patch prepared; keep open until the PR is merged and released.
+
+**Evidence (2026-10-13, nightly 0.0.55-beta.122 on Runpod):** UI-Mate-27B and Kev 4B are installed.
+The server task-role endpoint reports UI-Mate as the local grounding specialist, but `/v1/models`
+omits both specialists. The Mac remote-server dropdowns therefore show only the active Qwen chat
+model. `/v1/chat/completions` routes local requests to Chat rather than the requested specialist.
+Repeatedly selecting Kev with Use does not change the visible active lineup when the task strategy
+does not use a decision model; verify this selection behavior separately from runtime startup.
+
+**Required change:** advertise installed, runnable specialists with stable model IDs and route each
+request to the existing grounding or decision runtime. Keep the existing remote-client contract,
+Chat selection, streaming, errors, and cancellation behavior. Do not send Kev requests to Chat.
+
+**Acceptance:** the Mac discovers UI-Mate and Kev through the Runpod API; a small synthetic image
+request reaches UI-Mate; a small option-selection request reaches Kev and returns valid choice
+probabilities. Confirm CUDA for both. Preserve Chat and the persistent model files. Record the
+installed patch and verification here; a Runpod-only patch does not close the Git/release work.
+
+**Patch evidence:** installed on Runpod nightly 0.0.55-beta.122. A small synthetic Save-button image
+returned a UI-Mate result; Kev chose Save with 0.9916 probability through the private API. Runtime
+logs and GPU process memory confirm CUDA for both. Role dropdowns now filter grounding specialists
+and decision outputs separately, using the existing catalog and output-modalities contract.
+A renderer integration check covers UI-Mate, Kev, a provider decider, and a general vision model.
+The patched Mac client is installed. Its Grounding and Decision dropdowns were checked separately.
+The Kev Use action now enables a decision strategy while preserving each task's grounding choice.
+A real Electron check with a temporary profile passed all five starting strategies.
+
+### MODEL-SPLIT-20261013 (P1) - Download all GGUF shards with one file-picker action
+
+**Status:** source patch prepared; keep open until the PR is merged and released.
+
+**Evidence (2026-10-13, nightly 0.0.55-beta.122):** selecting a split Qwen3.8 Flash Next GGUF in the
+GUI downloads only the selected shard plus its projector. The user had to download part 1 separately
+after selecting part 2. The loader requires the complete matching shard set in the same directory.
+
+**Required change:** selecting any shard must resolve the complete matching set, download all parts
+and the required projector through the existing download queue, and record part 1 as the primary
+file. Validate the full set before download; preserve checksums, progress, cancellation, resume,
+existing completed files, and non-split downloads. Never combine different quantizations or folders.
+
+**Acceptance:** use a small complete split-file fixture to verify either selection fetches all parts
+once and records part 1; a missing shard fails clearly. Verify the installed Runpod patch without
+downloading the existing 75.8 GB model again. Record focused checks and remaining GUI/release checks.
+
+**Patch evidence:** shard resolution is installed on Runpod. Focused fixtures cover selection of
+either shard, order and metadata, incomplete sets, folders, quantizations, and ordinary files.
+A full GUI transfer was not repeated. Release and GUI download checks remain open.
+
+### MODEL-IMAGE-REMOTE-20261013 (P1) - Forward source images to remote editing endpoints
+
+**Status:** patched Mac client installed; a small real remote image edit returned HTTP 200.
+PR merge and release remain open.
+
+**Evidence:** a selected remote Qwen Image 2.1 model was rejected in the Mac client before the
+request reached the server. The client unconditionally rejected every remote init image.
+
+**Change:** send a source image as multipart data to the existing `/v1/images/edits` endpoint;
+retain JSON `/v1/images/generations` for requests without a source image. Preserve authentication,
+cancellation, and provider error handling. A small HTTP boundary fixture verifies source bytes,
+model, prompt, size, and the returned image for edit and generation requests.
+The separate chat claim that ten pages were generated after tool failures is not fixed here.
+
+### MODEL-TTS-REMOTE-20261013 (P1) - Load remote OGAD voices and languages
+
+**Status:** installed on Mac and Runpod. Remote synthesis returned WAV audio.
+After Keychain approval, the installed Mac comic reader shows English (US), Heart,
+and an enabled Read aloud control. The empty-selector check is complete.
+
+The remote OGAD server returns 20 voices, but Desktop returned an empty list for every
+remote provider except OpenRouter. Read the existing `/audio/voices` endpoint for OGAD,
+and use the shared Kokoro catalog for labels and languages. Two HTTP boundary checks
+verify the voice list, language mapping, and the selected voice sent for synthesis.
+No new API fields or stored preferences are required.
+
+### CHAT-ARTIFACT-SCROLL-20261013 (P2) - Keep chat usable beside an artifact
+
+**Status:** installed and restarted on Mac and Runpod. Renderer type check passed.
+A focused Mac UI check scrolled the chat while the artifact remained open.
+
+ArtifactCanvas used the modal SidePanel default. Its full-window backdrop caught the chat's
+wheel and click events. The existing panel now accepts an optional non-modal mode, used only
+by ArtifactCanvas. The chat can keep its own scroll and keyboard focus, while Close and Escape
+still dismiss the artifact. Other side panels retain their backdrop and focus trap.
+
+### MODEL-REMOTE-NAME-20261013 (P2) - Show a model label instead of its file path
+
+**Status:** installed and restarted on Mac and Runpod. Seventeen focused checks passed.
+The Mac composer displays Qwen3.8 Flash Next GSQ RCO IQ3_XXS without the server path.
+
+Remote providers can return a GGUF path as the model ID and as its name. The remote inventory
+now removes the directory, extension, and split suffix from filename labels. It preserves
+explicit display names and provider IDs, and keeps the full routing ID unchanged.
+Seventeen remote inventory tests passed, including six label and routing cases.
+
+### MODEL-IMAGE-CUDA-20261013 (P1) - Select CUDA with a nonzero Linux GPU index
+
+**Status:** installed on Runpod. A 256 × 256, one-step image edit returned HTTP 200.
+The live `sd-cuda/sd-cli` process used 10,600 MiB of GPU memory with no CPU-offload flag.
+The complete request took 39.2 seconds; this does not establish full-page generation latency.
+
+The CUDA pack is installed, but the image loader checked only `/dev/nvidia0`. Runpod
+exposes `/dev/nvidia1`, so it selected Vulkan. Reuse the existing NVIDIA driver check
+that accepts numbered GPU nodes. The earlier driver detection patch did not fix this
+separate image-runtime selector. An active real image request used the Vulkan sd-cli
+with CPU offload; successful CUDA use by Chat and specialists did not prove image CUDA.
+
+### MODEL-COMIC-PROMPT-20261013 (P2) - Include only selected comic options
+
+**Status:** source checks passed; installed in both Mac and Runpod renderers.
+Prompt selection checks passed in source. No new comic run was started for verification.
+
+The comic prompt included all six art treatments. Filter catalog option instructions against
+the approved choices and omit unanswered optional comic fields. Keep page count, format,
+reference image, and continuity rules when supplied. Tests cover all 24 style/format pairs
+and supplied optional inputs. Existing form submission checks also pass (27 tests total).
+
 ### REC-F6-001 (P1) - Desktop recovery backlog items need final review
 
 **Status:** open; reported during the cumulative F6 manual pass on 2026-09-11. These items are
@@ -1676,3 +1794,23 @@ Local evidence on commit `bcb86a09675cca8a60da68ff2afb571510454b9f` plus this di
    warnings remain for `computer-use-frame-pointer.ts` and `MessageNudge.tsx`.
 3. Node and web TypeScript checks: pass.
 4. Web Use lifecycle and semantic evidence tests: 2 files, 7 tests, all pass.
+
+
+### 2026-10-13: Runpod resident image engine and model discovery follow-up
+
+- Resident Qwen-Image generation and edits use the existing SD server, including the language encoder, vision projector, and VAE. API progress no longer forces a fresh CLI process.
+- On dedicated CUDA hosts, resident chat and image engines remain loaded across their queue transitions. Explicit Unload, model changes, shutdown, and on-demand behavior retain their existing paths. Mac unified-memory eviction is unchanged.
+- Remote image requests now carry saved size, steps, guidance, seed, and negative prompt settings.
+- The API advertises all complete downloaded chat models; Text + Vision excludes grounding and decision specialists. Image search retains matching local catalog entries and uses the Shared search correction.
+- Installed on Runpod and the signed per-user Mac app. Runpod synthetic 256 × 256, one-step generation → chat → generation returned success, retaining the same image PID 69919 and chat PID 69781. The image requests took 4.50 s and 2.56 s including transport. This is not a full comic-page benchmark.
+- 38 focused Desktop checks passed on the main-based PR candidate. The workspace main type check passes. The isolated main-based type check has the existing Shared video-phase mismatch; no new diagnostics were reported in the changed code.
+- Shared search contract checks passed (4). Live Qwen search returned Turbo image repositories and excluded the AtomicChat encoder-only result after honoring its text-encoder tag. Repositories with incomplete metadata can still be misclassified; full artifact compatibility must be checked separately.
+- Remaining work: expose all downloaded image, speech, and transcription choices through their existing runtime routing; validate complete arbitrary Hugging Face image packs before offering them for image generation. The AtomicChat Uncensored download is an encoder and is kept under Vision, with the user's active image choice unchanged.
+
+
+### 2026-10-13: Preserve comic prose across image tool rounds
+
+- Keep visible prose from all tool-calling rounds in the returned answer. Save that answer with the final comic reader so the title, continuity notes, and tables remain after image generation.
+- Six transport checks pass, including native and text-form image calls. Both new regression cases fail against the previous tool loop. A separate public API integration check covers split downloads, specialist discovery, decision JSON/SSE/async replies, grounding sync/async replies, and selecting downloaded chat models through a synthetic native inference boundary.
+- Remove the runtime-manager/LLM import cycle by passing the existing chat backend reader at startup. Shared PR #49 retains per-shard checksum metadata and types image-search metadata.
+- Deployment of this follow-up is pending: Runpod is offline after its credits ran out. The Mac archive update stopped when the disk filled; the prior archive and a backup remain, but the app signature needs repair before use. Do not mark this follow-up as installed.

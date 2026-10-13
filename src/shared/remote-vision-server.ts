@@ -89,19 +89,30 @@ export function remoteVisionInventoryModels(
       kind: RemoteVisionInventoryModel['kind'],
       catalogKind: RemoteVisionModality,
       tags: readonly string[] = ['Remote']
-    ): RemoteVisionInventoryModel => ({
-      id: remoteVisionModelId(server.id, modelId),
-      name:
-        server.modelCatalog?.find((model) => model.id === modelId && model.kind === catalogKind)
-          ?.name ?? modelId,
-      kind,
-      org: server.name,
-      description: `Runs through ${server.name}.`,
-      files: [] as [],
-      tags,
-      remoteServerId: server.id,
-      remoteModelId: modelId
-    })
+    ): RemoteVisionInventoryModel => {
+      const advertisedName = server.modelCatalog
+        ?.find((model) => model.id === modelId && model.kind === catalogKind)
+        ?.name?.trim()
+      const label = advertisedName || modelId
+      // File paths are routing IDs, not display names. Retain provider IDs and
+      // explicit names; shorten only GGUF filenames, including split suffixes.
+      const name = /\.gguf$/i.test(label)
+        ? (label.split(/[\\/]/).pop() || label)
+            .replace(/(?:-\d{5}-of-\d{5})?\.gguf$/i, '')
+            .replace(/-/g, ' ')
+        : label
+      return {
+        id: remoteVisionModelId(server.id, modelId),
+        name,
+        kind,
+        org: server.name,
+        description: `Runs through ${server.name}.`,
+        files: [] as [],
+        tags,
+        remoteServerId: server.id,
+        remoteModelId: modelId
+      }
+    }
     const media = (['text', 'image', 'video', 'transcription', 'voice'] as const).flatMap((modality) => {
       const modelId = selections[modality]
       if (!modelId || (modality === 'video' && !['ogad', 'openrouter'].includes(server.provider)))

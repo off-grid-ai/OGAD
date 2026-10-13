@@ -9,7 +9,7 @@ import {
   type VideoGenerationProgressContract,
   type VideoGenerationStage
 } from '@offgrid/models'
-import { kokoroVoiceLanguage, type RuntimeSpeechVoice } from '@offgrid/speech'
+import { kokoroVoiceLanguage, kokoroVoiceLabel, type RuntimeSpeechVoice } from '@offgrid/speech'
 import {
   IMAGE_MEMORY_GUARD_ERROR_CODE,
   imageMemoryGuardErrorMessage
@@ -24,6 +24,24 @@ export async function listRemoteVoices(server: RemoteServer): Promise<RuntimeSpe
   const key = `${server.id}:${server.endpoint}:${server.selectedModel}`
   if (cachedRemoteVoices?.key === key && cachedRemoteVoices.expiresAt > Date.now()) {
     return cachedRemoteVoices.voices
+  }
+  if (server.provider === 'ogad') {
+    const response = await checked(
+      await fetch(`${server.endpoint}/audio/voices`, { headers: headers(server) })
+    )
+    const body = (await response.json()) as { voices?: unknown }
+    const voices = (Array.isArray(body.voices) ? body.voices : [])
+      .filter((id): id is string => typeof id === 'string' && !!id)
+      .map((id) => {
+        const language = /kokoro/i.test(server.selectedModel) ? kokoroVoiceLanguage(id) : undefined
+        return {
+          id,
+          label: language ? kokoroVoiceLabel(id) : id,
+          ...(language ? { language: language.code, languageLabel: language.label } : {})
+        }
+      })
+    cachedRemoteVoices = { key, voices, expiresAt: Date.now() + 5 * 60_000 }
+    return voices
   }
   const response = await checked(
     await fetch(`${server.endpoint}/models?output_modalities=speech`, {
@@ -118,19 +136,37 @@ export async function generateRemoteImage(
   width: number | undefined,
   height: number | undefined,
   allowUnsafeMemoryOverride: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  initImage?: string,
+  parameters?: { steps?: number; cfgScale?: number; seed?: number; negativePrompt?: string }
 ): Promise<{ bytes: Buffer; mime: string }> {
+  const fields = {
+    model: server.selectedModel,
+    prompt,
+    ...(width && height ? { size: `${width}x${height}` } : {}),
+    ...(parameters?.steps !== undefined ? { steps: parameters.steps } : {}),
+    ...(parameters?.cfgScale !== undefined ? { cfg_scale: parameters.cfgScale } : {}),
+    ...(parameters?.seed !== undefined ? { seed: parameters.seed } : {}),
+    ...(parameters?.negativePrompt ? { negative_prompt: parameters.negativePrompt } : {}),
+    allow_unsafe_memory_override: allowUnsafeMemoryOverride
+  }
+  let requestBody: string | FormData = JSON.stringify(fields)
+  if (initImage) {
+    const form = new FormData()
+    for (const [key, value] of Object.entries(fields)) form.append(key, String(value))
+    const bytes = await fs.promises.readFile(initImage)
+    const extension = path.extname(initImage).toLowerCase()
+    const mime = extension === '.jpg' || extension === '.jpeg'
+      ? 'image/jpeg' : extension === '.webp' ? 'image/webp' : 'image/png'
+    form.append('image', new Blob([bytes], { type: mime }), path.basename(initImage))
+    requestBody = form
+  }
   const response = await checked(
-    await fetch(`${server.endpoint}/images/generations`, {
+    await fetch(`${server.endpoint}/images/${initImage ? 'edits' : 'generations'}`, {
       method: 'POST',
-      headers: headers(server, 'application/json'),
+      headers: headers(server, initImage ? undefined : 'application/json'),
       signal,
-      body: JSON.stringify({
-        model: server.selectedModel,
-        prompt,
-        ...(width && height ? { size: `${width}x${height}` } : {}),
-        allow_unsafe_memory_override: allowUnsafeMemoryOverride
-      })
+      body: requestBody
     })
   )
   const body = (await response.json()) as {

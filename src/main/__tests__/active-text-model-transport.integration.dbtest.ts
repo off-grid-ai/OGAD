@@ -158,6 +158,47 @@ afterAll(async () => {
 })
 
 describe('active text model transport', () => {
+  it.each([false, true])(
+    'keeps comic prose across image tool rounds (text calls: %s)',
+    async (textCalls) => {
+      const plan =
+        'Book title: STATIC RAIN\n\n| Page | Story |\n| --- | --- |\n| 1 | The pilot returns. |'
+      const continuation = 'The second page follows the pilot into the tower.'
+      const final = 'Both pages are queued.'
+      for (const [index, content] of [plan, continuation].entries()) {
+        const args = JSON.stringify({
+          prompt: `Noir comic page ${index + 1}`,
+          enhance_prompt: false
+        })
+        turns.push({
+          reasoning: 'Prepare the next illustration.',
+          content: textCalls
+            ? `${content}\n<tool_call>{"name":"generate_image","arguments":${args}}</tool_call>`
+            : content,
+          ...(textCalls
+            ? {}
+            : {
+                toolCall: { id: `image_${index}`, name: 'generate_image', arguments: args }
+              })
+        })
+      }
+      turns.push({ content: final })
+      const visible: string[] = []
+      const result = await toolChat('Create 2 images for a noir comic book.', [], {
+        imageAvailable: true,
+        onDelta: (text, kind) => {
+          if (kind === 'content') visible.push(text)
+        }
+      })
+      expect(visible.join('')).toContain(plan)
+      expect(result.answer).toBe([plan, continuation, final].join('\n\n'))
+      expect(result.imageRequests).toEqual([
+        { prompt: 'Noir comic page 1', enhancePrompt: false },
+        { prompt: 'Noir comic page 2', enhancePrompt: false }
+      ])
+    }
+  )
+
   it('uses the selected OpenRouter model for planner, chat, and tools', async () => {
     turns.push(
       { content: JSON.stringify({ steps: [] }) },

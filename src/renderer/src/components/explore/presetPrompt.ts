@@ -23,6 +23,7 @@ export function hasRequiredPresetAnswers(preset: DemoPreset, answers: PresetAnsw
  */
 export function buildPresetPrompt(preset: DemoPreset, answers: PresetAnswers): string {
   const approvedInputs = preset.intake.fields.flatMap((field) => {
+    if (preset.id === 'comic-book' && !(answers[field.id] ?? '').trim()) return []
     const answer = (answers[field.id] ?? '').trim() || 'Not provided'
     const value =
       answer === 'Not provided'
@@ -31,8 +32,21 @@ export function buildPresetPrompt(preset: DemoPreset, answers: PresetAnswers): s
     return [`Q: ${field.label}`, `A: ${value}`, '']
   })
 
+  // Comic treatment instructions live in the catalog. Send only the chosen
+  // options, while retaining the common page and continuity requirements.
+  const excludedOptions =
+    preset.id === 'comic-book'
+      ? preset.intake.fields.flatMap((field) =>
+          (field.options ?? []).filter((option) => option.value !== answers[field.id]?.trim())
+        )
+      : []
+  const prompt = preset.prompt
+    .split('\n')
+    .filter((line) => !excludedOptions.some((option) => line.startsWith(`- ${option.value}:`)))
+    .join('\n')
+
   return [
-    preset.prompt.trim(),
+    prompt.trim(),
     '',
     'User-approved inputs:',
     ...approvedInputs,

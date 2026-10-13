@@ -43,7 +43,7 @@ import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
 import { binRoots, dataDir, modelsDir, requireModelStorage, resourceDirs } from './runtime-env'
 import { modelEntryNames, resolveModelAsset } from './model-paths'
-import { sdServer } from './sd-server'
+import { sdServer, type SdServerContext } from './sd-server'
 import {
   findSdBinaries,
   findSdBinary,
@@ -586,13 +586,20 @@ export async function generateImage(
         remote &&
         (!params.model || params.model === remote.selectedModel || params.model === remoteId)
       ) {
-        if (params.initImage) {
-          throw new Error(
-            'The selected remote image model does not support image editing. Select a local image model that supports an init image.'
-          )
-        }
         if (remoteAbort)
           throw new Error('An image is already generating — please wait for it to finish.')
+        const stored = getSetting<ImageParameterStore>('imageParams', {})
+        const remoteParameters = resolveImageParameters(
+          { id: remoteId!, name: remote.selectedModel }, stored
+        )
+        const effectiveRemote = {
+          ...params,
+          width: params.width ?? remoteParameters.size,
+          height: params.height ?? remoteParameters.size,
+          steps: params.steps ?? remoteParameters.steps,
+          cfgScale: params.cfgScale ?? remoteParameters.cfgScale
+        }
+        log.update({ effectiveRequest: effectiveRemote, model: remote.selectedModel })
         const controller = new AbortController()
         const abort = (): void => controller.abort()
         signal?.addEventListener('abort', abort, { once: true })
@@ -602,10 +609,12 @@ export async function generateImage(
           const result = await generateRemoteImage(
             remote,
             enhanced,
-            params.width,
-            params.height,
+            effectiveRemote.width,
+            effectiveRemote.height,
             params.allowUnsafeMemoryOverride === true,
-            controller.signal
+            controller.signal,
+            params.initImage,
+            effectiveRemote
           )
           if (signal?.aborted) throw new Error(IMAGE_CANCELLED_MESSAGE)
           const extension =
@@ -898,55 +907,49 @@ async function runImageGen(
   const isQwenImage21 = isQwenImage21Model(base)
   const previewPath = path.join(outDir, `preview-${stamp}.png`)
 
-  // --- RESIDENT fast path (opt-in) --------------------------------------------
-  // When the user sets image residency to 'resident', a plain full-checkpoint
-  // txt2img (no LoRA, no init image, not Z-Image, not Core ML) runs on the warm
-  // sd-server: it keeps the model loaded across images (~45s cold -> ~7s warm on
-  // M4), same steps/quality. This was previously removed for causing memory
-  // contention on 16GB — now SAFE because the ModalityQueue evicts the LLM before
-  // image gen (evicts:['llm']) AND evicts this server when another modality needs
-  // the RAM (image is registered as a ManagedRuntime). Default is 'on-demand',
-  // which skips this entirely and uses the one-shot sd-cli path below (unchanged).
-  const residentImage = getResidencyMode('image') === 'resident'
+  // Reuse the existing server for resident checkpoints and Qwen's companion stack.
+  // Progress observers must not force a fresh CLI process for every API request.
   const eligibleForServer =
-    residentImage &&
-    !onProgress &&
-    !coreml &&
-    !isZImage &&
-    !isQwenImage21 &&
-    !loras.length &&
-    !params.initImage &&
-    ggufIsFullCheckpoint(model)
+    getResidencyMode('image') === 'resident' &&
+    !coreml && !isZImage && !loras.length &&
+    (isQwenImage21 || (!params.initImage && ggufIsFullCheckpoint(model)))
   if (eligibleForServer) {
-    const { defaultSize, defaultSteps, defaultCfg, sampler, scheduler } =
-      standardModelDefaults(base)
-    const taesd = params.fastVae ? resolveTaesd(base) : undefined
+    const defaults = standardModelDefaults(base)
+    const context: SdServerContext = {
+      modelPath: model, diffusionFa: true,
+      taesdPath: !isQwenImage21 && params.fastVae ? resolveTaesd(base) ?? undefined : undefined
+    }
+    if (isQwenImage21) {
+      context.diffusionModel = true
+      context.llmPath = findInModels(QWEN_IMAGE_21_COMPANIONS.llm) ?? undefined
+      context.llmVisionPath = findInModels(QWEN_IMAGE_21_COMPANIONS.llmVision) ?? undefined
+      context.vaePath = findInModels(QWEN_IMAGE_21_COMPANIONS.vae) ?? undefined
+      if (!context.llmPath || !context.vaePath || (params.initImage && !context.llmVisionPath)) {
+        throw new Error('Qwen-Image 2.1 companion files are missing. Download the complete model from Models.')
+      }
+    }
     generationLifecycle.start(signal, cancelRuntime)
     try {
-      await sdServer.ensureUp({
-        modelPath: model,
-        diffusionFa: true,
-        taesdPath: taesd ?? undefined
-      })
+      await sdServer.ensureUp(context)
       const residentBinary = sdServer.getBinaryPath() ?? cli
       generationLifecycle.throwIfCancelled()
       const { png, seed: usedSeed } = await sdServer.generate({
         prompt: params.prompt,
-        negativePrompt: params.negativePrompt?.trim() || DEFAULT_NEGATIVE,
-        width: params.width ?? defaultSize,
-        height: params.height ?? defaultSize,
-        steps: params.steps ?? defaultSteps,
-        cfgScale: params.cfgScale ?? defaultCfg,
-        sampleMethod: sampler,
-        scheduler,
-        seed
-      })
+        negativePrompt: params.negativePrompt?.trim() || (isQwenImage21 ? '' : DEFAULT_NEGATIVE),
+        width: params.width ?? defaults.defaultSize,
+        height: params.height ?? defaults.defaultSize,
+        steps: params.steps ?? defaults.defaultSteps,
+        cfgScale: params.cfgScale ?? defaults.defaultCfg,
+        sampleMethod: isQwenImage21 ? 'euler' : defaults.sampler,
+        scheduler: isQwenImage21 ? 'default' : defaults.scheduler,
+        seed,
+        refImages: params.initImage ? [(await fs.promises.readFile(params.initImage)).toString('base64')] : undefined
+      }, onProgress ? (progress) => onProgress({ ...progress, secPerStep: 0 }) : undefined)
+      generationLifecycle.throwIfCancelled()
       await fs.promises.writeFile(outPath, png)
       return {
         dataUrl: `data:image/png;base64,${png.toString('base64')}`,
-        path: outPath,
-        seed: usedSeed,
-        model: base,
+        path: outPath, seed: usedSeed, model: base,
         computeBackend: `SD runtime (${imageBackendForRuntime(process.platform, residentBinary)} build; device unknown)`
       }
     } finally {
@@ -954,23 +957,6 @@ async function runImageGen(
       currentChild = null
     }
   }
-
-  // --- Persistent sd-server fast path -----------------------------------------
-  // A plain full-pipeline checkpoint doing txt2img (no LoRA, no init image) runs
-  // on the RESIDENT sd-server, which keeps the model loaded across images: the
-  // first image pays the ~13s Metal shader warmup + model load, but every image
-  // after skips BOTH (measured ~45s cold -> ~7s warm on an M4). The step count /
-  // resolution / quality are UNCHANGED — this only removes per-image warmup and
-  // reload. Special stacks stay on one-shot sd-cli below: Z-Image (3-file stack),
-  // Core ML (ANE), UNET-only checkpoints needing separate CLIP+VAE, img2img, and
-  // LoRA (sd.cpp can't merge a LoRA into quantized weights anyway).
-  // NOTE: a persistent sd-server fast path once lived here but is removed — it kept
-  // ~4GB of image weights resident alongside the ~5GB chat model, causing memory
-  // contention -> hangs + corrupted output on 16GB machines, and was never verified
-  // end-to-end in-app. All full-checkpoint txt2img goes through the one-shot sd-cli
-  // path below: it loads the model, generates with the karras/defaults, and FREES it
-  // on exit (no resident pressure). sdServer.cancelCurrent() above stays a harmless
-  // no-op. Re-introduce a resident server only if proven safe on 16GB + good output.
 
   const threads = String(Math.max(1, os.cpus().length - 2))
   // Live preview: write a rough partial image every step ('proj' needs no extra

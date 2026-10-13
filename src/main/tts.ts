@@ -119,7 +119,10 @@ export async function listVoiceCatalog(
   onProgress?: (progress: number) => void
 ): Promise<RuntimeSpeechVoice[]> {
   const remote = getActiveRemoteVisionServerForModality('voice')
-  if (remote) return remote.provider === 'openrouter' ? listRemoteVoices(remote) : []
+  if (remote)
+    return remote.provider === 'openrouter' || remote.provider === 'ogad'
+      ? listRemoteVoices(remote)
+      : []
   const voices = speechCapabilities.voices.map(({ id, language }) => ({
     id,
     label: kokoroVoiceLabel(id),
