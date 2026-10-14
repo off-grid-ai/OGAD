@@ -1,0 +1,40 @@
+Desktop RC check — 2026-10-14
+
+Branch: fix/remote-inference-engine-updates
+Desktop: 6db70d9e7
+Pro: b62510f
+
+Fixed and committed
+- The 13 navigation and CommandPalette failures. Current roles and menu exit timing are covered; assertions remain.
+- Project headings that lost words when switching projects. The existing animated header remounts for the new name.
+- Gateway going blank after API keys load. FieldDescription and FieldError were used outside Field.Root and threw a render error. Panel help is now plain text; page errors use the library Alert. Normal entry and locked-storage errors work.
+- New-project focus after menu exit. Focus now transfers from onCloseAutoFocus, without a timer.
+- Space use in shared task-model rows, Active models, connector rows, and remote-server settings. Short model status sits on the right. Shared role rows retain readable labels. Product-wide density rules are recorded in docs/DESIGN.md.
+- DB UI journeys now target current radio, combobox, table, timeline, and icon-button semantics, and wait for animated exits. Persistence, focus, key security, source details, Undo, and error checks remain. No new mocks, spies, skipped tests, or weakened assertions.
+
+Verification
+- Default full Desktop/Pro suite: 7,497 passed, 1 failed, 25 skipped. The sole failure was new-project focus; its file now passes 8/8. Final affected UI run: 66/66 across 15 files.
+- Full DB suite: 615 passed, 14 failed (629 total). Focused reruns resolved all 14 failures. The final remaining action lifecycle test passed. The full DB suite was not repeated after these focused repairs.
+- Heavy suite: 44/44 across 7 files, after the user closed the app.
+- Navigation/CommandPalette/project regression group: 38/38.
+- Web and main-process typechecks passed.
+- Final renderer production build passed.
+- Real isolated browser checks used synthetic data. Project titles stayed painted through switches. Gateway rendered controls and retained its page on locked-storage errors. Compact model rows kept status beside names, stayed under 45px, and supported keyboard selection; light/dark and reduced-motion checks completed.
+- Changed-file lint has no errors. Full lint is not clean (see below).
+- Electron SQLite ABI restored and checked after native test runs.
+- No end-to-end suite was run. The browser checks above were isolated component checks, not full-app E2E tests.
+
+Remaining release checks, in order
+1. Resolve the 23 lint errors in unchanged tracked files: Pro SortableHead (1), browser-region (1), TodoCard (20), and core MessageMetadata (1). Full lint also includes 51 errors from local .demo-capture scripts; those are not tracked release code. These files were left out of this focused repair.
+2. Run the authorized release E2E checks in a fresh synthetic profile when explicitly requested. The user's app must be closed for suites that own ports 7878/8439.
+3. From the earlier RC handoff, still not verified in this session: mobile npm ci and all mobile tests; extension E2E; extension OPERATOR_UI_TOKEN secret for CI. Confirm these before release.
+4. Existing chat debug logs are a separate cleanup choice, as recorded in the earlier handoff.
+
+Evidence (local temporary reports)
+Default: /tmp/offgrid-desktop-full.BFzSvM/results.json
+Final UI: /tmp/offgrid-final-ui-results.json
+DB full: /tmp/offgrid-db-results.json
+DB repairs: /tmp/offgrid-db-focused-results.json, /tmp/offgrid-db-last-results.json, /tmp/offgrid-db-action-results.json
+Heavy: /tmp/offgrid-desktop-heavy.sfgAIR/results.json
+Lint: /tmp/offgrid-full-lint.log
+Build: /tmp/offgrid-renderer-build-final.log

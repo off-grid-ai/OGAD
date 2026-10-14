@@ -1,0 +1,129 @@
+CONTINUATION HANDOFF — 14 October 2026
+
+USER PRIORITIES AND AUTHORIZATION
+1. Continue fixing failing Desktop E2Es, preserve all meaningful assertions, push small commits.
+2. Once E2E fixes are done, change Actions and Entities to compact responsive card grids like Models. Use full card width, consistent hover/focus/selection, preserve all data/actions. This change has NOT started.
+3. Full Desktop tests, lint fixes, E2E runs, commits and pushes are explicitly authorized. User closed the dev app for tests. Keep regular progress updates, especially when a group passes or is pushed.
+4. User requested this handoff because model capacity interruptions made the session unreliable. Do not restart analysis from scratch.
+
+CONSTRAINTS
+- Follow injected AGENTS.md. Simple technical English.
+- No new agents, worktrees, unrelated refactors, abstractions/state owners/schema changes. Ask before new abstractions.
+- No new mocks/spies/direct state mutation/implementation-detail assertions. Existing E2Es contain legacy setup via IPC and external fakes; do not spread that pattern. Use actual controls for new interactions.
+- Use fresh synthetic profiles. Never evict a real licensed device to pass a test.
+- UI skill: /Users/user/.codex/skills/offgrid-ui/SKILL.md. Brand canon /Users/user/wednesday/off-grid-ai/brand/DESIGN_PHILOSOPHY.md, docs/DESIGN.md. Existing library and @offgrid/design only. Use skill again for new card work.
+- Named file staging. Do not stage unrelated outputs or generated E2E screenshots.
+- Pro is separate private git repo; commit/push Pro before Desktop pointer. Standing user instruction: git push --no-verify.
+
+WORKSPACE
+/Users/user/wednesday/off-grid-ai/desktop
+Branch in Desktop and Pro: fix/remote-inference-engine-updates
+Node22: export PATH=/opt/homebrew/opt/node@22/bin:$PATH
+Desktop HEAD == origin: d39417c0033974c1850f91f16938c10935ef0337
+Pro pushed HEAD: 3d44b44
+No Playwright/Vitest/build/lint process remains running at handoff.
+SQLite native module remains Electron-built. Do not rebuild for Node while Electron E2Es are active.
+
+PUSHED THIS SESSION
+Desktop:
+35bebe1e3 fix(ui): keep settings select popups above side panels
+  SettingsSelect.tsx supplies popup portalProps position relative + zIndex2147483647 to both SelectPopup and ComboboxPopup. SidePanel uses that top z-index; appended portal now paints above it.
+  Real browser fixture confirmed pointer + keyboard value changes, Escape/focus, plain + searchable, light and reduced-motion/dark.
+0adcf9a62 fix(lint): clear renderer errors and exclude local capture output
+  MessageMetadata unnecessary optional chain removed; .demo-capture/** excluded as ignored local output; Pro pointer.
+d39417c00 test(e2e): use current project view controls
+  app068 and app242 use radio roles instead of old buttons. BOTH passed focused E2E before commit/push.
+Pro:
+9601f3a fix(ui): separate table sorting hook and row refs
+  moved existing useTableSort into renderer/lib/use-table-sort.ts, updated imports, destructured ref-containing TodoRowState object to avoid refs lint false inference.
+3d44b44 fix(browser): subscribe to element visibility changes
+  useElementShown uses useSyncExternalStore with existing watchPlacement; removes effect-driven duplicate state.
+  60/60 focused UI tests passed, web typecheck passed. Real browser fixture confirmed clipping, disable/re-enable changes.
+
+EARLIER PUSHED WORK (previous handoff/context)
+08c4d05d1 project title reveal key + navigation/command palette tests.
+bd55a6296 Gateway blank page (Field helper outside root) + project composer focus handoff.
+621226da7 compact model/task/connector/remote settings rows, density docs.
+a212a8f31 TaskLineups aria-label correction.
+6db70d9e7 DB UI journeys, Pro pointer b62510f.
+See outputs/rc-codex-check-2026-10-14.txt and earlier handoffs if needed.
+Earlier full product suite: 7497 passed,1 failed,25 skipped; last failing focus test then fixed and affected66/66 passed.
+Earlier DB suite:615 passed14 failed; all14 fixed in focused reruns. Full DB not repeated afterward.
+Heavy suite44/44 passed. Renderer build and Node/Web typechecks passed then.
+
+LINT STATUS
+Full npm run lint completed with ZERO errors,2841 existing warnings after fixes.
+Log /tmp/offgrid-full-lint-after.log.
+Later AccountQuickConnection edit lint:0errors20warnings (/tmp/offgrid-account-fix-lint.log).
+New pending test edits need final lint review (do not mass-format unrelated files).
+
+E2E RUNS AND EVIDENCE
+FIRST FULL RUN: npm run test:e2e
+141 tests:93 passed,36 failed,8 skipped,4 did not run;26.7minutes.
+Log /tmp/offgrid-e2e-full.log
+Original results copied to /tmp/offgrid-e2e-first-results (also test-results current original root).
+E2Es write tracked e2e/screenshots/*.png. Those were clean before run and are now generated changes. Do NOT stage as fixes. Can restore those known generated screenshots if appropriate, preserving evidence in /tmp first.
+
+FOCUSED RUN:19 tests across accounts,AIactivity,app068,app143,app242,settings-residency,settings-sections,tour.
+10passed9failed;7minutes.
+Log /tmp/offgrid-e2e-controls.log
+Results /tmp/offgrid-e2e-controls-results
+Important: more fixes were made WHILE this run was executing. Results describe the code loaded at the start, not necessarily current files. Do not assume newer pending fixes have failed or passed.
+Passed: app068 project isolation, app242 portable backup,3settings-sections tests, Obsidian and MCP lifecycle, some tour.
+
+UNCOMMITTED PRODUCT FIX — DO FIRST
+pro/renderer/AccountQuickConnection.tsx
+Replaced its direct library Select composition with existing SettingsSelect adapter, same options/value/disabled/callback and visible label. No new abstraction.
+Reason: focused accounts Google/Microsoft rerun proved a REAL popup-layer defect: option exists but SidePanel intercepts clicks. It was NOT using SettingsSelect, so previous shared fix did not reach it.
+Evidence: /tmp/offgrid-e2e-controls-results/accounts-lifecycle-*/error-context.md shows intercepting panel.
+Lint passes. Not rebuilt or rerun yet. Rebuild electron-vite before E2E verification; built output currently predates this fix and Pro lint fixes.
+Then verify accounts-lifecycle.spec.ts, commit Pro small fix/push, Desktop pointer + related E2E corrections separately or coherent small commit.
+
+UNCOMMITTED TEST FIXES — REVIEW AND VERIFY, DON'T DISCARD
+- accounts-lifecycle: click Connection option combobox, click option 'Use your own application'; stdio transport role radio. MCP+Obsidian passed. Google/Microsoft need product fix rebuild above.
+- ai-activity: Images and Raw roles are radio. First rerun passed Images and failed old Raw role; Raw fixed afterward, not rerun.
+- app143-approval-gate: Approvals and history are radio. Rerun passed approval execution until old history button; fixed afterward.
+- app093-image-generation-persistence: Size is radiogroup/radio256; Steps is slider Home, adds aria-valuenow4 assertion. Removed obsolete Guidance-div ancestry (now sibling controls). Uses page for these unique controls. Adds gotoSettings/openSettingsSection and unchecks Image generation residency after onboarding through real UI to select on-demand CLI runtime required by this native-process fixture. Not rerun yet.
+- chat-memory: cancellation fixture only installs sd-cli. Prior failure was visible runtime error 'sd-server not found'. Added real Settings UI uncheck of Image generation residency before this test. Existing fake one-shot executable intentionally runs until killed. No new fake or product bypass.
+- app159-vault-secret-protection, vault-kinds: Kind is radiogroup/radio (NOT combobox); Folder filter remains combobox with real portal options. Folder option count assertion retained. Not rerun yet.
+- chat-large-collection: old direct scrollTop mutation was insufficient as virtual row sizes update; changed to real wheel scrolling in bounded toPass, retains oldest visible and geometry assertions. Not rerun.
+- chat-queue-versions: queue-count text exists both in Tasks indicator and composer; scope all1/2queued assertions to existing chat-composer. Not rerun.
+- helpers/onboarding: optional Dismiss notice can disappear when model becomes ready between visibility and click. Click now1sec; catch ONLY accepts expect(dismiss).toBeHidden. No silent failure/weak assertion. This addresses3queue suite failures in startup.
+- computer-use-model-strategy: strategy is combobox and options role option (was button/menuitemradio). Not rerun.
+- cu004-web-use-controls: Retry is inside complementary 'Task details', not 'Task history'. Not rerun.
+- devices-sync: project view Knowledge & settings role radio. BUT actual first failure is external licence capacity5/5. Never evict real devices. Needs contract-faithful isolated licence boundary if already supported, otherwise report external blocker. Test uses live registry today; inspect before running this journey again.
+- settings-residency: TextMorph has aria-hidden duplicate text. Replaced strict getByText visible assertion with Model memory region toContainText(required-status); chat remains checked+disabled assertions. New fix not rerun. Do not reintroduce filter visible, both copies are layout-visible.
+- settings-sections: resource controls radio/aria-checked, exact-one assertion uses checked radio. ALL3 passed focused run; can commit after inspect/lint.
+- tour: Coding and resource controls radio/aria-checked. A bulk replace accidentally changed nav(label) to radio; this was corrected back to button after focused run. So tour rerun failures from that accidental change are already addressed but need verification. Check diff: only use case/resource roles should change.
+
+UNRESOLVED E2E FINDINGS
+1. Sidebar clicking Vault or Clipboard sometimes lands on Today/Settings. app159 and pro.spec failed this way. Need reproduce with trace and read app diagnostic log. Do not merely weaken final screen assertion. App nav expands on hover/focus. Could be scroll/focus layout shift. Existing comment says group/header geometry should remain stable. Files: App.tsx navRowClass near187, renderNavItem1046, SidebarBody1190; navigation/SidebarNavigationMenu.tsx; library sidebar shim components/ui/sidebar.tsx.
+   app159 profiles deleted after test; next diagnostic run should preserve/attach synthetic log before cleanup, maybe Playwright --trace on. No logs from failed app159 remain in result by default.
+2. desktop-polish keyboard traversal still assumes old focus order and button filters. Inspect live semantics; keep all focus visibility coverage. Starting click on logo opens rail, first Tab likely Pin (test expects Discover). Segmented radios now use arrow navigation, one tab stop. Update to actual accessible interaction and preserve checks, not delete them.
+3. projects-layout spec still queries Chats button and brittle ../../.. detail ancestor; current Project view radio inside PageHeader. Needs faithful geometry verification with correct detail container; retain all density/geometry assertions. Product layout currently PageHeader inside flex detail wrapper at ProjectsScreen.tsx279 onward.
+4. pro Search -> Replay spec uses internal data-value obs:key that current CommandItem no longer exposes. Accessible option contains source+snippet, multiple same snippet. Need select correct semantic result and still prove exact interior frame, not weaken target. Existing fixture computes expected from API; inspect full test and current CommandPalette. Original accessible snapshot has3Notion options same snippet.
+5. p0-capture-consent-stop expected Models heading but missing after onboarding. Investigate snapshot and actual onboarding flow.
+6. Device sync licence capacity is real5/5, not product assertion failure. No eviction allowed.
+7. Some cases skipped by pre-existing environment guards: live-model AI activity needs OFFGRID_AI_ACTIVITY_MODELS, realGGUF download fixture missing, packaged update proof needs installed signed target. Do not claim those passed.4did-not-run were downstream serial image tests after firstfailure.
+8. Pro separate E2E config pro/e2e/playwright.config.ts NOT RUN yet (God journeys8 tests, downloads90MB). User authorized E2E broadly. Evaluate runtime and synthetic conditions.
+
+NEXT ORDER
+A. Review pending changes, rebuild app. Run small focused group accounts-lifecycle + ai-activity + app143 + settings-residency + tour to verify fixes. Commit/push passing logical groups; settings-sections already passed.
+B. Run image/chat controls group with native CLI residency preconditions, then computer-use, vault/navigation/layout/pro. Fix actual bugs based on logs, preserve assertions.
+C. Final appropriate verification (do not endlessly repeat known passing groups); full Node/DB re-runs still need fresh proof after previous fixes if carrying original full-suite request. Native ABI changes must be serial with Electron E2Es.
+D. Only after E2E work, implement Actions/Entities card grids via offgrid-ui skill and existing Model card primitive. User's screenshot is latest Models grid (4columns, compact cards, title+badges, metadata line, action at right). Preserve existing sorting/filtering/action behavior, avoid new state ownership. No card edits made yet.
+
+TOOLS / LOCAL SCRIPTS
+/tmp/offgrid-select-both-check.mjs: actual browser plain/searchable select pointer+keyboard+Escape fixture.
+/tmp/offgrid-select-both.log, /tmp/offgrid-select-both-reduced.log: PASS.
+/tmp/offgrid-visibility-check.mjs + .log: PASS clipping and enable/disable for useElementShown.
+Chromium explicit installed executable: /Users/user/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+Playwright package default looks for1228 (missing); ad hoc scripts use explicit1234. Electron tests use installed Electron.
+/tmp/offgrid-lint-ui-tests.log:60passed2files (WatchedBrowserPane + ActionsTarget integration).
+/tmp/offgrid-lint-typecheck.log: web tsc passed.
+/tmp/offgrid-desktop-full-tests.sh: rebuild Node22 SQLite, full product tests4workers, restore Electron EXIT trap/probe.
+/tmp/offgrid-desktop-heavy-tests.sh analogous heavy run (already44pass previousturn).
+npm run test:db handles Node build/restore; do not overlap Electron.
+./scripts/probe-electron-sqlite.sh '[label]' verifies restore.
+
+Workspace has many unrelated untracked outputs. Preserve them. This handoff is intentionally untracked.

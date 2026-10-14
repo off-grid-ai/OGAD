@@ -1,0 +1,182 @@
+[
+  {
+    "source": "https://getoffgridai.co/assets/cover.png",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/h6ohs5rfjg0ugnq0b4g2.png",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.0
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/actions-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/l70wen56vmhfunbbjjd7.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.2083
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/artifacts-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/iari3syjrf2pkhobykmy.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.198
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/artifacts-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/m00kxyh1da48hdpsslk3.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.1656
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/chat-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/ta9bofu5zyu8l5squuor.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.26
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/clipboard-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/j8ln4typbsf0wdquyqz4.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.2219
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/entities-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/602z5joftp8gb1do5ao4.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.2507
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/gateway-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/vtnucszc9qit4ht905gv.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.3931
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/gateway-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/kuw4e943twgt4d7detvs.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.3779
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/god-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/i9n5s2yx7g7b9194tuk6.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4033
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/imagegen-chat-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/tnhno73r0m148g4rfe8z.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.5762
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/integrations-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/nd2bt4jo6hpoa5iu7pmv.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.2647
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/meetings-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/uwcoqd9dfovyk5ch04fc.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.3618
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/meetings-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/suscz9b91npasovml6yb.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.3198
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/models-image-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/kfeegb9k7i9ld9nxmkd2.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4685
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/models-text-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/1qeazbpoxvejfy564ull.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4901
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/models-text-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/pcdu90ju1osirk1i10w4.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4817
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/models-transcription-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/as9uwwrlbr51r5pypg6t.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4128
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/models-voice-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/0wkm64dq5oxz3es30yxi.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4172
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/projects-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/og1axre5cwrwznj60hjj.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.2581
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/replay-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/f3yzuwea1989wmsmov05.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.3009
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/search-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/ogkjuf4aoxtycnaglwu6.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4266
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/vault-open-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/lhjswr8bdly1034tjg1s.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.1388
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/voice-dark-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/d509hbd1nbdjm7nq5gsy.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.4556
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/voice-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/nrpywz7hkoftzeba8wse.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.3799
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/app/web-plan-light-1760.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/278javpbgcmcng6mr3c0.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.3737
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/gen-dreamshaper.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/sliwlvwxi7xx38ca2k4n.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 3.0374
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/gen-juggernaut.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/r3kynciihufqz5ed491m.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 3.377
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/gen-realvis-lightning.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/5kwjiwqrl3rm0qbcru1f.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 2.1338
+  },
+  {
+    "source": "https://getoffgridai.co/assets/img/home/mobile/models-ios-1-light-640.webp",
+    "dev_copy": "https://dev-to-uploads.s3.us-east-2.amazonaws.com/uploads/articles/fbsq36cpvhd5nvpta31e.webp",
+    "same_dimensions": true,
+    "mean_pixel_difference_255": 0.9867
+  }
+]

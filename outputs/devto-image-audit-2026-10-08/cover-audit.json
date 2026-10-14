@@ -1,0 +1,2288 @@
+[
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/a-local-code-sandbox-run-ai-generated-code-safely-on-device-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-code-sandbox.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/a-local-offline-alternative-to-chatgpt-for-your-desktop-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-chatgpt-alternative.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/can-a-gaming-pc-run-your-everyday-ai-tasks-locally-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ffapkkw9f8djnfebai8g8.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/can-local-ai-help-with-work-without-access-to-your-email-or-accounts-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F0fznyti749molyc57wr2.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/can-local-ai-search-the-web-what-works-online-and-offline-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fy1vmfqmk2epdl838r0bf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/can-you-run-useful-ai-on-a-computer-without-an-nvidia-gpu-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3h6fuj6n15h8ak2vg3ao.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/can-you-use-local-ai-with-documents-it-was-never-trained-on-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6bryh1pzuj1e31c210ka.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/can-you-use-local-ai-without-an-account-or-subscription-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Farbv5fwp5cpdwqumf4a3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/can-you-use-offline-ai-on-a-phone-without-a-sim-card-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fd6u6n629qp49myujub4w.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/connector-support-in-off-grid-ai-desktop-private-approval-gated-integrations.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-ai-connector-support.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/do-you-need-a-powerful-computer-to-run-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fr88tsvospcdmkuslhun7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/fast-local-ai-on-device-text-and-image-generation-without-the-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Ffast-local-ai-text-and-images.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/fully-open-source-fully-private-how-off-grid-ai-desktop-keeps-your-ai-on-device.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Ffully-open-source-private-ai.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/have-you-ever-hesitated-before-typing-something-into-chatgpt-or-claude-i-did-and-so-i-built-off-grid.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Feymc8deyq4u042n49dup.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-much-can-off-grid-ai-remember-about-your-work-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F2wsmezmsbwfs38ob4ll2.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-much-does-it-cost-to-run-ai-locally-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F8vlh7588yt77ckiozw4x.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-much-storage-do-you-need-for-offline-ai-on-your-phone-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5s078o4gxdonm4rtb2xu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-add-calendar-events-by-asking-local-ai-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fy34x1lydmcgxr44eevl1.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-add-offline-speech-image-understanding-and-image-generation-to-your-app-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fdy0o2dt50lb1r9ep5ajd.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-add-offline-voice-narration-to-an-ai-generated-comic-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F4tzslzmucksjvsxjcwc3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-adjust-ai-writing-style-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fngybsj1xdmpigp16mxb6.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-analyze-images-from-your-phone-using-your-computer-s-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fkheoyab49yw2ywffvbnd.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-ai-about-a-screenshot-on-android-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F7jzsjwp9h2zzt0a2bjqd.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-ai-about-a-screenshot-on-iphone-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Frr6t4s7v9qko7eum93f0.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-ai-about-your-company-documents-in-2026-without-uploading-them.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F0p1bdc9pa8r50ed98ic3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-ai-questions-about-pitch-decks-without-uploading-them-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3s7lk1ca9qhpnra2zejv.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-ai-what-you-decided-at-work-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fbn9j61y98zqyyslnj2fo.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-follow-up-questions-while-local-ai-is-still-answering-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fkdgfc2e5lrdt6vd4r5ae.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-questions-about-a-pdf-on-android-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F918805ox5damfs1m7ew0.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-ask-questions-about-a-pdf-on-iphone-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fl1cx2nfj8tsabujvxs89.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automate-repetitive-browser-tasks-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F0mzsot8wx1fukz30dl53.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automate-repetitive-mac-tasks-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fqjacpisjncodt7pdk38g.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automate-repetitive-windows-tasks-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fn2qxierekqre9s16hh1r.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-build-a-private-to-do-list-from-your-work-chats-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fydb2hqy0ni26qj6toucm.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-delete-old-dictation-recordings-in-off-grid-ai-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fav07m9wotsgsehmu5xn7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-extract-action-items-from-meeting-recordings-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F7ob6jnc82rvdnd2q07f5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-organize-people-and-projects-from-your-mac-workday-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3qmzbx68gtajva6awtya.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-share-downloaded-files-across-your-own-devices-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fxkx21q0l2ef8jfgjbfcg.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-share-screenshots-between-your-phone-and-computer-in-2026-no-cloud-storage.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fj7l7b10yauu85iodnn4z.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-sync-ai-chats-between-your-android-phone-and-mac-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F7k1f4z3oe0pw81irvzmf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-sync-ai-chats-between-your-android-phone-and-windows-pc-in-2026-without-interne.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6w96oqfca6p9jzt8su9k.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-sync-ai-chats-between-your-iphone-and-mac-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvvgxmr0hq0ldhh3ggymh.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-sync-ai-chats-between-your-iphone-and-windows-pc-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fj92yzpha92oks0ggorgq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-sync-chat-attachments-in-off-grid-ai-in-2026-phone-to-computer-no-cloud-storage.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F4tm5933ky65pmbjzay2f.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-sync-generated-images-across-devices-in-off-grid-ai-in-2026-no-cloud-storage.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fqzyvnm686xyb2fhoe267.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-track-tasks-you-assign-to-others-in-work-chats-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5xygrkvjxvs7nhnzdq6c.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-automatically-turn-voice-notes-into-to-dos-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5ytbhofeot7ndxc2bldr.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-back-up-your-chats-and-projects-to-a-local-file-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3bovit488zpex3sf5911.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-batch-transcribe-audio-files-on-your-computer-with-a-local-api-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ffpqufemenox38gfbtzhh.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-local-ai-second-brain-on-your-desktop-in-2026-100-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-ai-second-brain.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-performance-review-from-your-work-history-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fo9eo87di8rnpnds27ghl.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-personal-glossary-from-your-team-s-documents-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6mqveqlx6le6pczub6wu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-private-knowledge-base-for-each-agency-client-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F4x6c9wxd5ye2vtocvbas.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-private-knowledge-base-on-your-phone-with-local-ai-no-cloud-no-api-keys.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Ffm9fc7yiphst7xbfhlv3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-react-prototype-with-ai-running-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F4x71prz99f79lsblsb20.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-searchable-product-manual-library-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ffm89ih116muuo3h9ny7k.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-a-simple-html-app-with-local-ai-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3pob1gnvg3r2axymozt8.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-build-private-document-search-with-local-embeddings-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fpvfksopc2z9z0ej7hnn1.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-chat-with-your-documents-locally-offline-rag-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fchat-with-documents-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-check-names-dates-and-numbers-in-an-ai-translation-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhij2qt1fkzq6mj4tjhv7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-check-what-makes-a-local-ai-reply-slow-in-off-grid-ai-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6ob7tjgfrggdcv8zhb9f.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-check-whether-a-deliverable-meets-the-clients-requirements-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp101rr4ke9z8lwqxqb45.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-check-your-computers-ai-task-from-your-phone-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fh3t0t8ldi7schxlp0koz.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-check-your-schedule-and-add-google-calendar-events-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp8m7ouvcx3dvz1wcj5dt.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-choose-a-local-ai-model-that-fits-your-computers-ram-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fbzjj7ldwbyo1ku7esohs.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-choose-which-ai-tasks-to-run-on-your-phone-and-which-to-run-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fr84o84ix9jzn7ls5dnga.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-compare-alternative-ai-answers-in-off-grid-ai-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fj0sj8fe76kfhx20yudtf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-compare-contractor-quotes-without-uploading-them-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fc8mve882g0cdip19f2ta.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-compare-flight-prices-and-baggage-fees-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fo3qkjjuk8lb2efc5g7am.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-compare-images-with-ai-on-your-own-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Flc5nvimltin5towv8huj.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-compare-online-product-prices-with-local-ai-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F93da9npk45eqtvjun5j5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-compare-themes-across-research-interviews-without-cloud-uploads-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F49alvfmsf2rdlgbh1olx.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-compare-two-documents-in-2026-without-sending-them-to-a-cloud-service.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhcixib9mjteaazqd9z66.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-connect-notion-linear-and-jira-to-a-local-ai-private-mcp.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fconnect-notion-linear-jira-local-ai.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-connect-your-phones-local-ai-to-apps-and-tools-with-mcp-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fxcqv4fes9eyfm1dbpg9h.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-continue-a-chat-that-fills-the-context-window-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F68kqelk13hbwh6vm5x1x.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-continue-an-ai-image-chat-from-phone-to-computer-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvfc3n40p8bjbhsbpod6w.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-continue-the-same-ai-conversation-on-android-and-iphone-in-2026-without-cloud-sync.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fjpzr7gitjptp7gszw33b.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-control-spotify-by-asking-local-ai-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fct5wxl6eb9ushctyr0mc.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-control-which-apps-and-tools-your-local-ai-can-use-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fdkpsyzy5iendc8qoriel.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-control-your-mac-from-your-android-phone-with-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Filof0ia9by79sdnckjq7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-control-your-mac-from-your-iphone-with-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvs4rtw1eo1492c8p1elg.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-copy-text-on-android-and-paste-it-on-windows-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ft2eo9q93wvumuxznyxww.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-copy-text-on-android-and-paste-it-on-your-mac-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fn299e49yzm8uau00n7k5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-correct-an-earlier-ai-prompt-without-restarting-the-chat-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fm5m3sdiie42gris3hhze.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-a-client-faq-from-approved-project-documents-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fiacpjdqyec7wt92ysi8n.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-a-client-handover-from-your-saved-work-history-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fpd095dqblvaai3x9rxaz.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-a-comic-book-with-ai-on-your-mac-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fwyqqnntlonso23l9853u.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-a-manga-style-comic-on-your-own-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzeog2t2nrdsazwx7p6fg.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-a-private-work-journal-from-your-mac-activity-in-2026-no-manual-logging.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F529x55jrqc7e0tuf2hau.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-a-technical-glossary-for-multilingual-project-work-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Frjn84r1fe2qxp2pkyz5v.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-a-visual-mood-board-from-your-own-photos-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fkqv5llnkbl1sicitdlah.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-an-offline-calculator-app-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fbf0okzpuifx19dhdtbek.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-an-offline-revision-pack-before-exam-week-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fruw0fco8jmw6dpsnfvsu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-architecture-diagrams-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fd7skk90rr7q9y0ypnljw.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-blog-illustrations-in-2026-without-cloud-image-generation.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fk1dpq9h72rphpnlvyrwa.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-image-concepts-from-a-written-campaign-brief-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fik0fd0tzht7k8s0uslzp.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-mac-reminders-by-asking-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fl48oa27a7gxk38w1ac8k.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-presentation-illustrations-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3tno3z3lpbx9dcaam07q.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-product-image-concepts-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp5shih4nkr0m4uxk5l3p.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-storybook-illustrations-on-your-own-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fejkbsv0wseq2b2d7899x.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-create-svg-graphics-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fi5czinrch3hqezf4fwo9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-crop-and-save-a-mac-screenshot-by-asking-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fx64xnnkc3f8w2wxvrbxh.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-delete-ai-chats-and-images-from-your-computer-in-off-grid-ai-in-2026-without-deleting-models.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ffao9ujis8aay11y6wedq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-delete-saved-screen-activity-and-ai-work-notes-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F0ddr3ywbbruyvs2dhykn.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-dictate-into-any-mac-app-with-local-ai-in-2026-no-cloud-transcription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhpb4awrr57b25ryni3pl.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-dictate-site-visit-notes-on-your-phone-without-internet-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fro78cxqvl5sznwommy31.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-document-a-work-process-from-notes-screenshots-and-recordings-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F4iccd1yc7yv8lhkq4a9m.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-download-and-switch-local-ai-models-from-a-python-script-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fs1zrfinpkge8e5p43jgv.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-download-several-ai-models-on-your-phone-in-2026-without-waiting-between-downloads.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fprtt0zc082tnhw7seef9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-draft-a-bilingual-client-update-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fi57dsv9ttmhigxv7fery.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-draft-a-cover-letter-from-your-own-experience-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Flewbcvu4re159awuqal1.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-draft-email-replies-on-your-mac-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvm4h52xwn1i7taa5jy05.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-draft-product-descriptions-from-your-own-product-notes-without-cloud-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3d6e74yjhtmrok1r66o7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-edit-an-image-with-a-reference-photo-using-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fi4j08fy5q7b79f7pgavo.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-edit-images-with-ai-on-windows-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fyxda86iucg5iaq0uebd5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-edit-images-with-ai-on-your-mac-in-2026-no-cloud-uploads.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fyg84xf1977d5zpqslmya.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-estimate-project-time-from-automatically-saved-mac-activity-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fumwywc40zgo6v87oj02o.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-exclude-private-files-and-clipboard-items-from-device-sync-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Flwu5wbtsu409dk2gfamu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-explain-a-chart-with-local-ai-in-2026-without-uploading-the-image.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fjgmxkpqngu93a3duw9mo.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-export-ai-generated-web-pages-diagrams-and-code-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fm1p392ml0ftvmljzopzq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-expose-on-device-ai-models-as-mcp-tools-local-mcp-server-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-ai-models-as-mcp-tools.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-a-document-you-worked-on-earlier-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fztyj1bx66chgnl6pf4xr.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-a-projects-related-meetings-and-work-notes-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fnp5e2jlqd5uwcegt35vy.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-a-web-page-you-read-on-your-mac-in-2026-without-remembering-its-title.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fdmvga7kiup4ue3zxxr0e.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-an-earlier-ai-answer-within-a-work-project-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fqh2xjpis4hgmdqmiwhd5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-answers-across-your-training-documents-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3d6fvkwmy5uizacalum7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-contradictions-between-meeting-notes-and-a-project-brief-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fn9yjlc6tu9vnq3vmmn9l.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-details-across-founder-meeting-notes-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fyqb92t06w49y55m808kb.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-gaps-in-a-project-handover-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fix8uht4hcwgso2ntzcim.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-images-from-an-earlier-project-or-chat-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3w6jwlkkriu01qkv32k3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-nearby-places-with-a-local-ai-assistant-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F8uksjyxifdcz0731vo1w.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-past-maintenance-notes-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fg95xq7nb81xro4ezrai7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-potential-quotes-in-an-interview-transcript-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fcoq77mmb20hqnjf7cjty.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-questions-left-unanswered-in-a-meeting-recording-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F7y1nf0ejrg1rws295xvd.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-something-you-saw-on-your-mac-in-2026-without-taking-notes.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fnbogylja5cws6rrvx1bj.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-something-you-saw-on-your-windows-pc-in-2026-without-taking-notes.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Futsjsffjb7yoys688663.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-the-reason-behind-a-design-change-in-your-project-notes-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3e650vc1b3yndqx2sbea.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-unanswered-client-requests-before-sending-a-project-update-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fiwbuta45po12yyy7avzc.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-what-an-artist-approved-across-project-notes-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fsp0vdnbge2t0g4wr2unf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-find-what-was-decided-in-a-recorded-meeting-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F8vmnz5w3d4dl8rorwfv0.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-fix-a-local-ai-model-that-cannot-read-images-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F0ubk5r97y8l02svntl4q.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-fix-inaccurate-audio-transcripts-on-your-mac-in-2026-no-cloud-uploads.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F68yjjlhuzvhashn0b5op.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-fix-local-ai-that-stops-responding-in-off-grid-ai-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fh8jsx0euzs9nn1kmy8kn.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-free-disk-space-used-by-ai-models-in-off-grid-ai-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F828j0z6i9o70zslaqtx7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-ai-images-faster-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzvacx47j7kzjcgm7s7f3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-ai-images-locally-on-your-android-phone-in-2026-no-cloud-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fxcjfnf9estzza0wj7b3h.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-ai-images-locally-on-your-iphone-in-2026-no-cloud-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fnob68da766f6nayqk753.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-ai-images-locally-on-your-mac-in-2026-no-cloud-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-generate-ai-images-locally-mac.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-ai-images-locally-on-your-windows-pc-in-2026-no-cloud-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-generate-ai-images-locally-windows.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-ai-images-with-your-voice-on-android-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fx7ki64qgr5uhzzfm84aa.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-ai-images-with-your-voice-on-iphone-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhfwn2dnbzeh57mlmpx20.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-generate-images-on-your-computer-from-your-phone-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6zocogu5ka810pfy5gmt.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-get-an-automatic-morning-briefing-of-meetings-and-to-dos-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Flbu63pwz3va2touew8fn.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-get-automatic-google-meet-notes-on-your-mac-in-2026-no-cloud-transcription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fsbmt4cv8qq6cya0pwikz.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-get-automatic-meeting-prep-alerts-with-relevant-notes-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fh5h0qrj7m9idoz7zx6l6.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-get-automatic-microsoft-teams-meeting-notes-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fkyeu23wfdkkom62suthu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-get-automatic-zoom-meeting-notes-on-your-mac-in-2026-no-cloud-transcription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhy3az2g62bsnbq8y9wz2.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-get-meeting-transcripts-in-multiple-languages-on-your-mac-in-2026-no-cloud-uploads.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fmklj516151j4ca2mn9cm.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-give-local-ai-more-context-for-long-conversations-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp1xd2n001up3n8lsziox.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-identify-missing-evidence-in-your-promotion-case-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fmbgala7ql7hhglsjf13k.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-inspect-requests-sent-to-an-ai-model-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fezu84mgtdv5esgm4dw1r.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-a-private-record-of-your-mac-activity-during-meetings-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fihns7nvu313vcjobujvz.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-client-meeting-notes-separate-as-a-fractional-cfo-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fw4f20iap2qkpu6mstvpl.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-client-requirements-separate-across-consulting-projects-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fng5bvwdcmf8no1sk1yw7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-private-notes-in-an-encrypted-offline-vault-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F195dddfsmjn32m6jfk9a.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-recording-a-mac-meeting-when-you-switch-apps-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F4hnquony28gikel7mb42.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-research-for-different-projects-separate-in-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fmf5equh4f389kipiq7bb.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-sensitive-apps-out-of-automatic-screen-history-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fqrls7b5cfwavm5i2yd4b.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-track-of-client-feedback-across-creative-projects-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzjemduwb05wv6vksnmfd.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-writing-with-ai-during-an-internet-outage-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fulhdm21nnmjoc9y55ws5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-your-clipboard-history-on-your-own-devices-in-2026-no-cloud-storage.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Frh3y7eq7mfyqaooimlc3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-keep-your-mac-screen-history-out-of-ai-document-answers-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Flfcewwhfz1dm3lcukwoo.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-learn-a-new-project-from-its-existing-documents-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fxe5zeu5q8xwqjxgde9m4.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-let-a-local-ai-assistant-work-with-your-apps-through-mcp-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fl9206v4h3x621845xiga.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-listen-to-ai-chat-replies-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fd5rycpk2w34vamw4bpjp.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-make-local-ai-replies-faster-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fm5w1j87o0oxj30q4p45x.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-make-work-app-data-searchable-with-local-ai-in-off-grid-ai-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fx3zd6sfskux3xkf4roov.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-move-your-pro-licence-to-a-new-phone-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5rfuo2g0tb93mix42x3m.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-organise-questions-about-a-rental-agreement-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F87n24hxtub3wu181cx1a.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-pair-your-phone-and-computer-in-off-grid-ai-in-2026-local-chat-and-file-sync.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fr54ybtm9lzw98omxil42.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-plan-your-offline-ai-downloads-when-storage-is-limited-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F633hx1noq3pms6hlctmo.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-point-your-ide-and-apps-at-a-local-ai-model-private-on-device.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fpoint-your-ide-at-local-ai.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-practise-interview-answers-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fukhg113anvj589m9plf9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-practise-speaking-another-language-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fcwcny4ok42jlwfj2xuyq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-a-client-finance-review-from-private-notes-and-documents-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fnbshusqf7x0o7s7iovw6.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-a-home-inventory-from-photos-and-notes-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fa34zuizez178h0sf71b8.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-a-meeting-agenda-from-open-questions-in-past-notes-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fi1tn7l4n6u8nx6ktgzag.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-a-project-handover-before-going-on-leave-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fyomvhmmldsunsssmf240.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-an-offline-ai-travel-folder-on-your-phone-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fgjjry3s0dq4wj35s58ci.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-discovery-call-questions-from-client-documents-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fijuwq9coo3fztl3n9bny.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-for-a-client-follow-up-using-past-meeting-notes-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fre6dhzk8vbhshhp18o5j.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-for-an-oral-exam-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fbbuszvzkcebl268qlfvr.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-prepare-questions-about-a-client-contract-without-uploading-it-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F10qudd3jayyx35qq6ot7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-read-gmail-and-draft-replies-with-local-ai-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ftinpvj1gvpbbkqb4kedy.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-read-text-from-an-image-with-local-ai-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Flumtczdqsp6z0anvsjea.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-recall-past-client-conversations-from-saved-notes-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fdng3638f2vrztr6sss6s.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-record-and-transcribe-an-in-person-meeting-on-your-mac-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fu3nzjqlhjtosizw6cfmr.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-recover-something-you-copied-earlier-on-windows-in-2026-automatic-clipboard-history.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Filvy2k0tz3kufo4z40i8.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-recover-text-you-copied-earlier-on-your-mac-in-2026-automatic-clipboard-history.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvirk7srq10ndfdd0j1ez.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-recover-your-offline-password-vault-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fe1fun1w4jwd4xhxvuc61.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-rehearse-a-presentation-with-local-ai-speech-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6rbgbpck304qo5r32u2h.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-remove-client-names-from-a-draft-using-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fctqstnjrkp6i1riev6ra.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-restore-a-backup-in-off-grid-ai-in-2026-without-losing-your-existing-chats.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Foiuqny3rssjgsmqwcsil.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-restyle-a-photo-with-ai-in-2026-without-uploading-it.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fy7m261srsjff7zju4fbv.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-resume-a-failed-ai-computer-task-in-off-grid-ai-in-2026-without-repeating-all-the-work.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ffe00ou2gmd7kuc8dt8fs.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-return-to-a-stable-release-in-off-grid-ai-after-trying-a-beta-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fed9muh3cvpbjyc1r2qb9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-review-a-client-proposal-with-ai-without-uploading-it-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fh04ro0lih0nc12e0f9qk.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-a-downloaded-gguf-ai-model-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fc48721vxvuzbz0zpt0aw.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-a-local-ai-image-studio-on-your-desktop-sdxl-z-image-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-ai-image-studio.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-a-local-ai-server-without-a-desktop-window-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fupxfzgpwre87msu4auog.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-a-local-openai-compatible-api-on-your-desktop-in-2026-no-cloud-no-keys.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-openai-compatible-api.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-a-private-ai-meeting-notetaker-zoom-and-google-meet-on-device.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fprivate-ai-meeting-notetaker.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-animagine-xl-4-0-locally-in-2026-offline-anime-ai-image-generation.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-animagine-xl-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-chat-image-and-voice-ai-on-a-low-memory-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvrem42lch5hmu73mqn3j.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-dreamshaper-xl-turbo-locally-on-your-desktop-fast-offline-ai-art.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-dreamshaper-xl-turbo-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-gemma-4-on-your-android-phone-in-2026-locally-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fw28esr9xs5kuba21006z.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-gemma-4-on-your-iphone-in-2026-completely-offline-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F7jumr70aokoyb9dmw9g5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-gemma-locally-on-your-computer-in-2026-mac-and-windows-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-gemma-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-illustrious-xl-2-0-locally-in-2026-offline-anime-and-illustration-ai.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-illustrious-xl-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-juggernaut-xl-locally-on-your-desktop-in-2026-photorealistic-ai-images-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-juggernaut-xl-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-llms-locally-on-your-mac-in-2026-completely-offline-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-llms-locally-mac.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-llms-locally-on-your-windows-pc-in-2026-completely-offline-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-llms-locally-windows.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-local-ai-on-a-low-memory-phone-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F04wnio8zdf0cl9nt0kw8.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-local-ai-on-linux-in-2026-no-cloud-no-account.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F31ioonpo61y48ntjbldv.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-local-ai-on-your-android-phone-in-2026-no-cloud-no-account.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F7er9ks3yvho0xqdd4516.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-local-ai-on-your-android-phones-npu-in-2026-supported-devices.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3f2h0a17fbdg1oopsu1g.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-local-ai-on-your-iphone-in-2026-completely-offline-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fg0kh4ium5tn1d10gge1u.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-local-ai-on-your-mac-in-2026-no-cloud-no-account.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-local-ai-mac.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-local-ai-on-your-windows-pc-in-2026-no-cloud-no-account.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-local-ai-windows.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-long-local-ai-api-requests-in-off-grid-ai-in-2026-without-waiting-for-one-http-response.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F9qhu2far75e40746li9n.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-pony-diffusion-v6-xl-locally-on-your-desktop-offline-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-pony-diffusion-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-qwen-3-5-on-your-android-phone-in-2026-locally-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fp5sukxwb55bbm05trx8y.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-qwen-3-5-on-your-iphone-in-2026-completely-offline-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F1ny3fkk1iwitz8yd2487.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-qwen-image-2-1-on-windows-in-2026-no-cloud-ai.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fwwh6cyveprji7pgbfu0h.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-qwen-image-2-1-on-your-mac-in-2026-local-image-generation-and-editing.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhtomthcxlpn1euchq9iq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-qwen-locally-on-your-computer-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-qwen-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-realvisxl-5-0-locally-on-your-desktop-photorealism-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-realvisxl-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-realvisxl-lightning-locally-in-2026-fast-photorealistic-ai-images-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-realvisxl-lightning-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-stable-diffusion-on-your-desktop-on-device-ai-image-generation.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fhow-to-run-stable-diffusion-desktop.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-text-to-speech-locally-on-your-desktop-in-2026-kokoro-offline-voice.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Ftext-to-speech-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-vision-ai-locally-on-your-android-phone-in-2026-no-cloud-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fcfqs2iq0k811261vxewk.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-vision-ai-locally-on-your-iphone-in-2026-completely-offline-no-account.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F827b9irvex43ht3z8rsf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-run-voice-to-text-locally-on-your-desktop-whisper-offline-dictation.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fvoice-to-text-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-search-across-multiple-documents-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fjbw7vp7jh8ynli4dgo0q.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-search-equipment-manuals-with-ai-without-internet-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fs1uz0y8z0wl4z0ekorju.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-search-user-research-transcripts-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ffvinhgqq1vs6sxffq13b.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-search-warehouse-procedures-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp5y89mv3eeo50r4attky.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-search-your-chats-meeting-notes-and-screen-history-together-in-off-grid-ai-on-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F8o5qzpo7rv36bwe8dfeb.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-search-your-recorded-meeting-transcripts-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fa6xczpx252ymyhfc258q.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-search-your-voice-notes-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Foecj8ykbeb99tpiahmmw.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-see-todays-meetings-and-to-dos-together-in-off-grid-ai-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fdgf9n2fvgzgd6ejbmrx3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-set-up-local-ai-on-your-computer-in-2026-without-picking-every-model.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhegehrih6k4t1zrcfgao.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-set-up-local-ai-when-you-have-limited-mobile-data-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fy2s0o01uvd4r4rg6x0pc.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-set-up-offline-ai-before-a-flight-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fykxdac6lvk57uowpqsr4.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-set-up-offline-ai-on-a-new-android-phone-in-2026-guided-model-setup.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fidwx3ikjhopz62orrx9x.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-set-up-offline-ai-on-a-new-iphone-in-2026-guided-model-setup.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fbf94ma3ekomubpi64bn6.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-simplify-an-english-document-before-translating-it-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fsark6teq9tn03y638uhf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-speed-up-local-ai-with-your-android-phones-gpu-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Frtbj6hdkqjm843eenas4.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-spot-focus-and-context-switching-patterns-in-your-mac-workday-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fx2p61oe3kjgcw7cfq1hi.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-stop-an-ai-document-assistant-from-using-outdated-files-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fxr3g9yu48evqk6gt9bcd.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-stop-an-old-device-from-receiving-your-synced-ai-chats-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F9eo89kxplq12wc0ogixk.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-stop-desktop-ai-from-sending-screen-images-to-a-remote-model-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fe3ruk6qq4rtucji1nna4.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-stop-local-ai-replies-from-becoming-too-long-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fj22lpna9psid8l2k5bfz.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-stop-long-local-ai-chats-from-using-too-much-ram-on-your-phone-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5bduqwjvzphkscpg8eus.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-stop-repeating-the-same-instructions-to-your-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fqcxfygrvowll2sfbe78o.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-store-api-keys-securely-on-your-computer-in-2026-no-cloud-vault.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fexm4yvtxcn728zq6l9j5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-store-passwords-on-your-mac-in-2026-without-cloud-sync.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6up10j7xtbmkd0ucwc3z.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-store-sensitive-files-in-an-encrypted-local-vault-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F83eoi679s3qdzxvjbhn3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-summarise-long-documents-on-windows-in-2026-without-cloud-ai.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fxkinv3x1zaz71egteobg.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-summarise-long-documents-on-your-mac-in-2026-without-uploading-them.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fyqkzhtoavezd4w96t1ax.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-switch-between-local-and-remote-llms-on-your-phone-without-two-apps-or-two-workflows.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fjuwnry3xuktegsex68xp.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-sync-ai-chats-between-apple-devices-in-2026-without-a-wi-fi-network.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F2z8f14w9i6i7yjauvw4o.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-sync-project-conversations-across-devices-in-off-grid-ai-in-2026-no-cloud-sync.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvwri9uv1akipeyg35jcr.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-tailor-your-cv-to-a-job-description-without-uploading-it-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fcsilqky53jjgvux7wigl.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-take-automatic-ai-meeting-notes-on-your-mac-in-2026-without-a-meeting-bot.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Facu1zxvgnssxe6njehj9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-talk-to-ai-hands-free-on-your-android-phone-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F8n6fkee0x0n4g1jxpb15.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-talk-to-ai-hands-free-on-your-iphone-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F02y6ytf456zn5comqw0e.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-test-faster-local-ai-replies-with-speculative-decoding-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5us7yohco40wdfdh0kzu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-test-the-local-api-in-off-grid-ai-in-2026-without-writing-code.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fd6efb73bye2fs9t12h6a.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-track-changing-project-decisions-across-recorded-meetings-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fltgl1oyjrzjgxfm0efku.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-audio-in-multiple-languages-on-android-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F4bsx8h9dl4q7tyi8zckj.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-audio-in-multiple-languages-on-iphone-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fkcq5spc3apj2jzfacnfk.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-audio-in-multiple-languages-on-windows-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Foi8r7q2i8ag1mk8oik3r.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-audio-in-multiple-languages-on-your-mac-in-2026-no-cloud-uploads.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvoet4rsbv8tgcew1cr24.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-audio-when-you-do-not-know-the-language-in-2026-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fe3jjibs33tllb3ox6ljc.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-long-audio-recordings-on-your-mac-in-2026-no-cloud-uploads.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3puf4zx7atj5s7zzili4.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-meetings-locally-in-2026-whisper-on-device.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Ftranscribe-meetings-locally.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-phone-audio-using-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fa0qv5v21ishc03hcy4xe.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-research-interviews-without-cloud-processing-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fj4od2123p0o8bemx8njw.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transcribe-training-recordings-without-uploading-them-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fwyfs0n87eb5kfm3sblm9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transfer-ai-models-between-two-phones-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5a8alkrtw2k5l3cum2iu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-transfer-ai-models-from-your-computer-to-your-phone-in-2026-without-downloading-them-again.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3bv4nc1g2wpk0w72tz3c.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-translate-document-text-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F0csl2jvi2qfgpmu17uz2.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-client-brief-into-a-project-proposal-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fy0n8z6avt73h7tk66dqq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-document-into-a-checklist-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ffybqbs2huxe32nte19jf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-long-article-into-a-presentation-outline-without-internet-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fvgf96tszsdmgowaaj9ph.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-podcast-transcript-into-show-notes-without-cloud-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F452unu3c8466607jmr3a.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-project-archive-into-lessons-for-your-next-project-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ftdrb9tdymg219uhp5ztq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-recorded-brainstorm-into-a-shortlist-of-ideas-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6wa72s2xpcv26bwvfgrf.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-recorded-interview-in-another-language-into-an-english-draft-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fv9bsbi9zv1lthkx4bwhq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-recorded-talk-into-a-blog-draft-without-cloud-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Froainlfwo3o43z3mclg7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-recorded-workshop-into-a-decision-brief-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhip63nw3q2zg6anrx65l.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-sketch-into-an-ai-image-on-your-computer-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ft3n43eae1756p7bqyedj.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-training-recording-into-an-onboarding-guide-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fdig2i2zbteqogts3j6q6.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-video-into-a-searchable-transcript-on-your-mac-in-2026-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzl43dw4r2j10e47gjxdo.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-webinar-into-a-downloadable-checklist-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F0a38rgdcmm5uqaq9dbi4.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-a-week-of-client-work-into-a-project-case-study-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzmhfcq1cjntth6m5tmwk.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-an-event-brief-into-a-planning-checklist-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fjwmvcwxz1ahzvc5v97f9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-an-idea-into-an-interactive-html-prototype-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F15is408csk7778ohklt6.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-client-discovery-calls-into-searchable-project-notes-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F3whxgfjti4uh1r37tac4.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-confidential-workshop-notes-into-a-report-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F1iq1gnb1x0gk8vplecwb.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-course-notes-into-an-offline-ai-study-assistant-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp4s4hnbo1574h5oftiu0.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-customer-interviews-into-product-requirements-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp3f5sto9v310rs16auzw.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-french-speech-into-text-on-your-computer-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fyau0m4uqqq6z5jkikk56.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-hindi-speech-into-text-on-your-phone-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzksfl8l5o812ewcs2byv.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-internal-documents-into-a-public-facing-draft-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fgss36evh0w2n5i1rn44l.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-interview-recordings-into-notes-in-2026-no-cloud-uploads.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F986ebp4c2m8ul4b4pmyx.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-lecture-notes-into-practice-questions-without-internet-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fwhmdhpdsfbbk0mtjzmc1.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-lecture-recordings-into-study-notes-in-2026-offline-ai.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F1jc1j9fekji7olwaoydw.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-onboarding-documents-into-a-first-week-checklist-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzihkox33di1tpc7d2mh9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-one-article-into-a-newsletter-and-social-posts-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F65rtqwv1ymvbgl1losia.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-past-work-into-a-portfolio-outline-without-cloud-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fr8dyunaq99gbbjcd6fe5.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-recorded-workshops-into-searchable-reference-material-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fgjmjxkrgplbftpjtb1il.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-recording-session-notes-into-a-revision-checklist-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ftd1hn7wdtks6zdeahw4s.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-research-notes-into-a-draft-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fbwgou0lyziw0qgf1ftbr.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-research-papers-into-an-evidence-table-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fxpdeahm24iq0386yvk9u.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-scattered-client-feedback-into-a-revision-checklist-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fe7nurg4t1pewjf86oady.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-school-notices-into-a-family-checklist-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fcmtaidi4n9276tfkniu2.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-spanish-speech-into-text-on-your-phone-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fniy330a5y29irf0egt07.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-spoken-ideas-into-a-first-draft-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F5xb15oxmejr1gii4y2ct.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-text-into-speech-in-multiple-languages-on-android-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fubsckffpqjbb1z2f8fvz.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-text-into-speech-in-multiple-languages-on-iphone-in-2026-completely-offline.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhrjoptkg2g2pefknik67.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-text-into-speech-in-multiple-languages-on-your-mac-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F73jlrnxfopbcqhoelrlu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-text-into-speech-on-windows-in-2026-without-internet.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fp442lu73vgh1uglte5do.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-written-instructions-into-a-flowchart-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fc7197htivw33yj0uuhpx.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-your-home-network-into-a-private-ai-cloud-you-access-from-your-phone.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fbz84zujktpfszc451glp.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-your-own-writing-samples-into-a-reusable-ai-style-guide-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fc6mp9rti6w5p6eby20i2.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-your-photo-into-a-comic-book-character-with-local-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fzouzhu5nm1zajho0jlnp.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-turn-your-project-notes-into-interview-examples-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fhilso12pj53aor59xdh8.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-understand-a-long-application-form-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6qe8yo0l15xxeo9yz259.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-understand-a-work-email-in-another-language-without-internet-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fro6aq3qi48h1dcd858p8.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-a-larger-ai-model-on-a-phone-with-limited-memory-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6iwmbvtm351to1zlku2w.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ai-models-on-your-mac-from-your-android-phone-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fj84suq0ntqc7qqu0urik.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ai-models-on-your-windows-pc-from-your-iphone-in-2026-no-internet-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fper9y4us4axaxtnyzn1e.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ai-on-your-android-phone-without-being-tracked.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F9r6hoodyt7gtuec8dup1.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ai-on-your-iphone-without-being-tracked.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fgntoy7y2nrw8rnh19m8c.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ai-running-on-your-own-computer-from-node-js-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fcs9ufst8k7lud0g3ufyl.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ai-running-on-your-own-computer-from-python-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fmrbctj27rkn9b95jsfs9.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ai-tool-calling-on-your-phone-without-paying-for-a-single-api.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fu4aj8qooqr85f0sq8zhr.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-an-openai-compatible-app-with-a-local-ai-model-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Flfxs1rgqqp363sqbtzha.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-lm-studio-from-your-android-phone-in-2026-your-desktop-ai-in-your-pocket.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fafv9b6knteuysmi6vm66.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-lm-studio-from-your-iphone-in-2026-no-cloud-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F860lexlquysjefb7hfmj.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-lm-studio-models-on-your-iphone-or-android-in-2026-no-cloud-no-subscription.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F1kvpw1xliw092nq1fouv.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-multiple-ai-models-in-one-chat-without-paying-for-any-of-them.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fi9d91l3fu7zrj72nq11j.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-multiple-local-ai-models-for-computer-tasks-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fynw2as55cvr58wvb6wcc.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ollama-from-your-android-phone-in-2026-auto-discovery-zero-setup.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fl6jekx3z3mw6l5v74wiu.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ollama-from-your-iphone-in-2026-no-configuration-required.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2Fagbg49llo95uuhwjiu1z.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-ollama-in-2026-no-configuration-required-plus-a-local-first-alternative.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Follama-alternative-local.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-your-home-ai-models-from-your-laptop-anywhere-in-2026-with-tailscale.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fslkrmio0k0t2f5lgof60.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-your-nvidia-gpu-for-local-ai-on-linux-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Futnkhxhfk2m6qv93mm6d.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-use-your-nvidia-gpu-for-local-ai-on-windows-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fkbp2gncooccsflzvnfrd.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-work-on-documents-during-a-flight-with-offline-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fttt12x39myolmqvwom0i.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-write-a-weekly-work-update-from-automatically-saved-mac-activity-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Ftfyfbtclbjubtmo96vbt.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/how-to-write-better-ai-image-prompts-with-a-local-assistant-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fe2st2k4to0htip2uhf2k.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/lm-studio-in-2026-setup-and-a-capture-aware-alternative.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flm-studio-alternative.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/local-artifacts-render-html-react-svg-and-mermaid-on-device-no-cloud.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-ai-artifacts.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/off-grid-ai-desktop-the-only-fully-local-multimodal-ai-app-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fonly-local-multimodal-ai.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/one-local-api-for-chat-vision-images-speech-and-embeddings-on-device-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fone-local-api-all-modalities.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/run-llms-stable-diffusion-vision-ai-whisper-and-tool-calling-on-your-phone-using-react-native.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F198t8u0jsh1h7esrk4pb.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/skills-give-your-local-ai-reusable-triggerable-automations-on-device.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Flocal-ai-skills-automation.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/the-all-in-one-local-voice-ai-built-in-tts-stt-and-audio-mode-on-device.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fall-in-one-local-voice-ai.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/the-most-optimised-way-to-run-ai-image-generation-locally-in-2026-gguf-on-device.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fraw.githubusercontent.com%2Foff-grid-ai%2Fdesktop%2Fmarketing-assets%2Fcovers%2Fbest-gguf-image-models-local.jpg",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/what-can-you-do-with-local-ai-on-a-16-gb-laptop-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fjh2zpwdjdunsdy753qte.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/what-does-off-grid-ai-record-when-you-enable-background-capture-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fa1x8v0o57l1x3y72vpn2.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/what-is-free-in-off-grid-ai-and-what-requires-pro-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fil3k6otpmi62ddcznqh3.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/what-should-you-test-before-relying-on-offline-ai-for-work-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fuf7w48qp0krilxjhboy7.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/what-works-without-internet-in-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F6dboes2shwn3ab98krtq.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/where-does-your-data-go-when-you-use-off-grid-ai-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2F88rmrhcr07d40wndrj4o.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/which-off-grid-ai-features-work-on-each-device-in-2026.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.us-east-2.amazonaws.com%2Fuploads%2Farticles%2Fyhxz3mkeamfwqabnk9as.png",
+    "status": 200,
+    "type": "image/webp"
+  },
+  {
+    "file": "/Users/user/wednesday/off-grid-ai/website/articles/your-ai-conversations-shouldn-t-live-on-someone-else-s-server-here-s-how-to-run-ai-locally-on-androi.md",
+    "url": "https://media2.dev.to/dynamic/image/width=1000,height=420,fit=cover,gravity=auto,format=auto/https%3A%2F%2Fdev-to-uploads.s3.amazonaws.com%2Fuploads%2Farticles%2F25syw6w40a4zrpfyad6u.png",
+    "status": 200,
+    "type": "image/webp"
+  }
+]

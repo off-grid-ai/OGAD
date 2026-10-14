@@ -1,0 +1,239 @@
+Off Grid AI Desktop E2E repair report — 12 October 2026
+
+Repositories and limits
+Desktop: /Users/user/wednesday/off-grid-ai/desktop, HEAD 0e76731cd.
+Pro: /Users/user/wednesday/off-grid-ai/desktop/pro, HEAD eacdeca.
+Both remain on feat/browser-thin-client. No commit, push, branch switch, or worktree.
+All app runs used fresh synthetic profiles. Before each test run, pgrep checked
+Electron, Playwright, and Vitest. No unrelated process was killed.
+The real-peer devices-sync test was not run, as requested.
+The Desktop tree was already dirty. The full status below includes those prior changes.
+
+1. Quit and relaunch — product fault plus test exit-wait fault
+The baseline APP-242 body reached its final restored-chat screenshot. Electron then
+exited with SIGABRT, rather than remaining alive. The runner waited for a past exit
+event because waitForExit checked exitCode only; exitCode is null after a signal exit.
+The baseline ended with 1 failed, 4 passed (4.7m); APP-242 failed in afterEach (3.5m).
+macOS crash report Electron-2026-10-12-210849.ips identifies restored Electron PID
+41888, SIGABRT, and onnxruntime_binding.node on worker thread 54. Its stack includes
+Napi::Error::ThrowAsJavaScriptException, InferenceSessionWrap's method callback,
+node::SpinEventLoopInternal, and node::worker::Worker::Run.
+No lingering Electron process remained at that point. The embedding service had
+an unreferenced worker but no quit cleanup. Electron could destroy its Node environment
+while a native embedding call was in progress.
+
+Product change A, Desktop:
+  src/main/embeddings.ts
+  src/main/index.ts
+The existing embedding service rejects new and queued requests once shutdown starts,
+cancels pending worker requests, and awaits worker termination before the before-quit
+path permits Electron to exit. The source-only path drains inference and disposes its
+model. An initial version waited for the worker queue, but the first combined run
+showed that a cold embedding load could delay quit by over two minutes. A read-only
+inspection of Electron PID 51943 showed llm.server=null, llm.initPromise=null,
+embeddings.shuttingDown=true, one pending worker request, and a pending queue.
+The final version stops the worker without waiting for a cold download to finish.
+In the final combined run, Hybrid, Same as Chat, and Specialist each passed in
+14.6s, 14.9s, and 14.5s, including their prompt, clean shutdown assertions. The earlier
+queue-draining version took 2.7m, 2.3m, and 2.2m for those same tests.
+Regression proof uses the real Electron and native ONNX quit path in APP-242. A pure
+unit test would not exercise the native shutdown that aborted. APP-242 now requires
+exitCode 0 within 15 seconds of the close request. The same concurrent exit check
+covers strategy relaunch and vault shutdown. The final combined results below cover
+the complete fix, including cold model loads.
+No separate single-instance-lock defect was reproduced.
+Test files, Desktop:
+  e2e/app242-portable-backup.spec.ts
+  e2e/computer-use-model-strategy.spec.ts
+  e2e/app159-vault-secret-protection.spec.ts (same exit-wait defect)
+
+2. Capture Last frame — stale test timing; no capture product change
+The native boundary uses the real frame store. The app log shows PNG creation and
+[extract] ... vision=y pending=1. The production capture:status response has a non-null
+pipeline.stats.lastCapturedAt. That query only selects rows with image_path IS NOT NULL.
+The PNG can appear before the parallel Accessibility read and the frame write finish
+(Pro 40d21ef6). Pro 0e5ce8d deliberately stopped refreshing capture status on each
+content event. The test also returned from Models before the old Settings exit
+animation finished, so it reused the old panel. Desktop f2121f7ea6 installs the
+AnimatePresence mode=wait screen transition; 747e2fbcc0 sets its fade transition.
+The spec now waits for the durable status, then for Models to be visible and Settings
+to be hidden before it opens Settings again. The exact Last frame time check remains.
+All consent, capture-file, stopped-event, paused-file-count, and cross-screen checks remain.
+Desktop file: e2e/p0-capture-consent-stop.spec.ts.
+Focused result: 1 passed (capture journey, 21.4s in its test body).
+
+3. Vault — stale selectors after redesign; small accessibility product fix
+Pro d271d6c split the vault into kind-specific views and fields; 58df194 grouped
+websites. The old last-generic-container selector did not identify those field rows.
+Tests now address the existing field labels by group role. All masks, reveals, exact
+clipboard values, encrypted-file checks, unlock/relaunch checks, and locked IPC list,
+add, and get denial checks remain.
+Desktop file: e2e/app159-vault-secret-protection.spec.ts.
+Both focused security tests passed (6.4s and 18.2s).
+
+Product change B, Pro:
+  renderer/screens/vault-common.tsx
+  renderer/screens/__tests__/vault-common.test.tsx (new)
+Each existing DetailRow now has role=group and its field label as its accessible name.
+The existing generic div had no named field boundary. This change lets assistive
+technology associate repeated Copy/Reveal actions with their field. It adds no styling,
+new component, or new state. The focused test uses the real DetailRow, CopyButton,
+and clipboard adapter. Only the browser clipboard is supplied by userEvent.
+Focused result: Test Files 1 passed (1); Tests 1 passed (1), duration 1.49s.
+UI sources: docs/DESIGN.md, canonical brand/DESIGN_PHILOSOPHY.md, and the offgrid-ui
+skill. Component library inspected at 5d280d5fd732a6a928baaaa52aa7e1a7a091aeda.
+The existing field composition is retained. The library Field and Button were inspected;
+replacing the layout would exceed this repair. Only field-group semantics changed.
+
+4. Web Use retry — stale native-model fixture
+The fixture returned HTTP 500 for any prompt containing 'resumed by the user'. That
+note is also produced by ordinary Pause/Resume (Desktop 47159c74ab), so the fixture
+failed a healthy run after the requested control actions. It was not keyed on request IDs.
+The fixture also returned a new action during a verification turn. Desktop 9b3b476a0d
+requires the previous action to be resolved first. Its plan now has separate focus,
+type, click, and protected-step phases, and confirms each action on a fresh observation.
+The canonical strict-tool, streaming, reasoning, screenshot, and screenshot-bounds
+checks remain. The existing spec still covers Retry, Pause, Take Over, Resume, HITL,
+Continue, and terminal Stop.
+Desktop file: e2e/fixtures/cu004-web-use-llama-server.mjs.
+Focused result: passed (3.1s). No Web Use product change.
+
+5. Speak — stale native-model fixture
+Desktop b7918e7ea moved English Kokoro speech to OnnxSpeechRuntime and the real
+worker-thread entry tts-onnx-worker. The old tts-worker.mjs resource was no longer called.
+The fixture now supplies Kokoro's external from_pretrained/generate boundary. The real
+OS Worker runs with that dependency preload; the app, TTS service, worker message flow,
+PCM16 WAV encoder, IPC, and browser audio player stay real. The fresh profile has a
+local models directory. A source-only Electron bootstrap installs this boundary;
+packaged runs retain the normal launch path.
+The exact cleaned text remains 'A local reply with code'. Stop and return-to-Speak
+checks remain. The app log is attached to the test result.
+Desktop files:
+  e2e/tts-speak.spec.ts
+  e2e/fixtures/tts-kokoro-boundary.cjs (new)
+Focused result: 1 passed (3.6s), test body 1.3s. No TTS product change.
+
+6. Zoom — stale macOS input driver
+Desktop 2d6d5b18d routes View-menu zoom to the clicked/focused BrowserWindow. CDP
+keyboard events do not activate the native app menu. The spec now invokes the actual
+Zoom In, Zoom Out, and Actual Size menu handlers with the focused window on macOS.
+Other platforms retain keyboard input, which covers before-input-event there.
+Zoom-in, zoom-out, reset, persisted width after relaunch, and shortcut-help assertions
+remain. This run verifies macOS; other operating systems were not run.
+Desktop file: e2e/zoom-shortcuts.spec.ts. Focused result: passed.
+No zoom product change.
+
+7. Desktop polish — stale focus-ring inspection
+The existing data-focus-surface change passed for model search. The command palette
+uses a separate command-input-wrapper and a 2px inset ring (Desktop 036819cbdf);
+fd952efe4f removes the input's own outline. The spec now reads that wrapper and checks
+its exact solid 2px ring, theme color, and -2px offset. Other fields retain their exact
++2px offset. Navigation order, primary actions, focus trap, resize, Escape, and reduced
+motion checks remain.
+Desktop file: e2e/desktop-polish.spec.ts.
+Focused result: all 3 tests passed. No polish product change.
+
+Checks
+npm test -- pro/renderer/screens/__tests__/vault-common.test.tsx: 1 passed.
+npm run typecheck: passed for main and renderer.
+Prettier check: all 13 changed source/test files pass.
+ESLint: 0 errors; one existing max-lines-per-function warning at src/main/index.ts:351
+in the unchanged startup callback. Both git diff --check commands passed.
+No bundled chat-engine or packaging code changed; build-llama was not required.
+
+Final combined run
+Command: npm run test:e2e -- e2e/app242-portable-backup.spec.ts e2e/computer-use-model-strategy.spec.ts e2e/p0-capture-consent-stop.spec.ts e2e/app159-vault-secret-protection.spec.ts e2e/cu004-web-use-controls.spec.ts e2e/tts-speak.spec.ts e2e/zoom-shortcuts.spec.ts e2e/desktop-polish.spec.ts
+Process exit code: 0
+Raw log: outputs/e2e-repair-final-run-2026-10-12.log
+
+
+  ✓   1 e2e/app159-vault-secret-protection.spec.ts:186:7 › APP-159 vault secret protection › masks login and API secrets, copies exact fields, then locks and restores safely (7.8s)
+  ✓   2 e2e/app159-vault-secret-protection.spec.ts:274:7 › APP-159 vault secret protection › masks a secure note until an explicit reveal (21.0s)
+  ✓   3 e2e/app242-portable-backup.spec.ts:175:7 › APP-242 portable backup › restores chats, projects, and retrievable knowledge into a clean profile (32.4s)
+  ✓   4 e2e/computer-use-model-strategy.spec.ts:171:5 › all strategies project their effective roles and Reasoning + Specialist survives relaunch (34.9s)
+  ✓   5 e2e/computer-use-model-strategy.spec.ts:197:5 › a Chat request runs the hybrid reasoner and specialist through one Computer Use task (14.6s)
+  ✓   6 e2e/computer-use-model-strategy.spec.ts:238:7 › a Chat request completes a real Computer Use task with Same as Chat (14.9s)
+  ✓   7 e2e/computer-use-model-strategy.spec.ts:238:7 › a Chat request completes a real Computer Use task with Specialist (14.5s)
+  ✓   8 e2e/cu004-web-use-controls.spec.ts:222:5 › runs Web Use through Pause, Take Over, HITL, Resume, and terminal Stop (4.8s)
+  ✓   9 e2e/desktop-polish.spec.ts:97:5 › window resize adds collection columns while filter context remains reachable (#150) (94ms)
+  ✓  10 e2e/desktop-polish.spec.ts:126:5 › keyboard focus follows navigation, form, dialog, and primary-action order (#151) (1.3s)
+  ✓  11 e2e/desktop-polish.spec.ts:227:5 › reduced motion keeps the detail layer reachable and Escape preserves the collection (#152, #153) (102ms)
+  ✓  12 e2e/p0-capture-consent-stop.spec.ts:106:5 › APP-119 and APP-121: capture requires opt-in, then pause stops it everywhere (21.8s)
+  ✓  13 e2e/tts-speak.spec.ts:81:5 › Speak sends clean text through production TTS and plays local WAV audio (#105) (952ms)
+  ✓  14 e2e/zoom-shortcuts.spec.ts:57:5 › desktop zoom shortcuts are complete and persist across restart (3.1s)
+  14 passed (3.3m)
+
+Final process check
+pgrep -fl "Electron.app/Contents/MacOS/Electron|playwright test|vitest": no matches (exit 1).
+No new Electron crash report followed the final run.
+
+git status --short — /Users/user/wednesday/off-grid-ai/desktop
+ M e2e/app159-vault-secret-protection.spec.ts
+ M e2e/app242-portable-backup.spec.ts
+ M e2e/computer-use-model-strategy.spec.ts
+ M e2e/cu004-web-use-controls.spec.ts
+ M e2e/desktop-polish.spec.ts
+ M e2e/fixtures/computer-use-hybrid-llama-server.mjs
+ M e2e/fixtures/cu004-web-use-llama-server.mjs
+ M e2e/p0-capture-consent-stop.spec.ts
+ M e2e/screenshots/assistant-reply-copied.png
+ M e2e/screenshots/capture-permissions-replay.png
+ M e2e/screenshots/capture-permissions-settings.png
+ M e2e/screenshots/chat-composer-filled.png
+ M e2e/screenshots/chat-screen.png
+ M e2e/screenshots/conversation-renamed.png
+ M e2e/screenshots/devices-free-upgrade.png
+ M e2e/screenshots/devices-pro.png
+ M e2e/screenshots/devices-sync-settings.png
+ M e2e/screenshots/explore-chat-empty.png
+ M e2e/screenshots/meeting-transcription-picker.png
+ M e2e/screenshots/memory-all-memory-selected.png
+ M e2e/screenshots/memory-dropdown-open.png
+ M e2e/screenshots/memory-no-memory-selected.png
+ M e2e/screenshots/onboarding-pro-grid.png
+ M e2e/screenshots/packaged-app-shell.png
+ M e2e/screenshots/pro-capture-processing.png
+ M e2e/screenshots/pro-clipboard-quick-open.png
+ M e2e/screenshots/pro-dictation-widget.png
+ M e2e/screenshots/qh-integrations-byo-google-setup.png
+ M e2e/screenshots/qh-integrations-overview.png
+ M e2e/screenshots/qh-models-fit-chip.png
+ M e2e/screenshots/qh-replay-capture-toggle.png
+ M e2e/screenshots/qh-settings-capture-optin.png
+ M e2e/screenshots/qh-settings-model-pipeline.png
+ M e2e/screenshots/r1-chat-action-verified.png
+ M e2e/screenshots/release-107-mobile-model-control.png
+ M e2e/screenshots/settings-collapsed-again.png
+ M e2e/screenshots/settings-collapsed.png
+ M e2e/screenshots/settings-opening-midframe.png
+ M e2e/screenshots/settings-section-open.png
+ M e2e/screenshots/smoke-chat.png
+ M e2e/screenshots/smoke-clipboard.png
+ M e2e/screenshots/smoke-entities.png
+ M e2e/screenshots/smoke-gateway.png
+ M e2e/screenshots/smoke-integrations.png
+ M e2e/screenshots/smoke-models.png
+ M e2e/screenshots/smoke-replay.png
+ M e2e/screenshots/smoke-settings.png
+ M e2e/screenshots/smoke-vault.png
+ M e2e/screenshots/smoke-voice.png
+ M e2e/screenshots/streaming-after-send.png
+ M e2e/screenshots/streaming-placeholder.png
+ M e2e/screenshots/vault-kinds-login-totp-light.png
+ M e2e/tts-speak.spec.ts
+ M e2e/zoom-shortcuts.spec.ts
+ m pro
+ M src/main/embeddings.ts
+ M src/main/index.ts
+?? e2e/fixtures/tts-kokoro-boundary.cjs
+?? outputs/browser-extension-architecture-study-2026-10-11.txt
+?? outputs/devto-image-audit-2026-10-08/
+?? outputs/e2e-repair-report-2026-10-12.txt
+?? outputs/release-audit-2026-10-12.md
+?? outputs/release-coordination-2026-10-08/
+?? outputs/task-view-check/
+?? outputs/test-backups/
+
+git status --short — /Users/user/wednesday/off-grid-ai/desktop/pro
+ M renderer/screens/vault-common.tsx
+?? renderer/screens/__tests__/vault-common.test.tsx

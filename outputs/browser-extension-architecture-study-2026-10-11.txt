@@ -1,0 +1,268 @@
+OFF GRID: BROWSER EXTENSION ARCHITECTURE STUDY
+11 October 2026
+
+Decision in brief
+
+- Use OGAD's existing product functions from the extension.
+- Keep browser access, browser checks, and display state in the extension.
+- Use BrowserOS as a reference for task ownership and reconnection.
+- Use Page Assist and Nanobrowser as references for browser-specific work.
+- Preserve Mobile's ability to run models without Desktop.
+- Preserve current Free and Pro feature access.
+
+Scope and evidence
+
+This is a source-code study. I traced the main chat, agent, storage, context,
+browser-action, and connection paths. I did not install or run these products.
+This is not a full security audit or a performance benchmark.
+
+External source snapshots:
+- Page Assist: 1fee4a657d48f171d334e531998125b91cef18ac
+- Nanobrowser: ad47282a17ecdfb894745af093e0f7332fc1f71a
+- BrowserOS: 9d4eaf6ae878390f4341171f0a5b8d354deaddba
+
+OGAD evidence is from the current local Desktop, Pro, browser-extension,
+Mobile, and shared-package files. These include the tool-selection change
+already made in this chat. They are not a claim about a released build.
+
+1. PAGE ASSIST
+
+Observed design:
+- The extension owns the chat application. It constructs prompts and history,
+  calls model providers, runs MCP tool calls, and saves messages.
+- Its MCP chat path gets tools from configured servers, binds them to the
+  model, then runs a model/tool loop. It also handles user tool approval. [P1]
+- Dexie/IndexedDB stores chats, messages, prompts, provider settings, knowledge
+  records, vectors, memory, and MCP server settings in the browser. [P2]
+- Page capture extracts content from tabs. It has specific handlers for some
+  sites and PDFs. It shares a character allowance across selected pages. [P3]
+- Knowledge processing splits documents and requests embeddings. The provider
+  can be Ollama or an OpenAI-compatible endpoint. This is a separate feature
+  from selecting tools for a task. [P4, P5]
+
+What OGAD can learn:
+- Keep page extraction close to browser APIs. Supply source URLs with content.
+- Study its selected-page flow when improving page context.
+
+What OGAD should not copy:
+- A second browser-owned knowledge store, memory store, connector setup, or
+  agent loop would repeat functions OGAD already has.
+- A local model endpoint does not make Page Assist a thin product client.
+  Inference location and application ownership are separate questions.
+- The inspected MCP path binds the collected tools. It is not evidence of a
+  semantic tool selector or a complete request-size check.
+
+2. NANOBROWSER
+
+Observed design:
+- The background worker owns an Executor. The panel sends commands such as
+  new task, follow-up, pause, resume, and cancel. [N1]
+- The Executor runs a planner and navigator with step and failure limits.
+  The planner checks completion after navigation. [N2]
+- BrowserContext and Page handle browser state and actions.
+- MessageManager estimates tokens from text length, counts image costs, and
+  trims the latest state message when the input allowance is exceeded. This
+  is approximate counting, not an exact model tokenizer. [N3]
+- The browser stores chat sessions, messages, and agent step history. [N4]
+- Closing the side panel disconnects its port and cancels the current task.
+  The live executor is held in worker memory. Saved history alone does not
+  establish that an interrupted live task can resume after a worker restart. [N1]
+
+What OGAD can learn:
+- Keep browser-state collection and action execution distinct from planning.
+- Use clear task events so the UI does not infer success from partial text.
+
+What OGAD should not copy:
+- Its worker-owned agent is appropriate for an independent extension. OGAD
+  already has an execution host, so a second agent owner adds duplicate rules.
+- Its transcript estimate is not a proven solution to OGAD's oversized tool
+  schemas. Keep schema selection and full-request budgeting in the review.
+- Do not adopt multiple model agents merely because this project uses them.
+
+3. BROWSEROS
+
+Observed design:
+- For its built-in model agent, the local server builds prompts, connects
+  tools, runs ToolLoopAgent, and applies context compaction. [B1, B3]
+- Its UI sends a message, conversation identity, model/provider choice, and
+  browser context to the server. The same chat boundary can also delegate to
+  external agent runtimes. [B5, B6]
+- ConversationRuns owns the live run, cancellation, subscribers, and buffered
+  events. Closing an HTTP stream removes a subscriber; explicit stop cancels
+  execution. A panel can fetch state and reconnect to the same run. [B2]
+- Live run state is in memory. This supports panel reconnection; it does not
+  by itself prove task continuation after a server restart.
+- The server stores conversation history in SQLite and loads provider
+  credentials for model requests. [B4, B6]
+- Browser control uses a browser-core layer with a CDP backend. BrowserOS
+  controls a Chromium fork. OGAD must still support its existing Chrome and
+  Firefox extension boundaries. [B7]
+- Server tool guards enforce read-only mode and require an active run for
+  calls made with an internal task grant. [B8]
+
+What OGAD can learn:
+- One task owner can support several UI views.
+- Run identity, task status, cancellation, and reconnection belong together.
+- Shared request/response types can support separate client and server code.
+
+What OGAD should not copy unchanged:
+- The inspected tool setup combines internal, custom MCP, filesystem, and
+  suggestion tools. Its compaction path allows a fixed cost for prompts and
+  tool schemas, then prunes messages. It does not measure all schemas there.
+- If messages still exceed its budget, the inspected fallback can return the
+  remaining messages and log the overflow. This is not a strict preflight
+  guarantee for a 149-tool request. [B1, B3]
+- Its Chromium control and local-server assumptions do not replace OGAD's
+  paired, sealed bridge or its LAN/Tailscale support.
+
+4. COMPARISON WITH THE CURRENT OGAD ECOSYSTEM
+
+Task execution:
+- Desktop already has toolChat: tool selection, prompts, model calls, tool
+  execution, and limits. Desktop UI reaches it through IPC.
+- /v1/chat/completions is a model gateway. It adapts and forwards a prepared
+  request. It does not invoke toolChat for an extension request.
+- The extension therefore builds prompts and runs its own model/tool loop.
+- A separate extension path hands a task to Pro web_use. That is not the same
+  operation as the generic Desktop chat workflow.
+
+Tool selection and context:
+- Desktop has lexical and local MiniLM tool selection, schema reduction, and
+  per-round budget checks that include messages and tool schemas.
+- The current bridge change reuses selection and the tool budget for the
+  extension. It reduces tool payloads but leaves the extension as loop owner.
+- These limits are estimates. A 4,000-token tool cap alone does not prove the
+  whole request fits the selected model. History, prompts, page data, images,
+  and answer space also matter.
+- Reuse Desktop's complete execution policy rather than importing a second
+  policy from one of the studied products.
+
+Lifecycle:
+- The extension currently aborts its in-flight controller when the panel
+  disconnects. Its handoff also uses that cancellation signal.
+- BrowserOS provides a useful alternative: the panel is a view of the run.
+- Keeping work active after a panel closes would be a user-visible behavior
+  change. It should be approved before implementation.
+
+Data:
+- The extension has a local chat library with sync, conflict, deletion, and
+  retention rules. It is more than a display cache today.
+- Making Desktop authoritative for browser chats requires care with existing
+  records and with the difference between clearing this browser and deleting
+  a shared chat. Do not remove local storage without an approved data plan.
+- Mobile is a different case. It runs local inference and holds its own data.
+  It must not become dependent on Desktop as a side effect of this work.
+
+Shared rules:
+- Desktop and Mobile already use @offgrid/models for tool execution policy.
+- @offgrid/sync already holds common live-chat lifecycle rules, with each host
+  supplying its transport and display adapters.
+- Reuse those existing packages where needed. Shared pure code can run on
+  multiple devices without creating a second set of product rules.
+- Browser-specific permissions, origin checks, frame checks, message parsing,
+  and UI state still belong in the extension.
+
+Vault:
+- Desktop Pro already owns storage, unlock checks, site matching, and secret
+  release. The extension still contains generation, strength, TOTP preview,
+  and import logic.
+- Move remaining vault rules to the existing Desktop vault owner, as requested.
+- Desktop currently lacks some item kinds and authenticator-secret storage.
+  Closing those gaps is capability work, not just relocating functions.
+- Keep form detection and the final page check in the extension. Keep vault
+  secrets out of model messages and ordinary agent tool results.
+- None of the three projects provides a directly equivalent vault reference
+  in the paths studied.
+
+Suggested next actions:
+- Keep the approved feature. The extension can request and display suggestions.
+- If its generation moves to Desktop, use the same model-selection and request
+  rules as other Desktop work. A suggestion must not execute itself.
+
+5. RECOMMENDED DIRECTION
+
+- First reuse existing OGAD functions at existing interfaces.
+- For a missing interface, propose a small extension to the current bridge.
+  Keep the generic model gateway compatible for other clients.
+- Use core Desktop chat execution for work that is already Free. Preserve Pro
+  checks on paid tools. Do not make Pro web_use the only execution entry point.
+- Keep the browser action implementation and its final execution checks local.
+- Evaluate run reconnection separately from moving execution. A dropped
+  connection must not cause an automatic repeat of a side-effecting action.
+- Preserve Mobile's independent local runtime. Use existing shared packages
+  for common rules rather than routing all ecosystem activity through Desktop.
+- Do not build a new agent framework, sync engine, or browser-control stack
+  solely to match these projects.
+
+Before a future change is declared complete, focused checks should cover:
+- Equivalent task/tool rules from Desktop UI and extension.
+- A large tool catalog with a small model context.
+- A cancelled run and a late browser action reply.
+- Reconnection without repeating a submission.
+- Existing Free/Pro capabilities and existing chat records.
+- A page or frame change before vault fill.
+
+No application code was changed for this study. No runtime tests were run.
+The conclusions above describe source behavior, not measured reliability.
+
+LOCAL EVIDENCE
+
+Desktop:
+src/main/tools.ts:585 (toolChat); :734 (selection); :814 (tool budget);
+:983 (per-round fitting); src/main/ipc.ts:2095 (Desktop entry point).
+src/main/model-server.ts:611 (model gateway).
+src/main/extension-bridge/bridge-electron.ts:213 (task-aware tool list).
+pro/main/vault/extension-vault.ts (vault authority and unsupported capabilities).
+
+Browser extension:
+../browser-extension/src/background/agent.ts
+../browser-extension/src/background/index.ts:96 (disconnect cancellation)
+../browser-extension/src/shared/agent/run.ts
+../browser-extension/src/shared/agent/handoff.ts
+../browser-extension/src/shared/desktop/chat-sync.ts
+../browser-extension/src/shared/desktop/merge.ts
+../browser-extension/src/background/agent-suggest.ts
+
+Mobile and shared:
+../mobile/src/services/generationToolLoop.ts
+../mobile/pro/sync/chatStreamService.ts
+../shared/packages/models/src/tool-execution-policy.ts
+../shared/packages/sync/src/chat-stream-orchestrator.ts
+
+EXTERNAL SOURCE LINKS
+
+Pinned links are listed below. They identify the exact source reviewed.
+
+[P1] https://github.com/n4ze3m/page-assist/blob/1fee4a657d48f171d334e531998125b91cef18ac/src/libs/mcp/normal-chat.ts
+
+[P2] https://github.com/n4ze3m/page-assist/blob/1fee4a657d48f171d334e531998125b91cef18ac/src/db/dexie/schema.ts
+
+[P3] https://github.com/n4ze3m/page-assist/blob/1fee4a657d48f171d334e531998125b91cef18ac/src/libs/get-tab-contents.ts
+
+[P4] https://github.com/n4ze3m/page-assist/blob/1fee4a657d48f171d334e531998125b91cef18ac/src/libs/process-knowledge.ts
+
+[P5] https://github.com/n4ze3m/page-assist/blob/1fee4a657d48f171d334e531998125b91cef18ac/src/models/embedding.ts
+
+[N1] https://github.com/nanobrowser/nanobrowser/blob/ad47282a17ecdfb894745af093e0f7332fc1f71a/src/background/index.ts
+
+[N2] https://github.com/nanobrowser/nanobrowser/blob/ad47282a17ecdfb894745af093e0f7332fc1f71a/src/background/agent/executor.ts
+
+[N3] https://github.com/nanobrowser/nanobrowser/blob/ad47282a17ecdfb894745af093e0f7332fc1f71a/src/background/agent/messages/service.ts
+
+[N4] https://github.com/nanobrowser/nanobrowser/blob/ad47282a17ecdfb894745af093e0f7332fc1f71a/src/storage/lib/chat/history.ts
+
+[B1] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/apps/server/src/agent/ai-sdk-agent.ts
+
+[B2] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/apps/server/src/api/services/conversation-runs.ts
+
+[B3] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/apps/server/src/agent/compaction.ts
+
+[B4] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/apps/server/src/lib/conversations/conversation-store.ts
+
+[B5] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/apps/app/modules/chat/chat-session-request.ts
+
+[B6] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/apps/server/src/api/routes/chat.ts
+
+[B7] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/packages/browser-core/src/backends/cdp.ts
+
+[B8] https://github.com/browseros-ai/BrowserOS/blob/9d4eaf6ae878390f4341171f0a5b8d354deaddba/packages/browseros-agent/apps/server/src/api/services/mcp/guards/read-only.ts
