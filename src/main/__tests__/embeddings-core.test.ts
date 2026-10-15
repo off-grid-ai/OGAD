@@ -53,7 +53,8 @@ it('loads embeddings from a scan folder while the chosen folder is offline', asy
   fs.rmdirSync(selected)
   host.pipeline.mockResolvedValue(
     Object.assign(
-      vi.fn(async () => ({ data: new Float32Array([0.25, 0.5]) })),
+      // A transformers.js Tensor: one row per text.
+      vi.fn(async () => ({ data: new Float32Array([0.25, 0.5]), tolist: () => [[0.25, 0.5]] })),
       { dispose: vi.fn() }
     )
   )

@@ -154,9 +154,20 @@ export function buildQwenImage21Args(i: QwenImage21ArgsInput): string[] {
   return args
 }
 
-/** Keep Qwen weights on the CUDA device; other runtimes can still offload. */
-export function qwenImageArgsForBackend(args: string[], backend: string): string[] {
-  return backend === 'CUDA' ? args.filter((arg) => arg !== '--offload-to-cpu') : args
+/**
+ * Qwen-Image keeps `--offload-to-cpu` on every backend: without a VRAM reading per device, dropping
+ * it on CUDA only fits data-centre cards (it was tuned on an L40S) and runs a consumer card out of
+ * memory mid-image. `freeVramBytes`/`needBytes`, when both are known, allow the weights to stay on
+ * the GPU.
+ */
+export function qwenImageArgsForBackend(
+  args: string[],
+  backend: string,
+  vram?: { freeVramBytes: number; needBytes: number }
+): string[] {
+  return backend === 'CUDA' && vram && vram.freeVramBytes >= vram.needBytes
+    ? args.filter((arg) => arg !== '--offload-to-cpu')
+    : args
 }
 
 export interface StandardArgsInput {

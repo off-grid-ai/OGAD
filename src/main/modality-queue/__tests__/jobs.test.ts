@@ -12,8 +12,8 @@ describe('standard modality jobs', () => {
     expect(CHAT_JOB).toEqual({ tier: 2, label: 'chat', evicts: ['image'] })
   })
 
-  it('IMAGE_JOB evicts the resident LLM (tier 2)', () => {
-    expect(IMAGE_JOB).toEqual({ tier: 2, label: 'image', evicts: ['llm'] })
+  it('IMAGE_JOB evicts the resident LLM and the task engines (tier 2)', () => {
+    expect(IMAGE_JOB).toEqual({ tier: 2, label: 'image', evicts: ['llm', 'grounding', 'decision'] })
   })
 
   it('they evict each other (mutually exclusive on unified memory)', () => {

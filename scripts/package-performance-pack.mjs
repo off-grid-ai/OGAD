@@ -7,27 +7,88 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 
 const [, , platform, binRoot, archive, version] = process.argv
-if (!['win32', 'linux'].includes(platform) || !binRoot || !archive || !/^[a-zA-Z0-9._-]+$/.test(version ?? '')) {
-  throw new Error('Usage: node scripts/package-performance-pack.mjs <win32|linux> <bin-root> <output.tar.gz> <version>')
+if (
+  !['win32', 'linux'].includes(platform) ||
+  !binRoot ||
+  !archive ||
+  !/^[a-zA-Z0-9._-]+$/.test(version ?? '')
+) {
+  throw new Error(
+    'Usage: node scripts/package-performance-pack.mjs <win32|linux> <bin-root> <output.tar.gz> <version>'
+  )
 }
 
-const folders = platform === 'win32'
-  ? ['llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'whisper', 'kev-runtime', 'onnx-cuda']
-  : ['llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'whisper-cuda', 'kev-runtime', 'onnx-cuda']
-const required = platform === 'win32'
-  ? ['llama-cuda/llama-server.exe', 'llama-prism-cuda/llama-server.exe', 'cuda-runtime/cudart64_12.dll', 'sd-cuda/sd-cli.exe', 'whisper/whisper-cli.exe', 'kev-runtime/python/python.exe', 'onnx-cuda/onnxruntime_binding.node', 'onnx-cuda/onnxruntime.dll', 'onnx-cuda/onnxruntime_providers_cuda.dll', 'onnx-cuda/cublasLt64_12.dll', 'onnx-cuda/cudnn64_9.dll']
-  : ['llama-cuda/llama-server', 'llama-prism-cuda/llama-server', 'cuda-runtime/libcudart.so.12', 'sd-cuda/sd-cli', 'whisper-cuda/whisper-cli', 'kev-runtime/python/bin/python3', 'onnx-cuda/libcublasLt.so.13', 'onnx-cuda/libcudnn.so.9']
+const folders =
+  platform === 'win32'
+    ? [
+        'llama-cuda',
+        'llama-prism-cuda',
+        'cuda-runtime',
+        'sd-cuda',
+        'whisper',
+        'kev-runtime',
+        'onnx-cuda'
+      ]
+    : [
+        'llama-cuda',
+        'llama-prism-cuda',
+        'cuda-runtime',
+        'sd-cuda',
+        'whisper-cuda',
+        'kev-runtime',
+        'onnx-cuda'
+      ]
+const required =
+  platform === 'win32'
+    ? [
+        'llama-cuda/llama-server.exe',
+        'llama-prism-cuda/llama-server.exe',
+        'cuda-runtime/cudart64_12.dll',
+        'sd-cuda/sd-cli.exe',
+        'whisper/whisper-cli.exe',
+        'kev-runtime/python/python.exe',
+        'onnx-cuda/onnxruntime_binding.node',
+        'onnx-cuda/onnxruntime.dll',
+        'onnx-cuda/onnxruntime_providers_cuda.dll',
+        'onnx-cuda/cublasLt64_12.dll',
+        'onnx-cuda/cudnn64_9.dll'
+      ]
+    : [
+        'llama-cuda/llama-server',
+        'llama-prism-cuda/llama-server',
+        'cuda-runtime/libcudart.so.12',
+        'sd-cuda/sd-cli',
+        'whisper-cuda/whisper-cli',
+        'kev-runtime/python/bin/python3',
+        'onnx-cuda/libcublasLt.so.13',
+        'onnx-cuda/libcudnn.so.9',
+        'onnx-cuda/libcufft.so.12',
+        'onnx-cuda/libcufftw.so.12',
+        'onnx-cuda/libnvrtc.so.13',
+        'onnx-cuda/libnvrtc-builtins.so.13.2'
+      ]
 for (const relative of required) {
-  if (!fs.statSync(path.join(binRoot, relative)).isFile()) throw new Error(`Missing CUDA input: ${relative}`)
+  if (!fs.statSync(path.join(binRoot, relative)).isFile())
+    throw new Error(`Missing CUDA input: ${relative}`)
 }
 
 fs.mkdirSync(path.dirname(path.resolve(archive)), { recursive: true })
 // Stream straight from the staged folders. A second full copy can exhaust
 // the runner disk before the archive is ready.
-const tar = spawnSync('tar', [
-  '-czf', path.resolve(archive), '--dereference',
-  '--transform', 's,^,bin/,', '-C', path.resolve(binRoot), ...folders
-], { stdio: 'inherit' })
+const tar = spawnSync(
+  'tar',
+  [
+    '-czf',
+    path.resolve(archive),
+    '--dereference',
+    '--transform',
+    's,^,bin/,',
+    '-C',
+    path.resolve(binRoot),
+    ...folders
+  ],
+  { stdio: 'inherit' }
+)
 if (tar.status !== 0) throw new Error(`tar failed with exit code ${tar.status}`)
 const hash = createHash('sha256')
 for await (const chunk of fs.createReadStream(archive)) hash.update(chunk)

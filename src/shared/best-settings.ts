@@ -3,7 +3,7 @@
 // engine's launch settings, which engines stay in memory, and the screenshot size).
 // The main process detects the hardware and applies the plan; this file only decides.
 
-import { backendChoices, type BackendModality, type BackendPreference } from './backend-preferences'
+import { type BackendModality, type BackendPreference } from './backend-preferences'
 import { DEFAULT_CTX_SIZE } from './llm-defaults'
 import type { Modality } from './runtime-residency-types'
 
@@ -28,7 +28,7 @@ export interface ChatModelProfile {
 }
 
 interface BestChatSettings {
-  gpuLayers: number
+  gpuLayers: number | null
   flashAttn: boolean
   kvCacheType: KvCache
   ctxSize: number
@@ -66,20 +66,8 @@ const MANY_RAM_GB = 32
 const ENOUGH_RAM_GB = 16
 
 /** The fastest available processor for one modality, chosen from what the platform offers. */
-function bestBackend(
-  modality: BackendModality,
-  machine: Pick<MachineProfile, 'platform' | 'gpu'>
-): BackendPreference {
-  const offered = backendChoices(modality, machine.platform)
-  const wanted: BackendPreference[] =
-    machine.platform === 'darwin'
-      ? ['metal']
-      : machine.gpu === 'CUDA'
-        ? ['cuda', 'directml', 'vulkan']
-        : machine.gpu === 'Vulkan'
-          ? ['vulkan', 'directml']
-          : []
-  return wanted.find((choice) => offered.includes(choice)) ?? 'auto'
+function bestBackend(): BackendPreference {
+  return 'auto'
 }
 
 /** f16 when RAM holds the context at full precision (the reference path), else the
@@ -96,7 +84,8 @@ function bestChatSettings(machine: MachineProfile, model: ChatModelProfile): Bes
       ? Math.min(DEFAULT_CTX_SIZE, model.modelMaxCtx)
       : DEFAULT_CTX_SIZE
   return {
-    gpuLayers: machine.gpu ? 99 : 0,
+    // With a GPU, llama.cpp fits as many layers as its memory holds; without one, none.
+    gpuLayers: machine.gpu ? null : 0,
     flashAttn: true,
     kvCacheType: bestKvCache(ctxSize, machine.totalRamGb, model.weightsGb),
     ctxSize,
@@ -146,8 +135,8 @@ function summarize(machine: MachineProfile, plan: Omit<BestSettingsPlan, 'summar
       : 'no speculative decoding (this model has no MTP heads)'
   const kept = (Object.keys(plan.residency) as Modality[]).map((m) => KEPT_LABEL[m] ?? m)
   return [
-    `Chat and vision run on the ${processorName(machine)} with ${chat.gpuLayers ? 'every layer offloaded' : `${chat.threads} CPU threads`}, ${speculation}, ${KV_LABEL[chat.kvCacheType]} and a ${chat.ctxSize / 1024}K context.`,
-    `Images, voice, transcription and search use ${machine.platform === 'darwin' ? 'Metal and Core ML' : machine.gpu ? `the ${machine.gpu} GPU` : 'the best available processor'}.`,
+    `Chat and vision run on the ${processorName(machine)} with ${machine.gpu ? 'layers placed on the GPU automatically' : `${chat.threads} CPU threads`}, ${speculation}, ${KV_LABEL[chat.kvCacheType]} and a ${chat.ctxSize / 1024}K context.`,
+    'Auto picks the fastest processor that works on this computer.',
     kept.length
       ? `Kept ready in memory: ${kept.join(', ')}.`
       : 'Models load when needed, leaving memory free on this machine.',
@@ -160,7 +149,7 @@ export function planBestSettings(
   model: ChatModelProfile
 ): BestSettingsPlan {
   const backends = Object.fromEntries(
-    BACKEND_ORDER.map((modality) => [modality, bestBackend(modality, machine)])
+    BACKEND_ORDER.map((modality) => [modality, bestBackend()])
   ) as Record<BackendModality, BackendPreference>
   const plan = {
     chat: bestChatSettings(machine, model),
@@ -187,7 +176,10 @@ export function matchesBestSettings(
     // An unset draft model and an empty one mean the same thing.
     key === 'draftModel'
       ? (current.chat.draftModel ?? '') === plan.chat.draftModel
-      : current.chat[key] === plan.chat[key]
+      : key === 'gpuLayers'
+        ? (current.chat.gpuLayers === 99 ? null : current.chat.gpuLayers) ===
+          (plan.chat.gpuLayers === 99 ? null : plan.chat.gpuLayers)
+        : current.chat[key] === plan.chat[key]
   )
   return (
     chatMatches &&

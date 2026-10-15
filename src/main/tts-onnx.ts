@@ -2,12 +2,12 @@ import { beginRuntimeBackend, providerLabel } from './runtime-backends'
 import { currentAIRequest, type AIRequestHandle } from './ai-request-log'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { Worker } from 'node:worker_threads'
+import { clearHelperCrashes, forkHelper, type HelperProcess } from './onnx-host/utility-host'
 import type { DownloadProgress } from '@offgrid/executorch-speech'
 import { modelsDir } from './runtime-env'
 import { modelReadDirectories } from './model-paths'
-import type { TtsWorkerResponse } from './tts-onnx-worker'
-import { getBackendPreference } from './backend-preferences'
+import type { TtsWorkerInit, TtsWorkerResponse } from './tts-onnx-worker'
+import { onnxLadder } from './backend-facts'
 
 export interface OnnxSynthesisInput {
   text: string
@@ -33,28 +33,38 @@ interface PendingRequest {
   onProgress?: (progress: DownloadProgress) => void
 }
 
+const SERVICE_NAME = 'offgrid-voice'
+
 function workerEntry(): string | null {
   const built = path.join(__dirname, 'tts-onnx-worker.js')
   return existsSync(built) ? built : null
 }
 
 export class OnnxSpeechRuntime {
-  private worker: Worker | null = null
+  private worker: HelperProcess | null = null
   private nextId = 1
   private readonly pending = new Map<number, PendingRequest>()
 
-  private spawn(): Worker {
+  private spawn(): HelperProcess {
     if (this.worker) return this.worker
     const entry = workerEntry()
     if (!entry) throw new Error('The ONNX speech worker is not built.')
     const backendState = beginRuntimeBackend('speech', 'Kokoro')
-    const worker = new Worker(entry, {
-      workerData: {
-        modelsDir: modelsDir(),
-        modelReadDirectories: modelReadDirectories(),
-        backendPreference: getBackendPreference('tts')
-      }
-    })
+    let worker: HelperProcess
+    try {
+      worker = forkHelper(
+        entry,
+        {
+          modelsDir: modelsDir(),
+          modelReadDirectories: modelReadDirectories(),
+          devices: onnxLadder('tts')
+        } satisfies TtsWorkerInit,
+        { serviceName: SERVICE_NAME, label: 'Voice' }
+      )
+    } catch (error) {
+      backendState.fail(error)
+      throw error
+    }
     worker.on('message', (response: TtsWorkerResponse) => {
       if (response.type === 'ready') {
         backendState.ready(providerLabel(response.device!), undefined, response.fallbackReason)
@@ -74,7 +84,8 @@ export class OnnxSpeechRuntime {
       }
       this.pending.delete(response.id)
       backendState.recordRequest(pending.log)
-      if (response.type === 'error') pending.reject(new Error(response.error || 'ONNX speech failed.'))
+      if (response.type === 'error')
+        pending.reject(new Error(response.error || 'ONNX speech failed.'))
       else pending.resolve(response.device || 'cpu')
     })
     const fail = (error: Error): void => {
@@ -84,14 +95,17 @@ export class OnnxSpeechRuntime {
       for (const request of this.pending.values()) request.reject(error)
       this.pending.clear()
     }
-    worker.on('error', fail)
     worker.on('exit', (code) => {
-      backendState.stop()
-      if (this.worker !== worker) return
-      if (code !== 0) fail(new Error(`ONNX speech worker exited with code ${code}.`))
-      else this.worker = null
+      if (this.worker !== worker) {
+        backendState.stop()
+        return
+      }
+      if (code !== 0) fail(new Error(`The voice helper stopped (exit code ${code}).`))
+      else {
+        backendState.stop()
+        this.worker = null
+      }
     })
-    worker.unref()
     this.worker = worker
     return worker
   }
@@ -103,7 +117,13 @@ export class OnnxSpeechRuntime {
     const worker = this.spawn()
     const id = this.nextId++
     return new Promise<string>((resolve, reject) => {
-      this.pending.set(id, { voice: message.voice, resolve, reject, onProgress, log: currentAIRequest() })
+      this.pending.set(id, {
+        voice: message.voice,
+        resolve,
+        reject,
+        onProgress,
+        log: currentAIRequest()
+      })
       worker.postMessage({ ...message, id })
     })
   }
@@ -125,11 +145,28 @@ export class OnnxSpeechRuntime {
     )
   }
 
+  /** True while a voice helper process is running. */
+  get isRunning(): boolean {
+    return this.worker !== null
+  }
+
+  /** Start the next request on a fresh helper with the current backend choice and environment.
+   *  Waits up to 10 s for requests in flight. */
+  async restart(): Promise<void> {
+    clearHelperCrashes(SERVICE_NAME)
+    const deadline = Date.now() + 10_000
+    while (this.pending.size > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    await this.close()
+  }
+
   async close(): Promise<void> {
     const worker = this.worker
     this.worker = null
     if (!worker) return
-    for (const request of this.pending.values()) request.reject(new Error('Speech runtime unloaded.'))
+    for (const request of this.pending.values())
+      request.reject(new Error('Speech runtime unloaded.'))
     this.pending.clear()
     await worker.terminate()
   }

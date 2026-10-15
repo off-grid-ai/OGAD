@@ -27,7 +27,7 @@ import {
   tableExists,
   type FtsIndexSpec
 } from '../database'
-import { RECORD_EMBEDDER } from '../embeddings-core'
+import { RECORD_EMBEDDER } from '../embedding-models'
 import { actionWhenSql } from './sources'
 
 type Db = ReturnType<typeof getDB>
@@ -75,7 +75,10 @@ function retireLegacyRecords(db: Db): void {
         DROP TRIGGER IF EXISTS ${table}_record_ad;
       `)
       // Range scans on the keys' primary key and the kind index.
-      db.prepare('DELETE FROM record_queue WHERE key >= ? AND key < ?').run(`${prefix}:`, `${prefix};`)
+      db.prepare('DELETE FROM record_queue WHERE key >= ? AND key < ?').run(
+        `${prefix}:`,
+        `${prefix};`
+      )
       db.prepare('DELETE FROM record_vectors WHERE kind = ?').run(kind)
       clearRebuildCursor(db, `record_queue:${table}`)
     }

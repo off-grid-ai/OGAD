@@ -3344,6 +3344,51 @@ export function MemoryChat({
         data.step &&
         typeof data.step === 'object' &&
         'kind' in data.step &&
+        data.step.kind === 'restarting_model'
+      ) {
+        // The same model restarts after a GPU fault; the reply placeholder starts over.
+        reasoningByStream.current[data.streamId] = ''
+        answerByStream.current[data.streamId] = ''
+        timelineByStream.current[data.streamId] = []
+        toolCallsByStream.current[data.streamId] = []
+        resetStreamViewMessage(data.streamId)
+      }
+      if (
+        data.type === 'step' &&
+        data.step &&
+        typeof data.step === 'object' &&
+        'kind' in data.step &&
+        data.step.kind === 'device_fallback' &&
+        'message' in data.step &&
+        typeof data.step.message === 'string'
+      ) {
+        // Chat moved to the CPU: one notice above the reply. The same model answers, so the reply
+        // (which may already be complete) is left as it is.
+        const content = data.step.message
+        const noticeId = crypto.randomUUID()
+        setConvMessages(cid, (previous) => {
+          const notice: ChatMessage = { id: noticeId, role: 'assistant', content, notice: true }
+          const streamIndex = previous.findIndex((message) => message.id === data.streamId)
+          if (streamIndex < 0) return [...previous, notice]
+          return [...previous.slice(0, streamIndex), notice, ...previous.slice(streamIndex)]
+        })
+        void window.api
+          .addRagMessage(cid, 'assistant', content, { notice: true })
+          .then((stored) =>
+            setConvMessages(cid, (previous) =>
+              previous.map((message) =>
+                message.id === noticeId ? { ...message, id: stored.uuid } : message
+              )
+            )
+          )
+          .catch((error) => console.warn('Could not save the CPU notice', error))
+        return
+      }
+      if (
+        data.type === 'step' &&
+        data.step &&
+        typeof data.step === 'object' &&
+        'kind' in data.step &&
         data.step.kind === 'model_changed'
       ) {
         const failed =

@@ -22,8 +22,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { isPackaged } from '../runtime-env'
-import { findWhisperBinary, whisperRuntimeLibraryEnv } from './whisper-runtime'
-import { getBackendPreference } from '../backend-preferences'
+import { findWhisperBinary, findWhisperBinaries, whisperRuntimeLibraryEnv } from './whisper-runtime'
 import type { Transcript } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
 import { Mutex } from 'async-mutex'
@@ -124,6 +123,7 @@ export class WhisperServerService {
   private readonly inferenceMutex = new Mutex()
   private activeKey: string | null = null // whisperContextKey of the loaded model, null when down
   private startPromise: Promise<void> | null = null
+  private startEpoch = 0
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private idleMs = 5 * 60_000 // keep the model hot for 5 min of inactivity, then evict
   private stderrTail: string[] = []
@@ -144,8 +144,8 @@ export class WhisperServerService {
   }
 
   /** Resolve the bundled whisper-server binary across dev / packaged layouts. */
-  findBinary(): string | null {
-    return findWhisperBinary('whisper-server', getBackendPreference('stt'))
+  findBinary(): Promise<string | null> {
+    return findWhisperBinary('whisper-server')
   }
 
   /** Ensure a server is up with EXACTLY this context; restart on a model/thread
@@ -156,18 +156,46 @@ export class WhisperServerService {
     if (this.server && this.activeKey === key) return // already the right model
     if (this.server && this.activeKey !== key) this.stopProcess() // swap -> restart
     if (this.startPromise !== null) return this.startPromise
-    this.startPromise = this.spawn(ctx, key).finally(() => {
+    this.startPromise = this.startWithFallback(ctx, key).finally(() => {
       this.startPromise = null
     })
     return this.startPromise
   }
 
-  private async spawn(ctx: WhisperServerContext, key: string): Promise<void> {
-    const bin = this.findBinary()
-    if (!bin)
-      throw new Error(
-        'Resident STT engine (whisper-server) not found in resources/bin/whisper-server.'
-      )
+  private async startWithFallback(ctx: WhisperServerContext, key: string): Promise<void> {
+    let epoch = this.startEpoch
+    const steps = await findWhisperBinaries('whisper-server')
+    const failures: string[] = []
+    for (const [index, step] of steps.entries()) {
+      if (epoch !== this.startEpoch) throw new Error('Transcription server startup canceled.')
+      try {
+        await this.spawn(
+          ctx,
+          key,
+          step,
+          epoch,
+          failures.length ? `Earlier engines did not start: ${failures.join('; ')}` : undefined
+        )
+        return
+      } catch (error) {
+        if (epoch !== this.startEpoch) throw error
+        failures.push(error instanceof Error ? error.message : String(error))
+        this.stopProcess()
+        epoch = this.startEpoch
+        if (index === steps.length - 1) throw error
+        console.warn(`[whisper-server] Runtime failed; retrying ${steps[index + 1]?.path}`, error)
+      }
+    }
+  }
+
+  private async spawn(
+    ctx: WhisperServerContext,
+    key: string,
+    step: Awaited<ReturnType<typeof findWhisperBinaries>>[number],
+    epoch: number,
+    fallbackReason?: string
+  ): Promise<void> {
+    const bin = step.path
     if (!fs.existsSync(ctx.modelPath))
       throw new Error(`Transcription model not found: ${ctx.modelPath}`)
     const binDir = path.dirname(bin)
@@ -184,9 +212,11 @@ export class WhisperServerService {
 
     // Kill an orphaned whisper-server from a prior app process still holding the
     // port, but never a foreign process that merely happened to bind it.
-    this.killOrphanOnPort()
+    await this.killOrphanOnPort()
+    if (epoch !== this.startEpoch) throw new Error('Transcription server startup canceled.')
 
     const args = buildWhisperServerArgs({ ...ctx, port: this.port })
+    if (step.cpuOnly && step.backend !== 'cpu') args.push('-ng')
     // cwd at the binary dir so @rpath resolves the co-located libwhisper/libggml dylibs.
     const proc = spawn(bin, args, {
       cwd: binDir,
@@ -217,7 +247,7 @@ export class WhisperServerService {
 
     try {
       await this.waitForReady()
-      backendState.ready()
+      backendState.ready(step.cpuOnly ? 'CPU' : undefined, undefined, fallbackReason)
     } catch (error) {
       backendState.fail(error)
       throw error
@@ -302,6 +332,7 @@ export class WhisperServerService {
   }
 
   private stopProcess(): void {
+    this.startEpoch++
     this.backendState?.stop()
     if (this.server) {
       try {
@@ -331,13 +362,13 @@ export class WhisperServerService {
     }
   }
 
-  private killOrphanOnPort(): void {
+  private async killOrphanOnPort(): Promise<void> {
     // Shared cross-platform reaper (kill-orphan-port.ts) — adds the Windows branch this
     // used to lack (a crashed whisper-server would keep holding the port after a restart).
     // Match policy: posix matches our OWN bundled binary by FULL PATH (a user's separately
     // run whisper-server is left untouched); win32's tasklist only exposes the image name,
     // so match the exe name there.
-    const ownBin = this.findBinary()
+    const ownBin = await this.findBinary()
     if (!ownBin) return
     reapOrphansOnPort(
       this.port,

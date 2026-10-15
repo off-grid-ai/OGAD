@@ -1,5 +1,5 @@
 /**
- * Embedding inference, off the main thread.
+ * Embedding inference, in its own utility process (onnx-host/utility-host.ts).
  *
  * all-MiniLM-L6-v2 runs on the ONNX/WASM runtime, and profiling the main process showed why that
  * cannot live beside the window: tokenization and mean pooling are JS (they block the event loop),
@@ -7,34 +7,28 @@
  * for cores. A startup backfill of a few dozen rows held the main process at 110% CPU with no chat
  * open and no task running.
  *
- * This worker owns the pipeline and answers one request at a time. The host (embeddings.ts) keeps
+ * This helper process owns the pipeline and answers one request at a time. The host (embeddings.ts) keeps
  * the queue, so back-pressure and cancellation stay a host concern and this file stays a pure
  * text-in / vector-out service.
  */
-import { parentPort, workerData } from 'worker_threads'
 import { DEFAULT_EMBEDDER, embedTexts, embeddingDevice, rerankPassages } from './embeddings-core'
 import { configureRuntime } from './runtime-env'
-import type { BackendPreference } from '../shared/backend-preferences'
+import type { OnnxDevice } from '@offgrid/models'
+import { connectHelper, type HelperPort } from './onnx-host/helper-port'
 
-if (!parentPort) throw new Error('embeddings-worker must be started as a worker thread')
-const port = parentPort
-
-// modelsDir() reads Electron's app paths, which do not exist in a worker thread — the host
-// resolves the directory and passes it in.
-const {
-  modelsDir,
-  chosenModelsDir,
-  modelReadDirectories = [modelsDir],
-  backendPreference = 'auto'
-} = workerData as {
+// modelsDir() reads Electron's app paths, which a helper process does not have — the host
+// resolves the directories and sends them as the first message.
+export interface EmbeddingWorkerInit {
   modelsDir: string
   chosenModelsDir?: string
   modelReadDirectories?: string[]
-  backendPreference?: BackendPreference
+  devices: OnnxDevice[]
 }
 
-// Preserve the host's explicit choice without treating its default path as chosen.
-configureRuntime({ modelsDir: chosenModelsDir })
+let port: HelperPort<EmbeddingRequest>
+let modelsDir = ''
+let modelReadDirectories: string[] = []
+let devices: OnnxDevice[] = ['cpu']
 
 export interface EmbeddingRequest {
   id: number
@@ -55,7 +49,7 @@ export interface EmbeddingResponse {
   error?: string
 }
 
-port.on('message', (request: EmbeddingRequest) => {
+function handle(request: EmbeddingRequest): void {
   void (async () => {
     try {
       if (request.rerankQuery !== undefined) {
@@ -63,10 +57,10 @@ port.on('message', (request: EmbeddingRequest) => {
           request.rerankQuery,
           request.texts,
           modelsDir,
-          backendPreference,
+          devices,
           modelReadDirectories
         )
-        port.postMessage({ id: request.id, scores } satisfies EmbeddingResponse)
+        port.post({ id: request.id, scores } satisfies EmbeddingResponse)
         return
       }
       const vectors = await embedTexts(
@@ -74,26 +68,36 @@ port.on('message', (request: EmbeddingRequest) => {
         request.model ?? DEFAULT_EMBEDDER.model,
         modelsDir,
         (device, fallbackReason) => {
-          port.postMessage({
+          port.post({
             id: request.id,
             ready: true,
             device,
             fallbackReason
           } satisfies EmbeddingResponse)
         },
-        backendPreference,
+        devices,
         modelReadDirectories
       )
-      port.postMessage({
+      port.post({
         id: request.id,
         vectors,
         device: embeddingDevice() ?? undefined
       } satisfies EmbeddingResponse)
     } catch (error) {
-      port.postMessage({
+      port.post({
         id: request.id,
         error: error instanceof Error ? error.message : String(error)
       } satisfies EmbeddingResponse)
     }
   })()
+}
+
+void connectHelper<EmbeddingWorkerInit, EmbeddingRequest>().then(({ init, port: connected }) => {
+  port = connected
+  modelsDir = init.modelsDir
+  modelReadDirectories = init.modelReadDirectories ?? [init.modelsDir]
+  devices = init.devices
+  // Preserve the host's explicit choice without treating its default path as chosen.
+  configureRuntime({ modelsDir: init.chosenModelsDir })
+  port.onRequest(handle)
 })

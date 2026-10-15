@@ -10,8 +10,17 @@ import {
 import { modelReadDirectories, resolveTransformersPackage } from './model-paths'
 import { requireModelStorage } from './runtime-env'
 import { configureTransformersEnv } from './embeddings-env'
-import { loadWithOnnxFallback, onnxDeviceCandidates } from './onnx-device'
-import type { BackendPreference } from '../shared/backend-preferences'
+import { loadWithOnnxFallback } from './onnx-device'
+import type { OnnxDevice } from '@offgrid/models'
+import { DOCUMENT_RERANKER } from './embedding-models'
+export {
+  DEFAULT_EMBEDDER,
+  DOCUMENT_EMBEDDER,
+  DOCUMENT_EMBEDDER_SPEC,
+  DOCUMENT_RERANKER,
+  RECORD_EMBEDDER,
+  type EmbedderSpec
+} from './embedding-models'
 
 /**
  * Text -> vector. The actual inference, owned in ONE place.
@@ -41,46 +50,6 @@ export async function disposeEmbeddingModel(): Promise<void> {
   await (await reranker?.catch(() => null))?.model.dispose()
 }
 
-/** A sentence embedder and the prefixes its training expects on questions and passages. */
-export interface EmbedderSpec {
-  model: string
-  queryPrefix: string
-  passagePrefix: string
-}
-
-const EMBEDDERS = {
-  /** English. Measured 3.3 ms a passage fp32 on CPU here; q8 was slower (30.6 ms). */
-  miniLM: { model: 'Xenova/all-MiniLM-L6-v2', queryPrefix: '', passagePrefix: '' },
-  /** Hindi and English in one space (a Hindi question finds the English passage). 7.9 ms a passage
-   *  fp32; a ~470 MB download against MiniLM's ~90 MB. Trained with these prefixes. */
-  multilingualE5Small: {
-    model: 'Xenova/multilingual-e5-small',
-    queryPrefix: 'query: ',
-    passagePrefix: 'passage: '
-  }
-} as const satisfies Record<string, EmbedderSpec>
-
-/** The model behind embeddings that have no corpus of their own (/v1/embeddings, MCP, tool routing). */
-export const DEFAULT_EMBEDDER: EmbedderSpec = EMBEDDERS.miniLM
-
-/**
- * The model memory search embeds records and questions with. Changing it is this one line: each
- * stored vector records its model, so every record is embedded again with the new one.
- */
-export const RECORD_EMBEDDER: EmbedderSpec = EMBEDDERS.multilingualE5Small
-
-/**
- * Models for documents (chat attachments, knowledge bases, transcripts): the same multilingual
- * embedder as memory search, so one model is loaded and a Hindi question finds an English passage.
- * fp32 is 7.9 ms a passage on CPU here (the ~1.7 s once measured was its q8 build). Documents
- * indexed with MiniLM re-embed on their next use: the ingest compares each document's embedder. Indian-language documents still match by
- * keyword (FTS5 keeps their words whole). ms-marco-MiniLM-L-6-v2 is the cross-encoder AnythingLLM's
- * native reranker uses.
- */
-export const DOCUMENT_EMBEDDER_SPEC: EmbedderSpec = EMBEDDERS.multilingualE5Small
-export const DOCUMENT_EMBEDDER = DOCUMENT_EMBEDDER_SPEC.model
-export const DOCUMENT_RERANKER = 'Xenova/ms-marco-MiniLM-L-6-v2'
-
 let rerankerLoading: Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> | null =
   null
 
@@ -103,11 +72,11 @@ export async function embedTexts(
   model: string,
   modelsDir: string,
   onReady?: (device: string, reason?: string) => void,
-  backendPreference: BackendPreference = 'auto',
+  devices: OnnxDevice[] = ['cpu'],
   readDirectories = modelReadDirectories()
 ): Promise<number[][]> {
   if (!texts.length) return []
-  const pipe = await loadPipeline(model, modelsDir, onReady, backendPreference, readDirectories)
+  const pipe = await loadPipeline(model, modelsDir, onReady, devices, readDirectories)
   const output = await pipe(texts, { pooling: 'mean', normalize: true })
   return output.tolist() as number[][]
 }
@@ -117,7 +86,7 @@ function loadPipeline(
   model: string,
   modelsDir: string,
   onReady: ((device: string, reason?: string) => void) | undefined,
-  backendPreference: BackendPreference,
+  devices: OnnxDevice[],
   readDirectories: string[]
 ): Promise<FeatureExtractionPipeline> {
   const loaded = pipes.get(model)
@@ -134,7 +103,7 @@ function loadPipeline(
         device,
         ...(cached ? { local_files_only: true, ...(fp32 ? {} : { dtype: 'q8' as const }) } : {})
       }),
-    embeddingDevices(backendPreference)
+    embeddingDevices(devices)
   ).then(({ runtime, device, fallbackReason }) => {
     onReady?.(device, fallbackReason)
     activeDevice = device
@@ -152,7 +121,7 @@ export async function rerankPassages(
   query: string,
   passages: string[],
   modelsDir: string,
-  backendPreference: BackendPreference = 'auto',
+  devices: OnnxDevice[] = ['cpu'],
   readDirectories = modelReadDirectories()
 ): Promise<number[]> {
   if (!passages.length) return []
@@ -168,7 +137,7 @@ export async function rerankPassages(
             dtype: 'q8',
             ...options
           }),
-        embeddingDevices(backendPreference)
+        embeddingDevices(devices)
       ).then(({ runtime }) => runtime)
     ]).then(([tokenizer, model]) => ({ tokenizer, model }))
     rerankerLoading.catch(() => {
@@ -192,23 +161,7 @@ export async function rerankPassages(
   return scores
 }
 
-/**
- * Devices for the embedders and the reranker: never CoreML on macOS, whatever the backend
- * preference. CoreML ran MiniLM at about 450 ms a passage against 50 ms on the CPU (measured
- * 2026-10-15, app under load), and the multilingual embedder on CoreML ended the whole app
- * mid-batch in the background indexer (no crash report; every "Memory indexing" request with
- * backend Core ML was interrupted by the app closing). A "metal" preference maps to CoreML for ONNX,
- * so excluding it only for "auto" was not enough.
- *
- * WebGPU only when the user picks it. A second process running the multilingual embedder on
- * WebGPU beside the app caused a GPU page fault (2026-10-15, gpuEvent "BIF0 page fault"); the GPU
- * restarted, llama-server answered every request with "Compute error", and WindowServer later hung
- * until the Mac was force-reset. Background indexing is not worth that risk, and on the CPU it
- * leaves the GPU to the chat model. A query vector costs about 60-90 ms on the CPU.
- */
-function embeddingDevices(
-  backendPreference: BackendPreference
-): ReturnType<typeof onnxDeviceCandidates> {
-  if (process.platform !== 'darwin') return onnxDeviceCandidates(process.platform, backendPreference)
-  return backendPreference === 'webgpu' ? ['webgpu', 'cpu'] : ['cpu']
+/** The host supplies the shared policy result to both execution paths. */
+function embeddingDevices(devices: OnnxDevice[]): OnnxDevice[] {
+  return devices
 }

@@ -3,11 +3,10 @@
 // hardware facts and writes the chosen settings through each owner's own setter.
 
 import os from 'node:os'
-import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { llm } from './llm'
-import { selectLocalEngine } from './llm/select-local-engine'
+import { nativeLadder } from './backend-facts'
 import { getBackendPreferences, setBackendPreference } from './backend-preferences'
 import { getResidency, setResidencyMode } from './runtime-residency'
 import { getSetting, saveSetting } from './database'
@@ -38,12 +37,16 @@ async function applePerformanceCores(): Promise<number | null> {
 
 /** The GPU backend of the engine llama.cpp would load with, after its own device probe. */
 async function nativeGpu(): Promise<NativeGpu | null> {
-  if (process.platform === 'darwin') return 'Metal'
-  const engine = await selectLocalEngine('auto')
-  const directory = engine ? path.basename(path.dirname(engine)) : ''
-  if (directory === 'llama-cuda') return 'CUDA'
-  if (directory === 'llama') return 'Vulkan'
-  return null
+  const step = (await nativeLadder('llm', undefined, 'auto')).find(
+    (candidate) => !candidate.cpuOnly
+  )
+  return step?.backend === 'cuda'
+    ? 'CUDA'
+    : step?.backend === 'vulkan'
+      ? 'Vulkan'
+      : step?.backend === 'metal'
+        ? 'Metal'
+        : null
 }
 
 export async function detectMachine(): Promise<MachineProfile> {

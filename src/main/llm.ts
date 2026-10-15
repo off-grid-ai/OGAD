@@ -11,17 +11,11 @@ import path from 'path'
 import { recordAIRequest, currentAIRequest } from './ai-request-log'
 import * as fs from 'fs'
 import { modelMetadataFile, resolveModelReference } from './model-paths'
-import {
-  modelsDir as getModelsDir,
-  binRoots,
-  isPackaged,
-  exe,
-  requireModelStorage
-} from './runtime-env'
+import { modelsDir as getModelsDir, binRoots, isPackaged, requireModelStorage } from './runtime-env'
 import { reapOrphanProcessesOnPort, type PortReapResult } from './kill-orphan-port'
 import { loadAttempts, type KvCacheType, type PerformanceMode } from './model-sizing'
 import { resolveMaxTokens, maxTokensForWire, MAX_TOKENS_AUTO } from './llm/gen-params'
-import { classifyLlamaError, modelPortConflictReason } from './llama-error'
+import { classifyLlamaError, modelPortConflictReason, GPU_FAULT_PATTERN } from './llama-error'
 import type { ManagedRuntime } from './runtime-manager'
 import { LLAMA_SERVER_PORT } from '../shared/ports'
 import {
@@ -29,7 +23,12 @@ import {
   DEFAULT_MAX_TOOL_CALLS,
   normalizeMaxToolCalls
 } from '../shared/llm-defaults'
-import { REASONING_BUDGET_AUTO, reasoningBudgetPayload } from '@offgrid/models'
+import {
+  REASONING_BUDGET_AUTO,
+  reasoningBudgetPayload,
+  backendReasonText,
+  type NativeBackend
+} from '@offgrid/models'
 import type { EngineAccelerator } from '../shared/engine-accelerator'
 import {
   applyModePreset,
@@ -52,15 +51,14 @@ import {
   type CatalogEntry
 } from './models/catalog-logic'
 import { pickFreePort, isPortFree } from './free-port'
-import { postCompletionOnce } from './llm/http-post'
+import { ModelServerError, postCompletionOnce } from './llm/http-post'
 import { modalityQueue } from './modality-queue/queue'
 import { engineSpawnEnv } from './llm/spawn-env'
-import { gpuDeviceAvailable } from './llm/gpu-device-probe'
 import { shouldAutoRecover } from './llm/crash-policy'
-import { enginePriority } from './llm/engine-priority'
+import { engineCandidates, nativeLadder } from './backend-facts'
 import { modelStartupQuietLimit, startupStalled } from './llm/startup-timeout'
+import { waitForEngineResumeHealth } from './engine-resume-health'
 import { getBackendPreference } from './backend-preferences'
-import { prioritizeBackend, type BackendPreference } from '../shared/backend-preferences'
 import { streamCompletion, type StreamResult } from './llm/stream'
 import type { AssembledToolCall } from './llm/sse-stream'
 import {
@@ -100,7 +98,7 @@ export interface LlmSettings {
   // Launch-time (require a server respawn to take effect):
   kvCacheType?: KvCacheType // quantize the KV cache to cut memory (needs flash-attn)
   flashAttn?: boolean // FlashAttention: faster + lower memory; required for quantized KV
-  gpuLayers?: number // -ngl: layers offloaded to the GPU. 99 = all.
+  gpuLayers?: number | null // null lets llama.cpp fit layers automatically.
   threads?: number // CPU threads for inference
   batchSize?: number // -b: prompt batch size
   speculativeDecoding?: SpeculativeDecodingMode
@@ -252,6 +250,10 @@ export class LLMService {
   private backendOutput = ''
   private backendModelPath = ''
   private backendPlacement: ReturnType<typeof parseNativeBackend>
+  /** Layers the engine put on the GPU, from its load log ("offloaded N/M layers to GPU"). */
+  private offloadedLayers: { gpu: number; total: number } | undefined
+  /** When the current engine started loading, for the first-load notice. */
+  private loadingSince: number | undefined
   private backendFallbackReason: string | undefined
   // A model selection is durable as soon as the manager writes active-model.json, but
   // replacing llama-server while it is answering destroys the user's in-flight turn.
@@ -299,7 +301,7 @@ export class LLMService {
   // choice (the "q8_0 reverts to f16 on every restart" bug). Persisted alongside the
   // values so a plain restart keeps the pin.
   private readonly userExplicit = new Set<PresetField>()
-  private gpuLayers = 99
+  private gpuLayers: number | null = null
   private threads: number | undefined
   private batchSize: number | undefined
   private speculativeDecoding: SpeculativeDecodingMode = 'off'
@@ -312,6 +314,10 @@ export class LLMService {
   // a server that keeps dying (e.g. memory pressure on a too-large model) can NOT
   // thrash-respawn a multi-GB process forever.
   private restartTimes: number[] = []
+  private deviceFaultAt: number | null = null
+  private recoveryPromise: Promise<void> | null = null
+  private recoveryModel: { path: string; mmproj: string } | null = null
+  private currentBackend: NativeBackend | undefined
   // Launch-setting restarts are serialized and last-wins. A slider drag or a fast
   // sequence of settings writes used to call stop()+init() once per change, so several
   // spawns raced and an EARLIER one could win and leave the engine running arguments the
@@ -377,7 +383,8 @@ export class LLMService {
       if (s.kvCacheType === 'f16' || s.kvCacheType === 'q8_0' || s.kvCacheType === 'q4_0')
         this.kvCacheType = s.kvCacheType
       if (typeof s.flashAttn === 'boolean') this.flashAttn = s.flashAttn
-      if (typeof s.gpuLayers === 'number') this.gpuLayers = s.gpuLayers
+      if (s.gpuLayers === null || typeof s.gpuLayers === 'number')
+        this.gpuLayers = s.gpuLayers === 99 ? null : s.gpuLayers
       if (typeof s.threads === 'number') this.threads = s.threads
       if (typeof s.batchSize === 'number') this.batchSize = s.batchSize
       if (
@@ -389,7 +396,11 @@ export class LLMService {
       )
         this.speculativeDecoding = s.speculativeDecoding
       if (typeof s.draftModel === 'string') this.draftModel = path.basename(s.draftModel)
-      if (Number.isInteger(s.speculativeDraftMax) && s.speculativeDraftMax >= 0 && s.speculativeDraftMax <= 16)
+      if (
+        Number.isInteger(s.speculativeDraftMax) &&
+        s.speculativeDraftMax >= 0 &&
+        s.speculativeDraftMax <= 16
+      )
         this.speculativeDraftMax = s.speculativeDraftMax
       if (
         s.performanceMode === 'conservative' ||
@@ -557,11 +568,27 @@ export class LLMService {
   runtimeBackend(): RuntimeBackend {
     const placement = this.initialized ? this.backendPlacement : undefined
     return {
-      id: 'chat', model: this.backendModelPath,
-      state: this.initialized ? 'loaded' : this.isStarting() ? 'loading' : this.lastError() ? 'error' : 'stopped',
+      id: 'chat',
+      model: this.backendModelPath,
+      state:
+        this.deviceFaultAt !== null
+          ? 'error'
+          : this.initialized
+            ? 'loaded'
+            : this.isStarting()
+              ? 'loading'
+              : this.lastError()
+                ? 'error'
+                : 'stopped',
       backend: placement?.backend,
       device: placement?.device,
-      detail: this.lastError() ?? this.backendFallbackReason
+      detail: this.lastError() ?? this.backendFallbackReason,
+      fallbackReason: this.backendFallbackReason,
+      lastError: this.lastError() ?? undefined,
+      ...(placement && this.offloadedLayers
+        ? { gpuLayers: this.offloadedLayers.gpu, totalLayers: this.offloadedLayers.total }
+        : {}),
+      ...(this.isStarting() && this.loadingSince ? { loadingSince: this.loadingSince } : {})
     }
   }
 
@@ -621,7 +648,11 @@ export class LLMService {
   }
 
   /** Build argv for the selected context and a GPU-layer count. */
-  private launchArgsFor(effectiveCtxSize: number, gpuLayers: number): string[] {
+  private launchArgsFor(
+    effectiveCtxSize: number,
+    gpuLayers: number | null,
+    cpuOnly = false
+  ): string[] {
     const useSelectedModelSpeculation =
       this.runtimeModelOverride === null &&
       this.speculativeModeSupported(this.speculativeDecoding, this.draftModel)
@@ -633,6 +664,7 @@ export class LLMService {
       port: this.port,
       effectiveCtxSize,
       gpuLayers,
+      cpuOnly,
       flashAttn: this.flashAttn,
       kvCacheType: this.kvCacheType,
       threads: this.threads,
@@ -712,8 +744,12 @@ export class LLMService {
   /** Update inference settings; respawns the server if any launch-time arg changed
    *  (context, KV-cache type, flash-attn, GPU layers, threads, batch). */
   async setSettings(s: LlmSettings, options: LlmSettingsUpdateOptions = {}): Promise<void> {
-    if (s.speculativeDraftMax !== undefined &&
-      (!Number.isInteger(s.speculativeDraftMax) || s.speculativeDraftMax < 0 || s.speculativeDraftMax > 16)) {
+    if (
+      s.speculativeDraftMax !== undefined &&
+      (!Number.isInteger(s.speculativeDraftMax) ||
+        s.speculativeDraftMax < 0 ||
+        s.speculativeDraftMax > 16)
+    ) {
       throw new Error('Draft token limit must be Auto (0) or a whole number from 1 to 16.')
     }
     this.ensureLoaded()
@@ -797,7 +833,7 @@ export class LLMService {
       this.kvCacheType = compatibleSettings.kvCacheType
     if (typeof compatibleSettings.flashAttn === 'boolean')
       this.flashAttn = compatibleSettings.flashAttn
-    if (typeof compatibleSettings.gpuLayers === 'number')
+    if (compatibleSettings.gpuLayers === null || typeof compatibleSettings.gpuLayers === 'number')
       this.gpuLayers = compatibleSettings.gpuLayers
     if (typeof compatibleSettings.threads === 'number') this.threads = compatibleSettings.threads
     if (typeof compatibleSettings.batchSize === 'number')
@@ -843,7 +879,8 @@ export class LLMService {
       this.systemPrompt = priorSettings.systemPrompt ?? this.systemPrompt
       this.kvCacheType = priorSettings.kvCacheType ?? this.kvCacheType
       this.flashAttn = priorSettings.flashAttn ?? this.flashAttn
-      this.gpuLayers = priorSettings.gpuLayers ?? this.gpuLayers
+      this.gpuLayers =
+        priorSettings.gpuLayers === undefined ? this.gpuLayers : priorSettings.gpuLayers
       this.threads = priorSettings.threads
       this.batchSize = priorSettings.batchSize
       this.speculativeDecoding = priorSettings.speculativeDecoding ?? this.speculativeDecoding
@@ -934,6 +971,11 @@ export class LLMService {
   // ({ id, primary, mmproj }) after resolving a catalog entry; default to the
   // bundled Qwen3-VL vision model when nothing is selected yet.
   private resolveModel(): void {
+    if (this.recoveryModel) {
+      this.modelPath = this.recoveryModel.path
+      this.mmProjPath = this.recoveryModel.mmproj
+      return
+    }
     if (this.runtimeModelOverride) {
       this.modelPath = resolveModelReference(this.runtimeModelOverride.primary)
       this.mmProjPath = this.runtimeModelOverride.mmproj
@@ -1184,30 +1226,31 @@ export class LLMService {
     // Try CUDA on NVIDIA, Vulkan on other GPUs, then the CPU-only engine.
     // macOS has its own Metal engines, so the absent CUDA/Vulkan paths are skipped.
     const roots = binRoots()
-    const serverPaths = roots
-      .flatMap((r) =>
-        requiresPrism
-          ? [
-              path.join(r, 'llama-prism-cuda', exe('llama-server')),
-              path.join(r, 'llama-prism', exe('llama-server')),
-              path.join(r, 'llama-prism-cpu', exe('llama-server'))
-            ]
-          : [
-              path.join(r, 'llama-cuda', exe('llama-server')),
-              path.join(r, 'llama', exe('llama-server')),
-              path.join(r, 'llama-cpu', exe('llama-server')),
-              path.join(r, exe('llama-server'))
-            ]
+    const serverPaths = await nativeLadder(
+      'llm',
+      undefined,
+      getBackendPreference('llm'),
+      requiresPrism
+    )
+    this.backendFallbackReason =
+      serverPaths[0]?.cpuOnly && this.recoveryModel && this.hasDeviceFault()
+        ? 'The GPU stopped responding.'
+        : undefined
+    const candidates = await engineCandidates('llm', undefined, requiresPrism)
+    const firstGpu = candidates.find((candidate) => candidate.backend !== 'cpu')
+    if (serverPaths[0]?.cpuOnly || (firstGpu && serverPaths[0]?.path !== firstGpu.id)) {
+      const skipped = candidates.find(
+        (candidate) => candidate.backend !== 'cpu' && !candidate.usable
       )
-      .filter((p) => fs.existsSync(p))
+      if (skipped?.reason) this.backendFallbackReason = backendReasonText(skipped.reason)
+    }
     if (!serverPaths.length) {
       if (requiresPrism) {
         throw new Error(
           'Bonsai 2 requires the bundled Prism llama.cpp engine, which is missing from this build.'
         )
       }
-      console.error(`[LLMService] llama-server binary not found under: ${roots.join(', ')}`)
-      return
+      throw new Error(`No chat engine is installed. Searched: ${roots.join(', ')}`)
     }
 
     console.log(`[LLMService] Model: ${this.modelPath}`)
@@ -1241,54 +1284,16 @@ export class LLMService {
 
   /** Try all accelerated engines before CPU at the selected context. */
   private async launchWithFallback(
-    serverPaths: string[],
+    serverPaths: Awaited<ReturnType<typeof nativeLadder>>,
     generation = this.launchGeneration
   ): Promise<boolean> {
-    this.backendFallbackReason = undefined
-    const preference = getBackendPreference('llm')
-    const ordered = prioritizeBackend(
-      [...serverPaths].sort((a, b) => enginePriority(a) - enginePriority(b)),
-      preference === 'cpu' ? 'auto' : preference,
-      (serverPath): BackendPreference => {
-        const directory = path.basename(path.dirname(serverPath))
-        if (directory.endsWith('-cpu')) return 'cpu'
-        if (directory.endsWith('-cuda')) return 'cuda'
-        return process.platform === 'darwin' ? 'metal' : 'vulkan'
-      }
-    )
-    const candidates = preference === 'cpu'
-      ? ordered.map((serverPath) => ({ serverPath, cpuOnly: true }))
-      : [
-          ...ordered.map((serverPath) => ({ serverPath, cpuOnly: false })),
-          ...ordered
-            .filter((p) => !p.includes('llama-cpu') && !p.includes('llama-prism-cpu'))
-            .map((serverPath) => ({ serverPath, cpuOnly: true }))
-        ]
-    for (const { serverPath, cpuOnly } of candidates) {
+    for (const { path: serverPath, cpuOnly, backend } of serverPaths) {
       if (generation !== this.launchGeneration) return false
-      if (!serverPath) continue
+      this.currentBackend = cpuOnly ? 'cpu' : backend
       const engineDir = path.basename(path.dirname(serverPath))
-      const backend = engineDir.endsWith('-cuda')
-        ? 'CUDA'
-        : engineDir === 'llama' || engineDir === 'llama-prism'
-          ? 'Vulkan'
-          : null
-      if (!cpuOnly && (process.platform === 'win32' || process.platform === 'linux') && backend) {
-        if (this.gpuLayers === 0) continue
-        if (!(await gpuDeviceAvailable(serverPath, backend, process.platform))) {
-          this.backendFallbackReason = `${backend} did not report a usable device. Another engine was selected.`
-          console.warn(
-            `[LLMService] no usable ${backend} device for ${serverPath}; trying next engine`
-          )
-          continue
-        }
-      }
       // Read after the device probe's wait, with no await before the launch arguments, so a save made
       // during the probe cannot leave the checkpoint and the arguments describing different launches.
-      const attempts = loadAttempts(
-        this.ctxSize,
-        cpuOnly || enginePriority(serverPath) === 2 ? 0 : this.gpuLayers
-      ).slice(0, 1)
+      const attempts = loadAttempts(this.ctxSize, cpuOnly ? 0 : this.gpuLayers).slice(0, 1)
       for (let a = 0; a < attempts.length; a++) {
         if (generation !== this.launchGeneration) return false
         const at = attempts[a]
@@ -1296,12 +1301,16 @@ export class LLMService {
         if (a > 0) {
           console.warn(`[LLMService] out of memory — retrying load at ${at.reason}`)
         }
-        const args = this.launchArgsFor(at.ctxSize, at.gpuLayers)
+        const args = this.launchArgsFor(at.ctxSize, at.gpuLayers, cpuOnly)
         // The six-token Qwen3.5 9B gain was measured with stock llama.cpp on
         // Metal. Preserve the existing limit for other engines and backends.
         const draftMaxIndex = args.indexOf('--spec-draft-n-max')
-        if (draftMaxIndex >= 0 && this.speculativeDecoding === 'mtp' && this.speculativeDraftMax === 0 &&
-          (engineDir !== 'llama' || cpuOnly || process.platform !== 'darwin')) {
+        if (
+          draftMaxIndex >= 0 &&
+          this.speculativeDecoding === 'mtp' &&
+          this.speculativeDraftMax === 0 &&
+          (engineDir !== 'llama' || cpuOnly || process.platform !== 'darwin')
+        ) {
           args[draftMaxIndex + 1] = '2'
         }
         // Captured in the same step as the arguments: a save can land during init's earlier awaits,
@@ -1316,8 +1325,9 @@ export class LLMService {
         }
         if (generation !== this.launchGeneration) return false
         const failure = classifyLlamaError(this.stderrTail.join('\n'))
-        this.backendFallbackReason = failure?.reason ?? 'The previous engine could not load the model.'
-        if (failure?.code === 'speculation_unsupported') {
+        this.backendFallbackReason =
+          failure?.reason ?? 'The previous engine could not load the model.'
+        if (failure?.code === 'speculation_unsupported' && !this.recoveryModel) {
           console.warn(
             `[LLMService] ${failure.reason} Retrying the selected model with speculative decoding off.`
           )
@@ -1329,10 +1339,7 @@ export class LLMService {
           }
           await this.prepareModelPort()
           if (generation !== this.launchGeneration) return false
-          const retryArgs = this.launchArgsFor(
-            this.ctxSize,
-            cpuOnly || enginePriority(serverPath) === 2 ? 0 : this.gpuLayers
-          )
+          const retryArgs = this.launchArgsFor(this.ctxSize, cpuOnly ? 0 : this.gpuLayers, cpuOnly)
           const retriedWith = { settings: this.getSettings(), explicit: new Set(this.userExplicit) }
           if (await this.launchServer(serverPath, retryArgs)) {
             this.lastWorkingLaunch = retriedWith
@@ -1393,6 +1400,8 @@ export class LLMService {
     this.backendOutput = ''
     this.backendModelPath = this.modelPath
     this.backendPlacement = undefined
+    this.offloadedLayers = undefined
+    this.loadingSince = Date.now()
     this.stderrTail = []
     this.lastServerOutputAt = Date.now()
     this.invalidateHealth()
@@ -1417,7 +1426,15 @@ export class LLMService {
       const text = String(data)
       // Verbosity 4 also emits request traces. Read and log it only during model
       // load so user prompts cannot enter the app log or its diagnostic tail.
-      if (!probing || this.server !== proc) return
+      if (this.server !== proc) return
+      if (!probing) {
+        if (GPU_FAULT_PATTERN.test(text)) {
+          this.lastErrorMsg = 'The GPU stopped responding.'
+          this.deviceFaultAt = Date.now()
+          this.invalidateHealth()
+        }
+        return
+      }
       console.log(`[llama-server] ${text}`)
       this.backendOutput = (this.backendOutput + text).slice(-65536)
       // Keep a rolling tail so we can classify a load failure after it exits.
@@ -1439,7 +1456,8 @@ export class LLMService {
       const deliberateClose = wasIntentional
       if (!deliberateClose && !this.paused) {
         const failure = classifyLlamaError(this.stderrTail.join('\n'))
-        this.backendFallbackReason = failure?.reason ?? 'The previous engine could not load the model.'
+        this.backendFallbackReason =
+          failure?.reason ?? 'The previous engine could not load the model.'
         if (failure) {
           this.lastErrorMsg = failure.reason
           console.error(
@@ -1450,7 +1468,10 @@ export class LLMService {
       this.invalidateHealth()
       // Recover unexpected exits of a previously healthy engine, including OS kills.
       // App stops and memory pauses stay stopped; launch failures use the engine ladder.
-      if (shouldAutoRecover({ probing, wasIntentional, paused: this.paused, signal })) {
+      if (
+        this.deviceFaultAt === null &&
+        shouldAutoRecover({ probing, wasIntentional, paused: this.paused, signal })
+      ) {
         void this.handleCrash(code ?? -1).catch((error) => {
           console.error('[LLMService] automatic recovery failed:', error)
         })
@@ -1468,10 +1489,18 @@ export class LLMService {
       console.log('[LLMService] Vision server ready!')
       const engineDir = path.basename(binDir)
       this.backendPlacement = parseNativeBackend(this.backendOutput)
+      const layers = [
+        ...this.backendOutput.matchAll(/\boffloaded\s+(\d+)\/(\d+)\s+layers to GPU\b/gi)
+      ].at(-1)
+      this.offloadedLayers = layers
+        ? { gpu: Number(layers[1]), total: Number(layers[2]) }
+        : undefined
+      this.loadingSince = undefined
       console.log(
         `[LLMService] model ready: engine=${engineDir}, backend=${this.backendPlacement?.backend ?? 'unconfirmed'}`
       )
       this.initialized = true
+      this.deviceFaultAt = null
       this.lastErrorMsg = null // healthy again — clear any prior failure reason
       this.invalidateHealth()
       return true
@@ -1499,6 +1528,11 @@ export class LLMService {
    *  init, and fail loudly if init didn't take. Single source of truth so the
    *  three chat methods don't each re-implement it. */
   private async ensureReady(): Promise<void> {
+    await waitForEngineResumeHealth()
+    if (this.recoveryPromise) await this.recoveryPromise
+    if (this.hasDeviceFault()) {
+      throw new ModelServerError('device_fault', 'The GPU stopped responding while answering.')
+    }
     await prepareModelMemory('chat')
     if (this.paused) throw new Error('LLM paused during image generation — deferred')
     if (!this.initialized) {
@@ -1573,7 +1607,8 @@ export class LLMService {
       await this.init()
     } catch (error) {
       console.error('[LLMService] recovery startup failed:', error)
-      if (generation === this.launchGeneration && !(this.server as ChildProcess | null)) await this.handleCrash(code)
+      if (generation === this.launchGeneration && !(this.server as ChildProcess | null))
+        await this.handleCrash(code)
     }
   }
 
@@ -2186,6 +2221,7 @@ export class LLMService {
   stop(): void {
     this.launchGeneration++
     this.initialized = false
+    this.intentionalStop = true
     if (this.server) {
       this.intentionalStop = true // deliberate shutdown — don't auto-restart
       this.server.kill()
@@ -2293,7 +2329,9 @@ export class LLMService {
   private async pauseAndWait(): Promise<void> {
     const { portFree } = await this.unload(true)
     if (!portFree) {
-      throw new Error('The chat model port is still occupied; image generation cannot start safely.')
+      throw new Error(
+        'The chat model port is still occupied; image generation cannot start safely.'
+      )
     }
   }
 
@@ -2341,6 +2379,67 @@ export class LLMService {
    *  or never failed). Surfaced in the Health panel so "Down" explains itself. */
   lastError(): string | null {
     return this.lastErrorMsg
+  }
+
+  hasDeviceFault(): boolean {
+    return this.deviceFaultAt !== null
+  }
+
+  gpuBackend(): NativeBackend | undefined {
+    return this.currentBackend === 'cpu' ? undefined : this.currentBackend
+  }
+
+  shouldBeRunning(): boolean {
+    return (
+      !this.paused && !this.intentionalStop && this.lastWorkingLaunch !== null && !this.initPromise
+    )
+  }
+
+  async healthCheck(): Promise<boolean> {
+    const proc = this.server
+    if (
+      !proc ||
+      proc.killed ||
+      proc.exitCode !== null ||
+      proc.signalCode !== null ||
+      this.hasDeviceFault()
+    )
+      return false
+    try {
+      const response = await fetch(`http://127.0.0.1:${this.port}/health`, {
+        signal: AbortSignal.timeout(3000)
+      })
+      await response.body?.cancel()
+      // The process may have been replaced while the request was in flight.
+      return response.status === 200 && (this.server as ChildProcess | null) === proc
+    } catch {
+      return false
+    }
+  }
+
+  /** Fault recovery shares the crash budget and never writes the user's settings. */
+  async restartSameModel(): Promise<void> {
+    if (this.recoveryPromise) return this.recoveryPromise
+    const now = Date.now()
+    this.restartTimes = this.restartTimes.filter((time) => now - time < 120_000)
+    if (this.restartTimes.length >= 3) {
+      this.lastErrorMsg =
+        'Model server stopped repeatedly. Automatic restart limit reached. Check GPU memory and use Restart after fixing the cause.'
+      this.invalidateHealth()
+      throw new Error(this.lastErrorMsg)
+    }
+    this.restartTimes.push(now)
+    this.recoveryModel = { path: this.modelPath, mmproj: this.mmProjPath }
+    this.recoveryPromise = (async () => {
+      this.stop()
+      await this.init()
+      if (!this.isReady())
+        throw new Error('Server did not come back up — check the model is downloaded')
+    })().finally(() => {
+      this.recoveryModel = null
+      this.recoveryPromise = null
+    })
+    return this.recoveryPromise
   }
 
   /** Hard restart: kill the server and spawn it fresh (picks up a model swap or

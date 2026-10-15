@@ -17,7 +17,7 @@ import {
 } from '@offgrid/rag/records'
 import type { SearchKind, SearchResult } from '../../shared/search-contract'
 import { embeddings } from '../embeddings'
-import { RECORD_EMBEDDER } from '../embeddings-core'
+import { RECORD_EMBEDDER } from '../embedding-models'
 import { entityRecall } from './entities'
 import { ensureRecordSchema } from './schema'
 import { RECORD_SOURCES, type DesktopRecordHit } from './sources'
@@ -25,7 +25,13 @@ import { embedQueuedRecords, hasRecordVectors, recordVectors, recordVectorStatus
 
 export { ensureRecordSchema } from './schema'
 export { releaseRecordIndex } from './store'
-export { actionWhenSql, screenMomentKey, SYNCED_BULK_MAIL, visibleEntity, windowSql } from './sources'
+export {
+  actionWhenSql,
+  screenMomentKey,
+  SYNCED_BULK_MAIL,
+  visibleEntity,
+  windowSql
+} from './sources'
 export type { DesktopRecordHit } from './sources'
 
 /** The record kinds a search can be narrowed to. Search kinds map onto them ('message' is a

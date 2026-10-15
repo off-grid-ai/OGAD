@@ -95,6 +95,8 @@ export function activityLabel(activity?: {
   label?: string
 }): string {
   if (!activity) return ''
+  if (activity.kind === 'restarting_model') return 'Restarting the model…'
+  if (activity.kind === 'waiting') return ''
   if (activity.kind === 'planning') return 'Planning next action…'
   if (activity.kind === 'preparing_tool_calls')
     return activity.name === 'generate_image' ? 'Preparing image requests…' : 'Preparing actions…'

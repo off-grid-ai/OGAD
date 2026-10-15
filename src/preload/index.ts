@@ -398,6 +398,11 @@ const offGridApi = {
   residencyGet: () => ipcRenderer.invoke('runtime:residency:get'),
   residencySet: (modality: string, mode: string) =>
     ipcRenderer.invoke('runtime:residency:set', modality, mode),
+  backendChoices: (): Promise<
+    Record<import('@offgrid/models').BackendModality, import('@offgrid/models').BackendChoice[]>
+  > => ipcRenderer.invoke('runtime:backend:choices'),
+  backendRetry: (modality: string): Promise<void> =>
+    ipcRenderer.invoke('runtime:backend:retry', modality),
   backendPreferencesGet: () => ipcRenderer.invoke('runtime:backend:get'),
   backendPreferenceSet: (modality: string, preference: string) =>
     ipcRenderer.invoke('runtime:backend:set', modality, preference),
@@ -590,7 +595,6 @@ const offGridApi = {
     status: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:status'),
     start: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:start'),
     pause: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:pause'),
-    restart: (): Promise<void> => ipcRenderer.invoke('performance-pack:restart'),
     onChanged: (callback: (status: PerformancePackStatus) => void): (() => void) => {
       const subscription = (_event: unknown, status: PerformancePackStatus): void =>
         callback(status)
@@ -700,7 +704,7 @@ const offGridApi = {
     systemPrompt?: string
     kvCacheType?: 'f16' | 'q8_0' | 'q4_0'
     flashAttn?: boolean
-    gpuLayers?: number
+    gpuLayers?: number | null
     threads?: number
     batchSize?: number
     speculativeDecoding?: 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
@@ -816,6 +820,7 @@ const offGridApi = {
 
   // --- Voice output (text-to-speech via Kokoro) ---
   ttsVoices: () => ipcRenderer.invoke('tts:voices'),
+  parakeetAvailable: (): Promise<boolean> => ipcRenderer.invoke('transcription:parakeet-available'),
   prepareTtsVoice: (voice: string) => ipcRenderer.invoke('tts:prepare-voice', voice),
   onTtsVoiceProgress: (
     callback: (data: {

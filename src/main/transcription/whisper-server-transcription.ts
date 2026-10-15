@@ -1,3 +1,4 @@
+import { nativeBinaryInstalled } from '../backend-facts'
 import fs from 'fs'
 import { recordAIRequest } from '../ai-request-log'
 import os from 'os'
@@ -14,7 +15,7 @@ export class WhisperServerTranscription implements TranscriptionService {
   constructor(private readonly svc: WhisperServerService = whisperServer) {}
 
   isAvailable(): boolean {
-    return !!this.svc.findBinary() && !!whisperModel()
+    return nativeBinaryInstalled('stt', 'whisper-server') && !!whisperModel()
   }
 
   async transcribe(input: { path: string }, opts: TranscribeOptions = {}): Promise<Transcript> {

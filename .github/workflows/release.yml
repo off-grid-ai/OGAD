@@ -122,6 +122,8 @@ jobs:
   build-mac:
     needs: version
     runs-on: macos-15 # Standard arm64 runner; matches the pinned native payload.
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -139,13 +141,12 @@ jobs:
             'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-mac-native-2026-09-arm64-v1.tar.gz'
           echo 'ef1880daac727595bf825a254b1ebbc2a0c15c0cecd8da422c499b1568db0ad0  '"$RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
+      - name: Build macOS image engine for macOS 13
+        run: bash scripts/build-sd-mac.sh
       - name: Verify cached macOS engines
         run: |
           for variant in llama llama-prism; do
             test -x "resources/bin/$variant/llama-server"
-            minos=$(otool -l "resources/bin/$variant/llama-server" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
-            test -n "$minos"
-            case "$minos" in 1[0-3].*|[1-9].*) ;; *) echo "Unsupported $variant minos $minos" >&2; exit 1 ;; esac
             DYLD_LIBRARY_PATH="resources/bin/$variant" "resources/bin/$variant/llama-server" --help >/dev/null
           done
           test -x resources/bin/whisper/whisper-cli
@@ -283,6 +284,7 @@ jobs:
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
           path: _executorch_speech
           lfs: true # Mac releases bundle the default English voices for offline first use.
+          submodules: recursive
           persist-credentials: false
       - name: Put the speech runtime beside this checkout
         run: |
@@ -292,6 +294,17 @@ jobs:
           fi
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
+      - name: Build macOS speech runtime for macOS 13
+        run: |
+          npm --prefix ../executorch-speech ci
+          # Use the bundled Python and its existing torchgen, YAML, and Jinja dependencies.
+          speech_python="$GITHUB_WORKSPACE/resources/bin/kev-runtime/python/bin/python3"
+          "$speech_python" -c 'import torchgen, yaml, jinja2'
+          cmake -S ../executorch-speech/native -B ../executorch-speech/native/build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DFLATCC_ALLOW_WERROR=OFF -DPYTHON_EXECUTABLE="$speech_python"
+          cmake --build ../executorch-speech/native/build --config Release --parallel 4 \
+            --target executorch-speech
       - name: Let npm read the private UI package (core and Pro)
         # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
         # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
@@ -382,14 +395,15 @@ jobs:
           printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
           npm run prepare:speech-defaults
+          node scripts/check-macos-minos.mjs 13.0
           # Build every artifact with publication disabled. The artifact hook verifies
           # both the updater ZIP and DMG before this command can complete.
           npx electron-builder --mac \
-            -c.dmg.artifactName='OffGrid-${version}.${ext}' \
+            -c.dmg.artifactName='OffGrid-${version}-${arch}.${ext}' \
             --publish never
           # electron-builder notarizes the app before it creates the DMG. Submit the
           # completed, signed DMG too, then staple its ticket for offline Gatekeeper.
-          DMG="dist/OffGrid-$VERSION.dmg"
+          DMG="dist/OffGrid-$VERSION-arm64.dmg"
           xcrun notarytool submit "$DMG" \
             --key "$APPLE_API_KEY" \
             --key-id "$APPLE_API_KEY_ID" \
@@ -485,7 +499,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          cp "dist/OffGrid-$VERSION.dmg" dist/OffGrid-latest.dmg
+          cp "dist/OffGrid-$VERSION-arm64.dmg" dist/OffGrid-latest.dmg
           gh release upload "v$VERSION" dist/OffGrid-latest.dmg --clobber
       # Constant nightly download link. /releases/latest EXCLUDES pre-releases, so it
       # can never point at a beta build (that is exactly what keeps the STABLE link
@@ -499,7 +513,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          cp "dist/OffGrid-$VERSION.dmg" dist/OffGrid-nightly.dmg
+          cp "dist/OffGrid-$VERSION-arm64.dmg" dist/OffGrid-nightly.dmg
           # Ensure the rolling 'nightly' pre-release exists (kept separate from the
           # versioned -beta.N releases electron-builder makes for the updater feed),
           # then clobber its dmg so the link always serves the freshest nightly.
@@ -678,6 +692,14 @@ jobs:
           fi
       - name: Install dependencies
         run: npm ci
+      - name: Install Vulkan SDK for Whisper
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: '1.4.321.1'
+          cache: true
+      - name: Build Windows Vulkan Whisper
+        shell: pwsh
+        run: ./scripts/build-whisper-vulkan-win.ps1
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh
         env:
@@ -694,7 +716,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
-        run: node scripts/stage-native.mjs && npx electron-vite build && node scripts/check-windows-onnx-preload.mjs
+        run: node scripts/stage-native.mjs && npx electron-vite build
       - name: Package Windows web installer, payload, and update metadata
         shell: bash
         env:
@@ -708,10 +730,10 @@ jobs:
         shell: bash
         run: |
           test -s dist/win-unpacked/resources/performance-packs.json
-          for binary in llama/llama-server.exe llama-cpu/llama-server.exe llama-prism/llama-server.exe llama-prism-cpu/llama-server.exe whisper-cpu/whisper-cli.exe sd/sd-cli.exe sd-cpu/sd-cli.exe ffmpeg.exe; do
+          for binary in llama/llama-server.exe llama-cpu/llama-server.exe llama-prism/llama-server.exe llama-prism-cpu/llama-server.exe whisper-cpu/whisper-cli.exe whisper-vulkan/whisper-cli.exe whisper-vulkan/whisper-server.exe sd/sd-cli.exe sd-cpu/sd-cli.exe ffmpeg.exe; do
             test -s "dist/win-unpacked/resources/bin/$binary"
           done
-          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper kev-runtime; do
+          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper kev-runtime onnx-cuda; do
             test ! -e "dist/win-unpacked/resources/bin/$folder"
           done
       - name: Report Windows native payload sizes
@@ -925,6 +947,14 @@ jobs:
         run: npm ci
       - name: Install Linux GPU runtime dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers unzip
+      - name: Stage Vulkan loaders beside cached Linux engines
+        run: |
+          source="$(ldconfig -p | awk '$1 == "libvulkan.so.1" && /x86-64/ && !found { found=$NF } END { print found }')"
+          test -n "$source"
+          for folder in llama llama-prism whisper; do
+            install -m 755 "$(readlink -f "$source")" "build/linux-bin/$folder/libvulkan.so.1"
+            test -s "build/linux-bin/$folder/libvulkan.so.1"
+          done
       - name: Typecheck Linux main process
         env:
           OFFGRID_FORCE_CORE: '0'
@@ -953,8 +983,21 @@ jobs:
       - name: Verify Linux package inputs
         run: |
           test -s dist/linux-unpacked/resources/performance-packs.json
+          provider="$(find dist/linux-unpacked/resources/app.asar.unpacked/node_modules \
+            -path '*/onnxruntime-node/*' -name libonnxruntime_providers_cuda.so -type f -print -quit)"
+          test -n "$provider"
+          test -s "$provider"
+          for folder in llama llama-prism whisper; do
+            test -s "dist/linux-unpacked/resources/bin/$folder/libvulkan.so.1"
+          done
+          while IFS= read -r -d '' binary; do
+            if file "$binary" | grep -q 'ELF.*executable'; then
+              glibc="$(objdump -T "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1 || true)"
+              printf '[ci] %s highest GLIBC: %s\n' "$binary" "${glibc:-none (static binary)}"
+            fi
+          done < <(find dist/linux-unpacked/resources/bin -type f -print0)
           cmp resources/bin/kev-local-server.py dist/linux-unpacked/resources/bin/kev-local-server.py
-          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper-cuda kev-runtime; do
+          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper-cuda kev-runtime onnx-cuda; do
             test ! -e "dist/linux-unpacked/resources/bin/$folder"
           done
           for variant in llama llama-cpu llama-prism llama-prism-cpu; do
@@ -1029,7 +1072,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in llama/libvulkan.so.1 llama-prism/libvulkan.so.1 whisper/libvulkan.so.1 whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/squashfs-root" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
@@ -1046,7 +1089,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in llama/libvulkan.so.1 llama-prism/libvulkan.so.1 whisper/libvulkan.so.1 whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/deb" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"

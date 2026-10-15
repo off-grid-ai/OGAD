@@ -17,7 +17,10 @@ describe('sdRuntimeLibraryEnv', () => {
   it('adds the shared CUDA runtime for the Linux CUDA image engine', () => {
     expect(
       sdRuntimeLibraryEnv('linux', '/app/bin/sd-cuda/sd-cli', { LD_LIBRARY_PATH: '/host/lib' })
-    ).toEqual({ LD_LIBRARY_PATH: '/app/bin/sd-cuda:/app/bin/cuda-runtime:/host/lib' })
+    ).toEqual({
+      CUDA_CACHE_MAXSIZE: '4294967296',
+      LD_LIBRARY_PATH: '/app/bin/sd-cuda:/app/bin/cuda-runtime:/host/lib'
+    })
   })
 
   it('adds the shared CUDA runtime for the Windows CUDA image engine', () => {
@@ -26,6 +29,8 @@ describe('sdRuntimeLibraryEnv', () => {
         PATH: 'C:\\Windows'
       })
     ).toEqual({
+      CUDA_CACHE_MAXSIZE: '4294967296',
+      GGML_VK_DISABLE_BFLOAT16: '1',
       PATH: 'C:\\app\\bin\\sd-cuda;C:\\app\\bin\\cuda-runtime;C:\\Windows'
     })
   })
@@ -35,6 +40,6 @@ describe('sdRuntimeLibraryEnv', () => {
       sdRuntimeLibraryEnv('win32', 'C:\\app\\bin\\sd\\sd-cli.exe', {
         PATH: 'C:\\Windows'
       })
-    ).toEqual({ PATH: 'C:\\app\\bin\\sd;C:\\Windows' })
+    ).toEqual({ GGML_VK_DISABLE_BFLOAT16: '1', PATH: 'C:\\app\\bin\\sd;C:\\Windows' })
   })
 })

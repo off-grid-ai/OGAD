@@ -98,7 +98,7 @@ type LlmSettings = {
   systemPrompt?: string
   kvCacheType?: KvCacheType
   flashAttn?: boolean
-  gpuLayers?: number
+  gpuLayers?: number | null
   threads?: number
   batchSize?: number
   speculativeDecoding?: SpeculativeDecodingMode
@@ -198,7 +198,7 @@ const DEFAULTS: LlmSettings = {
   systemPrompt: '',
   kvCacheType: 'f16',
   flashAttn: false,
-  gpuLayers: 99,
+  gpuLayers: null,
   threads: 0,
   batchSize: 512,
   speculativeDecoding: 'off',
@@ -1059,16 +1059,28 @@ export function SettingsPanel({
                 </Row>
               )}
               <Row label="GPU layers" hint={gpuLayersHint(s.gpuAccelerator ?? null)}>
-                <SettingSlider
-                  label="GPU layers"
-                  value={s.gpuLayers ?? 99}
-                  min={0}
-                  max={99}
-                  step={1}
-                  format={(value) => String(value)}
-                  onDraft={(value) => setS((current) => ({ ...current, gpuLayers: value }))}
-                  onCommit={(value) => set({ gpuLayers: value })}
-                />
+                <div className="flex items-center gap-3">
+                  {s.gpuLayers != null && (
+                    <SettingSlider
+                      label="GPU layers"
+                      value={s.gpuLayers}
+                      min={0}
+                      max={99}
+                      step={1}
+                      format={(value) => String(value)}
+                      onDraft={(value) => setS((current) => ({ ...current, gpuLayers: value }))}
+                      onCommit={(value) => set({ gpuLayers: value })}
+                    />
+                  )}
+                  <label className="flex w-fit cursor-pointer items-center gap-3 text-[12px] text-muted-foreground">
+                    <Switch
+                      aria-label="Choose GPU layers automatically"
+                      checked={s.gpuLayers == null}
+                      onCheckedChange={(auto) => set({ gpuLayers: auto ? null : 0 })}
+                    />
+                    Auto
+                  </label>
+                </div>
               </Row>
               <Row label="CPU threads" hint="Auto lets llama.cpp choose.">
                 <div className="flex items-center gap-3">

@@ -47,7 +47,7 @@ import { whisperModel } from './media-text'
 import { getActiveModal } from './active-models'
 import { modalityForKind } from './active-models-logic'
 import { embeddings } from './embeddings'
-import { DEFAULT_EMBEDDER } from './embeddings-core'
+import { DEFAULT_EMBEDDER } from './embedding-models'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
@@ -71,7 +71,16 @@ import { isAsync, matchPollRoute } from './model-server/async-request'
 import { sanitizeChatMessages, parseDecisionChatMessages } from './model-server/chat-messages'
 import { applyThinkingPayload, requestedThinking } from './llm/chat-payload'
 import { parseMultipart } from './model-server/multipart'
-import { tagLlmEntries, modelEntry, ollamaMirror, specialistModelEntries, installedTextModelEntries, installedImageModelEntries, leadWithActiveChatModel, liveChatCapabilities } from './model-server/models-list'
+import {
+  tagLlmEntries,
+  modelEntry,
+  ollamaMirror,
+  specialistModelEntries,
+  installedTextModelEntries,
+  installedImageModelEntries,
+  leadWithActiveChatModel,
+  liveChatCapabilities
+} from './model-server/models-list'
 import { buildGatewayModalities, type GatewayModalities } from './model-server/health'
 import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
@@ -954,86 +963,101 @@ async function handleChat(
     json(res, failure.status, errBody(failure.message, failure.type))
     return
   }
-  await modalityQueue.run(CHAT_JOB, async () => {
-    const requested = typeof body.model === 'string' ? body.model : ''
-    if (requested && !parseRemoteVisionModelId(requested)) {
-      const { getCatalog, listInstalled, setActiveModel } = await import('./models-manager')
-      const installed = await listInstalled()
-      const catalog = (await getCatalog()).models as { id: string; kind: string; remoteServerId?: string }[]
-      const selected = catalog.find((model) => model.id === requested && !model.remoteServerId &&
-        (model.kind === 'text' || model.kind === 'vision') && installed.includes(model.id))
-      if (selected && llm.activeModelInfo()?.id !== requested) {
-        const result = await setActiveModel(requested)
-        if (!result.success) { json(res, 400, errBody(result.error ?? 'Model could not be selected.')); return }
-      }
-      if (selected) await llm.init()
-    }
-  try {
-    let changed = await inlineChatImages(body)
-    // Gemma 4 (and others) reject system messages that aren't at position 0.
-    // Consolidate them before forwarding so any client's ordering works.
-    if (sanitizeChatMessages(body)) changed = true
-    // A client says WHETHER it wants thinking; this server decides HOW, because the second half
-    // of the answer (reasoning_format) is a property of the model server running here, not of the
-    // request. Without this a phone could ask for thinking and get a reply with nothing in it.
-    if (applyThinkingPayload(body, llm.currentThinkingDialect)) changed = true
-    if (changed) forward = Buffer.from(JSON.stringify(body))
-  } catch {
-    // Image fetch failed — forward the original valid request unchanged so the
-    // model process can return its own stable input error.
-  }
-
-  // A paired Mobile sends the stable remote inventory id advertised by Desktop.
-  // Route that id through the configured remote server instead of llama-server.
-  res.setHeader('X-Request-Id', rid)
-  const activity = new AIRequestHandle({
-    modality: 'text',
-    source: 'API chat',
-    model: typeof body.model === 'string' ? body.model : undefined,
-    request: body
-  })
-  activity.update({ effectiveRequest: body, backend: llm.activeAccelerator() ?? 'Unknown' })
-  if (proxyToSelectedRemote(res, body, activity)) return
-
-  // Async chat: run a non-streaming completion in the background and poll for it.
-  if (isAsync(req, body)) {
-    const inlined = body
-    let completion: Promise<unknown> | undefined
-    await serve(
-      res,
-      rid,
-      'chat',
-      '/v1/chat/completions',
-      true,
-      () => completion = (async () => {
-        try {
-          const result = await callLlamaJson(inlined, Date.now() + 45_000)
-          activity.finish(result)
-          return result
-        } catch (error) {
-          activity.finish(undefined, error)
-          throw error
+  await modalityQueue
+    .run(CHAT_JOB, async () => {
+      const requested = typeof body.model === 'string' ? body.model : ''
+      if (requested && !parseRemoteVisionModelId(requested)) {
+        const { getCatalog, listInstalled, setActiveModel } = await import('./models-manager')
+        const installed = await listInstalled()
+        const catalog = (await getCatalog()).models as {
+          id: string
+          kind: string
+          remoteServerId?: string
+        }[]
+        const selected = catalog.find(
+          (model) =>
+            model.id === requested &&
+            !model.remoteServerId &&
+            (model.kind === 'text' || model.kind === 'vision') &&
+            installed.includes(model.id)
+        )
+        if (selected && llm.activeModelInfo()?.id !== requested) {
+          const result = await setActiveModel(requested)
+          if (!result.success) {
+            json(res, 400, errBody(result.error ?? 'Model could not be selected.'))
+            return
+          }
         }
-      })(),
-      () => {}
-    )
-    await completion?.catch(() => {})
-    return
-  }
+        if (selected) await llm.init()
+      }
+      try {
+        let changed = await inlineChatImages(body)
+        // Gemma 4 (and others) reject system messages that aren't at position 0.
+        // Consolidate them before forwarding so any client's ordering works.
+        if (sanitizeChatMessages(body)) changed = true
+        // A client says WHETHER it wants thinking; this server decides HOW, because the second half
+        // of the answer (reasoning_format) is a property of the model server running here, not of the
+        // request. Without this a phone could ask for thinking and get a reply with nothing in it.
+        if (applyThinkingPayload(body, llm.currentThinkingDialect)) changed = true
+        if (changed) forward = Buffer.from(JSON.stringify(body))
+      } catch {
+        // Image fetch failed — forward the original valid request unchanged so the
+        // model process can return its own stable input error.
+      }
 
-  // Sync: stream straight through. Retry for up to 45s if llama-server is mid-reload
-  // (e.g. just after an image generation freed and is respawning it, ~16s).
-  await new Promise<void>((resolve) => {
-    res.once('close', resolve)
-    res.once('finish', resolve)
-    proxyToLlama(req, res, forward, Date.now() + 45_000, activity)
-  })
-  }).catch((error) => {
-    if (!res.headersSent && !res.destroyed) {
-      const failure = errMeta(error)
-      json(res, failure.status, errBody(failure.message, failure.type))
-    }
-  })
+      // A paired Mobile sends the stable remote inventory id advertised by Desktop.
+      // Route that id through the configured remote server instead of llama-server.
+      res.setHeader('X-Request-Id', rid)
+      const activity = new AIRequestHandle({
+        modality: 'text',
+        source: 'API chat',
+        model: typeof body.model === 'string' ? body.model : undefined,
+        request: body
+      })
+      activity.update({ effectiveRequest: body, backend: llm.activeAccelerator() ?? 'Unknown' })
+      if (proxyToSelectedRemote(res, body, activity)) return
+
+      // Async chat: run a non-streaming completion in the background and poll for it.
+      if (isAsync(req, body)) {
+        const inlined = body
+        let completion: Promise<unknown> | undefined
+        await serve(
+          res,
+          rid,
+          'chat',
+          '/v1/chat/completions',
+          true,
+          () =>
+            (completion = (async () => {
+              try {
+                const result = await callLlamaJson(inlined, Date.now() + 45_000)
+                activity.finish(result)
+                return result
+              } catch (error) {
+                activity.finish(undefined, error)
+                throw error
+              }
+            })()),
+          () => {}
+        )
+        await completion?.catch(() => {})
+        return
+      }
+
+      // Sync: stream straight through. Retry for up to 45s if llama-server is mid-reload
+      // (e.g. just after an image generation freed and is respawning it, ~16s).
+      await new Promise<void>((resolve) => {
+        res.once('close', resolve)
+        res.once('finish', resolve)
+        proxyToLlama(req, res, forward, Date.now() + 45_000, activity)
+      })
+    })
+    .catch((error) => {
+      if (!res.headersSent && !res.destroyed) {
+        const failure = errMeta(error)
+        json(res, failure.status, errBody(failure.message, failure.type))
+      }
+    })
 }
 
 // ─── Embeddings (local MiniLM) ───────────────────────────────────────────────
@@ -1200,9 +1224,15 @@ async function handleModelsList(
       (whisperModel() ? path.basename(whisperModel() as string) : null)
   const transcription = sttId ? [tag(sttId, 'transcription')] : []
 
-  const { desktopCatalog, listInstalled, getCatalog, getActiveModel } = await import('./models-manager')
+  const { desktopCatalog, listInstalled, getCatalog, getActiveModel } =
+    await import('./models-manager')
   const installed = await listInstalled()
-  const catalog = (await getCatalog()).models as { id: string; name: string; kind: string; remoteServerId?: string }[]
+  const catalog = (await getCatalog()).models as {
+    id: string
+    name: string
+    kind: string
+    remoteServerId?: string
+  }[]
   if (!activeRemote) {
     const downloaded = installedTextModelEntries(catalog, installed, now)
     if (downloaded.length) text = downloaded
@@ -1741,7 +1771,10 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         json(
           res,
           503,
-          errBody(locked ? 'API key storage is locked.' : 'API key storage is unavailable.', 'server_error')
+          errBody(
+            locked ? 'API key storage is locked.' : 'API key storage is unavailable.',
+            'server_error'
+          )
         )
         return
       }

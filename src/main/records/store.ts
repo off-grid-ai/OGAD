@@ -17,7 +17,7 @@ import {
   type TimeWindow
 } from '@offgrid/rag/records'
 import { getDB } from '../database'
-import { RECORD_EMBEDDER } from '../embeddings-core'
+import { RECORD_EMBEDDER } from '../embedding-models'
 import { embeddableRecords, hydrateRecords } from './sources'
 
 /** The index is dropped after this long without a meaning search. */

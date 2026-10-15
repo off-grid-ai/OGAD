@@ -46,5 +46,5 @@ export function gpuLayersHint(accelerator: EngineAccelerator | null): string {
     return 'This engine runs on the CPU, so this setting changes nothing.'
   }
   const api = accelerator ? ` (${accelerator})` : ''
-  return `Layers offloaded to the GPU${api}. 99 = all. Lower only if you hit GPU-memory issues.`
+  return `Auto places as many layers on the GPU${api} as fit. Set a number only to cap GPU memory.`
 }

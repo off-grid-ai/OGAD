@@ -150,14 +150,14 @@ export function checkOverrideSurvival(opts: { availGb: number; incomingWeightsGb
 
 export interface LoadAttempt {
   ctxSize: number
-  gpuLayers: number
+  gpuLayers: number | null
   reason: string
 }
 
 /** Try GPU, then CPU at the selected context. Never reduce the selected value. */
-export function loadAttempts(requestedCtx: number, gpuLayers: number): LoadAttempt[] {
+export function loadAttempts(requestedCtx: number, gpuLayers: number | null): LoadAttempt[] {
   const out: LoadAttempt[] = [{ ctxSize: requestedCtx, gpuLayers, reason: 'requested' }]
-  if (gpuLayers > 0) {
+  if (gpuLayers === null || gpuLayers > 0) {
     out.push({ ctxSize: requestedCtx, gpuLayers: 0, reason: 'CPU-only' })
   }
   return out

@@ -1,3 +1,4 @@
+import { backendChoicesForUi } from './backend-facts'
 import { settingsChanged } from './settings-version'
 import { withStorageDownload, storageDownloadsActive } from './model-storage-guard'
 import { moveModelStorage } from './model-storage-move'
@@ -92,6 +93,30 @@ import { runChatWithFallback } from './chat-fallback'
 
 const streamControllers = new Map<string, AbortController>()
 
+function deviceFallbackNotices(
+  sender: { send: (channel: string, payload: unknown) => void } | undefined,
+  streamId: string | undefined
+): Pick<
+  NonNullable<Parameters<typeof runChatWithFallback>[1]>,
+  'onDeviceFallback' | 'onRestarting'
+> {
+  if (!sender || !streamId) return {}
+  const send = (step: unknown): void => {
+    try {
+      sender.send('rag:stream', { streamId, type: 'step', step })
+    } catch {
+      /* window gone */
+    }
+  }
+  return {
+    onDeviceFallback: (message) => send({ kind: 'device_fallback', message }),
+    onRestarting: (restarting) => {
+      if (restarting) resetChatStreamPartial(streamId)
+      send({ kind: restarting ? 'restarting_model' : 'waiting' })
+    }
+  }
+}
+
 async function streamAnswer(
   event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
   streamId: string | undefined,
@@ -111,8 +136,9 @@ async function streamAnswer(
     // evicts nothing (evicting 'llm' would evict itself). run()'s finally releases
     // the slot even if fn throws, so we let errors propagate from inside.
     return modalityQueue.run(CHAT_JOB, async () => {
-      const { result, modelName } = await runChatWithFallback(() =>
-        llm.chatStream(prompt, images, () => {}, { thinking })
+      const { result, modelName } = await runChatWithFallback(
+        () => llm.chatStream(prompt, images, () => {}, { thinking }),
+        deviceFallbackNotices(event?.sender, streamId)
       )
       const response = toResponseGenerationResult(result)
       return modelName ? { ...response, metrics: { ...response.metrics, modelName } } : response
@@ -147,6 +173,7 @@ async function streamAnswer(
           ),
         {
           signal: controller.signal,
+          ...deviceFallbackNotices(sender, streamId),
           onModelChanged: (failed, next) => {
             resetChatStreamPartial(streamId)
             try {
@@ -207,7 +234,6 @@ export function setupIPC(): void {
   ipcMain.handle('performance-pack:status', performancePackStatus)
   ipcMain.handle('performance-pack:start', startPerformancePack)
   ipcMain.handle('performance-pack:pause', pausePerformancePack)
-  ipcMain.handle('performance-pack:restart', () => requestApplicationRelaunch(app))
   // Engines published between releases install in the background unless the user turns it off.
   engineUpdater.onChanged((status) => {
     BrowserWindow.getAllWindows().forEach((window) =>
@@ -511,13 +537,38 @@ export function setupIPC(): void {
     ;(await import('./best-settings')).markSpeedSettingsManual()
     return setResidencyMode(modality, mode)
   })
+  ipcMain.handle('runtime:backend:choices', () => backendChoicesForUi())
+  // "Try the GPU again": forget this session's demotion and restart the engine on its ladder.
+  ipcMain.handle('runtime:backend:retry', async (_e, modality: BackendModality) => {
+    const { clearDemotions, invalidateBackendFacts } = await import('./backend-facts')
+    clearDemotions(modality)
+    invalidateBackendFacts()
+    if (modality === 'llm') {
+      const { llm } = await import('./llm')
+      if (llm.shouldBeRunning()) await llm.restartSameModel()
+    } else if (modality === 'grounding') {
+      const { grounderRuntime } = await import('./vision/grounder-runtime')
+      if (grounderRuntime.shouldBeRunning()) await grounderRuntime.restart()
+    } else if (modality === 'decision') {
+      const { decisionRuntime } = await import('./accessibility/decision-runtime')
+      if (decisionRuntime.shouldBeRunning()) await decisionRuntime.restart()
+    } else if (modality === 'tts') {
+      await (await import('./tts')).ttsOnnxRuntime.restart()
+    } else if (modality === 'embeddings') {
+      await (await import('./embeddings')).embeddings.restart()
+    }
+    // Image and transcription load per job; their next job uses the restored ladder.
+  })
   ipcMain.handle('runtime:backend:get', () => getBackendPreferences())
   ipcMain.handle(
     'runtime:backend:set',
     async (_e, modality: BackendModality, preference: BackendPreference) => {
       ;(await import('./best-settings')).markSpeedSettingsManual()
       const next = setBackendPreference(modality, preference)
-      // A loaded engine keeps its present backend until its next load. The UI says so.
+      // Chat, image and the task engines take the new backend at their next load (the UI says
+      // so); voice and search helpers restart between requests onto it.
+      if (modality === 'embeddings') void (await import('./embeddings')).embeddings.restart()
+      if (modality === 'tts') void (await import('./tts')).ttsOnnxRuntime.restart()
       return next
     }
   )
@@ -895,7 +946,7 @@ export function setupIPC(): void {
       m.removeModelScanFolder(app.getPath('userData'), directory)
     )
     BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('models:inventory-changed'))
-      settingsChanged()
+    settingsChanged()
     return folders
   })
   ipcMain.handle('models:delete-orphans', () =>
@@ -1198,8 +1249,9 @@ export function setupIPC(): void {
       // Non-stream fallback (no streamId): buffer, no live deltas (matches streamAnswer).
       if (!streamId) {
         return modalityQueue.run(CHAT_JOB, async () => {
-          const { result, modelName } = await runChatWithFallback((attempt) =>
-            toolChat(query, history || [], { ...(opts || {}), ...attempt })
+          const { result, modelName } = await runChatWithFallback(
+            (attempt) => toolChat(query, history || [], { ...(opts || {}), ...attempt }),
+            deviceFallbackNotices(sender, streamId)
           )
           return modelName ? { ...result, metrics: { ...result.metrics, modelName } } : result
         })
@@ -1274,6 +1326,7 @@ export function setupIPC(): void {
             {
               signal: controller.signal,
               canRetry: () => !toolStarted,
+              ...deviceFallbackNotices(sender, streamId),
               onModelChanged: (failed, next) => {
                 resetChatStreamPartial(streamId)
                 try {
@@ -1392,7 +1445,10 @@ export function setupIPC(): void {
     const path = await import('path')
     if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Invalid file.')
     const { processUploadPath } = await import('./files')
-    return processUploadPath(filePath, typeof name === 'string' && name ? name : path.basename(filePath))
+    return processUploadPath(
+      filePath,
+      typeof name === 'string' && name ? name : path.basename(filePath)
+    )
   })
 
   // --- Documents in a chat: what the conversation holds, and which ones answers may use ---

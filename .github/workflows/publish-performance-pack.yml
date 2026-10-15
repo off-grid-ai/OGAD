@@ -70,7 +70,12 @@ jobs:
         run: ./scripts/fetch-win-binaries.ps1
       - name: Build Kev server runtime (model weights excluded)
         shell: pwsh
-        run: ./scripts/build-kev-runtime.ps1
+        run: |
+          ./scripts/build-kev-runtime.ps1
+          . ./scripts/config/windows-vc-runtime.ps1
+          Get-ChildItem resources/bin/kev-runtime -Recurse -File -Filter '*.exe' |
+            Select-Object -ExpandProperty DirectoryName -Unique |
+            ForEach-Object { Copy-VCRuntime $_ }
       - name: Check staged Windows runtimes
         shell: bash
         run: |
@@ -160,6 +165,13 @@ jobs:
           rm -rf "$BIN_ROOT/llama-cuda" "$BIN_ROOT/cuda-runtime"
           cp -a "$RUNNER_TEMP/engine/llama-cuda" "$RUNNER_TEMP/engine/cuda-runtime" "$BIN_ROOT/"
           cat "$RUNNER_TEMP/engine/engine.json"
+          if [ "$PLATFORM" = win32 ]; then
+            # llama-cuda was staged on Linux; reuse the VC redist from the Windows job.
+            for dll in MSVCP140.dll MSVCP140_1.dll MSVCP140_2.dll MSVCP140_ATOMIC_WAIT.dll \
+              MSVCP140_CODECVT_IDS.dll VCRUNTIME140.dll VCRUNTIME140_1.dll CONCRT140.dll VCOMP140.dll; do
+              cp "$BIN_ROOT/whisper/$dll" "$BIN_ROOT/llama-cuda/$dll"
+            done
+          fi
       - name: Check the Linux llama engines' libraries resolve
         if: inputs.platform == 'linux'
         run: |
@@ -183,7 +195,8 @@ jobs:
         run: |
           python3 -m pip install --no-cache-dir --no-deps --target "$RUNNER_TEMP/onnx-nvidia" \
             'nvidia-cuda-runtime==13.2.86' 'nvidia-cublas==13.2.2.2' \
-            'nvidia-curand==10.4.2.66' 'nvidia-cudnn-cu13==9.23.1.3'
+            'nvidia-curand==10.4.2.66' 'nvidia-cudnn-cu13==9.23.1.3' \
+            'nvidia-cufft==12.2.0.57' 'nvidia-cuda-nvrtc==13.2.86'
           mkdir -p "$BIN_ROOT/onnx-cuda"
           for folder in cu13 cudnn; do
             find "$RUNNER_TEMP/onnx-nvidia/nvidia/$folder/lib" -maxdepth 1 -type f -name '*.so.*' \

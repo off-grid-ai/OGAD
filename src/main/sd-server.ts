@@ -25,7 +25,6 @@ import os from 'os'
 import { isPackaged } from './runtime-env'
 import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
 import { findSdBinaries, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
-import { getBackendPreference } from './backend-preferences'
 import { getResidencyMode } from './runtime-residency'
 
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
@@ -254,24 +253,37 @@ class SdServerService {
   }
 
   private async startWithFallback(ctx: SdServerContext, key: string, epoch: number): Promise<void> {
-    const binaries = findSdBinaries('sd-server', getBackendPreference('image'))
-    if (!binaries.length)
-      throw new Error('Image server binary (sd-server) not found in resources/bin/sd.')
-    for (const [index, binary] of binaries.entries()) {
+    const binaries = await findSdBinaries('sd-server')
+    if (!binaries.length) throw new Error('No image engine is installed for this choice.')
+    const failures: string[] = []
+    for (const [index, step] of binaries.entries()) {
       if (epoch !== this.startEpoch) throw new Error('Image server startup canceled.')
       try {
-        await this.spawn(ctx, key, binary)
+        await this.spawn(
+          ctx,
+          key,
+          step.path,
+          step.cpuOnly && step.backend !== 'cpu',
+          failures.length ? `Earlier engines did not start: ${failures.join('; ')}` : undefined
+        )
         if (epoch !== this.startEpoch) throw new Error('Image server startup canceled.')
         return
       } catch (error) {
         this.stopProcess()
+        failures.push(error instanceof Error ? error.message : String(error))
         if (epoch !== this.startEpoch || index === binaries.length - 1) throw error
         console.warn(`[sd-server] Runtime failed; retrying ${binaries[index + 1]}`, error)
       }
     }
   }
 
-  private async spawn(ctx: SdServerContext, key: string, bin: string): Promise<void> {
+  private async spawn(
+    ctx: SdServerContext,
+    key: string,
+    bin: string,
+    cpuOnly: boolean,
+    fallbackReason?: string
+  ): Promise<void> {
     if (!fs.existsSync(ctx.modelPath)) throw new Error(`Image model not found: ${ctx.modelPath}`)
     const binDir = path.dirname(bin)
 
@@ -287,9 +299,10 @@ class SdServerService {
 
     // Kill an orphaned sd-server from a prior app process still holding the port,
     // but never a foreign process that merely happened to bind it.
-    this.killOrphanOnPort()
+    await this.killOrphanOnPort()
 
     const args = buildSdServerContextArgs({ ...ctx, port: this.port })
+    if (cpuOnly) args.push('--backend', 'cpu')
     // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
     // Windows: prepend binDir to PATH so the co-located stable-diffusion DLLs resolve.
     const proc = spawn(bin, args, {
@@ -328,7 +341,7 @@ class SdServerService {
 
     try {
       await this.waitForReady()
-      backendState.ready()
+      backendState.ready(cpuOnly ? 'CPU' : undefined, undefined, fallbackReason)
     } catch (error) {
       backendState.fail(error)
       throw error
@@ -452,19 +465,19 @@ class SdServerService {
     }
   }
 
-  private killOrphanOnPort(): void {
+  private async killOrphanOnPort(): Promise<void> {
     // Shared cross-platform reaper (kill-orphan-port.ts) — adds the Windows branch this
     // used to lack (a crashed sd-server would keep holding the port after a restart).
     // posix matches our OWN bundled binary by FULL PATH (a user's separately-run sd-server
     // is left untouched); win32's tasklist only exposes the image name, so match that.
-    const ownBins = findSdBinaries('sd-server', getBackendPreference('image'))
+    const ownBins = await findSdBinaries('sd-server')
     if (!ownBins.length) return
     reapOrphansOnPort(
       this.port,
       (info) =>
         process.platform === 'win32'
           ? /sd-server/i.test(info)
-          : ownBins.some((bin) => info.includes(bin)),
+          : ownBins.some((bin) => info.includes(bin.path)),
       'sd-server'
     )
   }

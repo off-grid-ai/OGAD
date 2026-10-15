@@ -302,12 +302,7 @@ describe('macOS artifact integrity', () => {
     const appOutDir = path.join(root, 'linux-unpacked')
     const resources = path.join(appOutDir, 'resources')
     writeAsarArchive(path.join(resources, 'app.asar'), ['out/main/index.js'])
-    for (const variant of [
-      'llama',
-      'llama-cpu',
-      'llama-prism',
-      'llama-prism-cpu'
-    ]) {
+    for (const variant of ['llama', 'llama-cpu', 'llama-prism', 'llama-prism-cpu']) {
       const server = path.join(resources, 'bin', variant, 'llama-server')
       fs.mkdirSync(path.dirname(server), { recursive: true })
       fs.writeFileSync(server, 'fixture')
@@ -335,6 +330,13 @@ describe('macOS artifact integrity', () => {
     fs.mkdirSync(path.dirname(whisperCpu), { recursive: true })
     fs.writeFileSync(whisperCpu, 'fixture')
     fs.writeFileSync(path.join(resources, 'bin', 'whisper', 'LICENSE'), 'fixture')
+    // Each Vulkan engine carries its loader, so a desktop without libvulkan1 still starts it.
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/llama/libvulkan.so.1'
+    )
+    for (const folder of ['llama', 'llama-prism', 'whisper']) {
+      fs.writeFileSync(path.join(resources, 'bin', folder, 'libvulkan.so.1'), 'fixture')
+    }
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
       'installer input is missing required runtime: bin/ffmpeg'
     )

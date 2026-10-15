@@ -88,7 +88,7 @@ export interface LaunchState {
   ctxSize: number
   kvCacheType: KvCacheType
   flashAttn: boolean
-  gpuLayers: number
+  gpuLayers?: number | null
   threads: number | undefined
   batchSize: number | undefined
   speculativeDecoding?: SpeculativeDecodingMode
@@ -101,11 +101,12 @@ export interface LaunchState {
  *  file sizes) and stays in LLMService; everything here is a pure function of these
  *  inputs so the terminal artifact (the args array handed to llama-server) is testable. */
 export interface LaunchArgsInput {
+  cpuOnly?: boolean
   modelPath: string
   mmProjPath: string // empty string = text-only (no --mmproj)
   port: number
   effectiveCtxSize: number // already RAM-clamped
-  gpuLayers: number
+  gpuLayers?: number | null
   flashAttn: boolean
   kvCacheType: KvCacheType
   threads: number | undefined
@@ -151,10 +152,10 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     '--parallel',
     '1',
     '-c',
-    String(i.effectiveCtxSize),
-    '-ngl',
-    String(i.gpuLayers)
+    String(i.effectiveCtxSize)
   )
+  if (i.cpuOnly) args.push('--device', 'none', '-ngl', '0')
+  else if (typeof i.gpuLayers === 'number') args.push('-ngl', String(i.gpuLayers))
   // Hybrid models (Qwen3.5, Bonsai 2) cannot roll recurrent state back past a saved
   // context checkpoint. At the 8192-token default spacing, any edit earlier in a shorter
   // conversation (a dropped screenshot, a compacted turn) re-processes the whole prompt;
@@ -173,7 +174,7 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
   if (i.kvCacheType !== 'f16') {
     args.push('--cache-type-k', i.kvCacheType, '--cache-type-v', i.kvCacheType)
   }
-  if (typeof i.threads === 'number') {
+  if (typeof i.threads === 'number' && i.threads > 0) {
     args.push('-t', String(i.threads))
   }
   if (typeof i.batchSize === 'number') {
@@ -187,7 +188,7 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     const draftMax = i.speculativeDraftMax ? String(i.speculativeDraftMax) : '2'
     args.push('--spec-type', 'draft-mtp', '--spec-draft-n-max', draftMax)
     if (i.draftModelPath) {
-      args.push('--spec-draft-model', i.draftModelPath, '--spec-draft-ngl', String(i.gpuLayers))
+      args.push('--spec-draft-model', i.draftModelPath)
     }
   } else if (
     i.draftModelPath &&
@@ -200,6 +201,10 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
       i.draftModelPath
     )
     if (i.speculativeDraftMax) args.push('--spec-draft-n-max', String(i.speculativeDraftMax))
+  }
+  if (i.draftModelPath && ['mtp', 'draft', 'dflash'].includes(i.speculativeDecoding ?? '')) {
+    if (i.cpuOnly) args.push('--spec-draft-ngl', '0')
+    else if (typeof i.gpuLayers === 'number') args.push('--spec-draft-ngl', String(i.gpuLayers))
   }
   // Grounding models (UI-TARS / Qwen-VL) need a minimum image-token budget or
   // clicks land in the wrong place; only set when a projector is present.
@@ -218,7 +223,7 @@ export function launchArgsChanged(
     ctxSize?: number
     kvCacheType?: KvCacheType
     flashAttn?: boolean
-    gpuLayers?: number
+    gpuLayers?: number | null
     threads?: number
     batchSize?: number
     speculativeDecoding?: SpeculativeDecodingMode
@@ -233,7 +238,7 @@ export function launchArgsChanged(
     (typeof patch.ctxSize === 'number' && patch.ctxSize !== current.ctxSize) ||
     (patch.kvCacheType !== undefined && patch.kvCacheType !== current.kvCacheType) ||
     (typeof patch.flashAttn === 'boolean' && patch.flashAttn !== current.flashAttn) ||
-    (typeof patch.gpuLayers === 'number' && patch.gpuLayers !== current.gpuLayers) ||
+    (patch.gpuLayers !== undefined && patch.gpuLayers !== current.gpuLayers) ||
     (typeof patch.threads === 'number' && patch.threads !== current.threads) ||
     (typeof patch.batchSize === 'number' && patch.batchSize !== current.batchSize) ||
     (patch.speculativeDecoding !== undefined &&

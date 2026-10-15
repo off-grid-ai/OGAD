@@ -33,6 +33,7 @@ import type { ManagedRuntime } from './runtime-manager'
 import { modalityQueue, SPEECH_JOB } from './modality-queue/queue'
 import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
 import { OnnxSpeechRuntime } from './tts-onnx'
+import { executorchSpeechBinary, executorchSpeechInstalled } from './runtime-availability'
 
 const LANGUAGE_TAGS: Readonly<Record<string, string>> = {
   'en-us': 'en-US',
@@ -44,18 +45,16 @@ const ONNX_VOICES = new Set(
     .filter(({ language }) => language === 'en-us' || language === 'en-gb')
     .map(({ id }) => id)
 )
-const onnxSpeech = new OnnxSpeechRuntime()
+/** The Kokoro voice helper process; index.ts restarts it on wake and after a CUDA check. */
+export const ttsOnnxRuntime = new OnnxSpeechRuntime()
+const onnxSpeech = ttsOnnxRuntime
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
 function executablePath(): string {
-  const candidates = [
-    ...resourceDirs().map((root) => path.join(root, 'bin', 'executorch-speech')),
-    path.resolve(process.cwd(), '../executorch-speech/native/bin/executorch-speech')
-  ]
-  const executable = candidates.find((candidate) => fs.existsSync(candidate))
+  const executable = executorchSpeechBinary()
   if (!executable) throw new Error('The local voice runtime is not installed in this build.')
   return executable
 }
@@ -99,7 +98,9 @@ function runtime(voice: string): ExecutorchSpeechRuntime {
   )
 }
 
-async function synthesizeExecutorch(input: Parameters<ExecutorchSpeechRuntime['synthesize']>[0]): Promise<void> {
+async function synthesizeExecutorch(
+  input: Parameters<ExecutorchSpeechRuntime['synthesize']>[0]
+): Promise<void> {
   await onnxSpeech.close()
   const status = beginRuntimeBackend('speech', 'Kokoro')
   try {
@@ -109,7 +110,9 @@ async function synthesizeExecutorch(input: Parameters<ExecutorchSpeechRuntime['s
   } catch (error) {
     status.fail(error)
     throw error
-  } finally { status.stop() }
+  } finally {
+    status.stop()
+  }
 }
 
 let busy = false
@@ -129,12 +132,17 @@ export async function listVoiceCatalog(
   const remote = getActiveRemoteVisionServerForModality('voice')
   // Every remote provider owns its speakers; the remote model, not this machine, decides them.
   if (remote) return listRemoteVoices(remote)
-  const voices = speechCapabilities.voices.map(({ id, language }) => ({
-    id,
-    label: kokoroVoiceLabel(id),
-    language: LANGUAGE_TAGS[language] ?? language,
-    languageLabel: speechLanguageLabel(LANGUAGE_TAGS[language] ?? language)
-  }))
+  // Every voice but the English Kokoro ones speaks through the ExecuTorch runtime; without it,
+  // offering them only leads to a download that cannot play.
+  const executorch = executorchSpeechInstalled()
+  const voices = speechCapabilities.voices
+    .filter(({ id }) => executorch || ONNX_VOICES.has(id))
+    .map(({ id, language }) => ({
+      id,
+      label: kokoroVoiceLabel(id),
+      language: LANGUAGE_TAGS[language] ?? language,
+      languageLabel: speechLanguageLabel(LANGUAGE_TAGS[language] ?? language)
+    }))
   onProgress?.(100)
   return voices
 }
@@ -155,6 +163,9 @@ async function prepareVoiceAssetsInner(
   voice: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<void> {
+  if (!ONNX_VOICES.has(voice) && !executorchSpeechInstalled()) {
+    throw new Error('This voice needs the local voice runtime, which is not in this build.')
+  }
   if (ONNX_VOICES.has(voice)) {
     try {
       await onnxSpeech.prepare(voice, onProgress)

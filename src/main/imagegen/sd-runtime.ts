@@ -1,9 +1,6 @@
-import fs from 'fs'
 import path from 'path'
-import { binRoots, exe } from '../runtime-env'
 import { nativeLibraryEnv } from '../native-library-env'
-import { hasLinuxNvidiaDriver } from '../transcription/whisper-runtime'
-import { prioritizeBackend, type BackendPreference } from '../../shared/backend-preferences'
+import { nativeLadder, type NativeStep } from '../backend-facts'
 
 /** The backend selected by the native image binary that completed the run. */
 export function imageBackendForRuntime(
@@ -16,43 +13,14 @@ export function imageBackendForRuntime(
   return platform === 'darwin' ? 'Metal' : 'Vulkan'
 }
 
-/** Windows needs the system Vulkan loader before the GPU image binary can start. */
-function hasWindowsVulkanLoader(
-  windowsDir = process.env.WINDIR ?? process.env.SystemRoot ?? 'C:\\Windows'
-): boolean {
-  return fs.existsSync(path.join(windowsDir, 'System32', 'vulkan-1.dll'))
+export async function findSdBinaries(name: 'sd-cli' | 'sd-server'): Promise<NativeStep[]> {
+  const steps = await nativeLadder('image', name)
+  if (!steps.length) throw new Error('No image engine is installed for this choice.')
+  return steps
 }
 
-/**
- * Resolve an image runtime. Windows uses the compact Vulkan build when its loader
- * is installed, then uses the separately packaged CPU build. Linux and macOS keep
- * their existing `sd` runtime; the Linux Vulkan build contains CPU kernels too.
- */
-export function findSdBinaries(name: 'sd-cli' | 'sd-server', preference: BackendPreference = 'auto'): string[] {
-  let directories =
-    process.platform === 'linux' && hasLinuxNvidiaDriver()
-      ? ['sd-cuda', 'sd', 'sd-cpu']
-      : ['sd', 'sd-cpu']
-  if (process.platform === 'win32') {
-    directories = hasWindowsVulkanLoader()
-      ? ['sd-cuda', 'sd', 'sd-cpu']
-      : ['sd-cuda', 'sd-cpu', 'sd']
-  }
-  const matches: string[] = []
-  for (const directory of directories) {
-    for (const root of binRoots()) {
-      const candidate = path.join(root, directory, exe(name))
-      if (fs.existsSync(candidate) && !matches.includes(candidate)) matches.push(candidate)
-    }
-  }
-  return prioritizeBackend(matches, preference, (binary) => {
-    const backend = imageBackendForRuntime(process.platform, binary)
-    return backend.toLowerCase() as BackendPreference
-  })
-}
-
-export function findSdBinary(name: 'sd-cli' | 'sd-server'): string | null {
-  return findSdBinaries(name)[0] ?? null
+export async function findSdBinary(name: 'sd-cli' | 'sd-server'): Promise<string | null> {
+  return (await findSdBinaries(name))[0]?.path ?? null
 }
 
 /** CUDA image binaries reuse the CUDA libraries already packaged for llama.cpp. */

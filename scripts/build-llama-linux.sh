@@ -113,6 +113,11 @@ cp "$SOURCE/LICENSE" "$DEST/"
 GOMP="$(ldconfig -p | awk '/libgomp\.so\.1 / && !found { found=$NF } END { print found }')"
 test -n "$GOMP"
 cp -L "$GOMP" "$DEST/libgomp.so.1"
+if [ "$ACCELERATOR" = vulkan ]; then
+  VULKAN="$(ldconfig -p | awk '$1 == "libvulkan.so.1" && /x86-64/ && !found { found=$NF } END { print found }')"
+  test -n "$VULKAN"
+  install -m 755 "$(readlink -f "$VULKAN")" "$DEST/libvulkan.so.1"
+fi
 chmod +x "$DEST/llama-server"
 
 file "$DEST/llama-server" | grep -q 'ELF 64-bit.*x86-64'

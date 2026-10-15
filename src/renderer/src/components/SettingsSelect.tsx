@@ -22,6 +22,7 @@ export interface SettingsSelectOption<T extends string> {
   value: T
   label: string
   disabled?: boolean
+  hint?: string
 }
 
 // Every settings picker. A long list (installed models) is searchable, so it is a combobox you
@@ -97,7 +98,12 @@ export function SettingsSelect<T extends string>({
       <SelectPopup portalProps={popupPortalProps}>
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-            {option.label}
+            <span>
+              <span className="block">{option.label}</span>
+              {option.hint && (
+                <span className="block text-xs text-muted-foreground">{option.hint}</span>
+              )}
+            </span>
           </SelectItem>
         ))}
       </SelectPopup>

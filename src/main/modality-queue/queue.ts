@@ -45,10 +45,14 @@ export interface QueueRequest {
 
 // The two standard heavy jobs, defined once instead of spelled out at every
 // call site (chat was inlined 4× in ipc.ts). A chat/tool turn evicts a resident
-// image server; image generation evicts the resident LLM — they can't co-reside
-// on unified memory. Frozen so a caller can't mutate the shared descriptor.
+// image server; image generation evicts the resident LLM and the task engines (grounding,
+// decision) — they can't co-reside on unified memory or on one GPU's VRAM. Frozen so a caller can't mutate the shared descriptor.
 export const CHAT_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'chat', evicts: ['image'] })
-export const IMAGE_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'image', evicts: ['llm'] })
+export const IMAGE_JOB: QueueRequest = Object.freeze({
+  tier: 2,
+  label: 'image',
+  evicts: ['llm', 'grounding', 'decision']
+})
 
 // Background model work (capture distill, replay-vision, secretary/agent passes).
 // Tier 3 = lowest priority: runs only when no chat/workspace/image job is running
