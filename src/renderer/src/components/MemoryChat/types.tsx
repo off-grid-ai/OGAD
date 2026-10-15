@@ -18,10 +18,8 @@ import type { TaskSession } from '@renderer/lib/task-session-store'
 import type { Artifact } from '../ArtifactCanvas'
 import type { DemoPreset } from '../explore/presetCatalog'
 
-export type RagMemory = { id: number; content?: string; text?: string }
 export type RagSummary = { session_id: string; summary?: string; title?: string; app_name?: string }
 export type RagEntity = { id: number; name?: string }
-export type RagEntityFact = { fact?: string } | string
 
 export type RagContext = {
   branches?: { question: string; answers: ResponseVersion[] }[]
@@ -30,12 +28,11 @@ export type RagContext = {
   notice?: boolean
   /** On a compaction notice: the summary that stands in for every turn before it. */
   compactionSummary?: string
-  masterMemory?: string | null
-  memories?: RagMemory[]
+  // masterMemory, memories and entityFacts in older saved contexts are from the retired legacy
+  // stores and are no longer shown.
   messages?: unknown[]
   summaries?: RagSummary[]
   entities?: RagEntity[]
-  entityFacts?: RagEntityFact[]
   unified?: Array<
     Omit<SearchHit, 'key' | 'refId' | 'url' | 'score'> & {
       key?: string
@@ -206,7 +203,8 @@ export type StoredMessageAttachment = NonNullable<ChatMessage['attachments']>[nu
 export type OpenImage = { url: string; path?: string }
 
 export type ContextNavigation = Readonly<{
-  onNavigateToMemory?: (memoryId: number) => void
+  /** Open a to-do on the Actions screen (Pro). */
+  onNavigateToAction?: (actionId: number) => void
   onNavigateToChat?: (sessionId: string) => void
   onNavigateToMeeting?: (meetingId: number) => void
   onNavigateToEntity?: (entityId: number) => void

@@ -69,7 +69,14 @@ import {
 import { PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS } from '@offgrid/sync'
 import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
-import { purgeLegacyChatImports, getSetting, saveSetting, optimizeDB } from './database'
+import {
+  purgeLegacyChatImports,
+  getSetting,
+  saveSetting,
+  optimizeDB,
+  startIndexRebuilds,
+  stopIndexRebuilds
+} from './database'
 import { modalityQueue } from './modality-queue/queue'
 import { applyQueueConfig, readQueueConfig } from './modality-queue/config'
 import { registerRuntime } from './runtime-manager'
@@ -706,6 +713,43 @@ app.whenReady().then(async () => {
   setTimeout(() => {
     void import('./documents').then((documents) => documents.collectDocumentGarbage())
   }, 120_000).unref()
+
+  // Background index work, once start-up has settled, a short slice at a time: full-text indexes
+  // built by an older schema are rebuilt beside the old ones (which keep answering until each
+  // rebuild finishes), and rows that predate the memory-search triggers are queued for embedding.
+  const indexWork = setTimeout(() => {
+    void import('./records')
+      .then((records) => records.ensureRecordSchema())
+      .catch((error: unknown) => console.error('[search index] schema check failed', error))
+      .finally(startIndexRebuilds)
+  }, 15_000)
+  indexWork.unref()
+  // Embed the memory-search backlog (records queued by their tables' triggers): once shortly after
+  // launch, then every few minutes for what was added since. Core owns this, so builds without
+  // Pro index chats and people too.
+  const embedBacklog = (): void => {
+    void import('./records')
+      .then((records) =>
+        records.embedRecordBacklog((progress) => {
+          if (progress.remaining % 200 === 0)
+            console.log(`[search index] ${progress.done} embedded, ${progress.remaining} left`)
+        })
+      )
+      .catch((error: unknown) => console.error('[search index]', error))
+  }
+  const firstEmbed = setTimeout(embedBacklog, 20_000)
+  firstEmbed.unref()
+  const embedTimer = setInterval(embedBacklog, 5 * 60_000)
+  embedTimer.unref()
+  applicationShutdown.register({
+    name: 'core:background-indexing',
+    shutdown: () => {
+      clearTimeout(indexWork)
+      clearTimeout(firstEmbed)
+      clearInterval(embedTimer)
+      stopIndexRebuilds()
+    }
+  })
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow()

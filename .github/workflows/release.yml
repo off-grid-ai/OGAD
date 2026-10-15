@@ -1007,9 +1007,6 @@ jobs:
             const root = path.resolve("dist/linux-unpacked/resources/app.asar/node_modules")
             const Database = require(path.join(root, "better-sqlite3-multiple-ciphers"))
             new Database(":memory:").close()
-            if (typeof require(path.join(root, "@lancedb/lancedb")).connect !== "function") {
-              throw new Error("LanceDB native package did not load")
-            }
             if (typeof require(path.join(root, "sharp")) !== "function") {
               throw new Error("Sharp native package did not load")
             }

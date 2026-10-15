@@ -11,65 +11,10 @@ interface ProLicenseInfo {
 
 type OffGridPermissionStatus = import('../../shared/ipc-contracts').PermissionStatusContract
 
-interface DashboardStats {
-  totalChats: number
-  totalMemories: number
-  totalEntities: number
-  totalRelationships: number
-  totalMessages: number
-  totalFacts: number
-  todayChats: number
-  todayMemories: number
-  todayEntities: number
-  recentChats: Array<{
-    session_id: string
-    title: string | null
-    app_name: string
-    memory_count: number
-    entity_count: number
-    updated_at: string
-  }>
-  recentMemories: Array<{
-    id: number
-    content: string
-    source_app: string
-    created_at: string
-  }>
-  topEntities: Array<{
-    id: number
-    name: string
-    type: string
-    fact_count: number
-    session_count: number
-  }>
-  entityTypeCounts: Array<{
-    type: string
-    count: number
-  }>
-  appDistribution: Array<{
-    app_name: string
-    chat_count: number
-    memory_count: number
-  }>
-  activityByDay: Array<{
-    date: string
-    chats: number
-    memories: number
-  }>
-}
-
 type RagConversation = import('../../shared/ipc-contracts').RagConversationContract
 
 type RagMessage = import('../../shared/ipc-contracts').RagMessageContract
 type RagChatResult = import('../../shared/ipc-contracts').RagChatResultContract
-
-// DUPLICATE (ambient decl). Canonical shape: the `reprocess:progress` IPC payload
-// emitted in src/main/ipc.ts. Keep in sync; guarded by ipc-type-parity.test.ts.
-interface ReprocessProgress {
-  phase: string
-  processed: number
-  total: number
-}
 
 interface AppSettings {
   memoryStrictness?: 'lenient' | 'balanced' | 'strict'
@@ -80,26 +25,8 @@ interface AppSettings {
 interface ChatSessionRecord {
   session_id: string
   last_activity: string
-  memory_count: number
   entity_count: number
   summary: string | null
-}
-
-interface SessionMemoryRecord {
-  id: number
-  content: string
-  raw_text: string | null
-  source_app: string | null
-  session_id: string
-  created_at: string
-}
-
-interface MemoryListRecord {
-  id: number
-  name: string | null
-  content: string
-  source_app: string
-  created_at: string
 }
 
 interface SessionEntityRecord {
@@ -108,7 +35,6 @@ interface SessionEntityRecord {
   type: string
   summary: string | null
   updated_at: string
-  fact_count: number
 }
 
 type ArtifactKind = import('../../shared/ipc-contracts').ArtifactKindContract
@@ -301,26 +227,13 @@ interface RendererAPIOverrides {
     relaunch: () => Promise<void>
     onChanged: (cb: (info: ProLicenseInfo) => void) => () => void
   }
-  onMasterMemoryProgress?: (
-    callback: (data: { current: number; total: number }) => void
-  ) => () => void
-  getMemories: (limit: number, appName?: string) => Promise<MemoryListRecord[]>
-  addMemory: (content: string, source?: string) => Promise<{ id: number }>
-  searchMemories: (query: string) => Promise<unknown[]>
-  getStats: () => Promise<Record<string, number>>
-  getDashboardStats: () => Promise<DashboardStats>
   extractMemory: (text: string) => Promise<{ summary: string; entities: string[]; topic: string }>
 
   getChatSessions: () => Promise<ChatSessionRecord[]>
   getMemoriesForSession: (sessionId: string) => Promise<unknown[]>
   getEntitiesForSession: (sessionId: string) => Promise<SessionEntityRecord[]>
-  getMemoryRecordsForSession: (sessionId: string) => Promise<SessionMemoryRecord[]>
   summarizeSession: (sessionId: string) => Promise<string>
   deleteSession: (sessionId: string) => Promise<boolean>
-
-  // Master Memory
-  getMasterMemory: () => Promise<{ content: string | null; updated_at: string | null }>
-  regenerateMasterMemory: () => Promise<string | null>
 
   // RAG Chat
   ragChat: (
@@ -406,12 +319,8 @@ interface RendererAPIOverrides {
     lastSync: number
   }>
   consoleDisconnect: () => Promise<boolean>
-  reprocessAllSessions: (clean?: boolean) => Promise<{ processed: number; total: number }>
 
-  getEntities: (appName?: string) => Promise<unknown[]>
-  getEntityDetails: (entityId: number, appName?: string) => Promise<unknown>
   deleteEntity: (entityId: number) => Promise<boolean>
-  deleteMemory: (memoryId: number) => Promise<boolean>
 
   // Artifacts library
   saveArtifact: (a: {
@@ -490,7 +399,6 @@ interface RendererAPIOverrides {
       sourceApp: string
     }) => void
   ) => () => void
-  onReprocessProgress: (callback: (data: ReprocessProgress) => void) => () => void
   onUpdateDownloaded: (callback: (data: { version: string }) => void) => () => void
   getStagedUpdateVersion: () => Promise<string | null>
   installUpdate: () => Promise<void>

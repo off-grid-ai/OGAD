@@ -1,4 +1,5 @@
 import { conversationSummaryTurn } from '@offgrid/models'
+import { formatDay } from '@offgrid/rag/records'
 import { versionContent, type ResponseVersion } from './chat-versions'
 // Pure builder for the model-facing history of a chat send. Kept Electron-free and
 // component-free so it's unit-tested directly — and, more importantly, so the
@@ -24,6 +25,8 @@ export interface HistoryTurn {
   } | null
   attachments?: { name: string; kind: string; text?: string }[]
   notice?: boolean
+  /** When the turn was written, epoch ms. Earlier days get a date marker in the replay. */
+  createdAt?: number
 }
 
 function modelContent(turn: HistoryTurn): string {
@@ -52,6 +55,37 @@ function modelContent(turn: HistoryTurn): string {
 
 export const EARLIER_CHAT_EXCERPTS_PREFIX = 'Earlier chat excerpts'
 
+function localDay(ms: number): number {
+  const day = new Date(ms)
+  day.setHours(0, 0, 0, 0)
+  return day.getTime()
+}
+
+/** The turn's time, when it has a usable one. */
+function writtenAt(turn: HistoryTurn): Pick<HistoryTurn, 'createdAt'> {
+  const at = turn.createdAt
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? { createdAt: at } : {}
+}
+
+/** A replayed chat that spans days says so: the first turn of each earlier day starts with that
+ *  day's date, so an old "today" or "tomorrow" is not read as now. A chat held all today gets no
+ *  marker; after an earlier day, the first turn of today is marked as today. The turn being
+ *  answered counts as now when it has no time. */
+function withDayMarkers(turns: HistoryTurn[], now: number): HistoryTurn[] {
+  const today = localDay(now)
+  let markedDay: number | null = null
+  return turns.map((turn, index) => {
+    const at = turn.createdAt ?? (index === turns.length - 1 ? now : undefined)
+    if (at === undefined) return turn
+    const day = localDay(at)
+    if (day === markedDay || (day === today && markedDay === null)) return turn
+    markedDay = day
+    const marker =
+      day === today ? `[Today — ${formatDay(now)}]` : `[Earlier conversation — ${formatDay(at)}]`
+    return { ...turn, content: `${marker}\n${turn.content}` }
+  })
+}
+
 /** Build bounded history for a send.
  *  - regen: the latest user turn is already in the thread → keep up to and
  *    including it (drop anything after).
@@ -62,7 +96,8 @@ export function buildSendHistory<T extends HistoryTurn>(
   regen: boolean,
   newUserText: string,
   limit = 20,
-  contextWindowTokens?: number
+  contextWindowTokens?: number,
+  now = Date.now()
 ): HistoryTurn[] {
   // Task guidance is shown in Chat for continuity, but the operator already
   // consumed it. Do not replay it as another user prompt to the resident LLM.
@@ -100,7 +135,8 @@ export function buildSendHistory<T extends HistoryTurn>(
                 `${EARLIER_CHAT_EXCERPTS_PREFIX} (${preCompactionTurns.length} turns; some details omitted): ${preCompactionLabels.join(' | ')}`.slice(
                   0,
                   400
-                )
+                ),
+              ...writtenAt(preCompactionTurns[0]!)
             }
           ]
         : []),
@@ -108,7 +144,7 @@ export function buildSendHistory<T extends HistoryTurn>(
     ...convMsgs
       .slice(lastCompaction + 1)
       .filter((message) => !message.context?.taskGuidance && !message.notice)
-  ].map((m) => ({ role: m.role, content: modelContent(m) }))
+  ].map((m): HistoryTurn => ({ role: m.role, content: modelContent(m), ...writtenAt(m) }))
   let base: HistoryTurn[]
   if (regen) {
     const lastUserIdx = flat.map((m) => m.role).lastIndexOf('user')
@@ -117,13 +153,16 @@ export function buildSendHistory<T extends HistoryTurn>(
     base = [...flat, { role: 'user', content: newUserText }]
   }
   if (base.length === 0) return []
+  // Day markers go on last, so excerpts and per-turn cuts never trim one away. Each is one short
+  // line, inside the room the estimate below leaves.
   const estimatedTokens = Math.ceil(JSON.stringify(base).length / 4)
-  if (contextWindowTokens && estimatedTokens < contextWindowTokens * 0.8) return base
+  if (contextWindowTokens && estimatedTokens < contextWindowTokens * 0.8)
+    return withDayMarkers(base, now)
   const effectiveLimit =
     contextWindowTokens && estimatedTokens >= contextWindowTokens * 0.8 && base.length > 2
       ? Math.min(limit, Math.max(2, Math.floor(base.length / 2)))
       : limit
-  if (effectiveLimit <= 1) return base.slice(-1)
+  if (effectiveLimit <= 1) return withDayMarkers(base.slice(-1), now)
   // The active turn is never shortened. Prior turns share a fixed budget so a
   // few very large messages cannot exhaust the model context by themselves.
   const recent = base.length <= effectiveLimit ? base : base.slice(-(effectiveLimit - 1))
@@ -139,21 +178,25 @@ export function buildSendHistory<T extends HistoryTurn>(
       ? [
           {
             role: 'user',
-            content: `${EARLIER_CHAT_EXCERPTS_PREFIX} (${older.length} turns; some details omitted): ${excerpts.join(' | ')}`
+            content: `${EARLIER_CHAT_EXCERPTS_PREFIX} (${older.length} turns; some details omitted): ${excerpts.join(' | ')}`,
+            ...writtenAt(older[0]!)
           }
         ]
       : []),
     ...recent.slice(0, -1)
   ]
   const charsPerTurn = Math.max(1, Math.floor(3000 / Math.max(1, prior.length)))
-  return [
-    ...prior.map((turn) => ({
-      ...turn,
-      content:
-        turn.content.length > charsPerTurn
-          ? `${turn.content.slice(0, charsPerTurn - 1)}…`
-          : turn.content
-    })),
-    recent[recent.length - 1]!
-  ]
+  return withDayMarkers(
+    [
+      ...prior.map((turn) => ({
+        ...turn,
+        content:
+          turn.content.length > charsPerTurn
+            ? `${turn.content.slice(0, charsPerTurn - 1)}…`
+            : turn.content
+      })),
+      recent[recent.length - 1]!
+    ],
+    now
+  )
 }

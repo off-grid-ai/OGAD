@@ -1,11 +1,15 @@
-/** `message`: a synced email or chat (from a connected account), not something seen on screen. */
+/** `message`: a synced email or chat (from a connected account), not something seen on screen.
+ *  The retired legacy stores' kinds ('memory', 'fact') are no longer searched; a saved result may
+ *  still carry one (see search-navigation). */
 export type SearchKind =
   | 'screen'
   | 'message'
+  /** A to-do or commitment (action item). */
+  | 'action'
   | 'meeting'
-  | 'memory'
   | 'entity'
-  | 'fact'
+  /** A legacy chat-session summary. */
+  | 'summary'
   | 'chat'
   | 'doc'
   /** A passage of a document attached to the chat (key: attachment:<documentId>:<page>:<position>). */

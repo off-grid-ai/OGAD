@@ -125,9 +125,11 @@ async function createProject(project: string, document: string, content: string)
   fs.writeFileSync(filePath, content)
   await chooseFile(filePath)
   await page.getByRole('button', { name: 'Add files', exact: true }).click()
-  await expect(page.getByText(`${document}: indexed`, { exact: true })).toBeVisible({
+  // Indexed: the row's progress bar is gone and it shows the ready line ("text  ·  62 B").
+  await expect(page.getByRole('progressbar', { name: `Indexing ${document}` })).toBeHidden({
     timeout: 60_000
   })
+  await expect(page.getByText(/^text\s+·\s+\d+ B$/).first()).toBeVisible({ timeout: 60_000 })
   await expect(page.getByText(document, { exact: true })).toBeVisible()
 }
 

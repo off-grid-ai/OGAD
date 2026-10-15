@@ -55,7 +55,8 @@ export interface GodChatOptions {
 }
 
 export interface MemoryChatProps {
-  readonly onNavigateToMemory?: (memoryId: number) => void
+  /** Open a to-do on the Actions screen (Pro). */
+  readonly onNavigateToAction?: (actionId: number) => void
   readonly onNavigateToChat?: (sessionId: string) => void
   readonly onNavigateToMeeting?: (meetingId: number) => void
   readonly onNavigateToEntity?: (entityId: number) => void

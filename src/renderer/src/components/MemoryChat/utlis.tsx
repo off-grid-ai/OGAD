@@ -5,6 +5,7 @@ import {
   isSupportingChatContext,
   preprocessChatMarkdown
 } from '@offgrid/sync'
+import { splitCitations } from '@offgrid/rag/documents'
 import { toSpeakableText } from '@renderer/lib/speakable'
 import { runningToolLabel } from '@renderer/lib/tool-display'
 import type { ImageGenerationJobContract } from '../../../../shared/image-generation-contract'
@@ -19,7 +20,6 @@ export const ACTIVE_CHAT_TAB_KEY = 'offgrid:chat:active-tab'
 
 export const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i
 const ARTIFACT_FENCE = /```(?:html|svg|mermaid|jsx|tsx|react|image)\s*\n[\s\S]*?```/gi
-const CITATION = /\[S(\d+)\]/g
 export const IMAGE_MESSAGE_COLUMN_WIDTH = 'w-full max-w-2xl'
 
 export function imageProgressLabel(
@@ -75,9 +75,16 @@ export function parseAsk(content: string): AskBlock | null {
   return null
 }
 
+/** Each `[S#]` tag (grouped tags too) replaced, read the way the shared engine reads them. */
+function mapCitations(text: string, citation: (index: number) => string): string {
+  return splitCitations(text)
+    .map((segment) => (segment.kind === 'citation' ? citation(segment.index) : segment.text))
+    .join('')
+}
+
 export function messageToSpeakable(raw: string): string {
   return toSpeakableText(
-    (raw || '').replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, '').replace(CITATION, '').trim()
+    mapCitations((raw || '').replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, ''), () => '').trim()
   )
 }
 
@@ -98,12 +105,7 @@ export function activityLabel(activity?: {
   if (activity.kind === 'searching') return 'Searching your memory…'
   if (activity.kind === 'memory') {
     const counts = activity.counts || {}
-    const total =
-      (counts.memories || 0) +
-      (counts.summaries || 0) +
-      (counts.entities || 0) +
-      (counts.facts || 0) +
-      (counts.unified || 0)
+    const total = (counts.summaries || 0) + (counts.entities || 0) + (counts.unified || 0)
     return `Searched your memory — ${total} result${total === 1 ? '' : 's'}`
   }
   if (activity.kind === 'project') {
@@ -138,10 +140,7 @@ export function renderedMessageContent(message: ChatMessage): string {
   const selected = selectedMessageContent(message)
   if (message.role !== 'assistant') return preprocessChatMarkdown(selected)
   return preprocessChatMarkdown(
-    selected
-      .replace(ASK_FENCE, '')
-      .replace(/\[S(\d+)\]/g, '[S$1](cite:$1)')
-      .trim()
+    mapCitations(selected.replace(ASK_FENCE, ''), (index) => `[S${index}](cite:${index})`).trim()
   )
 }
 
@@ -204,10 +203,8 @@ export function assistantWorkIsSettled(message: ChatMessage): boolean {
 export function contextResultCount(context: RagContext): number {
   return (
     (context.sources?.length ?? 0) +
-    (context.memories?.length ?? 0) +
     (context.summaries?.length ?? 0) +
     (context.entities?.length ?? 0) +
-    (context.entityFacts?.length ?? 0) +
     (context.unified?.length ?? 0)
   )
 }

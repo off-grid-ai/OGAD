@@ -12,7 +12,7 @@
  * text-in / vector-out service.
  */
 import { parentPort, workerData } from 'worker_threads'
-import { embedText, embedTexts, embeddingDevice, rerankPassages } from './embeddings-core'
+import { DEFAULT_EMBEDDER, embedTexts, embeddingDevice, rerankPassages } from './embeddings-core'
 import { configureRuntime } from './runtime-env'
 import type { BackendPreference } from '../shared/backend-preferences'
 
@@ -38,15 +38,15 @@ configureRuntime({ modelsDir: chosenModelsDir })
 
 export interface EmbeddingRequest {
   id: number
-  text: string
-  /** Several texts for one model (documents attached to chat). */
-  texts?: string[]
+  /** The texts to embed, or to score against `rerankQuery`. */
+  texts: string[]
+  /** The sentence embedder (embeddings-core EMBEDDERS); DEFAULT_EMBEDDER when absent. */
+  model?: string
   /** Score `texts` against this query with the cross-encoder instead of embedding them. */
   rerankQuery?: string
 }
 export interface EmbeddingResponse {
   id: number
-  vector?: number[]
   vectors?: number[][]
   scores?: number[]
   ready?: boolean
@@ -61,7 +61,7 @@ port.on('message', (request: EmbeddingRequest) => {
       if (request.rerankQuery !== undefined) {
         const scores = await rerankPassages(
           request.rerankQuery,
-          request.texts ?? [],
+          request.texts,
           modelsDir,
           backendPreference,
           modelReadDirectories
@@ -69,18 +69,9 @@ port.on('message', (request: EmbeddingRequest) => {
         port.postMessage({ id: request.id, scores } satisfies EmbeddingResponse)
         return
       }
-      if (request.texts) {
-        const vectors = await embedTexts(
-          request.texts,
-          modelsDir,
-          backendPreference,
-          modelReadDirectories
-        )
-        port.postMessage({ id: request.id, vectors } satisfies EmbeddingResponse)
-        return
-      }
-      const vector = await embedText(
-        request.text,
+      const vectors = await embedTexts(
+        request.texts,
+        request.model ?? DEFAULT_EMBEDDER.model,
         modelsDir,
         (device, fallbackReason) => {
           port.postMessage({
@@ -95,14 +86,14 @@ port.on('message', (request: EmbeddingRequest) => {
       )
       port.postMessage({
         id: request.id,
-        vector,
+        vectors,
         device: embeddingDevice() ?? undefined
-      } as EmbeddingResponse)
+      } satisfies EmbeddingResponse)
     } catch (error) {
       port.postMessage({
         id: request.id,
         error: error instanceof Error ? error.message : String(error)
-      } as EmbeddingResponse)
+      } satisfies EmbeddingResponse)
     }
   })()
 })

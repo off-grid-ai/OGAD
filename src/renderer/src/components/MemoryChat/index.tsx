@@ -287,7 +287,7 @@ const MESSAGE_ROW_ENTER = {
 /** God's own voice turn mode (hands-free unless changed in its voice composer). */
 
 export function MemoryChat({
-  onNavigateToMemory,
+  onNavigateToAction,
   onNavigateToChat,
   onNavigateToMeeting,
   onNavigateToEntity,
@@ -3718,7 +3718,7 @@ export function MemoryChat({
   const installedSkillNames = useMemo(() => skills.map((skill) => skill.name), [skills])
   const messageNavigation = useMemo<ContextNavigation>(
     () => ({
-      onNavigateToMemory,
+      onNavigateToAction,
       onNavigateToChat,
       onNavigateToMeeting,
       onNavigateToEntity,
@@ -3757,7 +3757,7 @@ export function MemoryChat({
       onNavigateToChat,
       onNavigateToEntity,
       onNavigateToMeeting,
-      onNavigateToMemory,
+      onNavigateToAction,
       onOpenProject,
       onOpenSkillPreset,
       onSeekReplay

@@ -5,7 +5,15 @@ import { selectedVersionRepairs, type StoredVersionRow } from '../shared/chat-ve
 import Database from 'better-sqlite3-multiple-ciphers'
 import { safeStorage } from 'electron'
 import path from 'path'
-import { escapeFtsMatch } from './fts-match'
+import {
+  FTS_SCHEMA_VERSION,
+  FTS_TOKENIZE,
+  FTS_TRIGRAM_TOKENIZE,
+  ftsQuery,
+  ftsTypeahead,
+  needsTrigram,
+  normaliseForIndex
+} from '@offgrid/rag/records'
 import { dataDir } from './runtime-env'
 import fs from 'fs'
 import crypto from 'crypto'
@@ -17,13 +25,6 @@ import type {
   RagMessageContract,
   UserProfileContract
 } from '../shared/ipc-contracts'
-
-/**
- * The full-text schema this build expects. Bump it when an FTS table, its columns or its triggers
- * change: that is what makes every existing profile rebuild its indexes exactly once, on the next
- * launch, instead of on every launch.
- */
-const FTS_SCHEMA_VERSION = 1
 
 /** Conversation-list page size when a caller does not ask for one, and the ceiling it may ask for. */
 const DEFAULT_CONVERSATION_PAGE = 500
@@ -71,30 +72,633 @@ function loadOrCreateKey(dbPath: string): string | null {
   }
 }
 
-// Cosine similarity function for vector search
-// Returns similarity between 0 and 1 (1 = identical)
-function cosineSimilarity(v1Str: string, v2Str: string): number {
+// --- Full-text indexes --------------------------------------------------------------------------
+// Every FTS5 table uses one tokenizer (FTS_TOKENIZE: keeps Devanagari vowel signs inside words) and
+// indexes text exactly as normaliseForIndex leaves it (NFC, no zero-width joiners), so a word
+// matches the same way in every corpus. Triggers normalise through offgrid_fts_text(); a rebuild
+// re-inserts through it too, never with FTS5's 'rebuild' command, which would read the raw text.
+// Each table records the FTS_SCHEMA_VERSION it was built with in fts_schema, so a tokenizer or
+// normalisation change rebuilds every profile's indexes exactly once, in the background after
+// start-up (never inside getDB()). frame_fts is the exception: see frame-text-index.ts.
+//
+// Chinese, Japanese, Thai, Lao, Khmer and Burmese are written without spaces, so unicode61 makes a
+// whole run one token and a word inside it never matches. Each index with `trigram` set has a twin,
+// `${name}_tri`, on FTS5's trigram tokenizer (any substring of three characters or more), holding
+// only the rows whose text has such a script (offgrid_needs_trigram). See ensureTrigramIndex.
+
+/** The SQLite functions the FTS triggers call. Every connection that writes indexed tables needs them. */
+export function registerFtsFunctions(database: Database.Database): void {
+  database.function('offgrid_fts_text', { deterministic: true }, (value: unknown) =>
+    typeof value === 'string' ? normaliseForIndex(value) : (value as null)
+  )
+  // 1 when any argument is text in a script written without spaces (the trigram twins' filter).
+  database.function(
+    'offgrid_needs_trigram',
+    { deterministic: true, varargs: true },
+    (...values: unknown[]) =>
+      values.some((value) => typeof value === 'string' && needsTrigram(value)) ? 1 : 0
+  )
+}
+
+/** An external-content FTS5 index over one table's text columns, kept in step by triggers. */
+export interface FtsIndexSpec {
+  /** The FTS5 table. */
+  name: string
+  /** The table it indexes, and the column that is that table's rowid. */
+  source: string
+  rowid: string
+  /** Searched columns; their text is normalised as it is indexed. */
+  columns: string[]
+  /** Stored with each row but not searched (e.g. the owning conversation). */
+  unindexed?: string[]
+  /** Its triggers are `${triggers}_ai`, `_ad` and `_au`. */
+  triggers: string
+  /** Also keep a trigram twin (`${name}_tri`) of the rows in no-space scripts. */
+  trigram?: boolean
+}
+
+export const CORE_FTS_INDEXES: FtsIndexSpec[] = [
+  {
+    name: 'rag_message_fts',
+    source: 'rag_messages',
+    rowid: 'id',
+    columns: ['content'],
+    unindexed: ['conversation_id'],
+    triggers: 'rag_messages',
+    trigram: true
+  },
+  {
+    name: 'summary_fts',
+    source: 'chat_summaries',
+    rowid: 'rowid',
+    columns: ['summary'],
+    unindexed: ['session_id'],
+    triggers: 'summaries',
+    trigram: true
+  },
+  {
+    name: 'entity_fts',
+    source: 'entities',
+    rowid: 'id',
+    columns: ['name', 'summary', 'type'],
+    triggers: 'entities',
+    trigram: true
+  }
+]
+
+/** Screen moments. Pro creates `observations`; the index is rebuilt here once the table exists. */
+export const OBSERVATION_FTS: FtsIndexSpec = {
+  name: 'observation_fts',
+  source: 'observations',
+  rowid: 'id',
+  columns: ['summary'],
+  triggers: 'observations',
+  trigram: true
+}
+
+/**
+ * The legacy `memories` and `entity_facts` stores are retired: nothing writes or searches them. Their
+ * rows stay (the user's data, cleared by "Delete all my data"); their full-text indexes, which were
+ * derived from those rows, and the triggers that kept them are removed so no stale copy of the text
+ * outlives the rows. Idempotent.
+ */
+function retireLegacyMemoryIndexes(database: Database.Database): void {
+  database.exec(`
+    DROP TRIGGER IF EXISTS memories_ai;
+    DROP TRIGGER IF EXISTS memories_ad;
+    DROP TRIGGER IF EXISTS memories_au;
+    DROP TRIGGER IF EXISTS memories_next_ai;
+    DROP TRIGGER IF EXISTS memories_next_ad;
+    DROP TRIGGER IF EXISTS memories_next_au;
+    DROP TRIGGER IF EXISTS entity_facts_ai;
+    DROP TRIGGER IF EXISTS entity_facts_ad;
+    DROP TRIGGER IF EXISTS entity_facts_au;
+    DROP TRIGGER IF EXISTS entity_facts_next_ai;
+    DROP TRIGGER IF EXISTS entity_facts_next_ad;
+    DROP TRIGGER IF EXISTS entity_facts_next_au;
+    DROP TABLE IF EXISTS memory_fts;
+    DROP TABLE IF EXISTS memory_fts_next;
+    DROP TABLE IF EXISTS entity_fact_fts;
+    DROP TABLE IF EXISTS entity_fact_fts_next;
+  `)
+  for (const name of ['memory_fts', 'entity_fact_fts']) clearRebuildCursor(database, name)
+}
+
+/** Whether a table (or virtual table) exists. The one check every store uses: Pro creates many of
+ *  the tables core reads, lazily. */
+export function tableExists(database: Database.Database, name: string): boolean {
+  return !!database
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(name)
+}
+
+/** True when `name` exists and was built with this build's tokenizer and normalisation. */
+export function ftsIndexIsCurrent(database: Database.Database, name: string): boolean {
+  database.exec(
+    'CREATE TABLE IF NOT EXISTS fts_schema (name TEXT PRIMARY KEY, version INTEGER NOT NULL)'
+  )
+  const row = database.prepare('SELECT version FROM fts_schema WHERE name = ?').get(name) as
+    | { version: number }
+    | undefined
+  return !!row && row.version >= FTS_SCHEMA_VERSION && tableExists(database, name)
+}
+
+export function markFtsIndexCurrent(database: Database.Database, name: string): void {
+  database.exec(
+    'CREATE TABLE IF NOT EXISTS fts_schema (name TEXT PRIMARY KEY, version INTEGER NOT NULL)'
+  )
+  database
+    .prepare(
+      'INSERT INTO fts_schema (name, version) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET version = excluded.version'
+    )
+    .run(name, FTS_SCHEMA_VERSION)
+}
+
+/** Deleted terms are removed from the index itself, not only marked (FTS5 'secure-delete'). */
+export function enableFtsSecureDelete(database: Database.Database, name: string): void {
+  database.exec(`INSERT INTO ${name}(${name}, rank) VALUES('secure-delete', 1)`)
+}
+
+function ftsRowValues(spec: FtsIndexSpec, row: 'new' | 'old'): string {
+  return [
+    `${row}.${spec.rowid}`,
+    ...spec.columns.map((column) => `offgrid_fts_text(${row}.${column})`),
+    ...(spec.unindexed ?? []).map((column) => `${row}.${column}`)
+  ].join(', ')
+}
+
+function ftsColumnNames(spec: FtsIndexSpec): string {
+  return ['rowid', ...spec.columns, ...(spec.unindexed ?? [])].join(', ')
+}
+
+/** Create the three sync triggers if they are missing. */
+export function installFtsTriggers(database: Database.Database, spec: FtsIndexSpec): void {
+  const { name, source, triggers } = spec
+  const columns = ftsColumnNames(spec)
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS ${triggers}_ai AFTER INSERT ON ${source} BEGIN
+      INSERT INTO ${name}(${columns}) VALUES (${ftsRowValues(spec, 'new')});
+    END;
+    CREATE TRIGGER IF NOT EXISTS ${triggers}_ad AFTER DELETE ON ${source} BEGIN
+      INSERT INTO ${name}(${name}, ${columns}) VALUES ('delete', ${ftsRowValues(spec, 'old')});
+    END;
+    CREATE TRIGGER IF NOT EXISTS ${triggers}_au AFTER UPDATE ON ${source} BEGIN
+      INSERT INTO ${name}(${name}, ${columns}) VALUES ('delete', ${ftsRowValues(spec, 'old')});
+      INSERT INTO ${name}(${columns}) VALUES (${ftsRowValues(spec, 'new')});
+    END;
+  `)
+}
+
+/** Re-index every row of the source table (the index is emptied first). One statement: only for
+ *  rare repairs (the legacy purge, "clear memories"); a schema upgrade rebuilds in the background
+ *  (ensureFtsIndex queues it). */
+export function rebuildFtsIndex(database: Database.Database, spec: FtsIndexSpec): void {
+  database.exec(`INSERT INTO ${spec.name}(${spec.name}) VALUES('delete-all')`)
+  database.exec(
+    `INSERT INTO ${spec.name}(${ftsColumnNames(spec)})
+     SELECT ${ftsSelectValues(spec)} FROM ${spec.source}`
+  )
+  const twin = trigramName(spec)
+  // A twin still being filled in the background is left to finish (it reads the rows as they are).
+  if (spec.trigram && ftsIndexIsCurrent(database, twin)) {
+    database.exec(`INSERT INTO ${twin}(${twin}) VALUES('delete-all')`)
+    database.exec(
+      `INSERT INTO ${twin}(${trigramColumnNames(spec)})
+       SELECT ${trigramSelectValues(spec)} FROM ${spec.source} WHERE ${trigramFilter(spec)}`
+    )
+  }
+}
+
+function ftsSelectValues(spec: FtsIndexSpec): string {
+  return [
+    spec.rowid,
+    ...spec.columns.map((column) => `offgrid_fts_text(${column})`),
+    ...(spec.unindexed ?? [])
+  ].join(', ')
+}
+
+function createFtsTable(database: Database.Database, spec: FtsIndexSpec, name: string): void {
+  const columns = [...spec.columns, ...(spec.unindexed ?? []).map((c) => `${c} UNINDEXED`)]
+  database.exec(`
+    CREATE VIRTUAL TABLE ${name} USING fts5(
+      ${columns.join(', ')},
+      content='${spec.source}'${spec.rowid === 'rowid' ? '' : `, content_rowid='${spec.rowid}'`},
+      tokenize = "${FTS_TOKENIZE}"
+    );
+  `)
+  enableFtsSecureDelete(database, name)
+}
+
+/**
+ * Make `spec`'s index usable without reading its rows, so it is safe inside getDB() and on any
+ * request path:
+ *   - current: put back triggers something dropped;
+ *   - missing: create it (empty) with its triggers; an empty source table makes it current;
+ *   - built by an older schema: leave it serving, with the triggers it was built with (their
+ *     deletes must match what it indexed), until the background rebuild replaces it.
+ * Returns true when the index still needs rebuilding (queued; startIndexRebuilds runs it). A no-op
+ * until the source table exists.
+ */
+/** Indexes small enough to verify at startup (to-dos, meetings): FTS5's own integrity check. */
+const VERIFIED_AT_STARTUP = new Set(['action_fts', 'meeting_fts'])
+const verified = new Set<string>()
+
+/**
+ * An index FTS5 reports inconsistent with its table (an entry deleted that was never added) is
+ * marked out of date, so the background rebuild replaces it. Once per index per launch.
+ */
+function verifySmallIndex(database: Database.Database, spec: FtsIndexSpec): void {
+  if (!VERIFIED_AT_STARTUP.has(spec.name) || verified.has(spec.name)) return
+  verified.add(spec.name)
+  if (!tableExists(database, spec.name) || !ftsIndexIsCurrent(database, spec.name)) return
   try {
-    const v1 = JSON.parse(v1Str) as number[]
-    const v2 = JSON.parse(v2Str) as number[]
+    database.exec(`INSERT INTO ${spec.name}(${spec.name}, rank) VALUES ('integrity-check', 1)`)
+  } catch (error) {
+    console.warn(`[fts] ${spec.name} is inconsistent; rebuilding it:`, (error as Error).message)
+    // Its triggers stop now, so edits cannot fail on it; the rebuild puts them back with the swap.
+    database.exec(`
+      DROP TRIGGER IF EXISTS ${spec.triggers}_ai;
+      DROP TRIGGER IF EXISTS ${spec.triggers}_ad;
+      DROP TRIGGER IF EXISTS ${spec.triggers}_au;
+    `)
+    database.prepare('DELETE FROM fts_schema WHERE name = ?').run(spec.name)
+  }
+}
 
-    if (v1.length !== v2.length) return 0
+export function ensureFtsIndex(database: Database.Database, spec: FtsIndexSpec): boolean {
+  verifySmallIndex(database, spec)
+  const pending = ensureMainFtsIndex(database, spec)
+  if (spec.trigram) ensureTrigramIndex(database, spec)
+  return pending
+}
 
-    let dotProduct = 0
-    let normA = 0
-    let normB = 0
+function ensureMainFtsIndex(database: Database.Database, spec: FtsIndexSpec): boolean {
+  if (!tableExists(database, spec.source)) return false
+  if (ftsIndexIsCurrent(database, spec.name)) {
+    installFtsTriggers(database, spec)
+    return false
+  }
+  if (!tableExists(database, spec.name)) {
+    database.transaction(() => {
+      database.exec(`
+        DROP TRIGGER IF EXISTS ${spec.triggers}_ai;
+        DROP TRIGGER IF EXISTS ${spec.triggers}_ad;
+        DROP TRIGGER IF EXISTS ${spec.triggers}_au;
+      `)
+      createFtsTable(database, spec, spec.name)
+      // Triggers only once every existing row is indexed. On a table that already has rows, an
+      // update or delete would otherwise remove an entry that was never added, which FTS5 (with
+      // secure-delete) reports as a malformed index. The background rebuild indexes the rows into a
+      // twin with guarded triggers and installs these triggers when it swaps the twin in.
+      if (!database.prepare(`SELECT 1 FROM ${spec.source} LIMIT 1`).get()) {
+        installFtsTriggers(database, spec)
+        markFtsIndexCurrent(database, spec.name)
+      }
+    })()
+    if (ftsIndexIsCurrent(database, spec.name)) return false
+  }
+  queueIndexRebuild(spec.name, ftsRebuildStep(spec))
+  return true
+}
 
-    for (let i = 0; i < v1.length; i++) {
-      // i < v1.length === v2.length (checked above), so both reads are in-bounds.
-      dotProduct += v1[i]! * v2[i]!
-      normA += v1[i]! * v1[i]!
-      normB += v2[i]! * v2[i]!
+// --- Trigram twins -------------------------------------------------------------------------------
+// `${name}_tri` is an external-content FTS5 table over the same source table and columns, on the
+// trigram tokenizer, holding only the rows offgrid_needs_trigram picks (mostly Latin profiles hold
+// next to nothing in it). Its triggers carry the same filter, so a delete removes exactly what an
+// insert indexed; 'secure-delete' erases the deleted terms, as on every other index. A missing or
+// outdated twin is created empty with its triggers and filled in the background in rowid order
+// (fts_rebuild holds how far): until then its triggers index only rows already copied, and later
+// rows are copied with their latest text, so no row is indexed twice or deleted unindexed. frame_fts
+// has no twin: it is every word ever on screen, and observation summaries cover the moments.
+
+/** The trigram twin of an index. */
+export function trigramName(spec: { name: string }): string {
+  return `${spec.name}_tri`
+}
+
+function trigramColumnNames(spec: FtsIndexSpec): string {
+  return ['rowid', ...spec.columns].join(', ')
+}
+
+function trigramRowValues(spec: FtsIndexSpec, row: 'new' | 'old'): string {
+  return [
+    `${row}.${spec.rowid}`,
+    ...spec.columns.map((column) => `offgrid_fts_text(${row}.${column})`)
+  ].join(', ')
+}
+
+function trigramSelectValues(spec: FtsIndexSpec): string {
+  return [spec.rowid, ...spec.columns.map((column) => `offgrid_fts_text(${column})`)].join(', ')
+}
+
+/** True for a row the twin indexes. `row` is 'new', 'old' or '' (the source table itself). */
+function trigramFilter(spec: FtsIndexSpec, row: 'new' | 'old' | '' = ''): string {
+  const prefix = row ? `${row}.` : ''
+  return `offgrid_needs_trigram(${spec.columns.map((column) => prefix + column).join(', ')})`
+}
+
+function createTrigramTable(database: Database.Database, spec: FtsIndexSpec): void {
+  const name = trigramName(spec)
+  database.exec(`
+    CREATE VIRTUAL TABLE ${name} USING fts5(
+      ${spec.columns.join(', ')},
+      content='${spec.source}'${spec.rowid === 'rowid' ? '' : `, content_rowid='${spec.rowid}'`},
+      tokenize = "${FTS_TRIGRAM_TOKENIZE}"
+    );
+  `)
+  enableFtsSecureDelete(database, name)
+}
+
+/** The twin's triggers. While it is being filled, only rows the fill has copied are kept in step. */
+function installTrigramTriggers(database: Database.Database, spec: FtsIndexSpec): void {
+  const name = trigramName(spec)
+  const columns = trigramColumnNames(spec)
+  rebuildState(database) // the triggers read fts_rebuild
+  const copied = (row: 'new' | 'old'): string =>
+    `${row}.${spec.rowid} <= COALESCE((SELECT cursor FROM fts_rebuild WHERE name = '${name}'), ${Number.MAX_SAFE_INTEGER})`
+  const indexed = (row: 'new' | 'old'): string => `${trigramFilter(spec, row)} AND ${copied(row)}`
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS ${spec.triggers}_tri_ai AFTER INSERT ON ${spec.source}
+    WHEN ${indexed('new')} BEGIN
+      INSERT INTO ${name}(${columns}) VALUES (${trigramRowValues(spec, 'new')});
+    END;
+    CREATE TRIGGER IF NOT EXISTS ${spec.triggers}_tri_ad AFTER DELETE ON ${spec.source}
+    WHEN ${indexed('old')} BEGIN
+      INSERT INTO ${name}(${name}, ${columns}) VALUES ('delete', ${trigramRowValues(spec, 'old')});
+    END;
+    CREATE TRIGGER IF NOT EXISTS ${spec.triggers}_tri_au AFTER UPDATE OF ${spec.columns.join(', ')} ON ${spec.source}
+    WHEN ${trigramFilter(spec, 'old')} OR ${trigramFilter(spec, 'new')} BEGIN
+      INSERT INTO ${name}(${name}, ${columns}) SELECT 'delete', ${trigramRowValues(spec, 'old')} WHERE ${indexed('old')};
+      INSERT INTO ${name}(${columns}) SELECT ${trigramRowValues(spec, 'new')} WHERE ${indexed('new')};
+    END;
+  `)
+}
+
+function dropTrigramTriggers(database: Database.Database, spec: FtsIndexSpec): void {
+  database.exec(`
+    DROP TRIGGER IF EXISTS ${spec.triggers}_tri_ai;
+    DROP TRIGGER IF EXISTS ${spec.triggers}_tri_ad;
+    DROP TRIGGER IF EXISTS ${spec.triggers}_tri_au;
+  `)
+}
+
+/**
+ * Make `spec`'s trigram twin usable without reading its rows (safe inside getDB()): a current twin
+ * gets back any trigger something dropped; a missing or outdated one is created empty and filled in
+ * the background after start-up (trigramFillStep); a fill under way resumes. A no-op until the
+ * source table exists.
+ */
+export function ensureTrigramIndex(database: Database.Database, spec: FtsIndexSpec): void {
+  if (!tableExists(database, spec.source)) return
+  const name = trigramName(spec)
+  if (ftsIndexIsCurrent(database, name)) {
+    installTrigramTriggers(database, spec)
+    return
+  }
+  if (rebuildCursor(database, name) === null || !tableExists(database, name)) {
+    database.transaction(() => {
+      dropTrigramTriggers(database, spec)
+      database.exec(`DROP TABLE IF EXISTS ${name}`)
+      createTrigramTable(database, spec)
+      if (database.prepare(`SELECT 1 FROM ${spec.source} LIMIT 1`).get()) {
+        setRebuildCursor(database, name, 0)
+      } else {
+        clearRebuildCursor(database, name)
+        markFtsIndexCurrent(database, name)
+      }
+      installTrigramTriggers(database, spec)
+    })()
+    if (ftsIndexIsCurrent(database, name)) return
+  } else {
+    installTrigramTriggers(database, spec)
+  }
+  queueIndexRebuild(name, trigramFillStep(spec))
+}
+
+/** One slice of filling a twin with the source rows that need it, in rowid order. The last slice
+ *  ends the fill (its triggers then keep every row in step) in the same transaction. */
+function trigramFillStep(spec: FtsIndexSpec): () => boolean {
+  let batch = 500
+  const name = trigramName(spec)
+  return () => {
+    const database = getDB()
+    if (!tableExists(database, spec.source) || !tableExists(database, name)) return false
+    const cursor = rebuildCursor(database, name)
+    if (cursor === null) return false
+    const started = Date.now()
+    const upper = (
+      database
+        .prepare(
+          `SELECT MAX(r) AS r FROM (SELECT ${spec.rowid} AS r FROM ${spec.source}
+            WHERE ${spec.rowid} > ? ORDER BY ${spec.rowid} LIMIT ?)`
+        )
+        .get(cursor, batch) as { r: number | null }
+    ).r
+    if (upper === null) {
+      database.transaction(() => {
+        clearRebuildCursor(database, name)
+        markFtsIndexCurrent(database, name)
+      })()
+      return false
     }
+    database.transaction(() => {
+      database
+        .prepare(
+          `INSERT INTO ${name}(${trigramColumnNames(spec)})
+           SELECT ${trigramSelectValues(spec)} FROM ${spec.source}
+            WHERE ${spec.rowid} > ? AND ${spec.rowid} <= ? AND ${trigramFilter(spec)}`
+        )
+        .run(cursor, upper)
+      setRebuildCursor(database, name, upper)
+    })()
+    batch = adaptBatch(batch, Date.now() - started)
+    return true
+  }
+}
 
-    if (normA === 0 || normB === 0) return 0
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
-  } catch {
-    return 0
+// --- Background index rebuilds ------------------------------------------------------------------
+// A tokenizer or normalisation change (FTS_SCHEMA_VERSION) rebuilds each index beside the old one,
+// `${name}_next`, a slice at a time on the main thread's idle moments, while the old index keeps
+// answering searches. Rows are copied in rowid order; fts_rebuild holds how far the copy got, and
+// the _next triggers mirror only edits to rows already copied (later rows are copied with their
+// latest text). When every row is in, the new index replaces the old in one transaction. Progress
+// survives a restart. Nothing here runs until startIndexRebuilds() (after start-up). The same queue
+// and cursors (fts_rebuild) serve the document index rebuild, the trigram twins' fills and the
+// memory-search queue seeding.
+
+/** A slice indexes for about this long, then the thread rests. */
+const REBUILD_SLICE_MS = 20
+const REBUILD_PAUSE_MS = 60
+
+const pendingRebuilds = new Map<string, () => boolean>()
+let rebuildsStarted = false
+let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+
+/** Queue background work (one slice per call; it returns whether more remains) under `name`. */
+export function queueIndexRebuild(name: string, step: () => boolean): void {
+  if (!pendingRebuilds.has(name)) pendingRebuilds.set(name, step)
+  if (rebuildsStarted) scheduleRebuildSlice()
+}
+
+/** Start the queued index rebuilds, a slice at a time. Called once start-up has settled. */
+export function startIndexRebuilds(): void {
+  rebuildsStarted = true
+  scheduleRebuildSlice()
+}
+
+/** Stop between slices (shutdown, profile switch). Progress is kept; the next start resumes. */
+export function stopIndexRebuilds(): void {
+  rebuildsStarted = false
+  if (rebuildTimer) clearTimeout(rebuildTimer)
+  rebuildTimer = null
+}
+
+function scheduleRebuildSlice(): void {
+  if (rebuildTimer || !pendingRebuilds.size) return
+  rebuildTimer = setTimeout(runRebuildSlice, REBUILD_PAUSE_MS)
+  rebuildTimer.unref()
+}
+
+function runRebuildSlice(): void {
+  rebuildTimer = null
+  // A closed connection (shutdown, profile switch) is not reopened for background work.
+  if (!rebuildsStarted || !db?.open) return
+  const next = pendingRebuilds.entries().next()
+  if (next.done) return
+  const [name, step] = next.value
+  let more = false
+  try {
+    more = step()
+  } catch (error) {
+    // Not marked current, so it is retried on the next launch; the old index keeps serving.
+    console.error(`[database] background rebuild of ${name} failed; will retry`, error)
+  }
+  if (!more) pendingRebuilds.delete(name)
+  scheduleRebuildSlice()
+}
+
+/** Rows a slice copies; adjusted so a slice takes about REBUILD_SLICE_MS. */
+function adaptBatch(batch: number, elapsedMs: number): number {
+  if (elapsedMs > REBUILD_SLICE_MS) return Math.max(10, Math.floor(batch / 2))
+  if (elapsedMs < REBUILD_SLICE_MS / 2) return Math.min(5_000, batch * 2)
+  return batch
+}
+
+function rebuildState(database: Database.Database): void {
+  database.exec(
+    'CREATE TABLE IF NOT EXISTS fts_rebuild (name TEXT PRIMARY KEY, cursor INTEGER NOT NULL)'
+  )
+}
+
+/** The highest rowid copied into `name`'s rebuild; null when no rebuild is under way. */
+export function rebuildCursor(database: Database.Database, name: string): number | null {
+  rebuildState(database)
+  const row = database.prepare('SELECT cursor FROM fts_rebuild WHERE name = ?').get(name) as
+    | { cursor: number }
+    | undefined
+  return row ? row.cursor : null
+}
+
+export function setRebuildCursor(database: Database.Database, name: string, cursor: number): void {
+  rebuildState(database)
+  database
+    .prepare(
+      'INSERT INTO fts_rebuild (name, cursor) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET cursor = excluded.cursor'
+    )
+    .run(name, cursor)
+}
+
+export function clearRebuildCursor(database: Database.Database, name: string): void {
+  rebuildState(database)
+  database.prepare('DELETE FROM fts_rebuild WHERE name = ?').run(name)
+}
+
+/** Triggers that mirror edits to rows already copied into the rebuild. */
+function installRebuildTriggers(database: Database.Database, spec: FtsIndexSpec): void {
+  const next = `${spec.name}_next`
+  const columns = ftsColumnNames(spec)
+  const copied = (row: 'new' | 'old'): string =>
+    `${row}.${spec.rowid} <= (SELECT cursor FROM fts_rebuild WHERE name = '${spec.name}')`
+  database.exec(`
+    CREATE TRIGGER IF NOT EXISTS ${spec.triggers}_next_ai AFTER INSERT ON ${spec.source}
+    WHEN ${copied('new')} BEGIN
+      INSERT INTO ${next}(${columns}) VALUES (${ftsRowValues(spec, 'new')});
+    END;
+    CREATE TRIGGER IF NOT EXISTS ${spec.triggers}_next_ad AFTER DELETE ON ${spec.source}
+    WHEN ${copied('old')} BEGIN
+      INSERT INTO ${next}(${next}, ${columns}) VALUES ('delete', ${ftsRowValues(spec, 'old')});
+    END;
+    CREATE TRIGGER IF NOT EXISTS ${spec.triggers}_next_au AFTER UPDATE ON ${spec.source} BEGIN
+      INSERT INTO ${next}(${next}, ${columns}) SELECT 'delete', ${ftsRowValues(spec, 'old')} WHERE ${copied('old')};
+      INSERT INTO ${next}(${columns}) SELECT ${ftsRowValues(spec, 'new')} WHERE ${copied('new')};
+    END;
+  `)
+}
+
+function dropRebuildTriggers(database: Database.Database, spec: FtsIndexSpec): void {
+  database.exec(`
+    DROP TRIGGER IF EXISTS ${spec.triggers}_next_ai;
+    DROP TRIGGER IF EXISTS ${spec.triggers}_next_ad;
+    DROP TRIGGER IF EXISTS ${spec.triggers}_next_au;
+  `)
+}
+
+/** One slice of `spec`'s background rebuild; the last one swaps the new index in. */
+function ftsRebuildStep(spec: FtsIndexSpec): () => boolean {
+  let batch = 200
+  const next = `${spec.name}_next`
+  return () => {
+    const database = getDB()
+    if (!tableExists(database, spec.source) || ftsIndexIsCurrent(database, spec.name)) return false
+    let cursor = rebuildCursor(database, spec.name)
+    if (cursor === null || !tableExists(database, next)) {
+      database.transaction(() => {
+        dropRebuildTriggers(database, spec)
+        database.exec(`DROP TABLE IF EXISTS ${next}`)
+        createFtsTable(database, spec, next)
+        setRebuildCursor(database, spec.name, 0)
+        installRebuildTriggers(database, spec)
+      })()
+      cursor = 0
+    }
+    const started = Date.now()
+    const upper = (
+      database
+        .prepare(
+          `SELECT MAX(r) AS r FROM (SELECT ${spec.rowid} AS r FROM ${spec.source}
+            WHERE ${spec.rowid} > ? ORDER BY ${spec.rowid} LIMIT ?)`
+        )
+        .get(cursor, batch) as { r: number | null }
+    ).r
+    const copy = database.prepare(
+      `INSERT INTO ${next}(${ftsColumnNames(spec)})
+       SELECT ${ftsSelectValues(spec)} FROM ${spec.source}
+        WHERE ${spec.rowid} > ? AND ${spec.rowid} <= ?`
+    )
+    if (upper === null) {
+      // Every row is in: the new index replaces the old, with the normalising triggers.
+      database.transaction(() => {
+        copy.run(cursor, Number.MAX_SAFE_INTEGER)
+        dropRebuildTriggers(database, spec)
+        database.exec(`
+          DROP TRIGGER IF EXISTS ${spec.triggers}_ai;
+          DROP TRIGGER IF EXISTS ${spec.triggers}_ad;
+          DROP TRIGGER IF EXISTS ${spec.triggers}_au;
+          DROP TABLE IF EXISTS ${spec.name};
+          ALTER TABLE ${next} RENAME TO ${spec.name};
+        `)
+        installFtsTriggers(database, spec)
+        markFtsIndexCurrent(database, spec.name)
+        clearRebuildCursor(database, spec.name)
+      })()
+      return false
+    }
+    database.transaction(() => {
+      copy.run(cursor, upper)
+      setRebuildCursor(database, spec.name, upper)
+    })()
+    batch = adaptBatch(batch, Date.now() - started)
+    return true
   }
 }
 
@@ -126,15 +730,11 @@ export function getDB(): Database.Database {
   db.pragma('busy_timeout = 5000')
   db.pragma('temp_store = MEMORY')
   db.pragma('cache_size = -65536')
-
-  // Register custom function for vector search. Declare the two params EXPLICITLY:
-  // better-sqlite3 derives the SQL arity from fn.length, and a rest param
-  // (...args) has length 0 — so it registered as a 0-arg function and every
-  // 2-arg call ("SELECT cosine_similarity(embedding, ?)") threw "wrong number of
-  // arguments to function cosine_similarity()".
-  db.function('cosine_similarity', (a: unknown, b: unknown) =>
-    cosineSimilarity(a as string, b as string)
-  )
+  // Deleted content is overwritten inside the pages it lived in (screenpipe leaves it; a deleted
+  // capture must not be readable from the file). FAST adds no I/O: pages already being written are
+  // zeroed, whole freed pages are not. The FTS5 indexes also use their own 'secure-delete'.
+  db.pragma('secure_delete = FAST')
+  registerFtsFunctions(db)
 
   // Initialize Schema
   db.exec(`
@@ -157,60 +757,17 @@ export function getDB(): Database.Database {
         FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
 
-    -- Legacy 'memories' for vector search (optional link to message_id later)
+    -- Legacy memories, retired: nothing writes, indexes, embeds or searches them. Existing rows stay
+    -- until the user deletes their data ("Delete all my data" clears them).
     CREATE TABLE IF NOT EXISTS memories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       content TEXT NOT NULL,
-      raw_text TEXT, 
+      raw_text TEXT,
       source_app TEXT,
-      session_id TEXT, 
+      session_id TEXT,
       message_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      embedding TEXT 
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-        content, 
-        content='memories'
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
-      content,
-      conversation_id UNINDEXED,
-      content='messages',
-      content_rowid='id'
-    );
-
-    -- Chat message content, searchable. The chat-list content search used to be a
-    -- lower(content) LIKE match per term over rag_messages, which no index can serve: every
-    -- keystroke's search read every message ever stored. External-content FTS5, same shape as
-    -- message_fts above, so the index holds terms and the rows stay in rag_messages.
-    CREATE VIRTUAL TABLE IF NOT EXISTS rag_message_fts USING fts5(
-      content,
-      conversation_id UNINDEXED,
-      content='rag_messages',
-      content_rowid='id'
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS summary_fts USING fts5(
-      summary,
-      session_id UNINDEXED,
-      content='chat_summaries'
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS entity_fts USING fts5(
-      name,
-      summary,
-      type,
-      content='entities',
-      content_rowid='id'
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS entity_fact_fts USING fts5(
-      fact,
-      entity_id UNINDEXED,
-      content='entity_facts',
-      content_rowid='id'
+      embedding TEXT
     );
 
     CREATE TABLE IF NOT EXISTS entities (
@@ -223,6 +780,7 @@ export function getDB(): Database.Database {
       UNIQUE(name, type)
     );
 
+    -- Legacy entity facts, retired like memories: rows stay, nothing writes or reads them.
     CREATE TABLE IF NOT EXISTS entity_facts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       entity_id INTEGER NOT NULL,
@@ -268,7 +826,7 @@ export function getDB(): Database.Database {
     );
   `)
 
-  // Create Master Memory Table - cumulative summary of all summaries
+  // Master Memory Table - the retired cumulative profile; nothing writes or reads it.
   db.exec(`
     CREATE TABLE IF NOT EXISTS master_memory (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -316,77 +874,27 @@ export function getDB(): Database.Database {
 
   initializeSettingsStore(db)
 
-  // Triggers to keep FTS in sync
-  const triggers = [
-    `CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-      INSERT INTO memory_fts(rowid, content) VALUES (new.id, new.content);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, content) VALUES('delete', old.id, old.content);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-      INSERT INTO memory_fts(memory_fts, rowid, content) VALUES('delete', old.id, old.content);
-      INSERT INTO memory_fts(rowid, content) VALUES (new.id, new.content);
-    END;`,
-
-    `CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-      INSERT INTO message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-      INSERT INTO message_fts(message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-      INSERT INTO message_fts(message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
-      INSERT INTO message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
-    END;`,
-
-    `CREATE TRIGGER IF NOT EXISTS rag_messages_ai AFTER INSERT ON rag_messages BEGIN
-      INSERT INTO rag_message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS rag_messages_ad AFTER DELETE ON rag_messages BEGIN
-      INSERT INTO rag_message_fts(rag_message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS rag_messages_au AFTER UPDATE ON rag_messages BEGIN
-      INSERT INTO rag_message_fts(rag_message_fts, rowid, content, conversation_id) VALUES('delete', old.id, old.content, old.conversation_id);
-      INSERT INTO rag_message_fts(rowid, content, conversation_id) VALUES (new.id, new.content, new.conversation_id);
-    END;`,
-
-    `CREATE TRIGGER IF NOT EXISTS summaries_ai AFTER INSERT ON chat_summaries BEGIN
-      INSERT INTO summary_fts(rowid, summary, session_id) VALUES (new.rowid, new.summary, new.session_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS summaries_ad AFTER DELETE ON chat_summaries BEGIN
-      INSERT INTO summary_fts(summary_fts, rowid, summary, session_id) VALUES('delete', old.rowid, old.summary, old.session_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS summaries_au AFTER UPDATE ON chat_summaries BEGIN
-      INSERT INTO summary_fts(summary_fts, rowid, summary, session_id) VALUES('delete', old.rowid, old.summary, old.session_id);
-      INSERT INTO summary_fts(rowid, summary, session_id) VALUES (new.rowid, new.summary, new.session_id);
-    END;`,
-
-    `CREATE TRIGGER IF NOT EXISTS entities_ai AFTER INSERT ON entities BEGIN
-      INSERT INTO entity_fts(rowid, name, summary, type) VALUES (new.id, new.name, new.summary, new.type);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS entities_ad AFTER DELETE ON entities BEGIN
-      INSERT INTO entity_fts(entity_fts, rowid, name, summary, type) VALUES('delete', old.id, old.name, old.summary, old.type);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
-      INSERT INTO entity_fts(entity_fts, rowid, name, summary, type) VALUES('delete', old.id, old.name, old.summary, old.type);
-      INSERT INTO entity_fts(rowid, name, summary, type) VALUES (new.id, new.name, new.summary, new.type);
-    END;`,
-
-    `CREATE TRIGGER IF NOT EXISTS entity_facts_ai AFTER INSERT ON entity_facts BEGIN
-      INSERT INTO entity_fact_fts(rowid, fact, entity_id) VALUES (new.id, new.fact, new.entity_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS entity_facts_ad AFTER DELETE ON entity_facts BEGIN
-      INSERT INTO entity_fact_fts(entity_fact_fts, rowid, fact, entity_id) VALUES('delete', old.id, old.fact, old.entity_id);
-    END;`,
-    `CREATE TRIGGER IF NOT EXISTS entity_facts_au AFTER UPDATE ON entity_facts BEGIN
-      INSERT INTO entity_fact_fts(entity_fact_fts, rowid, fact, entity_id) VALUES('delete', old.id, old.fact, old.entity_id);
-      INSERT INTO entity_fact_fts(rowid, fact, entity_id) VALUES (new.id, new.fact, new.entity_id);
-    END;`
-  ]
-
-  for (const trigger of triggers) {
-    db.exec(trigger)
+  // Every full-text index over the core tables, on the shared tokenizer. message_fts indexed the
+  // legacy scraped `messages` table for the retired rag:chat retrieval; nothing reads it now.
+  db.exec(`
+    DROP TRIGGER IF EXISTS messages_ai;
+    DROP TRIGGER IF EXISTS messages_ad;
+    DROP TRIGGER IF EXISTS messages_au;
+    DROP TABLE IF EXISTS message_fts;
+  `)
+  // Cheap here: a missing index is created empty, and one built by an older schema keeps serving
+  // while it is rebuilt in the background after start-up (startIndexRebuilds).
+  for (const spec of [...CORE_FTS_INDEXES, OBSERVATION_FTS]) {
+    try {
+      ensureFtsIndex(db, spec)
+    } catch (error) {
+      console.error(`[database] full-text index ${spec.name} could not be prepared`, error)
+    }
+  }
+  try {
+    retireLegacyMemoryIndexes(db)
+  } catch (error) {
+    console.error('[database] legacy memory indexes could not be removed', error)
   }
 
   // The search index that makes the conversation list's content search an index lookup instead of
@@ -401,34 +909,6 @@ export function getDB(): Database.Database {
     `CREATE INDEX IF NOT EXISTS idx_rag_messages_attachments ON rag_messages(conversation_id, created_at, id)
      WHERE role = 'user' AND context LIKE '%"attachments"%'`
   )
-
-  /**
-   * FTS backfill, versioned so it happens once per profile instead of once per launch.
-   *
-   * Rebuilding five full-text indexes reads every message, summary, entity and fact in the
-   * database, synchronously, on Electron's main thread. It ran on EVERY startup - so the bigger a
-   * user's history got, the longer their app took to become usable, for work that had already been
-   * done. `PRAGMA user_version` is the gate: bumping FTS_SCHEMA_VERSION is how a future change to
-   * an FTS table or trigger repairs every existing profile exactly once.
-   *
-   * Nothing is trimmed or dropped here. This only rebuilds a derived index from rows that stay
-   * exactly as they are.
-   */
-  const installedFtsVersion = Number(db.pragma('user_version', { simple: true }) ?? 0)
-  if (installedFtsVersion < FTS_SCHEMA_VERSION) {
-    try {
-      db.exec("INSERT INTO message_fts(message_fts) VALUES('rebuild')")
-      db.exec("INSERT INTO rag_message_fts(rag_message_fts) VALUES('rebuild')")
-      db.exec("INSERT INTO summary_fts(summary_fts) VALUES('rebuild')")
-      db.exec("INSERT INTO entity_fts(entity_fts) VALUES('rebuild')")
-      db.exec("INSERT INTO entity_fact_fts(entity_fact_fts) VALUES('rebuild')")
-      db.pragma(`user_version = ${FTS_SCHEMA_VERSION}`)
-    } catch (error) {
-      // The version is deliberately NOT advanced: a failed rebuild must be retried on the next
-      // launch, not remembered as done. Search degrades to whatever the triggers have indexed.
-      console.error('[database] full-text index rebuild failed; will retry next launch', error)
-    }
-  }
 
   // Migration: Add timestamp column to messages if it doesn't exist
   try {
@@ -568,7 +1048,6 @@ export interface ChatSessionRecord {
   title: string | null
   source_app: string | null
   last_activity: string
-  memory_count: number
   entity_count: number
   summary: string | null
 }
@@ -583,27 +1062,15 @@ export interface MessageRecord {
   created_at: string
 }
 
-export interface MemoryRecord {
-  id: number
-  content: string
-  raw_text: string | null
-  source_app: string | null
-  session_id: string | null
-  message_id: number | null
-  created_at: string
-  name: string | null
-}
-
 export function getChatSessions(): ChatSessionRecord[] {
   const db = getDB()
-  // Query conversations with memory and entity counts instead of message count
+  // Query conversations with entity counts instead of message count
   const query = `
         SELECT 
             c.id as session_id,
             c.title,
             c.app_name as source_app,
             c.updated_at as last_activity,
-            (SELECT COUNT(*) FROM memories mem WHERE mem.session_id = c.id) as memory_count,
             (SELECT COUNT(DISTINCT es.entity_id) FROM entity_sessions es WHERE es.session_id = c.id) as entity_count,
             (SELECT summary FROM chat_summaries cs WHERE cs.session_id = c.id) as summary
         FROM conversations c
@@ -638,14 +1105,6 @@ export function getMemoriesForSession(sessionId: string, limit: number = 200): M
   return messages
 }
 
-export function getMemoryRecordsForSession(sessionId: string, limit: number = 200): MemoryRecord[] {
-  const db = getDB()
-  const stmt = db.prepare(
-    'SELECT * FROM memories WHERE session_id = ? ORDER BY created_at ASC LIMIT ?'
-  )
-  return stmt.all(sessionId, limit) as MemoryRecord[]
-}
-
 export function checkMessageExists(hash: string, conversationId: string): boolean {
   const db = getDB()
   const stmt = db.prepare('SELECT id FROM messages WHERE conversation_id = ? AND hash = ? LIMIT 1')
@@ -653,32 +1112,10 @@ export function checkMessageExists(hash: string, conversationId: string): boolea
   return !!result
 }
 
-// === MASTER MEMORY ===
-
-export function getMasterMemory(): { content: string | null; updated_at: string | null } {
-  const db = getDB()
-  const result = db.prepare('SELECT content, updated_at FROM master_memory WHERE id = 1').get() as
-    | { content: string; updated_at: string }
-    | undefined
-  return result || { content: null, updated_at: null }
-}
-
-export function updateMasterMemory(content: string): void {
-  const db = getDB()
-  const stmt = db.prepare(`
-        INSERT INTO master_memory (id, content, updated_at)
-        VALUES (1, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(id) DO UPDATE SET
-            content = excluded.content,
-            updated_at = excluded.updated_at
-    `)
-  stmt.run(content)
-}
-
 // One-shot, idempotent purge of the legacy "My Memories" data: the AI-chat
 // conversations the old watcher scraped (Claude / ChatGPT / Gemini, web +
-// desktop) and everything derived from them — messages, vector memories,
-// summaries, entity facts, and entities left orphaned afterwards. The shared
+// desktop) and everything derived from them — messages, the retired memories
+// and entity facts, summaries, and entities left orphaned afterwards. The shared
 // `entities` table is ALSO fed by the current screen-capture/observation
 // pipeline, so we only drop entities with no remaining link in entity_sessions,
 // entity_facts, OR observation_entities. Once the legacy conversations are gone
@@ -735,10 +1172,10 @@ export function purgeLegacyChatImports(): Record<string, number> | null {
       : 0 // without obs links we can't tell current from legacy — leave them
     // The stale consolidated profile is gone for good.
     counts.masterMemory = db.prepare(`DELETE FROM master_memory`).run().changes
-    // Rebuild external-content FTS indexes so they don't point at deleted rows.
-    for (const t of ['memory_fts', 'message_fts', 'summary_fts', 'entity_fts', 'entity_fact_fts']) {
+    // Re-index the external-content FTS tables so they don't point at deleted rows.
+    for (const spec of CORE_FTS_INDEXES) {
       try {
-        db.prepare(`INSERT INTO ${t}(${t}) VALUES('rebuild')`).run()
+        rebuildFtsIndex(db, spec)
       } catch {
         /* table may be absent */
       }
@@ -799,16 +1236,6 @@ export function updateEntitySummary(entityId: number, summary: string): void {
   stmt.run(summary, entityId)
 }
 
-export function addEntityFact(entityId: number, fact: string, sessionId?: string): boolean {
-  const db = getDB()
-  const stmt = db.prepare(`
-      INSERT OR IGNORE INTO entity_facts (entity_id, fact, source_session_id)
-      VALUES (?, ?, ?)
-    `)
-  const info = stmt.run(entityId, fact.trim(), sessionId || null)
-  return info.changes > 0
-}
-
 export function upsertEntitySession(entityId: number, sessionId: string): void {
   const db = getDB()
   const stmt = db.prepare(`
@@ -826,86 +1253,14 @@ export interface EntityRecord {
   updated_at: string
 }
 
-export interface EntityListRecord extends EntityRecord {
-  fact_count: number
-  session_count: number
-}
-
-export interface SessionEntityRecord extends EntityRecord {
-  fact_count: number
-}
-
-export interface EntityFactRecord {
-  id: number
-  fact: string
-  source_session_id: string | null
-  created_at: string
-}
-
-export interface EntityDetailsRecord {
-  entity: (EntityRecord & Record<string, unknown>) | undefined
-  facts: EntityFactRecord[]
-}
-
-export function getEntities(appName?: string): EntityListRecord[] {
-  const db = getDB()
-  let query = `
-      SELECT 
-        e.id,
-        e.name,
-        e.type,
-        e.summary,
-        e.updated_at,
-        COUNT(DISTINCT f.id) as fact_count,
-        COUNT(DISTINCT es.session_id) as session_count
-      FROM entities e
-      LEFT JOIN entity_facts f ON f.entity_id = e.id
-      LEFT JOIN entity_sessions es ON es.entity_id = e.id
-      LEFT JOIN conversations c ON es.session_id = c.id
-    `
-
-  const params: unknown[] = []
-  if (appName && appName !== 'All') {
-    query += ` WHERE c.app_name LIKE ? `
-    params.push(`%${appName}%`)
-  }
-
-  query += ` GROUP BY e.id ORDER BY e.updated_at DESC`
-  const stmt = db.prepare(query)
-  return stmt.all(...params) as EntityListRecord[]
-}
-
-export function getEntityDetails(entityId: number, appName?: string): EntityDetailsRecord {
-  const db = getDB()
-  const entity = db.prepare('SELECT * FROM entities WHERE id = ?').get(entityId) as
-    | (EntityRecord & Record<string, unknown>)
-    | undefined
-
-  let factsQuery = `
-      SELECT f.id, f.fact, f.source_session_id, f.created_at
-      FROM entity_facts f
-      LEFT JOIN conversations c ON f.source_session_id = c.id
-      WHERE f.entity_id = ?
-    `
-  const params: unknown[] = [entityId]
-  if (appName && appName !== 'All') {
-    factsQuery += ` AND c.app_name LIKE ? `
-    params.push(`%${appName}%`)
-  }
-  factsQuery += ` ORDER BY f.created_at DESC`
-
-  const facts = db.prepare(factsQuery).all(...params) as EntityFactRecord[]
-  return { entity, facts }
-}
+export type SessionEntityRecord = EntityRecord
 
 export function getEntitiesForSession(sessionId: string): SessionEntityRecord[] {
   const db = getDB()
   const stmt = db.prepare(`
-      SELECT e.id, e.name, e.type, e.summary, e.updated_at,
-             COUNT(DISTINCT f.id) as fact_count
+      SELECT e.id, e.name, e.type, e.summary, e.updated_at
       FROM entities e
       JOIN entity_sessions es ON es.entity_id = e.id
-      LEFT JOIN entity_facts f ON f.entity_id = e.id
       WHERE es.session_id = ?
       GROUP BY e.id
       ORDER BY e.updated_at DESC
@@ -927,6 +1282,7 @@ export function deleteEntityRecord(entityId: number): boolean {
       entityId,
       entityId
     )
+    // Retired facts are not read any more, but an entity's delete still takes them with it.
     db.prepare('DELETE FROM entity_facts WHERE entity_id = ?').run(entityId)
     db.prepare('DELETE FROM entity_sessions WHERE entity_id = ?').run(entityId)
     return db.prepare('DELETE FROM entities WHERE id = ?').run(entityId).changes > 0
@@ -934,228 +1290,6 @@ export function deleteEntityRecord(entityId: number): boolean {
   const deleted = remove()
   console.log(`Deleted entity ${entityId}, deleted: ${deleted}`)
   return deleted
-}
-
-export function deleteMemory(memoryId: number): boolean {
-  const db = getDB()
-  const stmt = db.prepare('DELETE FROM memories WHERE id = ?')
-  const info = stmt.run(memoryId)
-  console.log(`Deleted memory ${memoryId}, changes: ${info.changes}`)
-  return info.changes > 0
-}
-
-// === DASHBOARD STATS ===
-
-export interface DashboardStats {
-  totalChats: number
-  totalMemories: number
-  totalEntities: number
-  totalRelationships: number
-  totalMessages: number
-  todayChats: number
-  todayMemories: number
-  todayEntities: number
-  totalFacts: number
-  recentChats: Array<{
-    session_id: string
-    title: string | null
-    app_name: string
-    memory_count: number
-    entity_count: number
-    updated_at: string
-  }>
-  recentMemories: Array<{
-    id: number
-    content: string
-    source_app: string
-    created_at: string
-  }>
-  topEntities: Array<{
-    id: number
-    name: string
-    type: string
-    fact_count: number
-    session_count: number
-  }>
-  entityTypeCounts: Array<{
-    type: string
-    count: number
-  }>
-  appDistribution: Array<{
-    app_name: string
-    chat_count: number
-    memory_count: number
-  }>
-  activityByDay: Array<{
-    date: string
-    chats: number
-    memories: number
-  }>
-}
-
-export function getDashboardStats(): DashboardStats {
-  const db = getDB()
-
-  // Total counts
-  const totalChats = (
-    db.prepare('SELECT COUNT(*) as count FROM conversations').get() as { count: number }
-  ).count
-  const totalMemories = (
-    db.prepare('SELECT COUNT(*) as count FROM memories').get() as { count: number }
-  ).count
-  const totalEntities = (
-    db.prepare('SELECT COUNT(*) as count FROM entities').get() as { count: number }
-  ).count
-  const totalRelationships = (
-    db.prepare('SELECT COUNT(*) as count FROM entity_edges').get() as { count: number }
-  ).count
-  const totalMessages = (
-    db.prepare('SELECT COUNT(*) as count FROM messages').get() as { count: number }
-  ).count
-  const totalFacts = (
-    db.prepare('SELECT COUNT(*) as count FROM entity_facts').get() as { count: number }
-  ).count
-
-  // Today's activity (convert stored timestamps to localtime before comparing)
-  const todayChats = (
-    db
-      .prepare(
-        `SELECT COUNT(*) as count FROM conversations WHERE date(updated_at, 'localtime') = date('now', 'localtime')`
-      )
-      .get() as { count: number }
-  ).count
-  const todayMemories = (
-    db
-      .prepare(
-        `SELECT COUNT(*) as count FROM memories WHERE date(created_at, 'localtime') = date('now', 'localtime')`
-      )
-      .get() as { count: number }
-  ).count
-  const todayEntities = (
-    db
-      .prepare(
-        `SELECT COUNT(*) as count FROM entities WHERE date(created_at, 'localtime') = date('now', 'localtime')`
-      )
-      .get() as { count: number }
-  ).count
-
-  // Recent chats (top 5)
-  const recentChats = db
-    .prepare(
-      `
-        SELECT 
-            c.id as session_id,
-            c.title,
-            c.app_name,
-            c.updated_at,
-            (SELECT COUNT(*) FROM memories m WHERE m.session_id = c.id) as memory_count,
-            (SELECT COUNT(DISTINCT es.entity_id) FROM entity_sessions es WHERE es.session_id = c.id) as entity_count
-        FROM conversations c
-        ORDER BY c.updated_at DESC
-        LIMIT 5
-    `
-    )
-    .all() as DashboardStats['recentChats']
-
-  // Recent memories (top 5)
-  const recentMemories = db
-    .prepare(
-      `
-        SELECT id, content, source_app, created_at
-        FROM memories
-        ORDER BY created_at DESC
-        LIMIT 5
-    `
-    )
-    .all() as DashboardStats['recentMemories']
-
-  // Top entities by fact count
-  const topEntities = db
-    .prepare(
-      `
-        SELECT 
-            e.id,
-            e.name,
-            e.type,
-            COUNT(DISTINCT f.id) as fact_count,
-            COUNT(DISTINCT es.session_id) as session_count
-        FROM entities e
-        LEFT JOIN entity_facts f ON f.entity_id = e.id
-        LEFT JOIN entity_sessions es ON es.entity_id = e.id
-        GROUP BY e.id
-        ORDER BY fact_count DESC
-        LIMIT 6
-    `
-    )
-    .all() as DashboardStats['topEntities']
-
-  // Entity type distribution
-  const entityTypeCounts = db
-    .prepare(
-      `
-        SELECT type, COUNT(*) as count
-        FROM entities
-        GROUP BY type
-        ORDER BY count DESC
-        LIMIT 8
-    `
-    )
-    .all() as DashboardStats['entityTypeCounts']
-
-  // App distribution
-  const appDistribution = db
-    .prepare(
-      `
-        SELECT 
-            COALESCE(c.app_name, 'Unknown') as app_name,
-            COUNT(DISTINCT c.id) as chat_count,
-            COUNT(DISTINCT m.id) as memory_count
-        FROM conversations c
-        LEFT JOIN memories m ON m.session_id = c.id
-        GROUP BY c.app_name
-        ORDER BY chat_count DESC
-    `
-    )
-    .all() as DashboardStats['appDistribution']
-
-  // Activity by day (last 14 days, using localtime)
-  const activityByDay = db
-    .prepare(
-      `
-        WITH RECURSIVE dates(date) AS (
-            SELECT date('now', 'localtime', '-13 days')
-            UNION ALL
-            SELECT date(date, '+1 day')
-            FROM dates
-            WHERE date < date('now', 'localtime')
-        )
-        SELECT 
-            dates.date,
-            (SELECT COUNT(*) FROM conversations WHERE date(updated_at, 'localtime') = dates.date) as chats,
-            (SELECT COUNT(*) FROM memories WHERE date(created_at, 'localtime') = dates.date) as memories
-        FROM dates
-        ORDER BY dates.date ASC
-    `
-    )
-    .all() as DashboardStats['activityByDay']
-
-  return {
-    totalChats,
-    totalMemories,
-    totalEntities,
-    totalRelationships,
-    totalMessages,
-    totalFacts,
-    todayChats,
-    todayMemories,
-    todayEntities,
-    recentChats,
-    recentMemories,
-    topEntities,
-    entityTypeCounts,
-    appDistribution,
-    activityByDay
-  }
 }
 
 // === USER PROFILE ===
@@ -1355,25 +1489,7 @@ export function setRagConversationProject(id: string, projectId: string | null):
 }
 
 /**
- * The FTS5 MATCH expression for a user's search box, or null when there is nothing to match.
- *
- * Pure and separately testable, because this is where a user's typing becomes query syntax. Terms
- * are extracted as letters and digits only and each is quoted, so a stray quote, a hyphen or an
- * FTS operator like NEAR or OR is data rather than syntax. The trailing `*` keeps the
- * search-as-you-type behaviour the old LIKE had for the last, partial word.
- */
-export function ragMessageMatchExpression(query: string): string | null {
-  return (
-    escapeFtsMatch(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [], {
-      join: 'AND',
-      prefix: true,
-      maxTokens: 6
-    }) || null
-  )
-}
-
-/**
- * Conversation ids whose MESSAGE CONTENT matches a query (all terms, AND) — so the chat-list
+ * Conversation ids whose MESSAGE CONTENT matches a query (all of its words) — so the chat-list
  * search can match what was said, not just the title.
  *
  * This was `lower(content) LIKE '%term%'` per term, with no LIMIT, over a `rag_messages` table
@@ -1382,7 +1498,8 @@ export function ragMessageMatchExpression(query: string): string | null {
  * `rag_message_fts` now, and it returns a bounded page - the caller renders a list, not a report.
  */
 export function searchRagConversationIds(query: string, limit?: number): string[] {
-  const match = ragMessageMatchExpression(query)
+  // Type-ahead: every word must match, each as a word start (the last may still be half typed).
+  const match = ftsTypeahead(query)
   if (!match) return []
   const requested = limit ?? DEFAULT_SEARCH_LIMIT
   const bounded = Math.min(
@@ -1417,7 +1534,7 @@ export function searchRagConversationPage(
   turn_count: number
   fallback_title: string | null
 }[] {
-  const match = ragMessageMatchExpression(query)
+  const match = ftsTypeahead(query)
   return getDB()
     .prepare(
       `
@@ -1489,62 +1606,41 @@ export function getProjectChatHistory(
   return rows.map(({ role, content, title }) => ({ role, content, title })).reverse()
 }
 
-/** Relevant messages from other conversations in one project. Never crosses projects. */
+/** A sibling project chat's message, with the conversation it belongs to and when it was said. */
+export interface ProjectConversationMessage {
+  role: string
+  content: string
+  title: string | null
+  conversation_id: string
+  created_at: string
+}
+
+/** Relevant messages from other conversations in one project, best match first (bm25 over
+ *  rag_message_fts). Never crosses projects. */
 export function searchProjectConversations(
   projectId: string,
   query: string,
   excludeConversationId = '',
   limit = 6
-): { role: string; content: string; title: string | null }[] {
-  const stopWords = new Set([
-    'about',
-    'and',
-    'are',
-    'did',
-    'for',
-    'from',
-    'how',
-    'our',
-    'project',
-    'the',
-    'this',
-    'was',
-    'what',
-    'when',
-    'where',
-    'who',
-    'with',
-    'you'
-  ])
-  const terms = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])]
-    .filter((term) => term.length > 2 && !stopWords.has(term))
-    .slice(0, 6)
-  if (!terms.length) return []
-  const score = terms
-    .map(() => '(CASE WHEN lower(rm.content) LIKE ? THEN 1 ELSE 0 END)')
-    .join(' + ')
-  const patterns = terms.map((term) => `%${term}%`)
+): ProjectConversationMessage[] {
+  const match = ftsQuery(query)
+  if (!match) return []
   return getDB()
     .prepare(
-      `SELECT rm.role, rm.content, rc.title
-         FROM rag_messages rm
+      `SELECT rm.role, rm.content, rc.title, rm.conversation_id, rm.created_at
+         FROM rag_message_fts f
+         JOIN rag_messages rm ON rm.id = f.rowid
          JOIN rag_conversations rc ON rc.id = rm.conversation_id
-        WHERE rc.project_id = ? AND rm.conversation_id != ?
-          AND (${score}) > 0
-        ORDER BY (${score}) DESC, rm.created_at DESC, rm.id DESC
+        WHERE rag_message_fts MATCH ? AND rc.project_id = ? AND rm.conversation_id != ?
+        ORDER BY bm25(rag_message_fts), rm.created_at DESC, rm.id DESC
         LIMIT ?`
     )
     .all(
+      match,
       projectId,
       excludeConversationId,
-      ...patterns,
-      ...patterns,
       Math.min(12, Math.max(1, limit))
-    ) as {
-    role: string
-    content: string
-    title: string | null
-  }[]
+    ) as ProjectConversationMessage[]
 }
 
 export function updateRagConversationTitle(id: string, title: string): RagConversation {

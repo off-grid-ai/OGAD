@@ -19,6 +19,7 @@ import { llm } from './llm'
 import { generateImage, imageGenStatus } from './imagegen'
 import * as tts from './tts'
 import { embeddings } from './embeddings'
+import { DEFAULT_EMBEDDER } from './embeddings-core'
 import { mediaText } from './media-text'
 import { parseDataUrl } from './mcp-parse-data-url'
 import { runTool, getToolExtensions } from './tools'
@@ -239,10 +240,14 @@ export function buildMcpServer(
       inputSchema: { input: z.string() }
     },
     async ({ input }) => {
-      const embedding = await embeddings.generateEmbedding(input)
+      const [embedding = []] = await embeddings.embed([input], { model: DEFAULT_EMBEDDER.model })
       return {
         content: [{ type: 'text', text: JSON.stringify(embedding) }],
-        structuredContent: { model: 'all-MiniLM-L6-v2', dimensions: embedding.length, embedding }
+        structuredContent: {
+          model: DEFAULT_EMBEDDER.model.replace(/^Xenova\//, ''),
+          dimensions: embedding.length,
+          embedding
+        }
       }
     }
   )

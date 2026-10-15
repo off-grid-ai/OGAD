@@ -1,8 +1,4 @@
 import { memo } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkBreaks from 'remark-breaks'
-import { preprocessChatMarkdown } from '@offgrid/sync'
 import { navigateSearchHit } from '@renderer/lib/search-navigation'
 import {
   Collapsible,
@@ -10,20 +6,15 @@ import {
   CollapsibleTrigger
 } from '@renderer/components/ui/collapsible'
 import { captureUrlForPath } from '../../../../../shared/ogcapture-url'
-import { chatMarkdownComponents } from '../../chat-markdown-components'
 import type {
   ChatMessage,
   ContextNavigation,
   RagContext,
   RagEntity,
-  RagEntityFact,
-  RagMemory,
   RagSummary,
   UnifiedContextItem
 } from '../types'
 import { contextResultCount } from '../utlis'
-
-const markdownComponents = chatMarkdownComponents
 
 export function hasInlineMemorySources(
   message: ChatMessage
@@ -58,7 +49,6 @@ export function openUnifiedContext(item: UnifiedContextItem, navigation: Context
     },
     {
       selectEntity: (entityId) => navigation.onNavigateToEntity?.(entityId),
-      selectMemory: (memoryId) => navigation.onNavigateToMemory?.(memoryId),
       openMeeting: (meetingId) => {
         if (meetingId != null) navigation.onNavigateToMeeting?.(meetingId)
       },
@@ -66,7 +56,8 @@ export function openUnifiedContext(item: UnifiedContextItem, navigation: Context
         if (target?.conversationId) navigation.onNavigateToChat?.(target.conversationId)
         if (target?.projectId) navigation.onOpenProject?.(target.projectId)
       },
-      openReplay: (timestamp) => navigation.onSeekReplay?.(timestamp)
+      openReplay: (timestamp) => navigation.onSeekReplay?.(timestamp),
+      openAction: (actionId) => navigation.onNavigateToAction?.(actionId)
     }
   )
 }
@@ -188,53 +179,6 @@ function SourceScoresSectionComponent({
   )
 }
 
-function MasterMemorySectionComponent({
-  content
-}: Readonly<{ content?: string | null }>): React.JSX.Element | null {
-  if (!content) return null
-  return (
-    <div className="mb-3 rounded-md border border-neutral-800 p-3">
-      <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">Master memory</div>
-      <div className="text-neutral-300">
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={markdownComponents}>
-          {preprocessChatMarkdown(content)}
-        </ReactMarkdown>
-      </div>
-    </div>
-  )
-}
-
-function MemoriesContextSectionComponent({
-  memories,
-  onNavigate
-}: Readonly<{
-  memories?: readonly RagMemory[]
-  onNavigate?: (memoryId: number) => void
-}>): React.JSX.Element | null {
-  if (!memories?.length) return null
-  return (
-    <div className="mb-3">
-      <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">
-        Memories ({memories.length})
-      </div>
-      <div className="overflow-hidden rounded-md border border-neutral-800 divide-y divide-neutral-900">
-        {memories.slice(0, 5).map((memory, index) => (
-          <button
-            key={memory.id || index}
-            type="button"
-            onClick={() => onNavigate?.(memory.id)}
-            className="block w-full px-2.5 py-1.5 text-left transition-colors hover:bg-neutral-900/60"
-          >
-            <p className="line-clamp-2 text-[11px] text-neutral-400">
-              {memory.content || memory.text || 'Memory'}
-            </p>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function SummariesContextSectionComponent({
   summaries,
   onNavigate
@@ -298,28 +242,6 @@ function EntitiesContextSectionComponent({
   )
 }
 
-function EntityFactsContextSectionComponent({
-  facts
-}: Readonly<{ facts?: readonly RagEntityFact[] }>): React.JSX.Element | null {
-  if (!facts?.length) return null
-  return (
-    <div>
-      <div className="mb-2 text-[10px] uppercase tracking-wide text-neutral-600">
-        Entity facts ({facts.length})
-      </div>
-      <div className="space-y-1">
-        {facts.slice(0, 5).map((fact, index) => (
-          <div key={index} className="rounded-md border border-neutral-800 p-2">
-            <p className="line-clamp-2 text-[11px] text-neutral-400">
-              {typeof fact === 'string' ? fact : fact.fact}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function ContextDisclosureComponent({
   context,
   navigation
@@ -359,11 +281,6 @@ function ContextDisclosureComponent({
       <CollapsibleContent className="mt-1.5 max-h-[400px] max-w-full overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
         <UnifiedContextSection items={context.unified} navigation={navigation} />
         <SourceScoresSection sources={context.sources} />
-        <MasterMemorySection content={context.masterMemory} />
-        <MemoriesContextSection
-          memories={context.memories}
-          onNavigate={navigation.onNavigateToMemory}
-        />
         <SummariesContextSection
           summaries={context.summaries}
           onNavigate={navigation.onNavigateToChat}
@@ -372,7 +289,6 @@ function ContextDisclosureComponent({
           entities={context.entities}
           onNavigate={navigation.onNavigateToEntity}
         />
-        <EntityFactsContextSection facts={context.entityFacts} />
       </CollapsibleContent>
     </Collapsible>
   )
@@ -380,9 +296,6 @@ function ContextDisclosureComponent({
 
 export const UnifiedContextSection = memo(UnifiedContextSectionComponent)
 export const SourceScoresSection = memo(SourceScoresSectionComponent)
-export const MasterMemorySection = memo(MasterMemorySectionComponent)
-export const MemoriesContextSection = memo(MemoriesContextSectionComponent)
 export const SummariesContextSection = memo(SummariesContextSectionComponent)
 export const EntitiesContextSection = memo(EntitiesContextSectionComponent)
-export const EntityFactsContextSection = memo(EntityFactsContextSectionComponent)
 export const ContextDisclosure = memo(ContextDisclosureComponent)

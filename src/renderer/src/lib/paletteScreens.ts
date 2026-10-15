@@ -36,7 +36,6 @@ export const SCREEN_ALIASES: Record<string, string[]> = {
   models: ['download', 'gguf', 'llm'],
   connectors: ['integrations', 'mcp', 'tools'],
   'memory-chat': ['chat', 'ask'],
-  memories: ['memory', 'notes'],
   replay: ['timeline', 'movie', 'history'],
   day: ['today', 'timeline'],
   reflect: ['reflection', 'mind share'],

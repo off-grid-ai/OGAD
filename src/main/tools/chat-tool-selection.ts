@@ -81,15 +81,23 @@ export async function selectChatToolSchemas(
     if (!namedTool && !unavailableImageTool) {
       try {
         let embed = options.embed
+        let embedMany: ((texts: string[]) => Promise<number[][]>) | undefined
         if (!embed) {
           const { embeddings } = await import('../embeddings')
-          embed = (t: string): Promise<number[]> => embeddings.generateEmbedding(t, { interactive: true })
+          const many = (texts: string[]): Promise<number[][]> =>
+            embeddings.embed(texts, { interactive: true })
+          embedMany = many
+          embed = async (t: string): Promise<number[]> => (await many([t]))[0] ?? []
         }
         const { contextualToolRoutingText, selectRelevantToolsSemantic } =
           await import('./tool-embedding-ranking')
         const routingText = contextualToolRoutingText(query, history)
         const ranked = await withinRoutingWait(
-          selectRelevantToolsSemantic(routingText, rawTools, { embed }),
+          selectRelevantToolsSemantic(
+            routingText,
+            rawTools,
+            embedMany ? { embed, embedMany } : { embed }
+          ),
           options.semanticWaitMs ??
             ((await routingModelOnDisk()) ? LOCAL_ROUTING_MODEL_WAIT_MS : SEMANTIC_ROUTING_WAIT_MS)
         )

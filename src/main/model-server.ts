@@ -47,6 +47,7 @@ import { whisperModel } from './media-text'
 import { getActiveModal } from './active-models'
 import { modalityForKind } from './active-models-logic'
 import { embeddings } from './embeddings'
+import { DEFAULT_EMBEDDER } from './embeddings-core'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
@@ -1036,9 +1037,9 @@ async function handleChat(
 }
 
 // ─── Embeddings (local MiniLM) ───────────────────────────────────────────────
-// Served by the in-app embedder (all-MiniLM-L6-v2) rather than proxied to
-// llama-server, which isn't started with --embeddings. Same model the RAG/memory
-// layer uses, so vectors are consistent across the app.
+// Served by the in-app embedder (DEFAULT_EMBEDDER, all-MiniLM-L6-v2) rather than
+// proxied to llama-server, which isn't started with --embeddings. Same path every
+// in-app embedding takes (embeddings.embed).
 async function handleEmbeddings(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -1058,15 +1059,17 @@ async function handleEmbeddings(
     return
   }
   const run = async (): Promise<unknown> => {
-    const data: { object: string; index: number; embedding: number[] }[] = []
-    for (let i = 0; i < inputs.length; i++) {
-      const embedding = await embeddings.generateEmbedding(inputs[i]!)
-      data.push({ object: 'embedding', index: i, embedding })
+    // One forward pass per batch: padding to the longest input stays bounded.
+    const vectors: number[][] = []
+    for (let i = 0; i < inputs.length; i += 32) {
+      vectors.push(
+        ...(await embeddings.embed(inputs.slice(i, i + 32), { model: DEFAULT_EMBEDDER.model }))
+      )
     }
     return {
       object: 'list',
-      data,
-      model: 'all-MiniLM-L6-v2',
+      data: vectors.map((embedding, index) => ({ object: 'embedding', index, embedding })),
+      model: DEFAULT_EMBEDDER.model.replace(/^Xenova\//, ''),
       usage: { prompt_tokens: 0, total_tokens: 0 }
     }
   }
