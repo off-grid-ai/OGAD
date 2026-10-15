@@ -127,11 +127,19 @@ describe('buildQwenImage21Args', () => {
     expect(flagVal(args, '-r')).toBe('/in.png')
   })
 
-  it('keeps Qwen weights on CUDA and retains CPU offload for a fallback runtime', () => {
+  it('keeps Qwen CPU offload unless the CUDA device is known to hold the model', () => {
     const args = buildQwenImage21Args(base)
-    expect(qwenImageArgsForBackend(args, 'CUDA')).not.toContain('--offload-to-cpu')
+    expect(qwenImageArgsForBackend(args, 'CUDA')).toContain('--offload-to-cpu')
+    expect(
+      qwenImageArgsForBackend(args, 'CUDA', { freeVramBytes: 8 * 2 ** 30, needBytes: 20 * 2 ** 30 })
+    ).toContain('--offload-to-cpu')
+    expect(
+      qwenImageArgsForBackend(args, 'CUDA', {
+        freeVramBytes: 40 * 2 ** 30,
+        needBytes: 20 * 2 ** 30
+      })
+    ).not.toContain('--offload-to-cpu')
     expect(qwenImageArgsForBackend(args, 'Vulkan')).toContain('--offload-to-cpu')
-    expect(args).toContain('--offload-to-cpu')
   })
 })
 

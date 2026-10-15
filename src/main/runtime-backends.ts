@@ -8,8 +8,27 @@ export function runtimeBackendSnapshot(): RuntimeBackend[] {
 }
 
 /** A process-scoped lease prevents late output/exit from replacing a newer model. */
-export function beginRuntimeBackend(id: RuntimeId, model: string): { recordRequest: (request?: ReturnType<typeof currentAIRequest>) => void; ready: (backend?: string, device?: string, detail?: string) => void; observe: (chunk: string, loaded?: boolean) => void; stop: () => void; fail: (error: unknown) => void; } {
-  const record: RuntimeBackend = { id, model, state: 'loading' }
+export function beginRuntimeBackend(
+  id: RuntimeId,
+  model: string
+): {
+  recordRequest: (request?: ReturnType<typeof currentAIRequest>) => void
+  ready: (backend?: string, device?: string, detail?: string) => void
+  observe: (chunk: string, loaded?: boolean) => void
+  stop: () => void
+  fail: (error: unknown) => void
+} {
+  // A crash is kept until the next successful load, and an engine that loads per job keeps
+  // what it last ran on, so the next attempt does not wipe either from Settings.
+  const previous = live.get(id)
+  const record: RuntimeBackend = {
+    id,
+    model,
+    state: 'loading',
+    loadingSince: Date.now(),
+    ...(previous?.lastError ? { lastError: previous.lastError } : {}),
+    ...(previous?.lastRun ? { lastRun: previous.lastRun } : {})
+  }
   const startingRequest = currentAIRequest()
   live.set(id, record)
   const update = (value: Partial<RuntimeBackend>): void => {
@@ -24,26 +43,42 @@ export function beginRuntimeBackend(id: RuntimeId, model: string): { recordReque
     recordRequest: (request = currentAIRequest()): void => {
       request?.useRuntime(record)
     },
-    ready: (backend?: string, device?: string, detail?: string): void =>
+    ready: (backend?: string, device?: string, detail?: string): void => {
       update({
         state: 'loaded',
+        loadingSince: undefined,
+        lastError: undefined,
         ...(backend ? { backend } : {}),
         ...(device ? { device } : {}),
-        ...(detail ? { detail } : {})
-      }),
+        ...(detail ? { detail, fallbackReason: detail } : { fallbackReason: undefined })
+      })
+    },
     observe: (chunk: string, loaded = false): void => {
       output = (output + chunk).slice(-65536)
       const placement = parseNativeBackend(output)
       if (placement) update({ ...placement, ...(loaded ? { state: 'loaded' as const } : {}) })
     },
-    stop: (): void => update({ state: 'stopped', backend: undefined, device: undefined }),
-    fail: (error: unknown): void =>
+    stop: (): void =>
+      update({
+        state: 'stopped',
+        loadingSince: undefined,
+        ...(record.backend
+          ? { lastRun: { backend: record.backend, device: record.device, at: Date.now() } }
+          : {}),
+        backend: undefined,
+        device: undefined
+      }),
+    fail: (error: unknown): void => {
+      const message = String(error instanceof Error ? error.message : error).slice(0, 1000)
       update({
         state: 'error',
+        loadingSince: undefined,
         backend: undefined,
         device: undefined,
-        detail: String(error instanceof Error ? error.message : error).slice(0, 1000)
+        detail: message,
+        lastError: message
       })
+    }
   }
 }
 
@@ -61,7 +96,7 @@ export function parseNativeBackend(
       ? 'CUDA'
       : name.startsWith('vulkan')
         ? 'Vulkan'
-      : name === 'metal' || name.startsWith('mtl')
+        : name === 'metal' || name.startsWith('mtl')
           ? 'Metal'
           : 'CPU'
   }

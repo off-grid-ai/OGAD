@@ -68,7 +68,7 @@ export function attachmentsOf(message: { attachments?: StoredAttachment[] }): At
   }))
 }
 
-export function parseRagContext(context: unknown): RagContext | undefined {
+function parseRagContext(context: unknown): RagContext | undefined {
   if (typeof context === 'string') {
     try {
       return JSON.parse(context) as RagContext
@@ -79,7 +79,7 @@ export function parseRagContext(context: unknown): RagContext | undefined {
   return context && typeof context === 'object' ? (context as RagContext) : undefined
 }
 
-export function readRagProvenance(message: RawRagMessage): ChatMessage['provenance'] {
+function readRagProvenance(message: RawRagMessage): ChatMessage['provenance'] {
   if (
     typeof message.origin_device_id !== 'string' ||
     typeof message.origin_device_name !== 'string'

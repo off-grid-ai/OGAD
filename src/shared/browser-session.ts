@@ -45,7 +45,6 @@ export interface BrowserNavigationState extends BrowserChromeState {
  * surface is zoomed to fit its panel; responsive sites must not change layout
  * when the Off Grid AI task workspace changes size. */
 export const WEB_USE_DESKTOP_VIEWPORT = { width: 1440, height: 900 } as const
-export const WEB_USE_DESKTOP_ASPECT = WEB_USE_DESKTOP_VIEWPORT
 
 /**
  * The surfaces that can host the live page, and which one wins when both are on screen.
@@ -87,11 +86,11 @@ export function fitWebUseDesktopSurface(container: { width: number; height: numb
   height: number
 } {
   const widthFromHeight =
-    (container.height * WEB_USE_DESKTOP_ASPECT.width) / WEB_USE_DESKTOP_ASPECT.height
+    (container.height * WEB_USE_DESKTOP_VIEWPORT.width) / WEB_USE_DESKTOP_VIEWPORT.height
   const width = Math.max(1, Math.min(container.width, widthFromHeight))
   return {
     width: Math.round(width),
-    height: Math.round((width * WEB_USE_DESKTOP_ASPECT.height) / WEB_USE_DESKTOP_ASPECT.width)
+    height: Math.round((width * WEB_USE_DESKTOP_VIEWPORT.height) / WEB_USE_DESKTOP_VIEWPORT.width)
   }
 }
 
@@ -110,13 +109,6 @@ export function fitWebUseDesktopRegion(container: {
     y: Math.round(container.y + (container.height - surface.height) / 2),
     ...surface
   }
-}
-
-export interface BrowserPointerEvent {
-  sessionId: string
-  phase: 'moved' | 'pressed' | 'released'
-  x: number
-  y: number
 }
 
 export interface ManualBrowserHistoryEntry {

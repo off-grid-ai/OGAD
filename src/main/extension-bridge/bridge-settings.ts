@@ -47,7 +47,7 @@ export interface TextSettings {
   readonly systemPrompt?: string
   readonly kvCacheType?: 'f16' | 'q8_0' | 'q4_0'
   readonly flashAttn?: boolean
-  readonly gpuLayers?: number
+  readonly gpuLayers?: number | null
   readonly threads?: number
   readonly batchSize?: number
   readonly speculativeDecoding?: 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
@@ -291,7 +291,7 @@ const SECTION_RULES: Record<SettingsSection, Record<string, Rule>> = {
     reasoningBudget: int(0, 1048576),
     kvCacheType: oneOf(['f16', 'q8_0', 'q4_0']),
     flashAttn: bool,
-    gpuLayers: int(-1, 1000),
+    gpuLayers: (value) => (value === null ? null : int(-1, 1000)(value)),
     threads: int(0, 1024),
     batchSize: int(1, 65536),
     speculativeDecoding: oneOf(['off', 'ngram', 'mtp', 'draft', 'dflash']),

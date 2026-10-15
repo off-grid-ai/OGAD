@@ -1,69 +1,20 @@
-import fs from 'fs'
 import path from 'path'
-import { binRoots, exe } from '../runtime-env'
 import { nativeLibraryEnv } from '../native-library-env'
-import { prioritizeBackend, type BackendPreference } from '../../shared/backend-preferences'
+import { nativeLadder, type NativeStep } from '../backend-facts'
+export { hasWindowsNvidiaDriver, hasLinuxNvidiaDriver } from '../backend-facts'
 
-/** NVIDIA's Windows display driver installs this API library. */
-export function hasWindowsNvidiaDriver(
-  windowsDir = process.env.WINDIR ?? process.env.SystemRoot ?? 'C:\\Windows'
-): boolean {
-  return fs.existsSync(path.join(windowsDir, 'System32', 'nvcuda.dll'))
+export async function findWhisperBinary(
+  name: 'whisper-cli' | 'whisper-server'
+): Promise<string | null> {
+  return (await findWhisperBinaries(name))[0]?.path ?? null
 }
 
-/** Linux GPU device nodes are created by the active NVIDIA or DRM driver. */
-export function hasLinuxGpuDevice(): boolean {
-  if (hasLinuxNvidiaDriver()) return true
-  try {
-    return fs.readdirSync('/dev/dri').some((name) => name.startsWith('renderD'))
-  } catch {
-    return false
-  }
-}
-
-/** NVIDIA's Linux device node is available only when its driver is active. */
-export function hasLinuxNvidiaDriver(): boolean {
-  try {
-    // Containers can expose a GPU with a nonzero host device index.
-    return fs.readdirSync('/dev').some((name) => /^nvidia\d+$/.test(name))
-  } catch {
-    return false
-  }
-}
-
-/** Prefer accelerated Whisper, with a separate CPU runtime as the safe fallback. */
-export function findWhisperBinary(name: 'whisper-cli' | 'whisper-server', preference: BackendPreference = 'auto'): string | null {
-  return findWhisperBinaries(name, preference)[0] ?? null
-}
-
-/** Keep the CPU binary available when a present GPU driver cannot start Whisper. */
-export function findWhisperBinaries(name: 'whisper-cli' | 'whisper-server', preference: BackendPreference = 'auto'): string[] {
-  const gpuAvailable =
-    process.platform === 'win32'
-      ? hasWindowsNvidiaDriver()
-      : process.platform === 'linux'
-        ? hasLinuxGpuDevice()
-        : true
-  const accelerated =
-    process.platform === 'linux' && hasLinuxNvidiaDriver()
-      ? ['whisper-cuda', 'whisper', 'whisper-cpu']
-      : gpuAvailable
-        ? ['whisper', 'whisper-cpu']
-        : ['whisper-cpu', 'whisper']
-  // macOS and older packages keep the resident binary in its own directory.
-  const directories = name === 'whisper-server' ? ['whisper-server', ...accelerated] : accelerated
-  const binaries = directories.flatMap((directory) =>
-    binRoots()
-      .map((root) => path.join(root, directory, exe(name)))
-      .filter((candidate) => fs.existsSync(candidate))
-  )
-  return prioritizeBackend(binaries, preference, (binary) => {
-    const directory = path.basename(path.dirname(binary))
-    if (directory === 'whisper-cpu') return 'cpu'
-    if (directory === 'whisper-cuda' || (process.platform === 'win32' && directory === 'whisper')) return 'cuda'
-    if (process.platform === 'darwin' && directory !== 'whisper-cpu') return 'metal'
-    return 'vulkan'
-  })
+export async function findWhisperBinaries(
+  name: 'whisper-cli' | 'whisper-server'
+): Promise<NativeStep[]> {
+  const steps = await nativeLadder('stt', name)
+  if (!steps.length) throw new Error('No transcription engine is installed for this choice.')
+  return steps
 }
 
 /** Let Whisper load the bundled CUDA libraries before the system runtime path. */

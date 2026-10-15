@@ -39,7 +39,14 @@ if [ "${OFFGRID_BUILD_VOICE_FROM_SOURCE:-0}" != 1 ] &&
   tar -xzf "$VOICE_WORK/$VOICE_ARCHIVE" -C "$ROOT/build/linux-bin" --no-same-owner
   OFFGRID_REUSE_STAGED_VOICE=1
 fi
+stage_vulkan_loader() {
+  local source
+  source="$(ldconfig -p | awk '$1 == "libvulkan.so.1" && /x86-64/ && !found { found=$NF } END { print found }')"
+  test -n "$source"
+  install -m 755 "$(readlink -f "$source")" "$ROOT/build/linux-bin/whisper/libvulkan.so.1"
+}
 if [ "${OFFGRID_REUSE_STAGED_VOICE:-0}" = 1 ]; then
+  stage_vulkan_loader
   for binary in "$ROOT/build/linux-bin/whisper-cuda/whisper-cli" \
     "$ROOT/build/linux-bin/whisper/whisper-cli" \
     "$ROOT/build/linux-bin/whisper-cpu/whisper-cli" \
@@ -135,6 +142,7 @@ mkdir -p "$BIN/whisper-cuda" "$BIN/whisper" "$BIN/whisper-cpu" "$BIN/licenses"
 install -m 755 "$WHISPER_CUDA_BIN" "$BIN/whisper-cuda/whisper-cli"
 install -m 755 "$WHISPER_VULKAN_BIN" "$BIN/whisper/whisper-cli"
 install -m 755 "$WHISPER_CPU_BIN" "$BIN/whisper-cpu/whisper-cli"
+stage_vulkan_loader
 install -m 644 "$WORK/whisper/LICENSE" "$BIN/whisper/LICENSE"
 install -m 755 "$WORK/$FFMPEG_DIR/bin/ffmpeg" "$BIN/ffmpeg"
 install -m 644 "$WORK/$FFMPEG_DIR/LICENSE.txt" "$BIN/licenses/ffmpeg.txt"

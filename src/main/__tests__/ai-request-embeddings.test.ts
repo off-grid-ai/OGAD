@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const host = vi.hoisted(() => ({ embed: vi.fn() }))
-vi.mock('../embeddings-core', () => ({ embedText: host.embed, embeddingDevice: () => 'coreml' }))
+// The inference boundary: the ONNX pipeline reports its device once, then returns vectors.
+vi.mock('../embeddings-core', () => ({
+  embedTexts: async (
+    texts: string[],
+    _model: string,
+    _modelsDir: string,
+    onReady?: (device: string) => void
+  ) => {
+    onReady?.('coreml')
+    return [await host.embed(texts[0])]
+  }
+}))
 vi.mock('../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
 vi.mock('../runtime-residency', () => ({ getResidencyMode: () => 'resident' }))
 import { embeddings } from '../embeddings'
@@ -19,10 +30,10 @@ describe('embedding request records', () => {
     await expect(embeddings.generateEmbedding('local text')).resolves.toEqual([0.1, 0.2])
     expect(records.at(-1)).toMatchObject({
       modality: 'embedding',
-      backend: 'coreml',
+      backend: 'Core ML',
       status: 'completed',
       metrics: { dimensions: 2 },
-      response: [0.1, 0.2],
+      response: [[0.1, 0.2]],
       request: { text: 'local text' }
     })
   })

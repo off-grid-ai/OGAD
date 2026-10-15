@@ -28,13 +28,19 @@ async function ensureDedicatedRuntime(
   session: NonNullable<typeof dedicatedSession>
 ): Promise<void> {
   if (decisionRuntime.running) return
-  if (!decisionRuntime.memoryEvicted && session.restartsRemaining <= 0) {
+  if (
+    session.modelId === KEV_4B_ID &&
+    !decisionRuntime.memoryEvicted &&
+    session.restartsRemaining <= 0
+  ) {
     throw new DecisionRuntimeError(
       'The dedicated Decision runtime stopped before selection.',
       'startup'
     )
   }
-  if (!decisionRuntime.memoryEvicted) session.restartsRemaining -= 1
+  // The shared llama runtime owns its restart budget. Keep Kev unchanged.
+  if (session.modelId === KEV_4B_ID && !decisionRuntime.memoryEvicted)
+    session.restartsRemaining -= 1
   console.log('[computer-use] loading Decision runtime after eviction or recovery')
   await decisionRuntime.start(session.modelId)
 }

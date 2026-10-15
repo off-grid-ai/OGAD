@@ -1,7 +1,9 @@
+import { backendReasonText, type BackendChoice } from '@offgrid/models'
 import { useEffect, useState } from 'react'
 import { SettingsSelect } from './SettingsSelect'
 import { SettingsRow } from './SettingsRow'
 import {
+  BACKEND_MODALITIES,
   backendChoices,
   normalizeBackendPreferences,
   type BackendModality,
@@ -9,10 +11,13 @@ import {
   type BackendPreferences
 } from '../../../shared/backend-preferences'
 import {
-  runtimeBackendLabel,
+  runtimeBackendStatus,
   type RuntimeBackend,
   type RuntimeId
 } from '../../../shared/runtime-backends'
+import { ArrowClockwise } from '@phosphor-icons/react'
+import { Button } from './ui/button'
+import { IconTip } from './IconTip'
 import type { PerformancePackStatus } from '../../../shared/performance-pack'
 import { persistToggle } from '@renderer/lib/persist-toggle'
 import {
@@ -36,7 +41,7 @@ interface QueueLive {
   queued: { label: string; tier: number }[]
 }
 
-export function RuntimeResidencySection(): React.ReactElement {
+function RuntimeResidencySection(): React.ReactElement {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (window as any).api
   const [modes, setModes] = useState<Record<string, string>>({})
@@ -263,6 +268,30 @@ export function BackendPreferencesSection({
   const [running, setRunning] = useState<RuntimeBackend[]>([])
   const [packStatus, setPackStatus] = useState<PerformancePackStatus | null>(null)
   const [error, setError] = useState('')
+  const [choices, setChoices] = useState<Partial<Record<BackendModality, BackendChoice[]>>>({})
+
+  useEffect(() => {
+    // The main process knows which engines and devices this machine has. Without that answer
+    // (an older preload), every stored choice is offered and Auto still picks what runs.
+    const offerAll = (): Partial<Record<BackendModality, BackendChoice[]>> =>
+      Object.fromEntries(
+        BACKEND_MODALITIES.map((modality) => [
+          modality,
+          backendChoices(modality, platform).map((value) => ({ value, available: true }))
+        ])
+      )
+    if (typeof api.backendChoices !== 'function') {
+      setChoices(offerAll())
+      return
+    }
+    void api
+      .backendChoices()
+      .then((value: Partial<Record<BackendModality, BackendChoice[]>> | undefined) =>
+        setChoices(value ?? offerAll())
+      )
+      .catch(() => setError('Backend choices could not load.'))
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [packStatus, preferences])
 
   useEffect(() => {
     if (api.backendPreferencesGet) {
@@ -299,6 +328,17 @@ export function BackendPreferencesSection({
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [])
 
+  const retry = (modality: BackendModality): void => {
+    setError('')
+    void api
+      .backendRetry(modality)
+      .then(() => api.backendChoices?.())
+      .then((value: Partial<Record<BackendModality, BackendChoice[]>> | undefined) => {
+        if (value) setChoices(value)
+      })
+      .catch(() => setError('The engine could not be restarted.'))
+  }
+
   const change = (modality: BackendModality, preference: BackendPreference): void => {
     const previous = preferences
     setPreferences({ ...preferences, [modality]: preference })
@@ -322,37 +362,53 @@ export function BackendPreferencesSection({
       {modalities.map((modality) => {
         const runtime = running.find((entry) => entry.id === RUNTIME_IDS[modality])
         const label = `${BACKEND_ROW_LABELS[modality]} backend`
-        const packOwnsCuda = ['llm', 'image', 'stt', 'grounding', 'decision'].includes(modality)
-        const cudaNeedsPack =
-          packOwnsCuda &&
-          packStatus !== null &&
-          ['available', 'downloading', 'paused', 'failed', 'not-needed'].includes(packStatus.phase)
+        const status = runtimeBackendStatus(runtime)
+        const demoted = (choices[modality] ?? []).some(
+          (choice) => choice.reason?.code === 'failed-this-session'
+        )
+        const canRetry = status.tone === 'warn' || status.tone === 'error' || demoted
         return (
           <SettingsRow
             inline
             key={modality}
             label={label}
             controlId={`backend-${modality}`}
-            hint={
-              cudaNeedsPack
-                ? `Now: ${runtimeBackendLabel(runtime)}. CUDA needs the optional NVIDIA download in Setup & health. Other available backends can still run.`
-                : `Now: ${runtimeBackendLabel(runtime)}. Auto tries the best available backend. Changes when the model next loads.`
-            }
+            hint={`Now: ${status.text}${status.reason ? ` · ${status.reason}` : ''}. Auto picks the fastest that works here.`}
           >
-            <SettingsSelect
-              id={`backend-${modality}`}
-              label={label}
-              value={preferences[modality]}
-              options={backendChoices(modality, platform).map((value) => ({
-                value,
-                label:
-                  value === 'cuda' && cudaNeedsPack
-                    ? 'CUDA (download required)'
-                    : BACKEND_LABELS[value],
-                disabled: value === 'cuda' && cudaNeedsPack
-              }))}
-              onValueChange={(value) => change(modality, value)}
-            />
+            <div className="flex w-full items-center justify-end gap-2">
+              {canRetry ? (
+                <IconTip label="Try the GPU again">
+                  <Button
+                    size="icon-sm"
+                    variant="outline"
+                    aria-label="Try the GPU again"
+                    onClick={() => retry(modality)}
+                  >
+                    <ArrowClockwise className="h-4 w-4" />
+                  </Button>
+                </IconTip>
+              ) : null}
+              <SettingsSelect
+                id={`backend-${modality}`}
+                label={label}
+                value={preferences[modality]}
+                options={(choices[modality] ?? []).map((choice) => ({
+                  value: choice.value,
+                  label:
+                    choice.value === 'metal' &&
+                    platform === 'darwin' &&
+                    ['tts', 'embeddings'].includes(modality)
+                      ? 'Core ML'
+                      : BACKEND_LABELS[choice.value],
+                  disabled: !choice.available,
+                  hint:
+                    !choice.available && choice.reason
+                      ? backendReasonText(choice.reason)
+                      : undefined
+                }))}
+                onValueChange={(value) => change(modality, value)}
+              />
+            </div>
           </SettingsRow>
         )
       })}

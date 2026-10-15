@@ -9,31 +9,18 @@ import path from 'path'
 import type http from 'http'
 import { randomBytes } from 'crypto'
 import { app } from 'electron'
-import { authorizeBearer, authorizeBearerAny } from './mcp-auth-logic'
+import { authorizeBearer } from './mcp-auth-logic'
 
 let cached: string | null = null
 
-/** Supplies the tokens that authorize action tools RIGHT NOW - one per paired device that may
- *  run this Mac's tools. Registered by the pro sync layer, which owns the pairing set; core
- *  stays free of any pairing/device knowledge. Un-pairing a device drops its token from this
- *  list, so its next call is rejected - that is what makes tool access revoke on un-pair. */
-export type ActiveActionTokens = () => readonly string[]
-
-export interface ActiveActionCredential {
+interface ActiveActionCredential {
   deviceId: string
   token: string
 }
 
 export type ActiveActionCredentials = () => readonly ActiveActionCredential[]
 
-let activeActionTokens: ActiveActionTokens | null = null
 let activeActionCredentials: ActiveActionCredentials | null = null
-
-/** Install (or clear, with null) the live per-device token provider. When set, ONLY those
- *  tokens authorize; the legacy single global token is ignored. */
-export function registerActiveActionTokens(provider: ActiveActionTokens | null): void {
-  activeActionTokens = provider
-}
 
 /** Install the device-bound credentials owned by the paired-device layer. */
 export function registerActiveActionCredentials(provider: ActiveActionCredentials | null): void {
@@ -60,9 +47,6 @@ export function authorizeActionRequest(req: http.IncomingMessage): ActionRequest
     }
     return { allowed: deviceId !== null, deviceId }
   }
-  if (activeActionTokens) {
-    return { allowed: authorizeBearerAny(provided, activeActionTokens()), deviceId: null }
-  }
   return { allowed: authorizeBearer(provided, getActionToken()), deviceId: null }
 }
 
@@ -72,7 +56,7 @@ function tokenPath(): string {
 
 /** The action-tool token, generating + persisting one on first use. 32 random
  *  bytes (64 hex chars). Owner-only file perms. */
-export function getActionToken(): string {
+function getActionToken(): string {
   if (cached) {
     return cached
   }
@@ -93,17 +77,6 @@ export function getActionToken(): string {
   }
   cached = token
   return token
-}
-
-/** True when the request carries a valid action-tool token. Unauthenticated
- *  requests still get the open model tools - just not the action tools.
- *
- *  When the pro sync layer has registered a live-token provider, ONLY the tokens
- *  of currently paired + tools-allowed devices authorize (per-device, revoked on
- *  un-pair). With no provider (free build / no device sync), it falls back to the
- *  legacy single global token, which is never distributed in that build anyway. */
-export function isActionAuthorized(req: http.IncomingMessage): boolean {
-  return authorizeActionRequest(req).allowed
 }
 
 /** Dev-only: print the action token so a device can be paired for testing. In a

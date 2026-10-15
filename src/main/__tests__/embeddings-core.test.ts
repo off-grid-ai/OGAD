@@ -18,7 +18,7 @@ vi.mock('../onnx-device', () => ({
   })
 }))
 
-import { disposeEmbeddingModel, embedText } from '../embeddings-core'
+import { disposeEmbeddingModel } from '../embeddings-core'
 
 let profile: string
 let selected: string
@@ -34,18 +34,6 @@ afterEach(async () => {
   vi.unstubAllEnvs()
   configureRuntime({ dataDir: undefined, modelsDir: undefined })
   fs.rmSync(profile, { recursive: true, force: true })
-})
-
-it('retries an embedding model load after a temporary provider failure', async () => {
-  const runtime = Object.assign(
-    vi.fn(async () => ({ data: new Float32Array([0.25, 0.5]) })),
-    { dispose: vi.fn() }
-  )
-  host.pipeline.mockRejectedValueOnce(new Error('provider unavailable')).mockResolvedValue(runtime)
-
-  await expect(embedText('first', selected)).rejects.toThrow('provider unavailable')
-  await expect(embedText('second', selected)).resolves.toEqual([0.25, 0.5])
-  expect(host.pipeline).toHaveBeenCalledTimes(2)
 })
 
 it('loads embeddings from a scan folder while the chosen folder is offline', async () => {
@@ -65,7 +53,8 @@ it('loads embeddings from a scan folder while the chosen folder is offline', asy
   fs.rmdirSync(selected)
   host.pipeline.mockResolvedValue(
     Object.assign(
-      vi.fn(async () => ({ data: new Float32Array([0.25, 0.5]) })),
+      // A transformers.js Tensor: one row per text.
+      vi.fn(async () => ({ data: new Float32Array([0.25, 0.5]), tolist: () => [[0.25, 0.5]] })),
       { dispose: vi.fn() }
     )
   )
@@ -75,43 +64,5 @@ it('loads embeddings from a scan folder while the chosen folder is offline', asy
     device: 'cpu',
     local_files_only: true
   })
-  expect(fs.existsSync(selected)).toBe(false)
-})
-
-it('refuses an embedding download when no complete package exists and storage is offline', async () => {
-  fs.rmdirSync(selected)
-  await expect(embedText('query', selected)).rejects.toThrow(
-    'Connect the drive or choose another folder.'
-  )
-  expect(host.pipeline).not.toHaveBeenCalled()
-  expect(fs.existsSync(selected)).toBe(false)
-})
-
-it.each([undefined, '1'])(
-  'loads from an uncreated default models path (offline=%s)',
-  async (offline) => {
-    configureRuntime({ modelsDir: undefined })
-    fs.rmdirSync(selected)
-    vi.stubEnv('OFFGRID_EMBEDDINGS_OFFLINE', offline)
-    host.pipeline.mockResolvedValue(
-      Object.assign(
-        vi.fn(async () => ({ data: new Float32Array([0.25, 0.5]) })),
-        { dispose: vi.fn() }
-      )
-    )
-    await expect(embedText('query', selected)).resolves.toEqual([0.25, 0.5])
-    expect(host.pipeline).toHaveBeenCalledWith('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-      device: 'cpu'
-    })
-    expect(fs.existsSync(selected)).toBe(false)
-  }
-)
-
-it('attempts local-only resolution without a writable chosen folder', async () => {
-  fs.rmdirSync(selected)
-  vi.stubEnv('OFFGRID_EMBEDDINGS_OFFLINE', '1')
-  host.pipeline.mockRejectedValue(new Error('local model is missing'))
-  await expect(embedText('query', selected)).rejects.toThrow('local model is missing')
-  expect(host.pipeline).toHaveBeenCalledTimes(1)
   expect(fs.existsSync(selected)).toBe(false)
 })

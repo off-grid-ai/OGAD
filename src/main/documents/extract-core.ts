@@ -35,7 +35,7 @@ function pageText(items: PdfTextItem[]): string {
   return text.replace(/\n{3,}/g, '\n\n')
 }
 
-export async function extractPdfPages(
+async function extractPdfPages(
   filePath: string,
   onPages: (pages: DocumentPage[]) => void,
   signal?: AbortSignal
@@ -83,7 +83,7 @@ export async function extractPdfPages(
   }
 }
 
-export async function readTextFile(filePath: string): Promise<string> {
+async function readTextFile(filePath: string): Promise<string> {
   const bytes = await fs.promises.readFile(filePath)
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return bytes.subarray(2).toString('utf16le')
   if (bytes[0] === 0xfe && bytes[1] === 0xff) {
@@ -94,7 +94,7 @@ export async function readTextFile(filePath: string): Promise<string> {
   return bytes.toString('utf8').replace(/^\uFEFF/, '')
 }
 
-export async function extractDocxText(filePath: string): Promise<string> {
+async function extractDocxText(filePath: string): Promise<string> {
   const { default: mammoth } = await import('mammoth')
   try {
     return (await mammoth.extractRawText({ path: filePath })).value

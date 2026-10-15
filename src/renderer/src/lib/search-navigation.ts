@@ -2,10 +2,11 @@ import type { SearchHit } from '../types'
 
 export interface SearchNavigationPorts {
   selectEntity(entityId: number): void
-  selectMemory(memoryId: number): void
   openMeeting(meetingId: number | null): void
   openChat(target: { conversationId?: string; projectId?: string } | null): void
   openReplay(timestamp: number): void
+  /** A to-do opens on the Actions screen, focused on it (Pro). Without it a to-do opens nothing. */
+  openAction?(actionId: number): void
   /** A synced email or chat opens where it lives (its link), when it has one. */
   openLink?(url: string): void
 }
@@ -20,19 +21,24 @@ export function navigateSearchHit(
   ports: SearchNavigationPorts,
   now = Date.now()
 ): void {
-  if (hit.kind === 'entity' || hit.kind === 'fact') {
+  // A source saved before the legacy stores were retired may still say 'fact' (its refId is the
+  // entity it is about) or 'memory' (nothing shows those any more, so it opens nothing).
+  const kind: string = hit.kind
+  if (kind === 'entity' || kind === 'fact') {
     ports.selectEntity(hit.refId)
     return
   }
-  if (hit.kind === 'memory') {
-    ports.selectMemory(hit.refId)
-    return
-  }
+  if (kind === 'memory') return
   if (hit.kind === 'meeting') {
     ports.openMeeting(hit.refId || null)
     return
   }
-  if (hit.kind === 'chat') {
+  if (hit.kind === 'action') {
+    if (hit.refId) ports.openAction?.(hit.refId)
+    return
+  }
+  // A chat, or a chat summary: the conversation it belongs to.
+  if (hit.kind === 'chat' || hit.kind === 'summary') {
     ports.openChat(hit.url ? { conversationId: hit.url } : null)
     return
   }

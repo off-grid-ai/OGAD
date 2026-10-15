@@ -75,7 +75,7 @@ export const holo31Adapter: VisionModelAdapter = {
   }
 }
 
-export function holo31PolicyFailure(
+function holo31PolicyFailure(
   response: VisionPolicyResponse,
   bounds: Parameters<typeof generalVisionPolicyFailure>[1]
 ): string | undefined {

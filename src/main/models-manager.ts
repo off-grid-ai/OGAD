@@ -283,13 +283,11 @@ export interface KevRuntimeArtifact {
 
 /** Resolve the packaged server runtime and the model downloaded from the Models screen. */
 export function resolveKevRuntimeArtifact(): KevRuntimeArtifact | null {
-  if (
-    !(
-      (process.platform === 'darwin' && process.arch === 'arm64') ||
-      process.platform === 'win32' ||
-      (process.platform === 'linux' && process.arch === 'x64')
-    )
-  ) {
+  if (!(
+    (process.platform === 'darwin' && process.arch === 'arm64') ||
+    process.platform === 'win32' ||
+    (process.platform === 'linux' && process.arch === 'x64')
+  )) {
     return null
   }
   const modelRoot = path.join(llm.getModelsDir(), 'kev-4b')
@@ -483,9 +481,23 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     sizeOf: (name) => fileSizeOf(dir, name)
   })
   const remoteModels = remoteVisionInventoryModels(getRemoteVisionServerSettings().servers)
+  // A model whose runtime is not on this machine is not offered for download: Kev without its
+  // runtime, Parakeet without sherpa-onnx. One already downloaded stays listed, so it can be
+  // deleted.
+  const { kevRuntimeInstalled, parakeetRuntimeInstalled } = await import('./runtime-availability')
+  const kev = kevRuntimeInstalled()
+  const parakeet = parakeetRuntimeInstalled()
+  const offered = models.filter((entry) => {
+    const model = entry as { id?: string; engine?: string; files?: { name: string }[] }
+    const runtimeMissing =
+      (!kev && model.id === KEV_4B_ID) || (!parakeet && model.engine === 'parakeet')
+    if (!runtimeMissing) return true
+    const files = model.files ?? []
+    return files.length > 0 && files.every((file) => present(file.name))
+  })
   return {
     kinds: MODEL_KINDS,
-    models: [...models, ...remoteModels]
+    models: [...offered, ...remoteModels]
   }
 }
 
@@ -640,7 +652,9 @@ export async function searchModels(query: string, kind?: string): Promise<unknow
   }
 }
 
-export async function getModelFiles(modelId: string): Promise<import('@offgrid/models').ModelFileVariant[]> {
+export async function getModelFiles(
+  modelId: string
+): Promise<import('@offgrid/models').ModelFileVariant[]> {
   const { getModelFiles: listFiles } = await import('@offgrid/models')
   const repo = modelId === 'bartowski/tencent_UI-Mate-9B-GGUF+MTP' ? modelId.slice(0, -4) : modelId
   return (await listFiles(repo)).filter(
@@ -767,7 +781,13 @@ async function downloadModelInner(
   // The registry is re-judged on every read, so it records the resolved kind, not this guess.
   const resolvedKind = entry.kind
   if (!inCatalog) {
-    entry = { ...entry, kind: downloadedModelKind(entry.kind, entry.files.map((file) => file.name)) }
+    entry = {
+      ...entry,
+      kind: downloadedModelKind(
+        entry.kind,
+        entry.files.map((file) => file.name)
+      )
+    }
   }
   if (inCatalog?.availability === 'coming_soon') {
     const error = inCatalog.availabilityNote ?? 'This model is coming soon.'
@@ -1011,7 +1031,7 @@ async function downloadModelInner(
         // vision on now (main-side, so it works even when no Models screen is open).
         await reconcileActiveModelProjector().catch(() => false)
         settingsChanged()
-          send({ percent: 100, status: 'completed' })
+        send({ percent: 100, status: 'completed' })
         return { success: true }
       } catch (err) {
         // A capacity failure cannot resume until space is reclaimed. A file that failed byte or
@@ -1136,7 +1156,8 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
 }
 
 async function deleteModelFiles(modelId: string): Promise<DeleteModelResult> {
-  if (modelId.startsWith('external:')) return { success: false, error: 'External models are read only.' }
+  if (modelId.startsWith('external:'))
+    return { success: false, error: 'External models are read only.' }
   const dir = llm.getModelsDir()
   // Imported local model: remove its files + registry entry, clear if active.
   if (modelId.startsWith('local:')) {
@@ -1188,7 +1209,8 @@ async function deleteModelFiles(modelId: string): Promise<DeleteModelResult> {
   ) {
     return {
       success: false,
-      error: 'This model uses files in another model folder. Remove the folder reference to hide it. Files are kept in place.'
+      error:
+        'This model uses files in another model folder. Remove the folder reference to hide it. Files are kept in place.'
     }
   }
   let freed = 0
@@ -1690,7 +1712,14 @@ export function getLocalModels(dir = llm.getModelsDir()): LocalModel[] {
 }
 function saveLocalModels(list: LocalModel[], dir = llm.getModelsDir()): void {
   try {
-    fs.writeFileSync(localRegistryFile(dir), JSON.stringify(list.filter((model) => !model.id.startsWith('external:')), null, 2))
+    fs.writeFileSync(
+      localRegistryFile(dir),
+      JSON.stringify(
+        list.filter((model) => !model.id.startsWith('external:')),
+        null,
+        2
+      )
+    )
   } catch {
     /* best effort */
   }

@@ -31,7 +31,7 @@ export function setCurrentView(view: string): void {
   for (const listener of listeners) listener()
 }
 
-export function getCurrentView(): string {
+function getCurrentView(): string {
   return currentView
 }
 

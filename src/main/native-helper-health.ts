@@ -1,5 +1,6 @@
 import type { SystemHealthComponentContract } from '../shared/ipc-contracts'
-import { ffmpegBin, whisperBin } from './transcription/whisper-cli'
+import { ffmpegBin } from './transcription/whisper-cli'
+import { nativeBinaryInstalled } from './backend-facts'
 
 interface NativeHelperOwner {
   id: string
@@ -12,7 +13,11 @@ interface NativeHelperOwner {
 // runtime facts a stable System Health identity and label.
 const NATIVE_HELPERS: readonly NativeHelperOwner[] = [
   { id: 'helper-ffmpeg', label: 'Audio decoder (ffmpeg)', resolve: ffmpegBin },
-  { id: 'helper-whisper', label: 'Speech-to-text helper (whisper)', resolve: whisperBin }
+  {
+    id: 'helper-whisper',
+    label: 'Speech-to-text helper (whisper)',
+    resolve: () => (nativeBinaryInstalled('stt', 'whisper-cli') ? 'whisper-cli' : null)
+  }
 ]
 
 export function getNativeHelperHealth(): SystemHealthComponentContract[] {

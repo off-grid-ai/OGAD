@@ -237,67 +237,13 @@ describe('database.ts - RAG messages', () => {
   })
 })
 
-describe('database.ts - entities and facts', () => {
+describe('database.ts - entities', () => {
   it('EntityDomain creates an entity and returns a stable id on repeat (case-insensitive name)', () => {
     const id = resolveEntity('Ada Lovelace', 'Person')
     expect(id).toBeGreaterThan(0)
     // Same name+type upserts to the SAME row (UNIQUE(name,type)).
     const idAgain = resolveEntity('Ada Lovelace', 'Person')
     expect(idAgain).toBe(id)
-  })
-
-  it('EntityDomain defaults type to Unknown when blank', () => {
-    const id = resolveEntity('Mystery', '   ')
-    const { entity } = db.getEntityDetails(id) as { entity: { type: string } }
-    expect(entity.type).toBe('Unknown')
-  })
-
-  it('addEntityFact inserts once and dedupes on repeat (INSERT OR IGNORE)', () => {
-    const id = resolveEntity('Grace Hopper', 'Person')
-    expect(db.addEntityFact(id, 'Coined the term debugging', 'sess-1')).toBe(true)
-    // duplicate fact for the same entity is ignored -> no change.
-    expect(db.addEntityFact(id, 'Coined the term debugging', 'sess-1')).toBe(false)
-    // a distinct fact is inserted.
-    expect(db.addEntityFact(id, 'Rear admiral in the US Navy')).toBe(true)
-  })
-
-  it('updateEntitySummary persists a summary readable via getEntityDetails', () => {
-    const id = resolveEntity('Alan Turing', 'Person')
-    db.updateEntitySummary(id, 'Founder of theoretical computer science')
-    const { entity } = db.getEntityDetails(id) as { entity: { summary: string } }
-    expect(entity.summary).toBe('Founder of theoretical computer science')
-  })
-
-  it('getEntities returns fact_count aggregated per entity', () => {
-    const id = resolveEntity('Katherine Johnson', 'Person')
-    db.addEntityFact(id, 'Calculated trajectories for Mercury and Apollo')
-    db.addEntityFact(id, 'Received the Presidential Medal of Freedom')
-    const list = db.getEntities() as { id: number; fact_count: number }[]
-    const row = list.find((e) => e.id === id)
-    expect(row?.fact_count).toBe(2)
-  })
-
-  it('getEntityDetails returns the entity plus its facts (newest first)', () => {
-    const id = resolveEntity('Margaret Hamilton', 'Person')
-    db.addEntityFact(id, 'Led Apollo flight software')
-    const { entity, facts } = db.getEntityDetails(id) as {
-      entity: { id: number; name: string }
-      facts: { fact: string }[]
-    }
-    expect(entity.id).toBe(id)
-    expect(entity.name).toBe('Margaret Hamilton')
-    expect(facts.some((f) => f.fact === 'Led Apollo flight software')).toBe(true)
-  })
-
-  it('EntityDomain deletes the entity and its facts; false on a missing id', () => {
-    const id = resolveEntity('Temporary Person', 'Person')
-    db.addEntityFact(id, 'to be deleted')
-    expect(entityDomain.deleteEntityById(id)).toBe(true)
-    const { entity, facts } = db.getEntityDetails(id) as { entity: unknown; facts: unknown[] }
-    expect(entity).toBeUndefined()
-    expect(facts).toHaveLength(0)
-    // deleting again affects no rows.
-    expect(entityDomain.deleteEntityById(id)).toBe(false)
   })
 
   it('upsertEntitySession links entities to a session and getEntitiesForSession returns them', () => {
@@ -323,21 +269,6 @@ describe('database.ts - entities and facts', () => {
       )
     ).toBe(true)
     expect(forSession.every((entity) => !('session_count' in entity))).toBe(true)
-  })
-})
-
-describe('database.ts - master memory', () => {
-  it('getMasterMemory returns an object with content and updated_at keys', () => {
-    const before = db.getMasterMemory()
-    expect(before).toHaveProperty('content')
-    expect(before).toHaveProperty('updated_at')
-  })
-
-  it('updateMasterMemory upserts the single row and getMasterMemory reads it back', () => {
-    db.updateMasterMemory('cumulative profile v1')
-    expect(db.getMasterMemory().content).toBe('cumulative profile v1')
-    db.updateMasterMemory('cumulative profile v2')
-    expect(db.getMasterMemory().content).toBe('cumulative profile v2')
   })
 })
 
@@ -410,40 +341,7 @@ describe('database.ts - app settings (typed round-trip + defaults)', () => {
   })
 })
 
-describe('database.ts - memories, dashboard stats and legacy purge', () => {
-  it('deleteMemory returns false for a non-existent memory id', () => {
-    expect(db.deleteMemory(999999)).toBe(false)
-  })
-
-  it('deleteMemory returns true after inserting a memory row directly', () => {
-    const handle = db.getDB()
-    const info = handle
-      .prepare('INSERT INTO memories (content, source_app, session_id) VALUES (?, ?, ?)')
-      .run('a captured memory', 'TestApp', 'sess-mem')
-    const memId = Number(info.lastInsertRowid)
-    expect(db.deleteMemory(memId)).toBe(true)
-  })
-
-  it('getMemoryRecordsForSession returns rows scoped to a session', () => {
-    const handle = db.getDB()
-    handle
-      .prepare('INSERT INTO memories (content, source_app, session_id) VALUES (?, ?, ?)')
-      .run('scoped memory', 'TestApp', 'sess-scope')
-    const rows = db.getMemoryRecordsForSession('sess-scope') as { content: string }[]
-    expect(rows.some((r) => r.content === 'scoped memory')).toBe(true)
-  })
-
-  it('getDashboardStats returns the full stat shape with numeric totals', () => {
-    const stats = db.getDashboardStats()
-    expect(typeof stats.totalMemories).toBe('number')
-    expect(typeof stats.totalEntities).toBe('number')
-    expect(Array.isArray(stats.recentMemories)).toBe(true)
-    expect(Array.isArray(stats.topEntities)).toBe(true)
-    expect(Array.isArray(stats.activityByDay)).toBe(true)
-    // 14-day activity window.
-    expect(stats.activityByDay.length).toBe(14)
-  })
-
+describe('database.ts - legacy purge and chat sessions', () => {
   it('purgeLegacyChatImports returns null when there is nothing legacy to purge', () => {
     // No Claude/ChatGPT/Gemini conversations were seeded, so this is a no-op.
     expect(db.purgeLegacyChatImports()).toBeNull()

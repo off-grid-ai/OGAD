@@ -17,11 +17,11 @@ const appleM5: MachineProfile = {
 const qwen9b = { weightsGb: 6.4, supportsMtp: true, modelMaxCtx: 262_144 }
 
 describe('planBestSettings', () => {
-  it('runs everything on Metal with MTP, a full-precision cache and warm engines on a 32 GB Mac', () => {
+  it('lets every engine pick its fastest backend, with MTP, a full-precision cache and warm engines on a 32 GB Mac', () => {
     const plan = planBestSettings(appleM5, qwen9b)
 
     expect(plan.chat).toEqual({
-      gpuLayers: 99,
+      gpuLayers: null,
       flashAttn: true,
       kvCacheType: 'f16',
       ctxSize: 16_384,
@@ -30,7 +30,7 @@ describe('planBestSettings', () => {
       speculativeDraftMax: 2,
       draftModel: ''
     })
-    expect(Object.values(plan.backends)).toEqual(Array(7).fill('metal'))
+    expect(Object.values(plan.backends)).toEqual(Array(7).fill('auto'))
     expect(plan.residency).toEqual({
       image: 'resident',
       stt: 'resident',
@@ -39,14 +39,15 @@ describe('planBestSettings', () => {
     })
     expect(plan.screenshotSize).toBe('balanced')
     expect(plan.summary[0]).toBe(
-      'Chat and vision run on the Apple M5 GPU (Metal) with every layer offloaded, MTP with 2 draft tokens, a full-precision (f16) cache and a 16K context.'
+      'Chat and vision run on the Apple M5 GPU (Metal) with layers placed on the GPU automatically, MTP with 2 draft tokens, a full-precision (f16) cache and a 16K context.'
     )
+    expect(plan.summary[1]).toBe('Auto picks the fastest processor that works on this computer.')
     expect(plan.summary[2]).toBe(
       'Kept ready in memory: image generation, transcription, voice, search.'
     )
   })
 
-  it('uses CUDA for the native engines and DirectML for ONNX models on a Windows NVIDIA PC', () => {
+  it('leaves an NVIDIA PC on Auto, which tries CUDA first wherever it can run', () => {
     const plan = planBestSettings(
       {
         platform: 'win32',
@@ -58,18 +59,11 @@ describe('planBestSettings', () => {
       qwen9b
     )
 
-    expect(plan.backends).toEqual({
-      llm: 'cuda',
-      image: 'cuda',
-      stt: 'cuda',
-      tts: 'directml',
-      grounding: 'cuda',
-      decision: 'cuda',
-      embeddings: 'directml'
-    })
+    expect(Object.values(plan.backends)).toEqual(Array(7).fill('auto'))
+    expect(plan.chat.gpuLayers).toBeNull()
   })
 
-  it('keeps choices the platform does not offer on Auto for a Linux Vulkan GPU', () => {
+  it('leaves a Linux Vulkan GPU on Auto, which tries Vulkan before the CPU', () => {
     const plan = planBestSettings(
       {
         platform: 'linux',
@@ -81,8 +75,8 @@ describe('planBestSettings', () => {
       qwen9b
     )
 
-    expect(plan.backends.llm).toBe('vulkan')
-    expect(plan.backends.stt).toBe('vulkan')
+    expect(plan.backends.llm).toBe('auto')
+    expect(plan.backends.stt).toBe('auto')
     expect(plan.backends.tts).toBe('auto')
     expect(plan.backends.embeddings).toBe('auto')
     expect(plan.residency).toEqual({ stt: 'resident', tts: 'resident', embeddings: 'resident' })

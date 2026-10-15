@@ -6,9 +6,9 @@ import { mergeStickyTools, previousOfferedTools, rememberOfferedTools } from './
  * has to fetch the model (~23MB) first, and offline it may never arrive; the turn must not stall.
  * The load keeps going in the background, so later turns route semantically.
  */
-export const SEMANTIC_ROUTING_WAIT_MS = 2_000
+const SEMANTIC_ROUTING_WAIT_MS = 2_000
 /** When MiniLM is already on disk the wait is only its load (a few seconds on a cold start). */
-export const LOCAL_ROUTING_MODEL_WAIT_MS = 20_000
+const LOCAL_ROUTING_MODEL_WAIT_MS = 20_000
 
 // The routing model embeddings-core loads (Xenova/all-MiniLM-L6-v2, fp32 or quantized).
 async function routingModelOnDisk(): Promise<boolean> {
@@ -81,15 +81,23 @@ export async function selectChatToolSchemas(
     if (!namedTool && !unavailableImageTool) {
       try {
         let embed = options.embed
+        let embedMany: ((texts: string[]) => Promise<number[][]>) | undefined
         if (!embed) {
           const { embeddings } = await import('../embeddings')
-          embed = (t: string): Promise<number[]> => embeddings.generateEmbedding(t, { interactive: true })
+          const many = (texts: string[]): Promise<number[][]> =>
+            embeddings.embed(texts, { interactive: true })
+          embedMany = many
+          embed = async (t: string): Promise<number[]> => (await many([t]))[0] ?? []
         }
         const { contextualToolRoutingText, selectRelevantToolsSemantic } =
           await import('./tool-embedding-ranking')
         const routingText = contextualToolRoutingText(query, history)
         const ranked = await withinRoutingWait(
-          selectRelevantToolsSemantic(routingText, rawTools, { embed }),
+          selectRelevantToolsSemantic(
+            routingText,
+            rawTools,
+            embedMany ? { embed, embedMany } : { embed }
+          ),
           options.semanticWaitMs ??
             ((await routingModelOnDisk()) ? LOCAL_ROUTING_MODEL_WAIT_MS : SEMANTIC_ROUTING_WAIT_MS)
         )

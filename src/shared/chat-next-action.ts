@@ -4,7 +4,7 @@
 type AgentMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
 /** A suggestion longer than this is not one instruction. */
-export const MAX_SUGGESTION_CHARS = 90
+const MAX_SUGGESTION_CHARS = 90
 
 const SYSTEM =
   'You suggest the next thing the user might ask a browser assistant to do on the page they are on. ' +

@@ -1,3 +1,4 @@
+import { backendChoicesForUi } from './backend-facts'
 import { settingsChanged } from './settings-version'
 import { withStorageDownload, storageDownloadsActive } from './model-storage-guard'
 import { moveModelStorage } from './model-storage-move'
@@ -11,16 +12,7 @@ import {
   getChatSessions,
   upsertChatSummary,
   getMemoriesForSession,
-  getMemoryRecordsForSession,
-  getMasterMemory,
-  addEntityFact,
-  updateEntitySummary,
-  getEntities,
-  getEntityDetails,
-  upsertEntitySession,
-  deleteMemory,
   getEntitiesForSession,
-  getDashboardStats,
   getUserProfile,
   saveUserProfile,
   UserProfile,
@@ -36,12 +28,11 @@ import {
   saveSetting,
   getSetting
 } from './database'
-import { deleteEntityById, resolveEntityCandidate } from './entity-domain'
+import { deleteEntityById } from './entity-domain'
 import { setComputerUseSettings } from './computer-use-settings'
 import { COMPUTER_USE_SETTINGS_KEY } from '../shared/computer-use-settings'
 import { setWebUseSettings } from './web-use-settings'
 import { WEB_USE_SETTINGS_KEY } from '../shared/web-use-settings'
-import { embeddings } from './embeddings'
 import {
   getResidency,
   setResidencyMode,
@@ -65,14 +56,6 @@ import { getAllPromptDefs } from './prompts'
 import { getPrompt, getPromptTemplate, resetPrompt } from './prompt-store'
 import { setupTtsIpc } from './tts-ipc'
 import { setupVoiceTranscriptionIpc } from './voice-transcription-ipc'
-import {
-  safeParseJson,
-  ftsMatchExpression,
-  clipText,
-  isGenerativeRequest,
-  isTrivialMessage,
-  appNameLikeClause
-} from './ipc-query-logic'
 import { requestApplicationRelaunch } from './shutdown'
 import {
   activateInstalledPerformancePack,
@@ -85,28 +68,6 @@ import { engineUpdater } from './engine-updates-service'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import { notifyRagConversationChanged } from './rag-conversation-events'
 // import { llm } from './llm'; // Moved to dynamic import to support ESM
-
-// Incrementally update master memory with a new conversation summary
-// This approach keeps context bounded by only processing current master + new summary
-async function updateMasterMemoryIncremental(_newSummary: string): Promise<string | null> {
-  // Master memory (the consolidated "profile") is a retired My Memories feature —
-  // no longer injected into chat. Don't regenerate it so it stays cleared.
-  return null
-}
-
-// Full regeneration using map-reduce:
-// Phase 1 (map): Split summaries into chunks, generate a partial summary for each
-// Phase 2 (reduce): Merge all partial summaries into the final master memory
-// This avoids the growing-prompt problem and minimizes LLM calls
-async function regenerateMasterMemoryFull(): Promise<string | null> {
-  // Retired feature — see updateMasterMemoryIncremental. Don't rebuild the profile.
-  return null
-}
-
-// Main entry point - full regeneration
-async function regenerateMasterMemory(): Promise<string | null> {
-  return regenerateMasterMemoryFull()
-}
 
 // Generate the answer for a rag:chat turn. When a streamId + sender are present,
 // stream tokens/reasoning to the renderer over the 'rag:stream' channel as they
@@ -132,6 +93,30 @@ import { runChatWithFallback } from './chat-fallback'
 
 const streamControllers = new Map<string, AbortController>()
 
+function deviceFallbackNotices(
+  sender: { send: (channel: string, payload: unknown) => void } | undefined,
+  streamId: string | undefined
+): Pick<
+  NonNullable<Parameters<typeof runChatWithFallback>[1]>,
+  'onDeviceFallback' | 'onRestarting'
+> {
+  if (!sender || !streamId) return {}
+  const send = (step: unknown): void => {
+    try {
+      sender.send('rag:stream', { streamId, type: 'step', step })
+    } catch {
+      /* window gone */
+    }
+  }
+  return {
+    onDeviceFallback: (message) => send({ kind: 'device_fallback', message }),
+    onRestarting: (restarting) => {
+      if (restarting) resetChatStreamPartial(streamId)
+      send({ kind: restarting ? 'restarting_model' : 'waiting' })
+    }
+  }
+}
+
 async function streamAnswer(
   event: { sender?: { send: (channel: string, payload: unknown) => void } } | undefined,
   streamId: string | undefined,
@@ -151,8 +136,9 @@ async function streamAnswer(
     // evicts nothing (evicting 'llm' would evict itself). run()'s finally releases
     // the slot even if fn throws, so we let errors propagate from inside.
     return modalityQueue.run(CHAT_JOB, async () => {
-      const { result, modelName } = await runChatWithFallback(() =>
-        llm.chatStream(prompt, images, () => {}, { thinking })
+      const { result, modelName } = await runChatWithFallback(
+        () => llm.chatStream(prompt, images, () => {}, { thinking }),
+        deviceFallbackNotices(event?.sender, streamId)
       )
       const response = toResponseGenerationResult(result)
       return modelName ? { ...response, metrics: { ...response.metrics, modelName } } : response
@@ -187,6 +173,7 @@ async function streamAnswer(
           ),
         {
           signal: controller.signal,
+          ...deviceFallbackNotices(sender, streamId),
           onModelChanged: (failed, next) => {
             resetChatStreamPartial(streamId)
             try {
@@ -215,286 +202,11 @@ async function streamAnswer(
   }
 }
 
-type ChatIntent = { intent: 'build' | 'image' | 'chat'; urls: string[] }
-
-const INTENT_SCHEMA = {
-  type: 'object',
-  properties: {
-    intent: { type: 'string', enum: ['build', 'image', 'chat'] },
-    urls: { type: 'array', items: { type: 'string' } }
-  },
-  required: ['intent', 'urls'],
-  additionalProperties: false
-}
-
-// Decide the output format for a turn with the model itself (grammar-constrained
-// JSON), instead of brittle keyword matching: build (runnable artifact), image
-// (generate a picture), or chat. Also pulls out any URLs the user wants read.
-// Falls back to the keyword heuristic if the classifier call fails.
-async function classifyIntent(
-  query: string,
-  history?: { role: string; content: string }[],
-  streamId?: string
-): Promise<ChatIntent> {
-  const regexUrls = (query.match(/https?:\/\/[^\s)<>"']+/g) || []).slice(0, 3)
-  // Register a controller for this pre-stream classify so a rag:cancel during the
-  // "Searching your memory…" window actually aborts the model call (D11) — without
-  // it the classify ran to completion after Stop, holding the model + the next turn.
-  const controller = streamId ? new AbortController() : undefined
-  if (streamId && controller) streamControllers.set(streamId, controller)
-  try {
-    const { llm } = await import('./llm')
-    const hist = (history ?? [])
-      .slice(-4)
-      .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${clipText(m.content, 200)}`)
-      .join('\n')
-    const prompt = [
-      'You route a request for an on-device assistant. Decide the OUTPUT FORMAT:',
-      '- "build": the user wants runnable code / a UI created — an app, component, page, playground, dashboard, form, diagram, chart, visualization, game, etc. (rendered live in a canvas).',
-      '- "image": the user wants a picture/photo/logo/illustration/art generated.',
-      '- "chat": anything else — questions, explanations, writing, discussion.',
-      'Also list any http(s) URLs the user wants you to read or build from.',
-      'Reply with ONLY JSON: {"intent":"build|image|chat","urls":[]}.',
-      hist ? `Recent conversation:\n${hist}` : '',
-      `User: ${query}`
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-    const raw = await llm.chat(prompt, [], undefined, 200, {
-      disableThinking: true,
-      responseFormat: {
-        type: 'json_schema',
-        json_schema: { name: 'intent', schema: INTENT_SCHEMA, strict: true }
-      },
-      signal: controller?.signal
-    })
-    const j = JSON.parse(raw) as Partial<ChatIntent>
-    const intent = j.intent === 'build' || j.intent === 'image' ? j.intent : 'chat'
-    const urls = Array.isArray(j.urls) ? j.urls.filter((u) => /^https?:\/\//i.test(u)) : []
-    return { intent, urls: urls.length ? urls.slice(0, 3) : regexUrls }
-  } catch (e) {
-    console.warn('[intent] classifier failed, falling back to heuristic', (e as Error).message)
-    return { intent: isGenerativeRequest(query) ? 'build' : 'chat', urls: regexUrls }
-  } finally {
-    // Only remove OUR entry — streamAnswer re-registers its own controller under
-    // the same streamId for the streaming phase.
-    if (streamId && controller && streamControllers.get(streamId) === controller)
-      streamControllers.delete(streamId)
-  }
-}
-
-async function insertMemoryRecord(params: {
-  content: string
-  name?: string | null
-  rawText?: string | null
-  sourceApp?: string | null
-  sessionId?: string | null
-  messageId?: number | null
-}): Promise<number | null> {
-  const db = getDB()
-  const content = (params.content || '').trim()
-  if (!content) return null
-
-  if (params.messageId) {
-    const existing = db
-      .prepare('SELECT id FROM memories WHERE message_id = ? LIMIT 1')
-      .get(params.messageId) as { id: number } | undefined
-    if (existing?.id) return existing.id
-  }
-
-  if (params.sessionId) {
-    const existing = db
-      .prepare('SELECT id FROM memories WHERE session_id = ? AND content = ? LIMIT 1')
-      .get(params.sessionId, content) as { id: number } | undefined
-    if (existing?.id) return existing.id
-  }
-
-  let vectorJson = '[]'
-  try {
-    const vector = await embeddings.generateEmbedding(content)
-    vectorJson = JSON.stringify(vector)
-  } catch (e) {
-    console.error('Failed to generate embedding for memory record:', e)
-  }
-
-  const stmt = db.prepare(
-    'INSERT INTO memories (content, name, raw_text, source_app, session_id, embedding, message_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  )
-  const info = stmt.run(
-    content,
-    params.name || null,
-    params.rawText || null,
-    params.sourceApp || null,
-    params.sessionId || null,
-    vectorJson,
-    params.messageId || null
-  )
-  const memoryId = Number(info.lastInsertRowid || 0) || null
-
-  // Send notification about new memory
-  if (memoryId) {
-    BrowserWindow.getAllWindows().forEach((win) => {
-      win.webContents.send('notification:new-memory', {
-        sessionId: params.sessionId || null,
-        memoryContent: content.slice(0, 100) + (content.length > 100 ? '...' : '')
-      })
-    })
-  }
-
-  return memoryId
-}
-
-export async function evaluateAndStoreMemoryForMessage(params: {
-  sessionId: string
-  appName: string
-  role: string
-  content: string
-  messageId?: number | null
-}): Promise<void> {
-  const role = (params.role || 'unknown').toLowerCase()
-  const text = (params.content || '').trim()
-  if (!text || isTrivialMessage(text)) return
-
-  // Get strictness setting
-  const strictness = getSetting<'lenient' | 'balanced' | 'strict'>('memoryStrictness', 'balanced')
-
-  const prompt = getPrompt(`memoryFilter.${strictness}`, { ROLE: role, MESSAGE: text })
-
-  // Minimum content length filter: skip very short messages
-  if (role === 'user' && text.length < 30) return
-  if (role === 'assistant' && text.length < 50) return
-
-  try {
-    const { llm } = await import('./llm')
-    const response = await llm.chat(prompt)
-    const parsed = safeParseJson<{ store: boolean; name?: string; memory?: string }>(response, {
-      store: false
-    })
-    if (!parsed.store) return
-    const memoryText = (parsed.memory || '').trim()
-    const memoryName = (parsed.name || '').trim() || null
-    if (!memoryText) return
-    if (memoryText.split(/\s+/).length < 4) return
-    if (memoryText.length > 280) return
-
-    // Post-LLM filter: skip memories matching generic / low-value patterns
-    const genericPatterns = [
-      /^the user (asked|said|mentioned|wanted|is|was|has|had)\b/i,
-      /^(this|that|it) (is|was|seems|appears|looks)\b/i,
-      /^(a|an|the) (good|great|nice|common|typical|standard|normal)\b/i,
-      /\b(in general|generally speaking|as usual|as always)\b/i
-    ]
-    if (genericPatterns.some((p) => p.test(memoryText))) return
-
-    // Post-LLM filter: skip near-duplicates via substring check against existing session memories
-    if (params.sessionId) {
-      const existingMemories = getMemoryRecordsForSession(params.sessionId)
-      const memLower = memoryText.toLowerCase()
-      const isDuplicate = existingMemories.some((m) => {
-        const existing = (m.content || '').toLowerCase()
-        return existing === memLower || existing.includes(memLower) || memLower.includes(existing)
-      })
-      if (isDuplicate) return
-    }
-
-    await insertMemoryRecord({
-      content: memoryText,
-      name: memoryName,
-      rawText: text,
-      sourceApp: params.appName,
-      sessionId: params.sessionId,
-      messageId: params.messageId || null
-    })
-  } catch (e) {
-    console.error('[IPC] Memory evaluation failed:', e)
-  }
-}
-
-async function extractEntitiesForSession(sessionId: string): Promise<void> {
-  const memories = getMemoryRecordsForSession(sessionId)
-  if (memories.length === 0) return
-
-  // Get strictness setting
-  const strictness = getSetting<'lenient' | 'balanced' | 'strict'>('entityStrictness', 'balanced')
-
-  const memoryText = memories.map((m) => `- ${m.content}`).join('\n')
-
-  const prompt = getPrompt(`entityExtraction.${strictness}`, { MEMORY_TEXT: memoryText })
-
-  try {
-    const { llm } = await import('./llm')
-    const response = await llm.chat(prompt)
-    const parsed = safeParseJson<{ entities: { name: string; type?: string; facts?: string[] }[] }>(
-      response,
-      { entities: [] }
-    )
-
-    if (parsed.entities.length === 0) return
-
-    for (const entity of parsed.entities) {
-      const name = (entity.name || '').trim()
-      if (!name) continue
-      const type = (entity.type || 'Unknown').trim() || 'Unknown'
-      const facts = Array.isArray(entity.facts)
-        ? entity.facts
-            .filter(Boolean)
-            .map((f) => f.trim())
-            .filter(Boolean)
-        : []
-
-      if (facts.length === 0) continue
-
-      const resolution = resolveEntityCandidate({ name, type })
-      if (!resolution.admitted) continue
-      const entityId = resolution.entityId
-      if (!entityId) continue
-      upsertEntitySession(entityId, sessionId)
-
-      const newFacts: string[] = []
-      for (const fact of facts) {
-        const inserted = addEntityFact(entityId, fact, sessionId)
-        if (inserted) newFacts.push(fact)
-      }
-
-      // Send notification about new entity with facts
-      if (newFacts.length > 0) {
-        BrowserWindow.getAllWindows().forEach((win) => {
-          win.webContents.send('notification:new-entity', {
-            entityId,
-            entityName: name,
-            entityType: type,
-            factsCount: newFacts.length
-          })
-        })
-      }
-
-      if (newFacts.length === 0) continue
-
-      const details = getEntityDetails(entityId) as { entity?: { summary?: string } } | null
-      const existingSummary = details?.entity?.summary || ''
-
-      const summaryPrompt = getPrompt('entitySummary', {
-        NAME: name,
-        TYPE: type,
-        EXISTING_SUMMARY: existingSummary || '(none)',
-        NEW_FACTS: '- ' + newFacts.join('\n- ')
-      })
-
-      try {
-        const updatedSummary = await llm.chat(summaryPrompt)
-        if (updatedSummary && updatedSummary.trim()) {
-          updateEntitySummary(entityId, updatedSummary.trim())
-        }
-      } catch (e) {
-        console.error('[IPC] Failed to update entity summary:', e)
-      }
-    }
-  } catch (e) {
-    console.error('[IPC] Entity extraction failed:', e)
-  }
-}
-
-export async function summarizeSession(sessionId: string): Promise<string | null> {
+// A legacy chat session's summary (chat_summaries, searched as 'summary' records). The legacy
+// memories and entity facts that used to be extracted alongside it are retired: nothing writes or
+// reads them, and their rows stay until the user deletes their data. Live memory is screen moments,
+// entities, to-dos, meetings and chats.
+async function summarizeSession(sessionId: string): Promise<string | null> {
   const memories = getMemoriesForSession(sessionId)
   if (memories.length === 0) return null
 
@@ -505,21 +217,6 @@ export async function summarizeSession(sessionId: string): Promise<string | null
     const { llm } = await import('./llm')
     const summary = await llm.chat(prompt, [], 120000, 2048)
     upsertChatSummary(sessionId, summary)
-
-    // Extract and update entity memory (non-blocking — don't fail the summary if these error)
-    try {
-      await extractEntitiesForSession(sessionId)
-    } catch (entityErr) {
-      console.error('[IPC] Entity extraction failed (non-fatal):', entityErr)
-    }
-
-    // Incrementally update master memory with the new summary
-    try {
-      await updateMasterMemoryIncremental(summary)
-    } catch (masterErr) {
-      console.error('[IPC] Master memory incremental update failed (non-fatal):', masterErr)
-    }
-
     return summary
   } catch (e) {
     console.error('Failed to summarize session:', e)
@@ -537,7 +234,6 @@ export function setupIPC(): void {
   ipcMain.handle('performance-pack:status', performancePackStatus)
   ipcMain.handle('performance-pack:start', startPerformancePack)
   ipcMain.handle('performance-pack:pause', pausePerformancePack)
-  ipcMain.handle('performance-pack:restart', () => requestApplicationRelaunch(app))
   // Engines published between releases install in the background unless the user turns it off.
   engineUpdater.onChanged((status) => {
     BrowserWindow.getAllWindows().forEach((window) =>
@@ -553,109 +249,13 @@ export function setupIPC(): void {
   setupAIRequestLogIPC()
   setupChatNextActionIpc()
   setupVoiceTranscriptionIpc()
-  const db = getDB()
+  getDB()
   setupTtsIpc()
   setupSystemStatusIpc(ipcMain, {
     publish: (health) =>
       BrowserWindow.getAllWindows().forEach((window) =>
         window.webContents.send('system:chat-health-changed', health)
       )
-  })
-
-  ipcMain.handle('db:get-memories', (_, limit: number = 50, appName?: string) => {
-    let query = 'SELECT * FROM memories '
-    const params: unknown[] = []
-
-    const memFilter = appNameLikeClause(appName, 'source_app')
-    if (memFilter) {
-      query += `WHERE ${memFilter.clause} `
-      params.push(memFilter.param)
-    }
-
-    query += 'ORDER BY created_at DESC LIMIT ?'
-    params.push(limit)
-
-    const stmt = db.prepare(query)
-    // SQLite stores timestamps as UTC strings "YYYY-MM-DD HH:MM:SS" by default with CURRENT_TIMESTAMP
-    // To ensure JS treats them as UTC, we might need to append 'Z' or standardise.
-    // However, simplest is to let frontend handle "UTC" assumption.
-    return stmt.all(...params)
-  })
-
-  ipcMain.handle(
-    'db:add-memory',
-    async (_, content: string, source: string = 'user-input', sessionId?: string) => {
-      // Generate embedding
-      let vectorJson = '[]'
-      try {
-        const vector = await embeddings.generateEmbedding(content)
-        vectorJson = JSON.stringify(vector)
-      } catch (e) {
-        console.error('Failed to generate embedding:', e)
-      }
-
-      // Check if we can update an existing session
-      if (sessionId) {
-        // Look for a recent memory (e.g. last 12 hours) with this session_id
-        const existing = db
-          .prepare(
-            'SELECT id FROM memories WHERE session_id = ? AND created_at > datetime("now", "-12 hours") ORDER BY id DESC LIMIT 1'
-          )
-          .get(sessionId) as { id: number } | undefined
-
-        if (existing) {
-          console.log(`Updating existing memory session ${sessionId} (ID: ${existing.id})`)
-          const stmt = db.prepare(
-            'UPDATE memories SET content = ?, embedding = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?'
-          )
-          stmt.run(content, vectorJson, existing.id)
-          return { id: existing.id, updated: true }
-        }
-      }
-
-      const stmt = db.prepare(
-        'INSERT INTO memories (content, source_app, session_id, embedding) VALUES (?, ?, ?, ?)'
-      )
-      const info = stmt.run(content, source, sessionId || null, vectorJson)
-      return { id: info.lastInsertRowid }
-    }
-  )
-
-  ipcMain.handle('db:search-memories', async (_, query: string) => {
-    try {
-      const queryVector = await embeddings.generateEmbedding(query, { interactive: true })
-      const vecStr = JSON.stringify(queryVector)
-
-      const stmt = db.prepare(`
-          SELECT *, cosine_similarity(embedding, ?) as score 
-          FROM memories 
-          WHERE embedding IS NOT NULL AND embedding != '[]'
-          ORDER BY score DESC 
-          LIMIT 20
-        `)
-      return stmt.all(vecStr)
-    } catch (e) {
-      console.error('Vector search failed, falling back to FTS', e)
-      const match = ftsMatchExpression(query)
-      if (!match) return []
-      const stmt = db.prepare(`
-          SELECT memories.* 
-          FROM memories 
-          JOIN memory_fts ON memories.id = memory_fts.rowid 
-          WHERE memory_fts MATCH ? 
-          LIMIT 20
-        `)
-      return stmt.all(match)
-    }
-  })
-
-  ipcMain.handle('db:get-stats', () => {
-    const count = db.prepare('SELECT COUNT(*) as count FROM memories').get()
-    return count
-  })
-
-  ipcMain.handle('db:get-dashboard-stats', () => {
-    return getDashboardStats()
   })
 
   ipcMain.handle('llm:extract', async (_, text: string) => {
@@ -686,405 +286,38 @@ export function setupIPC(): void {
     streamControllers.get(streamId)?.abort()
   })
 
+  // A plain on-device model turn: no memory retrieval and no routing. Memory, tools and artifacts
+  // are the chat tools loop's (tools.ts); this channel is the direct call the preset setup form
+  // uses to fill a field. The memory arguments of the old contract are accepted and ignored.
   ipcMain.handle(
     'rag:chat',
     async (
       event,
       query: string,
-      appName?: string,
+      _appName?: string,
       conversationHistory?: { role: string; content: string }[],
-      projectId?: string | null,
+      _projectId?: string | null,
       conversationId?: string,
-      noMemory?: boolean,
+      _noMemory?: boolean,
       streamId?: string,
       thinking?: boolean,
       images?: string[]
     ) => {
-      const imgs = images || []
-      // Before the classifier, so the whole turn - including its thinking - is attributable to the
-      // conversation it belongs to.
       bindChatStream(streamId, conversationId, thinking ? 'thinking' : 'waiting')
-      // Intelligence layer: a grammar-constrained classifier picks the output
-      // format (build / image / chat) and extracts URLs to read — replacing the
-      // brittle keyword gate. Skip it in project mode (that path is its own thing).
-      const { intent, urls: intentUrls } = projectId
-        ? { intent: 'chat' as const, urls: [] as string[] }
-        : await classifyIntent(query, conversationHistory, streamId)
-
-      // Image request → have the model write a vivid prompt, then the renderer
-      // generates it (it already detects an ```image block).
-      if (intent === 'image') {
-        const imgPrompt = `Write ONE vivid, detailed image-generation prompt (visual description only, no preamble) for this request:\n${query}`
-        const desc = (
-          await (
-            await import('./llm')
-          ).llm.chat(imgPrompt, [], undefined, 200, { disableThinking: true })
-        )
-          .trim()
-          .replace(/^["']|["']$/g, '')
-        return { answer: '```image\n' + (desc || query) + '\n```', context: undefined }
-      }
-
-      // Build request → artifact prompt (even in No-memory mode), with any URLs
-      // fetched for us so the small model never has to chain tools.
-      if (intent === 'build') {
-        let historyBlock = ''
-        if (conversationHistory && conversationHistory.length > 0) {
-          const historyLines = conversationHistory
-            .map(
-              (msg) =>
-                `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 400)}`
-            )
-            .join('\n')
-          historyBlock = `Conversation so far:\n${historyLines}`
-        }
-        // read_url → build: fetch the classifier's URLs (deterministic).
-        let referenceBlock = ''
-        const urls = intentUrls
-        if (urls.length) {
-          if (streamId)
-            event.sender.send('rag:stream', {
-              streamId,
-              type: 'step',
-              step: { kind: 'reading', counts: { urls: urls.length } }
-            })
-          const { readUrlText } = await import('./tools')
-          const parts: string[] = []
-          for (const u of urls) {
-            try {
-              parts.push(
-                `--- Content fetched from ${u} ---\n${clipText(await readUrlText(u), 5000)}`
-              )
-            } catch (e) {
-              parts.push(`--- Could not fetch ${u}: ${(e as Error).message} ---`)
-            }
-          }
-          referenceBlock = `REFERENCE — the user pointed you at these page(s); BUILD using this content (e.g. if it's API docs, build a UI that actually calls those endpoints):\n${parts.join('\n\n')}`
-        }
-        const prompt = [
-          'You are Off Grid AI, an on-device assistant with a LIVE, sandboxed code canvas built in.',
-          'The user wants you to BUILD something. Output the FINISHED, self-contained code as ONE fenced block — it runs immediately in the canvas beside the chat:',
-          '- React app/component -> ```jsx — write idiomatic React (you may `import React, { useState } from "react"` and `export default function App() {…}`; the sandbox handles imports/exports). Define the main component as `App` or a default export.',
-          '- a plain web page / interactive UI (no React) -> ```html — one complete document, inline all CSS and JS.',
-          '- a diagram -> ```mermaid.  a static graphic -> ```svg.',
-          'You DO have a real execution sandbox — do NOT say "since I am on-device" or "copy this into a new project", do NOT give npm/Vite/Create-React-App setup steps, and do NOT split it into src/App.js + src/App.css instructions. Just write ONE runnable code block. At most one short sentence before it.',
-          referenceBlock,
-          historyBlock,
-          `User: ${query}`,
-          'Assistant:'
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-        const completion = await streamAnswer(event, streamId, prompt, thinking, imgs)
-        return { ...completion, context: undefined }
-      }
-
-      // No-memory mode: a plain on-device assistant — no retrieval at all.
-      if (noMemory) {
-        const { llm } = await import('./llm')
-        const hist = (conversationHistory ?? [])
-          .slice(-10)
-          .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
-          .join('\n')
-        const prompt = [
-          'You are Off Grid AI, a private, on-device assistant.',
-          'You can generate images on-device. If (and only if) the user is asking for a picture/image/logo/art to be CREATED, respond with ONLY a fenced block ```image\\n<a detailed image prompt>\\n``` and nothing else. For everything else, answer normally in text.',
-          hist ? `Conversation so far:\n${hist}` : '',
-          `User: ${query}`,
-          'Assistant:'
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-        void llm // retained for non-stream fallback inside streamAnswer
-        const completion = await streamAnswer(event, streamId, prompt, thinking, imgs)
-        return { ...completion, context: undefined }
-      }
-
-      if (streamId)
-        event.sender.send('rag:stream', { streamId, type: 'step', step: { kind: 'searching' } })
-      const db = getDB()
-      // Quote each token as an FTS5 phrase (via the shared safe builder) so a hyphenated word like
-      // "best-reviewed" can't reach MATCH as invalid syntax and throw "no such column: reviewed",
-      // which failed the whole retrieval. Preserves the any-term (OR) recall the retrieval expects.
-      const ftsQuery = ftsMatchExpression(query)
-
-      let memories: Array<{
-        source_app: string | null
-        created_at: string
-        content: string
-        score?: number
-      }> = []
-      try {
-        const queryVector = await embeddings.generateEmbedding(query, { interactive: true })
-        const vecStr = JSON.stringify(queryVector)
-        const params: unknown[] = [vecStr]
-        let memoryQuery = `
-            SELECT *, cosine_similarity(embedding, ?) as score
-            FROM memories
-            WHERE embedding IS NOT NULL AND embedding != '[]'
-          `
-        const vecFilter = appNameLikeClause(appName, 'source_app')
-        if (vecFilter) {
-          memoryQuery += ` AND ${vecFilter.clause} `
-          params.push(vecFilter.param)
-        }
-        memoryQuery += ` ORDER BY score DESC LIMIT 12`
-        memories = db.prepare<unknown[], (typeof memories)[number]>(memoryQuery).all(...params)
-        memories = memories.filter((m) => typeof m.score !== 'number' || m.score >= 0.2)
-      } catch (e) {
-        console.error('[RAG] Vector search failed, falling back to FTS', e)
-        const params: unknown[] = []
-        let fallbackQuery = `
-            SELECT memories.*
-            FROM memories
-            JOIN memory_fts ON memories.id = memory_fts.rowid
-            WHERE memory_fts MATCH ?
-          `
-        params.push(ftsQuery)
-        const ftsFilter = appNameLikeClause(appName, 'memories.source_app')
-        if (ftsFilter) {
-          fallbackQuery += ` AND ${ftsFilter.clause} `
-          params.push(ftsFilter.param)
-        }
-        fallbackQuery += ` LIMIT 12`
-        memories = ftsQuery
-          ? db.prepare<unknown[], (typeof memories)[number]>(fallbackQuery).all(...params)
-          : []
-      }
-
-      const messageParams: unknown[] = [ftsQuery]
-      let messageQuery = `
-                SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, c.title, c.app_name,
-                             bm25(message_fts) as score
-                FROM message_fts
-                JOIN messages m ON message_fts.rowid = m.id
-                JOIN conversations c ON c.id = m.conversation_id
-                WHERE message_fts MATCH ?
-            `
-      const msgFilter = appNameLikeClause(appName, 'c.app_name')
-      if (msgFilter) {
-        messageQuery += ` AND ${msgFilter.clause} `
-        messageParams.push(msgFilter.param)
-      }
-      messageQuery += ` ORDER BY score ASC LIMIT 12`
-      const messages = ftsQuery
-        ? db
-            .prepare<
-              unknown[],
-              {
-                app_name: string | null
-                title: string | null
-                created_at: string
-                role: string
-                content: string
-              }
-            >(messageQuery)
-            .all(...messageParams)
-        : []
-
-      const summaryParams: unknown[] = [ftsQuery]
-      let summaryQuery = `
-                SELECT cs.session_id, cs.summary, c.title, c.app_name, c.updated_at,
-                             bm25(summary_fts) as score
-                FROM summary_fts
-                JOIN chat_summaries cs ON summary_fts.rowid = cs.rowid
-                JOIN conversations c ON c.id = cs.session_id
-                WHERE summary_fts MATCH ?
-            `
-      const sumFilter = appNameLikeClause(appName, 'c.app_name')
-      if (sumFilter) {
-        summaryQuery += ` AND ${sumFilter.clause} `
-        summaryParams.push(sumFilter.param)
-      }
-      summaryQuery += ` ORDER BY score ASC LIMIT 8`
-      const summaries = ftsQuery
-        ? db
-            .prepare<
-              unknown[],
-              { app_name: string | null; title: string | null; summary: string }
-            >(summaryQuery)
-            .all(...summaryParams)
-        : []
-
-      const entityParams: unknown[] = [ftsQuery]
-      let entityQuery = `
-                SELECT e.id, e.name, e.type, e.summary, e.updated_at,
-                             bm25(entity_fts) as score
-                FROM entity_fts
-                JOIN entities e ON entity_fts.rowid = e.id
-                WHERE entity_fts MATCH ?
-            `
-      const entFilter = appNameLikeClause(appName, 'c.app_name')
-      if (entFilter) {
-        entityQuery += `
-                        AND e.id IN (
-                            SELECT es.entity_id
-                            FROM entity_sessions es
-                            JOIN conversations c ON c.id = es.session_id
-                            WHERE ${entFilter.clause}
-                        )
-                    `
-        entityParams.push(entFilter.param)
-      }
-      entityQuery += ` ORDER BY score ASC LIMIT 8`
-      const entities = ftsQuery
-        ? db
-            .prepare<
-              unknown[],
-              { type: string | null; name: string; summary: string | null }
-            >(entityQuery)
-            .all(...entityParams)
-        : []
-
-      const factParams: unknown[] = [ftsQuery]
-      let factQuery = `
-                SELECT f.fact, f.created_at, f.source_session_id, e.name, e.type,
-                             bm25(entity_fact_fts) as score
-                FROM entity_fact_fts
-                JOIN entity_facts f ON entity_fact_fts.rowid = f.id
-                JOIN entities e ON e.id = f.entity_id
-                WHERE entity_fact_fts MATCH ?
-            `
-      const factFilter = appNameLikeClause(appName, 'app_name')
-      if (factFilter) {
-        factQuery += ` AND f.source_session_id IN (SELECT id FROM conversations WHERE ${factFilter.clause}) `
-        factParams.push(factFilter.param)
-      }
-      factQuery += ` ORDER BY score ASC LIMIT 8`
-      const entityFacts = ftsQuery
-        ? db
-            .prepare<unknown[], { type: string | null; name: string; fact: string }>(factQuery)
-            .all(...factParams)
-        : []
-
-      // Supplementary context (no bracket labels — the ONLY citeable tags are the
-      // numbered [S#] SOURCES below, so the model can't invent uncited labels).
-      const memoryLines = memories
-        .slice(0, 6)
-        .map(
-          (m) => `- (${m.source_app || 'Unknown'} | ${m.created_at}): ${clipText(m.content, 500)}`
-        )
+      const history = (conversationHistory ?? [])
+        .slice(-10)
+        .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
         .join('\n')
-
-      const messageLines = messages
-        .slice(0, 6)
-        .map(
-          (m) =>
-            `- (${m.app_name || 'Unknown'} | ${m.title || 'Untitled'} | ${m.created_at}) ${m.role}: ${clipText(m.content, 400)}`
-        )
-        .join('\n')
-
-      const summaryLines = summaries
-        .slice(0, 6)
-        .map(
-          (s) =>
-            `- (${s.app_name || 'Unknown'} | ${s.title || 'Untitled'}): ${clipText(s.summary, 600)}`
-        )
-        .join('\n')
-
-      const entityLines = entities
-        .slice(0, 6)
-        .map((e) => `- (${e.type || 'Unknown'}) ${e.name}: ${clipText(e.summary || '', 400)}`)
-        .join('\n')
-
-      const factLines = entityFacts
-        .slice(0, 6)
-        .map((f) => `- (${f.type || 'Unknown'}) ${f.name}: ${clipText(f.fact, 400)}`)
-        .join('\n')
-
-      const contextBlock = `RELEVANT MEMORIES:\n${memoryLines || '(none)'}\n\nRELEVANT MESSAGES:\n${messageLines || '(none)'}\n\nRELEVANT SUMMARIES:\n${summaryLines || '(none)'}\n\nRELEVANT ENTITIES:\n${entityLines || '(none)'}\n\nRELEVANT ENTITY FACTS:\n${factLines || '(none)'}`
-
-      // Unified search: fuse in the best-ranked hits across screens, meetings,
-      // memories, entities and facts (hybrid FTS + vectors with RRF) — the same
-      // engine as the search screen, so the chat gets the right context too.
-      let unifiedBlock = ''
-      let unifiedHits: {
-        kind: string
-        title: string
-        snippet: string
-        surface: string
-        ts: number
-        refId: number
-        imagePath: string | null
-      }[] = []
-      try {
-        const { universalSearch } = await import('./search')
-        unifiedHits = await universalSearch(query, { limit: 12, semantic: true })
-        if (unifiedHits.length) {
-          unifiedBlock =
-            '\n\nSOURCES — every factual claim must cite the source it came from using its tag in square brackets, e.g. [S2]. Cite ONLY sources you actually used; never invent a citation:\n' +
-            unifiedHits
-              .map((h, i) => {
-                const when = h.ts ? ` · ${new Date(h.ts).toISOString().slice(0, 10)}` : ''
-                return `[S${i + 1}] (${h.kind} · ${h.surface || 'unknown'}${when})${h.title ? ` ${h.title} —` : ''} ${clipText(h.snippet || '', 350)}`
-              })
-              .join('\n')
-        }
-      } catch (e) {
-        console.error('[RAG] universalSearch failed', e)
-      }
-
-      // Build conversation history block if provided
-      let historyBlock = ''
-      if (conversationHistory && conversationHistory.length > 0) {
-        const historyLines = conversationHistory
-          .map(
-            (msg) => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${clipText(msg.content, 500)}`
-          )
-          .join('\n\n')
-        historyBlock = `\nCONVERSATION HISTORY:\n${historyLines}\n`
-      }
-
-      let skillsBlock = 'None installed.'
-      try {
-        const { listSkills } = await import('./skills')
-        const sk = listSkills()
-        if (sk.length) skillsBlock = sk.map((s) => `- /${s.name}: ${s.description}`).join('\n')
-      } catch {
-        /* skills optional */
-      }
-
-      const prompt = getPrompt('ragChat', {
-        HISTORY_BLOCK: historyBlock,
-        QUERY: query,
-        CONTEXT_BLOCK: contextBlock + unifiedBlock,
-        SKILLS_BLOCK: skillsBlock
-      })
-
-      try {
-        if (streamId)
-          event.sender.send('rag:stream', {
-            streamId,
-            type: 'step',
-            step: {
-              kind: 'memory',
-              counts: {
-                memories: memories.length,
-                messages: messages.length,
-                summaries: summaries.length,
-                entities: entities.length,
-                facts: entityFacts.length,
-                unified: unifiedHits.length
-              }
-            }
-          })
-        const completion = await streamAnswer(event, streamId, prompt, thinking, imgs)
-        return {
-          ...completion,
-          context: {
-            masterMemory: null,
-            memories,
-            messages,
-            summaries,
-            entities,
-            entityFacts,
-            unified: unifiedHits
-          }
-        }
-      } catch (e) {
-        console.error('[RAG] LLM chat failed:', e)
-        throw e
-      }
+      const prompt = [
+        'You are Off Grid AI, a private, on-device assistant.',
+        history ? `Conversation so far:\n${history}` : '',
+        `User: ${query}`,
+        'Assistant:'
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+      const completion = await streamAnswer(event, streamId, prompt, thinking, images ?? [])
+      return { ...completion, context: undefined }
     }
   )
 
@@ -1095,31 +328,18 @@ export function setupIPC(): void {
     // Need to export this from database.ts first or import it
     return getMemoriesForSession(sessionId)
   })
-  ipcMain.handle('db:get-entities', (_, appName?: string) => {
-    return getEntities(appName)
-  })
-  ipcMain.handle('db:get-entity-details', (_, entityId: number, appName?: string) => {
-    return getEntityDetails(entityId, appName)
-  })
   ipcMain.handle('db:get-entities-for-session', (_, sessionId: string) => {
     return getEntitiesForSession(sessionId)
   })
-  ipcMain.handle('db:get-memory-records-for-session', (_, sessionId: string) => {
-    return getMemoryRecordsForSession(sessionId)
-  })
 
-  ipcMain.handle('db:delete-session', async (_, sessionId: string) => {
+  ipcMain.handle('db:delete-session', (_, sessionId: string) => {
     const db = getDB()
     // Delete from new tables (messages will cascade due to foreign key)
     db.prepare('DELETE FROM conversations WHERE id = ?').run(sessionId)
-    // Also delete from legacy tables for cleanup
+    // Also delete from legacy tables for cleanup (retired memories stay deletable)
     db.prepare('DELETE FROM memories WHERE session_id = ?').run(sessionId)
     db.prepare('DELETE FROM chat_summaries WHERE session_id = ?').run(sessionId)
     console.log(`Deleted session: ${sessionId}`)
-
-    // Regenerate master memory after deletion
-    await regenerateMasterMemory()
-
     return true
   })
 
@@ -1127,24 +347,10 @@ export function setupIPC(): void {
     return await summarizeSession(sessionId)
   })
 
-  ipcMain.handle('db:get-master-memory', () => {
-    return getMasterMemory()
-  })
-
   ipcMain.handle('db:delete-entity', (_, entityId: number) => {
     const result = deleteEntityById(entityId)
     console.log(`[IPC] Deleted entity ${entityId}: ${result}`)
     return result
-  })
-
-  ipcMain.handle('db:delete-memory', (_, memoryId: number) => {
-    const result = deleteMemory(memoryId)
-    console.log(`[IPC] Deleted memory ${memoryId}: ${result}`)
-    return result
-  })
-
-  ipcMain.handle('db:regenerate-master-memory', async () => {
-    return await regenerateMasterMemory()
   })
 
   // User Profile handlers
@@ -1331,13 +537,38 @@ export function setupIPC(): void {
     ;(await import('./best-settings')).markSpeedSettingsManual()
     return setResidencyMode(modality, mode)
   })
+  ipcMain.handle('runtime:backend:choices', () => backendChoicesForUi())
+  // "Try the GPU again": forget this session's demotion and restart the engine on its ladder.
+  ipcMain.handle('runtime:backend:retry', async (_e, modality: BackendModality) => {
+    const { clearDemotions, invalidateBackendFacts } = await import('./backend-facts')
+    clearDemotions(modality)
+    invalidateBackendFacts()
+    if (modality === 'llm') {
+      const { llm } = await import('./llm')
+      if (llm.shouldBeRunning()) await llm.restartSameModel()
+    } else if (modality === 'grounding') {
+      const { grounderRuntime } = await import('./vision/grounder-runtime')
+      if (grounderRuntime.shouldBeRunning()) await grounderRuntime.restart()
+    } else if (modality === 'decision') {
+      const { decisionRuntime } = await import('./accessibility/decision-runtime')
+      if (decisionRuntime.shouldBeRunning()) await decisionRuntime.restart()
+    } else if (modality === 'tts') {
+      await (await import('./tts')).ttsOnnxRuntime.restart()
+    } else if (modality === 'embeddings') {
+      await (await import('./embeddings')).embeddings.restart()
+    }
+    // Image and transcription load per job; their next job uses the restored ladder.
+  })
   ipcMain.handle('runtime:backend:get', () => getBackendPreferences())
   ipcMain.handle(
     'runtime:backend:set',
     async (_e, modality: BackendModality, preference: BackendPreference) => {
       ;(await import('./best-settings')).markSpeedSettingsManual()
       const next = setBackendPreference(modality, preference)
-      // A loaded engine keeps its present backend until its next load. The UI says so.
+      // Chat, image and the task engines take the new backend at their next load (the UI says
+      // so); voice and search helpers restart between requests onto it.
+      if (modality === 'embeddings') void (await import('./embeddings')).embeddings.restart()
+      if (modality === 'tts') void (await import('./tts')).ttsOnnxRuntime.restart()
       return next
     }
   )
@@ -1412,128 +643,6 @@ export function setupIPC(): void {
     resetPrompt(key)
     console.log(`[IPC] Prompt reset: ${key}`)
     return true
-  })
-
-  // === REPROCESS ALL SESSIONS ===
-
-  ipcMain.handle('db:reprocess-all-sessions', async (_, clean: boolean = false) => {
-    const db = getDB()
-    const sessions = db.prepare('SELECT id FROM conversations').all() as { id: string }[]
-    let processed = 0
-
-    if (clean) {
-      // Clean reprocess: delete all old data and rebuild from scratch
-      console.log('[IPC] Clean reprocess: clearing all entities, facts, edges, and memories...')
-
-      // Drop FTS AFTER DELETE triggers first — if the FTS index is out of sync
-      // with the source tables, the delete triggers will error and silently
-      // prevent rows from being deleted. We recreate them after.
-      db.exec('DROP TRIGGER IF EXISTS memories_ad')
-      db.exec('DROP TRIGGER IF EXISTS entities_ad')
-      db.exec('DROP TRIGGER IF EXISTS entity_facts_ad')
-
-      // Delete only strictness-dependent data (children first)
-      // Conversations, messages, chat_summaries, and master_memory are NOT touched
-      db.prepare('DELETE FROM entity_edges').run()
-      db.prepare('DELETE FROM entity_facts').run()
-      db.prepare('DELETE FROM entity_sessions').run()
-      db.prepare('DELETE FROM entities').run()
-      db.prepare('DELETE FROM memories').run()
-
-      // Recreate the delete triggers
-      db.exec(`CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-              INSERT INTO memory_fts(memory_fts, rowid, content) VALUES('delete', old.id, old.content);
-          END;`)
-      db.exec(`CREATE TRIGGER IF NOT EXISTS entities_ad AFTER DELETE ON entities BEGIN
-              INSERT INTO entity_fts(entity_fts, rowid, name, summary, type) VALUES('delete', old.id, old.name, old.summary, old.type);
-          END;`)
-      db.exec(`CREATE TRIGGER IF NOT EXISTS entity_facts_ad AFTER DELETE ON entity_facts BEGIN
-              INSERT INTO entity_fact_fts(entity_fact_fts, rowid, fact, entity_id) VALUES('delete', old.id, old.fact, old.entity_id);
-          END;`)
-
-      // Rebuild FTS indexes so they reflect the now-empty source tables
-      try {
-        db.exec("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
-        db.exec("INSERT INTO entity_fts(entity_fts) VALUES('rebuild')")
-        db.exec("INSERT INTO entity_fact_fts(entity_fact_fts) VALUES('rebuild')")
-      } catch (e) {
-        console.error('[IPC] FTS rebuild during clean reprocess failed (non-fatal):', e)
-      }
-
-      const deletedCounts = {
-        entities: (db.prepare('SELECT COUNT(*) as c FROM entities').get() as { c: number }).c,
-        memories: (db.prepare('SELECT COUNT(*) as c FROM memories').get() as { c: number }).c,
-        facts: (db.prepare('SELECT COUNT(*) as c FROM entity_facts').get() as { c: number }).c
-      }
-      console.log('[IPC] Post-delete counts (should all be 0):', deletedCounts)
-
-      // Notify frontend to refresh immediately after clearing
-      BrowserWindow.getAllWindows().forEach((win) => {
-        win.webContents.send('reprocess:progress', {
-          phase: 'cleared',
-          processed: 0,
-          total: sessions.length
-        })
-      })
-
-      for (const session of sessions) {
-        try {
-          // Re-evaluate memories for each message in the session
-          const msgs = db
-            .prepare(
-              'SELECT id, role, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC'
-            )
-            .all(session.id) as { id: number; role: string; content: string }[]
-          const conv = db
-            .prepare('SELECT app_name FROM conversations WHERE id = ?')
-            .get(session.id) as { app_name: string } | undefined
-          const appName = conv?.app_name || 'Unknown'
-
-          for (const msg of msgs) {
-            await evaluateAndStoreMemoryForMessage({
-              sessionId: session.id,
-              appName,
-              role: msg.role,
-              content: msg.content,
-              messageId: msg.id
-            })
-          }
-
-          // Re-extract entities from the newly created memories
-          await extractEntitiesForSession(session.id)
-          processed++
-
-          // Send progress updates
-          BrowserWindow.getAllWindows().forEach((win) => {
-            win.webContents.send('reprocess:progress', {
-              phase: 'processing',
-              processed,
-              total: sessions.length
-            })
-          })
-        } catch (e) {
-          console.error(`[IPC] Failed to reprocess session ${session.id}:`, e)
-        }
-      }
-    } else {
-      // Additive reprocess: keep existing data, just re-run entity extraction on top
-      console.log(
-        '[IPC] Additive reprocess: re-extracting entities with current settings (keeping existing data)...'
-      )
-      for (const session of sessions) {
-        try {
-          await extractEntitiesForSession(session.id)
-          processed++
-        } catch (e) {
-          console.error(`[IPC] Failed to reprocess session ${session.id}:`, e)
-        }
-      }
-    }
-
-    console.log(
-      `[IPC] Reprocessed ${processed} sessions (clean=${clean}) with current strictness settings`
-    )
-    return { processed, total: sessions.length }
   })
 
   // === MODEL DOWNLOAD HANDLERS ===
@@ -1837,7 +946,7 @@ export function setupIPC(): void {
       m.removeModelScanFolder(app.getPath('userData'), directory)
     )
     BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('models:inventory-changed'))
-      settingsChanged()
+    settingsChanged()
     return folders
   })
   ipcMain.handle('models:delete-orphans', () =>
@@ -2140,8 +1249,9 @@ export function setupIPC(): void {
       // Non-stream fallback (no streamId): buffer, no live deltas (matches streamAnswer).
       if (!streamId) {
         return modalityQueue.run(CHAT_JOB, async () => {
-          const { result, modelName } = await runChatWithFallback((attempt) =>
-            toolChat(query, history || [], { ...(opts || {}), ...attempt })
+          const { result, modelName } = await runChatWithFallback(
+            (attempt) => toolChat(query, history || [], { ...(opts || {}), ...attempt }),
+            deviceFallbackNotices(sender, streamId)
           )
           return modelName ? { ...result, metrics: { ...result.metrics, modelName } } : result
         })
@@ -2216,6 +1326,7 @@ export function setupIPC(): void {
             {
               signal: controller.signal,
               canRetry: () => !toolStarted,
+              ...deviceFallbackNotices(sender, streamId),
               onModelChanged: (failed, next) => {
                 resetChatStreamPartial(streamId)
                 try {
@@ -2334,7 +1445,10 @@ export function setupIPC(): void {
     const path = await import('path')
     if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Invalid file.')
     const { processUploadPath } = await import('./files')
-    return processUploadPath(filePath, typeof name === 'string' && name ? name : path.basename(filePath))
+    return processUploadPath(
+      filePath,
+      typeof name === 'string' && name ? name : path.basename(filePath)
+    )
   })
 
   // --- Documents in a chat: what the conversation holds, and which ones answers may use ---

@@ -1,3 +1,4 @@
+import { nativeBinaryInstalled } from '../backend-facts'
 // WhisperCliTranscription — the only TranscriptionService implementation today.
 // Wraps the bundled whisper-cli + ffmpeg. The binary/model resolvers live here
 // (extractors.ts re-exports them for back-compat) so model selection and the
@@ -19,15 +20,14 @@ import type { TranscriptionService, Transcript, TranscribeOptions, Seg } from '.
 import { runNativeTranscriptionProcess } from './native-process'
 import { HINDI_SCRIPT_RECOVERY_MESSAGE } from '../../shared/transcription-recovery'
 import { findWhisperBinary, findWhisperBinaries, whisperRuntimeLibraryEnv } from './whisper-runtime'
-import { getBackendPreference } from '../backend-preferences'
 
 const HINDI_DEVANAGARI_PROMPT = 'यह ऑडियो हिंदी में है। हिंदी को केवल देवनागरी लिपि में लिखें।'
 
 /** Resolve the bundled whisper-cli across dev / packaged layouts. System Health
  * reuses this exact runtime resolver so its Installed claim cannot drift from
  * the executable the transcription service will actually launch. */
-export function whisperBin(): string | null {
-  return findWhisperBinary('whisper-cli', getBackendPreference('stt'))
+export function whisperBin(): Promise<string | null> {
+  return findWhisperBinary('whisper-cli')
 }
 
 /** Resolve ffmpeg: bundled first, then common system locations. */
@@ -80,7 +80,7 @@ function sizeRank(f: string): number {
 /** A Hindi transcription should contain Devanagari when it contains Hindi text. A small
  * multilingual Whisper model can occasionally return Latin or Perso-Arabic text even with
  * `-l hi`; that is a model-quality miss, not a request to translate the recording. */
-export function hindiTranscriptNeedsQualityRetry(text: string, language: string): boolean {
+function hindiTranscriptNeedsQualityRetry(text: string, language: string): boolean {
   if (language !== 'hi' || !text.trim()) return false
   return !/\p{Script=Devanagari}/u.test(text)
 }
@@ -88,7 +88,7 @@ export function hindiTranscriptNeedsQualityRetry(text: string, language: string)
 /** Pick a stronger downloaded multilingual Whisper model for one quality retry. English-only
  * `.en` models cannot correct a Hindi script miss. The active model still runs first; this only
  * returns a model whose catalog-size rank is higher than the one that produced the bad result. */
-export function strongerMultilingualWhisperModel(
+function strongerMultilingualWhisperModel(
   currentModel: string,
   files: readonly string[],
   dir: string
@@ -97,13 +97,17 @@ export function strongerMultilingualWhisperModel(
   const candidate = files
     .filter((file) => !/\.en\.bin$/i.test(file) && sizeRank(file) > currentRank)
     .sort((a, b) => sizeRank(b) - sizeRank(a))[0]
-  return candidate ? (resolveModelAsset(candidate, [dir]) ?? resolveModelAsset(candidate) ?? path.join(dir, candidate)) : null
+  return candidate
+    ? (resolveModelAsset(candidate, [dir]) ??
+        resolveModelAsset(candidate) ??
+        path.join(dir, candidate))
+    : null
 }
 
 /** Run the selected model first, then make one quality retry when Hindi text has the wrong
  * script and a stronger multilingual model is already on the device. `run` is the native-process
  * boundary, which keeps the decision deterministic and testable without replacing Off Grid code. */
-export async function transcribeWithHindiQualityRetry({
+async function transcribeWithHindiQualityRetry({
   language,
   model,
   modelFiles,
@@ -188,7 +192,7 @@ class WhisperCliTranscription implements TranscriptionService {
     // pre-converted 16 kHz WAV (alreadyWav16k:true) succeeds without it. Report
     // available if whisper + a model are present — the transcribe() call validates
     // ffmpeg at that point when it's actually needed.
-    return !!whisperBin() && !!whisperModel()
+    return nativeBinaryInstalled('stt', 'whisper-cli') && !!whisperModel()
   }
 
   async transcribe(input: { path: string }, opts: TranscribeOptions = {}): Promise<Transcript> {
@@ -201,8 +205,9 @@ class WhisperCliTranscription implements TranscriptionService {
       },
       async (log) => {
         await log.inputFile(input.path)
-        const binaries = findWhisperBinaries('whisper-cli', getBackendPreference('stt'))
-        if (binaries.length === 0) throw new Error('Transcription runtime (whisper) is not installed.')
+        const binaries = await findWhisperBinaries('whisper-cli')
+        if (binaries.length === 0)
+          throw new Error('Transcription runtime (whisper) is not installed.')
         const model = resolveModel(opts.model)
         log.update({ model: model ?? undefined, backend: 'Unknown' })
         if (!model)
@@ -254,18 +259,21 @@ class WhisperCliTranscription implements TranscriptionService {
               const runArgs = [...args]
               runArgs[1] = modelPath
               let lastError: unknown
-              for (const [index, binary] of binaries.entries()) {
+              for (const [index, step] of binaries.entries()) {
+                const binary = step.path
+                const attemptArgs =
+                  step.cpuOnly && step.backend !== 'cpu' ? [...runArgs, '-ng'] : runArgs
                 try {
                   const result = await recordAIRequest(
                     {
                       modality: 'stt',
                       source: 'Whisper attempt',
                       model: modelPath,
-                      request: { args: runArgs, binary },
+                      request: { args: attemptArgs, binary },
                       signal: opts.signal
                     },
                     async () =>
-                      runNativeTranscriptionProcess(binary, runArgs, {
+                      runNativeTranscriptionProcess(binary, attemptArgs, {
                         runtimeModel: modelPath,
                         maxBuffer: 64 * 1024 * 1024,
                         timeout: 30 * 60_000,
@@ -280,7 +288,10 @@ class WhisperCliTranscription implements TranscriptionService {
                 } catch (error) {
                   lastError = error
                   if (opts.signal?.aborted || index === binaries.length - 1) throw error
-                  console.warn(`[transcription] Whisper runtime failed; retrying ${binaries[index + 1]}`, error)
+                  console.warn(
+                    `[transcription] Whisper runtime failed; retrying ${binaries[index + 1]}`,
+                    error
+                  )
                 }
               }
               throw lastError

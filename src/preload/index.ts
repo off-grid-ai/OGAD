@@ -218,13 +218,6 @@ const offGridApi = {
   getMediaUrl: (absPath: string) => ipcRenderer.invoke('media:url', absPath),
   // Clipboard manager is a Pro feature: its renderer reaches IPC through the
   // generic proInvoke / proOn passthrough above (no dedicated namespace here).
-  getMemories: (limit: number, appName?: string) =>
-    ipcRenderer.invoke('db:get-memories', limit, appName),
-  addMemory: (content: string, source?: string) =>
-    ipcRenderer.invoke('db:add-memory', content, source),
-  searchMemories: (query: string) => ipcRenderer.invoke('db:search-memories', query),
-  getStats: () => ipcRenderer.invoke('db:get-stats'),
-  getDashboardStats: () => ipcRenderer.invoke('db:get-dashboard-stats'),
   extractMemory: (text: string) => ipcRenderer.invoke('llm:extract', text),
 
   // Chat Summaries
@@ -233,14 +226,8 @@ const offGridApi = {
     ipcRenderer.invoke('db:get-memories-for-session', sessionId),
   getEntitiesForSession: (sessionId: string) =>
     ipcRenderer.invoke('db:get-entities-for-session', sessionId),
-  getMemoryRecordsForSession: (sessionId: string) =>
-    ipcRenderer.invoke('db:get-memory-records-for-session', sessionId),
   summarizeSession: (sessionId: string) => ipcRenderer.invoke('llm:summarize-session', sessionId),
   deleteSession: (sessionId: string) => ipcRenderer.invoke('db:delete-session', sessionId),
-
-  // Master Memory
-  getMasterMemory: () => ipcRenderer.invoke('db:get-master-memory'),
-  regenerateMasterMemory: () => ipcRenderer.invoke('db:regenerate-master-memory'),
 
   // RAG Chat - updated to support conversation history + live streaming
   ragChat: (
@@ -352,11 +339,7 @@ const offGridApi = {
   deleteRagConversation: (id: string) => ipcRenderer.invoke('rag:delete-conversation', id),
 
   // Entities
-  getEntities: (appName?: string) => ipcRenderer.invoke('db:get-entities', appName),
-  getEntityDetails: (entityId: number, appName?: string) =>
-    ipcRenderer.invoke('db:get-entity-details', entityId, appName),
   deleteEntity: (entityId: number) => ipcRenderer.invoke('db:delete-entity', entityId),
-  deleteMemory: (memoryId: number) => ipcRenderer.invoke('db:delete-memory', memoryId),
 
   // User Profile
   getUserProfile: () => ipcRenderer.invoke('db:get-user-profile'),
@@ -394,31 +377,11 @@ const offGridApi = {
   consoleStatus: () => ipcRenderer.invoke('console:status'),
   consoleSyncNow: () => ipcRenderer.invoke('console:sync-now'),
   consoleDisconnect: () => ipcRenderer.invoke('console:disconnect'),
-  reprocessAllSessions: (clean?: boolean) =>
-    ipcRenderer.invoke('db:reprocess-all-sessions', clean ?? false),
-
-  // Master Memory Progress
-  onMasterMemoryProgress: (callback: (data: { current: number; total: number }) => void) => {
-    const subscription = (_event: unknown, data: { current: number; total: number }): void =>
-      callback(data)
-    ipcRenderer.on('master-memory:progress', subscription)
-    return unsubscribe('master-memory:progress', subscription)
-  },
 
   // Prompts
   getPrompts: () => ipcRenderer.invoke('prompts:get-all'),
   savePrompt: (key: string, value: string) => ipcRenderer.invoke('prompts:save', key, value),
   resetPrompt: (key: string) => ipcRenderer.invoke('prompts:reset', key),
-  onReprocessProgress: (
-    callback: (data: { phase: string; processed: number; total: number }) => void
-  ) => {
-    const subscription = (
-      _event: unknown,
-      data: { phase: string; processed: number; total: number }
-    ): void => callback(data)
-    ipcRenderer.on('reprocess:progress', subscription)
-    return unsubscribe('reprocess:progress', subscription)
-  },
 
   // Auto-update — fired when a new version finished downloading and is staged.
   // installUpdate() forces the quit+swap (Squirrel only applies on a graceful
@@ -435,6 +398,11 @@ const offGridApi = {
   residencyGet: () => ipcRenderer.invoke('runtime:residency:get'),
   residencySet: (modality: string, mode: string) =>
     ipcRenderer.invoke('runtime:residency:set', modality, mode),
+  backendChoices: (): Promise<
+    Record<import('@offgrid/models').BackendModality, import('@offgrid/models').BackendChoice[]>
+  > => ipcRenderer.invoke('runtime:backend:choices'),
+  backendRetry: (modality: string): Promise<void> =>
+    ipcRenderer.invoke('runtime:backend:retry', modality),
   backendPreferencesGet: () => ipcRenderer.invoke('runtime:backend:get'),
   backendPreferenceSet: (modality: string, preference: string) =>
     ipcRenderer.invoke('runtime:backend:set', modality, preference),
@@ -627,7 +595,6 @@ const offGridApi = {
     status: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:status'),
     start: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:start'),
     pause: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:pause'),
-    restart: (): Promise<void> => ipcRenderer.invoke('performance-pack:restart'),
     onChanged: (callback: (status: PerformancePackStatus) => void): (() => void) => {
       const subscription = (_event: unknown, status: PerformancePackStatus): void =>
         callback(status)
@@ -737,7 +704,7 @@ const offGridApi = {
     systemPrompt?: string
     kvCacheType?: 'f16' | 'q8_0' | 'q4_0'
     flashAttn?: boolean
-    gpuLayers?: number
+    gpuLayers?: number | null
     threads?: number
     batchSize?: number
     speculativeDecoding?: 'off' | 'ngram' | 'mtp' | 'draft' | 'dflash'
@@ -853,6 +820,7 @@ const offGridApi = {
 
   // --- Voice output (text-to-speech via Kokoro) ---
   ttsVoices: () => ipcRenderer.invoke('tts:voices'),
+  parakeetAvailable: (): Promise<boolean> => ipcRenderer.invoke('transcription:parakeet-available'),
   prepareTtsVoice: (voice: string) => ipcRenderer.invoke('tts:prepare-voice', voice),
   onTtsVoiceProgress: (
     callback: (data: {
@@ -1000,8 +968,6 @@ const offGridApi = {
     ipcRenderer.invoke('crm:entity-record', entityId, opts),
   crmObservationFrames: (observationId: number) =>
     ipcRenderer.invoke('crm:observation-frames', observationId),
-  crmSearch: (query: string, entityId?: number) =>
-    ipcRenderer.invoke('crm:search', query, entityId),
   searchFacets: (query: string) => ipcRenderer.invoke('search:facets', query),
   universalSearch: (
     query: string,

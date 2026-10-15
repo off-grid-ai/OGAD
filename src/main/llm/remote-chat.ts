@@ -181,7 +181,7 @@ interface RemoteErrorBody {
 
 /** Keep remote transport errors useful without exposing the endpoint, headers,
  * API key, or request body. */
-export function remoteTextModelTransportError(error: unknown): Error {
+function remoteTextModelTransportError(error: unknown): Error {
   if (!(error instanceof Error)) return new Error('Remote text model request failed.')
   const cause = error.cause
   if (!cause || typeof cause !== 'object') {

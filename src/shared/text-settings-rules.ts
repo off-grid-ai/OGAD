@@ -21,7 +21,7 @@ export interface TextRuleSettings {
 
 /** The ceiling on thinking: the response length it must fit inside, which for an auto output cap
  *  is the context window. Mirrors reconcileBudgets so the options offered match what is kept. */
-export function thinkingCeiling(s: TextRuleSettings): number {
+function thinkingCeiling(s: TextRuleSettings): number {
   const maxOutput = s.maxTokens ?? MAX_OUTPUT_AUTO
   const ctx = s.ctxSize ?? DEFAULT_CTX_SIZE
   return maxOutput === MAX_OUTPUT_AUTO ? ctx : maxOutput

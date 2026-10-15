@@ -16,7 +16,7 @@ import { binRoots } from '../runtime-env'
 import { modelReadDirectories } from '../model-paths'
 import { getActiveModal } from '../active-models'
 import { ffmpegBin } from './whisper-cli'
-import { existing } from './bin-resolution'
+import { parakeetBinary } from '../runtime-availability'
 import { modelsByEngine } from './classify'
 import { decodeToWavArgs, DECODE_TIMEOUT_MS } from './ffmpeg-decode'
 import type { TranscriptionService, Transcript, TranscribeOptions } from './types'
@@ -26,10 +26,7 @@ import { runNativeTranscriptionProcess } from './native-process'
  *  stager preserves the prebuilt's bin/ + lib/ structure (so its @rpath finds the
  *  dylibs), hence bin/sherpa-onnx-offline; the flat path is a fallback. */
 function parakeetBin(): string | null {
-  return existing([
-    ...binRoots().map((r) => path.join(r, 'parakeet', 'bin', 'sherpa-onnx-offline')),
-    ...binRoots().map((r) => path.join(r, 'parakeet', 'sherpa-onnx-offline'))
-  ])
+  return parakeetBinary()
 }
 
 /** The four files a sherpa-onnx offline transducer needs (bundled-default names). */

@@ -25,7 +25,7 @@ import {
 import { taskDisplayTitle } from '../../shared/task-display-title'
 
 export type TaskRunKind = AutomationTaskKind
-export type TaskRunStatus = AutomationTaskReadStatus
+type TaskRunStatus = AutomationTaskReadStatus
 
 export interface TaskRunSnapshot {
   taskId: string

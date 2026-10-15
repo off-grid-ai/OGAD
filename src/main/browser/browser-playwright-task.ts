@@ -149,7 +149,12 @@ async function runSemanticLoop(
         : 'The page did not expose usable semantic controls.'
     )
   }
-  await publishObservation(input, { step: 0, phase: 'observing', summary: 'Initial page' })
+  await publishObservation(input, {
+    step: 0,
+    phase: 'observing',
+    summary: 'Initial page',
+    screenshot: observation.screenshot
+  })
 
   const state: SemanticLoopState = {
     observation,
@@ -205,6 +210,9 @@ async function runSemanticStep(
   input.signal?.throwIfAborted()
   await input.guard.waitUntilRunnable(input.signal)
   if (input.guard.isHalted) input.signal?.throwIfAborted()
+  if (input.guard.snapshot().observationRequired) {
+    state.observation = await observeWithCurrentLease(input)
+  }
   input.onProgress(step, 'thinking', 'Deciding the next step')
   const modelLease = input.guard.currentActionLease()
   let decision: SemanticDecision
@@ -213,6 +221,7 @@ async function runSemanticStep(
       goal: input.goal,
       plan: input.plan,
       snapshot: state.observation.text,
+      image: state.observation.screenshot?.image,
       step,
       maxSteps: MAX_STEPS,
       recoveryNote: state.recoveryNote,
@@ -354,7 +363,12 @@ async function terminalDecision(
       input.onStep(`verification failed: ${failure}`)
       return { ok: false, fallback: false, summary: failure, handoffs: state.handoffs }
     }
-    await publishObservation(input, { step, phase: 'complete', summary })
+    await publishObservation(input, {
+      step,
+      phase: 'complete',
+      summary,
+      screenshot: verification.screenshot
+    })
     if (!input.guard.complete()) return undefined
     input.onStep(`verified: ${summary}`)
     return { ok: true, fallback: false, summary, handoffs: state.handoffs }
@@ -379,7 +393,8 @@ async function performHumanHandoff(
   await publishObservation(input, {
     step,
     phase: 'waiting',
-    summary: 'Continued after user input'
+    summary: 'Continued after user input',
+    screenshot: state.observation.screenshot
   })
   state.lastFingerprint = fingerprint(state.observation.text)
   state.lastActionKey = ''
@@ -468,7 +483,12 @@ async function performSemanticAction(
   const recovery = await recoverObservationError(input, state)
   if (recovery === 'recovered') return undefined
   if (recovery) return recovery
-  await publishObservation(input, { step, phase: 'checking', summary: actionLabel(decision) })
+  await publishObservation(input, {
+    step,
+    phase: 'checking',
+    summary: actionLabel(decision),
+    screenshot: state.observation.screenshot
+  })
   updateProgressEvidence(context, { decision, actionKey, before })
   remember(
     state,
@@ -498,7 +518,12 @@ async function handleUncertainAction(
       `The page could not be checked after an uncertain action: ${compact(state.observation.text)}`
     )
   }
-  await publishObservation(input, { step, phase: 'checking', summary: UNCERTAIN_ACTION_NOTE })
+  await publishObservation(input, {
+    step,
+    phase: 'checking',
+    summary: UNCERTAIN_ACTION_NOTE,
+    screenshot: state.observation.screenshot
+  })
   if (state.uncertainCount >= 2) {
     await performHumanHandoff(
       context,

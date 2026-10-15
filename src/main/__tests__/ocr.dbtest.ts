@@ -8,7 +8,7 @@ vi.mock('electron', () => ({
   app: { isPackaged: false, getAppPath: () => '/app' }
 }))
 
-import { runBoxedOCR, runOCR } from '../ocr'
+import { runBoxedOCR } from '../ocr'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -22,7 +22,6 @@ describe('OCR helper boundary', () => {
       available: false,
       degradedReason: 'ocr_helper_missing'
     })
-    await expect(runOCR('/tmp/frame.png')).resolves.toBe('')
     expect(mocks.exec).not.toHaveBeenCalled()
   })
 
@@ -58,12 +57,7 @@ describe('OCR helper boundary', () => {
     })
   })
 
-  it('returns trimmed text and degrades cleanly after process failures', async () => {
-    mocks.exec.mockImplementationOnce((_bin, _args, _options, callback) =>
-      callback(null, { stdout: '  visible text \n', stderr: '' })
-    )
-    await expect(runOCR('/tmp/frame.png')).resolves.toBe('visible text')
-
+  it('degrades cleanly after process failures', async () => {
     mocks.exec.mockImplementationOnce((_bin, _args, _options, callback) =>
       callback(new Error('helper stopped'))
     )

@@ -68,7 +68,10 @@ export function commitApplicationRelaunch(source: ApplicationRelaunchSource): vo
   if (!pendingRelaunch) return
   const { options } = pendingRelaunch
   pendingRelaunch = null
-  source.relaunch(options)
+  // An AppImage runs from a temporary mount that is gone once this process exits: relaunch the
+  // AppImage file itself.
+  const appImage = process.env.APPIMAGE
+  source.relaunch(appImage ? { ...options, execPath: appImage } : options)
 }
 
 export interface ShutdownFailure {

@@ -12,7 +12,7 @@ import type {
 type Role = ComputerUseActiveModel['role']
 
 /** What each role does, said the same everywhere. */
-export const TASK_ROLE_LABELS: Record<Role, { label: string; does: string }> = {
+const TASK_ROLE_LABELS: Record<Role, { label: string; does: string }> = {
   reasoner: { label: 'Reasoner', does: 'Plans the steps and writes text' },
   decision: { label: 'Decision model', does: 'Picks each next action' },
   grounding_specialist: { label: 'Grounding specialist', does: 'Finds what to click on screen' }
@@ -27,7 +27,7 @@ export interface TaskRoleSlot {
   readonly remote: boolean
 }
 
-export interface TaskLineup {
+interface TaskLineup {
   readonly task: 'computer_use' | 'web_use'
   readonly taskLabel: string
   readonly strategyLabel: string

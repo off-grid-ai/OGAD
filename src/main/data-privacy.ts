@@ -7,7 +7,7 @@ import path from 'path'
 import { app } from 'electron'
 import { getDB } from './database'
 import { ATTACHED_DOCUMENT_TABLES } from './documents/sqlite-store'
-import { deleteByKinds, deleteByKindsOlderThan, resetVectors } from './vectors'
+import { releaseRecordIndex } from './records/store'
 
 export interface DataCategory {
   id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
@@ -123,9 +123,10 @@ const CHAT_TABLES = [
   'rag_conversations',
   'rag_messages',
   'chat_summaries',
-  // Documents attached to chats: their text, passages, vectors and per-chat exclusions.
-  ...ATTACHED_DOCUMENT_TABLES
+  'conversation_document_exclusions'
 ]
+// memories, master_memory and entity_facts are retired (nothing writes or reads them); they stay
+// here so the rows a profile already has are still deleted with the rest.
 const MEMORY_TABLES = [
   'memories',
   'master_memory',
@@ -134,6 +135,31 @@ const MEMORY_TABLES = [
   'entity_facts',
   'entity_sessions'
 ]
+
+/** Who keeps documents outside chats (a meeting its transcript, a long dictation its text): the
+ *  owner prefix (`meeting` for "meeting:12") and the table its id lives in. Registered by the
+ *  owning feature, so core never names its tables. */
+const keptDocumentOwners = new Map<string, string>()
+
+export function registerKeptDocumentOwner(prefix: string, table: string): void {
+  keptDocumentOwners.set(prefix, table)
+}
+
+/**
+ * After rows were deleted by a category clear or retention: owners that are gone keep nothing,
+ * and every document nothing else uses (no chat, knowledge base or remaining owner) is deleted.
+ * Throws when a document cannot be deleted.
+ */
+async function forgetDocumentsOfDeletedOwners(): Promise<void> {
+  if (!keptDocumentOwners.size) return
+  const { releaseDocumentsOfDeletedOwners, removeUnreferencedDocuments } = await import(
+    './documents'
+  )
+  let released = 0
+  for (const [prefix, table] of keptDocumentOwners)
+    released += releaseDocumentsOfDeletedOwners(prefix, table)
+  if (released) await removeUnreferencedDocuments()
+}
 
 // The SINGLE source of truth for a FULL erase ("Delete all my data"): every store
 // that holds personal data. deleteAllData iterates this — so a new personal table
@@ -152,11 +178,17 @@ interface PersonalStore {
 }
 const CORE_PERSONAL: PersonalStore[] = [
   { tables: CHAT_TABLES, dirs: ['uploads'] },
+  // Every indexed document (chat attachments, knowledge-base files, meeting transcripts, long
+  // dictations) and which owner keeps which.
+  { tables: ATTACHED_DOCUMENT_TABLES, dirs: [] },
   { tables: MEMORY_TABLES, dirs: ['entity-photos'] },
   // Project metadata + knowledge base. Children precede parents so deletion also
   // works when SQLite foreign-key enforcement is enabled.
   { tables: ['rag_documents', 'projects'], dirs: [] },
   { tables: ['connectors', 'secrets'], dirs: [] }, // MCP integrations + their OAuth tokens (must not survive a wipe)
+  // Memory-search vectors and the queue of records waiting to be embedded. The in-memory index
+  // built from them is dropped first.
+  { tables: ['record_vectors', 'record_queue'], dirs: [], beforeDelete: releaseRecordIndex },
   { tables: ['user_profile'], dirs: [] },
   { tables: [], dirs: ['captures'] },
   { tables: [], dirs: ['meetings'] },
@@ -336,43 +368,29 @@ export async function clearCategory(
   try {
     return await withDeletionGuards({ scope: id, olderThanDays }, async () => {
       switch (id) {
-        case 'chats':
+        case 'chats': {
           clearTables(...CHAT_TABLES)
           clearDirs(ud('uploads'))
+          // The documents attached to those chats go with them; a knowledge base's files and the
+          // transcripts a meeting or dictation keeps stay.
+          const { removeUnreferencedDocuments } = await import('./documents')
+          await removeUnreferencedDocuments()
           break
+        }
         case 'memories':
+          // Each row's delete trigger removes its record vector in the same statement.
           clearTables(...MEMORY_TABLES)
           clearDirs(ud('entity-photos'))
-          // Delete ONLY the memory-side vectors (not the shared lancedb dir — that
-          // would wipe capture/meeting/chat vectors and dangle the live handle).
-          await deleteByKinds(['memory', 'entity', 'fact'])
           break
         case 'captures':
-          if (olderThanDays && olderThanDays > 0) {
-            clearDirsOlderThan(olderThanDays, ud('captures'))
-            await deleteByKindsOlderThan(['screen'], Date.now() - olderThanDays * 86_400_000) // prune stale capture vectors too
-          } else {
-            clearDirs(ud('captures'))
-            await deleteByKinds(['screen']) // full clear → drop capture vectors too
-            // Registered cleaners below remove the semantic source rows. Drop their indexing
-            // receipts here as well so a future capture can never inherit a stale marker.
-            try {
-              getDB()
-                .prepare("DELETE FROM vec_indexed WHERE key LIKE 'obs:%' OR key LIKE 'frame:%'")
-                .run()
-            } catch {
-              /* search index has not been initialized */
-            }
-          }
+          // Registered cleaners below remove the capture rows; their delete triggers remove the
+          // record vectors and full-text entries with them.
+          if (olderThanDays && olderThanDays > 0) clearDirsOlderThan(olderThanDays, ud('captures'))
+          else clearDirs(ud('captures'))
           break
         case 'meetings':
-          if (olderThanDays && olderThanDays > 0) {
-            clearDirsOlderThan(olderThanDays, ud('meetings'))
-            await deleteByKindsOlderThan(['meeting'], Date.now() - olderThanDays * 86_400_000) // prune stale meeting vectors too
-          } else {
-            clearDirs(ud('meetings'))
-            await deleteByKinds(['meeting']) // full clear → drop meeting vectors too
-          }
+          if (olderThanDays && olderThanDays > 0) clearDirsOlderThan(olderThanDays, ud('meetings'))
+          else clearDirs(ud('meetings'))
           pruneDanglingMeetings() // drop rows whose media we just deleted (no ghosts)
           break
         case 'images':
@@ -382,6 +400,10 @@ export async function clearCategory(
       for (const cleaner of categoryCleaners.get(id)?.values() ?? []) {
         await cleaner({ olderThanDays })
       }
+      // A meeting or recording deleted above (in full or by age) no longer keeps its transcript.
+      await forgetDocumentsOfDeletedOwners()
+      // Vectors of deleted rows went with them (delete triggers); the in-memory copy goes too.
+      releaseRecordIndex()
       return { success: true }
     })
   } catch (e) {
@@ -400,9 +422,8 @@ export async function deleteAllData(): Promise<{ success: boolean }> {
     return await withDeletionGuards({ scope: 'all' }, () => {
       for (const store of personalStores) store.beforeDelete?.()
       clearTables(...personalStores.flatMap((s) => s.tables ?? []))
-      clearDirs(...personalStores.flatMap((s) => s.dirs ?? []).map((d) => ud(d)), ud('lancedb'))
+      clearDirs(...personalStores.flatMap((s) => s.dirs ?? []).map((d) => ud(d)))
       clearFiles(...personalStores.flatMap((s) => s.files ?? []).map((file) => ud(file)))
-      resetVectors() // the lancedb dir is gone — drop cached handles so it reopens clean
       pruneDanglingMeetings() // media is gone now → drop all meeting rows (no ghosts)
       return { success: true }
     })

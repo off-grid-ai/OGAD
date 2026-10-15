@@ -9,9 +9,6 @@
 
 export type EngineAccelerator = 'Metal' | 'CUDA' | 'Vulkan' | 'CPU'
 
-/** Directory holding the standard CPU-only engine. Must match the fetch/stage destination. */
-export const CPU_ENGINE_DIR = 'llama-cpu'
-
 export interface EngineAcceleratorInput {
   /** Target platform. Injected, never read from `process` here. */
   platform: NodeJS.Platform
@@ -49,5 +46,5 @@ export function gpuLayersHint(accelerator: EngineAccelerator | null): string {
     return 'This engine runs on the CPU, so this setting changes nothing.'
   }
   const api = accelerator ? ` (${accelerator})` : ''
-  return `Layers offloaded to the GPU${api}. 99 = all. Lower only if you hit GPU-memory issues.`
+  return `Auto places as many layers on the GPU${api} as fit. Set a number only to cap GPU memory.`
 }

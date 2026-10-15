@@ -36,7 +36,7 @@ interface FakeTurn {
   requirePriorReasoningDetails?: boolean
   /** Tool calls emitted on this turn (the agentic loop then runs them and calls back). */
   toolCalls?: FakeToolCall[]
-  /** Force a non-200 to exercise the error path (body is surfaced by describeServerError). */
+  /** Force a non-200 to exercise the error path (body is surfaced by serverResponseError). */
   errorStatus?: number
   errorBody?: string
   /** Delay the native-engine response after the request is admitted. Lifecycle tests use

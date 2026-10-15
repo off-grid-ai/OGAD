@@ -5,7 +5,7 @@ export interface ActionApprovalRequestView {
   risk: string
 }
 
-export interface ActionApprovalDetail {
+interface ActionApprovalDetail {
   key: string
   label: string
   value: string
@@ -72,7 +72,7 @@ function normalizedPhrase(value: string): string {
     .trim()
 }
 
-export function isApprovalChatter(value: unknown): boolean {
+function isApprovalChatter(value: unknown): boolean {
   return typeof value === 'string' && APPROVAL_CHATTER.has(normalizedPhrase(value))
 }
 

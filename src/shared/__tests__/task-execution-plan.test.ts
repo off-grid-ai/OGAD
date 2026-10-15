@@ -41,6 +41,31 @@ describe('task execution plan', () => {
     ).toBe(1)
   })
 
+  it('preserves a sixteen-phase plan and restores progress through its final phase', () => {
+    const plan = normalizeTaskExecutionPlan({
+      phases: Array.from({ length: 16 }, (_, index) => ({
+        title: `Set form field ${index + 1}`,
+        operation: { kind: 'type', target: `Field ${index + 1}`, value: 'Example' }
+      }))
+    })!
+    expect(plan.phases).toHaveLength(16)
+    expect(decodeTaskExecutionPlan(encodeTaskExecutionPlan(plan))).toEqual(plan)
+    expect(taskExecutionPlanProgress(encodeTaskExecutionPlanProgress(plan, 15))).toEqual({
+      plan,
+      activePhaseIndex: 15
+    })
+    expect(
+      taskExecutionPlanProgress([
+        ...encodeTaskExecutionPlanProgress(plan, 15),
+        encodeTaskPhaseResume('phase-10')
+      ])
+    ).toEqual({ plan, activePhaseIndex: 9 })
+    for (const id of ['phase-0', 'phase-01', 'phase-17']) {
+      expect(decodeTaskPhase(encodeTaskPhase(id))).toBeNull()
+      expect(decodeTaskPhaseResume(encodeTaskPhaseResume(id))).toBeNull()
+    }
+  })
+
   it('provides computer-use phases without web-only copy', () => {
     const plan = fallbackTaskExecutionPlan('Messages', 'computer')
     expect(plan.phases.map((phase) => phase.title)).toEqual([

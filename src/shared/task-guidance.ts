@@ -5,7 +5,7 @@ export const TASK_GUIDE_MAX_TOTAL_ATTACHMENT_BYTES = 12 * 1024 * 1024
 export const TASK_GUIDE_MAX_ATTACHMENT_TEXT_CHARS = 16_000
 export const TASK_GUIDE_MAX_TOTAL_ATTACHMENT_TEXT_CHARS = 48_000
 
-export const TASK_GUIDE_ATTACHMENT_EXTENSIONS = [
+const TASK_GUIDE_ATTACHMENT_EXTENSIONS = [
   'txt',
   'md',
   'markdown',
@@ -37,7 +37,7 @@ export interface TaskGuideInput {
   attachments?: TaskGuideAttachmentInput[]
 }
 
-export function taskGuideAttachmentExtension(name: string): string {
+function taskGuideAttachmentExtension(name: string): string {
   const leaf = name.replace(/\\/g, '/').split('/').at(-1) ?? ''
   const dot = leaf.lastIndexOf('.')
   return dot > 0 ? leaf.slice(dot + 1).toLowerCase() : ''

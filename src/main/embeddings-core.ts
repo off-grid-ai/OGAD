@@ -10,8 +10,17 @@ import {
 import { modelReadDirectories, resolveTransformersPackage } from './model-paths'
 import { requireModelStorage } from './runtime-env'
 import { configureTransformersEnv } from './embeddings-env'
-import { loadWithOnnxFallback, onnxDeviceCandidates } from './onnx-device'
-import type { BackendPreference } from '../shared/backend-preferences'
+import { loadWithOnnxFallback } from './onnx-device'
+import type { OnnxDevice } from '@offgrid/models'
+import { DOCUMENT_RERANKER } from './embedding-models'
+export {
+  DEFAULT_EMBEDDER,
+  DOCUMENT_EMBEDDER,
+  DOCUMENT_EMBEDDER_SPEC,
+  DOCUMENT_RERANKER,
+  RECORD_EMBEDDER,
+  type EmbedderSpec
+} from './embedding-models'
 
 /**
  * Text -> vector. The actual inference, owned in ONE place.
@@ -21,10 +30,9 @@ import type { BackendPreference } from '../shared/backend-preferences'
  * in-process, where there is no built worker to spawn. Sharing the implementation is what keeps the
  * second path honest: the alternative was a second copy that could drift from the one users run.
  *
- * The pipeline is cached per process, because loading it is the expensive part.
+ * Pipelines are cached per process and per model, because loading one is the expensive part.
  */
-let pipe: FeatureExtractionPipeline | null = null
-let loading: Promise<FeatureExtractionPipeline> | null = null
+const pipes = new Map<string, Promise<FeatureExtractionPipeline>>()
 let activeDevice: DeviceType | null = null
 
 export function embeddingDevice(): DeviceType | null {
@@ -33,25 +41,14 @@ export function embeddingDevice(): DeviceType | null {
 
 /** Called after serialized inference when the model is configured on demand. */
 export async function disposeEmbeddingModel(): Promise<void> {
-  const previous = pipe
-  pipe = null
-  loading = null
+  const loaded = [...pipes.values()]
+  pipes.clear()
   activeDevice = null
-  await previous?.dispose()
+  for (const pipe of loaded) await (await pipe.catch(() => null))?.dispose()
   const reranker = rerankerLoading
   rerankerLoading = null
   await (await reranker?.catch(() => null))?.model.dispose()
 }
-
-/**
- * Models for documents attached to chat. Passages are embedded with MiniLM, the model memory search
- * already keeps loaded: measured ~15 ms a passage on CPU here, where multilingual-e5-small (q8) took
- * ~1.7 s, which made a long book index for over an hour. Indian-language documents still match by
- * keyword (FTS5 keeps their words whole). ms-marco-MiniLM-L-6-v2 is the cross-encoder AnythingLLM's
- * native reranker uses.
- */
-export const DOCUMENT_EMBEDDER = 'Xenova/all-MiniLM-L6-v2'
-export const DOCUMENT_RERANKER = 'Xenova/ms-marco-MiniLM-L-6-v2'
 
 let rerankerLoading: Promise<{ tokenizer: PreTrainedTokenizer; model: PreTrainedModel }> | null =
   null
@@ -65,28 +62,58 @@ function prepareModel(id: string, modelsDir: string, readDirectories: string[]):
 }
 
 /**
- * Vectors for several texts in one forward pass. Document passages are close in length, so padding
- * costs little: measured 81 ms a passage batched against 186 ms one by one (MiniLM fp32 on CPU,
- * 1,000-character passages, app under load), with the same vectors (max difference 1.5e-7).
+ * Vectors for several texts with one model, in one forward pass. Document passages are close in
+ * length, so padding costs little: measured 81 ms a passage batched against 186 ms one by one
+ * (MiniLM fp32 on CPU, 1,000-character passages, app under load), with the same vectors (max
+ * difference 1.5e-7). `onReady` hears the device once, when the model first loads.
  */
 export async function embedTexts(
   texts: string[],
+  model: string,
   modelsDir: string,
-  backendPreference: BackendPreference = 'auto',
+  onReady?: (device: string, reason?: string) => void,
+  devices: OnnxDevice[] = ['cpu'],
   readDirectories = modelReadDirectories()
 ): Promise<number[][]> {
-  const out: number[][] = []
-  let rest = texts
-  // The first text loads the model.
-  if (!pipe && rest.length) {
-    out.push(await embedText(rest[0]!, modelsDir, undefined, backendPreference, readDirectories))
-    rest = rest.slice(1)
-  }
-  if (rest.length) {
-    const output = await pipe!(rest, { pooling: 'mean', normalize: true })
-    out.push(...(output.tolist() as number[][]))
-  }
-  return out
+  if (!texts.length) return []
+  const pipe = await loadPipeline(model, modelsDir, onReady, devices, readDirectories)
+  const output = await pipe(texts, { pooling: 'mean', normalize: true })
+  return output.tolist() as number[][]
+}
+
+/** The model's pipeline: full-precision weights when present, else quantized; downloads on first use. */
+function loadPipeline(
+  model: string,
+  modelsDir: string,
+  onReady: ((device: string, reason?: string) => void) | undefined,
+  devices: OnnxDevice[],
+  readDirectories: string[]
+): Promise<FeatureExtractionPipeline> {
+  const loaded = pipes.get(model)
+  if (loaded) return loaded
+  const fp32 = resolveTransformersPackage(model, 'model.onnx', readDirectories)
+  const cached = fp32 ?? resolveTransformersPackage(model, 'model_quantized.onnx', readDirectories)
+  // Local-only reads must not require writable storage. Guard only an explicit
+  // folder choice when the pipeline can download; default storage is created lazily.
+  if (!cached && process.env.OFFGRID_EMBEDDINGS_OFFLINE !== '1') requireModelStorage()
+  configureTransformersEnv(modelsDir, !!cached)
+  const loading = loadWithOnnxFallback(
+    (device) =>
+      pipeline('feature-extraction', cached ?? model, {
+        device,
+        ...(cached ? { local_files_only: true, ...(fp32 ? {} : { dtype: 'q8' as const }) } : {})
+      }),
+    embeddingDevices(devices)
+  ).then(({ runtime, device, fallbackReason }) => {
+    onReady?.(device, fallbackReason)
+    activeDevice = device
+    return runtime
+  })
+  loading.catch(() => {
+    if (pipes.get(model) === loading) pipes.delete(model)
+  })
+  pipes.set(model, loading)
+  return loading
 }
 
 /** Relevance of each passage to the query (sigmoid of the cross-encoder logit), same order. */
@@ -94,7 +121,7 @@ export async function rerankPassages(
   query: string,
   passages: string[],
   modelsDir: string,
-  backendPreference: BackendPreference = 'auto',
+  devices: OnnxDevice[] = ['cpu'],
   readDirectories = modelReadDirectories()
 ): Promise<number[]> {
   if (!passages.length) return []
@@ -110,7 +137,7 @@ export async function rerankPassages(
             dtype: 'q8',
             ...options
           }),
-        embeddingDevices(backendPreference)
+        embeddingDevices(devices)
       ).then(({ runtime }) => runtime)
     ]).then(([tokenizer, model]) => ({ tokenizer, model }))
     rerankerLoading.catch(() => {
@@ -134,52 +161,7 @@ export async function rerankPassages(
   return scores
 }
 
-/**
- * Devices for the MiniLM embedder and the reranker. On macOS, CoreML ran MiniLM at about 450 ms a
- * passage against 50 ms on the CPU (measured 2026-10-15, app under load), so CPU is used unless the
- * user chose a backend.
- */
-function embeddingDevices(backendPreference: BackendPreference): ReturnType<typeof onnxDeviceCandidates> {
-  const devices = onnxDeviceCandidates(process.platform, backendPreference)
-  return backendPreference === 'auto' && process.platform === 'darwin'
-    ? devices.filter((device) => device !== 'coreml')
-    : devices
-}
-
-export async function embedText(
-  text: string,
-  modelsDir: string,
-  onReady?: (device: string, reason?: string) => void,
-  backendPreference: BackendPreference = 'auto',
-  readDirectories = modelReadDirectories()
-): Promise<number[]> {
-  if (!pipe) {
-    const id = 'Xenova/all-MiniLM-L6-v2'
-    const fp32 = resolveTransformersPackage(id, 'model.onnx', readDirectories)
-    const cached = fp32 ?? resolveTransformersPackage(id, 'model_quantized.onnx', readDirectories)
-    // Local-only reads must not require writable storage. Guard only an explicit
-    // folder choice when the pipeline can download; default storage is created lazily.
-    if (!cached && process.env.OFFGRID_EMBEDDINGS_OFFLINE !== '1') requireModelStorage()
-    configureTransformersEnv(modelsDir, !!cached)
-    loading ??= loadWithOnnxFallback(
-      (device) =>
-        pipeline('feature-extraction', cached ?? 'Xenova/all-MiniLM-L6-v2', {
-          device,
-          ...(cached ? { local_files_only: true, ...(fp32 ? {} : { dtype: 'q8' as const }) } : {})
-        }),
-      embeddingDevices(backendPreference)
-    )
-      .then(({ runtime, device, fallbackReason }) => {
-        onReady?.(device, fallbackReason)
-        activeDevice = device
-        return runtime
-      })
-      .catch((error) => {
-        loading = null
-        throw error
-      })
-    pipe = await loading
-  }
-  const output = await pipe(text, { pooling: 'mean', normalize: true })
-  return Array.from(output.data)
+/** The host supplies the shared policy result to both execution paths. */
+function embeddingDevices(devices: OnnxDevice[]): OnnxDevice[] {
+  return devices
 }

@@ -40,7 +40,7 @@ import {
   waitForVisionUser
 } from './vision-controller'
 import { hideSupervisorWindow, showSupervisorWindow } from './supervisor-window'
-import { loadActuation, actuationAvailable, type ActuationPort } from '../input/actuation'
+import { loadActuation, type ActuationPort } from '../input/actuation'
 import { checkAccessibilityPermission, checkScreenRecordingPermission } from '../permissions'
 import { mapActionToScreen, type DisplayGeometry } from '../input/coordinate-mapping'
 import {
@@ -123,14 +123,6 @@ async function activateAndConfirmTarget(targetLabel: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-export type { ActuationPort }
-
-/** Back-compat alias: the rail-neutral availability check now lives in the
- *  shared actuation module (both vision and the accessibility rail use it). */
-export function visionActuationAvailable(): boolean {
-  return actuationAvailable()
 }
 
 function makeScreen(input: {

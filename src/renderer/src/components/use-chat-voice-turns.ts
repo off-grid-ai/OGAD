@@ -17,7 +17,7 @@ import { captureUrlForPath } from '../../../shared/ogcapture-url'
 
 export type ChatVoicePhase = 'idle' | 'starting' | 'listening' | 'recording' | 'transcribing'
 
-export interface ChatVoiceClip {
+interface ChatVoiceClip {
   url: string
   duration: number
   path?: string

@@ -1,11 +1,30 @@
 // DocumentIndexStore and KeywordSearchPort over the app's encrypted SQLite database (memories.db,
 // SQLCipher). Documents attached to chat live here, never as plain files, so their text is
 // protected like the rest of the user's data. Keyword search is SQLite FTS5 (GPT4All LocalDocs'
-// approach); vectors are Float32 BLOBs beside each passage.
+// approach); vectors are Float32 BLOBs beside each passage. Passages in scripts written without
+// spaces (Chinese, Japanese, Thai…) are also kept in a trigram index, attached_document_fts_tri.
 
-import { getDB } from '../database'
 import {
-  contentTerms,
+  clearRebuildCursor,
+  enableFtsSecureDelete,
+  ftsIndexIsCurrent,
+  getDB,
+  markFtsIndexCurrent,
+  queueIndexRebuild,
+  rebuildCursor,
+  setRebuildCursor,
+  tableExists
+} from '../database'
+import {
+  FTS_TOKENIZE,
+  FTS_TRIGRAM_TOKENIZE,
+  ftsQuery,
+  ftsTrigramQuery,
+  fuseLists,
+  needsTrigram,
+  normaliseForIndex
+} from '@offgrid/rag/records'
+import {
   indexedText,
   type DocumentChunk,
   type DocumentIndexStore,
@@ -14,20 +33,6 @@ import {
   type KeywordSearchPort,
   type StoredDocument
 } from '@offgrid/rag/documents'
-
-/**
- * FTS5's unicode61 tokenizer treats combining marks as separators, which cuts Hindi words at every
- * vowel sign ("बदलाव" → "बदल" + "ा" + "व"). The Indic blocks are declared token characters, with
- * zero-width joiners, so words stay whole; the danda (।, ॥) stays a separator. Verified against
- * the bundled SQLite 3.53 with Devanagari text.
- */
-function indicTokenChars(): string {
-  const chars: number[] = []
-  for (let code = 0x0900; code <= 0x0d7f; code++)
-    if (code !== 0x0964 && code !== 0x0965) chars.push(code)
-  chars.push(0x200c, 0x200d)
-  return String.fromCodePoint(...chars).replace(/'/g, "''")
-}
 
 let schemaFor: object | undefined
 
@@ -83,17 +88,225 @@ export function ensureAttachedDocumentSchema(database: ReturnType<typeof getDB>)
       PRIMARY KEY (conversation_id, document_id)
     );
   `)
-  database.exec(
-    `CREATE VIRTUAL TABLE IF NOT EXISTS attached_document_fts USING fts5(
-      body, document_id UNINDEXED, position UNINDEXED,
-      tokenize = "unicode61 remove_diacritics 0 tokenchars '${indicTokenChars()}'"
-    )`
-  )
+  prepareDocumentIndex(database)
+  prepareDocumentTrigramIndex(database)
 }
 
-/** Every table that holds attached-document data (for "Delete all my data"). */
+const INDEX = 'attached_document_fts'
+const NEXT = 'attached_document_fts_next'
+/** The trigram twin: only passages whose text has a script written without spaces. */
+const TRIGRAM = 'attached_document_fts_tri'
+
+function createDocumentIndex(database: ReturnType<typeof getDB>, name: string): void {
+  database.exec(`
+    CREATE VIRTUAL TABLE ${name} USING fts5(
+      body, document_id UNINDEXED, position UNINDEXED,
+      tokenize = "${FTS_TOKENIZE}"
+    );
+  `)
+  enableFtsSecureDelete(database, name)
+}
+
+/**
+ * The passage index on the shared tokenizer (it keeps Hindi vowel signs inside words), without
+ * reading any passage here: a missing index is created (current when there are no passages yet);
+ * one built by an older schema keeps answering while it is rebuilt in the background after
+ * start-up (rebuildDocumentIndexSlice), so documents attached before a tokenizer change still match.
+ */
+function prepareDocumentIndex(database: ReturnType<typeof getDB>): void {
+  if (ftsIndexIsCurrent(database, INDEX)) return
+  if (!tableExists(database, INDEX)) {
+    createDocumentIndex(database, INDEX)
+    if (!database.prepare('SELECT 1 FROM attached_document_chunks LIMIT 1').get()) {
+      markFtsIndexCurrent(database, INDEX)
+      return
+    }
+  }
+  queueIndexRebuild(INDEX, rebuildDocumentIndexSlice())
+}
+
+type ChunkRow = {
+  rowid: number
+  document_id: string
+  position: number
+  page: number
+  label: string | null
+  heading: string | null
+  text: string
+  tokens: number
+  name: string
+}
+
+/** Passages after `cursor` in rowid order, with their document's name (`limit` -1: all). */
+function readChunkRows(
+  database: ReturnType<typeof getDB>,
+  cursor: number,
+  limit: number
+): ChunkRow[] {
+  return database
+    .prepare(
+      `SELECT c.rowid, c.document_id, c.position, c.page, c.label, c.heading, c.text, c.tokens,
+              COALESCE(d.name, '') AS name
+         FROM attached_document_chunks c
+         LEFT JOIN attached_documents d ON d.id = c.document_id
+        WHERE c.rowid > ? ORDER BY c.rowid LIMIT ?`
+    )
+    .all(cursor, limit) as ChunkRow[]
+}
+
+/** A passage's text exactly as both indexes hold it. */
+function chunkBody(row: ChunkRow): string {
+  const chunk: DocumentChunk = {
+    documentId: row.document_id,
+    position: row.position,
+    page: row.page,
+    ...(row.label ? { label: row.label } : {}),
+    ...(row.heading ? { heading: row.heading } : {}),
+    text: row.text,
+    tokens: row.tokens
+  }
+  return normaliseForIndex(indexedText(row.name, chunk))
+}
+
+/**
+ * One slice of the background rebuild: passages are copied into attached_document_fts_next in
+ * rowid order (fts_rebuild holds how far). Passages written later have higher rowids and are
+ * copied by a later slice; deletes reach both indexes (clearChunks, deleteDocument). The last
+ * slice replaces the old index in one transaction. Returns whether more remain.
+ */
+function rebuildDocumentIndexSlice(): () => boolean {
+  let batch = 200
+  return () => {
+    const database = db()
+    if (ftsIndexIsCurrent(database, INDEX)) return false
+    let cursor = rebuildCursor(database, INDEX)
+    if (cursor === null || !tableExists(database, NEXT)) {
+      database.transaction(() => {
+        database.exec(`DROP TABLE IF EXISTS ${NEXT}`)
+        createDocumentIndex(database, NEXT)
+        setRebuildCursor(database, INDEX, 0)
+      })()
+      cursor = 0
+    }
+    const started = Date.now()
+    const insert = database.prepare(
+      `INSERT INTO ${NEXT} (body, document_id, position) VALUES (?, ?, ?)`
+    )
+    const copy = (rows: ChunkRow[]): void => {
+      for (const row of rows) insert.run(chunkBody(row), row.document_id, row.position)
+    }
+    const rows = readChunkRows(database, cursor, batch)
+    if (!rows.length) {
+      database.transaction(() => {
+        copy(readChunkRows(database, cursor, -1))
+        database.exec(`DROP TABLE IF EXISTS ${INDEX}; ALTER TABLE ${NEXT} RENAME TO ${INDEX};`)
+        markFtsIndexCurrent(database, INDEX)
+        clearRebuildCursor(database, INDEX)
+      })()
+      return false
+    }
+    database.transaction(() => {
+      copy(rows)
+      setRebuildCursor(database, INDEX, rows[rows.length - 1]!.rowid)
+    })()
+    const elapsed = Date.now() - started
+    if (elapsed > 20) batch = Math.max(10, Math.floor(batch / 2))
+    else if (elapsed < 10) batch = Math.min(2_000, batch * 2)
+    return true
+  }
+}
+
+function createTrigramIndex(database: ReturnType<typeof getDB>): void {
+  database.exec(`
+    CREATE VIRTUAL TABLE ${TRIGRAM} USING fts5(
+      body, document_id UNINDEXED, position UNINDEXED,
+      tokenize = "${FTS_TRIGRAM_TOKENIZE}"
+    );
+  `)
+  enableFtsSecureDelete(database, TRIGRAM)
+}
+
+/**
+ * The trigram twin, without reading any passage here: a missing or outdated one is created empty
+ * (current when there are no passages) and filled in the background after start-up
+ * (fillTrigramIndexSlice); a fill under way resumes.
+ */
+function prepareDocumentTrigramIndex(database: ReturnType<typeof getDB>): void {
+  if (ftsIndexIsCurrent(database, TRIGRAM)) return
+  if (rebuildCursor(database, TRIGRAM) === null || !tableExists(database, TRIGRAM)) {
+    database.transaction(() => {
+      database.exec(`DROP TABLE IF EXISTS ${TRIGRAM}`)
+      createTrigramIndex(database)
+      if (database.prepare('SELECT 1 FROM attached_document_chunks LIMIT 1').get()) {
+        setRebuildCursor(database, TRIGRAM, 0)
+      } else {
+        clearRebuildCursor(database, TRIGRAM)
+        markFtsIndexCurrent(database, TRIGRAM)
+      }
+    })()
+    if (ftsIndexIsCurrent(database, TRIGRAM)) return
+  }
+  queueIndexRebuild(TRIGRAM, fillTrigramIndexSlice())
+}
+
+/** Whether new passages go straight into the trigram twin. While it is being filled they are left
+ *  to the fill: they have higher rowids than any passage it has read. */
+function trigramIndexIsLive(database: ReturnType<typeof getDB>): boolean {
+  return tableExists(database, TRIGRAM) && rebuildCursor(database, TRIGRAM) === null
+}
+
+/** One slice of filling the trigram twin with the passages that need it, in rowid order. The last
+ *  slice ends the fill in the same transaction. Returns whether more remain. */
+function fillTrigramIndexSlice(): () => boolean {
+  let batch = 200
+  return () => {
+    const database = db()
+    if (!tableExists(database, TRIGRAM)) return false
+    const cursor = rebuildCursor(database, TRIGRAM)
+    if (cursor === null) return false
+    const started = Date.now()
+    const rows = readChunkRows(database, cursor, batch)
+    if (!rows.length) {
+      database.transaction(() => {
+        clearRebuildCursor(database, TRIGRAM)
+        markFtsIndexCurrent(database, TRIGRAM)
+      })()
+      return false
+    }
+    const insert = database.prepare(
+      `INSERT INTO ${TRIGRAM} (body, document_id, position) VALUES (?, ?, ?)`
+    )
+    database.transaction(() => {
+      for (const row of rows) {
+        const body = chunkBody(row)
+        if (needsTrigram(body)) insert.run(body, row.document_id, row.position)
+      }
+      setRebuildCursor(database, TRIGRAM, rows[rows.length - 1]!.rowid)
+    })()
+    const elapsed = Date.now() - started
+    if (elapsed > 20) batch = Math.max(10, Math.floor(batch / 2))
+    else if (elapsed < 10) batch = Math.min(2_000, batch * 2)
+    return true
+  }
+}
+
+/** Delete passages from the index, from its rebuild while one is under way, and from the trigram
+ *  twin. */
+function unindexDocument(database: ReturnType<typeof getDB>, id: string): void {
+  database.prepare(`DELETE FROM ${INDEX} WHERE document_id = ?`).run(id)
+  if (tableExists(database, NEXT))
+    database.prepare(`DELETE FROM ${NEXT} WHERE document_id = ?`).run(id)
+  if (tableExists(database, TRIGRAM))
+    database.prepare(`DELETE FROM ${TRIGRAM} WHERE document_id = ?`).run(id)
+}
+
+/** Every table that holds document data, and which owner keeps which document (for "Delete all
+ *  my data"). */
 export const ATTACHED_DOCUMENT_TABLES = [
+  'kept_documents',
   'attached_document_fts',
+  'attached_document_fts_next',
+  'attached_document_fts_tri',
   'attached_document_chunks',
   'attached_document_pages',
   'conversation_document_exclusions',
@@ -227,7 +440,7 @@ export const documentStore: DocumentIndexStore = {
     const database = db()
     database.transaction(() => {
       database.prepare('DELETE FROM attached_document_chunks WHERE document_id = ?').run(id)
-      database.prepare('DELETE FROM attached_document_fts WHERE document_id = ?').run(id)
+      unindexDocument(database, id)
       database.prepare('UPDATE attached_documents SET map = NULL WHERE id = ?').run(id)
     })()
   },
@@ -246,6 +459,9 @@ export const documentStore: DocumentIndexStore = {
     const index = database.prepare(
       'INSERT INTO attached_document_fts (body, document_id, position) VALUES (?, ?, ?)'
     )
+    const trigram = trigramIndexIsLive(database)
+      ? database.prepare(`INSERT INTO ${TRIGRAM} (body, document_id, position) VALUES (?, ?, ?)`)
+      : null
     database.transaction((rows: DocumentChunk[]) => {
       for (const chunk of rows) {
         insert.run(
@@ -257,7 +473,9 @@ export const documentStore: DocumentIndexStore = {
           chunk.text,
           chunk.tokens
         )
-        index.run(indexedText(name, chunk), id, chunk.position)
+        const body = normaliseForIndex(indexedText(name, chunk))
+        index.run(body, id, chunk.position)
+        if (trigram && needsTrigram(body)) trigram.run(body, id, chunk.position)
       }
     })(chunks)
   },
@@ -329,7 +547,7 @@ export const documentStore: DocumentIndexStore = {
   async deleteDocument(id) {
     const database = db()
     database.transaction(() => {
-      database.prepare('DELETE FROM attached_document_fts WHERE document_id = ?').run(id)
+      unindexDocument(database, id)
       database.prepare('DELETE FROM attached_document_chunks WHERE document_id = ?').run(id)
       database.prepare('DELETE FROM attached_document_pages WHERE document_id = ?').run(id)
       database.prepare('DELETE FROM conversation_document_exclusions WHERE document_id = ?').run(id)
@@ -347,33 +565,77 @@ export const documentStore: DocumentIndexStore = {
   }
 }
 
-/** An FTS5 MATCH expression from free text: quoted phrases kept, every other term OR-ed. */
-export function ftsQuery(text: string): string | null {
-  const quote = (term: string): string => `"${term.replace(/"/g, '""')}"`
-  const phrases = [...text.matchAll(/"([^"]{3,})"/g)].map((match) => quote(match[1]!.trim()))
-  const terms = contentTerms(text.replace(/"[^"]*"/g, ' ')).map(quote)
-  const all = [...phrases, ...terms]
-  return all.length ? all.join(' OR ') : null
-}
+type PassageRow = { documentId: string; position: number; rank: number }
 
+const toKeywordHit = (row: PassageRow): KeywordHit => ({
+  documentId: row.documentId,
+  position: Number(row.position),
+  score: -row.rank
+})
+
+/**
+ * Keyword passages: bm25 over the passage index, and for a question in a script written without
+ * spaces also the trigram twin (runs of three characters or more by MATCH, shorter ones by
+ * substring among the twin's passages of these documents), fused by rank.
+ */
 export const documentKeywordSearch: KeywordSearchPort = {
   async search(documentIds, query, limit) {
-    const match = ftsQuery(query)
-    if (!match || !documentIds.length) return []
+    if (!documentIds.length) return []
+    const database = db()
     const placeholders = documentIds.map(() => '?').join(', ')
-    const rows = db()
-      .prepare(
-        `SELECT document_id AS documentId, position, bm25(attached_document_fts) AS rank
-         FROM attached_document_fts
-         WHERE attached_document_fts MATCH ? AND document_id IN (${placeholders})
-         ORDER BY rank LIMIT ?`
+    const lists: KeywordHit[][] = []
+    const match = ftsQuery(query)
+    if (match) {
+      lists.push(
+        (
+          database
+            .prepare(
+              `SELECT document_id AS documentId, position, bm25(${INDEX}) AS rank
+               FROM ${INDEX}
+               WHERE ${INDEX} MATCH ? AND document_id IN (${placeholders})
+               ORDER BY rank LIMIT ?`
+            )
+            .all(match, ...documentIds, limit) as PassageRow[]
+        ).map(toKeywordHit)
       )
-      .all(match, ...documentIds, limit) as { documentId: string; position: number; rank: number }[]
-    return rows.map((row): KeywordHit => ({
-      documentId: row.documentId,
-      position: Number(row.position),
-      score: -row.rank
-    }))
+    }
+    const trigram = needsTrigram(query) ? ftsTrigramQuery(query) : null
+    if (trigram && tableExists(database, TRIGRAM)) {
+      if (trigram.match)
+        lists.push(
+          (
+            database
+              .prepare(
+                `SELECT document_id AS documentId, position, bm25(${TRIGRAM}) AS rank
+                 FROM ${TRIGRAM}
+                 WHERE ${TRIGRAM} MATCH ? AND document_id IN (${placeholders})
+                 ORDER BY rank LIMIT ?`
+              )
+              .all(trigram.match, ...documentIds, limit) as PassageRow[]
+          ).map(toKeywordHit)
+        )
+      if (trigram.short.length)
+        lists.push(
+          (
+            database
+              .prepare(
+                `SELECT document_id AS documentId, position, 0 AS rank
+                 FROM ${TRIGRAM}
+                 WHERE document_id IN (${placeholders})
+                   AND (${trigram.short.map(() => 'instr(body, ?) > 0').join(' OR ')})
+                 LIMIT ?`
+              )
+              .all(...documentIds, ...trigram.short, limit) as PassageRow[]
+          ).map(toKeywordHit)
+        )
+    }
+    if (lists.length <= 1) return lists[0] ?? []
+    return fuseLists(
+      lists.map((items) => ({ items })),
+      (hit) => `${hit.documentId}:${hit.position}`
+    )
+      .slice(0, limit)
+      .map(({ item, score }) => ({ ...item, score }))
   }
 }
 

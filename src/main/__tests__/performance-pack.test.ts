@@ -5,26 +5,34 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 
-const fixture = vi.hoisted(() => ({ root: '', driver: true }))
+const fixture = vi.hoisted(() => ({ root: '', driver: true, driverVersion: null as string | null }))
 
 vi.mock('../runtime-env', () => ({
   dataDir: () => fixture.root,
   resourceFile: () => path.join(fixture.root, 'performance-packs.json')
 }))
-vi.mock('../transcription/whisper-runtime', () => ({
+vi.mock('../backend-facts', () => ({
   hasLinuxNvidiaDriver: () => fixture.driver,
   hasWindowsNvidiaDriver: () => fixture.driver
 }))
+vi.mock('../nvidia-driver', () => ({ cachedNvidiaDriverVersion: () => fixture.driverVersion }))
 
 const version = 'test-v1'
 const url = `https://runtime.getoffgridai.co/desktop/cuda/linux/${version}.tar.gz`
 let originalPlatform: PropertyDescriptor | undefined
+let originalArch: PropertyDescriptor | undefined
 const originalLibraryPath = process.env.LD_LIBRARY_PATH
 
-function archive(withSpeechLibraries = true): Buffer {
+/** The pack's chat engine, as a script: `--list-devices` reports a CUDA GPU unless told not to. */
+function archive(withSpeechLibraries = true, withGpu = true): Buffer {
   const source = path.join(fixture.root, 'source', 'bin', 'llama-cuda')
   fs.mkdirSync(source, { recursive: true })
-  fs.writeFileSync(path.join(source, 'llama-server'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+  const devices = withGpu ? '  CUDA0: Test GPU (8192 MiB, 8000 MiB free)\\n' : ''
+  fs.writeFileSync(
+    path.join(source, 'llama-server'),
+    `#!/bin/sh\nprintf 'Available devices:\\n${devices}'\nexit 0\n`,
+    { mode: 0o755 }
+  )
   if (withSpeechLibraries) {
     const onnx = path.join(fixture.root, 'source', 'bin', 'onnx-cuda')
     fs.mkdirSync(onnx, { recursive: true })
@@ -38,13 +46,18 @@ function archive(withSpeechLibraries = true): Buffer {
 }
 
 function manifest(bytes: Buffer, digest = createHash('sha256').update(bytes).digest('hex')): void {
-  fs.writeFileSync(path.join(fixture.root, 'performance-packs.json'), JSON.stringify({
-    schemaVersion: 1,
-    cuda: { linux: { url, sha256: digest, bytes: bytes.length, version } }
-  }))
+  fs.writeFileSync(
+    path.join(fixture.root, 'performance-packs.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      cuda: { linux: { url, sha256: digest, bytes: bytes.length, version } }
+    })
+  )
 }
 
-async function settled(phase: 'installed' | 'failed'): Promise<Awaited<ReturnType<typeof import('../performance-pack')['performancePackStatus']>>> {
+async function settled(
+  phase: 'installed' | 'failed'
+): Promise<Awaited<ReturnType<(typeof import('../performance-pack'))['performancePackStatus']>>> {
   const { performancePackStatus } = await import('../performance-pack')
   for (let attempt = 0; attempt < 100; attempt++) {
     const status = performancePackStatus()
@@ -58,8 +71,12 @@ beforeEach(() => {
   vi.resetModules()
   fixture.root = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-pack-test-'))
   fixture.driver = true
+  fixture.driverVersion = null
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+  originalArch = Object.getOwnPropertyDescriptor(process, 'arch')
   Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+  // The pack carries x64 engines only.
+  Object.defineProperty(process, 'arch', { value: 'x64', configurable: true })
 })
 
 afterEach(() => {
@@ -68,10 +85,18 @@ afterEach(() => {
   if (originalLibraryPath === undefined) delete process.env.LD_LIBRARY_PATH
   else process.env.LD_LIBRARY_PATH = originalLibraryPath
   if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform)
+  if (originalArch) Object.defineProperty(process, 'arch', originalArch)
   fs.rmSync(fixture.root, { recursive: true, force: true })
 })
 
 describe('optional NVIDIA performance pack', () => {
+  it('offers no download on an arm64 machine', async () => {
+    manifest(archive())
+    Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true })
+    const pack = await import('../performance-pack')
+    expect(pack.performancePackStatus().phase).toBe('unavailable')
+  })
+
   it('offers no download without a pinned manifest or an NVIDIA driver', async () => {
     const pack = await import('../performance-pack')
     expect(pack.performancePackStatus().phase).toBe('unavailable')
@@ -103,16 +128,103 @@ describe('optional NVIDIA performance pack', () => {
     expect(pack.startPerformancePack().phase).toBe('downloading')
     const status = await settled('installed')
     expect(status.downloadedBytes).toBe(bytes.length)
-    expect(status.restartRequired).toBe(true)
+    expect(status.device).toBe('Test GPU')
     expect(fetcher).toHaveBeenCalledOnce()
-    expect(fs.existsSync(path.join(process.env.OFFGRID_PERFORMANCE_PACK_BIN!, 'llama-cuda', 'llama-server'))).toBe(true)
-    expect(pack.prepareInstalledOnnxCudaLibraries()).toBe(true)
-    expect(process.env.LD_LIBRARY_PATH).toContain('/bin/onnx-cuda')
-    expect(pack.prepareInstalledOnnxCudaLibraries()).toBe(false)
+    expect(
+      fs.existsSync(
+        path.join(process.env.OFFGRID_PERFORMANCE_PACK_BIN!, 'llama-cuda', 'llama-server')
+      )
+    ).toBe(true)
+    // The app never relaunches itself for the pack's libraries.
+    expect(process.env.LD_LIBRARY_PATH ?? '').not.toContain('onnx-cuda')
     expect(pack.startPerformancePack().phase).toBe('installed')
-    vi.resetModules()
-    const afterRestart = await import('../performance-pack')
-    expect(afterRestart.performancePackStatus().restartRequired).toBe(false)
+  })
+
+  it('does not offer the pack on a driver older than its floor', async () => {
+    const bytes = archive()
+    manifest(bytes)
+    fixture.driverVersion = '515.65.01'
+    const pack = await import('../performance-pack')
+    expect(pack.performancePackStatus()).toMatchObject({
+      phase: 'driver-too-old',
+      driver: '515.65.01',
+      minDriver: '525.60.13'
+    })
+    expect(pack.startPerformancePack().phase).toBe('driver-too-old')
+  })
+
+  it('installs a complete archive already on disk without downloading it again', async () => {
+    const bytes = archive()
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    manifest(bytes, hash)
+    const packRoot = path.join(
+      fixture.root,
+      'performance-packs',
+      `cuda-${version}-${hash.slice(0, 12)}`
+    )
+    fs.mkdirSync(path.dirname(packRoot), { recursive: true })
+    fs.writeFileSync(`${packRoot}.tar.gz.part`, bytes)
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('installed')).device).toBe('Test GPU')
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('starts over after HTTP 416 instead of failing for good', async () => {
+    const bytes = archive()
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    manifest(bytes, hash)
+    const packRoot = path.join(
+      fixture.root,
+      'performance-packs',
+      `cuda-${version}-${hash.slice(0, 12)}`
+    )
+    fs.mkdirSync(path.dirname(packRoot), { recursive: true })
+    fs.writeFileSync(`${packRoot}.tar.gz.part`, bytes.subarray(0, 10))
+    const fetcher = vi.fn(async (_url: string, options: RequestInit) =>
+      options.headers
+        ? new Response(null, { status: 416 })
+        : new Response(new Uint8Array(bytes), { status: 200 })
+    )
+    vi.stubGlobal('fetch', fetcher)
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('installed')).bytes).toBe(bytes.length)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('replaces a partial file larger than the pack', async () => {
+    const bytes = archive()
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    manifest(bytes, hash)
+    const packRoot = path.join(
+      fixture.root,
+      'performance-packs',
+      `cuda-${version}-${hash.slice(0, 12)}`
+    )
+    fs.mkdirSync(path.dirname(packRoot), { recursive: true })
+    fs.writeFileSync(`${packRoot}.tar.gz.part`, Buffer.concat([bytes, Buffer.from('extra')]))
+    const fetcher = vi.fn(
+      async (_url: string, _options: RequestInit) =>
+        new Response(new Uint8Array(bytes), { status: 200 })
+    )
+    vi.stubGlobal('fetch', fetcher)
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('installed')).bytes).toBe(bytes.length)
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ headers: undefined })
+  })
+
+  it('keeps the files out of use when the GPU does not start with them', async () => {
+    const bytes = archive(true, false)
+    manifest(bytes)
+    vi.stubGlobal('fetch', async () => new Response(new Uint8Array(bytes), { status: 200 }))
+    const pack = await import('../performance-pack')
+    pack.startPerformancePack()
+    expect((await settled('failed')).error).toMatch(/GPU did not start/)
+    expect(process.env.OFFGRID_PERFORMANCE_PACK_BIN).toBeUndefined()
   })
 
   it('rejects an archive with the wrong hash and removes the partial file', async () => {
@@ -122,7 +234,7 @@ describe('optional NVIDIA performance pack', () => {
     const pack = await import('../performance-pack')
     pack.startPerformancePack()
     const status = await settled('failed')
-    expect(status.error).toMatch(/hash check/)
+    expect(status.error).toMatch(/damaged/)
     expect(process.env.OFFGRID_PERFORMANCE_PACK_BIN).toBeUndefined()
     expect(fs.readdirSync(path.join(fixture.root, 'performance-packs'))).toEqual([])
   })
@@ -140,7 +252,11 @@ describe('optional NVIDIA performance pack', () => {
     const bytes = archive()
     const hash = createHash('sha256').update(bytes).digest('hex')
     manifest(bytes, hash)
-    const packRoot = path.join(fixture.root, 'performance-packs', `cuda-${version}-${hash.slice(0, 12)}`)
+    const packRoot = path.join(
+      fixture.root,
+      'performance-packs',
+      `cuda-${version}-${hash.slice(0, 12)}`
+    )
     fs.mkdirSync(path.dirname(packRoot), { recursive: true })
     const prefix = Math.floor(bytes.length / 2)
     fs.writeFileSync(`${packRoot}.tar.gz.part`, bytes.subarray(0, prefix))
@@ -162,14 +278,22 @@ describe('optional NVIDIA performance pack', () => {
     const bytes = archive()
     const hash = createHash('sha256').update(bytes).digest('hex')
     manifest(bytes, hash)
-    const packRoot = path.join(fixture.root, 'performance-packs', `cuda-${version}-${hash.slice(0, 12)}`)
+    const packRoot = path.join(
+      fixture.root,
+      'performance-packs',
+      `cuda-${version}-${hash.slice(0, 12)}`
+    )
     fs.mkdirSync(path.dirname(packRoot), { recursive: true })
     const prefix = Math.floor(bytes.length / 2)
     fs.writeFileSync(`${packRoot}.tar.gz.part`, bytes.subarray(0, prefix))
-    vi.stubGlobal('fetch', async () => new Response(new Uint8Array(bytes.subarray(prefix)), {
-      status: 206,
-      headers: { 'Content-Range': `bytes 0-${bytes.length - 1}/${bytes.length}` }
-    }))
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(new Uint8Array(bytes.subarray(prefix)), {
+          status: 206,
+          headers: { 'Content-Range': `bytes 0-${bytes.length - 1}/${bytes.length}` }
+        })
+    )
     const pack = await import('../performance-pack')
     pack.startPerformancePack()
     expect((await settled('failed')).error).toMatch(/invalid resume range/)

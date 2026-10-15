@@ -1,3 +1,5 @@
+import { normalizeBackendPreference } from '@offgrid/models'
+import { invalidateBackendFacts, clearDemotions } from './backend-facts'
 import { getSetting, saveSetting } from './database'
 import {
   BACKEND_MODALITIES,
@@ -22,11 +24,19 @@ export function setBackendPreference(
   modality: BackendModality,
   preference: BackendPreference
 ): BackendPreferences {
-  if (!BACKEND_MODALITIES.includes(modality) ||
-      !backendChoices(modality, process.platform).includes(preference)) {
+  if (
+    !BACKEND_MODALITIES.includes(modality) ||
+    !backendChoices(modality, process.platform).includes(preference)
+  ) {
     throw new Error('Invalid model backend setting')
   }
+  preference = normalizeBackendPreference(modality, preference)
+  const previous = getBackendPreference(modality)
   const next = { ...getBackendPreferences(), [modality]: preference }
   saveSetting(KEY, next)
+  if (previous !== preference) {
+    invalidateBackendFacts()
+    clearDemotions(modality)
+  }
   return next
 }

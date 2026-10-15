@@ -3,12 +3,12 @@ export interface BrowserCoordinatePoint {
   y: number
 }
 
-export interface BrowserCoordinateSize {
+interface BrowserCoordinateSize {
   width: number
   height: number
 }
 
-export interface BrowserCoordinateRect extends BrowserCoordinateSize {
+interface BrowserCoordinateRect extends BrowserCoordinateSize {
   x: number
   y: number
 }

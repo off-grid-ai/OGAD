@@ -2,23 +2,15 @@ import { withStorageDownload } from './model-storage-guard'
 import { beginRuntimeBackend, providerLabel } from './runtime-backends'
 import path from 'path'
 import { existsSync } from 'fs'
-import { Worker } from 'worker_threads'
+import { clearHelperCrashes, forkHelper, type HelperProcess } from './onnx-host/utility-host'
 import { chosenModelsDir, modelsDir } from './runtime-env'
 import { modelReadDirectories } from './model-paths'
-import {
-  DOCUMENT_EMBEDDER,
-  DOCUMENT_RERANKER,
-  disposeEmbeddingModel,
-  embedText,
-  embedTexts,
-  embeddingDevice,
-  rerankPassages
-} from './embeddings-core'
+import { DEFAULT_EMBEDDER, DOCUMENT_EMBEDDER, DOCUMENT_RERANKER } from './embedding-models'
 import { getResidencyMode } from './runtime-residency'
 import { recordAIRequest, type AIRequestHandle } from './ai-request-log'
-import type { EmbeddingRequest, EmbeddingResponse } from './embeddings-worker'
+import type { EmbeddingRequest, EmbeddingResponse, EmbeddingWorkerInit } from './embeddings-worker'
 import { writeDiagnosticLog } from './diagnostics-log'
-import { getBackendPreference } from './backend-preferences'
+import { onnxLadder } from './backend-facts'
 
 /**
  * The built worker, when there is one.
@@ -28,6 +20,11 @@ import { getBackendPreference } from './backend-preferences'
  * no TypeScript transform, so its own imports fail to resolve. Returning null there is deliberate:
  * the caller embeds in-process instead, using the same implementation.
  */
+const SERVICE_NAME = 'offgrid-search'
+
+/** The in-process path loads transformers.js only when there is no helper to run it. */
+const core = (): Promise<typeof import('./embeddings-core')> => import('./embeddings-core')
+
 function builtWorkerEntry(): string | null {
   const built = path.join(__dirname, 'embeddings-worker.js')
   return existsSync(built) ? built : null
@@ -36,14 +33,13 @@ function builtWorkerEntry(): string | null {
 /**
  * Text -> vector, executed in a worker thread (see embeddings-worker.ts for why).
  *
- * The public surface is unchanged: callers still `await embeddings.generateEmbedding(text)`. What
- * changed is where that runs. Requests are serialized onto one worker rather than issued
- * concurrently, because the ONNX runtime is already multi-threaded internally — firing several at
- * once multiplies its WASM threads and starves the UI, which is the behaviour this move exists to
- * stop.
+ * Every embedding goes through embed(): memory records, document passages, /v1/embeddings, MCP and
+ * tool routing. Requests are serialized onto one worker rather than issued concurrently, because
+ * the ONNX runtime is already multi-threaded internally — firing several at once multiplies its
+ * WASM threads and starves the UI, which is the behaviour this move exists to stop.
  */
 class EmbeddingService {
-  private worker: Worker | null = null
+  private worker: HelperProcess | null = null
   private nextId = 1
   private readonly waiting = new Map<
     number,
@@ -59,6 +55,8 @@ class EmbeddingService {
    *  on) go ahead of background indexing, which can queue hundreds. */
   private readonly pending: { interactive: boolean; start: () => void }[] = []
   private running = false
+  /** When the last interactive request was scheduled or finished (ms epoch). */
+  private lastInteractiveAt = 0
   private reportedDevice: string | null = null
   private shuttingDown = false
 
@@ -77,25 +75,33 @@ class EmbeddingService {
     // Queued requests see shuttingDown and cannot start another worker. The source-only
     // fallback has no worker to terminate, so let its active inference finish before disposal.
     await this.queue
-    if (!worker) await disposeEmbeddingModel()
+    if (!worker) await (await core()).disposeEmbeddingModel()
     this.reportedDevice = null
   }
 
-  private spawn(entry: string): Worker {
+  private spawn(entry: string): HelperProcess {
     if (this.worker) return this.worker
     // Built entries sit side by side in out/main (electron.vite.config.ts), but tests and any
     // run-from-source context have only the .ts next to this file. Resolve whichever EXISTS rather
     // than assuming the built layout: assuming it made every embedding fail outside a packaged
     // build, which silently demoted vector search to the FTS fallback instead of erroring.
-    const backendState = beginRuntimeBackend('embeddings', 'Xenova/all-MiniLM-L6-v2')
-    const worker = new Worker(entry, {
-      workerData: {
-        modelsDir: modelsDir(),
-        chosenModelsDir: chosenModelsDir(),
-        modelReadDirectories: modelReadDirectories(),
-        backendPreference: getBackendPreference('embeddings')
-      }
-    })
+    const backendState = beginRuntimeBackend('embeddings', DEFAULT_EMBEDDER.model)
+    let worker: HelperProcess
+    try {
+      worker = forkHelper(
+        entry,
+        {
+          modelsDir: modelsDir(),
+          chosenModelsDir: chosenModelsDir(),
+          modelReadDirectories: modelReadDirectories(),
+          devices: onnxLadder('embeddings')
+        } satisfies EmbeddingWorkerInit,
+        { serviceName: SERVICE_NAME, label: 'Search' }
+      )
+    } catch (error) {
+      backendState.fail(error)
+      throw error
+    }
     worker.on('message', (response: EmbeddingResponse) => {
       if (response.ready && response.device) {
         backendState.ready(providerLabel(response.device), undefined, response.fallbackReason)
@@ -125,17 +131,36 @@ class EmbeddingService {
       for (const [, pending] of this.waiting) pending.reject(error)
       this.waiting.clear()
     }
-    worker.on('error', fail)
     worker.on('exit', (code) => {
-      backendState.stop()
-      if (this.worker !== worker) return
+      if (this.worker !== worker) {
+        backendState.stop()
+        return
+      }
       this.reportedDevice = null
-      if (code !== 0) fail(new Error(`Embedding worker exited with code ${code}`))
-      else this.worker = null
+      if (code !== 0) fail(new Error(`The search helper stopped (exit code ${code}).`))
+      else {
+        backendState.stop()
+        this.worker = null
+      }
     })
-    worker.unref() // never hold the app open just for this
     this.worker = worker
     return worker
+  }
+
+  /** True while a search helper process is running. */
+  get isRunning(): boolean {
+    return this.worker !== null
+  }
+
+  /** Start the next request on a fresh helper with the current backend choice and environment,
+   *  after the requests already scheduled finish. */
+  async restart(): Promise<void> {
+    clearHelperCrashes(SERVICE_NAME)
+    await this.queue.catch(() => {})
+    const worker = this.worker
+    this.worker = null
+    this.reportedDevice = null
+    if (worker) await worker.terminate()
   }
 
   /** Kept for callers that want to pay the model load cost up front. */
@@ -143,20 +168,74 @@ class EmbeddingService {
     await this.generateEmbedding('')
   }
 
-  /** `interactive`: someone is waiting on this vector (a search), so it runs before background
-   *  indexing that is already queued. */
+  /**
+   * Vectors for `texts`: the one embedding path. `model` is a sentence embedder from
+   * embeddings-core's EMBEDDERS (DEFAULT_EMBEDDER when omitted). `interactive`: someone is waiting
+   * on it (a search), so it runs before background indexing that is already queued.
+   */
+  async embed(
+    texts: string[],
+    opts: { model?: string; interactive?: boolean; source?: string } = {}
+  ): Promise<number[][]> {
+    if (!texts.length) return []
+    const model = opts.model ?? DEFAULT_EMBEDDER.model
+    const source =
+      opts.source ??
+      (texts.length > 1 ? 'Embedding batch' : texts[0] ? 'Embedding' : 'Embedding warm-up')
+    // A cold worker may download its model while handling its first request.
+    return withStorageDownload(() =>
+      this.runModel(
+        texts.length === 1
+          ? { text: texts[0], pooling: 'mean', normalize: true }
+          : { passages: texts.length, characters: texts.reduce((sum, t) => sum + t.length, 0) },
+        (entry, log) =>
+          // No built worker means we are running from source. Embed here rather than failing: a
+          // failed embedding silently demotes every search to keyword only, which is a far worse
+          // outcome than briefly holding this thread in a context that has no UI to block.
+          entry
+            ? this.post({ id: this.nextId++, texts, model }, entry, log).then(
+                (r) => r.vectors ?? []
+              )
+            : core().then(({ embedTexts }) =>
+                embedTexts(
+                  texts,
+                  model,
+                  modelsDir(),
+                  (device, reason) => {
+                    this.reportedDevice = device
+                    beginRuntimeBackend('embeddings', model).ready(
+                      providerLabel(device),
+                      undefined,
+                      reason
+                    )
+                  },
+                  onnxLadder('embeddings'),
+                  modelReadDirectories()
+                )
+              ),
+        opts.interactive === true,
+        model,
+        source,
+        (vectors) => ({ dimensions: vectors[0]?.length ?? 0 })
+      )
+    )
+  }
+
+  /** One text's vector with DEFAULT_EMBEDDER: embed() for a single text. */
   async generateEmbedding(text: string, opts: { interactive?: boolean } = {}): Promise<number[]> {
-    // A cold worker may download its model while handling its first embedding.
-    return withStorageDownload(() => this.generateEmbeddingInner(text, opts.interactive === true))
+    const [vector] = await this.embed([text], opts)
+    return vector ?? []
   }
 
   /** Run `task` when the worker is free, interactive requests first, then in arrival order. */
   private schedule<T>(task: () => Promise<T>, interactive: boolean): Promise<T> {
+    if (interactive) this.lastInteractiveAt = Date.now()
     const result = new Promise<T>((resolve, reject) => {
       const start = (): void => {
         void task()
           .then(resolve, reject)
           .finally(() => {
+            if (interactive) this.lastInteractiveAt = Date.now()
             this.running = false
             this.pump()
           })
@@ -179,48 +258,6 @@ class EmbeddingService {
     next.start()
   }
 
-  private async generateEmbeddingInner(text: string, interactive: boolean): Promise<number[]> {
-    if (this.shuttingDown) throw new Error('Embedding runtime is shutting down.')
-    return recordAIRequest(
-      {
-        modality: 'embedding',
-        source: text ? 'Embedding' : 'Embedding warm-up',
-        model: 'Xenova/all-MiniLM-L6-v2',
-        request: { text, pooling: 'mean', normalize: true }
-      },
-      async (log) => {
-        const run = (): Promise<number[]> => {
-          if (this.shuttingDown) throw new Error('Embedding runtime is shutting down.')
-          const entry = builtWorkerEntry()
-          // No built worker means we are running from source. Embed here rather than failing: a failed
-          // embedding silently demotes every search to the FTS fallback, which is a far worse outcome
-          // than briefly holding this thread in a context that has no UI to block.
-          if (!entry)
-            return embedText(
-              text,
-              modelsDir(),
-              (device, reason) => {
-                beginRuntimeBackend('embeddings', 'Xenova/all-MiniLM-L6-v2').ready(
-                  providerLabel(device),
-                  undefined,
-                  reason
-                )
-              },
-              getBackendPreference('embeddings'),
-              modelReadDirectories()
-            )
-          return this.post({ id: this.nextId++, text }, entry, log).then((r) => r.vector ?? [])
-        }
-        const vector = await this.schedule(() => this.withResidency(run), interactive)
-        log.update({
-          backend: this.reportedDevice ?? embeddingDevice() ?? 'Unknown',
-          metrics: { dimensions: vector.length }
-        })
-        return vector
-      }
-    )
-  }
-
   private post(
     request: EmbeddingRequest,
     entry: string,
@@ -237,6 +274,19 @@ class EmbeddingService {
   private holds = 0
 
   /** Keep the worker and models loaded until the returned release is called, even on demand. */
+  /**
+   * Resolve once no interactive request has run for `quietMs`. Background indexing waits on this
+   * before each batch, so a search never queues behind a batch that started between its query
+   * vector and its rerank (a search makes both requests, a moment apart).
+   */
+  async whenQuiet(quietMs: number): Promise<void> {
+    for (;;) {
+      const wait = this.lastInteractiveAt + quietMs - Date.now()
+      if (wait <= 0 && !this.pending.some((p) => p.interactive)) return
+      await new Promise((resolve) => setTimeout(resolve, Math.max(wait, 100)))
+    }
+  }
+
   hold(): () => void {
     this.holds++
     let released = false
@@ -258,44 +308,25 @@ class EmbeddingService {
         const worker = this.worker
         this.worker = null
         if (worker) await worker.terminate()
-        else await disposeEmbeddingModel()
+        else await (await core()).disposeEmbeddingModel()
         this.reportedDevice = null
       }
     }
   }
 
   /**
-   * Vectors for passages of documents attached to chat, with the multilingual document model.
-   * Background work unless `interactive` (a question is waiting on a query vector).
+   * Vectors for passages of documents attached to chat, with the document model. Background work
+   * unless `interactive` (a question is waiting on a query vector).
    */
   async embedDocumentTexts(
     texts: string[],
     opts: { interactive?: boolean } = {}
   ): Promise<number[][]> {
-    if (!texts.length) return []
-    return withStorageDownload(() =>
-      this.runModel(
-        texts.length === 1
-          ? { text: texts[0], model: DOCUMENT_EMBEDDER }
-          : { passages: texts.length, characters: texts.reduce((sum, t) => sum + t.length, 0) },
-        (entry, log) =>
-          entry
-            ? this.post(
-                { id: this.nextId++, text: '', texts },
-                entry,
-                log
-              ).then((r) => r.vectors ?? [])
-            : embedTexts(
-                texts,
-                modelsDir(),
-                getBackendPreference('embeddings'),
-                modelReadDirectories()
-              ),
-        opts.interactive === true,
-        DOCUMENT_EMBEDDER,
-        texts.length === 1 ? 'Document question embedding' : 'Document indexing'
-      )
-    )
+    return this.embed(texts, {
+      ...opts,
+      model: DOCUMENT_EMBEDDER,
+      source: texts.length === 1 ? 'Document question embedding' : 'Document indexing'
+    })
   }
 
   /** Cross-encoder relevance of each passage to the query, same order. Someone is waiting on it. */
@@ -307,16 +338,18 @@ class EmbeddingService {
         (entry, log) =>
           entry
             ? this.post(
-                { id: this.nextId++, text: '', texts: passages, rerankQuery: query },
+                { id: this.nextId++, texts: passages, rerankQuery: query },
                 entry,
                 log
               ).then((r) => r.scores ?? [])
-            : rerankPassages(
-                query,
-                passages,
-                modelsDir(),
-                getBackendPreference('embeddings'),
-                modelReadDirectories()
+            : core().then(({ rerankPassages }) =>
+                rerankPassages(
+                  query,
+                  passages,
+                  modelsDir(),
+                  onnxLadder('embeddings'),
+                  modelReadDirectories()
+                )
               ),
         true,
         DOCUMENT_RERANKER,
@@ -330,7 +363,8 @@ class EmbeddingService {
     run: (entry: string | null, log: AIRequestHandle) => Promise<T>,
     interactive: boolean,
     model: string,
-    source: string
+    source: string,
+    metrics?: (result: T) => Record<string, number>
   ): Promise<T> {
     if (this.shuttingDown) throw new Error('Embedding runtime is shutting down.')
     return recordAIRequest({ modality: 'embedding', source, model, request }, async (log) => {
@@ -342,7 +376,10 @@ class EmbeddingService {
           }),
         interactive
       )
-      log.update({ backend: this.reportedDevice ?? embeddingDevice() ?? 'Unknown' })
+      log.update({
+        backend: this.reportedDevice ?? 'Unknown',
+        ...(metrics ? { metrics: metrics(result) } : {})
+      })
       return result
     })
   }

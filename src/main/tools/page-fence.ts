@@ -15,8 +15,8 @@ export function buildPageFence(pageText?: string): string {
 // Reserve roughly a quarter of context for page text at four characters per token.
 // The floor keeps small-model excerpts useful; the ceiling stays below the wire cap
 // and leaves space for instructions, history, tools, and the model's answer.
-export const PAGE_CONTEXT_FRACTION = 0.25
-export const PAGE_CHARS_PER_TOKEN = 4
+const PAGE_CONTEXT_FRACTION = 0.25
+const PAGE_CHARS_PER_TOKEN = 4
 export const MIN_PAGE_BUDGET_CHARS = 4_000
 export const MAX_PAGE_BUDGET_CHARS = 60_000
 

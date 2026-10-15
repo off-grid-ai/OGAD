@@ -29,6 +29,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # makes Invoke-WebRequest downloads fast
+. "$PSScriptRoot\config\windows-vc-runtime.ps1"
 $IncludeCuda = $env:OFFGRID_INCLUDE_CUDA -ne '0'
 
 $bin = Join-Path $PSScriptRoot '..\resources\bin'
@@ -172,9 +173,8 @@ try {
 } catch { Write-Warning "whisper.cpp CPU fetch failed: $_" }
 
 # --- stable-diffusion.cpp (image gen): CUDA, Vulkan, then CPU -------------------
-# The CUDA engine reuses bin/cuda-runtime from llama.cpp. Do not fetch the
-# separate 563 MB stable-diffusion CUDA runtime archive: it contains the same
-# three CUDA DLLs and previously made the installer too large to build.
+# The image engine needs CUDA 12.8, while llama uses 12.4. Keep the image
+# runtime beside sd-cuda so the optional pack preserves both versions.
 # Keep this release pinned: Qwen-Image 2.1 needs the current runtime and a moving
 # latest release can change the packaged DLL contract without review.
 $SdRef = 'master-920-2f88688'
@@ -183,6 +183,12 @@ if ($IncludeCuda) {
   try {
     $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
     $dest = Copy-Runtime $x 'sd-cuda'
+    $runtime = Expand-Asset 'leejet/stable-diffusion.cpp' '^cudart-sd-bin-win-cu12-x64\.zip$' $SdRef 'fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d'
+    foreach ($name in @('cudart64_12.dll', 'cublas64_12.dll', 'cublasLt64_12.dll')) {
+      $source = Get-ChildItem $runtime -Recurse -File -Filter $name | Select-Object -First 1
+      if (-not $source) { throw "CUDA 12.8 DLL missing from image runtime: $name" }
+      Copy-Item $source.FullName -Destination $dest -Force
+    }
     $cli = Join-Path $dest 'sd-cli.exe'
     $sd = Join-Path $dest 'sd.exe'
     if (-not (Test-Path $cli) -and (Test-Path $sd)) { Copy-Item $sd $cli -Force }
@@ -220,6 +226,11 @@ try {
 } catch { Write-Warning "ffmpeg fetch failed: $_" }
 
 Write-Host ''
+# Include the root FFmpeg executable and every nested engine executable.
+Get-ChildItem -Path $bin -Recurse -Filter '*.exe' -File |
+  Select-Object -ExpandProperty DirectoryName -Unique |
+  ForEach-Object { Copy-VCRuntime $_ }
+
 Write-Host 'resources/bin now contains (win64):'
 Get-ChildItem -Path $bin -Recurse -Include *.exe |
   ForEach-Object { Write-Host "  $($_.FullName.Replace($bin, '').TrimStart('\'))" }
@@ -262,6 +273,9 @@ if ($IncludeCuda) {
       (Join-Path $bin 'whisper\cublasLt64_12.dll'),
       (Join-Path $bin 'whisper\nvrtc64_120_0.dll'),
       (Join-Path $bin 'sd-cuda\sd-cli.exe'),
+      (Join-Path $bin 'sd-cuda\cudart64_12.dll'),
+      (Join-Path $bin 'sd-cuda\cublas64_12.dll'),
+      (Join-Path $bin 'sd-cuda\cublasLt64_12.dll'),
       (Join-Path $bin 'sd-cuda\ggml-cuda.dll'))) {
     if (-not (Test-Path -LiteralPath $p)) { throw "REQUIRED Windows CUDA runtime missing: $p" }
   }

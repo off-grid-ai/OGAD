@@ -12,15 +12,7 @@
 // The RAM-fit verdict is defined once in shared/ and re-exported here so existing
 // main-process importers (setup.ts, tests) are unchanged while the renderer badge
 // imports the same source directly — one rule, no drift.
-export {
-  fitLevel,
-  fitTier,
-  isLoadableOnDevice,
-  FIT_OK_FRAC,
-  FIT_TIGHT_FRAC,
-  type FitLevel,
-  type FitTier
-} from '../shared/model-fit'
+export { fitLevel, fitTier, isLoadableOnDevice } from '../shared/model-fit'
 import { FIT_SOFT_FRAC, FIT_CEIL_FRAC } from '../shared/model-fit'
 
 export type KvCacheType = 'f16' | 'q8_0' | 'q4_0'
@@ -136,8 +128,8 @@ export function preferredModelIds(ramGb: number, mode: PerformanceMode): string[
 // ceiling, offers "Load anyway" instead of a dead end. Only the physics floor
 // below can truly refuse a load — the point where the OS would kill the app.
 
-// fitTier / isLoadableOnDevice / FitTier now live in ../shared/model-fit (re-exported
-// above) so the renderer browse chip and this loader share ONE definition + fractions.
+// fitTier / isLoadableOnDevice / FitTier now live in ../shared/model-fit (the functions are
+// re-exported above) so the renderer browse chip and this loader share ONE definition + fractions.
 
 /** The hard headroom (GB) a "Load anyway" must still leave free after the model's
  *  weights are resident, or the OS starts killing the app. Below this we refuse
@@ -158,14 +150,14 @@ export function checkOverrideSurvival(opts: { availGb: number; incomingWeightsGb
 
 export interface LoadAttempt {
   ctxSize: number
-  gpuLayers: number
+  gpuLayers: number | null
   reason: string
 }
 
 /** Try GPU, then CPU at the selected context. Never reduce the selected value. */
-export function loadAttempts(requestedCtx: number, gpuLayers: number): LoadAttempt[] {
+export function loadAttempts(requestedCtx: number, gpuLayers: number | null): LoadAttempt[] {
   const out: LoadAttempt[] = [{ ctxSize: requestedCtx, gpuLayers, reason: 'requested' }]
-  if (gpuLayers > 0) {
+  if (gpuLayers === null || gpuLayers > 0) {
     out.push({ ctxSize: requestedCtx, gpuLayers: 0, reason: 'CPU-only' })
   }
   return out

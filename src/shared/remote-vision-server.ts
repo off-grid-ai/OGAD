@@ -180,10 +180,7 @@ export interface RemoteVisionConnectionResult {
   models?: RemoteVisionCatalogModel[]
 }
 
-export const REMOTE_VISION_DEFAULTS: Record<
-  Exclude<RemoteVisionProvider, 'local' | 'custom'>,
-  string
-> = {
+const REMOTE_VISION_DEFAULTS: Record<Exclude<RemoteVisionProvider, 'local' | 'custom'>, string> = {
   ollama: 'http://127.0.0.1:11434/v1',
   lmstudio: 'http://127.0.0.1:1234/v1',
   ogad: 'http://127.0.0.1:7878/v1',

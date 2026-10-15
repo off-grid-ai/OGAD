@@ -6,7 +6,7 @@ import { dataDir } from './runtime-env'
 import { hasLinuxNvidiaDriver, hasWindowsNvidiaDriver } from './transcription/whisper-runtime'
 
 /** Setting key; engines stay current unless the user turns this off. */
-export const KEEP_ENGINES_UPDATED = 'keepEnginesUpdated'
+const KEEP_ENGINES_UPDATED = 'keepEnginesUpdated'
 
 export const engineUpdater = createEngineUpdater({
   platform: process.platform,

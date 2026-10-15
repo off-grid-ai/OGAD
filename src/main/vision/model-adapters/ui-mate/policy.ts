@@ -8,7 +8,7 @@
  * execute input, or decide whether an action is allowed.
  */
 
-export const UI_MATE_ACTIONS = [
+const UI_MATE_ACTIONS = [
   'left_click',
   'right_click',
   'middle_click',
@@ -27,8 +27,8 @@ export const UI_MATE_ACTIONS = [
   'finished'
 ] as const
 
-export type UIMateActionName = (typeof UI_MATE_ACTIONS)[number] | 'subtask_complete'
-export type UIMateControl = 'WAIT' | 'USER' | 'DONE' | 'FAIL'
+type UIMateActionName = (typeof UI_MATE_ACTIONS)[number] | 'subtask_complete'
+type UIMateControl = 'WAIT' | 'USER' | 'DONE' | 'FAIL'
 
 export const UI_MATE_GENERATION_CONFIG = {
   temperature: 1,
@@ -57,7 +57,7 @@ export interface UIMateParsedResponse {
   error?: string
 }
 
-export interface UIMateHistoryStep {
+interface UIMateHistoryStep {
   /** The response returned by UI-Mate at this step. */
   response: string
   /** The short action text parsed from the response. */
@@ -66,7 +66,7 @@ export interface UIMateHistoryStep {
   screenshotDataUrl?: string
 }
 
-export type UIMateContentBlock =
+type UIMateContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } }
 

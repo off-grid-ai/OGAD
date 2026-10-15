@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { Button } from '@renderer/components/ui/button'
@@ -190,6 +190,11 @@ function makeUserMessageComponents(navigation: ContextNavigation): Components {
   }
 }
 
+/** Keeps `cite:N` links (the answer's `[S#]` tags) that react-markdown would otherwise blank. */
+function keepCitationLinks(url: string): string {
+  return /^cite:\d+$/.test(url) ? url : defaultUrlTransform(url)
+}
+
 function MessageMarkdownComponent({
   message,
   navigation,
@@ -221,6 +226,7 @@ function MessageMarkdownComponent({
           : [remarkGfm, remarkBreaks]
       }
       components={components}
+      urlTransform={keepCitationLinks}
     >
       {content}
     </ReactMarkdown>

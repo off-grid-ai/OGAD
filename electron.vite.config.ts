@@ -82,8 +82,9 @@ const proRenderer = proExists ? resolve('pro/renderer/index.tsx') : stub
 const proDefine = { __OFFGRID_PRO__: JSON.stringify(proExists) }
 // The app's own version. An unpackaged launch that points Electron at a script rather than this
 // package (the e2e capture fixtures) gets Electron's version from app.getVersion().
-const appVersion = (JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string })
-  .version
+const appVersion = (
+  JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
+).version
 // App registrations for Connect with Off Grid AI (scripts/oauth-build-config.mjs). Only a Desktop
 // Google registration is accepted: a Web application's confidential secret must not enter an
 // installed app. A release build (OFFGRID_REQUIRE_OAUTH=1) fails rather than ship without them.
@@ -125,12 +126,6 @@ export default defineConfig({
       // embeddings.ts can spawn it by path. It must not be folded into the main chunk: the point
       // is that native ONNX inference runs off the thread that owns the window.
       rollupOptions: {
-        // Rollup hoists external require() calls above source imports. The CUDA
-        // pack must be selected before its first ONNX Runtime import, including
-        // in the embedding and speech workers.
-        output: {
-          banner: readFileSync(resolve('scripts/windows-onnx-cuda-preload.cjs'), 'utf8')
-        },
         input: {
           index: resolve('src/main/index.ts'),
           'embeddings-worker': resolve('src/main/embeddings-worker.ts'),
