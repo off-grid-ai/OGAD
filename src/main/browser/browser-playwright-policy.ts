@@ -130,6 +130,7 @@ export interface BrowserSemanticDecisionRequest {
   goal: string
   plan: TaskExecutionPlan
   snapshot: string
+  image?: string
   step: number
   maxSteps: number
   recoveryNote: string
@@ -192,7 +193,8 @@ Rules:
 <untrusted_page_snapshot>
 ${boundedSnapshot(request.snapshot, request.goal)}
 </untrusted_page_snapshot>`
-  const raw = await llm.chat(prompt, [], undefined, undefined, {
+  const raw = await llm.chat(prompt, request.image ? [request.image] : [], undefined, undefined, {
+    requireImages: Boolean(request.image),
     disableThinking: true,
     temperature: 0.1,
     responseFormat: useDecider ? PLAYWRIGHT_CANDIDATES_FORMAT : PLAYWRIGHT_STEP_FORMAT,

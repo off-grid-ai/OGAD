@@ -1818,6 +1818,7 @@ export class LLMService {
     timeoutMs?: number,
     maxTokens?: number,
     opts: {
+      requireImages?: boolean
       responseFormat?: unknown
       temperature?: number
       enableThinking?: boolean
@@ -1826,7 +1827,13 @@ export class LLMService {
       signal?: AbortSignal
     } = {}
   ): Promise<string> {
-    const messages = buildMessages(message, readImages(images), this.systemPrompt)
+    const decodedImages = readImages(images)
+    if (opts.requireImages && (images.length === 0 || decodedImages.length !== images.length)) {
+      throw new Error(
+        'Required model image could not be read. Take a fresh screenshot before retrying.'
+      )
+    }
+    const messages = buildMessages(message, decodedImages, this.systemPrompt)
     return recordAIRequest(
       {
         modality: 'text',

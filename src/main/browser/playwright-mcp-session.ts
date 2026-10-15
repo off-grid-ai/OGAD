@@ -1,3 +1,4 @@
+import type { VisionScreen } from '../vision/vision-agent'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createConnection } from '@playwright/mcp'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -32,6 +33,8 @@ export interface PlaywrightToolResult {
   text: string
   isError: boolean
   uncertain?: true
+  /** Local model frame paired with this observation; never an MCP action argument. */
+  screenshot?: Awaited<ReturnType<VisionScreen['capture']>>
 }
 
 /**
