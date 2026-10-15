@@ -7,7 +7,7 @@ export const REPLY_SOUND_SETTING = 'replySound'
 const CHANGED = 'offgrid:reply-sound-changed'
 
 /** On unless turned off. */
-export function readReplySound(settings: Record<string, unknown>): boolean {
+function readReplySound(settings: Record<string, unknown>): boolean {
   return settings[REPLY_SOUND_SETTING] !== false
 }
 

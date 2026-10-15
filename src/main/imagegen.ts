@@ -435,7 +435,7 @@ export type ImageGenOutput = ImageGenerationOutputContract
 /** Native runtimes receive the final prompt as input. The wrapper adds it to their output once. */
 type NativeImageGenOutput = Omit<ImageGenOutput, 'prompt'>
 
-export interface ImageGenProgress {
+interface ImageGenProgress {
   step: number
   total: number
   secPerStep: number

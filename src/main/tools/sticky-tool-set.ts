@@ -11,7 +11,7 @@ type ToolSchema = unknown
 const MAX_CONVERSATIONS = 64
 const offeredByConversation = new Map<string, string[]>()
 
-export function toolSchemaName(schema: ToolSchema): string | undefined {
+function toolSchemaName(schema: ToolSchema): string | undefined {
   const name = (schema as { function?: { name?: unknown } } | null)?.function?.name
   return typeof name === 'string' && name ? name : undefined
 }

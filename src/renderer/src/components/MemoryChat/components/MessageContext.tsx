@@ -295,7 +295,7 @@ function ContextDisclosureComponent({
 }
 
 export const UnifiedContextSection = memo(UnifiedContextSectionComponent)
-export const SourceScoresSection = memo(SourceScoresSectionComponent)
-export const SummariesContextSection = memo(SummariesContextSectionComponent)
-export const EntitiesContextSection = memo(EntitiesContextSectionComponent)
+const SourceScoresSection = memo(SourceScoresSectionComponent)
+const SummariesContextSection = memo(SummariesContextSectionComponent)
+const EntitiesContextSection = memo(EntitiesContextSectionComponent)
 export const ContextDisclosure = memo(ContextDisclosureComponent)

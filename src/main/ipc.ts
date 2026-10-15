@@ -179,7 +179,7 @@ async function streamAnswer(
 // memories and entity facts that used to be extracted alongside it are retired: nothing writes or
 // reads them, and their rows stay until the user deletes their data. Live memory is screen moments,
 // entities, to-dos, meetings and chats.
-export async function summarizeSession(sessionId: string): Promise<string | null> {
+async function summarizeSession(sessionId: string): Promise<string | null> {
   const memories = getMemoriesForSession(sessionId)
   if (memories.length === 0) return null
 

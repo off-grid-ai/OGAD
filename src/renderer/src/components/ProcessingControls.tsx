@@ -36,7 +36,7 @@ interface QueueLive {
   queued: { label: string; tier: number }[]
 }
 
-export function RuntimeResidencySection(): React.ReactElement {
+function RuntimeResidencySection(): React.ReactElement {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = (window as any).api
   const [modes, setModes] = useState<Record<string, string>>({})

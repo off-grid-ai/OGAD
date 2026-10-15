@@ -42,7 +42,7 @@ export function sanitizeUploadName(name: string): string {
 }
 
 /** Formats we cannot read yet. Read as text, their bytes would reach the model as garbage. */
-export const BINARY_EXT = [
+const BINARY_EXT = [
   'xlsx',
   'xls',
   'xlsm',

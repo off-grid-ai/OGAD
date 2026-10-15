@@ -7,7 +7,7 @@
  */
 import type { ActionRecord, ExecuteResult } from '@offgrid/use'
 
-export interface ConnectorCallResult {
+interface ConnectorCallResult {
   ok: boolean
   result?: unknown
   error?: string
@@ -25,7 +25,7 @@ export interface ConnectorActionArgs {
   args: Record<string, unknown>
 }
 
-export function connectorActionArgs(value: Record<string, unknown>): ConnectorActionArgs | null {
+function connectorActionArgs(value: Record<string, unknown>): ConnectorActionArgs | null {
   const connectorId = value.connectorId
   const tool = value.tool
   const args = value.args

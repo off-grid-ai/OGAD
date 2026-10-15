@@ -4,7 +4,7 @@ import { attachmentsOf, taskReferencesInMessages } from '../components/MemoryCha
 import { editedBranch } from './chat-edit-branch'
 import { priorAnswerVersions } from './chat-versions'
 
-export interface ReplacementSend {
+interface ReplacementSend {
   regen: true
   atts: Attachment[]
   priorVariants?: ResponseVersion[]

@@ -4,7 +4,7 @@
 
 import { BrowserWindow } from 'electron'
 
-export const TASK_SETTINGS_CHANGED = 'task-settings:changed'
+const TASK_SETTINGS_CHANGED = 'task-settings:changed'
 
 export function announceTaskSettings(key: string, value: unknown): void {
   // The model manager also runs without Electron (no windows to tell), as runtime-env allows.

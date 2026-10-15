@@ -18,7 +18,7 @@ export const EMPTY_MSGS: ChatMessage[] = []
 export const OPEN_CHAT_TABS_KEY = 'offgrid:chat:open-tabs'
 export const ACTIVE_CHAT_TAB_KEY = 'offgrid:chat:active-tab'
 
-export const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i
+const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i
 const ARTIFACT_FENCE = /```(?:html|svg|mermaid|jsx|tsx|react|image)\s*\n[\s\S]*?```/gi
 export const IMAGE_MESSAGE_COLUMN_WIDTH = 'w-full max-w-2xl'
 

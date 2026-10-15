@@ -15,7 +15,7 @@ import {
   type ToolCatalogEntry
 } from './planner-logic'
 
-export class PlanValidationError extends Error {
+class PlanValidationError extends Error {
   constructor(readonly validationErrors: readonly string[]) {
     super(`Invalid structured plan after retry: ${validationErrors.join('; ')}`)
     this.name = 'PlanValidationError'

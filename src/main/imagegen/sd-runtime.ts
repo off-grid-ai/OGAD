@@ -17,7 +17,7 @@ export function imageBackendForRuntime(
 }
 
 /** Windows needs the system Vulkan loader before the GPU image binary can start. */
-export function hasWindowsVulkanLoader(
+function hasWindowsVulkanLoader(
   windowsDir = process.env.WINDIR ?? process.env.SystemRoot ?? 'C:\\Windows'
 ): boolean {
   return fs.existsSync(path.join(windowsDir, 'System32', 'vulkan-1.dll'))

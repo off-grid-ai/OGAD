@@ -168,7 +168,7 @@ export function needsApproval(action: Pick<ActionRecord, 'rail'>): boolean {
 
 /** A routine runs with nobody watching: anything it does beyond reading waits for approval,
  *  including the native actions a person in Chat runs straight away. */
-export function unattended(action: Pick<ActionRecord, 'source' | 'risk'>): boolean {
+function unattended(action: Pick<ActionRecord, 'source' | 'risk'>): boolean {
   return action.source === 'routine' && action.risk !== 'read'
 }
 

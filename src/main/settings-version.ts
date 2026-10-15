@@ -13,10 +13,6 @@
 let version = Date.now()
 const waiters = new Set<() => void>()
 
-export function settingsVersion(): number {
-  return version
-}
-
 export function settingsChanged(): void {
   version += 1
   const ready = [...waiters]

@@ -51,7 +51,7 @@ export interface ImageGenerationProgressContract {
   phase?: 'sampling' | 'decoding'
 }
 
-export type ImageGenerationJobStage = 'enhancing' | 'preparing' | 'generating' | 'decoding'
+type ImageGenerationJobStage = 'enhancing' | 'preparing' | 'generating' | 'decoding'
 
 /** One update shape for every operation in the image pipeline. */
 export interface ImageGenerationPipelineUpdateContract {
@@ -60,7 +60,7 @@ export interface ImageGenerationPipelineUpdateContract {
   progress?: ImageGenerationProgressContract | null
 }
 
-export type ImageGenerationJobPhase = 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+type ImageGenerationJobPhase = 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
 /** Main-owned image job state. Renderer mounts observe this snapshot; they never
  * own or cancel a job merely because a screen unmounted. */

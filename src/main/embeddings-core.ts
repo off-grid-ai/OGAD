@@ -48,7 +48,7 @@ export interface EmbedderSpec {
   passagePrefix: string
 }
 
-export const EMBEDDERS = {
+const EMBEDDERS = {
   /** English. Measured 3.3 ms a passage fp32 on CPU here; q8 was slower (30.6 ms). */
   miniLM: { model: 'Xenova/all-MiniLM-L6-v2', queryPrefix: '', passagePrefix: '' },
   /** Hindi and English in one space (a Hindi question finds the English passage). 7.9 ms a passage

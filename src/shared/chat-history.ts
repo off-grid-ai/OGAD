@@ -53,7 +53,7 @@ function modelContent(turn: HistoryTurn): string {
   return names.length ? `[Attached: ${names.join(', ')}]\n${turn.content}` : turn.content
 }
 
-export const EARLIER_CHAT_EXCERPTS_PREFIX = 'Earlier chat excerpts'
+const EARLIER_CHAT_EXCERPTS_PREFIX = 'Earlier chat excerpts'
 
 function localDay(ms: number): number {
   const day = new Date(ms)

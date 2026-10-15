@@ -7,15 +7,9 @@ import type {
   VisionPolicyToolCall
 } from './types'
 
-export const GENERAL_VISION_TOOL_NAMES = [
-  'complete_milestone',
-  'perform_action',
-  'rethink',
-  'call_user'
-] as const
-export const DIRECTION_VERDICTS = ['aligned', 'off_course'] as const
+const DIRECTION_VERDICTS = ['aligned', 'off_course'] as const
 
-type ToolName = (typeof GENERAL_VISION_TOOL_NAMES)[number]
+type ToolName = 'complete_milestone' | 'perform_action' | 'rethink' | 'call_user'
 type Direction = (typeof DIRECTION_VERDICTS)[number]
 type ObjectValue = Record<string, unknown>
 type DecisionResult =

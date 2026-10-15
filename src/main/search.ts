@@ -344,7 +344,7 @@ function queryTerms(query: string): string[] {
 }
 
 /** Literal term-overlap count in a haystack (for the "Match" sort). Case-insensitive. */
-export function matchScore(haystack: string, terms: string[]): number {
+function matchScore(haystack: string, terms: string[]): number {
   const hay = (haystack || '').toLowerCase()
   return terms.reduce((n, t) => n + (t ? hay.split(t).length - 1 : 0), 0)
 }

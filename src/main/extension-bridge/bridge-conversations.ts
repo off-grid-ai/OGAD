@@ -49,7 +49,7 @@ export function setBrowserConversationOrigin(
 
 export const MAX_LISTED = 100
 export const MAX_TURNS = 40
-export const MAX_TURN_CHARS = 20_000
+const MAX_TURN_CHARS = 20_000
 
 /** SQLite CURRENT_TIMESTAMP ('YYYY-MM-DD HH:MM:SS', UTC) to epoch ms; 0 when unreadable. */
 export function sqlTime(value: string | null | undefined): number {
@@ -173,7 +173,7 @@ export const HISTORY_CONFLICT =
 export type BridgeListedConversation = Omit<BridgeConversation, 'turns'> & {
   readonly turns: (BridgeTurn & { readonly image?: string })[]
 }
-export type BridgeConversationSearchHit = Omit<BridgeConversation, 'turns'> & {
+type BridgeConversationSearchHit = Omit<BridgeConversation, 'turns'> & {
   readonly snippet: string
   readonly turnCount: number
 }

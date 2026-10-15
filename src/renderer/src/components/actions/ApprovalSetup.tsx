@@ -34,7 +34,7 @@ function parsedArgs(record: ApprovalSetupRecord): Record<string, string> {
   }
 }
 
-export function buildApprovalChatPrompt(
+function buildApprovalChatPrompt(
   record: ApprovalSetupRecord,
   instruction: string,
   context: string,

@@ -30,7 +30,7 @@ export function internalTabPaletteScreens(
  * Screens whose name is not the word people reach for. Matched in addition to the label, so
  * "preferences" finds Settings and "sync" finds Devices.
  */
-export const SCREEN_ALIASES: Record<string, string[]> = {
+const SCREEN_ALIASES: Record<string, string[]> = {
   settings: ['preferences', 'config'],
   devices: ['sync', 'mesh', 'phone', 'pairing'],
   models: ['download', 'gguf', 'llm'],

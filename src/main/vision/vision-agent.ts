@@ -20,7 +20,7 @@ import type { VisionActionEffect, VisionSemanticElement } from './vision-common-
 
 export type { VisionActionEffect, VisionSemanticElement } from './vision-common-types'
 
-export interface VisionCaptureMetadata {
+interface VisionCaptureMetadata {
   path?: string
   geometry?: ScreenshotGeometry
   /** Native title of the captured target window, when accessibility provides it. */
@@ -34,7 +34,7 @@ export interface VisionCaptureMetadata {
   verificationSemanticElements?: readonly VisionSemanticElement[]
 }
 
-export interface VisionActuationResult {
+interface VisionActuationResult {
   mappedAction?: VisionAction
   /** Execution-boundary handoff. The private value is intentionally absent. */
   handoff?: string
@@ -149,7 +149,7 @@ export interface VisionTaskProgress {
   action: string
 }
 
-export interface VisionTaskReasoning {
+interface VisionTaskReasoning {
   step: number
   content: string
   live: boolean

@@ -41,7 +41,7 @@ export function latestBrowserTask(
 
 /** A task this browser's chat was given an id for, that has not started yet: queued behind
  *  another task, or waiting for approval. Its own id, so the chat follows and stops only it. */
-export function queuedBrowserTask(taskId: string): BrowserTaskProgress {
+function queuedBrowserTask(taskId: string): BrowserTaskProgress {
   return {
     taskId,
     status: 'queued',

@@ -1,6 +1,6 @@
 export const AI_MODALITIES = ['text', 'image', 'tts', 'stt', 'embedding'] as const
 export type AIModality = (typeof AI_MODALITIES)[number]
-export type AIRequestStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+type AIRequestStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 export interface AIRequestSummary {
   id: string
   parentId?: string

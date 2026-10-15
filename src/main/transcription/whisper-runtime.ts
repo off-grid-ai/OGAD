@@ -12,7 +12,7 @@ export function hasWindowsNvidiaDriver(
 }
 
 /** Linux GPU device nodes are created by the active NVIDIA or DRM driver. */
-export function hasLinuxGpuDevice(): boolean {
+function hasLinuxGpuDevice(): boolean {
   if (hasLinuxNvidiaDriver()) return true
   try {
     return fs.readdirSync('/dev/dri').some((name) => name.startsWith('renderD'))

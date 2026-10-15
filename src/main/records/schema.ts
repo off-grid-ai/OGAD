@@ -33,7 +33,7 @@ import { actionWhenSql } from './sources'
 type Db = ReturnType<typeof getDB>
 
 /** A table whose rows are embedded as records. */
-export interface EmbeddedTable {
+interface EmbeddedTable {
   /** The record kind (RecordSource.kind). */
   kind: string
   /** Record keys are `${prefix}:${id}`. */
@@ -45,7 +45,7 @@ export interface EmbeddedTable {
   watch: string[]
 }
 
-export const EMBEDDED_TABLES: EmbeddedTable[] = [
+const EMBEDDED_TABLES: EmbeddedTable[] = [
   { kind: 'screen', prefix: 'obs', table: 'observations', id: 'id', watch: ['summary'] },
   { kind: 'action', prefix: 'act', table: 'action_items', id: 'id', watch: ['text', 'due'] },
   { kind: 'meeting', prefix: 'mtg', table: 'meetings', id: 'id', watch: ['title', 'summary'] },
@@ -83,7 +83,7 @@ function retireLegacyRecords(db: Db): void {
 }
 
 /** To-dos by what they say (and the words as first heard). */
-export const ACTION_FTS: FtsIndexSpec = {
+const ACTION_FTS: FtsIndexSpec = {
   name: 'action_fts',
   source: 'action_items',
   rowid: 'id',
@@ -93,7 +93,7 @@ export const ACTION_FTS: FtsIndexSpec = {
 }
 
 /** Meetings by title and summary. Transcripts are documents, searched by the document engine. */
-export const MEETING_FTS: FtsIndexSpec = {
+const MEETING_FTS: FtsIndexSpec = {
   name: 'meeting_fts',
   source: 'meetings',
   rowid: 'id',

@@ -167,7 +167,7 @@ async function prepareVoiceAssetsInner(
 }
 
 /** One finished speech pass: the voice can start on pass 0 while the rest is still being made. */
-export interface SpeechPass {
+interface SpeechPass {
   readonly index: number
   readonly count: number
   readonly dataUrl: string

@@ -295,7 +295,7 @@ function hydrateFrames(db: Db, ids: number[]): DesktopRecordHit[] {
 
 /** Screen moments: their summaries (observation_fts) and every word on screen (frame_fts). A frame
  *  that belongs to a moment counts for that moment; a frame of its own is a hit with its picture. */
-export const screenSource: RecordSource = {
+const screenSource: RecordSource = {
   kind: 'screen',
   decays: true,
   keyword(match, window, limit) {
@@ -603,7 +603,7 @@ function ftsSource(options: {
   }
 }
 
-export const actionSource: RecordSource = {
+const actionSource: RecordSource = {
   ...ftsSource({
     kind: 'action',
     decays: false,
@@ -631,7 +631,7 @@ export const actionSource: RecordSource = {
   }
 }
 
-export const meetingSource: RecordSource = {
+const meetingSource: RecordSource = {
   ...ftsSource({
     kind: 'meeting',
     decays: false,
@@ -657,7 +657,7 @@ export const meetingSource: RecordSource = {
   }
 }
 
-export const entitySource: RecordSource = ftsSource({
+const entitySource: RecordSource = ftsSource({
   kind: 'entity',
   decays: false,
   prefix: 'ent',
@@ -668,7 +668,7 @@ export const entitySource: RecordSource = ftsSource({
   where: (db) => visibleEntity(db, 's')
 })
 
-export const summarySource: RecordSource = ftsSource({
+const summarySource: RecordSource = ftsSource({
   kind: 'summary',
   decays: true,
   prefix: 'sum',
@@ -726,7 +726,7 @@ function chatHitsForMessages(db: Db, ids: number[], limit: number): DesktopRecor
 
 /** Your chats: one hit per conversation, its best-matching message (rag_message_fts), plus chats
  *  whose title has the words. The conversation id is the hit's url. */
-export const chatSource: RecordSource = {
+const chatSource: RecordSource = {
   kind: 'chat',
   decays: true,
   trigram(query, window, limit) {
@@ -862,7 +862,7 @@ function docHitsForPassages(
 
 const DOC_TRIGRAM = 'attached_document_fts_tri'
 
-export const docSource: RecordSource = {
+const docSource: RecordSource = {
   kind: 'doc',
   decays: false,
   keyword(match, window, limit) {

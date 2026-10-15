@@ -10,7 +10,7 @@ export interface PerformancePackManifest {
   cuda: Partial<Record<'win32' | 'linux', PerformancePackAsset>>
 }
 
-export type PerformancePackPhase =
+type PerformancePackPhase =
   | 'unavailable'
   | 'not-needed'
   | 'available'

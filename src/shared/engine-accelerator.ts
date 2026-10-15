@@ -9,9 +9,6 @@
 
 export type EngineAccelerator = 'Metal' | 'CUDA' | 'Vulkan' | 'CPU'
 
-/** Directory holding the standard CPU-only engine. Must match the fetch/stage destination. */
-export const CPU_ENGINE_DIR = 'llama-cpu'
-
 export interface EngineAcceleratorInput {
   /** Target platform. Injected, never read from `process` here. */
   platform: NodeJS.Platform

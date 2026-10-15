@@ -1342,7 +1342,7 @@ function clickTarget(action: VisionAction): { x: number; y: number } | null {
 }
 
 /** Treat nearby click variants as one target strategy, even after capture resizing. */
-export function isEquivalentClickTarget(
+function isEquivalentClickTarget(
   action: VisionAction,
   currentFrame: ReturnType<typeof coordinateFrame>,
   previous:

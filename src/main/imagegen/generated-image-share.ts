@@ -13,7 +13,7 @@ import { readGeneratedImageSidecar, writeGeneratedImageSidecar } from './gallery
  * a generated image looks like on the wire is not. That decision lived here AND on the phone, and the
  * two copies had already disagreed about the name of the model field.
  */
-export function describeOwnGeneratedImage(
+function describeOwnGeneratedImage(
   imagePath: string,
   shownIn?: ChatHome
 ): SharedFileDescriptor | null {

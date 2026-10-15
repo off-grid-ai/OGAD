@@ -238,7 +238,7 @@ export type MessageRowState = Readonly<{
   regenerationDisabled: boolean
 }>
 
-export type AskOptionSelection = Readonly<{
+type AskOptionSelection = Readonly<{
   message: ChatMessage
   ask: AskBlock
   option: string

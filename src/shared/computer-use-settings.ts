@@ -87,17 +87,7 @@ export const SCREENSHOT_MAX_EDGE: Record<ComputerUseScreenshotSize, number> = {
   large: 1_920
 }
 
-export const SCREENSHOT_RESIZE_QUALITY: Record<
-  ComputerUseScreenshotQuality,
-  'good' | 'better' | 'best'
-> = {
-  efficient: 'good',
-  balanced: 'better',
-  detailed: 'best'
-}
-
-/** The sharp resize kernel for each screenshot quality - the same setting
- * SCREENSHOT_RESIZE_QUALITY maps for Electron's NativeImage.resize. */
+/** The sharp resize kernel for each screenshot quality. */
 export const SCREENSHOT_RESIZE_KERNEL: Record<
   ComputerUseScreenshotQuality,
   'nearest' | 'cubic' | 'lanczos3'

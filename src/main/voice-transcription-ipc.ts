@@ -17,7 +17,7 @@ export type TranscriptionServiceProvider = () => Promise<TranscriptionService>
 const active = new Map<string, AbortController>()
 
 /** A transcription that has not finished by this deadline is treated as stalled and ended. */
-export const TRANSCRIBE_TIMEOUT_MS = 5 * 60_000
+const TRANSCRIBE_TIMEOUT_MS = 5 * 60_000
 
 function requestKey(senderId: number, requestId: string): string {
   return `${senderId}:${requestId}`

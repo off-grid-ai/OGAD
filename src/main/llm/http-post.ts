@@ -56,7 +56,7 @@ function serverDetail(body: string): string {
  *  llama-server returns a JSON body like {"error":{"message":"request (22825 tokens) exceeds
  *  the available context size (16384 tokens) …"}}; the bare status code alone is useless both
  *  to the user and to a retry policy. */
-export function classifyServerError(
+function classifyServerError(
   statusCode: number | undefined,
   body: string
 ): { kind: ModelServerFailureKind; message: string } {
@@ -96,11 +96,6 @@ export function classifyServerError(
   const refused = statusCode !== undefined && statusCode >= 400 && statusCode < 500
   const kind: ModelServerFailureKind = refused ? 'rejected' : 'unavailable'
   return { kind, message: `LLM Server Error: ${statusCode ?? '?'}${detail ? ` ${detail}` : ''}` }
-}
-
-/** Turn a non-200 model-server response into an ACTIONABLE message. */
-export function describeServerError(statusCode: number | undefined, body: string): string {
-  return classifyServerError(statusCode, body).message
 }
 
 /** The typed rejection for a non-200 response, carrying the reason with the message. */

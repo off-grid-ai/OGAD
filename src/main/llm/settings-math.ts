@@ -128,7 +128,7 @@ export interface LaunchArgsInput {
  * 16 GB machine 8 GB of cache next to the model invites swapping, so it is capped at a quarter of
  * RAM; machines with 32 GB or more keep the engine default.
  */
-export function promptCacheMiB(totalRamBytes: number | undefined): number | undefined {
+function promptCacheMiB(totalRamBytes: number | undefined): number | undefined {
   if (!totalRamBytes || !Number.isFinite(totalRamBytes)) return undefined
   const quarter = Math.floor(totalRamBytes / 1024 / 1024 / 4)
   return quarter >= 8192 ? undefined : Math.max(1024, quarter)

@@ -120,7 +120,7 @@ export interface ToolContext {
   completedPrerequisites?: string[]
 }
 
-export interface ToolConversationTurn {
+interface ToolConversationTurn {
   role: 'user' | 'assistant'
   content: string
 }

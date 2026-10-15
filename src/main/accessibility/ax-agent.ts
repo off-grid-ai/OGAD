@@ -110,7 +110,7 @@ export interface ElementTaskDeps {
   control?: ElementTaskControl
 }
 
-export interface ElementTaskControl {
+interface ElementTaskControl {
   snapshot(): Pick<GuardSnapshot, 'status' | 'reason' | 'inputLease'>
   waitUntilRunnable(signal?: AbortSignal): Promise<Pick<GuardSnapshot, 'status' | 'reason'>>
   markObservationReady(): boolean
@@ -439,8 +439,8 @@ export function buildElementDecisionContext(input: {
 
 const MAX_CONSECUTIVE_PARSE_FAILURES = 3
 const MAX_CONSECUTIVE_NO_PROGRESS = 3
-export const AX_INVALID_REPLY_SUMMARY = `The action model returned an invalid reply ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row.`
-export const AX_NO_PROGRESS_SUMMARY = 'The action did not produce its required result.'
+const AX_INVALID_REPLY_SUMMARY = `The action model returned an invalid reply ${MAX_CONSECUTIVE_PARSE_FAILURES} times in a row.`
+const AX_NO_PROGRESS_SUMMARY = 'The action did not produce its required result.'
 
 /** A stable signature of an actuating step, used to detect a runaway loop. Two
  *  consecutive identical signatures mean the model is repeating itself (it sent

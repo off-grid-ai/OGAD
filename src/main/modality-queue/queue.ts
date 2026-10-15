@@ -82,7 +82,7 @@ export function backgroundJob(label: string): QueueRequest {
 }
 
 /** Why a preempted job's model request was aborted. */
-export class PreemptedError extends Error {
+class PreemptedError extends Error {
   constructor(readonly by: string) {
     super(`Stopped to make room for ${by}; it runs again later.`)
     this.name = 'PreemptedError'

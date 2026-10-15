@@ -80,7 +80,7 @@ function sizeRank(f: string): number {
 /** A Hindi transcription should contain Devanagari when it contains Hindi text. A small
  * multilingual Whisper model can occasionally return Latin or Perso-Arabic text even with
  * `-l hi`; that is a model-quality miss, not a request to translate the recording. */
-export function hindiTranscriptNeedsQualityRetry(text: string, language: string): boolean {
+function hindiTranscriptNeedsQualityRetry(text: string, language: string): boolean {
   if (language !== 'hi' || !text.trim()) return false
   return !/\p{Script=Devanagari}/u.test(text)
 }
@@ -88,7 +88,7 @@ export function hindiTranscriptNeedsQualityRetry(text: string, language: string)
 /** Pick a stronger downloaded multilingual Whisper model for one quality retry. English-only
  * `.en` models cannot correct a Hindi script miss. The active model still runs first; this only
  * returns a model whose catalog-size rank is higher than the one that produced the bad result. */
-export function strongerMultilingualWhisperModel(
+function strongerMultilingualWhisperModel(
   currentModel: string,
   files: readonly string[],
   dir: string
@@ -103,7 +103,7 @@ export function strongerMultilingualWhisperModel(
 /** Run the selected model first, then make one quality retry when Hindi text has the wrong
  * script and a stronger multilingual model is already on the device. `run` is the native-process
  * boundary, which keeps the decision deterministic and testable without replacing Off Grid code. */
-export async function transcribeWithHindiQualityRetry({
+async function transcribeWithHindiQualityRetry({
   language,
   model,
   modelFiles,

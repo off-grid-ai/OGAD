@@ -48,7 +48,7 @@ function taskResultDetail(task: TaskRunSnapshot): string {
 /** The task state owner supplies the status and detail. This one-way Chat
  * projection makes the state explicit, so a failed or stopped task can never
  * look successful because of optimistic summary text. */
-export function taskResultChatContent(task: TaskRunSnapshot): string | undefined {
+function taskResultChatContent(task: TaskRunSnapshot): string | undefined {
   if (!CHAT_RESULT_STATUSES.has(task.status)) return undefined
   const detail = taskResultDetail(task)
   if (!detail) return undefined

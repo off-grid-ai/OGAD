@@ -195,7 +195,7 @@ function formatGenerationTime(ms: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
 }
 
-export const SpeechAction = memo(SpeechActionComponent)
+const SpeechAction = memo(SpeechActionComponent)
 export const VariantNavigation = memo(VariantNavigationComponent)
 export const AssistantMessageActions = memo(AssistantMessageActionsComponent)
 export const MessageTime = memo(MessageTimeComponent)

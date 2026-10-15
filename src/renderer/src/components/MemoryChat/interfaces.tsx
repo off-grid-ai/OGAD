@@ -25,7 +25,7 @@ export interface GodChatState {
  * all memory, and takes what it knows right now with every question. Generation details and the
  * tools-sent list are not shown.
  */
-export interface GodChatOptions {
+interface GodChatOptions {
   /** The companion's name, shown as the chat's title. */
   readonly name: string
   /** What God knows right now and how it should answer, added to every turn. */

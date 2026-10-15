@@ -27,7 +27,7 @@ export interface ChatModelProfile {
   modelMaxCtx: number | null
 }
 
-export interface BestChatSettings {
+interface BestChatSettings {
   gpuLayers: number
   flashAttn: boolean
   kvCacheType: KvCache
@@ -66,7 +66,7 @@ const MANY_RAM_GB = 32
 const ENOUGH_RAM_GB = 16
 
 /** The fastest available processor for one modality, chosen from what the platform offers. */
-export function bestBackend(
+function bestBackend(
   modality: BackendModality,
   machine: Pick<MachineProfile, 'platform' | 'gpu'>
 ): BackendPreference {
@@ -84,16 +84,13 @@ export function bestBackend(
 
 /** f16 when RAM holds the context at full precision (the reference path), else the
  *  lightest quantization that still fits. */
-export function bestKvCache(ctxSize: number, totalRamGb: number, weightsGb: number): KvCache {
+function bestKvCache(ctxSize: number, totalRamGb: number, weightsGb: number): KvCache {
   const budgetGb = totalRamGb * CHAT_RAM_SHARE - weightsGb - RAM_RESERVE_GB
   const fits = (kv: KvCache): boolean => (ctxSize / 1000) * KV_GB_PER_1K[kv] <= budgetGb
   return fits('f16') ? 'f16' : fits('q8_0') ? 'q8_0' : 'q4_0'
 }
 
-export function bestChatSettings(
-  machine: MachineProfile,
-  model: ChatModelProfile
-): BestChatSettings {
+function bestChatSettings(machine: MachineProfile, model: ChatModelProfile): BestChatSettings {
   const ctxSize =
     model.modelMaxCtx && model.modelMaxCtx > 0
       ? Math.min(DEFAULT_CTX_SIZE, model.modelMaxCtx)
@@ -114,7 +111,7 @@ export function bestChatSettings(
 }
 
 /** Engines kept in memory skip their cold start. More RAM keeps more of them ready. */
-export function bestResidency(totalRamGb: number): Partial<Record<Modality, 'resident'>> {
+function bestResidency(totalRamGb: number): Partial<Record<Modality, 'resident'>> {
   if (totalRamGb >= MANY_RAM_GB) {
     return { image: 'resident', stt: 'resident', tts: 'resident', embeddings: 'resident' }
   }

@@ -45,7 +45,7 @@ function plural(n: number, word: string): string {
 }
 
 /** A passage as a turn source: the same key whether the turn or a search tool cited it. */
-export function passageSource(passage: {
+function passageSource(passage: {
   documentId: string
   name: string
   page: number
