@@ -121,6 +121,18 @@ describe('buildQwenImage21Args', () => {
     expect(args).not.toContain('-r')
   })
 
+  it('picks Turbo defaults from the file name, not from a folder named turbo', () => {
+    const inTurboFolder = buildQwenImage21Args({
+      ...base,
+      model: '/models/turbo/qwen-image-2.1.gguf'
+    })
+    expect(flagVal(inTurboFolder, '--steps')).toBe('40')
+    const turbo = buildQwenImage21Args({ ...base, model: 'C:\\m\\qwen-image-2.1-turbo-Q4_K.gguf' })
+    expect(flagVal(turbo, '--steps')).toBe(
+      String(standardModelDefaults('qwen_image_2.1-turbo').defaultSteps)
+    )
+  })
+
   it('adds the vision projector and reference image for editing', () => {
     const args = buildQwenImage21Args({ ...base, initImage: '/in.png' })
     expect(flagVal(args, '--llm_vision')).toBe(base.llmVision)

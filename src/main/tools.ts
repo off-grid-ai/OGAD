@@ -659,7 +659,13 @@ export async function selectChatTools(
   // no extensions, so this is just the built-ins.
   const exts =
     toolsEnabled || opts.assistantOnly
-      ? selectToolExtensions(getToolExtensions(), { connectors: toolsEnabled && !!opts.connectors })
+      ? selectToolExtensions(getToolExtensions(), {
+          // Settings → Connectors can switch every connector off at once, like tools.
+          connectors:
+            toolsEnabled &&
+            !!opts.connectors &&
+            getSetting<boolean>('connectorsEnabled', true) !== false
+        })
       : []
   const extSchemas: unknown[] = []
   const hints: string[] = []

@@ -80,15 +80,16 @@ jobs:
             test -s "resources/bin/$file"
           done
           du -sh resources/bin/llama-prism-cuda resources/bin/sd-cuda resources/bin/whisper resources/bin/kev-runtime
+      - name: Bundle the runtimes into one file
+        shell: bash
+        # upload-artifact opens every file at once and fails with EMFILE on the Kev runtime's
+        # ~19,000 files, so hand over one uncompressed tar. A relative path keeps GNU tar off "D:".
+        run: tar -cf win32-cuda-runtimes.tar -C resources/bin llama-prism-cuda sd-cuda whisper kev-runtime
       - name: Hand the runtimes to the pack job
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
         with:
           name: win32-cuda-runtimes
-          path: |
-            resources/bin/llama-prism-cuda
-            resources/bin/sd-cuda
-            resources/bin/whisper
-            resources/bin/kev-runtime
+          path: win32-cuda-runtimes.tar
           if-no-files-found: error
           include-hidden-files: true
           compression-level: 0 # the pack is compressed once, in the next job
@@ -147,6 +148,11 @@ jobs:
         with:
           name: win32-cuda-runtimes
           path: ${{ runner.temp }}/win-bin
+      - name: Unpack Windows runtimes
+        if: inputs.platform == 'win32'
+        run: |
+          tar -xf "$RUNNER_TEMP/win-bin/win32-cuda-runtimes.tar" -C "$RUNNER_TEMP/win-bin"
+          rm "$RUNNER_TEMP/win-bin/win32-cuda-runtimes.tar"
       - name: Stage Linux Prism CUDA engine
         if: inputs.platform == 'linux'
         # Also writes build/linux-bin/cuda-runtime; the next step replaces it with the engine's copy.

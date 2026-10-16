@@ -240,7 +240,7 @@ function SettingSlider({
     <div id={id} onBlur={() => onCommit(value)}>
       <ElasticSlider
         aria-label={label}
-        className="w-full pt-4"
+        className="w-56 pt-4"
         value={value}
         onValueChange={(next: number) => onDraft(Number(next.toFixed(decimals)))}
         startingValue={min}
@@ -248,8 +248,8 @@ function SettingSlider({
         isStepped
         stepSize={step}
         formatValue={format}
-        leftIcon={leftIcon}
-        rightIcon={rightIcon}
+        leftIcon={leftIcon ?? <Minus className="size-3.5 text-muted-foreground" />}
+        rightIcon={rightIcon ?? <Plus className="size-3.5 text-muted-foreground" />}
       />
     </div>
   )
@@ -383,6 +383,7 @@ export function SettingsPanel({
   const [transcriptionInfo, setTranscriptionInfo] = useState<TranscriptionInfo | null>(null)
   const [tools, setTools] = useState<ToolSetting[]>([])
   const [toolsEnabled, setToolsEnabled] = useState(true)
+  const [connectorsEnabled, setConnectorsEnabled] = useState(true)
   const [expandedToolGroups, setExpandedToolGroups] = useState<Set<string>>(new Set())
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [newConn, setNewConn] = useState({ name: '', url: '' })
@@ -471,6 +472,7 @@ export function SettingsPanel({
       .then((settings) => {
         setShowGenerationDetails(settings.showGenerationDetails === true)
         setToolsEnabled(settings.toolsEnabled !== false)
+        setConnectorsEnabled(settings.connectorsEnabled !== false)
       })
       .catch(() => {})
     ;(window.api as Partial<typeof window.api>)
@@ -815,7 +817,7 @@ export function SettingsPanel({
               summary={`Temperature ${(s.temperature ?? 0.7).toFixed(2)} · up to ${s.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS} tool calls`}
               defaultOpen
             >
-              <Row label="Temperature" hint="Lower = focused, higher = creative.">
+              <Row inline label="Temperature" hint="Lower = focused, higher = creative.">
                 <SettingSlider
                   label="Temperature"
                   value={s.temperature ?? 0.7}
@@ -856,7 +858,7 @@ export function SettingsPanel({
                   onCheckedChange={() => setReplySound(!replySound)}
                 />
               </Row>
-              <Row
+              <Row inline
                 label="Maximum tool calls"
                 controlId="maximum-tool-calls"
                 hint="Emergency limit for tool calls in one response."
@@ -896,7 +898,7 @@ export function SettingsPanel({
               title="Sampling"
               summary={`Top-P ${(s.topP ?? 0.95).toFixed(2)} · Top-K ${s.topK ?? 40} · repeat penalty ${(s.repeatPenalty ?? 1.1).toFixed(2)}`}
             >
-              <Row label="Top-P" hint="Nucleus sampling cutoff.">
+              <Row inline label="Top-P" hint="Nucleus sampling cutoff.">
                 <SettingSlider
                   label="Top-P"
                   value={s.topP ?? 0.95}
@@ -909,7 +911,7 @@ export function SettingsPanel({
                   onCommit={(value) => set({ topP: value })}
                 />
               </Row>
-              <Row label="Top-K" hint="0 disables. Limits candidate tokens.">
+              <Row inline label="Top-K" hint="0 disables. Limits candidate tokens.">
                 <SettingSlider
                   label="Top-K"
                   value={s.topK ?? 40}
@@ -921,7 +923,7 @@ export function SettingsPanel({
                   onCommit={(value) => set({ topK: value })}
                 />
               </Row>
-              <Row label="Min-P" hint="Min probability relative to the top token.">
+              <Row inline label="Min-P" hint="Min probability relative to the top token.">
                 <SettingSlider
                   label="Min-P"
                   value={s.minP ?? 0.05}
@@ -934,7 +936,7 @@ export function SettingsPanel({
                   onCommit={(value) => set({ minP: value })}
                 />
               </Row>
-              <Row label="Repeat penalty" hint="Higher discourages repetition.">
+              <Row inline label="Repeat penalty" hint="Higher discourages repetition.">
                 <SettingSlider
                   label="Repeat penalty"
                   value={s.repeatPenalty ?? 1.1}
@@ -1001,7 +1003,7 @@ export function SettingsPanel({
                 />
               </Row>
               {['mtp', 'draft', 'dflash'].includes(s.speculativeDecoding ?? 'off') && (
-                <Row
+                <Row inline
                   label="Draft token limit"
                   controlId="speculative-draft-max"
                   hint="Maximum tokens proposed per step. More is not always faster. Auto uses two for MTP and the engine default for Draft and DFlash."
@@ -1058,7 +1060,7 @@ export function SettingsPanel({
                   />
                 </Row>
               )}
-              <Row label="GPU layers" hint={gpuLayersHint(s.gpuAccelerator ?? null)}>
+              <Row inline label="GPU layers" hint={gpuLayersHint(s.gpuAccelerator ?? null)}>
                 <SettingSlider
                   label="GPU layers"
                   value={s.gpuLayers ?? 99}
@@ -1070,7 +1072,7 @@ export function SettingsPanel({
                   onCommit={(value) => set({ gpuLayers: value })}
                 />
               </Row>
-              <Row label="CPU threads" hint="Auto lets llama.cpp choose.">
+              <Row inline label="CPU threads" hint="Auto lets llama.cpp choose.">
                 <div className="flex items-center gap-3">
                   <SettingStepper
                     label="CPU threads"
@@ -1095,7 +1097,7 @@ export function SettingsPanel({
                   </label>
                 </div>
               </Row>
-              <Row label="Batch size" hint="Tokens processed per batch during prompt ingest.">
+              <Row inline label="Batch size" hint="Tokens processed per batch during prompt ingest.">
                 <SettingSlider
                   label="Batch size"
                   value={s.batchSize ?? 512}
@@ -1348,6 +1350,22 @@ export function SettingsPanel({
 
         {tab === 'connectors' && (
           <>
+            <SettingRow
+              icon={<Plugs />}
+              title="Enable connectors"
+              description="Controls whether any connector tools are sent to the chat model."
+              className="mb-3 pt-0"
+            >
+              <Switch
+                aria-label="Enable connectors"
+                checked={connectorsEnabled}
+                onCheckedChange={() => {
+                  const next = !connectorsEnabled
+                  setConnectorsEnabled(next)
+                  void window.api.saveSetting('connectorsEnabled', next)
+                }}
+              />
+            </SettingRow>
             <p className="mb-2 text-[11.5px] leading-snug text-neutral-500">
               Connect MCP servers — your reusable tool library (web search, fetch, etc.). Add an
               HTTP MCP endpoint:

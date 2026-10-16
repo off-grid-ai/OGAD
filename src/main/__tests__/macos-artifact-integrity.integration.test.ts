@@ -15,6 +15,10 @@ import {
 } from '../../../scripts/lib/macos-artifact-integrity.mjs'
 import verifyElectronBuilderArtifact from '../../../scripts/verify-electron-builder-artifact.mjs'
 
+// The pre-push hook runs tests in Electron's Node, whose fs reads any app.asar path as an archive.
+// These fixtures are plain files named app.asar, so read them as files.
+;(process as { noAsar?: boolean }).noAsar = true
+
 const REPO_ROOT = path.resolve(import.meta.dirname, '../../..')
 const require = createRequire(import.meta.url)
 const { getMainFileMatchers } = require('app-builder-lib/out/fileMatcher')

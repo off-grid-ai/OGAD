@@ -11,6 +11,7 @@
 //      through its warm server; an 'on-demand' engine uses its one-shot path. Each
 //      engine reads getResidencyMode(modality) — the same rule, applied once per side.
 
+import os from 'node:os'
 import { modalityQueue, type ModalityQueue } from './modality-queue/queue'
 import { getResidencyMode, type Modality, type ResidencyMode } from './runtime-residency'
 import type { RuntimeBackend } from '../shared/runtime-backends'
@@ -39,6 +40,25 @@ export function warmActionForMode(mode: ResidencyMode): 'warm' | 'release' {
   return mode === 'resident' ? 'warm' : 'release'
 }
 
+/** Unified memory at which an in-memory image model and the chat model fit together (the chat
+ *  model plus the Qwen-Image stack is about 16 GB). Below it, chat and image still take turns. */
+export const IMAGE_BESIDE_CHAT_MIN_BYTES = 32 * 1024 ** 3
+
+/** Whether a job that displaces the image model leaves it loaded: the person chose in-memory, the
+ *  job keeps the chat model loaded (a chat turn or background pass, not video, which frees both),
+ *  and the machine has room for both. Pure, so the rule is tested on its own. */
+export function keepsImageResident(
+  mode: ResidencyMode,
+  totalMemoryBytes: number,
+  jobEvicts: readonly string[]
+): boolean {
+  return (
+    mode === 'resident' &&
+    !jobEvicts.includes('llm') &&
+    totalMemoryBytes >= IMAGE_BESIDE_CHAT_MIN_BYTES
+  )
+}
+
 const registry = new Map<Modality, ManagedRuntime>()
 let shuttingDown = false
 
@@ -49,6 +69,7 @@ export interface RegisterDeps {
   queue?: ModalityQueue
   readMode?: (m: Modality) => ResidencyMode
   readChatBackend?: () => RuntimeBackend
+  totalMemory?: () => number
 }
 
 /** Register a runtime into the queue through the ONE mode-aware policy. The queue
@@ -63,7 +84,12 @@ export function registerRuntime(rt: ManagedRuntime, deps: RegisterDeps = {}): vo
   const readMode = deps.readMode ?? getResidencyMode
   registry.set(rt.modality, rt)
   queue.registerEvictable(rt.modality, {
-    evict: () => {
+    evict: (by) => {
+      if (
+        rt.modality === 'image' &&
+        keepsImageResident(readMode('image'), (deps.totalMemory ?? os.totalmem)(), by?.evicts ?? [])
+      )
+        return
       // Dedicated CUDA runtimes have their own allocation/auto-fit policy. Do not
       // apply the unified-memory Mac's unconditional chat/image teardown there.
       // Explicit Unload and shutdown still call rt.evict() directly.

@@ -177,11 +177,11 @@ try {
 # three CUDA DLLs and previously made the installer too large to build.
 # Keep this release pinned: Qwen-Image 2.1 needs the current runtime and a moving
 # latest release can change the packaged DLL contract without review.
-$SdRef = 'master-920-2f88688'
+$SdRef = 'master-968-8cd731e'
 Write-Host "== stable-diffusion.cpp (pinned $SdRef): CUDA + Vulkan + CPU =="
 if ($IncludeCuda) {
   try {
-    $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
+    $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '8b6f311f22b56db02f545a674f7549a0da283f7134d5fd01c42014b81ab78af0'
     $dest = Copy-Runtime $x 'sd-cuda'
     $cli = Join-Path $dest 'sd-cli.exe'
     $sd = Join-Path $dest 'sd.exe'
@@ -190,7 +190,7 @@ if ($IncludeCuda) {
 }
 
 try {
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '63e84439c20dde75487a933066318ae01353e9e80ee70e031acad48e857e1cb9'
+  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '060767935e2543c27e0fcd5a024f62d978970c221c60658da87c768c27a841fa'
   $dest = Copy-Runtime $x 'sd'
   # Older releases named the one-shot binary sd.exe; normalize the app contract.
   $cli = Join-Path $dest 'sd-cli.exe'
@@ -199,7 +199,7 @@ try {
 } catch { Write-Warning "stable-diffusion.cpp Vulkan fetch failed: $_" }
 
 try {
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cpu-x64\.zip$' $SdRef '10fc73b25bd97fb071c6bb6ba2a18e8811e6dd421c32bead98c18c84cd305d7f'
+  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cpu-x64\.zip$' $SdRef '3289065032e298d751964ced2fb444c6e11f58793ba14c76f1f6a1d5b5ffff9c'
   $dest = Copy-Runtime $x 'sd-cpu'
   $cli = Join-Path $dest 'sd-cli.exe'
   $sd = Join-Path $dest 'sd.exe'

@@ -103,6 +103,7 @@ import {
   internalTabRoutes,
   internalTabSubroute
 } from '@renderer/lib/internal-tab-route'
+import offGridLogo from '@/assets/logo.png'
 
 function Sel({
   value,
@@ -351,6 +352,11 @@ const RISE = {
 const ACTIVE_RING =
   'shadow-[inset_0_0_0_1px_rgb(var(--og-rgb-primary)/0.55),0_0_28px_-10px_rgb(var(--og-rgb-primary)/0.8)]'
 const MotionRow = motion.create(TableRow)
+
+/** Off Grid AI's own conversions (huggingface.co/offgrid-ai) carry its mark beside the name. */
+function isOffGridModel(id: string): boolean {
+  return id.toLowerCase().startsWith('offgrid-ai/')
+}
 
 export function ModelsScreen({
   navigationSubroute,
@@ -896,6 +902,7 @@ export function ModelsScreen({
     // piece below, so a state (downloading, failed, active) reads the same in either view.
     const nameRow = (
       <div className="flex flex-wrap items-center gap-1">
+        {isOffGridModel(m.id) && <img src={offGridLogo} alt="Made by Off Grid AI" title="Made by Off Grid AI" className="size-3 shrink-0 rounded-[3px]" />}
         <button
           onClick={() => openDetail(m)}
           className="truncate text-left text-xs text-neutral-100 transition-colors duration-100 hover:text-emerald-500"
@@ -1818,6 +1825,7 @@ export function ModelsScreen({
                 <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
+                      {isOffGridModel(m.id) && <img src={offGridLogo} alt="Made by Off Grid AI" title="Made by Off Grid AI" className="size-3.5 shrink-0 rounded-[3px]" />}
                       <h2 className="truncate text-sm text-white">{m.name}</h2>
                       {m.kind === 'vision' && (
                         <span className="flex items-center gap-0.5 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">

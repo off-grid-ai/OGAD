@@ -131,7 +131,12 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
     for (const modality of Object.keys(modes) as Modality[]) {
       const q = new ModalityQueue()
       const log: string[] = []
-      registerRuntime(recordingRuntime(modality, log), { queue: q, readMode: (m) => modes[m] })
+      // A 16 GB machine: the image model takes turns with chat (32 GB+ keeps it beside chat).
+      registerRuntime(recordingRuntime(modality, log), {
+        queue: q,
+        readMode: (m) => modes[m],
+        totalMemory: () => 16 * 1024 ** 3
+      })
       await q.run({ tier: 2, label: 'x', evicts: [modality] }, async () => {
         log.push('job')
       })

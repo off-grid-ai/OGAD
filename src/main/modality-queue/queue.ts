@@ -20,7 +20,7 @@ export interface Evictable {
    *  MUST be idempotent/safe when the engine is already down (the queue always
    *  calls it for a declared id rather than tracking exact residency, so an engine
    *  that lazily reloaded can't slip through and leave two models resident). */
-  evict: () => Promise<void> | void
+  evict: (by?: QueueRequest) => Promise<void> | void
   /** Clear an eviction block if a later engine fails to evict. This must not
    *  load a model while the failed engine may still hold memory. */
   recover?: () => Promise<void> | void
@@ -337,7 +337,7 @@ export class ModalityQueue {
       const e = this.evictables.get(id)
       if (!e) continue
       try {
-        await e.evict()
+        await e.evict(waiter.request)
         entry.evicted.push(id)
       } catch (err) {
         console.error(`[ModalityQueue] evict '${id}' failed:`, err)
