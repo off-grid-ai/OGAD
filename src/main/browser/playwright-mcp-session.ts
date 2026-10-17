@@ -16,6 +16,8 @@ const ALLOWED_TOOLS = new Set([
   'browser_hover',
   'browser_drag',
   'browser_navigate',
+  // back() in the planner_actor_evaluator strategy (browser-agent-task.ts).
+  'browser_navigate_back',
   // Only for the click fallback (browser-playwright-actions.ts); the model never names it.
   'browser_evaluate'
 ])

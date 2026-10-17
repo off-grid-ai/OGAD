@@ -64,7 +64,7 @@ interface ChatToolRowsProps {
   failed?: boolean
 }
 
-type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
+type WorkStatus = 'running' | 'complete' | 'failed' | 'stopped' | 'needs attention'
 
 type ToolEntryState = Extract<ToolTraceEntry, { kind: 'tool' }>['state']
 
@@ -225,6 +225,7 @@ const ENTRY_STATE: Record<WorkStatus, ToolEntryState> = {
   running: 'running',
   complete: 'success',
   failed: 'error',
+  stopped: 'stopped',
   'needs attention': 'pending'
 }
 
@@ -421,7 +422,9 @@ function shortResult(tool: DisplayTool, status = workStatus(tool), taskSummary?:
 
 function taskWorkStatus(task: TaskSession | undefined): WorkStatus | undefined {
   if (!task) return undefined
-  if (task.status === 'failed' || task.status === 'stopped') return 'failed'
+  if (task.status === 'failed') return 'failed'
+  // A task the person stopped did not fail.
+  if (task.status === 'stopped') return 'stopped'
   if (task.status === 'paused' || task.status === 'waiting') return 'needs attention'
   if (task.status === 'running' || task.status === 'reconnecting') return 'running'
   return 'complete'

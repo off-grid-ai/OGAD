@@ -487,7 +487,8 @@ function MessageBubble({
           src={message.image}
           path={message.imagePath}
           metadata={message.imageMetadata}
-          className="mb-2 w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"
+          className="w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"
+          spacing="mb-2"
           fill
           onOpen={actions.openImage}
         />
@@ -619,6 +620,11 @@ function StandardMessageRow({
         ) : null}
         {message.role === 'user' ? (
           <div className="mt-1.5 flex items-center justify-end gap-2 pr-1">
+            <VariantNavigation
+              message={message}
+              noun="question"
+              onSelect={(direction) => actions.selectVariant(message.id, direction)}
+            />
             <MessageTime message={message} />
             {message.context?.taskGuidance ? (
               <MessageActionsMenu>

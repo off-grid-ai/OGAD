@@ -68,7 +68,9 @@ function MessageAttachmentsComponent({
           fileName: attachment.name,
           mimeType: (attachment as { mimeType?: string }).mimeType,
           path: attachment.path,
-          text: attachment.text
+          text: attachment.text,
+          // A recorded voice note is saved as .webm; its stored kind keeps it audio.
+          recordedKind: attachment.kind
         })
         const viewable = view.viewable
         return (

@@ -7,6 +7,10 @@
 export interface BridgeTurn {
   readonly role: 'user' | 'assistant'
   readonly content: string
+  /** The stored message's id, so a browser can choose one of its versions. */
+  readonly id?: string
+  /** Where this turn sits among its versions (0-based), when a retry or an edit added others. */
+  readonly versions?: { readonly index: number; readonly count: number }
 }
 
 export interface BridgeConversation {
@@ -31,6 +35,8 @@ interface ConversationRow {
 interface MessageRow {
   readonly role: string
   readonly content: string
+  readonly uuid?: string | null
+  readonly versions?: { readonly index: number; readonly count: number }
 }
 
 /** Browser-origin conversations are tagged so their origin survives the round trip. */
@@ -70,11 +76,15 @@ export function toBridgeConversation(
   messages: readonly MessageRow[]
 ): BridgeConversation {
   const stored = messages.filter(
-    (m): m is BridgeTurn => m.role === 'user' || m.role === 'assistant'
+    (m): m is MessageRow & { role: 'user' | 'assistant' } =>
+      m.role === 'user' || m.role === 'assistant'
   )
-  const turns = stored
-    .slice(-MAX_TURNS)
-    .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_TURN_CHARS) }))
+  const turns: BridgeTurn[] = stored.slice(-MAX_TURNS).map((m) => ({
+    role: m.role,
+    content: m.content.slice(0, MAX_TURN_CHARS),
+    ...(m.uuid ? { id: m.uuid } : {}),
+    ...(m.versions ? { versions: { index: m.versions.index, count: m.versions.count } } : {})
+  }))
   return {
     id: row.id,
     title: row.title || turns.find((t) => t.role === 'user')?.content.slice(0, 48) || 'Chat',

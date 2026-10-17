@@ -50,6 +50,20 @@ function versionIs(label: string): (content: string, element: Element | null) =>
     !Array.from(element.children).some((child) => child.textContent === label)
 }
 
+/** Every saved answer of conversation-a, every version, in storage order. */
+function savedAnswers(boundary: ChatBoundary): string[] {
+  return boundary.messages['conversation-a']!
+    .filter((message) => message.role === 'assistant')
+    .map((message) => message.content)
+}
+
+/** The answers conversation-a reads with: the chosen version of each. */
+async function shownAnswers(boundary: ChatBoundary): Promise<string[]> {
+  return (await boundary.api.getRagMessages('conversation-a'))
+    .filter((message) => message.role === 'assistant')
+    .map((message) => message.content)
+}
+
 describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -749,7 +763,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
 
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
-    expect(boundary.api.speak).toHaveBeenCalledWith('Read this answer.')
+    expect(boundary.api.speak).toHaveBeenCalledWith('Read this answer.', undefined, expect.any(Function))
   })
 
   it('streams and persists the first local reply in one assistant bubble (#32)', async () => {
@@ -1199,14 +1213,22 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await user.click(await screen.findByRole('button', { name: 'Next response' }))
     expect(screen.queryByText('Original explanation')).toBeNull()
     expect(screen.getAllByText('Explain the release gate')).toHaveLength(1)
+    // Both answers are kept; the chat reads with the newer one.
     await waitFor(() =>
       expect(
         boundary.messages['conversation-a']!.map(({ role, content }) => [role, content])
       ).toEqual([
         ['user', 'Explain the release gate'],
+        ['assistant', 'Original explanation'],
         ['assistant', 'Updated explanation']
       ])
     )
+    expect(
+      (await boundary.api.getRagMessages('conversation-a')).map(({ role, content }) => [role, content])
+    ).toEqual([
+      ['user', 'Explain the release gate'],
+      ['assistant', 'Updated explanation']
+    ])
   })
 
   it('keeps Resend disabled until the active reply finishes, then regenerates one turn', async () => {
@@ -1517,17 +1539,9 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
     )
-    const saved = boundary.messages['conversation-a']!.filter(
-      (message) => message.role === 'assistant'
-    )
-    expect(saved).toHaveLength(1)
-    expect(saved[0]!.content).toBe('Partial resend')
-    expect(saved[0]!.context).toMatchObject({
-      variants: [
-        expect.objectContaining({ content: 'Earlier answer' }),
-        expect.objectContaining({ content: 'Partial resend' })
-      ]
-    })
+    // Each answer is its own saved version; the partial one is shown.
+    await waitFor(() => expect(savedAnswers(boundary)).toEqual(['Earlier answer', 'Partial resend']))
+    expect(await shownAnswers(boundary)).toEqual(['Partial resend'])
   })
 
   it('shows the version arrows while a regenerated answer streams and lets the user flip back', async () => {
@@ -1627,16 +1641,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(await screen.findByText(versionIs('2/2'))).toBeTruthy()
     await user.click(await screen.findByRole('button', { name: 'Previous response' }))
     expect(await screen.findByText('Original explanation')).toBeTruthy()
-    const saved = boundary.messages['conversation-a']!.filter(
-      (message) => message.role === 'assistant'
-    )
-    expect(saved).toHaveLength(1)
-    expect(saved[0]!.context).toMatchObject({
-      variants: [
-        expect.objectContaining({ content: 'Original explanation' }),
-        expect.objectContaining({ content: '' })
-      ]
-    })
+    await waitFor(() => expect(savedAnswers(boundary)).toEqual(['Original explanation', '']))
   })
 
   /** Regenerate a saved answer and leave the new version streaming, as main reports it. */
@@ -1693,16 +1698,7 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
       expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
     )
     expect(await screen.findByText(versionIs('2/2'))).toBeTruthy()
-    const saved = boundary.messages['conversation-a']!.filter(
-      (message) => message.role === 'assistant'
-    )
-    expect(saved).toHaveLength(1)
-    expect(saved[0]!.context).toMatchObject({
-      variants: [
-        expect.objectContaining({ content: 'Original explanation' }),
-        expect.objectContaining({ content: 'Finished replacement' })
-      ]
-    })
+    expect(savedAnswers(boundary)).toEqual(['Original explanation', 'Finished replacement'])
     await user.click(await screen.findByRole('button', { name: 'Previous response' }))
     expect(await screen.findByText('Original explanation')).toBeTruthy()
   })
@@ -1719,17 +1715,11 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     )
 
     expect(await screen.findByText(versionIs('2/2'))).toBeTruthy()
-    const saved = boundary.messages['conversation-a']!.filter(
-      (message) => message.role === 'assistant'
-    )
-    expect(saved).toHaveLength(1)
-    expect(saved[0]!.content).toBe('Streaming replacement and more')
-    expect(saved[0]!.context).toMatchObject({
-      variants: [
-        expect.objectContaining({ content: 'Original explanation' }),
-        expect.objectContaining({ content: 'Streaming replacement and more' })
-      ]
-    })
+    expect(savedAnswers(boundary)).toEqual([
+      'Original explanation',
+      'Streaming replacement and more'
+    ])
+    expect(await shownAnswers(boundary)).toEqual(['Streaming replacement and more'])
 
     cleanup()
     renderChat({ conversationId: 'conversation-a' })
@@ -1780,7 +1770,14 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
 
     expect(await screen.findByText(versionIs('2/2'))).toBeTruthy()
-    expect(imageSources()).toContain('data:image/png;base64,Rk9YMg==')
+    // The new picture, from its data or from its saved file once the chat is read back.
+    await waitFor(() =>
+      expect(
+        imageSources().some(
+          (src) => src === 'data:image/png;base64,Rk9YMg==' || src.includes('fox-2.png')
+        )
+      ).toBe(true)
+    )
     expect(imageSources().some((src) => src.includes('fox-1.png'))).toBe(false)
     await user.click(await screen.findByRole('button', { name: 'Previous response' }))
     expect(await screen.findByText(versionIs('1/2'))).toBeTruthy()
@@ -1789,25 +1786,14 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(await screen.findByText(versionIs('2/2'))).toBeTruthy()
     expect(imageSources().some((src) => src.includes('fox-2.png'))).toBe(true)
 
+    // Each picture is its own saved version.
     const saved = boundary.messages['conversation-a']!.filter(
       (message) => message.role === 'assistant'
     )
-    expect(saved).toHaveLength(1)
-    expect(saved[0]!.context).toMatchObject({
-      imageRef: { id: 'fox-2', path: '/images/fox-2.png' },
-      variants: [
-        expect.objectContaining({
-          context: expect.objectContaining({
-            imageRef: expect.objectContaining({ path: '/images/fox-1.png' })
-          })
-        }),
-        expect.objectContaining({
-          context: expect.objectContaining({
-            imageRef: expect.objectContaining({ path: '/images/fox-2.png' })
-          })
-        })
-      ]
-    })
+    expect(saved.map((message) => (message.context as { imageRef?: unknown })?.imageRef)).toEqual([
+      expect.objectContaining({ path: '/images/fox-1.png' }),
+      expect.objectContaining({ id: 'fox-2', path: '/images/fox-2.png' })
+    ])
     expect(JSON.stringify(saved[0]!.context)).not.toContain('base64')
 
     cleanup()
@@ -1954,12 +1940,14 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     boundary.resolve(0, 'Edited first answer')
     await screen.findByText('Edited first answer')
     expect(screen.queryByRole('button', { name: 'Previous response' })).toBeNull()
-    expect(boundary.messages['conversation-a']![0]).toMatchObject({
-      content: 'Edited question',
-      context: {
-        branches: [{ question: 'Old question', answers: [{ content: 'Old branch answer' }] }]
-      }
-    })
+    // The old question and its answer stay, as the first version of the question.
+    expect(await screen.findByRole('button', { name: 'Previous question' })).toBeTruthy()
+    expect(boundary.messages['conversation-a']!.map(({ content }) => content)).toEqual([
+      'Old question',
+      'Old branch answer',
+      'Edited question',
+      'Edited first answer'
+    ])
     await openActionsFor('Edited first answer')
     await user.click(screen.getByRole('menuitem', { name: 'Regenerate' }))
     await waitFor(() => expect(boundary.calls).toHaveLength(2))
@@ -1978,6 +1966,15 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     )
     expect(JSON.stringify(history)).not.toContain('Old branch answer')
     boundary.resolve(2, 'Matched follow up')
+    await screen.findByText('Matched follow up')
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
+    )
+
+    // Going back to the old question brings back its answer, and only its answer.
+    await user.click(await screen.findByRole('button', { name: 'Previous question' }))
+    expect(await screen.findByText('Old branch answer')).toBeTruthy()
+    expect(screen.queryByText('Matched follow up')).toBeNull()
   })
 
   it('Send Now saves an unclaimed partial response and drains the urgent item', async () => {

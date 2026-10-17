@@ -242,6 +242,7 @@ import {
 } from './stream-view-store'
 
 import { stopLiveTask, stopLiveWebUseForConversation } from './helper'
+import { PassPlayback, type PlayableClip } from '@renderer/lib/pass-playback'
 import {
   ACTIVE_CHAT_TAB_KEY,
   EMPTY_MSGS,
@@ -894,7 +895,7 @@ export function MemoryChat({
   const draftInputRef = useRef<ChatDraftInputHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioRef = useRef<PlayableClip | null>(null)
   const voiceMountedRef = useRef(true)
   const speechRequestRef = useRef(0)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -1617,6 +1618,8 @@ export function MemoryChat({
     opts?: {
       regen?: boolean
       priorVariants?: ResponseVersion[]
+      /** The saved answer a retry's new answer sits beside (shown in its place while it streams). */
+      versionOf?: string
       priorAnswer?: ChatMessage
       replacementMessageId?: string
       history?: ChatMessage[]
@@ -2069,6 +2072,7 @@ export function MemoryChat({
             {
               id: `a-${Date.now()}`,
               role: 'assistant',
+              createdAt: Date.now(),
               ...completedImage,
               image: img.dataUrl,
               imagePath: img.path,
@@ -2118,6 +2122,7 @@ export function MemoryChat({
               {
                 id: `a-${Date.now()}`,
                 role: 'assistant',
+                createdAt: Date.now(),
                 content: errorContent,
                 imageMemoryRetry: memoryGuard
                   ? { request: imageRequest, prompt: trimmed, conversationId: convId, projectId }
@@ -2160,7 +2165,10 @@ export function MemoryChat({
       const toolStreamMessage: ChatMessage = {
         id: toolStreamId,
         replacementMessageId: opts?.replacementMessageId,
+        ...(opts?.versionOf ? { versionOf: opts.versionOf } : {}),
         role: 'assistant',
+        // Stamped when the reply starts, so its time shows the moment it finishes, not after a reload.
+        createdAt: Date.now(),
         content: '',
         reasoning: '',
         reasoningRequested: thinkingEnabled,
@@ -2569,6 +2577,7 @@ export function MemoryChat({
                   {
                     id: imageMessageId,
                     role: 'assistant',
+                    createdAt: Date.now(),
                     ...completedImage,
                     image: img.dataUrl,
                     imagePath: img.path,
@@ -2824,6 +2833,9 @@ export function MemoryChat({
               context
             )
           : await window.api.addRagMessage(convId, 'assistant', failed.content, context)
+        // A retry that failed is kept as a version, and the answer it was retrying stays shown.
+        if (stored && stored !== true && opts?.versionOf)
+          await window.api.selectRagMessageVersion(convId, stored.uuid, -1)
         if (stored && sid)
           setConvMessages(convId, (previous) =>
             previous.map((message) =>
@@ -3005,12 +3017,26 @@ export function MemoryChat({
     saveRecording: (audio, extension) => window.api.saveVoiceRecording(audio, extension),
     cancelTranscription: (requestId) => window.api.cancelTranscription(requestId),
     getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
-    onTranscript: (text, clip) => {
+    onTranscript: (text, clip, owner) => {
       if (voiceMode && clip) {
+        // Sent in the chat it was recorded in, even when another chat is open by now.
+        const recordedIn = owner === NEW_CHAT ? null : owner
+        if (recordedIn !== (activeConversationId ?? null)) {
+          // A new chat left before it had any message has nowhere to receive it.
+          if (recordedIn === null) return false
+          const home = conversations.find((conversation) => conversation.id === recordedIn)
+          void sendMessage(text, {
+            voiceClip: clip,
+            conversationId: recordedIn,
+            ...(home ? { projectIdOverride: home.project_id ?? null } : {})
+          })
+          return true
+        }
         void sendMessage(text, { voiceClip: clip })
-        return
+        return true
       }
       draftStore.update((previous) => `${previous}${previous ? ' ' : ''}${text}`)
+      return true
     }
   })
   const recording =
@@ -3152,17 +3178,11 @@ export function MemoryChat({
       setSpeakError(null)
       setSpeakLoadingId(id) // generating on-device — show a loading state
       try {
-        const { dataUrl } = await window.api.speak(messageToSpeakable(text))
-        if (!voiceMountedRef.current || speechRequestRef.current !== request) return
-        if (!dataUrl) throw new Error('empty dataUrl')
-        const audio = new Audio(dataUrl)
+        // A long reply is spoken in passes: play each as it arrives, so the voice starts after
+        // the first sentence instead of after the whole reply.
+        const audio = new PassPlayback()
         audioRef.current = audio
-        audio.onended = () => {
-          setSpeakingId((cur) => (cur === id ? null : cur))
-          if (audioRef.current === audio) audioRef.current = null
-        }
-        audio.onerror = () => {
-          console.error('[tts] audio element error', audio.error)
+        const failed = (): void => {
           setSpeakingId((cur) => (cur === id ? null : cur))
           setSpeakLoadingId((cur) => (cur === id ? null : cur))
           setSpeakError({
@@ -3171,7 +3191,38 @@ export function MemoryChat({
               'Speech could not be played. Check your audio output, then try speaking the reply again.'
           })
         }
-        await audio.play()
+        audio.onended = () => {
+          setSpeakingId((cur) => (cur === id ? null : cur))
+          if (audioRef.current === audio) audioRef.current = null
+        }
+        audio.onerror = () => {
+          console.error('[tts] audio element error')
+          failed()
+        }
+        const made = window.api
+          .speak(messageToSpeakable(text), undefined, (pass) =>
+            audio.addPass(pass.index, pass.dataUrl)
+          )
+          .then(({ dataUrl }) => {
+            if (!dataUrl) throw new Error('empty dataUrl')
+            audio.setFull(dataUrl)
+          })
+        const playing = audio.play()
+        // The first audio, or the synthesis failing before any audio exists.
+        await Promise.race([playing, made.then(() => playing)])
+        if (!voiceMountedRef.current || speechRequestRef.current !== request) {
+          audio.pause()
+          made.catch(() => undefined)
+          return
+        }
+        // The rest of the reply can still fail after its first sentence started playing.
+        made.catch((e: unknown) => {
+          console.error('[tts] failed', e)
+          if (audioRef.current !== audio) return
+          audio.pause()
+          audioRef.current = null
+          failed()
+        })
         setSpeakLoadingId((cur) => (cur === id ? null : cur))
         setSpeakingId(id) // now actually speaking
       } catch (e) {
@@ -3517,9 +3568,8 @@ export function MemoryChat({
     markGenerating,
     resetPreview: () => setRemoteWorkPreview(null),
     stopTask: stopLiveWebUseForConversation,
-    update: (...args) => window.api.updateRagMessage(...args),
-    truncate: (...args) => window.api.truncateRagMessages(...args),
-    removeTasks: async (ids) => window.api.tasks?.remove?.(ids),
+    addVersion: (...args) => window.api.addRagMessageVersion(...args),
+    prepareAnswerVersion: (...args) => window.api.prepareAnswerVersion(...args),
     setMessages: setConvMessages,
     refresh: refreshConversationMessages,
     announceSettled: announceRunSettled,
@@ -3772,7 +3822,9 @@ export function MemoryChat({
         fileName: attachment.name,
         mimeType: (attachment as { mimeType?: string }).mimeType,
         path: attachment.path,
-        text: attachment.text
+        text: attachment.text,
+        // A recorded voice note is saved as .webm; its stored kind keeps it audio.
+        recordedKind: attachment.kind
       })
       if (!view.viewable) return
       closePanels()
@@ -3824,7 +3876,16 @@ export function MemoryChat({
     selectVariant: (messageId, direction) => {
       const selected = messages.find((message) => message.id === messageId)
       const cid = activeConversationId
-      if (!selected?.variants?.length || !cid || selected.streaming) return
+      if (!selected || !cid || selected.streaming) return
+      // A saved version shows its own thread: the turns after it come back with it.
+      if (selected.threadVersions) {
+        void window.api
+          .selectRagMessageVersion(cid, messageId, direction)
+          .then((changed) => (changed ? refreshConversationMessages(cid) : undefined))
+          .catch((error) => console.error('Failed to show the selected version:', error))
+        return
+      }
+      if (!selected.variants?.length) return
       const restored = selectAnswerVersion(selected, direction)
       setMessages((previous) =>
         previous.map((message) => (message.id === messageId ? restored : message))

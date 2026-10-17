@@ -115,10 +115,14 @@ async function synthesizeExecutorch(input: Parameters<ExecutorchSpeechRuntime['s
 let busy = false
 
 /** The ONNX worker owns accelerated model memory and can be terminated on eviction. */
+/** Kokoro's resident cost in MB (the Settings note: on-demand frees about 330 MB). */
+const KOKORO_MB = 330
+
 export const ttsRuntime: ManagedRuntime = {
   modality: 'tts',
+  footprintMB: () => (onnxSpeech.isLoaded() ? KOKORO_MB : 0),
+  expectedMB: () => KOKORO_MB,
   evict: () => onnxSpeech.close(),
-  warm: () => onnxSpeech.prepare(DEFAULT_VOICE).then(() => undefined),
   release: () => onnxSpeech.close()
 }
 

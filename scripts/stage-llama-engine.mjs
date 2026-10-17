@@ -39,9 +39,9 @@ process.on('exit', () => fs.rmSync(work, { recursive: true, force: true }))
 // Linux CUDA runtime libraries come from one pinned upstream archive, the same one the CUDA pack
 // ships, so a machine with the pack already has these files and downloads none of them.
 const LINUX_CUDART = {
-  ref: 'b11056',
-  name: 'cudart-llama-b11056-bin-ubuntu-cuda-12.8-x64.tar.gz',
-  sha256: '9fba31d628eca3672b187da52aab123e9c9c04b376ccf5408d283ecaae4c0891'
+  ref: 'b11669',
+  name: 'cudart-llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz',
+  sha256: 'ab3eda89a82096bcba00b6448218c3c11eec2016b0f38d64884dc29736549f26'
 }
 
 async function releaseAsset(tag, name) {

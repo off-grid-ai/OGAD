@@ -209,6 +209,31 @@ export function activeModelProjectionIdentity(
 
 /** Web Use has its own strategy settings but shares the installed model runtimes. */
 export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModelProjection> {
+  const strategy =
+    currentRemoteScreenTaskSession()?.modelStrategy ?? getWebUseSettings().modelStrategy
+  if (strategy === 'planner_actor_evaluator') {
+    // The four contract models (planner, actor, evaluator, answer), named as configured.
+    const { planner, actor, evaluator, answerer } = getWebUseSettings().agentModels
+    const remote = (url: string): boolean => !/^https?:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(url)
+    const named = (
+      endpoint: { model: string; baseUrl: string },
+      role: string
+    ): { modelId: string; modelName: string; remote: boolean } => ({
+      modelId: endpoint.model,
+      modelName: `${endpoint.model} (${role})`,
+      remote: remote(endpoint.baseUrl)
+    })
+    return Promise.resolve({
+      strategy,
+      strategyLabel: 'Planner + Actor + Evaluator',
+      models: [
+        { role: 'reasoner', ...named(planner, 'planner') },
+        { role: 'grounding_specialist', ...named(actor, 'actor') },
+        { role: 'decision', ...named(evaluator, 'evaluator') },
+        ...(answerer ? [{ role: 'reasoner' as const, ...named(answerer, 'answer') }] : [])
+      ]
+    })
+  }
   return getComputerUseActiveModelProjection({
     ...productionDependencies,
     strategy: () =>

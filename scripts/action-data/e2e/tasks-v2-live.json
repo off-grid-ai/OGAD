@@ -1,0 +1,1046 @@
+[
+ {
+  "id": "showcase-sphere-1",
+  "group": "showcase",
+  "site": "sphere",
+  "url": "https://www.thespherevegas.com/",
+  "goal": "Find the next scheduled concert at the Sphere in Las Vegas and tell me the artist name and its date.",
+  "expect": "answer",
+  "source": "OpenAI Operator suggested prompt - https://www.axios.com/2025/01/24/openai-operator-agent-web-sam-altman"
+ },
+ {
+  "id": "showcase-opentable-1",
+  "group": "showcase",
+  "site": "opentable",
+  "url": "https://www.opentable.com/",
+  "goal": "Search OpenTable for Italian restaurants in San Francisco and tell me the name of the first restaurant listed and its price band.",
+  "expect": "answer",
+  "source": "OpenAI Operator launch demo (Jan 2025) - https://www.axios.com/2025/01/23/openai-operator-agent-preview-chatgpt"
+ },
+ {
+  "id": "showcase-amazon-1",
+  "group": "showcase",
+  "site": "amazon",
+  "url": "https://www.amazon.in/",
+  "goal": "Search Amazon.in for 'Tata Salt 1kg' and tell me the price of the first non-sponsored result, stopping before adding anything to the cart.",
+  "expect": "answer",
+  "source": "OpenAI Operator launch demo (Jan 2025) - https://www.axios.com/2025/01/23/openai-operator-agent-preview-chatgpt (Instacart grocery list, converted to read-only price lookup)"
+ },
+ {
+  "id": "showcase-etsy-1",
+  "group": "showcase",
+  "site": "etsy",
+  "url": "https://www.etsy.com/",
+  "goal": "Search Etsy for 'handmade ceramic coffee mug' and tell me the shop name of the first non-ad result.",
+  "expect": "answer",
+  "source": "OpenAI Operator launch demo (Jan 2025) - https://www.axios.com/2025/01/23/openai-operator-agent-preview-chatgpt (Etsy shopping multitask example)"
+ },
+ {
+  "id": "showcase-allrecipes-1",
+  "group": "showcase",
+  "site": "allrecipes",
+  "url": "https://www.allrecipes.com/",
+  "goal": "Find an Allrecipes recipe for tamagoyaki (Japanese rolled omelette) and tell me how many eggs it uses.",
+  "expect": "answer",
+  "source": "OpenAI ChatGPT agent launch demo (Jul 2025) - https://www.techradar.com/computing/artificial-intelligence/openai-claims-the-new-chatgpt-agent-can-run-your-errands-build-your-slides-and-make-you-look-like-you-have-your-life-together (Japanese breakfast for four)"
+ },
+ {
+  "id": "showcase-wikipedia-1",
+  "group": "showcase",
+  "site": "wikipedia",
+  "url": "https://en.wikipedia.org/wiki/List_of_current_Major_League_Baseball_stadiums",
+  "goal": "Using the list of current Major League Baseball stadiums, tell me which stadium has the largest seating capacity and the number.",
+  "expect": "answer",
+  "source": "OpenAI ChatGPT agent launch demo (Jul 2025) - https://www.techradar.com/computing/artificial-intelligence/openai-claims-the-new-chatgpt-agent-can-run-your-errands-build-your-slides-and-make-you-look-like-you-have-your-life-together (30-MLB-stadium itinerary)"
+ },
+ {
+  "id": "showcase-timeanddate-1",
+  "group": "showcase",
+  "site": "timeanddate",
+  "url": "https://www.timeanddate.com/weather/usa/napa/climate",
+  "goal": "Find the average high temperature in Napa, California in October on timeanddate.com.",
+  "expect": "answer",
+  "source": "OpenAI ChatGPT agent launch demo (Jul 2025) - https://www.techradar.com/computing/artificial-intelligence/openai-claims-the-new-chatgpt-agent-can-run-your-errands-build-your-slides-and-make-you-look-like-you-have-your-life-together (wedding outfit for venue and weather)"
+ },
+ {
+  "id": "showcase-notion-1",
+  "group": "showcase",
+  "site": "notion",
+  "url": "https://www.notion.com/pricing",
+  "goal": "Find the monthly per-seat price of the Notion Plus plan when billed yearly, in US dollars.",
+  "expect": "answer",
+  "source": "OpenAI ChatGPT agent launch demo (Jul 2025) - https://www.techradar.com/computing/artificial-intelligence/openai-claims-the-new-chatgpt-agent-can-run-your-errands-build-your-slides-and-make-you-look-like-you-have-your-life-together (analyze three competitors)"
+ },
+ {
+  "id": "showcase-wikimedia-1",
+  "group": "showcase",
+  "site": "wikimedia",
+  "url": "https://wikimediafoundation.org/",
+  "goal": "Find the press contact email address of the Wikimedia Foundation on its website.",
+  "expect": "answer",
+  "source": "Google Project Mariner demo (Dec 2024) - https://techcrunch.com/2024/12/11/google-unveils-project-mariner-ai-agents-to-use-the-web-for-you/ (find company websites and contact emails)"
+ },
+ {
+  "id": "showcase-apple-1",
+  "group": "showcase",
+  "site": "apple",
+  "url": "https://www.apple.com/in/",
+  "goal": "Find the price in rupees of AirPods Pro on Apple's India store, stopping before adding to bag.",
+  "expect": "answer",
+  "source": "Google Project Mariner demo (Dec 2024) - https://techcrunch.com/2024/12/11/google-unveils-project-mariner-ai-agents-to-use-the-web-for-you/ (comparing prices, converted to read-only)"
+ },
+ {
+  "id": "showcase-taskrabbit-1",
+  "group": "showcase",
+  "site": "taskrabbit",
+  "url": "https://www.taskrabbit.com/services/handyman/assemble-furniture",
+  "goal": "Find the furniture assembly service on Taskrabbit and tell me the lowest starting hourly rate or 'from' price it shows.",
+  "expect": "answer",
+  "source": "Google Project Mariner demo (Dec 2024) - https://techcrunch.com/2024/12/11/google-unveils-project-mariner-ai-agents-to-use-the-web-for-you/ (hire a Tasker for furniture assembly, stop before booking)"
+ },
+ {
+  "id": "showcase-amazon-2",
+  "group": "showcase",
+  "site": "amazon",
+  "url": "https://www.amazon.in/",
+  "goal": "Search Amazon.in for baby strollers and tell me the name and price of the highest-rated stroller under Rs 10,000 on the first results page.",
+  "expect": "answer",
+  "source": "Meta Muse launch (Sep 2026) - https://engadget.com/2253133/meta-reveals-its-ai-agent-that-can-shop-send-emails-and-plan-trips-on-your-behalf/ (shopping for a stroller)"
+ },
+ {
+  "id": "showcase-imdb-1",
+  "group": "showcase",
+  "site": "imdb",
+  "url": "https://www.imdb.com/chart/moviemeter/",
+  "goal": "Open IMDb's Most Popular Movies chart and tell me the runtime of the movie ranked number 1.",
+  "expect": "answer",
+  "source": "Meta Muse launch (Sep 2026) - https://engadget.com/2253133/meta-reveals-its-ai-agent-that-can-shop-send-emails-and-plan-trips-on-your-behalf/ (ordering movie tickets, converted to read-only lookup)"
+ },
+ {
+  "id": "showcase-bricklink-1",
+  "group": "showcase",
+  "site": "bricklink",
+  "url": "https://www.bricklink.com/",
+  "goal": "Look up LEGO part number 3001 on BrickLink and tell me the part's name.",
+  "expect": "answer",
+  "source": "ChatGPT agent hands-on test - https://www.datacamp.com/tutorial/chatgpt-agent (Lego parts list verification on BrickLink)"
+ },
+ {
+  "id": "showcase-huggingface-1",
+  "group": "showcase",
+  "site": "huggingface",
+  "url": "https://huggingface.co/models",
+  "goal": "On Hugging Face, filter models by the apache-2.0 license and the text-generation task, sort by most downloads, and tell me the name of the top model.",
+  "expect": "answer",
+  "source": "Browser Use README demos - https://github.com/browser-use/browser-use (filter HF models by license)"
+ },
+ {
+  "id": "showcase-github-1",
+  "group": "showcase",
+  "site": "github",
+  "url": "https://github.com/browser-use/browser-use",
+  "goal": "Open the browser-use GitHub repository and tell me which license it uses and its approximate star count shown on the page.",
+  "expect": "answer",
+  "source": "xAI Grok Bot beta use cases (Aug 2026) - https://t2online.in/tech/tech-news/xai-launches-grok-bot-to-handle-tasks-across-apps-and-websites/2007230 / Browser Use README demos - https://github.com/browser-use/browser-use (repo triage, read-only)"
+ },
+ {
+  "id": "webvoyager-allrecipes-1",
+  "group": "webvoyager",
+  "site": "allrecipes",
+  "url": "https://www.allrecipes.com/",
+  "goal": "Find a vegetarian lasagna recipe on Allrecipes with at least a 4.5-star rating and more than 500 ratings, and tell me its total time.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-amazon-1",
+  "group": "webvoyager",
+  "site": "amazon",
+  "url": "https://www.amazon.in/",
+  "goal": "Search Amazon.in for a Logitech wireless mouse with at least 4 stars and tell me the model name and price of the cheapest one on the first page.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-apple-1",
+  "group": "webvoyager",
+  "site": "apple",
+  "url": "https://www.apple.com/in/",
+  "goal": "On Apple's India site, find the starting price of the MacBook Air 13-inch.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-arxiv-1",
+  "group": "webvoyager",
+  "site": "arxiv",
+  "url": "https://arxiv.org/",
+  "goal": "Find the arXiv paper 'Attention Is All You Need' and tell me its arXiv identifier and the date of its first version.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-github-1",
+  "group": "webvoyager",
+  "site": "github",
+  "url": "https://github.com/",
+  "goal": "Search GitHub for the repository 'ggml-org/llama.cpp' and tell me its license and primary language.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-booking-1",
+  "group": "webvoyager",
+  "site": "booking",
+  "url": "https://www.booking.com/",
+  "goal": "Search Booking.com for hotels in Goa for two adults, check-in 15 days from today for 2 nights, filter to 4+ stars, and tell me the name of the first listed property (do not reserve).",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-espn-1",
+  "group": "webvoyager",
+  "site": "espn",
+  "url": "https://www.espn.com/",
+  "goal": "On ESPN, find the NBA team that won the most recent NBA Finals and tell me the series result.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-coursera-1",
+  "group": "webvoyager",
+  "site": "coursera",
+  "url": "https://www.coursera.org/",
+  "goal": "Search Coursera for Andrew Ng's 'Machine Learning Specialization' and tell me how many courses it contains.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-cambridge-dictionary-1",
+  "group": "webvoyager",
+  "site": "cambridge-dictionary",
+  "url": "https://dictionary.cambridge.org/",
+  "goal": "Look up the word 'serendipity' in the Cambridge Dictionary and tell me its UK IPA pronunciation.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-bbc-news-1",
+  "group": "webvoyager",
+  "site": "bbc-news",
+  "url": "https://www.bbc.com/news",
+  "goal": "On BBC News, open the Technology section and tell me the headline of the top story.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-google-flights-1",
+  "group": "webvoyager",
+  "site": "google-flights",
+  "url": "https://www.google.com/travel/flights",
+  "goal": "On Google Flights, search one-way flights from Mumbai (BOM) to Delhi (DEL) 14 days from today and tell me the airline and price of the cheapest nonstop flight shown (do not book).",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-google-maps-1",
+  "group": "webvoyager",
+  "site": "google-maps",
+  "url": "https://www.google.com/maps",
+  "goal": "On Google Maps, find the Gateway of India in Mumbai and tell me its star rating.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-google-search-1",
+  "group": "webvoyager",
+  "site": "google-search",
+  "url": "https://www.google.com/",
+  "goal": "Use Google Search to find the year the Indian Space Research Organisation (ISRO) was founded.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-huggingface-1",
+  "group": "webvoyager",
+  "site": "huggingface",
+  "url": "https://huggingface.co/datasets",
+  "goal": "On Hugging Face, find the dataset 'openai/gsm8k' and tell me how many rows its test split has.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "webvoyager-wolfram-alpha-1",
+  "group": "webvoyager",
+  "site": "wolfram-alpha",
+  "url": "https://www.wolframalpha.com/",
+  "goal": "Use Wolfram Alpha to compute the integral of x^2 * sin(x) from 0 to pi and give the exact result.",
+  "expect": "answer",
+  "source": "WebVoyager style (He et al. 2024) - https://github.com/MinorJerry/WebVoyager"
+ },
+ {
+  "id": "agent-common-amazon-1",
+  "group": "agent-common",
+  "site": "amazon",
+  "url": "https://www.amazon.in/",
+  "goal": "Compare the prices of the Samsung Galaxy Buds FE and the OnePlus Nord Buds 3 on Amazon.in and tell me which is cheaper and by how much.",
+  "expect": "answer",
+  "source": "Common user agent intent: shopping comparison; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-flipkart-1",
+  "group": "agent-common",
+  "site": "flipkart",
+  "url": "https://www.flipkart.com/",
+  "goal": "Search Flipkart for a 1.5 ton 3-star split AC and tell me the brand and price of the first non-sponsored result.",
+  "expect": "answer",
+  "source": "Common user agent intent: shopping search; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-croma-1",
+  "group": "agent-common",
+  "site": "croma",
+  "url": "https://www.croma.com/",
+  "goal": "Find the price of the Apple iPhone 16 128GB on Croma.",
+  "expect": "answer",
+  "source": "Common user agent intent: electronics price lookup; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-erail-1",
+  "group": "agent-common",
+  "site": "erail",
+  "url": "https://erail.in/",
+  "goal": "Find the departure time of train 12951 (Mumbai Rajdhani) from Mumbai Central.",
+  "expect": "answer",
+  "source": "Common user agent intent: travel schedule; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-google-flights-1",
+  "group": "agent-common",
+  "site": "google-flights",
+  "url": "https://www.google.com/travel/flights",
+  "goal": "Find the cheapest round-trip economy fare from Bengaluru (BLR) to Singapore (SIN) departing 30 days from today and returning 7 days later, and tell me the airline (do not book).",
+  "expect": "answer",
+  "source": "Common user agent intent: travel search; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-bbcgoodfood-1",
+  "group": "agent-common",
+  "site": "bbcgoodfood",
+  "url": "https://www.bbcgoodfood.com/",
+  "goal": "Find the BBC Good Food recipe for chicken tikka masala and tell me how many servings it makes.",
+  "expect": "answer",
+  "source": "Common user agent intent: recipe lookup; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-python-docs-1",
+  "group": "agent-common",
+  "site": "python-docs",
+  "url": "https://docs.python.org/3/",
+  "goal": "In the Python 3 docs, find the default value of the 'maxsize' parameter of functools.lru_cache.",
+  "expect": "answer",
+  "source": "Common user agent intent: docs lookup; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-mdn-1",
+  "group": "agent-common",
+  "site": "mdn",
+  "url": "https://developer.mozilla.org/",
+  "goal": "On MDN, find which HTTP status code means 'Too Many Requests'.",
+  "expect": "answer",
+  "source": "Common user agent intent: docs lookup; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-react-docs-1",
+  "group": "agent-common",
+  "site": "react-docs",
+  "url": "https://react.dev/",
+  "goal": "In the React docs, find the name of the hook used to read and subscribe to a context.",
+  "expect": "answer",
+  "source": "Common user agent intent: docs lookup; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-the-hindu-1",
+  "group": "agent-common",
+  "site": "the-hindu",
+  "url": "https://www.thehindu.com/",
+  "goal": "On The Hindu, open the Business section and tell me the headline of the top story.",
+  "expect": "answer",
+  "source": "Common user agent intent: news; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-greenhouse-1",
+  "group": "agent-common",
+  "site": "greenhouse",
+  "url": "https://job-boards.greenhouse.io/anthropic",
+  "goal": "On Anthropic's Greenhouse job board, tell me the title of the first open role listed for London.",
+  "expect": "answer",
+  "source": "Common user agent intent: jobs search; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-weather-1",
+  "group": "agent-common",
+  "site": "weather",
+  "url": "https://www.timeanddate.com/sun/india/mumbai",
+  "goal": "Find today's sunset time in Mumbai on timeanddate.com.",
+  "expect": "answer",
+  "source": "Common user agent intent: local info; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-google-maps-1",
+  "group": "agent-common",
+  "site": "google-maps",
+  "url": "https://www.google.com/maps",
+  "goal": "On Google Maps, find the closest pharmacy to Bandra Kurla Complex, Mumbai and tell me its name and rating.",
+  "expect": "answer",
+  "source": "Common user agent intent: local info; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-rbi-1",
+  "group": "agent-common",
+  "site": "rbi",
+  "url": "https://www.rbi.org.in/",
+  "goal": "Find the current policy repo rate on the Reserve Bank of India homepage.",
+  "expect": "answer",
+  "source": "Common user agent intent: finance info lookup; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "agent-common-wikipedia-1",
+  "group": "agent-common",
+  "site": "wikipedia",
+  "url": "https://en.wikipedia.org/",
+  "goal": "Find the population of Bengaluru according to the 2011 census on Wikipedia.",
+  "expect": "answer",
+  "source": "Common user agent intent: fact lookup; task style per Online-Mind2Web style - https://huggingface.co/datasets/osunlp/Online-Mind2Web"
+ },
+ {
+  "id": "ogad-reddit-1",
+  "group": "ogad-top",
+  "site": "reddit",
+  "url": "https://www.reddit.com/r/LocalLLaMA/top/?t=month",
+  "goal": "In r/LocalLLaMA, sort by Top for this month and tell me the title of the first post that mentions Apple Silicon or Mac.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:25"
+ },
+ {
+  "id": "ogad-youtube-1",
+  "group": "ogad-top",
+  "site": "youtube",
+  "url": "https://www.youtube.com/",
+  "goal": "Search YouTube for Mac mini AI cluster, filter to uploads from this month, and tell me the title and view count of the first video.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:26"
+ },
+ {
+  "id": "ogad-googlenews-1",
+  "group": "ogad-top",
+  "site": "googlenews",
+  "url": "https://news.google.com/?hl=en-IN&gl=IN&ceid=IN:en",
+  "goal": "Search Google News for UPI and tell me the headline and publisher of the first story.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:27"
+ },
+ {
+  "id": "ogad-huggingface-1",
+  "group": "ogad-top",
+  "site": "huggingface",
+  "url": "https://huggingface.co/models",
+  "goal": "Filter models by the GGUF library, sort by most downloads, and tell me the name of the first model.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:28"
+ },
+ {
+  "id": "ogad-github-1",
+  "group": "ogad-top",
+  "site": "github",
+  "url": "https://github.com/ggml-org/llama.cpp",
+  "goal": "Open the Releases of llama.cpp and tell me the tag of the latest release.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:29"
+ },
+ {
+  "id": "ogad-amazon-1",
+  "group": "ogad-top",
+  "site": "amazon",
+  "url": "https://www.amazon.in/",
+  "goal": "Search for Apple AirPods Pro 2 and tell me the price of the first matching result and the delivery date shown for PIN 400001. Do not buy.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:37"
+ },
+ {
+  "id": "ogad-flipkart-1",
+  "group": "ogad-top",
+  "site": "flipkart",
+  "url": "https://www.flipkart.com/",
+  "goal": "Search for boAt Airdopes 141, then search the same product on amazon.in, and tell me both prices and which site is cheaper.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:38"
+ },
+ {
+  "id": "ogad-flipkart-2",
+  "group": "ogad-top",
+  "site": "flipkart",
+  "url": "https://www.flipkart.com/",
+  "goal": "Find wireless earbuds rated 4 stars and above under 2000 rupees, sorted by price low to high, and tell me the name and price of the first one.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:39"
+ },
+ {
+  "id": "ogad-croma-1",
+  "group": "ogad-top",
+  "site": "croma",
+  "url": "https://www.croma.com/",
+  "goal": "Search Croma for MacBook Air and tell me the name and price of the first result.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:42"
+ },
+ {
+  "id": "ogad-amazon-2",
+  "group": "ogad-top",
+  "site": "amazon",
+  "url": "https://www.amazon.in/",
+  "goal": "Search for Samsung Galaxy M35 and, on the first result's product page, tell me the seller name and the return policy shown.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:44"
+ },
+ {
+  "id": "ogad-bigbasket-1",
+  "group": "ogad-top",
+  "site": "bigbasket",
+  "url": "https://www.bigbasket.com/",
+  "goal": "Search for Amul butter 500 g and tell me the price of the first result. Do not add to cart.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:43"
+ },
+ {
+  "id": "ogad-googleflights-1",
+  "group": "ogad-top",
+  "site": "googleflights",
+  "url": "https://www.google.com/travel/flights",
+  "goal": "Find the cheapest non-stop flight from Pune to Delhi on 20 November 2026 for 1 adult and tell me the airline and price. Do not book.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:50"
+ },
+ {
+  "id": "ogad-makemytrip-1",
+  "group": "ogad-top",
+  "site": "makemytrip",
+  "url": "https://www.makemytrip.com/flights/",
+  "goal": "Search one-way flights from Mumbai to Goa on 20 November 2026 for 1 adult and tell me the airline and price of the cheapest flight. Do not book.",
+  "expect": "answer",
+  "source": "src/renderer/src/components/explore/presetCatalog.ts:207"
+ },
+ {
+  "id": "ogad-booking-1",
+  "group": "ogad-top",
+  "site": "booking",
+  "url": "https://www.booking.com/",
+  "goal": "Search stays in Goa for 20-22 November 2026 for 2 adults, filter to review score 8+, sort by lowest price, and tell me the name and price of the first property. Do not book.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:52"
+ },
+ {
+  "id": "ogad-irctc-1",
+  "group": "ogad-top",
+  "site": "irctc",
+  "url": "https://www.irctc.co.in/nget/train-search",
+  "goal": "Search trains from Mumbai CSMT to Pune for tomorrow and tell me the name and departure time of the first train listed. Do not book.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:53"
+ },
+ {
+  "id": "ogad-googlemaps-1",
+  "group": "ogad-top",
+  "site": "googlemaps",
+  "url": "https://www.google.com/maps",
+  "goal": "Search for cafes in Koramangala, Bengaluru and tell me the name and rating of the highest-rated cafe in the first page of results.",
+  "expect": "answer",
+  "source": "src/renderer/src/components/explore/presetCatalog.ts:292"
+ },
+ {
+  "id": "ogad-getoffgridai-1",
+  "group": "ogad-top",
+  "site": "getoffgridai",
+  "url": "https://getoffgridai.co/",
+  "goal": "Find the pricing section and tell me the name and price of each plan shown.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:118"
+ },
+ {
+  "id": "ogad-pagespeed-1",
+  "group": "ogad-top",
+  "site": "pagespeed",
+  "url": "https://pagespeed.web.dev/",
+  "goal": "Run a report for getoffgridai.co and tell me the mobile Performance score.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:120"
+ },
+ {
+  "id": "ogad-wednesday-1",
+  "group": "ogad-top",
+  "site": "wednesday",
+  "url": "https://www.wednesday.is/",
+  "goal": "Find the contact page and tell me which fields the contact form asks for. Do not submit it.",
+  "expect": "answer",
+  "source": "docs/USE_CASE_BENCHMARK.md:121"
+ },
+ {
+  "id": "ogad-wikipedia-1",
+  "group": "ogad-top",
+  "site": "wikipedia",
+  "url": "https://en.wikipedia.org/wiki/Unified_Payments_Interface",
+  "goal": "Read this page and tell me the year UPI launched and the organisation that developed it.",
+  "expect": "answer",
+  "source": "../website/articles/how-to-summarise-web-pages-with-local-ai-in-your-browser-in-2026.md:41"
+ },
+ {
+  "id": "p-amazon-2",
+  "goal": "Search for headphones and tell me the name and price of the first result.",
+  "url": "https://www.amazon.in/",
+  "expect": "answer",
+  "expected": "First result: Bose NEW QuietComfort Wireless Noise Cancelling Headphones, Bluetooth Over Ear Headphones with Up to 24 Hours of Battery Life - Black — ₹15,490 (M.R.P: ₹27,900)",
+  "teacher_answer": "First result: Bose NEW QuietComfort Wireless Noise Cancelling Headphones, Bluetooth Over Ear Headphones with Up to 24 Hours of Battery Life - Black — ₹15,490 (M.R.P: ₹27,900)",
+  "site": "amazon",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-flipkart-14",
+  "goal": "Search for wireless earbuds and tell me how many results there are.",
+  "url": "https://www.flipkart.com/",
+  "expect": "answer",
+  "expected": "22,556 results for \"wireless earbuds\"",
+  "teacher_answer": "22,556 results for \"wireless earbuds\"",
+  "site": "flipkart",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-flipkart-15",
+  "goal": "Search for green tea and tell me how many results there are.",
+  "url": "https://www.flipkart.com/",
+  "expect": "answer",
+  "expected": "3,927 results for \"green tea\" (Showing 1 – 40 of 3,927 results)",
+  "teacher_answer": "3,927 results for \"green tea\" (Showing 1 – 40 of 3,927 results)",
+  "site": "flipkart",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-flipkart-21",
+  "goal": "Search for office chair and tell me how many results there are.",
+  "url": "https://www.flipkart.com/",
+  "expect": "answer",
+  "expected": "5,176 results for \"office chair\" (Showing 1 – 40 of 5,176 results)",
+  "teacher_answer": "5,176 results for \"office chair\" (Showing 1 – 40 of 5,176 results)",
+  "site": "flipkart",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-myntra-4",
+  "goal": "Search for backpack and tell me the brand and price of the first product.",
+  "url": "https://www.myntra.com/",
+  "expect": "answer",
+  "expected": "First product: Brand - uppercase; Product - Colourblocked Small Ergonomic Laptop Compartment Boxy Backpacks; Price - Rs. 749 (MRP Rs. 1500, 50% OFF)",
+  "teacher_answer": "First product: Brand - uppercase; Product - Colourblocked Small Ergonomic Laptop Compartment Boxy Backpacks; Price - Rs. 749 (MRP Rs. 1500, 50% OFF)",
+  "site": "myntra",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-myntra-8",
+  "goal": "Search for men running shoes and tell me the brand and price of the first product.",
+  "url": "https://www.myntra.com/",
+  "expect": "answer",
+  "expected": "Brand: Reebok — Product: Reebok Men Running Shoes — Price: Rs. 3359 (40% OFF from Rs. 5599)",
+  "teacher_answer": "Brand: Reebok — Product: Reebok Men Running Shoes — Price: Rs. 3359 (40% OFF from Rs. 5599)",
+  "site": "myntra",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-jiomart-7",
+  "goal": "Search for headphones and tell me the name and price of the first result.",
+  "url": "https://www.jiomart.com/",
+  "expect": "answer",
+  "expected": "First result: boAt Rockerz 512 ANC Over The Ear Headphones with 35db ANC, 40mm drivers, 80 Hours playback (Cosmic Black) — Price: ₹2,599 (original price ₹4,999)",
+  "teacher_answer": "First result: boAt Rockerz 512 ANC Over The Ear Headphones with 35db ANC, 40mm drivers, 80 Hours playback (Cosmic Black) — Price: ₹2,599 (original price ₹4,999)",
+  "site": "jiomart",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-nykaa-4",
+  "goal": "Search for headphones and tell me the name and price of the first result.",
+  "url": "https://www.nykaa.com/",
+  "expect": "answer",
+  "expected": "First result for \"headphones\" on Nykaa: iConnect Calling Ace 1.83\"(4.64 cm) Display & BT Calling Smartwatch Unisex TWIXW1100T — Regular price ₹4995, Discounted price ₹1798 (64% Off)",
+  "teacher_answer": "First result for \"headphones\" on Nykaa: iConnect Calling Ace 1.83\"(4.64 cm) Display & BT Calling Smartwatch Unisex TWIXW1100T — Regular price ₹4995, Discounted price ₹1798 (64% Off)",
+  "site": "nykaa",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-youtube-15",
+  "goal": "Search YouTube for iphone review and tell me the title and channel of the first video.",
+  "url": "https://www.youtube.com/",
+  "expect": "answer",
+  "expected": "Title: \"iPhone Duo vs iPhone 18 Pro: The $800 Question…\" — Channel: 9to5Mac",
+  "teacher_answer": "Title: \"iPhone Duo vs iPhone 18 Pro: The $800 Question…\" — Channel: 9to5Mac",
+  "site": "youtube",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-imdb-5",
+  "goal": "Find Inception on IMDb and tell me its rating and year.",
+  "url": "https://www.imdb.com/",
+  "expect": "answer",
+  "expected": "Inception (2010) — IMDb rating: 8.8/10 (based on 2.9M user ratings)",
+  "teacher_answer": "Inception (2010) — IMDb rating: 8.8/10 (based on 2.9M user ratings)",
+  "site": "imdb",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-bookmyshow-5",
+  "goal": "Find movies showing in Hyderabad and tell me the names of the first three.",
+  "url": "https://in.bookmyshow.com/",
+  "expect": "answer",
+  "expected": "Prahaar, Nayyi Navelli, Street Fighter",
+  "teacher_answer": "Prahaar, Nayyi Navelli, Street Fighter",
+  "site": "bookmyshow",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-makemytrip-4",
+  "goal": "Search hotels in Mumbai and tell me the name and price of the first hotel. Do not book.",
+  "url": "https://www.makemytrip.com/",
+  "expect": "answer",
+  "expected": "First hotel: \"Aurika, Mumbai International Airport - Luxury by Lemon Tree Hotels\" — price $91 per night (down from $128), plus $27 taxes & fees.",
+  "teacher_answer": "First hotel: \"Aurika, Mumbai International Airport - Luxury by Lemon Tree Hotels\" — price $91 per night (down from $128), plus $27 taxes & fees.",
+  "site": "makemytrip",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-booking-8",
+  "goal": "Search stays in Jaipur and tell me the name and price of the first property. Do not book.",
+  "url": "https://www.booking.com/",
+  "expect": "answer",
+  "expected": "First property: Tripli Sattva (Malviya Nagar, Jaipur) — $16 per night (1 night, 2 adults; original price $23, limited-time deal)",
+  "teacher_answer": "First property: Tripli Sattva (Malviya Nagar, Jaipur) — $16 per night (1 night, 2 adults; original price $23, limited-time deal)",
+  "site": "booking",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-tripadvisor-5",
+  "goal": "Find things to do in Mumbai and tell me the top attraction.",
+  "url": "https://www.tripadvisor.in/",
+  "expect": "answer",
+  "expected": "Gateway Of India — ranked #1 in \"Top Attractions in Mumbai\" (Points of Interest & Landmarks, Travellers' Choice Best of the Best)",
+  "teacher_answer": "Gateway Of India — ranked #1 in \"Top Attractions in Mumbai\" (Points of Interest & Landmarks, Travellers' Choice Best of the Best)",
+  "site": "tripadvisor",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-weather-5",
+  "goal": "Tell me the current temperature in Hyderabad.",
+  "url": "https://weather.com/",
+  "expect": "answer",
+  "expected": "The current temperature in Hyderabad (Telangana, India) is 77°F (about 25°C), with Mist/Foggy conditions, as of 1:33 AM GMT+5:30 (Feels Like 77°, High 94°, Low 74°).",
+  "teacher_answer": "The current temperature in Hyderabad (Telangana, India) is 77°F (about 25°C), with Mist/Foggy conditions, as of 1:33 AM GMT+5:30 (Feels Like 77°, High 94°, Low 74°).",
+  "site": "weather",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-weather-8",
+  "goal": "Tell me the current temperature in Jaipur.",
+  "url": "https://weather.com/",
+  "expect": "answer",
+  "expected": "The current temperature in Jaipur, Rajasthan, India is 74°F (Fog, feels like 74°F).",
+  "teacher_answer": "The current temperature in Jaipur, Rajasthan, India is 74°F (Fog, feels like 74°F).",
+  "site": "weather",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-naukri-5",
+  "goal": "Search sales executive jobs and tell me the title and company of the first listing.",
+  "url": "https://www.naukri.com/",
+  "expect": "answer",
+  "expected": "Title: Sales Executive - North Goa | Company: Delhivery",
+  "teacher_answer": "Title: Sales Executive - North Goa | Company: Delhivery",
+  "site": "naukri",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-hackernews-1",
+  "goal": "Tell me the title of item number 1 on the front page.",
+  "url": "https://news.ycombinator.com/",
+  "expect": "answer",
+  "expected": "Tesla Roadster",
+  "teacher_answer": "Tesla Roadster",
+  "site": "hackernews",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-producthunt-3",
+  "goal": "Tell me the name of the third product on today's list.",
+  "url": "https://www.producthunt.com/",
+  "expect": "answer",
+  "expected": "Tesla Roadster",
+  "teacher_answer": "Tesla Roadster",
+  "site": "producthunt",
+  "group": "top-sites"
+ },
+ {
+  "id": "p-pypi-4",
+  "goal": "Search PyPI for markdown and tell me the latest version of the top result.",
+  "url": "https://pypi.org/",
+  "expect": "answer",
+  "expected": "Markdown 3.11.1",
+  "teacher_answer": "Markdown 3.11.1",
+  "site": "pypi",
+  "group": "top-sites"
+ },
+ {
+  "id": "v-digipal-cms-replit-app-3",
+  "goal": "Open Pricing, select the Interactive Kiosks tab, and tell me the price per screen per month of the Self-Service plan.",
+  "url": "https://digipal-cms.replit.app",
+  "expect": "answer",
+  "expected": "$29",
+  "teacher_answer": "$29 per screen / mo (Self-Service plan, Interactive Kiosks tab, monthly billing)",
+  "site": "digipal-cms.replit.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-buildathons-replit-app-3",
+  "goal": "On the home page, find the Agent 4 Buildathon and tell me its date range.",
+  "url": "https://buildathons.replit.app/",
+  "expect": "answer",
+  "expected": "Mar 24, 2026 – Apr 19, 2026",
+  "teacher_answer": "Agent 4 Buildathon: 24 Mar 2026 – 19 Apr 2026",
+  "site": "buildathons.replit.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-launchedonlaunched-lovable-app-3",
+  "goal": "On the home page, what is the title of the latest recap for the week of June 30, 2025?",
+  "url": "https://launchedonlaunched.lovable.app/",
+  "expect": "answer",
+  "expected": "Food Planning and Creative Tools Take the Lead",
+  "teacher_answer": "Food Planning and Creative Tools Take the Lead",
+  "site": "launchedonlaunched.lovable.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-accessibility-lens-lovable-app-1",
+  "goal": "Scroll to 'Experience Real Disabilities' and tell me how many people the Dyslexia card says are affected.",
+  "url": "https://accessibility-lens.lovable.app/",
+  "expect": "answer",
+  "expected": "780M",
+  "teacher_answer": "780M affected",
+  "site": "accessibility-lens.lovable.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-therameets-lovable-app-1",
+  "goal": "On the home page, find the day and time of the Group Therapy Session.",
+  "url": "https://therameets.lovable.app/",
+  "expect": "answer",
+  "expected": "Every Friday, 7:00 PM",
+  "teacher_answer": "Every Friday, 7:00 PM",
+  "site": "therameets.lovable.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-drinkwater-plus-lovable-app-2",
+  "goal": "Open the Pricing page and tell me the yearly price of the Enterprise Hydration plan.",
+  "url": "https://drinkwater-plus.lovable.app/",
+  "expect": "answer",
+  "expected": "₹4,999/year",
+  "teacher_answer": "The Enterprise Hydration plan is priced at ₹4,999/year.",
+  "site": "drinkwater-plus.lovable.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-extraordinary-cocada-1b4824-netlify-app-1",
+  "goal": "On the home feed, find Jessica Kim's post and tell me which finance firms she mentions.",
+  "url": "https://extraordinary-cocada-1b4824.netlify.app/",
+  "expect": "answer",
+  "expected": "Goldman Sachs or JP Morgan",
+  "teacher_answer": "Jessica Kim's post (Oct 13, Harvard University 2021) mentions two finance firms: Goldman Sachs and JP Morgan. Full post: \"Looking for mentorship opportunities in the finance sector. Anyone from our alumni network working at Goldman Sachs or JP Morgan?\"",
+  "site": "extraordinary-cocada-1b4824.netlify.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-survivoriocalc-com-1",
+  "goal": "With the default Kunai weapon and default values, click Calculate Damage and tell me the average damage per hit.",
+  "url": "https://survivoriocalc.com/",
+  "expect": "answer",
+  "expected": "26,486",
+  "teacher_answer": "26,486 (Average Damage Per Hit; 15,135 non-crit | 37,838 crit at 50% rate)",
+  "site": "survivoriocalc.com",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-sports-club-manageme-744u-bolt-host-2",
+  "goal": "Go to the Coaches section and tell me the name of the Head Sensei.",
+  "url": "https://sports-club-manageme-744u.bolt.host/",
+  "expect": "answer",
+  "expected": "Takeshi Yamamoto",
+  "teacher_answer": "Takeshi Yamamoto",
+  "site": "sports-club-manageme-744u.bolt.host",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-west-midlands-travel-qlwo-bolt-host-3",
+  "goal": "Open the Attractions page and tell me the entry price of the Royal Pump Rooms.",
+  "url": "https://west-midlands-travel-qlwo.bolt.host/",
+  "expect": "answer",
+  "expected": "£6",
+  "teacher_answer": null,
+  "site": "west-midlands-travel-qlwo.bolt.host",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-gridirondata-com-1",
+  "goal": "Open the Pricing page and tell me the yearly price of the Pro plan.",
+  "url": "https://gridirondata.com",
+  "expect": "answer",
+  "expected": "$249/year",
+  "teacher_answer": "The Pro plan yearly price is $249/year (Pro is $29/month, or $249 per year).",
+  "site": "gridirondata.com",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-homepage-redesign-b07k-bolt-host-3",
+  "goal": "Scroll to the Labor Relations & Negotiations product and tell me its first listed feature.",
+  "url": "https://homepage-redesign-b07k.bolt.host/",
+  "expect": "answer",
+  "expected": "Bargaining units",
+  "teacher_answer": "Bargaining units",
+  "site": "homepage-redesign-b07k.bolt.host",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-hydradb-com-2",
+  "goal": "Go to the Pricing section and tell me the storage price per GB-month on the Scale plan.",
+  "url": "https://hydradb.com",
+  "expect": "answer",
+  "expected": "$0.25",
+  "teacher_answer": "$0.25/GB-month (Scale plan: Storage $0.25/GB-month, $300/mo min usage)",
+  "site": "hydradb.com",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-helm-by-nautilink-replit-app-3",
+  "goal": "Look at the Free plan in the pricing section and tell me how many devices it supports.",
+  "url": "https://helm-by-nautilink.replit.app/",
+  "expect": "answer",
+  "expected": "Up to 3 devices",
+  "teacher_answer": "The Free plan supports up to 3 devices.",
+  "site": "helm-by-nautilink.replit.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-onlinedecibelmeter-com-1",
+  "goal": "Scroll to the Reference Sound Levels list and tell me which common sounds are listed at 70 dB.",
+  "url": "https://onlinedecibelmeter.com/",
+  "expect": "answer",
+  "expected": "Shower running, Dishwasher",
+  "teacher_answer": "Shower running, Dishwasher",
+  "site": "onlinedecibelmeter.com",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-color-drenching-lovable-app-2",
+  "goal": "Scroll to the 'How to Apply Color Drenching' tips and tell me the title of tip 04.",
+  "url": "https://color-drenching.lovable.app/",
+  "expect": "answer",
+  "expected": "Test Before You Commit",
+  "teacher_answer": "Test Before You Commit",
+  "site": "color-drenching.lovable.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-launchedonlaunched-lovable-app-1",
+  "goal": "Open Archives and tell me the headline of the weekly recap for the week of June 23, 2025.",
+  "url": "https://launchedonlaunched.lovable.app/",
+  "expect": "answer",
+  "expected": "Social Platforms and Professional Development Take the Spotlight",
+  "teacher_answer": "Social Platforms and Professional Development Take the Spotlight",
+  "site": "launchedonlaunched.lovable.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-designful-app-3",
+  "goal": "Open the Pricing page and tell me how many variable modes / themes the Team plan allows.",
+  "url": "https://designful.app/",
+  "expect": "answer",
+  "expected": "20",
+  "teacher_answer": "20 — On the Designful Pricing page, the \"Variable modes / themes\" row lists the Team plan as allowing 20 variable modes / themes (Starter: —, Pro: 2, Team: 20, Enterprise: Enterprise policy).",
+  "site": "designful.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-sahadhyayi-com-2",
+  "goal": "Search the library for 'Pride and Prejudice' and tell me the author of the first result.",
+  "url": "https://www.sahadhyayi.com/library",
+  "expect": "answer",
+  "expected": "Jane Austen",
+  "teacher_answer": "Jane Austen",
+  "site": "sahadhyayi.com",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-challengebrew-com-1",
+  "goal": "Click 'All games →' and tell me how many games are in the 'Board games' category.",
+  "url": "https://challengebrew.com/",
+  "expect": "answer",
+  "expected": "30",
+  "teacher_answer": "30 games",
+  "site": "challengebrew.com",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-app-ideanation-cloud-1",
+  "goal": "Scroll to the pricing section and tell me the monthly price of the Workshop plan.",
+  "url": "https://app.ideanation.cloud/",
+  "expect": "answer",
+  "expected": "$15/month",
+  "teacher_answer": "The Workshop plan is $15/month.",
+  "site": "app.ideanation.cloud",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-buymeatea-online-2",
+  "goal": "Open the Pricing page and tell me how much the Kadak plan costs per month.",
+  "url": "https://buymeatea.online/",
+  "expect": "answer",
+  "expected": "₹999/mo",
+  "teacher_answer": "₹999/mo",
+  "site": "buymeatea.online",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-venturalawcenter-netlify-app-1",
+  "goal": "On the home page, under which practice area is 'Camp Lejeune Water Contamination' listed as a featured case?",
+  "url": "https://venturalawcenter.netlify.app/",
+  "expect": "answer",
+  "expected": "Environmental Contamination",
+  "teacher_answer": "Environmental Contamination",
+  "site": "venturalawcenter.netlify.app",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-treg-to-2",
+  "goal": "Find the \"One token\" catalog list and tell me the price listed for Email verify with Hunter.",
+  "url": "https://treg.to/people-search",
+  "expect": "answer",
+  "expected": "$0.003 / check",
+  "teacher_answer": "$0.003 / check (Email verify — Hunter, listed under \"One token. 4,000+ data & tools.\")",
+  "site": "treg.to",
+  "group": "vibe-coded"
+ },
+ {
+  "id": "v-vedicastrologychart-org-2",
+  "goal": "Open the Pricing page and tell me the price of the 10-Report Pack.",
+  "url": "https://vedicastrologychart.org/",
+  "expect": "answer",
+  "expected": "$19.9",
+  "teacher_answer": "The 10-Report Pack price is $19.9.",
+  "site": "vedicastrologychart.org",
+  "group": "vibe-coded"
+ }
+]

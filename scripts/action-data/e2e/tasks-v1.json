@@ -1,0 +1,767 @@
+[
+ {
+  "id": "p-amazon-2",
+  "goal": "Search for headphones and tell me the name and price of the first result.",
+  "url": "https://www.amazon.in/",
+  "expect": "answer",
+  "expected": "First result: Bose NEW QuietComfort Wireless Noise Cancelling Headphones, Bluetooth Over Ear Headphones with Up to 24 Hours of Battery Life - Black \u2014 \u20b915,490 (M.R.P: \u20b927,900)",
+  "teacher_answer": "First result: Bose NEW QuietComfort Wireless Noise Cancelling Headphones, Bluetooth Over Ear Headphones with Up to 24 Hours of Battery Life - Black \u2014 \u20b915,490 (M.R.P: \u20b927,900)",
+  "site": "amazon"
+ },
+ {
+  "id": "p-flipkart-14",
+  "goal": "Search for wireless earbuds and tell me how many results there are.",
+  "url": "https://www.flipkart.com/",
+  "expect": "answer",
+  "expected": "22,556 results for \"wireless earbuds\"",
+  "teacher_answer": "22,556 results for \"wireless earbuds\"",
+  "site": "flipkart"
+ },
+ {
+  "id": "p-flipkart-15",
+  "goal": "Search for green tea and tell me how many results there are.",
+  "url": "https://www.flipkart.com/",
+  "expect": "answer",
+  "expected": "3,927 results for \"green tea\" (Showing 1 \u2013 40 of 3,927 results)",
+  "teacher_answer": "3,927 results for \"green tea\" (Showing 1 \u2013 40 of 3,927 results)",
+  "site": "flipkart"
+ },
+ {
+  "id": "p-flipkart-21",
+  "goal": "Search for office chair and tell me how many results there are.",
+  "url": "https://www.flipkart.com/",
+  "expect": "answer",
+  "expected": "5,176 results for \"office chair\" (Showing 1 \u2013 40 of 5,176 results)",
+  "teacher_answer": "5,176 results for \"office chair\" (Showing 1 \u2013 40 of 5,176 results)",
+  "site": "flipkart"
+ },
+ {
+  "id": "p-myntra-4",
+  "goal": "Search for backpack and tell me the brand and price of the first product.",
+  "url": "https://www.myntra.com/",
+  "expect": "answer",
+  "expected": "First product: Brand - uppercase; Product - Colourblocked Small Ergonomic Laptop Compartment Boxy Backpacks; Price - Rs. 749 (MRP Rs. 1500, 50% OFF)",
+  "teacher_answer": "First product: Brand - uppercase; Product - Colourblocked Small Ergonomic Laptop Compartment Boxy Backpacks; Price - Rs. 749 (MRP Rs. 1500, 50% OFF)",
+  "site": "myntra"
+ },
+ {
+  "id": "p-myntra-8",
+  "goal": "Search for men running shoes and tell me the brand and price of the first product.",
+  "url": "https://www.myntra.com/",
+  "expect": "answer",
+  "expected": "Brand: Reebok \u2014 Product: Reebok Men Running Shoes \u2014 Price: Rs. 3359 (40% OFF from Rs. 5599)",
+  "teacher_answer": "Brand: Reebok \u2014 Product: Reebok Men Running Shoes \u2014 Price: Rs. 3359 (40% OFF from Rs. 5599)",
+  "site": "myntra"
+ },
+ {
+  "id": "p-jiomart-7",
+  "goal": "Search for headphones and tell me the name and price of the first result.",
+  "url": "https://www.jiomart.com/",
+  "expect": "answer",
+  "expected": "First result: boAt Rockerz 512 ANC Over The Ear Headphones with 35db ANC, 40mm drivers, 80 Hours playback (Cosmic Black) \u2014 Price: \u20b92,599 (original price \u20b94,999)",
+  "teacher_answer": "First result: boAt Rockerz 512 ANC Over The Ear Headphones with 35db ANC, 40mm drivers, 80 Hours playback (Cosmic Black) \u2014 Price: \u20b92,599 (original price \u20b94,999)",
+  "site": "jiomart"
+ },
+ {
+  "id": "p-nykaa-4",
+  "goal": "Search for headphones and tell me the name and price of the first result.",
+  "url": "https://www.nykaa.com/",
+  "expect": "answer",
+  "expected": "First result for \"headphones\" on Nykaa: iConnect Calling Ace 1.83\"(4.64 cm) Display & BT Calling Smartwatch Unisex TWIXW1100T \u2014 Regular price \u20b94995, Discounted price \u20b91798 (64% Off)",
+  "teacher_answer": "First result for \"headphones\" on Nykaa: iConnect Calling Ace 1.83\"(4.64 cm) Display & BT Calling Smartwatch Unisex TWIXW1100T \u2014 Regular price \u20b94995, Discounted price \u20b91798 (64% Off)",
+  "site": "nykaa"
+ },
+ {
+  "id": "p-youtube-15",
+  "goal": "Search YouTube for iphone review and tell me the title and channel of the first video.",
+  "url": "https://www.youtube.com/",
+  "expect": "answer",
+  "expected": "Title: \"iPhone Duo vs iPhone 18 Pro: The $800 Question\u2026\" \u2014 Channel: 9to5Mac",
+  "teacher_answer": "Title: \"iPhone Duo vs iPhone 18 Pro: The $800 Question\u2026\" \u2014 Channel: 9to5Mac",
+  "site": "youtube"
+ },
+ {
+  "id": "p-imdb-5",
+  "goal": "Find Inception on IMDb and tell me its rating and year.",
+  "url": "https://www.imdb.com/",
+  "expect": "answer",
+  "expected": "Inception (2010) \u2014 IMDb rating: 8.8/10 (based on 2.9M user ratings)",
+  "teacher_answer": "Inception (2010) \u2014 IMDb rating: 8.8/10 (based on 2.9M user ratings)",
+  "site": "imdb"
+ },
+ {
+  "id": "p-bookmyshow-5",
+  "goal": "Find movies showing in Hyderabad and tell me the names of the first three.",
+  "url": "https://in.bookmyshow.com/",
+  "expect": "answer",
+  "expected": "Prahaar, Nayyi Navelli, Street Fighter",
+  "teacher_answer": "Prahaar, Nayyi Navelli, Street Fighter",
+  "site": "bookmyshow"
+ },
+ {
+  "id": "p-makemytrip-4",
+  "goal": "Search hotels in Mumbai and tell me the name and price of the first hotel. Do not book.",
+  "url": "https://www.makemytrip.com/",
+  "expect": "answer",
+  "expected": "First hotel: \"Aurika, Mumbai International Airport - Luxury by Lemon Tree Hotels\" \u2014 price $91 per night (down from $128), plus $27 taxes & fees.",
+  "teacher_answer": "First hotel: \"Aurika, Mumbai International Airport - Luxury by Lemon Tree Hotels\" \u2014 price $91 per night (down from $128), plus $27 taxes & fees.",
+  "site": "makemytrip"
+ },
+ {
+  "id": "p-booking-8",
+  "goal": "Search stays in Jaipur and tell me the name and price of the first property. Do not book.",
+  "url": "https://www.booking.com/",
+  "expect": "answer",
+  "expected": "First property: Tripli Sattva (Malviya Nagar, Jaipur) \u2014 $16 per night (1 night, 2 adults; original price $23, limited-time deal)",
+  "teacher_answer": "First property: Tripli Sattva (Malviya Nagar, Jaipur) \u2014 $16 per night (1 night, 2 adults; original price $23, limited-time deal)",
+  "site": "booking"
+ },
+ {
+  "id": "p-tripadvisor-5",
+  "goal": "Find things to do in Mumbai and tell me the top attraction.",
+  "url": "https://www.tripadvisor.in/",
+  "expect": "answer",
+  "expected": "Gateway Of India \u2014 ranked #1 in \"Top Attractions in Mumbai\" (Points of Interest & Landmarks, Travellers' Choice Best of the Best)",
+  "teacher_answer": "Gateway Of India \u2014 ranked #1 in \"Top Attractions in Mumbai\" (Points of Interest & Landmarks, Travellers' Choice Best of the Best)",
+  "site": "tripadvisor"
+ },
+ {
+  "id": "p-weather-5",
+  "goal": "Tell me the current temperature in Hyderabad.",
+  "url": "https://weather.com/",
+  "expect": "answer",
+  "expected": "The current temperature in Hyderabad (Telangana, India) is 77\u00b0F (about 25\u00b0C), with Mist/Foggy conditions, as of 1:33 AM GMT+5:30 (Feels Like 77\u00b0, High 94\u00b0, Low 74\u00b0).",
+  "teacher_answer": "The current temperature in Hyderabad (Telangana, India) is 77\u00b0F (about 25\u00b0C), with Mist/Foggy conditions, as of 1:33 AM GMT+5:30 (Feels Like 77\u00b0, High 94\u00b0, Low 74\u00b0).",
+  "site": "weather"
+ },
+ {
+  "id": "p-weather-8",
+  "goal": "Tell me the current temperature in Jaipur.",
+  "url": "https://weather.com/",
+  "expect": "answer",
+  "expected": "The current temperature in Jaipur, Rajasthan, India is 74\u00b0F (Fog, feels like 74\u00b0F).",
+  "teacher_answer": "The current temperature in Jaipur, Rajasthan, India is 74\u00b0F (Fog, feels like 74\u00b0F).",
+  "site": "weather"
+ },
+ {
+  "id": "p-naukri-5",
+  "goal": "Search sales executive jobs and tell me the title and company of the first listing.",
+  "url": "https://www.naukri.com/",
+  "expect": "answer",
+  "expected": "Title: Sales Executive - North Goa | Company: Delhivery",
+  "teacher_answer": "Title: Sales Executive - North Goa | Company: Delhivery",
+  "site": "naukri"
+ },
+ {
+  "id": "p-hackernews-1",
+  "goal": "Tell me the title of item number 1 on the front page.",
+  "url": "https://news.ycombinator.com/",
+  "expect": "answer",
+  "expected": "Tesla Roadster",
+  "teacher_answer": "Tesla Roadster",
+  "site": "hackernews"
+ },
+ {
+  "id": "p-producthunt-3",
+  "goal": "Tell me the name of the third product on today's list.",
+  "url": "https://www.producthunt.com/",
+  "expect": "answer",
+  "expected": "Tesla Roadster",
+  "teacher_answer": "Tesla Roadster",
+  "site": "producthunt"
+ },
+ {
+  "id": "p-pypi-4",
+  "goal": "Search PyPI for markdown and tell me the latest version of the top result.",
+  "url": "https://pypi.org/",
+  "expect": "answer",
+  "expected": "Markdown 3.11.1",
+  "teacher_answer": "Markdown 3.11.1",
+  "site": "pypi"
+ },
+ {
+  "id": "v-gridirondata-com-1",
+  "goal": "Open the Pricing page and tell me the yearly price of the Pro plan.",
+  "url": "https://gridirondata.com",
+  "expect": "answer",
+  "expected": "$249/year",
+  "teacher_answer": "The Pro plan yearly price is $249/year (Pro is $29/month, or $249 per year).",
+  "site": "gridirondata.com"
+ },
+ {
+  "id": "v-hydradb-com-2",
+  "goal": "Go to the Pricing section and tell me the storage price per GB-month on the Scale plan.",
+  "url": "https://hydradb.com",
+  "expect": "answer",
+  "expected": "$0.25",
+  "teacher_answer": "$0.25/GB-month (Scale plan: Storage $0.25/GB-month, $300/mo min usage)",
+  "site": "hydradb.com"
+ },
+ {
+  "id": "v-femoniheal-com-1",
+  "goal": "Open the Pricing page and tell me the monthly price of the Premium plan.",
+  "url": "https://femoniheal.com/",
+  "expect": "answer",
+  "expected": "$59",
+  "teacher_answer": "The Premium plan's monthly price is $59/month.",
+  "site": "femoniheal.com"
+ },
+ {
+  "id": "v-tracetify-com-3",
+  "goal": "On the home page, find the base44.com trace card and tell me what it says Base44 was acquired by Wix for.",
+  "url": "https://tracetify.com/",
+  "expect": "answer",
+  "expected": "$80 million",
+  "teacher_answer": "$80 million \u2014 the base44.com trace card says \"Base44 was acquired by Wix for $80 million \u2014 6 months after it first surfaced\"",
+  "site": "tracetify.com"
+ },
+ {
+  "id": "v-tinapps-com-2",
+  "goal": "Open the Finance category and tell me how many calculators are listed.",
+  "url": "https://tinapps.com/",
+  "expect": "answer",
+  "expected": "9",
+  "teacher_answer": "9 calculators are listed in the Finance category: Budget tracker, Compound interest, Debt payoff planner, Investment return, Loan calculator, Mortgage calculator, Retirement planner, Savings goal, and Tip calculator.",
+  "site": "tinapps.com"
+ },
+ {
+  "id": "v-fabulous-valkyrie-1c2ba4-netlify-app-2",
+  "goal": "Scroll to the plans and tell me how many products the Pro plan allows.",
+  "url": "https://fabulous-valkyrie-1c2ba4.netlify.app/",
+  "expect": "answer",
+  "expected": "500 Products",
+  "teacher_answer": "The Pro plan allows 500 Products.",
+  "site": "fabulous-valkyrie-1c2ba4.netlify.app"
+ },
+ {
+  "id": "v-boltid-me-1",
+  "goal": "Open the Pricing page and tell me the price of the Individual plan.",
+  "url": "https://boltid.me/",
+  "expect": "answer",
+  "expected": "Free (forever)",
+  "teacher_answer": "The Individual plan is Free forever.",
+  "site": "boltid.me"
+ },
+ {
+  "id": "v-subba-pro-3",
+  "goal": "Open Pricing and tell me the price of the Starter plan per month.",
+  "url": "https://subba.pro/",
+  "expect": "answer",
+  "expected": "\u00a39.99",
+  "teacher_answer": "\u00a39.99/month",
+  "site": "subba.pro"
+ },
+ {
+  "id": "v-atsboost-org-2",
+  "goal": "Scroll to Simple Pricing and tell me the price of the One-time Credit.",
+  "url": "https://www.atsboost.org/",
+  "expect": "answer",
+  "expected": "$9",
+  "teacher_answer": "The One-time Credit is $9 (one-time), described as \"Perfect for a single job application.\"",
+  "site": "atsboost.org"
+ },
+ {
+  "id": "v-paper2play-com-2",
+  "goal": "On the home page, tell me how many worlds and how many games the hero section says there are.",
+  "url": "https://www.paper2play.com/",
+  "expect": "answer",
+  "expected": "13 worlds, 5 games",
+  "teacher_answer": "13 worlds and 5 games (hero section: \"13 worlds \u00b7 5 games \u00b7 Nothing to install \u00b7 Free on one screen\")",
+  "site": "paper2play.com"
+ },
+ {
+  "id": "v-digipal-cms-replit-app-3",
+  "goal": "Open Pricing, select the Interactive Kiosks tab, and tell me the price per screen per month of the Self-Service plan.",
+  "url": "https://digipal-cms.replit.app",
+  "expect": "answer",
+  "expected": "$29",
+  "teacher_answer": "$29 per screen / mo (Self-Service plan, Interactive Kiosks tab, monthly billing)",
+  "site": "digipal-cms.replit.app"
+ },
+ {
+  "id": "v-launchedonlaunched-lovable-app-1",
+  "goal": "Open Archives and tell me the headline of the weekly recap for the week of June 23, 2025.",
+  "url": "https://launchedonlaunched.lovable.app/",
+  "expect": "answer",
+  "expected": "Social Platforms and Professional Development Take the Spotlight",
+  "teacher_answer": "Social Platforms and Professional Development Take the Spotlight",
+  "site": "launchedonlaunched.lovable.app"
+ },
+ {
+  "id": "v-launchedonlaunched-lovable-app-3",
+  "goal": "On the home page, what is the title of the latest recap for the week of June 30, 2025?",
+  "url": "https://launchedonlaunched.lovable.app/",
+  "expect": "answer",
+  "expected": "Food Planning and Creative Tools Take the Lead",
+  "teacher_answer": "Food Planning and Creative Tools Take the Lead",
+  "site": "launchedonlaunched.lovable.app"
+ },
+ {
+  "id": "v-sololevelling-vercel-app-2",
+  "goal": "Find the Features section and tell me how many points each daily entry earns.",
+  "url": "https://sololevelling.vercel.app/",
+  "expect": "answer",
+  "expected": "10",
+  "teacher_answer": "Each daily entry earns 10 points. (Features section, \"Daily Progress\": \"Track your learning journey with up to 3 daily entries, earning 10 points for each achievement.\")",
+  "site": "sololevelling.vercel.app"
+ },
+ {
+  "id": "v-servisure-ai-q2j9-bolt-host-2",
+  "goal": "Click the 'Fee Reversal' demo scenario and tell me the last four digits of the account where the credit is posted.",
+  "url": "https://servisure-ai-q2j9.bolt.host/",
+  "expect": "answer",
+  "expected": "4827",
+  "teacher_answer": "4827",
+  "site": "servisure-ai-q2j9.bolt.host"
+ },
+ {
+  "id": "v-helm-by-nautilink-replit-app-1",
+  "goal": "Scroll to the pricing section and tell me the monthly price of the Premium plan.",
+  "url": "https://helm-by-nautilink.replit.app/",
+  "expect": "answer",
+  "expected": "$2.99",
+  "teacher_answer": "$2.99",
+  "site": "helm-by-nautilink.replit.app"
+ },
+ {
+  "id": "v-helm-by-nautilink-replit-app-3",
+  "goal": "Look at the Free plan in the pricing section and tell me how many devices it supports.",
+  "url": "https://helm-by-nautilink.replit.app/",
+  "expect": "answer",
+  "expected": "Up to 3 devices",
+  "teacher_answer": "The Free plan supports up to 3 devices.",
+  "site": "helm-by-nautilink.replit.app"
+ },
+ {
+  "id": "v-pennywyze-netlify-app-3",
+  "goal": "Enter 12000 as Current Savings and 2000 as Monthly Income, with no expenses. What does the Financial Runway show?",
+  "url": "https://pennywyze.netlify.app/",
+  "expect": "answer",
+  "expected": "Indefinite",
+  "teacher_answer": "Indefinite (Excellent financial runway)",
+  "site": "pennywyze.netlify.app"
+ },
+ {
+  "id": "v-awacarbon-netlify-app-1",
+  "goal": "Click Pricing in the navigation and tell me the monthly price of the Pro plan.",
+  "url": "https://awacarbon.netlify.app/",
+  "expect": "answer",
+  "expected": "$9 per month",
+  "teacher_answer": "$9 per month",
+  "site": "awacarbon.netlify.app"
+ },
+ {
+  "id": "v-marketontology-com-1",
+  "goal": "Open the Pricing page and tell me the monthly price per month of the Market Ontology Desk plan.",
+  "url": "https://marketontology.com/",
+  "expect": "answer",
+  "expected": "$399",
+  "teacher_answer": "$399/month (Market Ontology Desk plan, Monthly billing tab on the Pricing page)",
+  "site": "marketontology.com"
+ },
+ {
+  "id": "v-color-drenching-lovable-app-2",
+  "goal": "Scroll to the 'How to Apply Color Drenching' tips and tell me the title of tip 04.",
+  "url": "https://color-drenching.lovable.app/",
+  "expect": "answer",
+  "expected": "Test Before You Commit",
+  "teacher_answer": "Test Before You Commit",
+  "site": "color-drenching.lovable.app"
+ },
+ {
+  "id": "v-venturalawcenter-netlify-app-1",
+  "goal": "On the home page, under which practice area is 'Camp Lejeune Water Contamination' listed as a featured case?",
+  "url": "https://venturalawcenter.netlify.app/",
+  "expect": "answer",
+  "expected": "Environmental Contamination",
+  "teacher_answer": "Environmental Contamination",
+  "site": "venturalawcenter.netlify.app"
+ },
+ {
+  "id": "v-extraordinary-cocada-1b4824-netlify-app-1",
+  "goal": "On the home feed, find Jessica Kim's post and tell me which finance firms she mentions.",
+  "url": "https://extraordinary-cocada-1b4824.netlify.app/",
+  "expect": "answer",
+  "expected": "Goldman Sachs or JP Morgan",
+  "teacher_answer": "Jessica Kim's post (Oct 13, Harvard University 2021) mentions two finance firms: Goldman Sachs and JP Morgan. Full post: \"Looking for mentorship opportunities in the finance sector. Anyone from our alumni network working at Goldman Sachs or JP Morgan?\"",
+  "site": "extraordinary-cocada-1b4824.netlify.app"
+ },
+ {
+  "id": "v-homepage-redesign-b07k-bolt-host-2",
+  "goal": "Scroll to the Contracting section and tell me which contract option is marked 'Active'.",
+  "url": "https://homepage-redesign-b07k.bolt.host/",
+  "expect": "answer",
+  "expected": "LA County MSA",
+  "teacher_answer": "LA County MSA",
+  "site": "homepage-redesign-b07k.bolt.host"
+ },
+ {
+  "id": "v-homepage-redesign-b07k-bolt-host-3",
+  "goal": "Scroll to the Labor Relations & Negotiations product and tell me its first listed feature.",
+  "url": "https://homepage-redesign-b07k.bolt.host/",
+  "expect": "answer",
+  "expected": "Bargaining units",
+  "teacher_answer": "Bargaining units",
+  "site": "homepage-redesign-b07k.bolt.host"
+ },
+ {
+  "id": "v-call-to-cooperate-ta-lunq-bolt-host-2",
+  "goal": "Which open-source license is shown near the top of the page?",
+  "url": "https://call-to-cooperate-ta-lunq.bolt.host/",
+  "expect": "answer",
+  "expected": "CC-BY-NC-SA-4.0",
+  "teacher_answer": "CC-BY-NC-SA-4.0 License",
+  "site": "call-to-cooperate-ta-lunq.bolt.host"
+ },
+ {
+  "id": "v-domainnamesportal-com-1",
+  "goal": "In Featured Brands, click the Gaming filter and tell me the first domain and its price.",
+  "url": "https://domainnamesportal.com/",
+  "expect": "answer",
+  "expected": "GamesCompute.com, $10,000",
+  "teacher_answer": "GamesCompute.com \u2014 $10,000",
+  "site": "domainnamesportal.com"
+ },
+ {
+  "id": "v-arabique-digitals-lovable-app-1",
+  "goal": "Click the '\u062f\u0648\u0631\u0627\u062a' (courses) filter and tell me the price of the '\u062f\u0648\u0631\u0629 \u0627\u0644\u0628\u0631\u0645\u062c\u0629 \u0645\u0646 \u0627\u0644\u0635\u0641\u0631' course.",
+  "url": "https://arabique-digitals.lovable.app/",
+  "expect": "answer",
+  "expected": "$89",
+  "teacher_answer": "$89",
+  "site": "arabique-digitals.lovable.app"
+ },
+ {
+  "id": "v-drinkwater-plus-lovable-app-2",
+  "goal": "Open the Pricing page and tell me the yearly price of the Enterprise Hydration plan.",
+  "url": "https://drinkwater-plus.lovable.app/",
+  "expect": "answer",
+  "expected": "\u20b94,999/year",
+  "teacher_answer": "The Enterprise Hydration plan is priced at \u20b94,999/year.",
+  "site": "drinkwater-plus.lovable.app"
+ },
+ {
+  "id": "v-west-midlands-travel-qlwo-bolt-host-3",
+  "goal": "Open the Attractions page and tell me the entry price of the Royal Pump Rooms.",
+  "url": "https://west-midlands-travel-qlwo.bolt.host/",
+  "expect": "answer",
+  "expected": "\u00a36",
+  "teacher_answer": null,
+  "site": "west-midlands-travel-qlwo.bolt.host"
+ },
+ {
+  "id": "v-vedicastrologychart-org-2",
+  "goal": "Open the Pricing page and tell me the price of the 10-Report Pack.",
+  "url": "https://vedicastrologychart.org/",
+  "expect": "answer",
+  "expected": "$19.9",
+  "teacher_answer": "The 10-Report Pack price is $19.9.",
+  "site": "vedicastrologychart.org"
+ },
+ {
+  "id": "v-onlinedecibelmeter-com-1",
+  "goal": "Scroll to the Reference Sound Levels list and tell me which common sounds are listed at 70 dB.",
+  "url": "https://onlinedecibelmeter.com/",
+  "expect": "answer",
+  "expected": "Shower running, Dishwasher",
+  "teacher_answer": "Shower running, Dishwasher",
+  "site": "onlinedecibelmeter.com"
+ },
+ {
+  "id": "v-becometen-com-3",
+  "goal": "On the Pricing page, find how many scans PRO includes per rolling 30 days.",
+  "url": "https://becometen.com",
+  "expect": "answer",
+  "expected": "20 scans",
+  "teacher_answer": "20 scans per rolling 30 days",
+  "site": "becometen.com"
+ },
+ {
+  "id": "v-therameets-lovable-app-1",
+  "goal": "On the home page, find the day and time of the Group Therapy Session.",
+  "url": "https://therameets.lovable.app/",
+  "expect": "answer",
+  "expected": "Every Friday, 7:00 PM",
+  "teacher_answer": "Every Friday, 7:00 PM",
+  "site": "therameets.lovable.app"
+ },
+ {
+  "id": "v-machcut-com-1",
+  "goal": "Click Pricing in the top navigation and tell me the monthly price of the Pro plan.",
+  "url": "https://www.machcut.com/",
+  "expect": "answer",
+  "expected": "$29 / mo",
+  "teacher_answer": "$29 / mo",
+  "site": "machcut.com"
+ },
+ {
+  "id": "v-capytools-app-1",
+  "goal": "Click 'All tools' and tell me the name of the tool numbered N\u00ba 09.",
+  "url": "https://capytools.app/",
+  "expect": "answer",
+  "expected": "CapyToken",
+  "teacher_answer": "CapyToken",
+  "site": "capytools.app"
+ },
+ {
+  "id": "v-feynn-ai-2",
+  "goal": "Go to Pricing and tell me how many credits per month the Pro plan includes.",
+  "url": "https://feynn.ai/",
+  "expect": "answer",
+  "expected": "200 credits/month",
+  "teacher_answer": "200 credits per month",
+  "site": "feynn.ai"
+ },
+ {
+  "id": "v-lumotutor-com-1",
+  "goal": "Open the Pricing page and tell me the monthly price of the Plus plan when billed monthly.",
+  "url": "https://www.lumotutor.com/",
+  "expect": "answer",
+  "expected": "$9.99/month",
+  "teacher_answer": "$9.99/month (LumoTutor Plus, billed monthly \u00b7 cancel anytime)",
+  "site": "lumotutor.com"
+ },
+ {
+  "id": "v-ironclaw-com-1",
+  "goal": "In the use cases area, click the Developer filter and tell me the name of the use case that appears.",
+  "url": "https://www.ironclaw.com/",
+  "expect": "answer",
+  "expected": "Release tracker",
+  "teacher_answer": "Release tracker",
+  "site": "ironclaw.com"
+ },
+ {
+  "id": "v-survivoriocalc-com-1",
+  "goal": "With the default Kunai weapon and default values, click Calculate Damage and tell me the average damage per hit.",
+  "url": "https://survivoriocalc.com/",
+  "expect": "answer",
+  "expected": "26,486",
+  "teacher_answer": "26,486 (Average Damage Per Hit; 15,135 non-crit | 37,838 crit at 50% rate)",
+  "site": "survivoriocalc.com"
+ },
+ {
+  "id": "v-biosecurity-cold-cha-mvkd-bolt-host-1",
+  "goal": "Set the lymph node / tissue health status to Hemorrhagic Lesions and tell me the resulting CBI value shown in the computation.",
+  "url": "https://biosecurity-cold-cha-mvkd.bolt.host/",
+  "expect": "answer",
+  "expected": "0.31",
+  "teacher_answer": "CBI = 0.31 (SAFE). Computation: (0.05 \u00d7 0.5) + (0.80 \u00d7 0.35) + (0.05 \u00d7 0.15) = 0.31",
+  "site": "biosecurity-cold-cha-mvkd.bolt.host"
+ },
+ {
+  "id": "v-biosecurity-cold-cha-mvkd-bolt-host-3",
+  "goal": "Scroll to the Methodology section and tell me the CBI range that counts as WARNING.",
+  "url": "https://biosecurity-cold-cha-mvkd.bolt.host/",
+  "expect": "answer",
+  "expected": "0.40-0.65",
+  "teacher_answer": "0.40\u20130.65 = WARNING (enhanced screening)",
+  "site": "biosecurity-cold-cha-mvkd.bolt.host"
+ },
+ {
+  "id": "v-treg-to-2",
+  "goal": "Find the \"One token\" catalog list and tell me the price listed for Email verify with Hunter.",
+  "url": "https://treg.to/people-search",
+  "expect": "answer",
+  "expected": "$0.003 / check",
+  "teacher_answer": "$0.003 / check (Email verify \u2014 Hunter, listed under \"One token. 4,000+ data & tools.\")",
+  "site": "treg.to"
+ },
+ {
+  "id": "v-challengebrew-com-1",
+  "goal": "Click 'All games \u2192' and tell me how many games are in the 'Board games' category.",
+  "url": "https://challengebrew.com/",
+  "expect": "answer",
+  "expected": "30",
+  "teacher_answer": "30 games",
+  "site": "challengebrew.com"
+ },
+ {
+  "id": "v-buymeatea-online-2",
+  "goal": "Open the Pricing page and tell me how much the Kadak plan costs per month.",
+  "url": "https://buymeatea.online/",
+  "expect": "answer",
+  "expected": "\u20b9999/mo",
+  "teacher_answer": "\u20b9999/mo",
+  "site": "buymeatea.online"
+ },
+ {
+  "id": "v-sports-club-manageme-744u-bolt-host-2",
+  "goal": "Go to the Coaches section and tell me the name of the Head Sensei.",
+  "url": "https://sports-club-manageme-744u.bolt.host/",
+  "expect": "answer",
+  "expected": "Takeshi Yamamoto",
+  "teacher_answer": "Takeshi Yamamoto",
+  "site": "sports-club-manageme-744u.bolt.host"
+ },
+ {
+  "id": "v-octum-ai-2",
+  "goal": "On the home page, how long is the overview film 'Find. Raise. Connect.' shown in the video list?",
+  "url": "https://octum.ai/",
+  "expect": "answer",
+  "expected": "1:03",
+  "teacher_answer": "1:03",
+  "site": "octum.ai"
+ },
+ {
+  "id": "v-app-ideanation-cloud-1",
+  "goal": "Scroll to the pricing section and tell me the monthly price of the Workshop plan.",
+  "url": "https://app.ideanation.cloud/",
+  "expect": "answer",
+  "expected": "$15/month",
+  "teacher_answer": "The Workshop plan is $15/month.",
+  "site": "app.ideanation.cloud"
+ },
+ {
+  "id": "v-chiesapp-com-3",
+  "goal": "On the Pricing page, tell me how many admins with login the Starter plan (The hearth) includes.",
+  "url": "https://www.chiesapp.com/en/pricing",
+  "expect": "answer",
+  "expected": "5",
+  "teacher_answer": "5 admins with login",
+  "site": "chiesapp.com"
+ },
+ {
+  "id": "v-platzreife-de-2",
+  "goal": "In the 'So funktioniert Platzreife.de' steps, go to Schritt 3 and tell me how many exam questions there are, the minimum percentage correct, and the time limit.",
+  "url": "https://www.platzreife.de/",
+  "expect": "answer",
+  "expected": "30 questions, at least 70% correct, within 30 minutes",
+  "teacher_answer": "Schritt 3 \"Zertifikat erhalten\": 30 Pr\u00fcfungsfragen, mindestens 70% richtig (mind. 70%), Zeitlimit 30 Minuten. (\"Beantworten Sie von den 30 Pr\u00fcfungsfragen mind. 70% in 30 Minuten richtig, um Ihr Platzreife-Zertifikat zu erhalten.\")",
+  "site": "platzreife.de"
+ },
+ {
+  "id": "v-grow-terra-nova-lovable-app-1",
+  "goal": "Click 'Learning' in the top navigation and tell me the title of the guide in the Apiculture category at the top of the page.",
+  "url": "https://grow-terra-nova.lovable.app/",
+  "expect": "answer",
+  "expected": "Introduction to Beekeeping",
+  "teacher_answer": null,
+  "site": "grow-terra-nova.lovable.app"
+ },
+ {
+  "id": "v-lovify-lovable-app-1",
+  "goal": "In the FAQ section, open 'Is Lovify free to use?' and tell me what it says is offered for free.",
+  "url": "https://lovify.lovable.app/",
+  "expect": "answer",
+  "expected": "A free tier with essential features",
+  "teacher_answer": "For free: Lovify offers a free tier with essential features. (Advanced features and higher usage limits require premium plans.)",
+  "site": "lovify.lovable.app"
+ },
+ {
+  "id": "v-tini-la-1",
+  "goal": "Scroll to the pricing section and tell me the price of the Pro Yearly plan.",
+  "url": "https://tini.la",
+  "expect": "answer",
+  "expected": "$79/year",
+  "teacher_answer": "$79/year (list price $96/year \u2022 Save 18%, \"Save $17/year\")",
+  "site": "tini.la"
+ },
+ {
+  "id": "v-atlasai-data-centre-ogd4-bolt-host-1",
+  "goal": "Click the Project Manager role and tell me which active task is at 45% progress.",
+  "url": "https://atlasai-data-centre-ogd4.bolt.host",
+  "expect": "answer",
+  "expected": "Cooling Tower Installation",
+  "teacher_answer": null,
+  "site": "atlasai-data-centre-ogd4.bolt.host"
+ },
+ {
+  "id": "v-bakers-edge-calculator-lovable-app-2",
+  "goal": "Open the Substitutions tool and tell me the ratio given for Vegetable Oil as a substitute for Butter.",
+  "url": "https://bakers-edge-calculator.lovable.app/",
+  "expect": "answer",
+  "expected": "\u00be : 1",
+  "teacher_answer": "\u00be : 1 \u2014 the Substitutions tool lists Vegetable Oil as a substitute for Butter at a ratio of \"\u00be : 1\" (Use \u00be cup oil per 1 cup butter; slightly different texture).",
+  "site": "bakers-edge-calculator.lovable.app"
+ },
+ {
+  "id": "v-buildathons-replit-app-3",
+  "goal": "On the home page, find the Agent 4 Buildathon and tell me its date range.",
+  "url": "https://buildathons.replit.app/",
+  "expect": "answer",
+  "expected": "Mar 24, 2026 \u2013 Apr 19, 2026",
+  "teacher_answer": "Agent 4 Buildathon: 24 Mar 2026 \u2013 19 Apr 2026",
+  "site": "buildathons.replit.app"
+ },
+ {
+  "id": "v-designful-app-3",
+  "goal": "Open the Pricing page and tell me how many variable modes / themes the Team plan allows.",
+  "url": "https://designful.app/",
+  "expect": "answer",
+  "expected": "20",
+  "teacher_answer": "20 \u2014 On the Designful Pricing page, the \"Variable modes / themes\" row lists the Team plan as allowing 20 variable modes / themes (Starter: \u2014, Pro: 2, Team: 20, Enterprise: Enterprise policy).",
+  "site": "designful.app"
+ },
+ {
+  "id": "v-plattr-replit-app-3",
+  "goal": "On the home page, what Plattr score does the Organic Strawberry show?",
+  "url": "https://plattr.replit.app/",
+  "expect": "answer",
+  "expected": "97 /100 (Grade A+)",
+  "teacher_answer": "97 /100",
+  "site": "plattr.replit.app"
+ },
+ {
+  "id": "v-accessibility-lens-lovable-app-1",
+  "goal": "Scroll to 'Experience Real Disabilities' and tell me how many people the Dyslexia card says are affected.",
+  "url": "https://accessibility-lens.lovable.app/",
+  "expect": "answer",
+  "expected": "780M",
+  "teacher_answer": "780M affected",
+  "site": "accessibility-lens.lovable.app"
+ },
+ {
+  "id": "v-renameflow-com-2",
+  "goal": "Open Pricing and select the Pro Monthly option. What price per month is shown?",
+  "url": "https://renameflow.com/",
+  "expect": "answer",
+  "expected": "\u20ac2.99/month",
+  "teacher_answer": null,
+  "site": "renameflow.com"
+ },
+ {
+  "id": "v-qr-generator-pro-1",
+  "goal": "Open the Pricing page and tell me the yearly price of the Pro plan.",
+  "url": "https://qr-generator.pro/",
+  "expect": "answer",
+  "expected": "12,00 \u20ac/year",
+  "teacher_answer": "The Pro plan's yearly price is 12,00 \u20ac/year.",
+  "site": "qr-generator.pro"
+ },
+ {
+  "id": "v-visionalign-io-3",
+  "goal": "Open Pricing and tell me how many team members the Enterprise plan includes.",
+  "url": "https://visionalign.io/",
+  "expect": "answer",
+  "expected": "10",
+  "teacher_answer": "10 team members",
+  "site": "visionalign.io"
+ },
+ {
+  "id": "v-oruk-ai-1",
+  "goal": "Open the Pricing page and tell me the monthly price of the Builder plan billed monthly.",
+  "url": "https://oruk.ai/",
+  "expect": "answer",
+  "expected": "$49",
+  "teacher_answer": "$49 / month (Builder plan, Billed monthly)",
+  "site": "oruk.ai"
+ },
+ {
+  "id": "v-sahadhyayi-com-2",
+  "goal": "Search the library for 'Pride and Prejudice' and tell me the author of the first result.",
+  "url": "https://www.sahadhyayi.com/library",
+  "expect": "answer",
+  "expected": "Jane Austen",
+  "teacher_answer": "Jane Austen",
+  "site": "sahadhyayi.com"
+ },
+ {
+  "id": "v-h3max-app-1",
+  "goal": "Open the Pricing page and tell me the price of the Standard credit pack.",
+  "url": "https://h3max.app/",
+  "expect": "answer",
+  "expected": "$49 (2,500 credits)",
+  "teacher_answer": "$49 (Standard pack, 2,500 H3 Max credits, one-time purchase)",
+  "site": "h3max.app"
+ }
+]

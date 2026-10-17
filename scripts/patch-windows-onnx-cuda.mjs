@@ -8,7 +8,7 @@ import path from 'node:path'
 const root = path.resolve(import.meta.dirname, '..')
 const transformersRoot = path.join(root, 'node_modules', '@huggingface', 'transformers')
 const packageInfo = JSON.parse(fs.readFileSync(path.join(transformersRoot, 'package.json'), 'utf8'))
-if (packageInfo.version !== '4.3.0') {
+if (packageInfo.version !== '4.3.1') {
   throw new Error(`Review the Windows CUDA patch for Transformers.js ${packageInfo.version}`)
 }
 

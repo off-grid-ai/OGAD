@@ -24,6 +24,7 @@ export const ChatImagePreview = memo(function ChatImagePreview({
   metadata,
   className,
   fill = false,
+  spacing,
   onOpen
 }: Readonly<{
   src: string
@@ -32,20 +33,27 @@ export const ChatImagePreview = memo(function ChatImagePreview({
   metadata?: ImageGenerationMetadata
   className: string
   fill?: boolean
+  /** Space around the picture, kept outside its edge. */
+  spacing?: string
   onOpen: (image: OpenImage) => void
 }>): React.JSX.Element {
   return (
-    <div className={fill ? 'w-full' : undefined}>
+    <div className={fill ? `w-full ${spacing ?? ''}` : spacing}>
+      {/* A surface like every card: the field's light and click waves trace its edge. An <img>
+          cannot draw them itself, so the button around it does, with the image's corners. */}
       <button
         type="button"
+        data-og-surface=""
         aria-label={`Open ${alt}`}
         onClick={() => onOpen({ url: src, path })}
-        className={fill ? 'block w-full max-w-full' : 'block max-w-full'}
+        className={`relative rounded-md ${fill ? 'block w-full max-w-full' : 'block max-w-full'}`}
       >
+        {/* A block image: an inline one leaves a line gap under it, and the edge would trace
+            the gap instead of the picture. */}
         <img
           src={src}
           alt={alt}
-          className={className}
+          className={`block ${className}`}
           loading="lazy"
           decoding="async"
           fetchPriority="low"

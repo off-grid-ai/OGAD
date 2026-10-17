@@ -27,6 +27,10 @@ import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
 import { findSdBinaries, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
 import { getBackendPreference } from './backend-preferences'
 import { getResidencyMode } from './runtime-residency'
+import { filesMB } from './model-footprint'
+
+/** An allowance for activations and buffers beside the weights while generating. */
+export const SD_WORKING_MB = 1536
 
 /** Off the LLM's 8439 so both engines can bind (they never run at once, but a
  *  lingering LLM shouldn't block the image server's port either). */
@@ -119,7 +123,10 @@ export function buildImgGenRequest(req: SdGenRequest): Record<string, unknown> {
       sample_method: req.sampleMethod ?? 'dpm++2m',
       scheduler: req.scheduler ?? 'karras',
       guidance: { txt_cfg: req.cfgScale ?? 2.0 }
-    }
+    },
+    // A rough frame every step ('proj' needs no extra model), so the image forms on screen.
+    preview: 'proj',
+    preview_interval: 1
   }
   if (req.refImages?.length) body.ref_images = req.refImages
   if (typeof req.seed === 'number' && req.seed >= 0) body.seed = req.seed
@@ -135,6 +142,8 @@ export interface JobOutcome {
   error?: string
   /** Progress in [0,1] while running, if the server reported it. */
   progress?: number
+  /** The latest step preview while running: base64 PNG and its place in the sampling pass. */
+  preview?: { pngBase64: string; step: number; total: number }
   /** The seed the server actually used, when it reports one (so a random -1
    *  request can still be reproduced). Undefined if the server doesn't surface it. */
   seed?: number
@@ -148,6 +157,11 @@ export function parseJobResult(job: unknown): JobOutcome {
   const terminalOk = status === 'completed' || status === 'succeeded'
   const terminalFail = status === 'failed' || status === 'error' || status === 'cancelled'
   const progress = typeof j.progress === 'number' ? j.progress : undefined
+  const p = (j.preview ?? null) as Record<string, unknown> | null
+  const preview =
+    p && typeof p.b64_json === 'string' && typeof p.step === 'number' && typeof p.total_steps === 'number'
+      ? { pngBase64: p.b64_json, step: p.step, total: p.total_steps }
+      : undefined
   if (terminalOk) {
     const result = (j.result ?? {}) as Record<string, unknown>
     const images = Array.isArray(result.images) ? result.images : []
@@ -162,10 +176,15 @@ export function parseJobResult(job: unknown): JobOutcome {
     return { done: true, ok: true, pngBase64: b64, progress, seed }
   }
   if (terminalFail) {
-    const err = typeof j.error === 'string' && j.error ? j.error : `job ${status}`
+    // Newer servers send { code, message }; older ones a string.
+    const message =
+      typeof j.error === 'string'
+        ? j.error
+        : (j.error as { message?: unknown } | null)?.message
+    const err = typeof message === 'string' && message ? message : `job ${status}`
     return { done: true, ok: false, error: err }
   }
-  return { done: false, ok: false, progress }
+  return { done: false, ok: false, progress, ...(preview ? { preview } : {}) }
 }
 
 /** Turn a REJECTED fetch to the resident sd-server into an ACTIONABLE message. A bare
@@ -187,6 +206,8 @@ export function describeSdFetchFailure(
 interface SdGenProgress {
   step: number
   total: number
+  /** data: URL of the latest step preview, when the server sent a new one. */
+  preview?: string
 }
 
 /** The resident image server. One instance (the exported `sdServer`). */
@@ -194,6 +215,7 @@ class SdServerService {
   private server: ChildProcess | null = null
   private port = SD_SERVER_PORT
   private activeKey: string | null = null // contextKey of the loaded model, null when down
+  private activeContext: SdServerContext | null = null // what activeKey was built from
   private startPromise: Promise<void> | null = null
   private startEpoch = 0
   private activeBinary: string | null = null
@@ -217,6 +239,17 @@ class SdServerService {
 
   isUp(): boolean {
     return this.server !== null && this.activeKey !== null
+  }
+
+  /** Memory the loaded model holds, in MB: its weight files plus a working allowance for
+   *  activations at the default size. 0 when the server is down. */
+  residentMB(): number {
+    const ctx = this.activeContext
+    if (!this.isUp() || !ctx) return 0
+    return (
+      filesMB([ctx.modelPath, ctx.llmPath, ctx.llmVisionPath, ctx.vaePath, ctx.taesdPath]) +
+      SD_WORKING_MB
+    )
   }
 
   private base(): string {
@@ -334,6 +367,7 @@ class SdServerService {
       throw error
     }
     this.activeKey = key
+    this.activeContext = ctx
     this.activeBinary = bin
   }
 
@@ -373,6 +407,10 @@ class SdServerService {
       const pollUrl = job.poll_url ?? (job.id ? `/sdcpp/v1/jobs/${job.id}` : null)
       if (!pollUrl) throw new Error('sd-server did not return a job to poll.')
       this.currentJobId = job.id ?? null
+      // Every progress event carries the latest frame: a consumer replaces its progress with each
+      // event, so a step without a new frame must not drop the picture from the screen.
+      let lastPreview = ''
+      let lastPreviewUrl: string | undefined
 
       for (;;) {
         await new Promise((r) => setTimeout(r, 150))
@@ -380,8 +418,19 @@ class SdServerService {
         if (!res.ok) throw new Error(`job poll failed (HTTP ${res.status}).`)
         const status = await res.json()
         const outcome = parseJobResult(status)
-        if (onProgress && typeof outcome.progress === 'number') {
-          onProgress({ step: Math.min(total, Math.round(outcome.progress * total)), total })
+        if (onProgress && outcome.preview) {
+          const { pngBase64, step: previewStep, total: previewTotal } = outcome.preview
+          if (pngBase64 !== lastPreview) {
+            lastPreview = pngBase64
+            lastPreviewUrl = `data:image/png;base64,${pngBase64}`
+          }
+          onProgress({ step: previewStep, total: previewTotal, preview: lastPreviewUrl })
+        } else if (onProgress && typeof outcome.progress === 'number') {
+          onProgress({
+            step: Math.min(total, Math.round(outcome.progress * total)),
+            total,
+            ...(lastPreviewUrl ? { preview: lastPreviewUrl } : {})
+          })
         }
         if (!outcome.done) continue
         if (!outcome.ok) throw new Error(outcome.error ?? 'image generation failed.')

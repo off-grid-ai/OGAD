@@ -6,8 +6,8 @@ $destination = Join-Path $root 'resources\bin\sd-cuda'
 $temporary = Join-Path $env:TEMP "offgrid-sd-cuda-$([guid]::NewGuid().ToString('N'))"
 $archive = Join-Path $temporary 'sd-cuda.zip'
 $expanded = Join-Path $temporary 'expanded'
-$url = 'https://github.com/leejet/stable-diffusion.cpp/releases/download/master-920-2f88688/sd-master-2f88688-bin-win-cuda12-x64.zip'
-$expectedHash = '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
+$url = 'https://github.com/leejet/stable-diffusion.cpp/releases/download/master-968-8cd731e/sd-master-8cd731e-bin-win-cuda12-x64.zip'
+$expectedHash = '8b6f311f22b56db02f545a674f7549a0da283f7134d5fd01c42014b81ab78af0'
 
 try {
   New-Item -ItemType Directory -Force -Path $temporary, $destination | Out-Null

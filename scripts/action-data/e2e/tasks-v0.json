@@ -1,0 +1,12 @@
+[
+  { "id": "Q1", "url": "https://getoffgridai.co/", "goal": "Find the pricing section and tell me the plan names and their prices.", "expect": "answer" },
+  { "id": "Q4", "url": "https://wednesday.is/", "goal": "Open the contact page and tell me which fields the contact form has.", "expect": "answer" },
+  { "id": "R8", "url": "https://github.com/ggml-org/llama.cpp", "goal": "Find the latest release of llama.cpp and tell me its version tag.", "expect": "answer" },
+  { "id": "R7", "url": "https://huggingface.co/openbmb", "goal": "Find the most-downloaded model from openbmb and tell me its name.", "expect": "answer" },
+  { "id": "S5", "url": "https://kings-shop-ten.vercel.app/", "goal": "Add any gift box to the cart and go to checkout.", "expect": "takeover" },
+  { "id": "S1", "url": "https://www.amazon.in/", "goal": "Search for boAt Airdopes 141 and tell me the price of the first result.", "expect": "answer" },
+  { "id": "S3", "url": "https://www.flipkart.com/", "goal": "Search for wireless mouse, sort by price low to high, and tell me the first product and its price.", "expect": "answer" },
+  { "id": "W1", "url": "https://en.wikipedia.org/", "goal": "Open the Wikipedia article on Pune and tell me its population.", "expect": "answer" },
+  { "id": "R4", "url": "https://www.reddit.com/r/LocalLLaMA/", "goal": "Tell me the title of the top post in r/LocalLLaMA today.", "expect": "answer" },
+  { "id": "R5", "url": "https://www.youtube.com/", "goal": "Search YouTube for Mac mini AI cluster and tell me the title of the first video.", "expect": "answer" }
+]

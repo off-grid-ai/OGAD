@@ -132,6 +132,10 @@ export type ChatMessage = {
     documentId?: string
     pages?: number
   }[]
+  /** This message's place among its saved versions (a retried answer, an edited question). */
+  threadVersions?: { index: number; count: number }
+  /** A streaming retry: the saved answer it is a new version of, drawn in its place meanwhile. */
+  versionOf?: string
   variants?: ResponseVersion[]
   variantIndex?: number
   audioUrl?: string
@@ -197,6 +201,8 @@ export type RawRagMessage = {
   created_at?: string
   origin_device_id?: unknown
   origin_device_name?: unknown
+  /** Where this shown message sits among its versions, when it has others (main's thread). */
+  versions?: { index: number; count: number }
 }
 
 export type ProjectedTurn = NonNullable<

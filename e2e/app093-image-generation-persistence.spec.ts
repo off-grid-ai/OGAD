@@ -51,9 +51,10 @@ const launch = async (): Promise<void> => {
   await page.getByRole('switch', { name: 'Image generation residency', exact: true }).uncheck()
   // Let this profile own its model port before image eviction. Another running
   // Desktop instance can keep its real model on the default port.
+  // Models load on first use (c6a2d9f72): a healthy app at launch is ready or idle.
   await expect
     .poll(() => page.evaluate(async () => (await window.api.chatHealth()).status))
-    .toBe('ready')
+    .toMatch(/^(ready|idle)$/)
 }
 
 const enterChat = async (newChat = false): Promise<void> => {
@@ -174,6 +175,15 @@ test('APP-093 generates one owned image and keeps it usable across a full relaun
     .filter(({ event }) => event.startsWith('progress:'))
     .map(({ event }) => event)
   expect(progressEvents).toEqual(['progress:1', 'progress:2', 'progress:3', 'progress:4'])
+  // The image is a surface like every card: a click beside it sends the wave around its edge.
+  const imageSurface = page.getByRole('button', { name: 'Open Generated', exact: true })
+  const box = (await imageSurface.boundingBox())!
+  // Its edge is the picture's edge: no line gap or margin inside the surface.
+  const picture = (await generated.boundingBox())!
+  expect(Math.round(box.height)).toBe(Math.round(picture.height))
+  expect(Math.round(box.width)).toBe(Math.round(picture.width))
+  await page.mouse.click(box.x + box.width + 24, box.y + box.height / 2)
+  await expect(imageSurface).toHaveAttribute('data-og-wave', /.*/, { timeout: 5_000 })
   await expect(
     page.locator('p').getByText(`Generated for: ${PROMPT}`, { exact: true }).last()
   ).toBeVisible()

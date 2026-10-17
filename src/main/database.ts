@@ -11,6 +11,8 @@ import fs from 'fs'
 import crypto from 'crypto'
 import { createSettingsStore, initializeSettingsStore } from './settings-store'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
+import { appendPlace, chatThread, neighbourVersion, parentOfVersion } from '@offgrid/sync'
+import { migrateLegacyChatVersions } from './chat-thread-migration'
 import type {
   ConversationSurface,
   RagConversationContract,
@@ -528,6 +530,12 @@ export function getDB(): Database.Database {
     db.transaction(() => {
       for (const row of versionRepairs) update.run(row.content, row.id)
     })()
+  }
+  // Then versions kept inside a message become version rows that every surface shows.
+  try {
+    migrateLegacyChatVersions(db)
+  } catch (error) {
+    console.error('[database] chat versions could not be migrated', error)
   }
 
   // Profiles have never been ANALYZEd, so the planner had no statistics. The limit bounds each
@@ -1619,7 +1627,16 @@ export function addRagMessage(
   knownUuid?: string
 ): AddedRagMessage {
   const db = getDB()
-  const contextJson = context ? JSON.stringify(context) : null
+  // A retried answer is a version of the answer it retries (prepareAnswerVersion); a new question
+  // starts a new turn, so no retry from before it can claim the next answer.
+  const versionParent = role === 'assistant' ? pendingAnswerParents.get(conversationId) : undefined
+  pendingAnswerParents.delete(conversationId)
+  const placed = withThreadPlace(conversationId, context, versionParent)
+  const contextJson = placed
+    ? JSON.stringify(placed)
+    : context
+      ? JSON.stringify(context)
+      : null
   const uuid = knownUuid ?? crypto.randomUUID()
 
   // uuid is the cross-device identity for sync (the autoincrement id is device-local).
@@ -1666,7 +1683,12 @@ export function updateRagMessage(
     | undefined
   if (!existing) return false
 
-  const contextJson = context === undefined ? existing.context : JSON.stringify(context)
+  // A rewrite of the message keeps its place in the thread: which message it follows, and when its
+  // version was chosen.
+  const contextJson =
+    context === undefined
+      ? existing.context
+      : JSON.stringify(keepThreadPlace(context, threadPlace(existing.context)))
   db.prepare('UPDATE rag_messages SET content = ?, context = ? WHERE id = ?').run(
     content,
     contextJson,
@@ -1709,7 +1731,142 @@ export function truncateRagMessages(conversationId: string, keepCount: number): 
   return result.changes
 }
 
+/**
+ * The conversation as it reads: the shown version of each turn, in order (chat-thread.ts in
+ * @offgrid/sync). A message with other versions carries where it sits among them. Every reader that
+ * builds model history or shows a chat reads this; storedRagMessages has every version.
+ */
 export function getRagMessages(conversationId: string): RagMessage[] {
+  const rows = storedRagMessages(conversationId)
+  const thread = chatThread(threadRows(rows))
+  return thread.messages.map(({ row, uuid }) => {
+    const versions = thread.versions.get(uuid)
+    return versions ? { ...row, versions: { index: versions.index, count: versions.count } } : row
+  })
+}
+
+/** Show the version `direction` steps from the shown message `uuid` (-1 older, +1 newer). */
+export function selectRagMessageVersion(
+  conversationId: string,
+  uuid: string,
+  direction: number
+): boolean {
+  const target = neighbourVersion(threadRows(storedRagMessages(conversationId)), uuid, direction)
+  if (!target) return false
+  const db = getDB()
+  const row = db
+    .prepare('SELECT id, context FROM rag_messages WHERE conversation_id = ? AND uuid = ?')
+    .get(conversationId, target) as { id: number; context: string | null } | undefined
+  if (!row) return false
+  const context = { ...parsedContext(row.context), selectedAt: Date.now() }
+  db.prepare('UPDATE rag_messages SET context = ? WHERE id = ?').run(JSON.stringify(context), row.id)
+  emitSyncMutation({ entity: CORE_SYNC_ENTITIES.message, entityId: target, kind: 'put' })
+  return true
+}
+
+function parsedContext(json: string | null): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(json ?? 'null')
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+interface ThreadPlace {
+  parent?: string
+  selectedAt?: number
+}
+
+function threadPlace(json: string | null): ThreadPlace {
+  const context = parsedContext(json)
+  return {
+    ...(typeof context.parent === 'string' ? { parent: context.parent } : {}),
+    ...(typeof context.selectedAt === 'number' ? { selectedAt: context.selectedAt } : {})
+  }
+}
+
+function keepThreadPlace(context: unknown, place: ThreadPlace): unknown {
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
+    return Object.keys(place).length ? place : context
+  }
+  return { ...place, ...withoutInMessageVersions(context) }
+}
+
+/** Versions are messages of their own now; a list of them kept inside one message is not stored. */
+function withoutInMessageVersions(context: unknown): Record<string, unknown> {
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return {}
+  const {
+    variants: _variants,
+    variantIndex: _variantIndex,
+    branches: _branches,
+    ...rest
+  } = context as Record<string, unknown>
+  return rest
+}
+
+function threadRows(rows: RagMessage[]): Array<{ row: RagMessage; uuid: string } & ThreadPlace> {
+  return rows.map((row) => ({ row, uuid: row.uuid ?? `id:${row.id}`, ...threadPlace(row.context) }))
+}
+
+/** Answers saved next in a conversation that are versions of an earlier answer: the parent they take. */
+const pendingAnswerParents = new Map<string, string>()
+
+/**
+ * The next answer saved in this conversation is a new version of answer `ofUuid`, beside it rather
+ * than in its place: retrying an answer keeps the old one and the turns after it. The streamed
+ * answer keeps the name it streamed under, so it is saved the usual way and takes its place here.
+ */
+export function prepareAnswerVersion(conversationId: string, ofUuid: string): boolean {
+  const parent = parentOfVersion(threadRows(storedRagMessages(conversationId)), ofUuid)
+  if (parent === undefined) return false
+  pendingAnswerParents.set(conversationId, parent)
+  return true
+}
+
+/** Save a new version of message `ofUuid` (an edited question) beside it, chosen from now. */
+export function addRagMessageVersion(
+  conversationId: string,
+  ofUuid: string,
+  role: 'user' | 'assistant',
+  content: string,
+  context?: unknown
+): AddedRagMessage | null {
+  const parent = parentOfVersion(threadRows(storedRagMessages(conversationId)), ofUuid)
+  if (parent === undefined) return null
+  const base =
+    context && typeof context === 'object' && !Array.isArray(context)
+      ? (context as Record<string, unknown>)
+      : {}
+  return addRagMessage(conversationId, role, content, { ...base, parent })
+}
+
+/**
+ * Where a new message goes. A version (its context names its parent, or it is the answer a retry
+ * prepared) is chosen from now. Any other message is appended: in a chat without versions it
+ * stores nothing (appendPlace), so turns from several devices keep their order by time. Null when
+ * nothing about the thread needs storing.
+ */
+function withThreadPlace(
+  conversationId: string,
+  context: unknown,
+  versionParent?: string
+): Record<string, unknown> | null {
+  const base = withoutInMessageVersions(context)
+  if (typeof base.parent === 'string' || versionParent) {
+    if (typeof base.parent !== 'string') base.parent = versionParent
+    if (typeof base.selectedAt !== 'number') base.selectedAt = Date.now()
+    return base
+  }
+  const place = appendPlace(threadRows(storedRagMessages(conversationId)))
+  if (place.parent) return { ...base, parent: place.parent }
+  return context && typeof context === 'object' && !Array.isArray(context) ? base : null
+}
+
+/** Every saved message of the conversation, every version, in storage order. */
+export function storedRagMessages(conversationId: string): RagMessage[] {
   const db = getDB()
   return db
     .prepare(

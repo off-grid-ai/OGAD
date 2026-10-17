@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
 import { MemoryChat } from '../MemoryChat'
 import { TooltipProvider } from '../ui/tooltip'
+import { ThreadStore } from './harness/thread-store'
 
 type StoredMessage = {
   id: number
@@ -14,6 +15,8 @@ type StoredMessage = {
   content: string
   context: {
     attachments?: Array<{ name: string; kind: string; text?: string; path?: string }>
+    parent?: string
+    selectedAt?: number
   } | null
   created_at: string
 }
@@ -27,6 +30,7 @@ function installSavedVoiceBoundary(): void {
     updated_at: '2026-09-14 10:00:00',
     message_count: 2
   }
+  const thread = new ThreadStore()
   let messages: StoredMessage[] = [
     {
       id: 1,
@@ -78,7 +82,7 @@ function installSavedVoiceBoundary(): void {
     }),
     getRagConversations: async () => [{ ...conversation }],
     getRagConversation: async () => ({ ...conversation }),
-    getRagMessages: async () => messages.map((message) => ({ ...message })),
+    getRagMessages: async () => thread.read(messages.map((message) => ({ ...message }))),
     getActiveRagStreams: async () => [],
     onRagStream: () => () => { },
     // Documents in a chat (preload `documents`): none attached.
@@ -95,6 +99,7 @@ function installSavedVoiceBoundary(): void {
       content: string,
       context?: StoredMessage['context']
     ) => {
+      const placed = thread.place(messages, conversationId, role, context)
       const id = nextId++
       const uuid = `saved-voice-${id}`
       messages.push({
@@ -103,7 +108,7 @@ function installSavedVoiceBoundary(): void {
         conversation_id: conversationId,
         role,
         content,
-        context: context ?? null,
+        context: placed ?? null,
         created_at: `2026-09-14 10:00:0${id}`
       })
       return { id, uuid }
@@ -123,10 +128,26 @@ function installSavedVoiceBoundary(): void {
       messages[index] = {
         ...messages[index]!,
         content,
-        context: context === undefined ? messages[index]!.context : context
+        context:
+          context === undefined ? messages[index]!.context : thread.update(messages[index]!, context)
       }
       return true
     },
+    prepareAnswerVersion: async (conversationId: string, ofUuid: string) =>
+      thread.prepareAnswerVersion(messages, conversationId, ofUuid),
+    addRagMessageVersion: async (
+      conversationId: string,
+      ofUuid: string,
+      role: 'user' | 'assistant',
+      content: string,
+      context?: StoredMessage['context']
+    ) => {
+      const parent = thread.versionParent(messages, ofUuid)
+      if (parent === undefined) return null
+      return api.addRagMessage(conversationId, role, content, { ...(context ?? {}), parent })
+    },
+    selectRagMessageVersion: async (_conversationId: string, uuid: string, direction: number) =>
+      Boolean(thread.select(messages, uuid, direction)),
     truncateRagMessages: async (_conversationId: string, keepCount: number) => {
       messages = messages.slice(0, keepCount)
       return 0

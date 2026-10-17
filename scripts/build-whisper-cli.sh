@@ -6,14 +6,16 @@ set -euo pipefail
 # Release CI and the local DMG build both call this script. The committed LFS
 # payload is not trusted as a release input.
 
-WHISPER_REF="${WHISPER_REF:-v1.7.4}"
-TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"
+WHISPER_REF="${WHISPER_REF:-v1.9.5}"
+TARGET="${MACOS_DEPLOYMENT_TARGET:-15.0}"
+# Universal (arm64 + x86_64), like build-sd-macos.sh and build-llama.sh.
+WHISPER_ARCH="${WHISPER_ARCH:-arm64;x86_64}"
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 DEST="$ROOT/resources/bin/whisper"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-echo "[build-whisper-cli] ref=$WHISPER_REF target=$TARGET"
+echo "[build-whisper-cli] ref=$WHISPER_REF target=$TARGET arch=$WHISPER_ARCH"
 git clone --depth 1 --branch "$WHISPER_REF" https://github.com/ggml-org/whisper.cpp "$WORK/src"
 cd "$WORK/src"
 
@@ -23,6 +25,8 @@ cd "$WORK/src"
 # curl and OpenSSL are unnecessary too.
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$TARGET" \
+  -DCMAKE_OSX_ARCHITECTURES="$WHISPER_ARCH" \
+  -DGGML_NATIVE=OFF \
   -DBUILD_SHARED_LIBS=ON \
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
   -DGGML_OPENMP=OFF -DGGML_BLAS=OFF \
@@ -36,6 +40,12 @@ BIN="$(find build -name whisper-cli -type f -perm -111 | head -1)"
   echo "[build-whisper-cli] FATAL: whisper-cli not produced"
   exit 1
 }
+
+BUILT_ARCH="$(lipo -archs "$BIN" | tr ' ' '\n' | sort | paste -sd';' -)"
+if [ "$BUILT_ARCH" != "$WHISPER_ARCH" ]; then
+  echo "[build-whisper-cli] FATAL: built whisper-cli arch=$BUILT_ARCH (want $WHISPER_ARCH)" >&2
+  exit 1
+fi
 
 MINOS="$(otool -l "$BIN" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')"
 echo "[build-whisper-cli] built whisper-cli minos=$MINOS (want <= $TARGET)"
@@ -77,7 +87,8 @@ chmod +x "$DEST/whisper-cli"
 for f in "$DEST"/whisper-cli "$DEST"/*.dylib; do
   while IFS= read -r rpath; do
     install_name_tool -delete_rpath "$rpath" "$f"
-  done < <(otool -l "$f" | awk '/cmd LC_RPATH/{found=1; next} found && $1 == "path" {print $2; found=0}')
+  # sort -u: a universal binary lists each rpath once per architecture, and one delete removes it from both.
+  done < <(otool -l "$f" | awk '/cmd LC_RPATH/{found=1; next} found && $1 == "path" {print $2; found=0}' | sort -u)
   install_name_tool -add_rpath @loader_path "$f"
 done
 

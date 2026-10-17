@@ -347,6 +347,18 @@ const offGridApi = {
   ) => ipcRenderer.invoke('rag:update-message', conversationId, messageId, content, context),
   truncateRagMessages: (conversationId: string, keepCount: number) =>
     ipcRenderer.invoke('rag:truncate-messages', conversationId, keepCount),
+  prepareAnswerVersion: (conversationId: string, ofUuid: string): Promise<boolean> =>
+    ipcRenderer.invoke('rag:prepare-answer-version', conversationId, ofUuid),
+  addRagMessageVersion: (
+    conversationId: string,
+    ofUuid: string,
+    role: 'user' | 'assistant',
+    content: string,
+    context?: unknown
+  ): Promise<{ id: number; uuid: string } | null> =>
+    ipcRenderer.invoke('rag:add-message-version', conversationId, ofUuid, role, content, context),
+  selectRagMessageVersion: (conversationId: string, uuid: string, direction: number): Promise<boolean> =>
+    ipcRenderer.invoke('rag:select-version', conversationId, uuid, direction),
   updateRagConversationTitle: (id: string, title: string) =>
     ipcRenderer.invoke('rag:update-conversation-title', id, title),
   deleteRagConversation: (id: string) => ipcRenderer.invoke('rag:delete-conversation', id),

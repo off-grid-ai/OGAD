@@ -39,6 +39,7 @@ import { generateRemoteImage } from './remote-media-runtime'
 import { remoteVisionModelId } from '../shared/remote-vision-server'
 import { binRoots, dataDir, modelsDir, requireModelStorage, resourceDirs } from './runtime-env'
 import { modelEntryNames, resolveModelAsset } from './model-paths'
+import { readDownloaded } from './downloaded-models'
 import { sdServer, type SdServerContext } from './sd-server'
 import {
   findSdBinaries,
@@ -61,7 +62,7 @@ import {
   stripCheckpointExt,
   ensureCheckpointExt
 } from './imagegen/model-filter'
-import { evaluateMemoryGuard } from './imagegen/memory-guard'
+import { evaluateMemoryGuard, type MemoryGuardResult } from './imagegen/memory-guard'
 import {
   buildCoreMLArgs,
   buildQwenImage21Args,
@@ -116,8 +117,16 @@ export function listImageModels(): string[] {
     .map((name) => ({ name, filePath: resolveModelAsset(name) }))
     .filter((entry): entry is { name: string; filePath: string } => entry.filePath !== null)
   const coreml = ownedEntries.filter((entry) => isCoreMLModelDir(entry.filePath)).map((e) => e.name)
+  // A download recorded as an image model counts even when its filename names no known diffusion
+  // family: a Hugging Face repo labelled text-to-image is recorded as image whatever its files are called.
+  const recordedImages = new Set(
+    readDownloaded(modelsDir())
+      .filter((model) => model.kind === 'image')
+      .map((model) => model.files[0])
+      .filter((name): name is string => !!name)
+  )
   const checkpoints = ownedEntries
-    .filter((entry) => isImageModelFile(entry.name))
+    .filter((entry) => isImageModelFile(entry.name) || recordedImages.has(entry.name))
     .map((e) => e.name)
   // MLX (mflux) models are virtual ids (mlx/…), not files in the models dir.
   // Appended last so the sd-cli default (Z-Image) stays the preferred pick.
@@ -552,6 +561,53 @@ export function cancelImageGen(): boolean {
   return true // mflux/persistent-server gen has no currentChild but still owns the lifecycle
 }
 
+/** The memory guard's view of one image model: its whole stack (diffusion model plus the text
+ *  encoder, vision projector and VAE that load with it) against this machine's RAM. */
+function imageMemoryGuard(model: string, coreml: boolean, totalGb: number): MemoryGuardResult {
+  const safeSizeGb = (p: string | null | undefined): number => {
+    try {
+      return p && fs.existsSync(p) ? fs.statSync(p).size / 1e9 : 0
+    } catch {
+      return 0
+    }
+  }
+  // Z-Image is a 3-model stack (diffusion transformer + Qwen3-4B text encoder +
+  // FLUX VAE) all resident at once — the diffusion file alone wildly understates
+  // its footprint. Count the encoder + VAE too, or the guard waves through a
+  // combo that then overflows unified memory and freezes the box.
+  const zImageStack = isZImageModel(path.basename(model))
+  const qwenImageStack = isQwenImage21Model(path.basename(model))
+  return evaluateMemoryGuard({
+    totalGb,
+    modelSizeGb: safeSizeGb(model),
+    coreml,
+    zImageStack,
+    zEncoderGb: zImageStack ? safeSizeGb(findInModels(/qwen3-4b-instruct.*\.gguf$/i)) : 0,
+    zVaeGb: zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0,
+    qwenImageStack,
+    qwenEncoderGb: qwenImageStack ? safeSizeGb(findInModels(/^Qwen3VL-8B-Instruct-.*\.gguf$/i)) : 0,
+    qwenVisionGb: qwenImageStack
+      ? safeSizeGb(findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i))
+      : 0,
+    qwenVaeGb: qwenImageStack
+      ? safeSizeGb(findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i))
+      : 0
+  })
+}
+
+/** What the image engine will hold once the given (or chosen) model is loaded, in MB: the
+ *  guard's stack estimate. Undefined when no local image model is installed. */
+export function expectedImageResidentMB(preferred?: string): number | undefined {
+  const model = resolveModel(preferred)
+  if (!model) return undefined
+  const mb =
+    imageMemoryGuard(model, isCoreMLModelDir(model), os.totalmem() / 1e9).modelGb *
+    (1e9 / 1024 ** 2)
+  // No file to measure (an mlx/ ID is a virtual path): no estimate, so the job takes the
+  // unconditional eviction instead of being planned as if it needed no memory.
+  return mb > 0 ? mb : undefined
+}
+
 /**
  * Public entry: run image generation through the ModalityQueue so the image model
  * can't be resident alongside the chat model on unified memory. `evicts: ['llm']`
@@ -674,8 +730,10 @@ export async function generateImage(
         : undefined
       // The queue evicts 'llm' before this runs AND re-warms it (mode-aware) when the
       // job finishes — so the image path no longer touches llm.pause/resume itself.
-      const output = await modalityQueue.run(IMAGE_JOB, () =>
-        runImageGen(effective, progressObserver, signal)
+      const expectedMB = expectedImageResidentMB(effective.model)
+      const output = await modalityQueue.run(
+        expectedMB === undefined ? IMAGE_JOB : { ...IMAGE_JOB, uses: { id: 'image', expectedMB } },
+        () => runImageGen(effective, progressObserver, signal)
       )
       return {
         ...output,
@@ -843,35 +901,7 @@ async function runImageGen(
   // Reserve scales with RAM so an 8GB machine isn't blocked outright (a flat
   // 7GB reserve would leave it ~1GB and reject everything).
   const totalGb = os.totalmem() / 1e9
-  const safeSizeGb = (p: string | null | undefined): number => {
-    try {
-      return p && fs.existsSync(p) ? fs.statSync(p).size / 1e9 : 0
-    } catch {
-      return 0
-    }
-  }
-  // Z-Image is a 3-model stack (diffusion transformer + Qwen3-4B text encoder +
-  // FLUX VAE) all resident at once — the diffusion file alone wildly understates
-  // its footprint. Count the encoder + VAE too, or the guard waves through a
-  // combo that then overflows unified memory and freezes the box.
-  const zImageStack = isZImageModel(path.basename(model))
-  const qwenImageStack = isQwenImage21Model(path.basename(model))
-  const guard = evaluateMemoryGuard({
-    totalGb,
-    modelSizeGb: safeSizeGb(model),
-    coreml,
-    zImageStack,
-    zEncoderGb: zImageStack ? safeSizeGb(findInModels(/qwen3-4b-instruct.*\.gguf$/i)) : 0,
-    zVaeGb: zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0,
-    qwenImageStack,
-    qwenEncoderGb: qwenImageStack ? safeSizeGb(findInModels(/^Qwen3VL-8B-Instruct-.*\.gguf$/i)) : 0,
-    qwenVisionGb: qwenImageStack
-      ? safeSizeGb(findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i))
-      : 0,
-    qwenVaeGb: qwenImageStack
-      ? safeSizeGb(findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i))
-      : 0
-  })
+  const guard = imageMemoryGuard(model, coreml, totalGb)
   if (guard.overBudget && !params.allowUnsafeMemoryOverride) {
     throw new Error(
       imageMemoryGuardErrorMessage(
@@ -1262,16 +1292,15 @@ async function runImageGen(
 
 /** Image generation as a ManagedRuntime for the shared residency seam. Only the
  *  RESIDENT sd-server holds memory between images; evict stops it so another
- *  modality can reclaim the RAM. warm/release are no-ops — the server lazily
- *  re-spawns on the next eligible resident generation (ensureUp), and the one-shot
- *  sd-cli/mflux paths hold nothing between jobs. */
+ *  modality can reclaim the RAM. The server lazily re-spawns on the next eligible
+ *  resident generation (ensureUp), and the one-shot sd-cli/mflux paths hold nothing
+ *  between jobs. */
 export const imageRuntime: ManagedRuntime = {
   modality: 'image',
+  footprintMB: () => sdServer.residentMB(),
+  expectedMB: () => expectedImageResidentMB() ?? 0,
   evict: () => {
     sdServer.stop()
-  },
-  warm: () => {
-    /* lazily re-spawned by ensureUp on the next resident generation */
   },
   release: () => {
     sdServer.stop()

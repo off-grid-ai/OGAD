@@ -4,8 +4,8 @@
   "desktopName": "off-grid-ai.desktop",
   "version": "0.0.54",
   "offgrid": {
-    "llamaRef": "b11532",
-    "prismLlamaRef": "prism-b10754-2459f68"
+    "llamaRef": "b11669",
+    "prismLlamaRef": "prism-b10777-e3de715"
   },
   "description": "Off Grid AI — a private, local-first AI that runs open models (text, vision, image, voice) entirely on your device. No cloud, no accounts.",
   "license": "AGPL-3.0-only",
@@ -34,7 +34,7 @@
     "demo:run": "mkdir -p \"$PWD/.demo-profile\" && ln -sfn \"$HOME/Library/Application Support/Off Grid AI Desktop/models\" \"$PWD/.demo-profile/models\" && OFFGRID_PRO=1 OFFGRID_SEED=force OFFGRID_SEED_PRO=force OFFGRID_USER_DATA=\"$PWD/.demo-profile\" electron-vite preview",
     "demo:fresh": "rm -rf \"$PWD/.demo-profile\" && npm run demo",
     "dev": "node scripts/dev.mjs",
-    "dev:linked": "OPERATOR_UI_SRC=../../component-library-animations node scripts/dev.mjs",
+    "dev:linked": "OPERATOR_UI_SRC=../ui-library node scripts/dev.mjs",
     "dev:inner": "node scripts/stage-native.mjs && electron-vite dev",
     "gateway": "node scripts/stage-native.mjs && OFFGRID_SERVER_ONLY=1 electron-vite dev",
     "build": "node scripts/stage-native.mjs && npm run typecheck && electron-vite build && node scripts/check-windows-onnx-preload.mjs",
@@ -57,8 +57,11 @@
     "knip": "knip --no-gitignore",
     "coverage:all": "bash scripts/coverage-all.sh"
   },
-  "//overrides": "ONE sharp for the whole tree. sharp ships libvips as `libvips-42.dll`, and Windows resolves a DLL by NAME across the process: whichever copy loads first wins for every later binding. The embedding runtime can load sharp before our own sharp 0.35; two libvips versions in one Windows process then fail with ERR_DLOPEN_FAILED. Every file attachment failed on Windows and only there because macOS binds by path. Proven by load order: sharp alone loads; transformers-then-sharp does not. Deduping to one version is the fix, not load-order juggling.",
+  "//overrides": "ONE sharp for the whole tree. sharp ships libvips as `libvips-42.dll`, and Windows resolves a DLL by NAME across the process: whichever copy loads first wins for every later binding. The embedding runtime can load sharp before our own sharp 0.35; two libvips versions in one Windows process then fail with ERR_DLOPEN_FAILED. Every file attachment failed on Windows and only there because macOS binds by path. Proven by load order: sharp alone loads; transformers-then-sharp does not. Deduping to one version is the fix, not load-order juggling. The same holds for ONNX Runtime: LanceDB 0.40 lists Transformers.js 3.0.2 (ONNX Runtime 1.19, about 320 MB) as an optional dependency for an embedding helper the app never calls, so it shares the app's one Transformers.js.",
   "overrides": {
+    "@lancedb/lancedb": {
+      "@huggingface/transformers": "$@huggingface/transformers"
+    },
     "kokoro-js": {
       "@huggingface/transformers": "$@huggingface/transformers"
     },
@@ -71,8 +74,8 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@gutenye/ocr-node": "^1.4.9",
-    "@huggingface/transformers": "4.3.0",
-    "@lancedb/lancedb": "^0.30.0",
+    "@huggingface/transformers": "4.3.1",
+    "@lancedb/lancedb": "^0.40.0",
     "@langchain/core": "^1.2.9",
     "@langchain/langgraph": "^1.4.12",
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -80,14 +83,14 @@
     "@offgrid/clipboard": "file:./packages/clipboard",
     "@offgrid/design": "file:./packages/design",
     "@offgrid/models": "file:../shared/packages/models",
-    "@offgrid/operator-ui": "github:off-grid-ai/ui-library#feb04b6eb50a9f2d2d10436b04d6124e2f7a91cb",
+    "@offgrid/operator-ui": "github:off-grid-ai/ui-library#176f0815929e235622eef9b1aea73aa4c9df506d",
     "@offgrid/rag": "file:../shared/packages/rag",
     "@offgrid/speech": "file:../shared/packages/speech",
     "@offgrid/sync": "file:../shared/packages/sync",
     "@offgrid/ui": "file:../shared/packages/ui",
     "@offgrid/use": "file:../shared/packages/use",
     "@phosphor-icons/react": "^2.1.10",
-    "@playwright/mcp": "^0.0.79",
+    "@playwright/mcp": "^0.0.83",
     "@scure/bip39": "^2.2.0",
     "@tabler/icons-react": "^3.36.1",
     "@tailwindcss/vite": "^4.1.18",
@@ -164,6 +167,7 @@
     "js-yaml": "^4.3.0",
     "jsdom": "^29.1.1",
     "knip": "^6.25.0",
+    "playwright": "1.64.0",
     "postcss": "^8.5.6",
     "prettier": "^3.7.4",
     "react": "^19.2.1",

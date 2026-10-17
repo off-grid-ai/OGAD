@@ -26,6 +26,7 @@ import {
   addRagMessage,
   createRagConversation,
   deleteRagConversation,
+  selectRagMessageVersion,
   getDB,
   getRagConversation,
   updateRagConversationTitle,
@@ -217,9 +218,19 @@ export async function confirmPairing(
 }
 
 /** Paired browsers and whether each is connected over the live socket now (Tasks > Web Use). */
-export function listBridgeBrowsers(): Array<{ name: string; connected: boolean }> {
+export function listBridgeBrowsers(): Array<{ id: string; name: string; connected: boolean }> {
   const live = new Set(links.list().map((l) => l.browser.id))
-  return (readFile()?.browsers ?? []).map((b) => ({ name: b.name, connected: live.has(b.id) }))
+  return (readFile()?.browsers ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    connected: live.has(b.id)
+  }))
+}
+
+/** Remove a paired browser from Desktop, as its own Unpair does. */
+export async function removeBridgeBrowser(id: string): Promise<boolean> {
+  if (typeof id !== 'string' || !id) return false
+  return (await getBridgeService()).removeBrowser(id)
 }
 
 function features(): BridgeFeatures {
@@ -468,6 +479,13 @@ const data: BridgeData = {
   deleteConversation: async (id) => {
     deleteRagConversation(id)
     notifyRagConversationChanged({ conversationId: id })
+  },
+  selectConversationVersion: (id, messageId, direction) => {
+    const row = getRagConversation(id)
+    if (!row) return Promise.reject(new Error('not_found'))
+    selectRagMessageVersion(id, messageId, direction)
+    notifyRagConversationChanged({ conversationId: id })
+    return Promise.resolve(toBridgeConversation(row, getRagMessages(id)))
   },
   listTools: listBridgeTools,
   runTool: async (name, args, browser, tabId) => {

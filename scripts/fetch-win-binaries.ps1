@@ -102,10 +102,10 @@ $PackageJson = Join-Path (Split-Path $PSScriptRoot -Parent) 'package.json'
 $DefaultLlamaRef = (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.llamaRef
 $LlamaRef = if ($env:LLAMA_REF) { $env:LLAMA_REF } else { $DefaultLlamaRef }
 $LlamaHashes = @{
-  cuda = '520261241eacec1a3cc3b0ba2d9d731f969b7ab37891c80db8acf79559af8655'
+  cuda = 'c2da1f73ed176ae093ac5aceb978a7b167a16113f6d74c6789eeaee2135cb8dc'
   cudart = '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6'
-  vulkan = '33c3aed08c51abe576f741383796c012fb9cf06af40899ef2f5894d24463f18c'
-  cpu = 'db18cfa250eb692158eaf8fedb1dc5be0a9d280e87144b67465c774b664c5438'
+  vulkan = '2c07574e7bde71321cb785282b20cc821e951132149eeceeea32ddebdbf0598e'
+  cpu = '37b3efcf962847ca869745fd4ccf7f5e7e8dacfeff9fa3523b4ca8cdc66d632b'
 }
 if ($LlamaRef -ne $DefaultLlamaRef) {
   $overrideHashes = @{
@@ -139,23 +139,23 @@ Copy-Runtime $x 'llama-cpu' | Out-Null
 $PrismLlamaRef = (Get-Content $PackageJson -Raw | ConvertFrom-Json).offgrid.prismLlamaRef
 Write-Host "== Prism llama.cpp (pinned $PrismLlamaRef): CUDA + Vulkan + CPU =="
 if ($IncludeCuda) {
-  $x = Expand-Asset 'PrismML-Eng/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $PrismLlamaRef '200842b4c689fe092a8a1684ef1e185d8d025a0bfae6908737607a0f29560b96'
+  $x = Expand-Asset 'PrismML-Eng/llama.cpp' '^llama-.+-bin-win-cuda-12\.4-x64\.zip$' $PrismLlamaRef 'fa5874a1412e251a6efb13f289e97bacbbb4e7fc6714c1836b4fc6c1dc863462'
   Copy-Runtime $x 'llama-prism-cuda' | Out-Null
 }
-$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-vulkan-x64\.zip$' $PrismLlamaRef '790c979ca73f8b57c5a89ae782e952d8641e64280df4a11664198245f81e9df7'
+$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-vulkan-x64\.zip$' $PrismLlamaRef '6bf30d60dd35ae1129ae221593d79bed053c775c6ce8554f75cfe171f3028f10'
 Copy-Runtime $x 'llama-prism' | Out-Null
-$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef '509f3829371570dfd4a651a3583532515629fc835c4d050f14740df4ac4c7df2'
+$x = Expand-Asset 'PrismML-Eng/llama.cpp' 'bin-win-cpu-x64\.zip$' $PrismLlamaRef 'cff7eeff19163e6263720618cf98023715b8dac14d0873f5be0918765de323c4'
 Copy-Runtime $x 'llama-prism-cpu' | Out-Null
 
 # --- whisper.cpp (whisper-cli.exe + DLLs): CUDA GPU + CPU fallback -----------
 # The newest semantic release can have no binary assets. Pin the current build
 # release so Windows voice cannot disappear because GitHub's "latest" moved.
-$WhisperRef = 'b5130'
+$WhisperRef = 'b5454'
 Write-Host "== whisper.cpp (pinned $WhisperRef): CUDA 12.4 + CPU =="
 if ($IncludeCuda) {
   # The CUDA 11.8 build needs cublas64_11.dll, while the performance pack
   # provides CUDA 12.4. Keep Whisper's CUDA major version aligned with the pack.
-  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-cublas-12\.4\.0-bin-x64\.zip$' $WhisperRef 'af520ddd034d985b55dfeea3e465ed93653ba2aee1a55e865033edc548c272a7'
+  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-bin-win-cuda-12\.4\.0-x64\.zip$' $WhisperRef 'afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a'
   $dest = Copy-Runtime $x 'whisper'
   # Older releases ship the CLI as main.exe; the app expects whisper-cli.exe.
   $wc = Join-Path $dest 'whisper-cli.exe'
@@ -164,7 +164,7 @@ if ($IncludeCuda) {
 }
 
 try {
-  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-bin-x64\.zip$' $WhisperRef 'f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c'
+  $x = Expand-Asset 'ggml-org/whisper.cpp' '^whisper-bin-x64\.zip$' $WhisperRef '6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb'
   $dest = Copy-Runtime $x 'whisper-cpu'
   $wc = Join-Path $dest 'whisper-cli.exe'
   $mn = Join-Path $dest 'main.exe'
@@ -177,11 +177,11 @@ try {
 # three CUDA DLLs and previously made the installer too large to build.
 # Keep this release pinned: Qwen-Image 2.1 needs the current runtime and a moving
 # latest release can change the packaged DLL contract without review.
-$SdRef = 'master-920-2f88688'
+$SdRef = 'master-968-8cd731e'
 Write-Host "== stable-diffusion.cpp (pinned $SdRef): CUDA + Vulkan + CPU =="
 if ($IncludeCuda) {
   try {
-    $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '479133a03d5c861ce77e70354dbbe75dd6e8d9955d1d1c7b6b1456b4571e3039'
+    $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cuda12-x64\.zip$' $SdRef '8b6f311f22b56db02f545a674f7549a0da283f7134d5fd01c42014b81ab78af0'
     $dest = Copy-Runtime $x 'sd-cuda'
     $cli = Join-Path $dest 'sd-cli.exe'
     $sd = Join-Path $dest 'sd.exe'
@@ -190,7 +190,7 @@ if ($IncludeCuda) {
 }
 
 try {
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '63e84439c20dde75487a933066318ae01353e9e80ee70e031acad48e857e1cb9'
+  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-vulkan-x64\.zip$' $SdRef '060767935e2543c27e0fcd5a024f62d978970c221c60658da87c768c27a841fa'
   $dest = Copy-Runtime $x 'sd'
   # Older releases named the one-shot binary sd.exe; normalize the app contract.
   $cli = Join-Path $dest 'sd-cli.exe'
@@ -199,7 +199,7 @@ try {
 } catch { Write-Warning "stable-diffusion.cpp Vulkan fetch failed: $_" }
 
 try {
-  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cpu-x64\.zip$' $SdRef '10fc73b25bd97fb071c6bb6ba2a18e8811e6dd421c32bead98c18c84cd305d7f'
+  $x = Expand-Asset 'leejet/stable-diffusion.cpp' 'bin-win-cpu-x64\.zip$' $SdRef '3289065032e298d751964ced2fb444c6e11f58793ba14c76f1f6a1d5b5ffff9c'
   $dest = Copy-Runtime $x 'sd-cpu'
   $cli = Join-Path $dest 'sd-cli.exe'
   $sd = Join-Path $dest 'sd.exe'
@@ -209,10 +209,15 @@ try {
 # --- ffmpeg (GPL, win64) — single ffmpeg.exe flat in resources/bin -----------
 Write-Host '== ffmpeg =='
 try {
+  # Pinned FFmpeg 9.0.2 build from BtbN, mirrored on our release because BtbN prunes old autobuilds.
   $zip = Join-Path $tmp 'ffmpeg.zip'
   Invoke-WebRequest -Headers @{ 'User-Agent' = 'offgrid-fetch-win' } `
-    -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip' `
+    -Uri 'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ffmpeg-n9.0.2-28-g669f5ab083-win64-gpl-9.0.zip' `
     -OutFile $zip
+  $ffmpegSha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+  if ($ffmpegSha -ne '1bb62cfd4bdc12a63a6a1151458ea5ae7001fd055202afc5463517028882a631') {
+    throw "ffmpeg archive SHA256 mismatch: $ffmpegSha"
+  }
   $out = Join-Path $tmp 'ffmpeg'
   Expand-Archive -Path $zip -DestinationPath $out -Force
   Get-ChildItem -Path $out -Recurse -Filter 'ffmpeg.exe' |

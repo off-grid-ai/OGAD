@@ -200,7 +200,8 @@ function mapRagMessage(message: RawRagMessage): ChatMessage[] {
     provenance
   })
   if (!turn || shouldHideProjectedTurn(turn)) return []
-  return [projectChatMessage(turn, context)]
+  const projected = projectChatMessage(turn, context)
+  return [message.versions ? { ...projected, threadVersions: message.versions } : projected]
 }
 
 const groupedTurnCache = new WeakMap<
@@ -376,7 +377,13 @@ export function mergeDurableAndStreaming(
   current: ChatMessage[]
 ): ChatMessage[] {
   const active = current.filter((message) => message.streaming === true)
-  const replacedIds = new Set(active.map((message) => message.replacementMessageId ?? message.id))
+  const replacedIds = new Set(
+    active.flatMap((message) => [
+      message.replacementMessageId ?? message.id,
+      // A retry streams in place of the saved answer it is a new version of.
+      ...(message.versionOf ? [message.versionOf] : [])
+    ])
+  )
   // Keep the live stream in place while storage still contains the prior answer.
   return [...durable.filter((message) => !replacedIds.has(message.id)), ...active]
 }

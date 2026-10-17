@@ -136,7 +136,7 @@ const server = http.createServer((request, response) => {
       'Queue this second.': 'The second queued reply is complete.',
       'Keep each response version.': `Original answer version ${attempt}.`,
       'Keep the edited response too.': 'Edited answer version 4.',
-      'Add a later turn.': 'The later answer will be removed by the edit.',
+      'Add a later turn.': 'The later answer stays with its version.',
       'Keep the saved answer during retry.': 'The saved answer remains available.',
       'Keep the saved answer after failure.': 'The saved answer before failure remains available.'
     }

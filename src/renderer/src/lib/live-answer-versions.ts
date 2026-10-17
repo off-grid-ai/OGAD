@@ -12,7 +12,7 @@ export function answerVersionsNavigable(
   return (
     message.role === 'assistant' &&
     !message.notice &&
-    (message.variants?.length ?? 0) > 1 &&
+    (message.threadVersions?.count ?? message.variants?.length ?? 0) > 1 &&
     nextMessageRole !== 'assistant' &&
     nextMessageRole !== 'tool'
   )

@@ -20,14 +20,14 @@ case "$VARIANT" in
     REF="${LLAMA_REF:-$(node -p "require('$ROOT/package.json').offgrid.llamaRef")}"
     REPO=ggml-org/llama.cpp
     DIR=llama
-    if [ "$REF" != b11532 ]; then
+    if [ "$REF" != b11669 ]; then
       echo '[build-llama-linux] update the pinned standard archive hashes for the new ref' >&2
       exit 1
     fi
     case "$ACCELERATOR" in
-      cuda) SHA256=7fb7cc87eba8ffedebc0fbe8acf0bacc628a9f6596260f7fa2aa28b387222e3b ;;
-      vulkan) SHA256=dfd641b1c69e0e9d4c232928f62dcfc2d681d62cf553ad7891468369383a1d81 ;;
-      cpu) SHA256=a3190cc22e1a0bab319c5eef1cedc8e346cfa690e173725ba97f92e4a150c4e2 ;;
+      cuda) SHA256=4703ed1a3cd6e8504affb6cb9866f501e96d634d68a002dc9a8251c9e2819b49 ;;
+      vulkan) SHA256=e8709e5ba6c1b093dea7f3de57f4aba842f9a188fba6b465782d65d6fcfa4d9f ;;
+      cpu) SHA256=cf07c1c112d709bd67e522017471de57ed0ec8bea031d732c5422351c07f65ac ;;
       *) echo "[build-llama-linux] unknown accelerator: $ACCELERATOR" >&2; exit 1 ;;
     esac
     ;;
@@ -35,14 +35,14 @@ case "$VARIANT" in
     REF="${PRISM_LLAMA_REF:-$(node -p "require('$ROOT/package.json').offgrid.prismLlamaRef")}"
     REPO=PrismML-Eng/llama.cpp
     DIR=llama-prism
-    if [ "$REF" != prism-b10754-2459f68 ]; then
+    if [ "$REF" != prism-b10777-e3de715 ]; then
       echo '[build-llama-linux] update the pinned Prism archive hashes for the new ref' >&2
       exit 1
     fi
     case "$ACCELERATOR" in
-      cuda) SHA256=f2c74401fc2425659588b4b52868c6d0dad5654b5ba2549ca34ef852312db9af ;;
-      vulkan) SHA256=32f871a8a2aae73c813255f0b72b64cc5e5aa6f7f6b764f173ce7332bd28c44d ;;
-      cpu) SHA256=348aeed3ef5ad801d460c9d41c2a18125438f8e5f058dfda5d0602f919ad098d ;;
+      cuda) SHA256=aa53e2256276e683386effdc8be34b3bd1cdf64ef9dc5d492da69227ac52531b ;;
+      vulkan) SHA256=b53d24c9fcf704656045fa62d2d1500d290da49800aa6ec0066f05f3367af498 ;;
+      cpu) SHA256=3f97b6fbec0065fede2be92f05df531c1050636fc2613e1ba0d975249df19713 ;;
       *) echo "[build-llama-linux] unknown accelerator: $ACCELERATOR" >&2; exit 1 ;;
     esac
     ;;
@@ -74,20 +74,20 @@ download_archive() {
   fi
 }
 CUDA_DEST="$ROOT/build/linux-bin/cuda-runtime"
-CUDA_ARCHIVE="cudart-llama-b11056-bin-ubuntu-cuda-12.8-x64.tar.gz"
-CUDA_SHA256=9fba31d628eca3672b187da52aab123e9c9c04b376ccf5408d283ecaae4c0891
+CUDA_ARCHIVE="cudart-llama-b11669-bin-ubuntu-cuda-12.8-x64.tar.gz"
+CUDA_SHA256=ab3eda89a82096bcba00b6448218c3c11eec2016b0f38d64884dc29736549f26
 if [ "$ACCELERATOR" = cuda ] &&
   { [ "$(cat "$CUDA_DEST/.archive-sha256" 2>/dev/null || true)" != "$CUDA_SHA256" ] ||
     [ ! -f "$CUDA_DEST/libcudart.so.12" ] ||
     [ ! -f "$CUDA_DEST/libcublas.so.12" ] ||
     [ ! -f "$CUDA_DEST/libcublasLt.so.12" ]; }; then
-  CUDA_URL="https://github.com/ggml-org/llama.cpp/releases/download/b11056/$CUDA_ARCHIVE"
+  CUDA_URL="https://github.com/ggml-org/llama.cpp/releases/download/b11669/$CUDA_ARCHIVE"
   download_archive "$CUDA_URL" "$CUDA_ARCHIVE"
   printf '%s  %s\n' "$CUDA_SHA256" "$WORK/$CUDA_ARCHIVE" | sha256sum --check --status
   tar -xzf "$WORK/$CUDA_ARCHIVE" -C "$WORK"
   rm -rf -- "$CUDA_DEST"
   mkdir -p "$CUDA_DEST"
-  cp "$WORK/cudart-llama-b11056-bin-ubuntu-cuda-12.8-x64/"lib*.so.12 "$CUDA_DEST/"
+  cp "$WORK/cudart-llama-b11669-bin-ubuntu-cuda-12.8-x64/"lib*.so.12 "$CUDA_DEST/"
   printf '%s\n' "$CUDA_SHA256" > "$CUDA_DEST/.archive-sha256"
 fi
 URL="https://github.com/$REPO/releases/download/$REF/$ARCHIVE"

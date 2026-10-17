@@ -5,12 +5,12 @@ set -euo pipefail
 # Pin the Whisper source and FFmpeg release asset so a later upstream build cannot
 # silently change an installer. Stage CUDA, Vulkan, and CPU binaries separately.
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-WHISPER_REF=b5130
-WHISPER_COMMIT=927cfce34f31707e17f2bff35c349632fb9e2c3a
+WHISPER_REF=v1.9.5
+WHISPER_COMMIT=d1be6fde11ac6e0407606b4e42fe72d34add8037
 CUDA_BUILD_IMAGE=nvidia/cuda:12.8.1-devel-ubuntu24.04@sha256:4b9ed5fa8361736996499f64ecebf25d4ec37ff56e4d11323ccde10aa36e0c43
-FFMPEG_ARCHIVE=ffmpeg-n8.1.3-linux64-lgpl-8.1.tar.xz
-FFMPEG_SHA256=5804347ca94249ceee74dd8c77dd3fa978d7d100808bebcd4889cd24eb89c004
-FFMPEG_DIR=ffmpeg-n8.1.3-linux64-lgpl-8.1
+FFMPEG_ARCHIVE=ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0.tar.xz
+FFMPEG_SHA256=b70078970e033c7e728a0c42d83a39d57f28b471a60866a2c4b0a2f598aec666
+FFMPEG_DIR=ffmpeg-n9.0.2-28-g669f5ab083-linux64-lgpl-9.0
 
 if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
   echo '[build-voice-linux] Linux x64 is required' >&2
@@ -23,7 +23,7 @@ fi
 if [ "${OFFGRID_BUILD_VOICE_FROM_SOURCE:-0}" != 1 ] &&
   [ "${OFFGRID_REUSE_STAGED_VOICE:-0}" != 1 ]; then
   VOICE_ARCHIVE="ogad-whisper-${WHISPER_REF}-linux-x64-cuda12.8-multiarch-v1.tar.gz"
-  VOICE_SHA256=ba6fe2d08fa75589cb86b01c06e2f16b8483b81d19949b2035289d8bc0ff3c77
+  VOICE_SHA256=3f796596214d2ffff26b641be1ba47f34277b6a6184ea51aa15e5bdd5a833f29
   VOICE_WORK="$(mktemp -d)"
   trap 'rm -rf -- "$VOICE_WORK"' EXIT
   if [ -n "${OFFGRID_VOICE_ARCHIVE_CACHE_DIR:-}" ] &&
@@ -65,29 +65,45 @@ test "$(git -C "$WORK/whisper" rev-parse HEAD)" = "$WHISPER_COMMIT"
 
 # The release runner has no CUDA compiler. Build in a pinned CUDA toolkit
 # container; the installed app uses the existing packaged CUDA 12 runtime.
+# A GPU build host without Docker (a RunPod pod) can use its own CUDA 12.8
+# toolkit instead: OFFGRID_NATIVE_CUDA=1 with nvcc on PATH or in /usr/local/cuda.
 mkdir -p "$WORK/whisper-build-cuda"
-DOCKER=(docker)
-if ! docker info >/dev/null 2>&1; then DOCKER=(sudo docker); fi
 CUDA_ARCHITECTURES="${OFFGRID_CUDA_ARCHITECTURES:-61;70;75;80;86;89;90}"
-"${DOCKER[@]}" run --rm --platform linux/amd64 \
-  -e CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" \
-  -v "$WORK/whisper:/src:ro" -v "$WORK/whisper-build-cuda:/build" \
-  "$CUDA_BUILD_IMAGE" bash -euo pipefail -c '
-    trap "chmod -R a+rwX /build" EXIT
-    apt-get update -qq
-    apt-get install -y --no-install-recommends cmake build-essential git
-    # Whisper configures its JavaScript package in the source tree. Keep the
-    # host checkout read-only and give CMake a writable container-local copy.
-    cp -R /src /tmp/whisper-src
-    cmake -S /tmp/whisper-src -B /build -DCMAKE_BUILD_TYPE=Release \
-      -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
-      -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF \
-      -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" \
-      -DGGML_CUDA=ON -DGGML_CUDA_NCCL=OFF -DGGML_VULKAN=OFF \
-      -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
-      -DWHISPER_BUILD_SERVER=OFF
-    cmake --build /build --config Release --parallel 4 --target whisper-cli
-  '
+if [ "${OFFGRID_NATIVE_CUDA:-0}" = 1 ]; then
+  export PATH="$PATH:/usr/local/cuda/bin"
+  nvcc --version | grep -q 'release 12\.8'
+  cmake -S "$WORK/whisper" -B "$WORK/whisper-build-cuda" -DCMAKE_BUILD_TYPE=Release \
+    -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
+    -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF \
+    -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" \
+    -DGGML_CUDA=ON -DGGML_CUDA_NCCL=OFF -DGGML_VULKAN=OFF \
+    -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
+    -DWHISPER_BUILD_SERVER=OFF
+  cmake --build "$WORK/whisper-build-cuda" --config Release \
+    --parallel "${OFFGRID_BUILD_JOBS:-4}" --target whisper-cli
+else
+  DOCKER=(docker)
+  if ! docker info >/dev/null 2>&1; then DOCKER=(sudo docker); fi
+  "${DOCKER[@]}" run --rm --platform linux/amd64 \
+    -e CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" \
+    -v "$WORK/whisper:/src:ro" -v "$WORK/whisper-build-cuda:/build" \
+    "$CUDA_BUILD_IMAGE" bash -euo pipefail -c '
+      trap "chmod -R a+rwX /build" EXIT
+      apt-get update -qq
+      apt-get install -y --no-install-recommends cmake build-essential git
+      # Whisper configures its JavaScript package in the source tree. Keep the
+      # host checkout read-only and give CMake a writable container-local copy.
+      cp -R /src /tmp/whisper-src
+      cmake -S /tmp/whisper-src -B /build -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
+        -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF -DGGML_F16C=OFF \
+        -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES" \
+        -DGGML_CUDA=ON -DGGML_CUDA_NCCL=OFF -DGGML_VULKAN=OFF \
+        -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
+        -DWHISPER_BUILD_SERVER=OFF
+      cmake --build /build --config Release --parallel 4 --target whisper-cli
+    '
+fi
 WHISPER_CUDA_BIN="$(find "$WORK/whisper-build-cuda" -name whisper-cli -type f -perm -111 -print -quit)"
 test -n "$WHISPER_CUDA_BIN"
 

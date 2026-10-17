@@ -5,9 +5,9 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 $Dest = Join-Path $Root "resources/bin/kev-runtime"
 $Temp = Join-Path ([System.IO.Path]::GetTempPath()) ("offgrid-kev-" + [guid]::NewGuid())
-$PythonUrl = "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
-$PythonSha256 = "7c45c9622400d578709a9b2cddbe8124cc21d382409d9f13406d706d28e31b14"
-$KevRef = "9145646c4188e1ed929fb6478d93df437cb57cf7"
+$PythonUrl = "https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.12.15%2B20261013-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+$PythonSha256 = "7a2aef48e5ee569e310b29b32681debbc5d888e92790d85331a47736c6b06aad"
+$KevRef = "6b719c3c3f367295f6ef336f4f751cf5ff970abc"
 
 New-Item -ItemType Directory -Path $Temp | Out-Null
 try {

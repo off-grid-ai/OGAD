@@ -122,6 +122,9 @@ test('window resize adds collection columns while filter context remains reachab
 })
 
 test('keyboard focus follows navigation, form, dialog, and primary-action order (#151)', async () => {
+  // A long keyboard walk (every stop on Models, Settings and the palette), about 90 s on this Mac;
+  // the default 60 s budget is for single journeys.
+  test.setTimeout(180_000)
   const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
   await navigation.getByRole('img', { name: 'Off Grid AI', exact: true }).click()
   await page.keyboard.press('Tab')

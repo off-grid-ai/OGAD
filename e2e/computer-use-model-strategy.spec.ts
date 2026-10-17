@@ -102,7 +102,10 @@ async function launch(): Promise<void> {
   await page.waitForLoadState('domcontentloaded')
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await completeOnboarding(page)
-  await expect(page.getByRole('button', { name: /Model server: model running/i })).toBeVisible({
+  // Models load on first use (c6a2d9f72): at launch the server is either running or waiting for it.
+  await expect(
+    page.getByRole('button', { name: /Model server: model (running|loads on first use)/i })
+  ).toBeVisible({
     timeout: 60_000
   })
 }
@@ -140,7 +143,7 @@ async function gotoChat(): Promise<void> {
 async function computerUseSummary(): Promise<string> {
   await gotoChat()
   await page.getByRole('button', { name: 'Active models' }).click()
-  const region = page.getByRole('region', { name: 'Computer Use' })
+  const region = page.getByRole('region', { name: 'Computer Use', exact: true })
   await expect(region).toBeVisible()
   await expect(region).not.toContainText('No Computer Use model is selected.', { timeout: 30_000 })
   const text = await region.innerText()
@@ -185,7 +188,7 @@ test('all strategies project their effective roles and Reasoning + Specialist su
   // fc0f7ca46: the reasoner is shown with Text models, outside the task lineup.
   expect(hybrid).toContain('Reasoning + Specialist')
   await page.getByRole('button', { name: 'Active models' }).click()
-  await expect(page.getByRole('button', { name: /Qwen.*3.5.*0.8B/, pressed: true })).toBeVisible()
+  await expect(page.getByLabel('Text & Vision active model')).toContainText(/Qwen.*3.5.*0.8B/)
   await page.getByRole('button', { name: 'Close', exact: true }).click()
   expect(hybrid.toLowerCase()).toContain('grounding specialist')
 

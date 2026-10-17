@@ -2,8 +2,8 @@
 //
 // On a 16GB unified-memory Mac two big models resident at once (chat + image, or
 // chat + replay-vision) overflow RAM and swap the whole machine into a beachball.
-// This queue serializes heavy jobs by PRIORITY (see policy.ts) and evicts named
-// engines before a job runs, so only one heavy model is resident at a time. It
+// This queue serializes heavy jobs by PRIORITY (see policy.ts) and, before a job runs, evicts
+// only the engines the shared residency plan says must go for it to fit live memory. It
 // generalizes the ad-hoc llm.pause()/resume() bracketing that imagegen.ts did
 // inline: engines register themselves as evictable, jobs declare what they evict.
 //
@@ -12,30 +12,41 @@
 // here. It never imports llm/image/capture — those register through the hooks.
 
 import { AsyncLocalStorage } from 'async_hooks'
+import { liveBudgetMB, planEviction, type Resident, type ResidentType } from '@offgrid/models'
 import { DEFAULT_POLICY, selectNext, type PolicyConfig, type QueueJob, type Tier } from './policy'
 
-/** An engine that can free its resident memory on demand (and warm back up). */
+/** An engine that can free its resident memory on demand; it loads again on its own next use. */
 export interface Evictable {
   /** Free the engine's memory NOW. Awaited before a job that evicts it runs.
    *  MUST be idempotent/safe when the engine is already down (the queue always
    *  calls it for a declared id rather than tracking exact residency, so an engine
    *  that lazily reloaded can't slip through and leave two models resident). */
-  evict: () => Promise<void> | void
-  /** Clear an eviction block if a later engine fails to evict. This must not
-   *  load a model while the failed engine may still hold memory. */
+  evict: (by?: QueueRequest) => Promise<void> | void
+  /** Clear the engine's eviction block WITHOUT loading a model. Called when the job that
+   *  evicted it ends, and when a later engine fails to evict. The engine then loads on its
+   *  own next use: nothing is reloaded only because memory came free. */
   recover?: () => Promise<void> | void
-  /** Warm the engine back up after the evicting job finishes. Called by the queue
-   *  in run()'s finally. Make it MODE-AWARE: a 'resident' engine reloads here (low
-   *  latency next use); an 'on-demand' engine should NOT reload — just clear any
-   *  eviction block so it can lazily load on its own next use (frees RAM meanwhile). */
-  warm?: () => Promise<void> | void
+  /** What the engine holds in memory now, in MB (0 when nothing is loaded). With
+   *  expectedMB and type, this lets the queue keep it resident while everything fits. */
+  footprintMB?: () => number
+  /** What the engine will hold once its current model is loaded, in MB. */
+  expectedMB?: () => number
+  /** The engine's kind, for the shared eviction priority (text kept longest). */
+  type?: ResidentType
 }
+
+/** Live memory the system can still give, in MB. Injected (an IO boundary). */
+export type MemoryProbe = () => { availableMB: number; totalMB: number }
 
 /** A job to run through the queue. */
 export interface QueueRequest {
   tier: Tier
   label: string
-  /** Ids of registered evictables to free (if resident) before this job runs. */
+  /** The engine this job runs on, and optionally its expected size once loaded. With a memory
+   *  probe set, the queue then frees only what the shared residency plan says, from `evicts`,
+   *  instead of all of it. */
+  uses?: { id: string; expectedMB?: number }
+  /** Ids of registered evictables this job may free (if resident) before it runs. */
   evicts?: string[]
   /** A background job that foreground work may stop mid-run: its model request is aborted
    *  (`currentSignal`) and the job runs again from the start once the slot is free. Only for
@@ -47,8 +58,18 @@ export interface QueueRequest {
 // call site (chat was inlined 4× in ipc.ts). A chat/tool turn evicts a resident
 // image server; image generation evicts the resident LLM — they can't co-reside
 // on unified memory. Frozen so a caller can't mutate the shared descriptor.
-export const CHAT_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'chat', evicts: ['image'] })
-export const IMAGE_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'image', evicts: ['llm'] })
+export const CHAT_JOB: QueueRequest = Object.freeze({
+  tier: 2,
+  label: 'chat',
+  uses: { id: 'llm' },
+  evicts: ['image']
+})
+export const IMAGE_JOB: QueueRequest = Object.freeze({
+  tier: 2,
+  label: 'image',
+  uses: { id: 'image' },
+  evicts: ['llm']
+})
 
 // Background model work (capture distill, replay-vision, secretary/agent passes).
 // Tier 3 = lowest priority: runs only when no chat/workspace/image job is running
@@ -60,6 +81,7 @@ export const IMAGE_JOB: QueueRequest = Object.freeze({ tier: 2, label: 'image', 
 export const CAPTURE_JOB: QueueRequest = Object.freeze({
   tier: 3,
   label: 'capture',
+  uses: { id: 'llm' },
   evicts: ['image'],
   preemptible: true
 })
@@ -78,7 +100,7 @@ export const FOREGROUND_GRACE_MS = 3000
  *  CAPTURE_JOB). Use for the many background LLM passes so they all share ONE
  *  priority + eviction policy instead of each spelling out an inline literal. */
 export function backgroundJob(label: string): QueueRequest {
-  return { tier: 3, label, evicts: ['image'], preemptible: true }
+  return { tier: 3, label, uses: { id: 'llm' }, evicts: ['image'], preemptible: true }
 }
 
 /** Why a preempted job's model request was aborted. */
@@ -104,7 +126,9 @@ interface Waiter {
 
 interface RunningEntry {
   job: QueueJob
-  /** Ids this job evicted, to re-warm when it finishes. */
+  /** The engine this job runs on: never evicted for another job while this one runs. */
+  uses?: string
+  /** Ids this job evicted, to release when it finishes. */
   evicted: string[]
   /** Stops a preemptible job's model request (see `currentSignal`). */
   controller?: AbortController
@@ -122,6 +146,9 @@ export class ModalityQueue {
   private running = new Map<string, RunningEntry>()
   private waiting: Waiter[] = []
   private evictables = new Map<string, Evictable>()
+  /** When each engine last ran a job, for least-recently-used eviction. */
+  private lastUsedAt = new Map<string, number>()
+  private memoryProbe: MemoryProbe | null = null
   private seqCounter = 0
   private idCounter = 0
   private changeCbs = new Set<(s: QueueState) => void>()
@@ -163,6 +190,55 @@ export class ModalityQueue {
    *  so an engine that lazily reloaded can't leave two models resident. */
   registerEvictable(id: string, e: Evictable): void {
     this.evictables.set(id, e)
+  }
+
+  /** Set how live memory is read. Without it, a job frees everything it declares. */
+  setMemoryProbe(probe: MemoryProbe | null): void {
+    this.memoryProbe = probe
+  }
+
+  /**
+   * Which loaded engines to free so this job's engine fits, from the shared residency policy (as
+   * mobile plans it): residents stay loaded while they all fit live memory; when the job's engine
+   * does not fit, idle engines go one at a time, lowest priority first (voice, transcription and
+   * embedding sidecars before image, text last), then least recently used. Any idle engine may go,
+   * not only the ones the job names: a job that could free only its named engine was admitted
+   * without room when other idle engines held the memory. An engine a running job is using is
+   * never freed. Without a probe, or a size for the incoming engine, it frees every declared id
+   * (the safe behaviour for jobs that need all the memory, such as video).
+   */
+  private planEvictions(request: QueueRequest): string[] {
+    const declared = request.evicts ?? []
+    const uses = request.uses
+    if (!uses || !this.memoryProbe) return declared
+    const incomingMB = uses.expectedMB ?? this.evictables.get(uses.id)?.expectedMB?.()
+    if (incomingMB === undefined || !Number.isFinite(incomingMB)) return declared
+    const inUse = new Set(
+      [...this.running.values()].flatMap((entry) => (entry.uses ? [entry.uses] : []))
+    )
+    const now = Date.now()
+    const residents: Resident[] = []
+    for (const [id, e] of this.evictables) {
+      const sizeMB = e.footprintMB?.() ?? 0
+      if (sizeMB <= 0) continue
+      residents.push({
+        key: id,
+        type: e.type ?? 'classifier',
+        sizeMB,
+        pinned: inUse.has(id),
+        lastUsedAt: this.lastUsedAt.get(id) ?? now
+      })
+    }
+    const { availableMB, totalMB } = this.memoryProbe()
+    const budgetMB = liveBudgetMB({
+      residentMB: residents.reduce((sum, r) => sum + r.sizeMB, 0),
+      availableMB,
+      // Kept free for the OS and the person's other apps.
+      headroomMB: Math.max(3072, totalMB * 0.1)
+    })
+    const type = this.evictables.get(uses.id)?.type ?? 'text'
+    const plan = planEviction(residents, { key: uses.id, type, sizeMB: incomingMB }, budgetMB)
+    return plan.evict.map((r) => r.key)
   }
 
   onChange(cb: (s: QueueState) => void): () => void {
@@ -253,16 +329,13 @@ export class ModalityQueue {
     } finally {
       this.running.delete(job.id)
       if (job.tier !== 3) this.holdBackground()
-      // Re-warm what this job evicted. Each engine's warm() is mode-aware: a
-      // 'resident' engine reloads now; an 'on-demand' engine just clears its
-      // eviction block and stays down until its own next use.
+      // Let what this job evicted load again on its own next use. Nothing reloads here: a model
+      // nobody asks for next would only take back the memory the job just freed.
       for (const id of entry?.evicted ?? []) {
-        const e = this.evictables.get(id)
-        if (!e?.warm) continue
         try {
-          await e.warm()
+          await this.evictables.get(id)?.recover?.()
         } catch (err) {
-          console.error(`[ModalityQueue] warm '${id}' failed:`, err)
+          console.error(`[ModalityQueue] release '${id}' failed:`, err)
         }
       }
       this.emitChange()
@@ -317,6 +390,7 @@ export class ModalityQueue {
       this.waiting.splice(idx, 1)
       const entry: RunningEntry = {
         job: waiter.job,
+        ...(waiter.request.uses ? { uses: waiter.request.uses.id } : {}),
         evicted: [],
         startedAt: Date.now(),
         ...(waiter.request.preemptible ? { controller: new AbortController() } : {})
@@ -331,13 +405,14 @@ export class ModalityQueue {
   }
 
   private async admitAfterEvict(waiter: Waiter, entry: RunningEntry): Promise<void> {
-    // Always evict every declared id (evict is idempotent when the engine is down),
-    // so an engine that lazily reloaded is still freed. Record them for re-warm.
-    for (const id of waiter.request.evicts ?? []) {
+    // Evict what the residency plan picks from the declared ids (all of them when the queue
+    // cannot size the job). evict is idempotent when the engine is down. Record each for release.
+    if (waiter.request.uses) this.lastUsedAt.set(waiter.request.uses.id, Date.now())
+    for (const id of this.planEvictions(waiter.request)) {
       const e = this.evictables.get(id)
       if (!e) continue
       try {
-        await e.evict()
+        await e.evict(waiter.request)
         entry.evicted.push(id)
       } catch (err) {
         console.error(`[ModalityQueue] evict '${id}' failed:`, err)

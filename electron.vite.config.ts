@@ -14,7 +14,7 @@ import {
 
 // Dev-only: link @offgrid/operator-ui to a local checkout of off-grid-ai/ui-library, so library
 // edits hot-reload here without a PR, pin and bump. Unset (CI, releases) changes nothing.
-//   OPERATOR_UI_SRC=../../component-library-animations npm run dev   (or npm run dev:linked)
+//   OPERATOR_UI_SRC=../ui-library npm run dev   (or npm run dev:linked)
 const operatorUiRoot = process.env.OPERATOR_UI_SRC ? resolve(process.env.OPERATOR_UI_SRC) : null
 if (operatorUiRoot) console.log(`[operator-ui] linked to ${operatorUiRoot}`)
 

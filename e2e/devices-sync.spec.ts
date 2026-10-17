@@ -315,7 +315,8 @@ test.describe('Devices surface — pro tier', () => {
     // Open the code a person would read to the joining device.
     const desktopCode = desktop.pairingCode?.code
     expect(desktopCode, 'the desktop has to be showing a pairing code to pair against').toBeTruthy()
-    await page.getByRole('button', { name: 'Show QR Code', exact: true }).click()
+    // The code is on the Devices screen; the larger QR opens the pairing panel.
+    await page.getByRole('button', { name: 'Show larger QR code', exact: true }).click()
     const pairingCode = page.getByRole('dialog', { name: 'Pair a device', exact: true })
     await expect(
       pairingCode.getByText(

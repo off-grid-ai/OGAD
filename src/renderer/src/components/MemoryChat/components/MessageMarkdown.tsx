@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { Button } from '@renderer/components/ui/button'
@@ -66,6 +66,11 @@ function linkBareDomains(node: MarkdownNode): void {
 function remarkBareDomains(): (tree: MarkdownNode) => void {
   return linkBareDomains
 }
+
+/** The default transform drops links with a protocol it does not know, which is every `cite:N`
+ *  link an answer's [S#] tags become. Those are kept for the citation pills; the rest is unchanged. */
+const keepCitations = (url: string): string =>
+  /^cite:\d+$/.test(url) ? url : defaultUrlTransform(url)
 
 function makeCiteComponents(
   unified: RagContext['unified'],
@@ -221,6 +226,7 @@ function MessageMarkdownComponent({
           : [remarkGfm, remarkBreaks]
       }
       components={components}
+      urlTransform={keepCitations}
     >
       {content}
     </ReactMarkdown>

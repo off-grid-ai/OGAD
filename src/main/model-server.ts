@@ -1905,7 +1905,9 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         await llm.setSettings(patch)
         json(res, 200, { success: true, settings: llm.getSettings() })
       })().catch((e) =>
-        json(res, 500, { error: { message: String(e instanceof Error ? e.message : e) } })
+        json(res, 500, {
+          error: { message: e instanceof Error ? e.message : 'The settings could not be saved.' }
+        })
       )
     }
 

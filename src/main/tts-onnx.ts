@@ -125,6 +125,11 @@ export class OnnxSpeechRuntime {
     )
   }
 
+  /** Whether the voice model is loaded (its worker holds it). */
+  isLoaded(): boolean {
+    return this.worker !== null
+  }
+
   async close(): Promise<void> {
     const worker = this.worker
     this.worker = null

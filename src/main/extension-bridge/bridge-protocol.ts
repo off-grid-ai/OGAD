@@ -201,6 +201,7 @@ export const RPC_METHODS = [
   'conversations.search',
   'conversations.put',
   'conversations.delete',
+  'conversations.selectVersion',
   'tools.list',
   'tools.run',
   'tasks.latest',

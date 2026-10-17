@@ -98,7 +98,7 @@ function requiredValues(values: string[] | null): string[] {
   return values
 }
 
-function safeWebUrl(value: string | null): string {
+export function safeWebUrl(value: string | null): string {
   const parsed = new URL(value ?? '')
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Web Use navigation accepts only HTTP or HTTPS URLs.')

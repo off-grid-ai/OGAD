@@ -381,6 +381,18 @@ interface RendererAPIOverrides {
     context?: unknown
   ) => Promise<boolean>
   truncateRagMessages: (conversationId: string, keepCount: number) => Promise<number>
+  /** The next answer saved in this chat is a new version of answer `ofUuid` (a retry). */
+  prepareAnswerVersion: (conversationId: string, ofUuid: string) => Promise<boolean>
+  /** Save a new version of message `ofUuid` (an edited question) beside it. */
+  addRagMessageVersion: (
+    conversationId: string,
+    ofUuid: string,
+    role: 'user' | 'assistant',
+    content: string,
+    context?: unknown
+  ) => Promise<{ id: number; uuid: string } | null>
+  /** Show the version `direction` steps from shown message `uuid`. */
+  selectRagMessageVersion: (conversationId: string, uuid: string, direction: number) => Promise<boolean>
   updateRagConversationTitle: (id: string, title: string) => Promise<RagConversation>
   deleteRagConversation: (id: string) => Promise<void>
 

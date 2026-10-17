@@ -18,8 +18,6 @@ import {
   priorAnswerVersions,
   selectAnswerVersion
 } from '../chat-versions'
-import { editedBranch } from '../chat-edit-branch'
-import { buildSendHistory } from '../../../../shared/chat-history'
 import {
   readVersions,
   versionContent,
@@ -112,25 +110,6 @@ describe('chat answer records and edit branches', () => {
     expect(versionContent('legacy', '')).toBe('legacy')
     expect(readVersions({ variants: ['legacy', answerVersion(next)] })).toHaveLength(2)
     expect(readVersions({ variants: [null, 'bad'] })).toBeUndefined()
-  })
-  it('archives old answers under the old question; edited model history has matching pairs', () => {
-    const question: ChatMessage = { id: 'q', role: 'user', content: 'Old question' }
-    const branch = editedBranch([question, original], 0, 'New question')
-    expect(branch.context.branches[0]).toEqual({
-      question: 'Old question',
-      answers: [answerVersion(original)]
-    })
-    const versions = appendAnswerVersion(priorAnswerVersions(next), {
-      ...next,
-      content: 'Second new answer'
-    })!
-    const selected = selectAnswerVersion({ ...next, variants: versions, variantIndex: 1 }, -1)
-    expect(buildSendHistory([...branch.history, selected], false, 'Follow up')).toEqual([
-      { role: 'user', content: 'New question' },
-      { role: 'assistant', content: 'New answer' },
-      { role: 'user', content: 'Follow up' }
-    ])
-    expect(branch.retainedCount).toBe(1)
   })
   it('keeps the previous answer and its complete context after failed regeneration', () => {
     const failed = failedAnswerVersion(original, 'Tool failed', priorAnswerVersions(original))
@@ -345,12 +324,13 @@ it('restores a stream with the durable answer identity and ordered thinking/tool
     ]
   })
 })
-it('plans replacement versions only for the same question and releases failed preparation', async () => {
+it('plans a new version for a retry or an edit, deletes nothing, and releases failed preparation', async () => {
   const messages: ChatMessage[] = [{ id: 'q', role: 'user', content: 'Question' }, original]
-  expect(planChatReplacement(messages, original.id)?.priorVariants).toEqual([
-    answerVersion(original)
-  ])
-  expect(planChatReplacement(messages, 'q', 'Edited')?.priorVariants).toBeUndefined()
+  const retry = planChatReplacement(messages, original.id)
+  expect(retry).toMatchObject({ edited: false, userIndex: 0, priorAnswer: original })
+  const edit = planChatReplacement(messages, 'q', 'Edited')
+  expect(edit).toMatchObject({ edited: true, priorAnswer: undefined })
+  expect(edit?.history.at(-1)?.content).toBe('Edited')
   expect(planChatReplacement(messages, 'missing')).toBeUndefined()
   const send = vi.fn()
   const release = vi.fn()
@@ -365,11 +345,10 @@ it('plans replacement versions only for the same question and releases failed pr
     markGenerating: vi.fn(),
     resetPreview: vi.fn(),
     stopTask: async () => {},
-    update: async () => false,
-    truncate: vi.fn(),
-    removeTasks: vi.fn(),
+    addVersion: async () => null,
+    prepareAnswerVersion: async () => false,
     setMessages: vi.fn(),
-    refresh: vi.fn(),
+    refresh: vi.fn(async () => undefined),
     announceSettled: () => false,
     drain,
     send

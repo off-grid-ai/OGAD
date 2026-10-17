@@ -4,17 +4,17 @@ import {
   runtimeBackendLabel,
   type RuntimeId
 } from '../../../shared/runtime-backends'
-import { useCallback, useEffect, useState } from 'react'
-import { Check, CircleNotch, Cpu, GearSix, Power, X } from '@phosphor-icons/react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Badge } from '@offgrid/operator-ui/operator/coss/badge'
+import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Cpu, GearSix, X } from '@phosphor-icons/react'
+import { AnimatePresence, motion } from 'motion/react'
 import { ListRow } from '@offgrid/operator-ui/operator/list-row'
 import { Section } from '@offgrid/operator-ui/operator/experience'
 import { SidePanel } from './SidePanel'
 import { Button } from './ui/button'
-import { GlyphSwap, IconTip } from './IconTip'
+import { IconTip } from './IconTip'
 import { openModelSettingsPanel } from '@renderer/lib/model-settings-panel'
 import { TaskLineups } from './TaskLineups'
+import { ActiveModelSlot, type UnloadStatus } from './ActiveModelSlot'
 import { useTaskRoles } from '../lib/task-roles'
 import { resolveActiveTextModel } from '../lib/model-summary'
 import { invalidateLlmSettings } from '../lib/settings-invalidation'
@@ -61,10 +61,6 @@ const MODE_TO_MODALITY: Record<PickerMode, string> = {
   transcription: 'stt'
 }
 
-// Per-modality unload status. Absent = loaded/idle. Kept as a map keyed by mode so each
-// modality is independent — unloading one must NOT reset another's state.
-type UnloadStatus = 'unloading' | 'unloaded' | 'error'
-
 function primaryFile(m: ModelEntry): string {
   return m.files?.find((f) => f.role === 'primary')?.name ?? m.files?.[0]?.name ?? m.id
 }
@@ -74,8 +70,6 @@ function primaryVariant(m: ModelEntry): string | null {
   if (!file.toLowerCase().endsWith('.gguf')) return null
   return file.slice(0, -'.gguf'.length).split('-').at(-1) ?? null
 }
-
-const EASE = [0.16, 1, 0.3, 1] as const
 
 function openSettings(onClose: () => void): void {
   onClose()
@@ -95,25 +89,6 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [taskRoles, reloadTaskRoles] = useTaskRoles()
-  const reduceMotion = useReducedMotion()
-  // Rows rise in as the catalog arrives; status marks pop between states.
-  const rowMotion = reduceMotion
-    ? { initial: false as const, transition: { duration: 0 } }
-    : {
-        initial: { opacity: 0, y: 6 },
-        animate: { opacity: 1, y: 0 },
-        exit: { opacity: 0 },
-        transition: { duration: 0.4, ease: EASE }
-      }
-  const markMotion = reduceMotion
-    ? { initial: false as const, transition: { duration: 0 } }
-    : {
-        initial: { opacity: 0, scale: 0.5 },
-        animate: { opacity: 1, scale: 1 },
-        exit: { opacity: 0, scale: 0.5 },
-        transition: { type: 'spring' as const, stiffness: 500, damping: 28 }
-      }
-
   const load = useCallback(async () => {
     const cat = await api().getModelCatalog?.()
     const catalogModels: ModelEntry[] = cat?.models ?? []
@@ -251,29 +226,8 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
             </motion.div>
           )}
         </AnimatePresence>
-        <TaskLineups
-          view={taskRoles}
-          models={models}
-          installed={installed}
-          onChanged={async () => {
-            await reloadTaskRoles()
-            await load()
-          }}
-          localDetail={(slot) =>
-            backendFor(
-              slot.role === 'reasoner'
-                ? 'chat'
-                : slot.role === 'decision'
-                  ? 'decision'
-                  : 'grounding',
-              [
-                slot.modelId,
-                ...(models.find((m) => m.id === slot.modelId)?.files ?? []).map((f) => f.name)
-              ]
-            )
-          }
-        />
-        {MODALITIES.map(({ label, kinds, mode }) => {
+        {/* Same order as the Models screen's tabs: Text, Image, Tasks, Voice, Transcription. */}
+        {MODALITIES.flatMap(({ label, kinds, mode }) => {
           const list = models.filter((m) => kinds.includes(m.kind) && installed.includes(m.id))
           const duplicateNames = new Set(
             list
@@ -283,139 +237,94 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
               .map((m) => m.name)
           )
           const cur = active[mode]
-          const status = unload[mode]
           const isActive = (m: ModelEntry): boolean =>
             mode === 'text'
               ? m.remoteServerId
                 ? activeIds.has(m.id)
                 : cur === m.id
               : cur === primaryFile(m)
+          const current = list.find(isActive) ?? null
+          const optionLabel = (m: ModelEntry): string =>
+            [
+              m.name,
+              duplicateNames.has(m.name) ? primaryVariant(m) : null,
+              m.remoteServerId ? 'Remote' : null
+            ]
+              .filter(Boolean)
+              .join(' · ')
           return (
-            <Section
+            <ActiveModelSlot
               key={mode}
+              ariaLabel={label}
               label={label}
-              actions={
-                cur ? (
-                  <IconTip
-                    label={
-                      <>
-                        {status === 'error' ? 'Restart to unload' : 'Unload'}
-                        <span className="block text-muted-foreground">
-                          {status === 'error'
-                            ? 'Unload unavailable — restart the app'
-                            : status === 'unloaded'
-                              ? 'Already unloaded — reloads on next use'
-                              : 'Unload from memory now — frees RAM; reloads on next use'}
-                        </span>
-                      </>
+              busy={busy !== null && list.some((m) => m.id === busy)}
+              empty={`No ${label.toLowerCase()} model downloaded — get one in Models.`}
+              active={
+                current
+                  ? {
+                      name: current.name,
+                      remote: !!current.remoteServerId,
+                      detail: current.remoteServerId
+                        ? null
+                        : backendFor(mode === 'text' ? 'chat' : mode, [
+                            current.id,
+                            primaryFile(current),
+                            ...(mode === 'speech' ? ['Kokoro'] : [])
+                          ])
                     }
-                  >
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label={status === 'error' ? 'Restart to unload' : 'Unload'}
-                      aria-busy={status === 'unloading' || undefined}
-                      onClick={() => void unloadModel(mode)}
-                      disabled={status === 'unloading' || status === 'unloaded'}
-                      className={
-                        status === 'error'
-                          ? 'text-amber-400'
-                          : 'text-neutral-500 hover:text-red-400'
-                      }
-                    >
-                      <GlyphSwap glyphKey={status === 'unloading' ? 'busy' : 'idle'}>
-                        {status === 'unloading' ? (
-                          <CircleNotch className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Power className="h-3.5 w-3.5" />
-                        )}
-                      </GlyphSwap>
-                    </Button>
-                  </IconTip>
-                ) : null
+                  : null
               }
-            >
-              {list.length === 0 ? (
-                <p className="text-xs text-neutral-500">
-                  No {label.toLowerCase()} model downloaded — get one in Models.
-                </p>
-              ) : (
-                <div className="divide-y divide-neutral-800 overflow-hidden rounded-lg border border-neutral-800">
-                  <AnimatePresence initial={false}>
-                    {list.map((m) => (
-                      <motion.div key={m.id} layout={!reduceMotion} {...rowMotion}>
-                        <button
-                          aria-pressed={isActive(m)}
-                          disabled={busy !== null}
-                          onClick={() => choose(mode, m)}
-                          className={`flex min-h-9 w-full items-center justify-between gap-3 border-l-2 px-3 py-1.5 text-left text-xs transition-colors duration-300 ${
-                            isActive(m)
-                              ? 'border-l-green-500 bg-green-500/5 text-white'
-                              : 'border-l-transparent text-neutral-300 hover:bg-neutral-900/60'
-                          }`}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="min-w-0">
-                              <span className="block truncate text-[13px]">{m.name}</span>
-                            </span>
-                            {duplicateNames.has(m.name) && primaryVariant(m) ? (
-                              <span
-                                className="shrink-0 text-xs text-neutral-500"
-                                title={primaryFile(m)}
-                              >
-                                {primaryVariant(m)}
-                              </span>
-                            ) : null}
-                            {m.remoteServerId ? (
-                              <Badge variant="success" size="sm" className="shrink-0">
-                                Remote
-                              </Badge>
-                            ) : null}
-                          </span>
-                          <span className="flex shrink-0 items-center justify-end gap-2">
-                            {!m.remoteServerId && (
-                              <span className="text-xs text-neutral-500">
-                                {backendFor(mode === 'text' ? 'chat' : mode, [
-                                  m.id,
-                                  primaryFile(m),
-                                  ...(mode === 'speech' ? ['Kokoro'] : [])
-                                ])}
-                              </span>
-                            )}
-                            <AnimatePresence mode="popLayout" initial={false}>
-                              {busy === m.id ? (
-                                <motion.span key="busy" className="flex shrink-0" {...markMotion}>
-                                  <CircleNotch className="h-3.5 w-3.5 animate-spin text-neutral-500" />
-                                </motion.span>
-                              ) : isActive(m) && status === 'unloaded' ? (
-                                // Still the active selection, but freed from memory — one coherent
-                                // state, not a green check next to an "unloaded" label.
-                                <motion.span
-                                  key="unloaded"
-                                  className="flex shrink-0"
-                                  {...markMotion}
-                                >
-                                  <Badge variant="outline" size="sm">
-                                    <Power className="h-3 w-3" /> Unloaded
-                                  </Badge>
-                                </motion.span>
-                              ) : isActive(m) ? (
-                                <motion.span key="active" className="flex shrink-0" {...markMotion}>
-                                  <Check className="h-3.5 w-3.5 text-green-500" weight="bold" />
-                                </motion.span>
-                              ) : null}
-                            </AnimatePresence>
-                          </span>
-                        </button>
-                      </motion.div>
-                    ))}
-                  </AnimatePresence>
-                </div>
-              )}
-            </Section>
+              unload={
+                current && !current.remoteServerId
+                  ? { status: unload[mode], onUnload: () => void unloadModel(mode) }
+                  : undefined
+              }
+              select={{
+                id: `active-model-${mode}`,
+                label: `${label} model`,
+                value: current?.id ?? '',
+                disabled: busy !== null,
+                options: list.map((m) => ({ value: m.id, label: optionLabel(m) })),
+                onValueChange: (id) => {
+                  const next = list.find((m) => m.id === id)
+                  if (next && next.id !== current?.id) void choose(mode, next)
+                }
+              }}
+            />
           )
-        })}
+        }).flatMap((slot, index) =>
+          index === 2
+            ? [
+                <Fragment key="tasks">
+                  <TaskLineups
+                    view={taskRoles}
+                    models={models}
+                    installed={installed}
+                    onChanged={async () => {
+                      await reloadTaskRoles()
+                      await load()
+                    }}
+                    localDetail={(slot) =>
+                      backendFor(
+                        slot.role === 'reasoner'
+                          ? 'chat'
+                          : slot.role === 'decision'
+                            ? 'decision'
+                            : 'grounding',
+                        [
+                          slot.modelId,
+                          ...(models.find((m) => m.id === slot.modelId)?.files ?? []).map(
+                            (f) => f.name
+                          )
+                        ]
+                      )
+                    }
+                  />
+                </Fragment>,
+                slot
+              ]
+            : [slot]
+        )}
         <section aria-label="Embeddings">
           <Section label="Embeddings">
             <ListRow

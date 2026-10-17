@@ -318,6 +318,8 @@ describe('multimodal import, scoped answer, deletion, and reopen', () => {
     for (const name of ['notes.md', 'decision.pdf', 'memo.docx', 'briefing.wav', 'walkthrough.mp4', 'diagram.png'])
       expect(byName.get(name), name).toMatchObject({ state: 'ready' })
 
+    // Settings → Text → Project knowledge → Relevant passages: the turn reads the matching files.
+    await invoke('settings:save', 'knowledgeBaseRetrieval', 'relevant')
     const conversationId = 'aurora-multimodal-chat'
     await invoke('rag:create-conversation', conversationId, 'Aurora evidence', selectedProject)
     const answer = await askProject(

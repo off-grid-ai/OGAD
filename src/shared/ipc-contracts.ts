@@ -43,6 +43,8 @@ export interface RagMessageContract {
   origin_device_id?: string | null
   origin_device_name?: string | null
   created_at: string
+  /** Where this shown message sits among its versions (0-based), when it has others. */
+  versions?: { index: number; count: number }
 }
 
 export interface ResponseCutoffContract {

@@ -17,6 +17,8 @@ const MCP_SERVER = path.resolve('e2e/fixtures/app143-approval-connector.mjs')
 const APPROVAL_TITLE = 'Create APP-143 release task'
 const EXTERNAL_TITLE = 'Ship guarded approval journey'
 const EXTERNAL_PROJECT = 'Desktop P0'
+// The evidence the secretary cites: an open to-do the proposed connector write would complete.
+const TODO_TEXT = `Ship guarded approval journey in ${EXTERNAL_PROJECT}`
 
 interface AuditEntry {
   action: string
@@ -32,6 +34,7 @@ interface App143RendererApi {
   }) => Promise<number>
   mcpTest: (id: number) => Promise<unknown>
   proInvoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+  crmAddTodo: (text: string) => Promise<unknown>
   approvalsApprove: (id: number) => Promise<void>
   approvalsAudit: (limit: number) => Promise<AuditEntry[]>
 }
@@ -133,27 +136,26 @@ test('holds a connector write until approval, then executes it once with visible
   await page.getByRole('radio', { name: /^Approvals/ }).click()
   await expect(page.getByText('Nothing waiting for approval.')).toBeVisible()
 
-  const approvalId = await page.evaluate(
-    async ({ id, title, externalTitle, externalProject }) => {
-      const api = (window as unknown as { api: App143RendererApi }).api
-      return api.proInvoke('approvals:propose', {
-        title,
-        detail: 'Create exactly one external task after the user reviews this request.',
-        connector: 'APP-143 guarded connector',
-        connectorId: id,
-        tool: 'create_external_task',
-        args: { title: externalTitle, project: externalProject },
-        entityName: 'Off Grid AI Desktop',
-        source: 'APP-143 rendered E2E'
-      }) as Promise<number>
-    },
-    {
-      id: connectorId,
-      title: APPROVAL_TITLE,
-      externalTitle: EXTERNAL_TITLE,
-      externalProject: EXTERNAL_PROJECT
-    }
+  // A connector write reaches the approval queue the way it does for a user: an open to-do is the
+  // evidence, and "Suggest actions" asks the secretary to propose the write that completes it.
+  await page.evaluate(
+    async (text) => (window as unknown as { api: App143RendererApi }).api.crmAddTodo(text),
+    TODO_TEXT
   )
+  await page.getByRole('button', { name: 'Suggest actions', exact: true }).click()
+  await expect(page.getByText('Proposed 1 action for your review.', { exact: true })).toBeVisible({
+    timeout: 60_000
+  })
+  const approvalId = await page.evaluate(async (title) => {
+    const api = (window as unknown as { api: App143RendererApi }).api
+    const pending = (await api.proInvoke('approvals:list', 'pending')) as {
+      id: number
+      title: string
+    }[]
+    const proposal = pending.find((approval) => approval.title === title)
+    if (!proposal) throw new Error(`No pending approval titled ${title}`)
+    return proposal.id
+  }, APPROVAL_TITLE)
 
   // This fresh profile contains one proposal, so the visible controls are unique.
   await expect(page.getByRole('paragraph').filter({ hasText: APPROVAL_TITLE })).toBeVisible()

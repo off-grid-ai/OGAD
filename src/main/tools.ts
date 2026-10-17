@@ -14,6 +14,10 @@ import { stripChatControlTokens } from '@offgrid/sync'
 import { isMemoryToolAllowed } from './tools/memory-scope'
 import { parseToolCallsFromText, stripQwenToolCallMarkup } from './tools/tool-call-parse'
 import { getSetting, saveSetting, searchProjectConversations } from './database'
+import {
+  projectDocumentsMode,
+  type ProjectDocumentsMode
+} from './documents/project-knowledge-mode'
 import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
 import { stripTags, htmlToText, decodeDdgHref } from './tools-parsers'
@@ -54,6 +58,14 @@ import {
 import { selectChatToolSchemas } from './tools/chat-tool-selection'
 import { budgetTools } from './tools/tool-budget'
 import { ANSWER_NOW_INSTRUCTION, emptyAnswerReason } from '../shared/empty-answer'
+
+/** What a project chat's system prompt says about its knowledge base (Settings → Project knowledge). */
+function projectKnowledgeHint(mode: ProjectDocumentsMode | undefined): string {
+  const rule = ' Do not invent project facts or use information from other projects.'
+  return mode === 'when-needed'
+    ? ` This project has a knowledge base of documents. Call search_knowledge_base when a question needs them or earlier conversations in this project, and answer other questions without searching.${rule}`
+    : ` This project's documents are already in your context. Use search_knowledge_base only when they do not hold the answer, or to find earlier conversations in this project.${rule}`
+}
 
 // Per-tool enable/disable, persisted as a list of disabled tool names.
 function disabledSet(): Set<string> {
@@ -659,7 +671,13 @@ export async function selectChatTools(
   // no extensions, so this is just the built-ins.
   const exts =
     toolsEnabled || opts.assistantOnly
-      ? selectToolExtensions(getToolExtensions(), { connectors: toolsEnabled && !!opts.connectors })
+      ? selectToolExtensions(getToolExtensions(), {
+          // Settings → Connectors can switch every connector off at once, like tools.
+          connectors:
+            toolsEnabled &&
+            !!opts.connectors &&
+            getSetting<boolean>('connectorsEnabled', true) !== false
+        })
       : []
   const extSchemas: unknown[] = []
   const hints: string[] = []
@@ -913,14 +931,15 @@ export async function toolChat(
         .find((project) => project.id === opts.projectId)
         ?.systemPrompt.trim()
     : undefined
+  const projectKnowledgeMode = opts.projectId
+    ? projectDocumentsMode(getSetting<unknown>('knowledgeBaseRetrieval', null))
+    : undefined
   const sys =
     'You are Off Grid AI, a private on-device assistant. Answer general questions using your knowledge. Use the provided tools when they help answer precisely. Before calling web_use, use the full conversation and ask the user one concise set of questions only when a material fact is missing. Answer questions directly. Call web_use only when the user asks you to do something on a website. Keep answers concise.' +
     (opts.allMemory
       ? ' Use search_memory when the user asks about their memories, past conversations, people, or captured activity. Do not invent personal facts or claim to have searched when you have not. Cite retrieved sources accurately.'
       : '') +
-    (opts.projectId
-      ? ' This project\'s documents are already in your context. Use search_knowledge_base only when they do not hold the answer, or to find earlier conversations in this project. Do not invent project facts or use information from other projects.'
-      : '') +
+    (opts.projectId ? projectKnowledgeHint(projectKnowledgeMode) : '') +
     (projectPrompt ? `\n\nProject instructions:\n${projectPrompt}` : '') +
     (opts.assistantOnly
       ? ' web_use and computer_use are available when the user asks you to do something on a website or in a desktop app.'

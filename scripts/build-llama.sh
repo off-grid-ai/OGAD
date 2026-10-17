@@ -11,7 +11,7 @@ set -euo pipefail
 # official llama.cpp release binaries are now minos 26. The only reliable fix is
 # to build it ourselves with the target pinned. Run in CI before packaging.
 #
-#   LLAMA_REF=<tag> MACOS_DEPLOYMENT_TARGET=13.0 scripts/build-llama.sh   (override; default is package.json offgrid.llamaRef)
+#   LLAMA_REF=<tag> MACOS_DEPLOYMENT_TARGET=15.0 scripts/build-llama.sh   (override; default is package.json offgrid.llamaRef)
 
 # ONE owner for the version: package.json, where every other version in this repo already lives. It was
 # hardcoded here AND in fetch-win-binaries.ps1 AND passed again by two callers - one fact with four homes.
@@ -23,28 +23,19 @@ if [ "$LLAMA_VARIANT" = prism ]; then
   LLAMA_REF="${PRISM_LLAMA_REF:-$(node -p "require('$(cd "$(dirname "$0")/.." && pwd)/package.json').offgrid.prismLlamaRef")}"
   LLAMA_REPO=https://github.com/PrismML-Eng/llama.cpp
   LLAMA_DIR=llama-prism
-  # The Prism fork currently asks AppleClang for apple-m4 on this build host,
-  # which the installed compiler rejects. Metal remains enabled; generic CPU
-  # code keeps the binary portable across supported Macs.
-  NATIVE_CPU=OFF
 elif [ "$LLAMA_VARIANT" = standard ]; then
   LLAMA_REPO=https://github.com/ggml-org/llama.cpp
   LLAMA_DIR=llama
-  NATIVE_CPU=ON
 else
   echo "[build-llama] unknown variant: $LLAMA_VARIANT" >&2; exit 1
 fi
-TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"             # runs on macOS 13+
-# A shell launched under Rosetta reports x86_64 even on Apple Silicon. Build for
-# the physical host unless a release job explicitly selects another architecture.
-if /usr/bin/arch -arm64 /usr/bin/true 2>/dev/null; then
-  HOST_ARCH=arm64
-else
-  HOST_ARCH=x86_64
-fi
-LLAMA_ARCH="${LLAMA_ARCH:-$HOST_ARCH}"
+TARGET="${MACOS_DEPLOYMENT_TARGET:-15.0}"             # runs on macOS 15+
+# Universal (arm64 + x86_64) by default, like build-sd-macos.sh: one engine for Apple Silicon and
+# Intel Macs. LLAMA_ARCH=arm64 (or x86_64) builds a single slice. GGML_NATIVE stays OFF so the CPU
+# code is generic and portable across every supported Mac rather than tuned to this build host.
+LLAMA_ARCH="${LLAMA_ARCH:-arm64;x86_64}"
 case "$LLAMA_ARCH" in
-  arm64|x86_64) ;;
+  arm64|x86_64|"arm64;x86_64") ;;
   *) echo "[build-llama] unsupported architecture: $LLAMA_ARCH" >&2; exit 1 ;;
 esac
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -64,7 +55,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$TARGET" \
   -DCMAKE_OSX_ARCHITECTURES="$LLAMA_ARCH" \
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
-  -DGGML_NATIVE="$NATIVE_CPU" \
+  -DGGML_NATIVE=OFF \
   -DGGML_OPENMP=OFF \
   -DLLAMA_CURL=OFF \
   -DLLAMA_BUILD_UI=OFF \
@@ -75,7 +66,7 @@ cmake --build build --config Release -j"$(sysctl -n hw.ncpu)" --target llama-ser
 
 BIN="$(find build -name llama-server -type f -perm -111 | head -1)"
 [ -n "$BIN" ] || { echo "[build-llama] FATAL: llama-server not produced"; exit 1; }
-BUILT_ARCH="$(lipo -archs "$BIN")"
+BUILT_ARCH="$(lipo -archs "$BIN" | tr ' ' '\n' | sort | paste -sd';' -)"
 if [ "$BUILT_ARCH" != "$LLAMA_ARCH" ]; then
   echo "[build-llama] FATAL: built llama-server arch=$BUILT_ARCH (want $LLAMA_ARCH)" >&2
   exit 1
@@ -129,7 +120,8 @@ echo "[build-llama] staged into $DEST:"; ls -1 "$DEST"
 for f in "$DEST"/llama-server "$DEST"/*.dylib; do
   while IFS= read -r rpath; do
     install_name_tool -delete_rpath "$rpath" "$f"
-  done < <(otool -l "$f" | awk '/cmd LC_RPATH/{found=1; next} found && $1 == "path" {print $2; found=0}')
+  # sort -u: a universal binary lists each rpath once per architecture, and one delete removes it from both.
+  done < <(otool -l "$f" | awk '/cmd LC_RPATH/{found=1; next} found && $1 == "path" {print $2; found=0}' | sort -u)
   install_name_tool -add_rpath @loader_path "$f"
 done
 

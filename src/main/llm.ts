@@ -864,9 +864,9 @@ export class LLMService {
         this.getSettings() as Record<string, unknown>
       )
     }
-    // With no model on disk there is nothing to relaunch: the saved settings apply to the first
-    // launch. Restarting here would fail and make a successful save look like an error.
-    if (launchChanged && !this.paused && this.modelsExist()) {
+    // With no model on disk, or no engine up, there is nothing to relaunch: the saved settings
+    // apply to the next launch, on first use. Starting one here would load a model nobody asked for.
+    if (launchChanged && !this.paused && this.modelsExist() && this.engineUp()) {
       // A running model is only replaced once the new launch succeeds. If it fails, the
       // previous settings are restored and the previous model is relaunched - unless a newer
       // launch change is already queued, which then owns the engine and its settings.
@@ -1440,8 +1440,10 @@ export class LLMService {
       if (!deliberateClose && !this.paused) {
         const failure = classifyLlamaError(this.stderrTail.join('\n'))
         this.backendFallbackReason = failure?.reason ?? 'The previous engine could not load the model.'
+        // Health shows an engine with no error as simply not loaded, so an unexpected exit
+        // always leaves a reason.
+        this.lastErrorMsg = failure?.reason ?? 'The chat model stopped unexpectedly.'
         if (failure) {
-          this.lastErrorMsg = failure.reason
           console.error(
             `[LLMService] llama-server load failure (${failure.code}): ${failure.reason}`
           )
@@ -2297,28 +2299,28 @@ export class LLMService {
     }
   }
 
-  /** Resume after image generation and warm the server back up (resident mode). */
-  resume(): void {
-    this.paused = false
-    this.init().catch(() => {})
-  }
-
-  /** Clear the pause block WITHOUT warming the server (on-demand mode). The server
-   *  stays down and lazily respawns on the next chat/tool turn, freeing its RAM in
-   *  the meantime. Pairs with pause() as the on-demand counterpart of resume(). */
+  /** Clear the pause block WITHOUT warming the server. The server stays down and lazily
+   *  respawns on the next chat/tool turn, freeing its RAM in the meantime. */
   releasePause(): void {
     this.paused = false
   }
 
   /** This engine as a ManagedRuntime for the shared residency seam (runtime-manager),
    *  so the chat model is managed identically to image/STT/TTS — one code path. */
+  /** What the chat engine holds once its model is loaded, in MB: the weights with projector and
+   *  MTP companion, plus an allowance for the KV cache (about 64 MB per 1K context at f16; q8_0
+   *  halves it, q4_0 quarters it) and the server's own buffers. */
+  expectedResidentMB(): number {
+    const kvScale = this.kvCacheType === 'q4_0' ? 0.25 : this.kvCacheType === 'q8_0' ? 0.5 : 1
+    return this.localWeightsGb() * 1024 + (this.ctxSize / 1024) * 64 * kvScale + 300
+  }
+
   get runtime(): ManagedRuntime {
     return {
       modality: 'llm',
+      footprintMB: () => (this.server && this.initialized ? this.expectedResidentMB() : 0),
+      expectedMB: () => this.expectedResidentMB(),
       evict: () => this.pauseAndWait(),
-      warm: () => {
-        this.resume()
-      },
       release: () => {
         this.releasePause()
       }
@@ -2327,6 +2329,11 @@ export class LLMService {
 
   isReady(): boolean {
     return this.initialized
+  }
+
+  /** An engine is running or on its way up (a launch already in flight). */
+  private engineUp(): boolean {
+    return this.initialized || this.server !== null || this.initPromise !== null
   }
 
   /** True when the server process is alive but the model hasn't finished loading

@@ -182,7 +182,7 @@ const LOAD_READ_MS = 1000
  * with "The page did not expose usable semantic controls" on a page that loaded a second later.
  * browser-use waits on an empty page before it treats it as a problem.
  */
-async function observeUntilLoaded(
+export async function observeUntilLoaded(
   input: BrowserPlaywrightTaskInput
 ): Promise<PlaywrightToolResult> {
   let observation = await observeWithCurrentLease(input)

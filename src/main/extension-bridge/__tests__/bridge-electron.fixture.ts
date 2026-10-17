@@ -48,7 +48,7 @@ app
       })
     )
     const { handleExtensionBridge, handleExtensionUpgrade } = await import('../bridge-http')
-    const { getBrowserLinks, listBridgeBrowsers, addBrowserLink } =
+    const { getBrowserLinks, listBridgeBrowsers, addBrowserLink, removeBridgeBrowser } =
       await import('../bridge-electron')
     const server = http.createServer((req, res) => {
       void handleExtensionBridge(
@@ -130,6 +130,23 @@ app
     await call('conversations.put', { conversation })
     const listed = await call('conversations.list')
     assert.ok(JSON.stringify(listed.body).includes('Hello'))
+    // Choosing a version reads the chat back; an unknown chat is refused.
+    const turns = (
+      listed.body.result as Array<{ id: string; turns?: Array<{ id?: string }> }>
+    ).find((chat) => chat.id === conversation.id)?.turns
+    const messageId = turns?.[0]?.id ?? 'first-message'
+    const chosen = await call('conversations.selectVersion', {
+      id: conversation.id,
+      messageId,
+      direction: 1
+    })
+    assert.ok(!chosen.body.error, JSON.stringify(chosen))
+    assert.equal((chosen.body.result as { id: string }).id, conversation.id)
+    assert.equal(
+      (await call('conversations.selectVersion', { id: 'no-such-chat', messageId, direction: 1 }))
+        .body.error,
+      'not_found'
+    )
     assert.ok(!(await call('conversations.delete', { id: conversation.id })).body.error)
     assert.ok(!(await call('tools.list')).body.error)
     assert.ok((await call('settings.get', { section: 'invalid' })).body.error)
@@ -141,6 +158,10 @@ app
     const [raw] = await readyMessage
     assert.ok(parseReady(await open(key, readyAad(device, nonce), JSON.parse(String(raw)))))
     assert.equal(listBridgeBrowsers()[0]?.connected, true)
+    assert.equal(listBridgeBrowsers()[0]?.id, device)
+    // Desktop's Remove answers false for a browser it does not have.
+    assert.equal(await removeBridgeBrowser(''), false)
+    assert.equal(await removeBridgeBrowser('unknown-browser'), false)
     const link = getBrowserLinks()[0]!
     const disconnected = once(ws, 'close')
     assert.ok(!(await call('unpair')).body.error)

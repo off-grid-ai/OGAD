@@ -9,11 +9,11 @@ import { CHAT_JOB, IMAGE_JOB, CAPTURE_JOB, backgroundJob } from '../queue'
 
 describe('standard modality jobs', () => {
   it('CHAT_JOB evicts a resident image server (tier 2)', () => {
-    expect(CHAT_JOB).toEqual({ tier: 2, label: 'chat', evicts: ['image'] })
+    expect(CHAT_JOB).toEqual({ tier: 2, label: 'chat', uses: { id: 'llm' }, evicts: ['image'] })
   })
 
   it('IMAGE_JOB evicts the resident LLM (tier 2)', () => {
-    expect(IMAGE_JOB).toEqual({ tier: 2, label: 'image', evicts: ['llm'] })
+    expect(IMAGE_JOB).toEqual({ tier: 2, label: 'image', uses: { id: 'image' }, evicts: ['llm'] })
   })
 
   it('they evict each other (mutually exclusive on unified memory)', () => {
@@ -27,7 +27,13 @@ describe('standard modality jobs', () => {
   })
 
   it('CAPTURE_JOB is background (tier 3), evicts a resident image server, and yields to foreground work', () => {
-    expect(CAPTURE_JOB).toEqual({ tier: 3, label: 'capture', evicts: ['image'], preemptible: true })
+    expect(CAPTURE_JOB).toEqual({
+      tier: 3,
+      label: 'capture',
+      uses: { id: 'llm' },
+      evicts: ['image'],
+      preemptible: true
+    })
     expect(Object.isFrozen(CAPTURE_JOB)).toBe(true)
     // Lower priority than chat/image so chat/workspace is always admitted first.
     expect(CAPTURE_JOB.tier).toBeGreaterThan(CHAT_JOB.tier)

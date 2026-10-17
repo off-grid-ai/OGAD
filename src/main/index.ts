@@ -72,7 +72,7 @@ import { nativeImage } from 'electron'
 import { purgeLegacyChatImports, getSetting, saveSetting, optimizeDB } from './database'
 import { modalityQueue } from './modality-queue/queue'
 import { applyQueueConfig, readQueueConfig } from './modality-queue/config'
-import { registerRuntime } from './runtime-manager'
+import { liveMemory, registerRuntime } from './runtime-manager'
 import { guardConsoleStreams } from './stream-guards'
 import { PRODUCT_NAME } from '../shared/product-identity'
 import { installMediaPermissionHandler } from './media-permission'
@@ -667,29 +667,26 @@ app.whenReady().then(async () => {
     }
   ])
 
-  // Text-model preparation starts a memory-heavy native runtime. Do not start it
-  // until Pro activation has finished and the first renderer frame can present.
+  // Text-model preparation registers the chat engine and applies its best settings. It does not
+  // load the model: the engine loads on its first use, so an idle app holds no model memory.
   void (async () => {
     await proFeaturesStartup
     await new Promise<void>((resolve) => setImmediate(resolve))
     await runStartupStage({
       name: 'models.text.prepare',
-      // A USB model load can stay quiet for ten minutes; allow setup time as well
-      // before the startup notice reports that preparation did not finish.
-      deadlineMs: 900_000,
+      // No model loads here; the settings check reads the model file headers only.
+      deadlineMs: 60_000,
       lateEffect: 'keep',
       run: async () => {
         const { llm } = await import('./llm')
         registerRuntime(llm.runtime, { readChatBackend: () => llm.runtimeBackend() })
         applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
-        // A remote chat model needs no local engine: loading one anyway holds gigabytes of
-        // memory for nothing. Chat starts it on demand if the user switches back.
-        const { getActiveRemoteVisionServer } = await import('./vision/remote-vision-server')
+        // Models stay loaded while they fit live memory; the queue frees only what it must.
+        modalityQueue.setMemoryProbe(liveMemory)
         // Before the first launch, so a fresh install starts on its fastest settings.
         await import('./best-settings')
           .then((m) => m.prepareBestSettingsOnStartup())
           .catch((error: unknown) => console.warn('[best-settings] startup check failed', error))
-        if (llm.modelsExist() && !getActiveRemoteVisionServer()) await llm.init()
       }
     })
   })()
@@ -700,6 +697,15 @@ app.whenReady().then(async () => {
     void import('./dev-seed')
       .then((module) => module.seedDemo(process.env.OFFGRID_SEED === 'force'))
       .catch((error) => console.error('[seed]', error))
+  }
+
+  // Development: the Web Use task list runner (src/main/browser/web-use-bench.ts).
+  if (process.env.OFFGRID_WEBUSE_BENCH) {
+    setTimeout(() => {
+      void import('./browser/web-use-bench').then(({ startWebUseBench }) =>
+        startWebUseBench().catch((e) => console.error('[web-use][bench] failed', e))
+      )
+    }, 15_000)
   }
 
   // Document caches no chat uses any more go after 30 days; well after startup, off the hot path.

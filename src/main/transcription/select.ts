@@ -343,15 +343,13 @@ export function residentWhisperAvailable(): boolean {
 
 /** STT as a ManagedRuntime for the shared residency seam. The only resident STT
  *  holder is the whisper-server; the whisper-cli and Parakeet paths are one-shot
- *  CLIs that free their model on exit. So evict stops the server; warm/release are
- *  no-ops (it lazily re-spawns via ensureUp on the next resident transcription). */
+ *  CLIs that free their model on exit. So evict stops the server; it lazily re-spawns
+ *  via ensureUp on the next resident transcription. */
 export const sttRuntime: ManagedRuntime = {
   modality: 'stt',
+  footprintMB: () => whisperServer.residentMB(),
   evict: () => {
     whisperServer.stop()
-  },
-  warm: () => {
-    /* lazily re-spawned by whisper-server ensureUp on next use */
   },
   release: () => {
     whisperServer.stop()

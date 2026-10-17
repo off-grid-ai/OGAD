@@ -42,8 +42,9 @@ const generated = spawnSync(
     'color=c=black:s=320x180:r=10',
     '-t',
     '1',
+    // mpeg4 is built into every ffmpeg; the pinned build has no libx264.
     '-c:v',
-    'libx264',
+    'mpeg4',
     '-pix_fmt',
     'yuv420p',
     screen

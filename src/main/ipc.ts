@@ -2,7 +2,7 @@ import { settingsChanged } from './settings-version'
 import { withStorageDownload, storageDownloadsActive } from './model-storage-guard'
 import { moveModelStorage } from './model-storage-move'
 import { ipcMain, BrowserWindow, app, clipboard } from 'electron'
-import { listBridgeBrowsers } from './extension-bridge/bridge-electron'
+import { listBridgeBrowsers, removeBridgeBrowser } from './extension-bridge/bridge-electron'
 import { setupAIRequestLogIPC } from './ai-request-log-ipc'
 import { setupChatNextActionIpc } from './chat-next-action'
 import { setupArtifactPreviewIpc } from './artifact-preview-ipc'
@@ -1250,6 +1250,27 @@ export function setupIPC(): void {
     }
   )
 
+  // Versions: retrying an answer or editing a question adds a version beside the old one.
+  ipcMain.handle('rag:prepare-answer-version', async (_e, conversationId: string, ofUuid: string) =>
+    (await import('./database')).prepareAnswerVersion(conversationId, ofUuid)
+  )
+  ipcMain.handle(
+    'rag:add-message-version',
+    async (
+      _e,
+      conversationId: string,
+      ofUuid: string,
+      role: 'user' | 'assistant',
+      content: string,
+      context?: unknown
+    ) => (await import('./database')).addRagMessageVersion(conversationId, ofUuid, role, content, context)
+  )
+  ipcMain.handle(
+    'rag:select-version',
+    async (_e, conversationId: string, uuid: string, direction: number) =>
+      (await import('./database')).selectRagMessageVersion(conversationId, uuid, direction)
+  )
+
   ipcMain.handle('rag:truncate-messages', async (_e, conversationId: string, keepCount: number) => {
     const { truncateRagMessages } = await import('./database')
     return truncateRagMessages(conversationId, keepCount)
@@ -1308,6 +1329,7 @@ export function setupIPC(): void {
 
   // Browsers paired through the extension bridge, and which are connected (Tasks > Web Use).
   ipcMain.handle('extension-bridge:browsers', () => listBridgeBrowsers())
+  ipcMain.handle('extension-bridge:remove', (_e, id: string) => removeBridgeBrowser(id))
 
   // App version (for the Settings footer — so users know what build they're on). A packaged app
   // reads its own; an unpackaged launch of a script reports Electron's, so it uses the build's.
@@ -1351,7 +1373,15 @@ export function setupIPC(): void {
   })
   // Unload one modality's model from memory now (the "free RAM" button). Goes through
   // the same evict() seam as residency/shutdown; the engine reloads on next use.
-  ipcMain.handle('runtime:unload', async (_e, modality: Modality) => {
+  ipcMain.handle('runtime:unload', async (_e, modality: Modality | 'decision' | 'grounding') => {
+    // Task models (the grounding specialist and the decision model) run their own servers; they
+    // unload through the same evictor the task memory policy uses.
+    if (modality === 'decision' || modality === 'grounding') {
+      const { unloadModelRole } = await import('./model-memory')
+      const freed = await unloadModelRole(modality)
+      console.log(`[runtime] unload ${modality}: ${freed ? 'freed' : 'nothing registered'}`)
+      return freed
+    }
     const { unloadRuntime } = await import('./runtime-manager')
     const freed = await unloadRuntime(modality)
     console.log(`[runtime] unload ${modality}: ${freed ? 'freed' : 'nothing registered'}`)

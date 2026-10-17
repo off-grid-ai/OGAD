@@ -136,8 +136,8 @@ jobs:
       - name: Stage pinned macOS native engines
         run: |
           curl -fL --retry 3 -o "$RUNNER_TEMP/mac-native.tar.gz" \
-            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-mac-native-2026-09-arm64-v1.tar.gz'
-          echo 'ef1880daac727595bf825a254b1ebbc2a0c15c0cecd8da422c499b1568db0ad0  '"$RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
+            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-mac-native-2026-10-v1.tar.gz'
+          echo '6bf0aa4a93ad16d62eef7d4242043501fca0f885b467ed129ee4e4865153acbc  '"$RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
       - name: Verify cached macOS engines
         run: |
@@ -145,7 +145,7 @@ jobs:
             test -x "resources/bin/$variant/llama-server"
             minos=$(otool -l "resources/bin/$variant/llama-server" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
             test -n "$minos"
-            case "$minos" in 1[0-3].*|[1-9].*) ;; *) echo "Unsupported $variant minos $minos" >&2; exit 1 ;; esac
+            case "$minos" in 1[0-5].*|[1-9].*) ;; *) echo "Unsupported $variant minos $minos" >&2; exit 1 ;; esac
             DYLD_LIBRARY_PATH="resources/bin/$variant" "resources/bin/$variant/llama-server" --help >/dev/null
           done
           test -x resources/bin/whisper/whisper-cli
@@ -283,6 +283,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: true # Mac releases bundle the default English voices for offline first use.
           persist-credentials: false
@@ -632,6 +633,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: false # The current native speech engine is macOS-only.
           persist-credentials: false
@@ -865,7 +867,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: e3b471e6ea8504f3877cd9f27a11bfe98ce3b3b5
+          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9
           path: _executorch_speech
           lfs: false # Build the Linux executable from the pinned source.
           submodules: recursive
@@ -877,8 +879,8 @@ jobs:
       - name: Stage pinned Linux native engines
         run: |
           curl -fL --retry 3 -o "$RUNNER_TEMP/linux-native.tar.gz" \
-            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-linux-native-2026-09-x64-v1.tar.gz'
-          echo '11f57bddc8b7b4c5efa4b4c298b8a000aaf0f203567f6c18953a6aff7a4e4b54  '"$RUNNER_TEMP/linux-native.tar.gz" | sha256sum -c -
+            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-linux-native-2026-10-x64-v1.tar.gz'
+          echo 'd043e3d12c68a07a6059a3e62e1283ea2cb2a23bf4a448d742149ad45586a6cf  '"$RUNNER_TEMP/linux-native.tar.gz" | sha256sum -c -
           mkdir -p build/linux-bin
           tar -xzf "$RUNNER_TEMP/linux-native.tar.gz" -C build/linux-bin
           git lfs pull --include="resources/bin/kev-local-server.py" --exclude=""

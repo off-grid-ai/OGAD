@@ -60,5 +60,15 @@ describe('<ModelPicker/> use model details', () => {
     const webUse = screen.getByRole('region', { name: 'Web Use' })
     expect(webUse.textContent).toContain('Same as Chat')
     expect(webUse.textContent).toContain('Web Use uses the Chat model.')
+
+    // The panel follows the Models screen's tabs: Text, Image, Tasks, Voice, Transcription.
+    const order = ['Text & Vision', 'Image', 'Web Use', 'Computer Use', 'Voice', 'Transcription'].map(
+      (name) => screen.getByRole('region', { name })
+    )
+    for (let i = 1; i < order.length; i++) {
+      expect(
+        order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
   })
 })

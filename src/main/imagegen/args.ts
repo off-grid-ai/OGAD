@@ -119,6 +119,10 @@ export interface QwenImage21ArgsInput {
 /** Qwen-Image 2.1 uses a standalone DiT, Qwen3-VL encoder, vision projector,
  * and its own VAE. Reference images use sd.cpp's `-r` edit path. */
 export function buildQwenImage21Args(i: QwenImage21ArgsInput): string[] {
+  // Base and Turbo share this stack; Turbo's distilled defaults apply when its file says so.
+  const defaults = standardModelDefaults(
+    /turbo/i.test(i.model) ? 'qwen_image_2.1-turbo' : 'qwen_image_2.1'
+  )
   const args = [
     '-M',
     'img_gen',
@@ -137,9 +141,9 @@ export function buildQwenImage21Args(i: QwenImage21ArgsInput): string[] {
     '-H',
     String(i.height ?? 1024),
     '--steps',
-    String(i.steps ?? 40),
+    String(i.steps ?? defaults.defaultSteps),
     '--cfg-scale',
-    String(i.cfgScale ?? 6),
+    String(i.cfgScale ?? defaults.defaultCfg),
     '--sampling-method',
     'euler',
     '--offload-to-cpu',

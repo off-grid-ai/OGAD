@@ -163,18 +163,22 @@ export class McpConnectorToolExtension implements ToolExtension {
     if (!meta) return `Error: unknown connector tool ${name}`
     const risk = riskOf(meta.tool)
     if (shouldGate(risk)) {
+      // A paired browser's write waits for approval on Desktop, as a routine's does: text on a page
+      // the browser read could have asked for it, and nobody on Desktop started it.
+      const waitsForApproval = context?.actionSource === 'routine' || origin.origin === 'bridge'
       const execution = await runChatConnectorAction(this.boundary.actions, {
         connectorId: meta.id,
         connector: meta.connector,
         tool: meta.tool,
         args,
         sourceRef: context?.conversationId,
-        ...(context?.actionSource ? { source: context.actionSource } : {})
+        ...(waitsForApproval
+          ? { source: 'routine' as const }
+          : context?.actionSource
+            ? { source: context.actionSource }
+            : {})
       })
-      return formatChatConnectorExecution(execution, {
-        ...meta,
-        unattended: context?.actionSource === 'routine'
-      })
+      return formatChatConnectorExecution(execution, { ...meta, unattended: waitsForApproval })
     }
     try {
       const r = await this.boundary.callTool(meta.id, meta.tool, args)

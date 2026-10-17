@@ -4,9 +4,9 @@ set -euo pipefail
 # Pin the upstream Ubuntu 24.04 x64 Vulkan build. It also contains the CPU
 # backend, so image generation remains available without a working GPU driver.
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-ARCHIVE=sd-master-2f88688-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip
-SHA256=81187de7eef5828816858de076c6d7efe4ee29e1536d22f86338960d5119c574
-URL="https://github.com/leejet/stable-diffusion.cpp/releases/download/master-920-2f88688/$ARCHIVE"
+ARCHIVE=sd-master-8cd731e-bin-Linux-Ubuntu-24.04-x86_64-vulkan.zip
+SHA256=1e82f932a678e28035d64bc9909b9c122c6ec0f92fcfd8e9ac2bea99b5619505
+URL="https://github.com/leejet/stable-diffusion.cpp/releases/download/master-968-8cd731e/$ARCHIVE"
 
 if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
   echo '[fetch-image-linux] Linux x64 is required' >&2

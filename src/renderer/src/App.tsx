@@ -194,8 +194,8 @@ const navRowClass = (expanded: boolean, active = false): string =>
 // Model-server health dot for the sidebar. Uses the same authoritative chat probe
 // as the full System Health panel, through a narrow IPC projection that does not
 // re-check permissions, the gateway, image generation, and native helpers every
-// five seconds. Green = running, amber = starting, red = stopped.
-type ChatHealth = 'ready' | 'starting' | 'down' | null
+// five seconds. Green = running, amber = starting, grey = not loaded yet, red = stopped.
+type ChatHealth = 'ready' | 'starting' | 'idle' | 'down' | null
 function ModelStatusDot({
   open,
   onClick
@@ -211,7 +211,9 @@ function ModelStatusDot({
     const api = (window as any).api
     const applyHealth = (chat: { status?: string } | null | undefined): void => {
       const next: ChatHealth =
-        chat?.status === 'ready' ? 'ready' : chat?.status === 'starting' ? 'starting' : 'down'
+        chat?.status === 'ready' || chat?.status === 'starting' || chat?.status === 'idle'
+          ? chat.status
+          : 'down'
       if (live) setStatus(next)
     }
     const refresh = (): void => {
@@ -252,7 +254,9 @@ function ModelStatusDot({
         ? 'text-green-500'
         : status === 'starting'
           ? 'text-amber-500'
-          : 'text-red-500'
+          : status === 'idle'
+            ? 'text-neutral-500'
+            : 'text-red-500'
   const text =
     status == null
       ? 'Checking…'
@@ -260,7 +264,9 @@ function ModelStatusDot({
         ? 'Model running'
         : status === 'starting'
           ? 'Model starting'
-          : 'Model stopped'
+          : status === 'idle'
+            ? 'Model loads on first use'
+            : 'Model stopped'
   const label =
     status === 'down'
       ? 'Model server stopped. Open Setup and health.'

@@ -63,6 +63,7 @@ import { BrowserJourneyRunOwners } from './browser-run-owners'
 import { ElectronPlaywrightRelay } from './electron-playwright-relay'
 import { PlaywrightMcpSession } from './playwright-mcp-session'
 import { runBrowserPlaywrightTask } from './browser-playwright-task'
+import { captureBrowserAgentFrame, runBrowserAgentTask } from './browser-agent-task'
 import { automationTaskReadStatus, isAutomationTaskTerminal } from '@offgrid/automation'
 import { getWebUseSettings } from '../web-use-settings'
 import { currentRemoteScreenTaskSession } from '../actions/remote-screen-session'
@@ -560,6 +561,18 @@ class BrowserHost implements BrowserRailHost {
     return true
   }
 
+  /** Closes every page of a journey (its task page and the tabs it opened). */
+  closeJourney(journeyId: string): void {
+    for (const record of [...this.sessions.journeyRecords(journeyId)]) {
+      const closed = this.sessions.close(record.sessionId)
+      if (!closed) continue
+      this.taskPointers.delete(record.sessionId)
+      this.destroyView(closed.resource)
+    }
+    this.syncViewVisibility()
+    this.broadcastSessions()
+  }
+
   closeSession(sessionId: string): boolean {
     const record = this.sessions.get(sessionId)
     if (!record) return false
@@ -863,8 +876,14 @@ class BrowserHost implements BrowserRailHost {
             (error: unknown) => ({ ok: false as const, error })
           )
         : undefined
+      // The planner_actor_evaluator strategy plans with its own planner model; the stages the
+      // task shows are that plan (browser-agent-task.ts), not a chat-model plan made first.
+      const agentPlanning =
+        (currentRemoteScreenTaskSession()?.modelStrategy ?? getWebUseSettings().modelStrategy) ===
+        'planner_actor_evaluator'
       const plan =
         checkpoint?.plan ??
+        (agentPlanning ? { version: 1 as const, phases: [] } : undefined) ??
         (await prepareTaskExecutionPlan(
           {
             goal: retryPlanningGoal(goal, checkpoint),
@@ -985,7 +1004,7 @@ class BrowserHost implements BrowserRailHost {
               handoffs: 0
             }
           }
-          return runBrowserPlaywrightTask({
+          const semanticInput: Parameters<typeof runBrowserPlaywrightTask>[0] = {
             goal,
             plan,
             session: playwright,
@@ -1014,7 +1033,18 @@ class BrowserHost implements BrowserRailHost {
             },
             onObservation: recordSemanticEvidence,
             signal: owner.controller.signal
-          })
+          }
+          const webUse = getWebUseSettings()
+          const agentStrategy =
+            (currentRemoteScreenTaskSession()?.modelStrategy ?? webUse.modelStrategy) ===
+            'planner_actor_evaluator'
+          return agentStrategy
+            ? runBrowserAgentTask({
+                ...semanticInput,
+                models: webUse.agentModels,
+                screenshot: () => captureBrowserAgentFrame(activePage().view, activePage().driver)
+              })
+            : runBrowserPlaywrightTask(semanticInput)
         })().finally(() => playwright.close())
 
         // Vision remains a bounded fallback for canvas, maps, remote desktops,
@@ -1163,6 +1193,11 @@ class BrowserHost implements BrowserRailHost {
 }
 
 let host: BrowserHost | null = null
+
+/** Closes a finished journey's pages (the Web Use task list runner, between tasks). */
+export function closeBrowserJourney(journeyId: string): void {
+  browserHost().closeJourney(journeyId)
+}
 
 function browserHost(): BrowserHost {
   if (!host) {

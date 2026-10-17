@@ -52,9 +52,9 @@ stage_native_helpers() {
     echo "!! cmake is required to rebuild llama-server and Whisper. Install it before continuing."
     exit 1
   }
-  MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
-  LLAMA_VARIANT=prism MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-llama.sh
-  MACOS_DEPLOYMENT_TARGET=13.0 WHISPER_REF=v1.7.4 bash scripts/build-whisper-cli.sh
+  bash scripts/build-llama.sh
+  LLAMA_VARIANT=prism bash scripts/build-llama.sh
+  bash scripts/build-whisper-cli.sh
   bash scripts/build-meeting-recorder.sh
   MACOS_DEPLOYMENT_TARGET=13.0 bash scripts/build-computer-use-capture.sh resources/bin
   bash scripts/build-dictation-hotkey.sh

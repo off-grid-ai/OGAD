@@ -17,7 +17,7 @@ const STAGE_LABELS: Readonly<Record<string, string>> = {
   'pro.entitlement.revalidate': 'Confirming your license',
   'models.gateway.start': 'Starting the local API',
   'media.server.start': 'Preparing media playback',
-  'models.text.prepare': 'Loading your model',
+  'models.text.prepare': 'Preparing your model',
   'modalities.runtime.register': 'Preparing local models',
   'models.projector.reconcile': 'Checking your models',
   'pro.features.load': 'Starting Pro features',
