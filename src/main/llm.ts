@@ -27,8 +27,16 @@ import {
   REASONING_BUDGET_AUTO,
   reasoningBudgetPayload,
   backendReasonText,
-  type NativeBackend
+  type NativeBackend,
+  isGatewayMode,
+  llmSlotPlan,
+  type GatewayMode,
+  type LlmSlotPlan
 } from '@offgrid/models'
+import { liveMemory } from './runtime-manager'
+import { filesMB } from './model-footprint'
+import { cudaVramMB } from './llm/vram-probe'
+import { slotInput } from './llm/settings-math'
 import type { EngineAccelerator } from '../shared/engine-accelerator'
 import {
   applyModePreset,
@@ -43,7 +51,12 @@ import { readImages } from './llm/read-images'
 import { detectThinkingDialect, type ThinkingDialect } from './llm/thinking-dialect'
 import { isValidGgufFile } from './models/gguf'
 import { CATALOG, isGrounderModel } from '@offgrid/models'
-import { readGgufContextLength, readGgufMtpSupport } from './models/gguf-metadata'
+import {
+  parseGgufMetadata,
+  readGgufContextLength,
+  readGgufKvShape,
+  readGgufMtpSupport
+} from './models/gguf-metadata'
 import {
   MTP_COMPANIONS,
   dflashFileName,
@@ -104,6 +117,10 @@ export interface LlmSettings {
   speculativeDecoding?: SpeculativeDecodingMode
   speculativeDraftMax?: number // 0 = Auto, otherwise 1-16 draft tokens
   draftModel?: string // filename of an installed GGUF in the app's model directory
+  gatewayMode?: GatewayMode // 'single' (one slot, as always) or 'team' (several slots, queued)
+  gatewaySlots?: number // read-only: how many requests the engine serves at once
+  gatewayClients?: number | null // team mode's "requests at once": null = Auto (the memory rule)
+  gatewaySlotsMax?: number // read-only: the memory rule's safe maximum ("Auto")
   supportsMtp?: boolean // read-only capability of the selected GGUF
   compatibleDraftModels?: string[] // read-only filenames with the same tokenizer/vocabulary
   compatibleDflashModels?: string[] // read-only compatible DFlash companions
@@ -307,6 +324,22 @@ export class LLMService {
   private speculativeDecoding: SpeculativeDecodingMode = 'off'
   private speculativeDraftMax = 0
   private draftModel = ''
+  private gatewayModeSetting: GatewayMode = 'single'
+  /** Team mode's manual "requests at once"; null = Auto. */
+  private gatewayClientsSetting: number | null = null
+  /** A headless launch's own gateway mode and "requests at once" (--gateway-mode, OFFGRID_GATEWAY_MODE
+   *  ...): used for this run only, never saved over the person's settings. */
+  private gatewayLaunchOverride: { mode?: GatewayMode; clients?: number | null } = {}
+  /** Hears when the gateway mode in effect changes (the gateway keeps a Team server awake). */
+  private gatewayModeListener: ((mode: GatewayMode) => void) | null = null
+  /** The slots and pool the running (or next) team-mode launch was sized to. */
+  private launchedSlotPlan: LlmSlotPlan | null = null
+  /** The backend the last launch placed the model on, kept across restarts for slot sizing. */
+  private lastPlacedBackend: string | undefined
+  /** Set by the gateway: an eviction waits for its in-flight streams and admits no new ones. */
+  private evictionGate: ((evict: () => Promise<void>) => Promise<void>) | null = null
+  /** Set by the gateway: a settings relaunch lets in-flight team-mode streams finish first. */
+  private relaunchGate: ((relaunch: () => Promise<void>) => Promise<void>) | null = null
   // Crash recovery: distinguish an intentional kill (stop/reload/settings respawn)
   // from an unexpected crash so we only auto-restart on real crashes.
   private intentionalStop = false
@@ -396,6 +429,9 @@ export class LLMService {
       )
         this.speculativeDecoding = s.speculativeDecoding
       if (typeof s.draftModel === 'string') this.draftModel = path.basename(s.draftModel)
+      if (isGatewayMode(s.gatewayMode)) this.gatewayModeSetting = s.gatewayMode
+      if (Number.isInteger(s.gatewayClients) && s.gatewayClients >= 1)
+        this.gatewayClientsSetting = s.gatewayClients
       if (
         Number.isInteger(s.speculativeDraftMax) &&
         s.speculativeDraftMax >= 0 &&
@@ -624,6 +660,10 @@ export class LLMService {
       speculativeDecoding: this.speculativeDecoding,
       speculativeDraftMax: this.speculativeDraftMax,
       draftModel: this.draftModel,
+      gatewayMode: this.gatewayModeSetting,
+      gatewaySlots: this.gatewaySlots(),
+      gatewayClients: this.gatewayClientsSetting,
+      gatewaySlotsMax: this.gatewaySlotsMax(),
       supportsMtp: this.supportsMtp(),
       ...speculativeCapabilities,
       performanceMode: this.performanceMode,
@@ -658,7 +698,7 @@ export class LLMService {
       this.speculativeModeSupported(this.speculativeDecoding, this.draftModel)
     const useRuntimeMtp =
       this.runtimeModelOverride !== null && this.speculativeDecoding === 'mtp' && this.supportsMtp()
-    return buildLaunchArgs({
+    const input: Parameters<typeof buildLaunchArgs>[0] = {
       modelPath: this.modelPath,
       mmProjPath: this.mmProjPath,
       port: this.port,
@@ -682,8 +722,173 @@ export class LLMService {
           : undefined,
       imageMinTokens: this.imageMinTokensForModel(),
       reportModelPlacement: true,
-      totalRamBytes: totalmem()
+      totalRamBytes: totalmem(),
+      gatewayMode: this.effectiveGatewayMode(),
+      ...(this.effectiveGatewayMode() === 'team'
+        ? {
+            ...this.slotLaunchInputs(),
+            ...this.requestedSlotsInput()
+          }
+        : {})
+    }
+    if (this.effectiveGatewayMode() === 'team') {
+      this.launchedSlotPlan = llmSlotPlan(slotInput(input))
+      // Say when team mode changes the person's cache type, and why.
+      if (this.launchedSlotPlan.kvNote) console.log(`[LLMService] ${this.launchedSlotPlan.kvNote}`)
+    }
+    return buildLaunchArgs(input)
+  }
+
+  /** Team mode's slot inputs: the platform, the memory free beside this model and its pool of the
+   *  person's context, and the model's size. Read once per launch. */
+  private slotLaunchInputs(): Partial<Parameters<typeof buildLaunchArgs>[0]> {
+    const weightsMB = this.localWeightsGb() * 1024
+    // The memory this engine may use counts its own model when it is loaded.
+    const ownMB = this.initialized ? this.baseResidentMB() : 0
+    const shape = { kvShape: readGgufKvShape(this.modelPath, fs) ?? undefined, architecture: this.modelArchitecture() }
+    // localWeightsGb counts the projector and an MTP companion; a draft model sits beside them too.
+    const draftMB =
+      this.speculativeDecoding === 'draft' || this.speculativeDecoding === 'dflash'
+        ? filesMB([this.draftModelPath()])
+        : 0
+    const common = {
+      weightsMB: weightsMB + draftMB,
+      mmprojMB: 0,
+      recurrentSlotMB: 64,
+      kvCacheTypeExplicit: this.userExplicit.has('kvCacheType'),
+      ...shape
+    }
+    if (process.platform !== 'darwin' && this.lastPlacedBackend?.includes('CUDA')) {
+      const vram = cudaVramMB()
+      return {
+        slotPlatform: 'cuda',
+        ...common,
+        ...(vram
+          ? { slotTotalMemoryGb: vram.totalMB / 1024, slotFreeMemoryMB: vram.freeMB + ownMB }
+          : {})
+      }
+    }
+    const { availableMB, totalMB } = liveMemory()
+    // Metal's recommended working set is about three quarters of unified memory.
+    const usable =
+      process.platform === 'darwin' ? Math.min(totalMB * 0.75, availableMB + ownMB) : availableMB + ownMB
+    return {
+      slotPlatform: process.platform === 'darwin' ? 'apple-unified' : 'other',
+      ...common,
+      slotFreeMemoryMB: Math.max(0, usable)
+    }
+  }
+
+  /** The GGUF architecture of the selected model (Gemma keeps an f16 cache in team mode). */
+  private modelArchitecture(): string | undefined {
+    try {
+      const fd = fs.openSync(this.modelPath, 'r')
+      const buf = Buffer.alloc(64 * 1024)
+      try {
+        fs.readSync(fd, buf, 0, buf.length, 0)
+      } finally {
+        fs.closeSync(fd)
+      }
+      return parseGgufMetadata(buf).architecture
+    } catch {
+      return undefined
+    }
+  }
+
+  /** Use this gateway mode and "requests at once" for this run without saving them (a headless
+   *  launch's flags). A later settings change of either takes over from it. */
+  setGatewayLaunchOverride(override: { mode?: GatewayMode; clients?: number | null }): void {
+    const before = this.effectiveGatewayMode()
+    this.gatewayLaunchOverride = { ...override }
+    this.launchedSlotPlan = null
+    if (this.effectiveGatewayMode() !== before) this.gatewayModeListener?.(this.effectiveGatewayMode())
+  }
+
+  /** Hear when the gateway mode in effect changes. */
+  onGatewayModeChange(listener: ((mode: GatewayMode) => void) | null): void {
+    this.gatewayModeListener = listener
+  }
+
+  private effectiveGatewayMode(): GatewayMode {
+    return this.gatewayLaunchOverride.mode ?? this.gatewayModeSetting
+  }
+
+  /** The slot rule's requestedSlots for the "requests at once" in effect (none for Auto). */
+  private requestedSlotsInput(): { requestedSlots?: number } {
+    const clients = this.effectiveGatewayClients()
+    return clients === null ? {} : { requestedSlots: clients }
+  }
+
+  private effectiveGatewayClients(): number | null {
+    return this.gatewayLaunchOverride.clients !== undefined
+      ? this.gatewayLaunchOverride.clients
+      : this.gatewayClientsSetting
+  }
+
+  /** The "requests at once" in effect: a number, or null for Auto. */
+  gatewayClients(): number | null {
+    this.ensureLoaded()
+    return this.effectiveGatewayClients()
+  }
+
+  /** Whether the gateway serves one person ('single', as always) or several clients ('team'). */
+  gatewayMode(): GatewayMode {
+    this.ensureLoaded()
+    return this.effectiveGatewayMode()
+  }
+
+  /** How many requests the engine serves at once: its llama-server slot count. */
+  gatewaySlots(): number {
+    this.ensureLoaded()
+    if (this.effectiveGatewayMode() !== 'team') return 1
+    return (
+      this.launchedSlotPlan?.slots ?? this.unlaunchedSlotPlan().slots
+    )
+  }
+
+  /** The memory rule's safe maximum for team mode ("Auto"); 1 in single mode. */
+  gatewaySlotsMax(): number {
+    this.ensureLoaded()
+    if (this.effectiveGatewayMode() !== 'team') return 1
+    return this.launchedSlotPlan?.maxSlots ?? this.unlaunchedSlotPlan().maxSlots
+  }
+
+  /** Before a team-mode launch: the context rule alone sizes the slots. */
+  private unlaunchedSlotPlan(): LlmSlotPlan {
+    return llmSlotPlan({
+      mode: 'team',
+      ctxSize: this.ctxSize,
+      speculativeDecoding: this.effectiveSpeculativeDecoding(),
+      totalMemoryGb: totalmem() / 1024 ** 3,
+...this.requestedSlotsInput()
     })
+  }
+
+  /** Team mode: the tokens the slots share (the unified KV pool). Undefined in single mode. */
+  gatewayPoolTokens(): number | undefined {
+    this.ensureLoaded()
+    if (this.effectiveGatewayMode() !== 'team') return undefined
+    return this.launchedSlotPlan?.poolCtx ?? this.ctxSize
+  }
+
+  /** The speculative mode the launch args actually carry (see launchArgsFor). */
+  private effectiveSpeculativeDecoding(): SpeculativeDecodingMode {
+    if (this.runtimeModelOverride !== null)
+      return this.speculativeDecoding === 'mtp' && this.supportsMtp() ? 'mtp' : 'off'
+    return this.speculativeModeSupported(this.speculativeDecoding, this.draftModel)
+      ? this.speculativeDecoding
+      : 'off'
+  }
+
+  /** The gateway makes an eviction wait for its in-flight streams (team mode). */
+  setEvictionGate(gate: ((evict: () => Promise<void>) => Promise<void>) | null): void {
+    this.evictionGate = gate
+  }
+
+  /** The gateway makes a relaunch for changed settings wait for its in-flight streams, up to a
+   *  deadline (team mode; in single mode no stream holds the gate). */
+  setRelaunchGate(gate: ((relaunch: () => Promise<void>) => Promise<void>) | null): void {
+    this.relaunchGate = gate
   }
 
   private draftModelPath(): string | undefined {
@@ -805,7 +1010,9 @@ export class LLMService {
         batchSize: this.batchSize,
         speculativeDecoding: this.speculativeDecoding,
         speculativeDraftMax: this.speculativeDraftMax,
-        draftModel: this.draftModel
+        draftModel: this.draftModel,
+        gatewayMode: this.effectiveGatewayMode(),
+        gatewayClients: this.effectiveGatewayClients()
       },
       modeChanged
     )
@@ -850,6 +1057,25 @@ export class LLMService {
       this.draftModel = path.basename(compatibleSettings.draftModel)
     if (typeof compatibleSettings.speculativeDraftMax === 'number')
       this.speculativeDraftMax = compatibleSettings.speculativeDraftMax
+    const modeBefore = this.effectiveGatewayMode()
+    // A setting the person changes now takes over from a headless launch's flag for it.
+    if (compatibleSettings.gatewayMode !== undefined) delete this.gatewayLaunchOverride.mode
+    if (compatibleSettings.gatewayClients !== undefined) delete this.gatewayLaunchOverride.clients
+    if (isGatewayMode(compatibleSettings.gatewayMode))
+      this.gatewayModeSetting = compatibleSettings.gatewayMode
+    // A manual "requests at once" (a whole number of 1 or more), or null for Auto. The memory
+    // rule clamps it at launch.
+    if (compatibleSettings.gatewayClients === null) this.gatewayClientsSetting = null
+    else if (
+      typeof compatibleSettings.gatewayClients === 'number' &&
+      Number.isInteger(compatibleSettings.gatewayClients) &&
+      compatibleSettings.gatewayClients >= 1
+    )
+      this.gatewayClientsSetting = compatibleSettings.gatewayClients
+    // The next launch sizes the slots again (mode, context and cache type all change them).
+    if (launchChanged) this.launchedSlotPlan = null
+    if (this.effectiveGatewayMode() !== modeBefore)
+      this.gatewayModeListener?.(this.effectiveGatewayMode())
     const budgets = budgetChange(
       { ctxSize: this.ctxSize, maxTokens: this.maxTokens, reasoningBudget: this.reasoningBudget },
       {}
@@ -886,6 +1112,8 @@ export class LLMService {
       this.speculativeDecoding = priorSettings.speculativeDecoding ?? this.speculativeDecoding
       this.speculativeDraftMax = priorSettings.speculativeDraftMax ?? 0
       this.draftModel = priorSettings.draftModel ?? this.draftModel
+      this.gatewayModeSetting = priorSettings.gatewayMode ?? this.gatewayModeSetting
+      this.gatewayClientsSetting = priorSettings.gatewayClients ?? null
       this.userExplicit.clear()
       priorExplicit.forEach((field) => this.userExplicit.add(field))
     }
@@ -901,9 +1129,9 @@ export class LLMService {
         this.getSettings() as Record<string, unknown>
       )
     }
-    // With no model on disk there is nothing to relaunch: the saved settings apply to the first
-    // launch. Restarting here would fail and make a successful save look like an error.
-    if (launchChanged && !this.paused && this.modelsExist()) {
+    // With no model on disk, or no engine up, there is nothing to relaunch: the saved settings
+    // apply to the next launch, on first use. Starting one here would load a model nobody asked for.
+    if (launchChanged && !this.paused && this.modelsExist() && this.engineUp()) {
       // A running model is only replaced once the new launch succeeds. If it fails, the
       // previous settings are restored and the previous model is relaunched - unless a newer
       // launch change is already queued, which then owns the engine and its settings.
@@ -958,8 +1186,12 @@ export class LLMService {
       if (request !== this.launchRestartRequest) return
       // A successful spawn records the settings its arguments were built from as the working
       // launch (launchWithFallback), so a save made while this loads is never mistaken for it.
-      this.stop()
-      await this.init()
+      const relaunch = async (): Promise<void> => {
+        this.stop()
+        await this.init()
+      }
+      // Team mode: streams in flight finish (up to a deadline) and none start meanwhile.
+      await (this.relaunchGate ? this.relaunchGate(relaunch) : relaunch())
     })
     // The queue itself must never carry a rejection: a failed respawn is reported to the
     // caller that asked for it, and the next request still gets its turn.
@@ -1456,10 +1688,11 @@ export class LLMService {
       const deliberateClose = wasIntentional
       if (!deliberateClose && !this.paused) {
         const failure = classifyLlamaError(this.stderrTail.join('\n'))
-        this.backendFallbackReason =
-          failure?.reason ?? 'The previous engine could not load the model.'
+        this.backendFallbackReason = failure?.reason ?? 'The previous engine could not load the model.'
+        // Health shows an engine with no error as simply not loaded, so an unexpected exit
+        // always leaves a reason.
+        this.lastErrorMsg = failure?.reason ?? 'The chat model stopped unexpectedly.'
         if (failure) {
-          this.lastErrorMsg = failure.reason
           console.error(
             `[LLMService] llama-server load failure (${failure.code}): ${failure.reason}`
           )
@@ -1496,6 +1729,7 @@ export class LLMService {
         ? { gpu: Number(layers[1]), total: Number(layers[2]) }
         : undefined
       this.loadingSince = undefined
+      this.lastPlacedBackend = this.backendPlacement?.backend ?? this.lastPlacedBackend
       console.log(
         `[LLMService] model ready: engine=${engineDir}, backend=${this.backendPlacement?.backend ?? 'unconfirmed'}`
       )
@@ -1825,6 +2059,8 @@ export class LLMService {
       disableThinking?: boolean
       separateReasoning?: boolean
       signal?: AbortSignal
+      /** Team gateway mode: the engine has slots, so this call need not wait for another. */
+      shared?: boolean
     } = {}
   ): Promise<string> {
     const decodedImages = readImages(images)
@@ -1942,10 +2178,13 @@ export class LLMService {
       disableThinking?: boolean
       separateReasoning?: boolean
       signal?: AbortSignal
+      shared?: boolean
     }
   ): Promise<string> {
     await this.ensureReady()
-    return this.chatMutex.runExclusive(async () => {
+    const exclusive = <T>(fn: () => Promise<T>): Promise<T> =>
+      opts.shared ? fn() : this.chatMutex.runExclusive(fn)
+    return exclusive(async () => {
       try {
         const payload: Record<string, unknown> = {
           messages: messages,
@@ -2342,28 +2581,36 @@ export class LLMService {
     }
   }
 
-  /** Resume after image generation and warm the server back up (resident mode). */
-  resume(): void {
-    this.paused = false
-    this.init().catch(() => {})
-  }
-
-  /** Clear the pause block WITHOUT warming the server (on-demand mode). The server
-   *  stays down and lazily respawns on the next chat/tool turn, freeing its RAM in
-   *  the meantime. Pairs with pause() as the on-demand counterpart of resume(). */
+  /** Clear the pause block WITHOUT warming the server. The server stays down and lazily
+   *  respawns on the next chat/tool turn, freeing its RAM in the meantime. */
   releasePause(): void {
     this.paused = false
   }
 
   /** This engine as a ManagedRuntime for the shared residency seam (runtime-manager),
    *  so the chat model is managed identically to image/STT/TTS — one code path. */
+  /** What the chat engine holds once its model is loaded, in MB: the weights with projector and
+   *  MTP companion, plus an allowance for the KV cache (about 64 MB per 1K context at f16; q8_0
+   *  halves it, q4_0 quarters it) and the server's own buffers. */
+  expectedResidentMB(): number {
+    // Team-mode slots add their recurrent state and any growth of the shared pool (none in single).
+    return this.baseResidentMB() + (this.launchedSlotPlan?.extraMB ?? 0)
+  }
+
+  private baseResidentMB(): number {
+    const kvScale = this.kvCacheType === 'q4_0' ? 0.25 : this.kvCacheType === 'q8_0' ? 0.5 : 1
+    return this.localWeightsGb() * 1024 + (this.ctxSize / 1024) * 64 * kvScale + 300
+  }
+
   get runtime(): ManagedRuntime {
     return {
       modality: 'llm',
-      evict: () => this.pauseAndWait(),
-      warm: () => {
-        this.resume()
-      },
+      footprintMB: () => (this.server && this.initialized ? this.expectedResidentMB() : 0),
+      expectedMB: () => this.expectedResidentMB(),
+      evict: () =>
+        this.evictionGate
+          ? this.evictionGate(() => this.pauseAndWait())
+          : this.pauseAndWait(),
       release: () => {
         this.releasePause()
       }
@@ -2372,6 +2619,11 @@ export class LLMService {
 
   isReady(): boolean {
     return this.initialized
+  }
+
+  /** An engine is running or on its way up (a launch already in flight). */
+  private engineUp(): boolean {
+    return this.initialized || this.server !== null || this.initPromise !== null
   }
 
   /** True when the server process is alive but the model hasn't finished loading

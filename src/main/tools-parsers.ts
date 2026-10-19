@@ -3,21 +3,33 @@
 // search-ranking.ts). No imports, no side effects. tools.ts re-imports these;
 // the tool defs + agentic loop stay there. Behaviour-neutral move.
 
-/** Decode the HTML entities the web tools care about (named + numeric decimal). */
+/** Decode the HTML entities the web tools care about (named + numeric decimal). `&amp;` goes
+ *  last, so "&amp;lt;" reads as the text "&lt;", not as "<". */
 export function decodeEntities(s: string): string {
   return s
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&amp;/g, '&')
+}
+
+/** Remove tags until none is left, so pieces of a tag cannot join into a new one. */
+function removeTags(s: string, replacement: string): string {
+  let previous: string
+  let text = s
+  do {
+    previous = text
+    text = text.replace(/<[^>]*>/g, replacement)
+  } while (text !== previous)
+  return text
 }
 
 /** Strip all tags, decode entities, collapse whitespace, trim (for titles/snippets). */
 export function stripTags(s: string): string {
-  return decodeEntities(s.replace(/<[^>]*>/g, ''))
+  return decodeEntities(removeTags(s, ''))
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -27,10 +39,10 @@ export function stripTags(s: string): string {
  *  spaces/tabs and 3+ newlines. */
 export function htmlToText(html: string): string {
   const body = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script\b[\s\S]*?<\/script[^>]*>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style[^>]*>/gi, ' ')
     .replace(/<\/(p|div|li|h[1-6]|br|tr|section|article)>/gi, '\n')
-  return decodeEntities(body.replace(/<[^>]*>/g, ' '))
+  return decodeEntities(removeTags(body, ' '))
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

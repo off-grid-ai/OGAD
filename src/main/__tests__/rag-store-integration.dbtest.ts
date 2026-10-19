@@ -12,7 +12,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { SYNTHETIC_PDF } from './fixtures/synthetic-pdf'
+import { textLayerPdf } from './fixtures/synthetic-pdf'
 
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-ragstore-it-'))
 
@@ -271,7 +271,11 @@ describe('knowledge base over the document engine', () => {
 
   it('reads a real PDF page by page', async () => {
     store.createProject({ id: 'p-pdf', name: 'PDF' })
-    const pdf = await addFile('p-pdf', 'decision.pdf', SYNTHETIC_PDF)
+    const pdf = await addFile(
+      'p-pdf',
+      'decision.pdf',
+      textLayerPdf('Decision record: the launch moves to the second week of March after the audit.')
+    )
 
     const indexed = await finishedIndexing(pdf.documentId!)
     expect(indexed.state).toBe('ready')

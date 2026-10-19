@@ -10,11 +10,7 @@ import {
   withAnswerVersions
 } from '@renderer/lib/chat-versions'
 import { replaceChatTurn, type ReplacementDependencies } from '@renderer/lib/chat-turn-replacement'
-import {
-  getChatQueueStore,
-  type ChatQueues,
-  type QueuedTurn
-} from '@renderer/lib/chat-queue-store'
+import { getChatQueueStore, type ChatQueues, type QueuedTurn } from '@renderer/lib/chat-queue-store'
 import {
   captureStopTarget,
   unownedTerminal,
@@ -46,6 +42,7 @@ import {
   type ProjectedSyncedTool
 } from '@offgrid/sync'
 import type { VoiceTurnMode } from '@offgrid/speech'
+import { modelDisplayName } from '@offgrid/models'
 import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { callHook } from '@/bootstrap/hookRegistry'
 import { useRendererEntitlement } from '@/bootstrap/useRendererEntitlement'
@@ -179,7 +176,10 @@ import {
   WarningCircle,
   DownloadSimple,
   Trash,
-  Stop
+  Stop,
+  SidebarSimple,
+  Gear,
+  Images
 } from '@phosphor-icons/react'
 import type { MemoryChatProps } from './interfaces'
 import { announceAssistantActivity, announceAssistantListening } from '../../lib/assistant-activity'
@@ -196,7 +196,8 @@ import type {
   ImageProgress,
   MessageRowActions,
   ProjectLite,
-  RagContext
+  RagContext,
+  StoredMessageAttachment
 } from './types'
 import {
   announceImageMessagePersisted,
@@ -206,6 +207,7 @@ import {
   mergeDurableAndStreaming,
   mergeRemotePreviewTools,
   queuedTurnId,
+  attachmentDisplayName,
   toProcessingAttachment,
   toQueuedMessage
 } from './helper'
@@ -238,10 +240,12 @@ import {
   clearStreamViewMessage,
   resetStreamViewMessage,
   seedStreamViewMessage,
-  streamViewMessage
+  streamViewMessage,
+  useStreamViewMessage
 } from './stream-view-store'
 
 import { stopLiveTask, stopLiveWebUseForConversation } from './helper'
+import { PassPlayback, type PlayableClip } from '@renderer/lib/pass-playback'
 import {
   ACTIVE_CHAT_TAB_KEY,
   EMPTY_MSGS,
@@ -253,6 +257,9 @@ import {
 } from './utlis'
 
 /** OGAD's names for the queue's rows and actions. */
+/** Stands in when no canvas follows a message, so the stream hook is always called. */
+const NO_FOLLOWED_MESSAGE: ChatMessage = { id: '', role: 'assistant', content: '' }
+
 const QUEUE_LABELS: MessageQueueLabels = {
   queue: 'Queued messages',
   section: 'queued',
@@ -576,6 +583,7 @@ export function MemoryChat({
   const [imgInit, setImgInit] = useState<string | null>(null)
   const [imgStrength, setImgStrength] = useState(0.6)
   const [imgModels, setImgModels] = useState<string[]>([])
+  const [imgModelNames, setImgModelNames] = useState<Record<string, string>>({})
   const [imgModel, setImgModel] = useState<string>('')
   // Per-model steps/size overrides. This is the ONE persisted owner of those two
   // params — the composer and (future) a Settings > Image section both read/write
@@ -854,7 +862,10 @@ export function MemoryChat({
   } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null)
-  const [lightbox, setLightbox] = useState<{ url: string; path?: string } | null>(null)
+  // `title` names a file the user brought (an upload); without it the picture is one Off Grid made.
+  const [lightbox, setLightbox] = useState<{ url: string; path?: string; title?: string } | null>(
+    null
+  )
   // Pro registers this slot after the core renderer starts. Resolve it on each render so an
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
@@ -873,9 +884,13 @@ export function MemoryChat({
     return () => window.removeEventListener('keydown', onKey)
   }, [viewer, lightbox])
   const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null)
+  /** The message the open canvas came from; while it streams, the canvas follows it. */
+  const [canvasMessageId, setCanvasMessageId] = useState<string | null>(null)
   const [skillsOpen, setSkillsOpen] = useState(false)
   const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>()
   const [showGallery, setShowGallery] = useState(false)
+  /** The open artifact came from the Gallery, so its canvas offers a way back to it. */
+  const [canvasFromGallery, setCanvasFromGallery] = useState(false)
   // The canvas / text viewer / gallery belong to a specific message, so they must
   // not bleed across chats — close them whenever the active conversation changes
   // (switch tab, new chat, close-to-fallback, open-from-projects, delete).
@@ -894,7 +909,7 @@ export function MemoryChat({
   const draftInputRef = useRef<ChatDraftInputHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const audioRef = useRef<PlayableClip | null>(null)
   const voiceMountedRef = useRef(true)
   const speechRequestRef = useRef(0)
   const bottomRef = useRef<HTMLDivElement | null>(null)
@@ -1020,6 +1035,7 @@ export function MemoryChat({
         ? rawModels.filter((model: unknown): model is string => typeof model === 'string')
         : []
       setImgModels(models)
+      setImgModelNames(s.modelNames)
       // Skip the parked/slow Core ML directory when choosing a default.
       const preferred = preferredImageModel(models)
       setImgModel(s.active || preferred)
@@ -1617,6 +1633,8 @@ export function MemoryChat({
     opts?: {
       regen?: boolean
       priorVariants?: ResponseVersion[]
+      /** The saved answer a retry's new answer sits beside (shown in its place while it streams). */
+      versionOf?: string
       priorAnswer?: ChatMessage
       replacementMessageId?: string
       history?: ChatMessage[]
@@ -1777,8 +1795,7 @@ export function MemoryChat({
           if (sk) {
             const rest =
               `${typed.slice(0, skillMention!.index)}${skillMention![1]}${typed.slice(skillMention!.index + skillMention![0].length)}`.trim()
-            modelQuery =
-              `# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim()
+            modelQuery = `# Skill: ${sk.name}\n${sk.instructions}\n\n${rest}`.trim()
           }
         } catch (e) {
           console.error('skill load failed', e)
@@ -1793,7 +1810,15 @@ export function MemoryChat({
     // Create new conversation if none active
     if (!convId) {
       convId = crypto.randomUUID()
-      const title = trimmed.length > 50 ? trimmed.slice(0, 47) + '...' : trimmed
+      // An action marker (<!-- offgrid-action:... -->) steers the run; it is not what the chat is about.
+      // Markers lead the prompt (presetCatalog), so they are peeled off the front by position, not
+      // stripped by pattern: a pattern pass can leave a `<!--` behind (CodeQL), slicing cannot.
+      let unmarked = trimmed
+      while (unmarked.startsWith('<!--') && unmarked.includes('-->')) {
+        unmarked = unmarked.slice(unmarked.indexOf('-->') + 3).trimStart()
+      }
+      const named = unmarked.trim() || trimmed
+      const title = named.length > 50 ? named.slice(0, 47) + '...' : named
       try {
         await window.api.createRagConversation(convId, title, projectId, surface)
         const now = new Date().toISOString()
@@ -2069,6 +2094,7 @@ export function MemoryChat({
             {
               id: `a-${Date.now()}`,
               role: 'assistant',
+              createdAt: Date.now(),
               ...completedImage,
               image: img.dataUrl,
               imagePath: img.path,
@@ -2118,6 +2144,7 @@ export function MemoryChat({
               {
                 id: `a-${Date.now()}`,
                 role: 'assistant',
+                createdAt: Date.now(),
                 content: errorContent,
                 imageMemoryRetry: memoryGuard
                   ? { request: imageRequest, prompt: trimmed, conversationId: convId, projectId }
@@ -2160,7 +2187,10 @@ export function MemoryChat({
       const toolStreamMessage: ChatMessage = {
         id: toolStreamId,
         replacementMessageId: opts?.replacementMessageId,
+        ...(opts?.versionOf ? { versionOf: opts.versionOf } : {}),
         role: 'assistant',
+        // Stamped when the reply starts, so its time shows the moment it finishes, not after a reload.
+        createdAt: Date.now(),
         content: '',
         reasoning: '',
         reasoningRequested: thinkingEnabled,
@@ -2298,7 +2328,8 @@ export function MemoryChat({
             earlyComicCancelled ||
             cancelledRef.current.has(convId) ||
             earlyComicImages.has(request.prompt)
-          ) return
+          )
+            return
           const image = earlyComicChain.then(() =>
             earlyComicCancelled || cancelledRef.current.has(convId)
               ? Promise.reject(new Error('Image generation cancelled.'))
@@ -2313,20 +2344,20 @@ export function MemoryChat({
       }
       const tr = await window.api
         .toolChat(modelQuery, fullHistory.slice(0, -1), {
-        assistantOnly: assistantForTurn,
-        connectors: god ? true : connectorsOn,
-        conversationId: convId,
-        // Memory scope drives which memory tools the model gets: a project offers its
-        // knowledge base; "All memory" offers search_memory; "No memory" offers neither.
-        projectId: projectId ?? undefined,
-        allMemory: god ? true : !projectId && !noMemory,
-        // God is set up to do everything: every tool, and the selected model reasoning.
-        ...(god ? { context: god.context(), rules: god.rules?.(), allTools: true } : {}),
-        images: imagePaths,
-        ...(turnDocuments.length ? { documents: turnDocuments } : {}),
-        imageAvailable,
-        streamId: toolStreamId,
-        thinking: god ? true : thinkingEnabled
+          assistantOnly: assistantForTurn,
+          connectors: god ? true : connectorsOn,
+          conversationId: convId,
+          // Memory scope drives which memory tools the model gets: a project offers its
+          // knowledge base; "All memory" offers search_memory; "No memory" offers neither.
+          projectId: projectId ?? undefined,
+          allMemory: god ? true : !projectId && !noMemory,
+          // God is set up to do everything: every tool, and the selected model reasoning.
+          ...(god ? { context: god.context(), rules: god.rules?.(), allTools: true } : {}),
+          images: imagePaths,
+          ...(turnDocuments.length ? { documents: turnDocuments } : {}),
+          imageAvailable,
+          streamId: toolStreamId,
+          thinking: god ? true : thinkingEnabled
         })
         .catch(async (error) => {
           earlyComicCancelled = true
@@ -2569,6 +2600,7 @@ export function MemoryChat({
                   {
                     id: imageMessageId,
                     role: 'assistant',
+                    createdAt: Date.now(),
                     ...completedImage,
                     image: img.dataUrl,
                     imagePath: img.path,
@@ -2824,6 +2856,9 @@ export function MemoryChat({
               context
             )
           : await window.api.addRagMessage(convId, 'assistant', failed.content, context)
+        // A retry that failed is kept as a version, and the answer it was retrying stays shown.
+        if (stored && stored !== true && opts?.versionOf)
+          await window.api.selectRagMessageVersion(convId, stored.uuid, -1)
         if (stored && sid)
           setConvMessages(convId, (previous) =>
             previous.map((message) =>
@@ -3005,12 +3040,26 @@ export function MemoryChat({
     saveRecording: (audio, extension) => window.api.saveVoiceRecording(audio, extension),
     cancelTranscription: (requestId) => window.api.cancelTranscription(requestId),
     getTranscriptionLabel: () => window.api.getTranscriptionInfo(),
-    onTranscript: (text, clip) => {
+    onTranscript: (text, clip, owner) => {
       if (voiceMode && clip) {
+        // Sent in the chat it was recorded in, even when another chat is open by now.
+        const recordedIn = owner === NEW_CHAT ? null : owner
+        if (recordedIn !== (activeConversationId ?? null)) {
+          // A new chat left before it had any message has nowhere to receive it.
+          if (recordedIn === null) return false
+          const home = conversations.find((conversation) => conversation.id === recordedIn)
+          void sendMessage(text, {
+            voiceClip: clip,
+            conversationId: recordedIn,
+            ...(home ? { projectIdOverride: home.project_id ?? null } : {})
+          })
+          return true
+        }
         void sendMessage(text, { voiceClip: clip })
-        return
+        return true
       }
       draftStore.update((previous) => `${previous}${previous ? ' ' : ''}${text}`)
+      return true
     }
   })
   const recording =
@@ -3152,17 +3201,11 @@ export function MemoryChat({
       setSpeakError(null)
       setSpeakLoadingId(id) // generating on-device — show a loading state
       try {
-        const { dataUrl } = await window.api.speak(messageToSpeakable(text))
-        if (!voiceMountedRef.current || speechRequestRef.current !== request) return
-        if (!dataUrl) throw new Error('empty dataUrl')
-        const audio = new Audio(dataUrl)
+        // A long reply is spoken in passes: play each as it arrives, so the voice starts after
+        // the first sentence instead of after the whole reply.
+        const audio = new PassPlayback()
         audioRef.current = audio
-        audio.onended = () => {
-          setSpeakingId((cur) => (cur === id ? null : cur))
-          if (audioRef.current === audio) audioRef.current = null
-        }
-        audio.onerror = () => {
-          console.error('[tts] audio element error', audio.error)
+        const failed = (): void => {
           setSpeakingId((cur) => (cur === id ? null : cur))
           setSpeakLoadingId((cur) => (cur === id ? null : cur))
           setSpeakError({
@@ -3171,7 +3214,38 @@ export function MemoryChat({
               'Speech could not be played. Check your audio output, then try speaking the reply again.'
           })
         }
-        await audio.play()
+        audio.onended = () => {
+          setSpeakingId((cur) => (cur === id ? null : cur))
+          if (audioRef.current === audio) audioRef.current = null
+        }
+        audio.onerror = () => {
+          console.error('[tts] audio element error')
+          failed()
+        }
+        const made = window.api
+          .speak(messageToSpeakable(text), undefined, (pass) =>
+            audio.addPass(pass.index, pass.dataUrl)
+          )
+          .then(({ dataUrl }) => {
+            if (!dataUrl) throw new Error('empty dataUrl')
+            audio.setFull(dataUrl)
+          })
+        const playing = audio.play()
+        // The first audio, or the synthesis failing before any audio exists.
+        await Promise.race([playing, made.then(() => playing)])
+        if (!voiceMountedRef.current || speechRequestRef.current !== request) {
+          audio.pause()
+          made.catch(() => undefined)
+          return
+        }
+        // The rest of the reply can still fail after its first sentence started playing.
+        made.catch((e: unknown) => {
+          console.error('[tts] failed', e)
+          if (audioRef.current !== audio) return
+          audio.pause()
+          audioRef.current = null
+          failed()
+        })
         setSpeakLoadingId((cur) => (cur === id ? null : cur))
         setSpeakingId(id) // now actually speaking
       } catch (e) {
@@ -3247,12 +3321,47 @@ export function MemoryChat({
     return () => window.removeEventListener(OPEN_ACTIVE_MODELS_PANEL_EVENT, openActiveModels)
   }, [closePanels])
   const openCanvas = useCallback(
-    (a: Artifact) => {
+    (a: Artifact, fromGallery = false) => {
       closePanels()
+      setCanvasFromGallery(fromGallery)
+      setCanvasMessageId(null)
       setCanvasArtifact(a)
     },
     [closePanels]
   )
+
+  // A canvas opened from a message follows it: while the answer streams, the artifact is re-read
+  // from its content at most twice a second, so the page renders as it is written; when the
+  // answer settles, the canvas shows its final artifact. A streaming reply's text lives in the
+  // stream view (the stored message stays empty until it is saved), so the canvas reads that.
+  const followedStoredMessage = canvasMessageId
+    ? messages.find((message) => message.id === canvasMessageId)
+    : undefined
+  const followedLiveMessage = useStreamViewMessage(followedStoredMessage ?? NO_FOLLOWED_MESSAGE)
+  const followedArtifactMessage = followedStoredMessage ? followedLiveMessage : undefined
+  const followedContent = followedArtifactMessage?.content ?? null
+  const followedStreaming = Boolean(followedArtifactMessage?.streaming)
+  const [liveCanvasArtifact, setLiveCanvasArtifact] = useState<Artifact | null>(null)
+  const lastCanvasReadRef = useRef(0)
+  useEffect(() => {
+    if (followedContent === null) {
+      setLiveCanvasArtifact(null)
+      return
+    }
+    const read = (): void => {
+      lastCanvasReadRef.current = Date.now()
+      setLiveCanvasArtifact(parseArtifact(followedContent))
+    }
+    const wait = followedStreaming ? 500 - (Date.now() - lastCanvasReadRef.current) : 0
+    if (wait <= 0) {
+      read()
+      return
+    }
+    // A throttle, not a debounce: a new token reschedules for the same moment, never later.
+    const timer = window.setTimeout(read, wait)
+    return () => window.clearTimeout(timer)
+  }, [followedContent, followedStreaming])
+  const shownCanvasArtifact = liveCanvasArtifact ?? canvasArtifact
 
   const openGallery = useCallback(() => {
     if (showGallery) {
@@ -3562,9 +3671,8 @@ export function MemoryChat({
     markGenerating,
     resetPreview: () => setRemoteWorkPreview(null),
     stopTask: stopLiveWebUseForConversation,
-    update: (...args) => window.api.updateRagMessage(...args),
-    truncate: (...args) => window.api.truncateRagMessages(...args),
-    removeTasks: async (ids) => window.api.tasks?.remove?.(ids),
+    addVersion: (...args) => window.api.addRagMessageVersion(...args),
+    prepareAnswerVersion: (...args) => window.api.prepareAnswerVersion(...args),
     setMessages: setConvMessages,
     refresh: refreshConversationMessages,
     announceSettled: announceRunSettled,
@@ -3660,7 +3768,7 @@ export function MemoryChat({
           ...prev,
           {
             id,
-            name: file.name,
+            name: attachmentDisplayName(file.name),
             kind: isImg ? 'image' : 'text',
             text: '',
             mimeType: file.type || undefined,
@@ -3778,7 +3886,8 @@ export function MemoryChat({
       },
       // A document citation opens the document at the page it cites.
       onOpenDocument: (documentId, page) => {
-        const conversation = messagesByConvRef.current[activeConversationId ?? NEW_CHAT] ?? EMPTY_MSGS
+        const conversation =
+          messagesByConvRef.current[activeConversationId ?? NEW_CHAT] ?? EMPTY_MSGS
         const attachment = conversation
           .flatMap((message) => message.attachments ?? [])
           .find((candidate) => candidate.documentId === documentId)
@@ -3817,12 +3926,18 @@ export function MemoryChat({
         fileName: attachment.name,
         mimeType: (attachment as { mimeType?: string }).mimeType,
         path: attachment.path,
-        text: attachment.text
+        text: attachment.text,
+        // A recorded voice note is saved as .webm; its stored kind keeps it audio.
+        recordedKind: attachment.kind
       })
       if (!view.viewable) return
       closePanels()
       if (view.renderer === 'image' && attachment.path) {
-        setLightbox({ url: captureUrlForPath(attachment.path), path: attachment.path })
+        setLightbox({
+          url: captureUrlForPath(attachment.path),
+          path: attachment.path,
+          title: attachment.name
+        })
         return
       }
       setViewer({
@@ -3849,7 +3964,10 @@ export function MemoryChat({
         imageRequest: { ...retry.request, allowUnsafeMemoryOverride: true }
       })
     },
-    openArtifact: openCanvas,
+    openArtifact: (artifact, messageId) => {
+      openCanvas(artifact)
+      setCanvasMessageId(messageId ?? null)
+    },
     selectAskOption: ({ message, ask, option, selected }) => {
       if (!ask.multiSelect) {
         void sendMessage(option)
@@ -3869,7 +3987,16 @@ export function MemoryChat({
     selectVariant: (messageId, direction) => {
       const selected = messages.find((message) => message.id === messageId)
       const cid = activeConversationId
-      if (!selected?.variants?.length || !cid || selected.streaming) return
+      if (!selected || !cid || selected.streaming) return
+      // A saved version shows its own thread: the turns after it come back with it.
+      if (selected.threadVersions) {
+        void window.api
+          .selectRagMessageVersion(cid, messageId, direction)
+          .then((changed) => (changed ? refreshConversationMessages(cid) : undefined))
+          .catch((error) => console.error('Failed to show the selected version:', error))
+        return
+      }
+      if (!selected.variants?.length) return
       const restored = selectAnswerVersion(selected, direction)
       setMessages((previous) =>
         previous.map((message) => (message.id === messageId ? restored : message))
@@ -4044,32 +4171,19 @@ export function MemoryChat({
       >
         {/* Header */}
         <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
-          <button
-            onClick={toggleConversationList}
-            className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
-            title={conversationsToggleLabel}
-            aria-label={conversationsToggleLabel}
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="3" y="4" width="18" height="16" rx="2" strokeWidth={2} />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v16" />
-            </svg>
-          </button>
-          <div className="flex h-8 w-8 items-center justify-center rounded-md border border-neutral-800 bg-neutral-900">
-            <svg
-              className="h-4 w-4 text-green-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-              />
-            </svg>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={toggleConversationList}
+                className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
+                aria-label={conversationsToggleLabel}
+              >
+                <SidebarSimple className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{conversationsToggleLabel}</TooltipContent>
+          </Tooltip>
+          {/* No decorative chat tile here: the sidebar already says where you are. */}
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-medium tracking-wide text-neutral-200">
               {god ? god.name : 'Off Grid AI'}
@@ -4089,81 +4203,62 @@ export function MemoryChat({
               </button>
             ) : (
               <p className="truncate text-xs text-neutral-500">
-                Private, on-device — chat, generate, and build
+                Private and on this device. Chat, generate, and build.
               </p>
             )}
           </div>
 
           {/* Active models and Settings: the same drawers in Chat and God (God runs tasks too). */}
           {/* Active models — pick the model per modality (text/image/voice/STT) */}
-          <button
-            onClick={() => {
-              closePanels()
-              setModelPickerOpen(true)
-            }}
-            className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-            title="Active models"
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="4" y="4" width="16" height="16" rx="2" strokeWidth={2} />
-              <path
-                strokeLinecap="round"
-                strokeWidth={2}
-                d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"
-              />
-            </svg>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  closePanels()
+                  setModelPickerOpen(true)
+                }}
+                className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Active models"
+              >
+                <Cpu className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Active models</TooltipContent>
+          </Tooltip>
 
           {/* Keep the conversation in place while its model settings drawer is open. */}
-          <button
-            onClick={() => {
-              closePanels()
-              setSettingsInitialTab('model')
-              setSettingsOpen(true)
-            }}
-            className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-            title="Settings"
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-            </svg>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  closePanels()
+                  setSettingsInitialTab('model')
+                  setSettingsOpen(true)
+                }}
+                className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Settings"
+              >
+                <Gear className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
           {/* God has no image gallery. */}
           {!god && (
             <>
-          <button
-            ref={galleryTriggerRef}
-            onClick={openGallery}
-            className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-            title="Generated images"
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 15l4-4 4 4 3-3 5 5"
-              />
-              <circle cx="9" cy="9" r="1.5" fill="currentColor" />
-            </svg>
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                ref={galleryTriggerRef}
+                onClick={openGallery}
+                className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Gallery"
+              >
+                <Images className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Gallery</TooltipContent>
+          </Tooltip>
             </>
           )}
           <TaskPanelTrigger conversationId={activeConversationId} />
@@ -4197,9 +4292,11 @@ export function MemoryChat({
                 ref={historyPanelRef}
                 id="conversation-history"
                 order={1}
-                defaultSize={20}
-                minSize={14}
-                maxSize={40}
+                // God's chat column is narrow beside Ares and the rail: a fifth of it cut every
+                // title to two words and the search box to "Search con".
+                defaultSize={god ? 34 : 20}
+                minSize={god ? 28 : 14}
+                maxSize={god ? 50 : 40}
                 collapsible
                 collapsedSize={0}
                 onCollapse={() => setConversationsVisible(false)}
@@ -4289,7 +4386,13 @@ export function MemoryChat({
                   )}
                   {/* Messages */}
                   <div className="relative min-h-0 flex-1">
-                    <div ref={scrollRef} onScroll={onScrollFollow} className="h-full overflow-y-auto">
+                    {/* The top edge fades, so a line scrolled up to the tab strip leaves softly
+                        instead of being cut in half under the tabs. */}
+                    <div
+                      ref={scrollRef}
+                      onScroll={onScrollFollow}
+                      className="h-full overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_16px)]"
+                    >
                       {switchingConversationId !== null &&
                         switchingConversationId === activeConversationId ? (
                         <div
@@ -4593,7 +4696,7 @@ export function MemoryChat({
                                 value={imgModel}
                                 options={imgModels.map((m) => ({
                                   value: m,
-                                  label: m.replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')
+                                  label: imgModelNames[m] ?? modelDisplayName(m) ?? m
                                 }))}
                                 onValueChange={chooseImageModel}
                               />
@@ -4869,7 +4972,10 @@ export function MemoryChat({
                         <AutoHeight>
                           {attachments.length > 0 ? (
                             <div
-                              className="px-3 pt-3"
+                              // A ready chip's name sits in its open button as an inline span, where
+                              // the library's max-width does not apply: a long name spanned the whole
+                              // composer and every chip reflowed when a file finished processing.
+                              className="px-3 pt-3 [&_[data-slot=attachment-chip]_button>span.truncate]:block"
                               aria-busy={attachments.some((a) => a.status === 'loading')}
                             >
                               <AttachmentList
@@ -4885,18 +4991,33 @@ export function MemoryChat({
                                     const url = a.preview || (a.path ? captureUrlForPath(a.path) : '')
                                     if (url) {
                                       closePanels()
-                                      setLightbox({ url, path: a.path })
+                                      setLightbox({ url, path: a.path, title: a.name })
                                     }
                                     return
                                   }
-                                  if (a.text || a.path) {
+                                  // The same viewer a sent message's attachment opens in: a PDF in
+                                  // the PDF viewer, audio in the player. Opening it as text drew an
+                                  // empty page for a PDF and a bare transcript for a recording.
+                                  const stored: StoredMessageAttachment & { mimeType?: string } = {
+                                    name: a.name,
+                                    kind: a.kind,
+                                    text: a.text,
+                                    path: a.path,
+                                    mimeType: a.mimeType
+                                  }
+                                  const view = describeAttachment({
+                                    fileName: a.name,
+                                    mimeType: a.mimeType,
+                                    path: a.path,
+                                    text: a.text,
+                                    recordedKind: a.kind
+                                  })
+                                  if (view.viewable) {
+                                    currentMessageActions.openAttachment(stored)
+                                  } else if (a.text) {
+                                    // Its file was not kept (only what was read from it): show that.
                                     closePanels()
-                                    setViewer({
-                                      title: a.kind === 'pasted' ? 'Pasted text' : a.name,
-                                      text: a.text || '',
-                                      path: a.path,
-                                      kind: a.kind
-                                    })
+                                    setViewer({ title: a.name, text: a.text, kind: a.kind })
                                   }
                                 }}
                               />
@@ -4976,7 +5097,10 @@ export function MemoryChat({
                         <PromptInputFooter className="cursor-auto select-auto flex-wrap gap-x-2 gap-y-2 px-2.5 pb-2.5 pt-1 font-normal text-foreground">
                           {/* Chips wrap to a new line on narrow widths instead of overflowing the composer
                       (the Image chip used to clip off the right edge). */}
-                          <PromptInputTools className="flex-wrap gap-2">
+                          {/* The chips take the room left of mic and send and wrap inside it; sized to
+                              their content they took the whole row once the canvas narrowed it, and
+                              pushed mic and send onto a line of their own. */}
+                          <PromptInputTools className="min-w-0 flex-1 flex-wrap gap-2">
                             {/* "+" menu — attach / image / project / tools */}
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
@@ -5171,25 +5295,29 @@ export function MemoryChat({
                                     <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
                                       Project memory
                                     </DropdownMenuLabel>
-                                    {projects.map((p) => (
-                                      <DropdownMenuItem
-                                        key={p.id}
-                                        onSelect={() => {
-                                          setNoMemory(false)
-                                          assignProject(p.id)
-                                        }}
-                                      >
-                                        <FolderOpen />
-                                        <span
-                                          className={`flex-1 truncate ${activeProjectId === p.id ? 'text-primary' : ''}`}
+                                    {/* About eight projects, then it scrolls: the choices above and
+                                        "New project" below stay in view however many there are. */}
+                                    <div className="max-h-64 overflow-y-auto overscroll-contain">
+                                      {projects.map((p) => (
+                                        <DropdownMenuItem
+                                          key={p.id}
+                                          onSelect={() => {
+                                            setNoMemory(false)
+                                            assignProject(p.id)
+                                          }}
                                         >
-                                          {p.name}
-                                        </span>
-                                        {activeProjectId === p.id && (
-                                          <Check className="h-3.5 w-3.5 text-primary" />
-                                        )}
-                                      </DropdownMenuItem>
-                                    ))}
+                                          <FolderOpen />
+                                          <span
+                                            className={`flex-1 truncate ${activeProjectId === p.id ? 'text-primary' : ''}`}
+                                          >
+                                            {p.name}
+                                          </span>
+                                          {activeProjectId === p.id && (
+                                            <Check className="h-3.5 w-3.5 text-primary" />
+                                          )}
+                                        </DropdownMenuItem>
+                                      ))}
+                                    </div>
                                   </>
                                 )}
                                 <DropdownMenuSeparator />
@@ -5524,8 +5652,16 @@ export function MemoryChat({
           {canvasArtifact && (
             <ArtifactCanvas
               key="artifact-canvas"
-              artifact={canvasArtifact}
+              artifact={shownCanvasArtifact ?? canvasArtifact}
               onClose={() => setCanvasArtifact(null)}
+              onBack={
+                canvasFromGallery
+                  ? () => {
+                      setCanvasArtifact(null)
+                      setShowGallery(true)
+                    }
+                  : undefined
+              }
               width={canvasWidth}
               onResize={setCanvasWidth}
             />
@@ -5629,8 +5765,8 @@ export function MemoryChat({
             lightbox
               ? {
                 url: lightbox.url,
-                alt: 'Generated preview',
-                dialogLabel: 'Generated image preview'
+                alt: lightbox.title ?? 'Generated image',
+                dialogLabel: lightbox.title ?? 'Generated image'
               }
               : null
           }
@@ -5653,6 +5789,8 @@ export function MemoryChat({
                   </TooltipTrigger>
                   <TooltipContent>Download</TooltipContent>
                 </Tooltip>
+                {/* Delete removes a picture Off Grid made; a file the user brought is not its to delete. */}
+                {lightbox.title ? null : (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -5668,6 +5806,7 @@ export function MemoryChat({
                   </TooltipTrigger>
                   <TooltipContent>Delete</TooltipContent>
                 </Tooltip>
+                )}
               </>
             ) : undefined
           }
@@ -5683,8 +5822,36 @@ export function MemoryChat({
               className="w-[min(720px,92vw)] overflow-hidden text-white"
               restoreFocusRef={galleryTriggerRef}
             >
-              <header className="flex items-center justify-between border-b border-neutral-900 px-4 py-3 text-left">
+              {/* One header row: what you are looking at, where from, and close. Three stacked bars
+                  took a fifth of the panel before anything was shown. */}
+              <header className="flex items-center gap-3 border-b border-neutral-900 px-4 py-2.5 text-left">
                 <h2 className="text-sm font-normal text-neutral-200">Gallery</h2>
+                <div className="flex items-center gap-1">
+                  {(['images', 'artifacts'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setGalleryTab(tab)}
+                      className={`rounded px-2.5 py-1 text-xs capitalize transition-colors ${galleryTab === tab ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                    >
+                      {tab}{' '}
+                      <span className="tabular-nums text-neutral-500">
+                        {tab === 'images' ? gallery.length : artifacts.length}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="ml-auto flex items-center gap-1">
+                  {(['chat', 'project', 'all'] as const).map((sc) => (
+                    <button
+                      key={sc}
+                      onClick={() => setGalleryScope(sc)}
+                      disabled={sc === 'project' && !activeProjectId}
+                      className={`rounded px-2 py-0.5 text-[11px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                    >
+                      {sc === 'chat' ? 'This chat' : sc}
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   onClick={() => setShowGallery(false)}
@@ -5694,29 +5861,6 @@ export function MemoryChat({
                   <X className="h-4 w-4" />
                 </button>
               </header>
-              <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-2">
-                {(['images', 'artifacts'] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setGalleryTab(tab)}
-                    className={`rounded px-3 py-1 text-xs capitalize transition-colors ${galleryTab === tab ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
-                  >
-                    {tab} {tab === 'images' ? `(${gallery.length})` : `(${artifacts.length})`}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-1 border-b border-neutral-900 px-3 py-1.5">
-                {(['chat', 'project', 'all'] as const).map((sc) => (
-                  <button
-                    key={sc}
-                    onClick={() => setGalleryScope(sc)}
-                    disabled={sc === 'project' && !activeProjectId}
-                    className={`rounded px-2 py-0.5 text-[10px] capitalize transition-colors disabled:opacity-30 ${galleryScope === sc ? 'bg-neutral-800 text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
-                  >
-                    {sc === 'chat' ? 'This chat' : sc}
-                  </button>
-                ))}
-              </div>
               <div className="flex-1 overflow-y-auto p-3">
                 {galleryTab === 'images' ? (
                   gallery.length === 0 ? (
@@ -5749,35 +5893,43 @@ export function MemoryChat({
                         No artifacts in this {galleryScope === 'all' ? 'app' : galleryScope}.
                       </p>
                     ) : (
-                      <div className="flex flex-col divide-y divide-neutral-900 overflow-hidden rounded-md border border-neutral-800">
+                      <div className="grid grid-cols-2 gap-2">
                         {artifacts.map((a) => (
                           <div
                             key={a.id}
-                            className="group flex items-center gap-2 px-3 py-2 transition-colors hover:bg-neutral-900/60"
+                            className="group flex items-start gap-2 rounded-md border border-neutral-800 bg-neutral-900/30 p-3 transition-colors hover:border-green-500/50 hover:bg-neutral-900/60"
                           >
                             <button
                               onClick={() =>
                                 a.kind === 'image'
                                   ? (closePanels(),
-                                    setLightbox({ url: captureUrlForPath(a.code), path: a.code }))
+                                    setLightbox({
+                                      url: captureUrlForPath(a.code),
+                                      path: a.code,
+                                      title: a.title
+                                    }))
                                   : a.kind === 'text'
                                     ? (closePanels(), setViewer({ title: a.title, text: a.code }))
-                                    : openCanvas({ kind: a.kind, code: a.code, title: a.title })
+                                    : openCanvas({ kind: a.kind, code: a.code, title: a.title }, true)
                               }
-                              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                              className="flex min-w-0 flex-1 flex-col items-start gap-2 text-left"
                             >
                               {a.kind === 'image' ? (
+                                // Big enough to tell the pictures apart: at 32px a screenshot read as an
+                                // empty square.
                                 <img
                                   src={captureUrlForPath(a.code)}
                                   alt=""
-                                  className="h-8 w-8 shrink-0 rounded-sm border border-neutral-800 object-cover"
+                                  loading="lazy"
+                                  decoding="async"
+                                  className="aspect-video w-full shrink-0 rounded-sm border border-neutral-800 bg-neutral-950 object-cover"
                                 />
                               ) : (
                                 <span className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-green-500">
                                   {a.kind === 'text' ? 'input' : a.kind}
                                 </span>
                               )}
-                              <span className="truncate text-xs text-neutral-200">{a.title}</span>
+                              <span className="line-clamp-2 text-sm text-neutral-200">{a.title}</span>
                             </button>
                             <Tooltip>
                               <TooltipTrigger asChild>

@@ -30,8 +30,22 @@ beforeAll(async () => {
   configureRuntime({ dataDir: root, binRoots: [bin] })
   const kev = (await desktopCatalog()).find((model) => model.id === KEV_4B_ID)
   if (!kev) throw new Error('Kev catalog entry is missing')
+  // The runtime reads the shards a base needs from its SafeTensors index, so the index is real
+  // JSON (padded to its catalog size); every other file is a sparse stand-in of its catalog size.
+  const shards = kev.files
+    .map((file) => path.basename(file.name))
+    .filter((name) => /^model\.safetensors-\d+-of-\d+\.safetensors$/.test(name))
   for (const file of kev.files) {
-    if (file.name.startsWith('kev-4b/base/')) {
+    if (file.name === 'kev-4b/base/model.safetensors.index.json') {
+      const index = JSON.stringify({
+        weight_map: Object.fromEntries(shards.map((shard, i) => [`layer.${i}.weight`, shard]))
+      })
+      fs.mkdirSync(base, { recursive: true })
+      fs.writeFileSync(
+        path.join(base, 'model.safetensors.index.json'),
+        index.padEnd(file.sizeBytes ?? 0, ' ')
+      )
+    } else if (file.name.startsWith('kev-4b/base/')) {
       sparseFile(path.join(base, file.name.slice('kev-4b/base/'.length)), file.sizeBytes ?? 0)
     } else {
       sparseFile(path.join(models, file.name), file.sizeBytes ?? 0)

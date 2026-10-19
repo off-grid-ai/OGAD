@@ -73,7 +73,11 @@ const boundary = new NativeIpcBoundary()
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-system-health-'))
 const profile = path.join(root, 'profile')
 const binRoot = path.join(root, 'bin')
-const enginePath = path.join(binRoot, process.platform === 'linux' ? 'llama-cpu' : 'llama', 'llama-server')
+const enginePath = path.join(
+  binRoot,
+  process.platform === 'linux' ? 'llama-cpu' : 'llama',
+  'llama-server'
+)
 const ffmpegPath = path.join(binRoot, 'ffmpeg')
 const whisperPath = path.join(binRoot, 'whisper', 'whisper-cli')
 const snapshots: SystemHealthContract[] = []
@@ -180,7 +184,7 @@ describe('<HealthPanel/> production status integration', () => {
     const user = userEvent.setup()
     render(<HealthPanel />)
 
-    await screen.findByRole('status', { name: 'Chat model (llama-server)' })
+    await screen.findByRole('status', { name: 'Chat model' })
     await expect(boundary.invoke('permissions:get-status')).resolves.toEqual({
       accessibility: true,
       screenRecording: process.platform !== 'darwin',
@@ -229,12 +233,13 @@ describe('<HealthPanel/> production status integration', () => {
       tccBoundary.error = 'TCC bridge unavailable'
       await user.click(screen.getByRole('button', { name: 'Refresh' }))
       await waitFor(() =>
-        expect(latestComponent('permission-accessibility').detail).toContain('TCC bridge unavailable')
+        expect(latestComponent('permission-accessibility').detail).toContain(
+          'TCC bridge unavailable'
+        )
       )
       expectRenderedRecord('permission-accessibility')
       expectRenderedRecord('permission-screen-recording')
       expectRenderedRecord('permission-local-network')
-
     }
 
     executable(
@@ -248,7 +253,7 @@ describe('<HealthPanel/> production status integration', () => {
 
     await waitFor(() => expect(latestComponent('chat').status).toBe('down'))
     expectRenderedRecord('chat')
-    const chat = screen.getByRole('status', { name: 'Chat model (llama-server)' })
+    const chat = screen.getByRole('status', { name: 'Chat model' })
     expect(within(chat).getByText(/engine is too old/i)).not.toBeNull()
     expect(within(chat).getByText(/gemma4/i)).not.toBeNull()
   })
@@ -263,7 +268,7 @@ describe('<HealthPanel/> production status integration', () => {
 
     const user = userEvent.setup()
     render(<HealthPanel />)
-    await screen.findByRole('status', { name: 'Chat model (llama-server)' })
+    await screen.findByRole('status', { name: 'Chat model' })
 
     await user.click(screen.getByRole('button', { name: 'Free engine' }))
 
@@ -275,17 +280,28 @@ describe('<HealthPanel/> production status integration', () => {
 
   it('shows a gateway bind failure after Restart instead of claiming success', async () => {
     cleanup()
-    const api = (globalThis as unknown as { window: { api: {
-      restartComponent: (id: string) => Promise<{ success: boolean; error?: string }>
-    } } }).window.api
+    const api = (
+      globalThis as unknown as {
+        window: {
+          api: {
+            restartComponent: (id: string) => Promise<{ success: boolean; error?: string }>
+          }
+        }
+      }
+    ).window.api
     const previousRestart = api.restartComponent
-    api.restartComponent = async () => ({ success: false, error: 'No free gateway port on 0.0.0.0.' })
+    api.restartComponent = async () => ({
+      success: false,
+      error: 'No free gateway port on 0.0.0.0.'
+    })
     try {
       const user = userEvent.setup()
       render(<HealthPanel />)
       const gateway = await screen.findByRole('status', { name: 'Local gateway' })
       await user.click(within(gateway).getByRole('button', { name: 'Restart' }))
-      expect((await screen.findByRole('alert')).textContent).toContain('No free gateway port on 0.0.0.0.')
+      expect((await screen.findByRole('alert')).textContent).toContain(
+        'No free gateway port on 0.0.0.0.'
+      )
     } finally {
       api.restartComponent = previousRestart
     }

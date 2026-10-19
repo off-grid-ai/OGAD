@@ -40,7 +40,7 @@ vi.mock('@lancedb/lancedb', () => ({
 
 import { toolChat, type ToolActivity } from '../tools'
 import { llm } from '../llm'
-import { getDB } from '../database'
+import { deleteSetting, getDB, saveSetting } from '../database'
 import { createProject, ensureRagStoreSchema } from '../rag/store'
 import { knowledgeBase } from '../rag'
 import { documentStore } from '../documents'
@@ -250,6 +250,10 @@ function handbook(fact: string): string {
 }
 
 describe('project chats answer from the knowledge base', () => {
+  // These turns read the project's files for every question (Settings → Text → Project knowledge →
+  // Every answer); the default, When needed, leaves them to the search tool.
+  beforeEach(() => saveSetting('knowledgeBaseRetrieval', 'every-answer'))
+  afterAll(() => deleteSetting('knowledgeBaseRetrieval'))
   it('gives a project turn its files as cited passages, never another project-s', async () => {
     createProject({ id: 'p-borealis', name: 'Borealis' })
     createProject({ id: 'p-elsewhere', name: 'Elsewhere' })

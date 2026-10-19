@@ -31,6 +31,15 @@ export function isDecisionModel(model: {
   )
 }
 
+/**
+ * A decision model staged for evaluation: an added-folder model kept under a `decision-eval` folder.
+ * It is a task specialist, not a chat model, so chat pickers leave it out. Paths are matched with
+ * either separator, since Windows lists them with backslashes.
+ */
+export function isStagedDecisionModel(model: { files?: readonly { name: string }[] }): boolean {
+  return (model.files ?? []).some((file) => /[\\/]decision-eval[\\/]/i.test(file.name))
+}
+
 export function isDecisionStrategy(strategy: ComputerUseModelStrategy): boolean {
   return strategyTaskRoles(strategy).includes('decision')
 }

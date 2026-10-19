@@ -8,7 +8,23 @@ import {
   clearAIRequestLogs,
   readAIRequestAttachment
 } from './ai-request-log-store'
-import { AI_MODALITIES, type AILogQuery } from '../shared/ai-request-log'
+import { modelDisplayName } from '@offgrid/models'
+import {
+  AI_MODALITIES,
+  type AILogPage,
+  type AILogQuery,
+  type AIRequestSummary
+} from '../shared/ai-request-log'
+
+/** Turns a logged model reference (an id, a file name or a path) into the name a person reads. */
+export type AILogModelNamer = (ref: string) => string
+
+const sharedNamer: AILogModelNamer = (ref) => modelDisplayName(ref) ?? ref
+
+/** Logs record what the runtime ran: often a file path. The screen shows the model's name. */
+export function nameLoggedModels<T extends AIRequestSummary>(row: T, name: AILogModelNamer): T {
+  return row.model ? { ...row, model: name(row.model) } : row
+}
 
 let activityWindow: BrowserWindow | null = null
 
@@ -73,15 +89,21 @@ export async function openAIActivityWindow(): Promise<void> {
   }
 }
 
-export function setupAIRequestLogIPC(): void {
-  ipcMain.handle('ai-logs:list', (_event, query: unknown) =>
-    listAIRequestLogs(validateAILogQuery(query))
-  )
-  ipcMain.handle('ai-logs:detail', (_event, id: unknown) =>
-    typeof id === 'string' ? getAIRequestLog(id) : null
-  )
+export function setupAIRequestLogIPC(nameModel: AILogModelNamer = sharedNamer): void {
+  ipcMain.handle('ai-logs:list', (_event, query: unknown) => {
+    const page: AILogPage = listAIRequestLogs(validateAILogQuery(query))
+    return Array.isArray(page.rows)
+      ? { ...page, rows: page.rows.map((row) => nameLoggedModels(row, nameModel)) }
+      : page
+  })
+  ipcMain.handle('ai-logs:detail', (_event, id: unknown) => {
+    const record = typeof id === 'string' ? getAIRequestLog(id) : null
+    return record ? nameLoggedModels(record, nameModel) : null
+  })
   ipcMain.handle('ai-logs:related', (_event, id: unknown) =>
-    typeof id === 'string' ? relatedAIRequests(id) : []
+    typeof id === 'string'
+      ? relatedAIRequests(id).map((row) => nameLoggedModels(row, nameModel))
+      : []
   )
   ipcMain.handle('ai-logs:attachment', (_event, id: unknown, asset: unknown) =>
     typeof id === 'string' && typeof asset === 'string' ? readAIRequestAttachment(id, asset) : null

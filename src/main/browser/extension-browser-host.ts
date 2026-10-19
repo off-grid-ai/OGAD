@@ -33,7 +33,11 @@ import {
 } from './browser-playwright-task'
 import type { BrowserRailHost, BrowserTaskRequest, WebTaskResult } from './browser-rail'
 import { ElectronPlaywrightRelay } from './electron-playwright-relay'
-import { createExtensionPageProvider, type ExtensionTabContents } from './extension-tab-pages'
+import {
+  createExtensionPageProvider,
+  taskTabLabel,
+  type ExtensionTabContents
+} from './extension-tab-pages'
 import { ExtensionSnapshotSession } from './extension-snapshot-session'
 import {
   DebuggerFallbackSession,
@@ -219,8 +223,10 @@ async function runInBrowser(
     steps.push(note)
     recordTaskRun({ taskId, journeyId, kind: 'web_use', title: goal, steps: [...steps] })
   }
-  const pages = createExtensionPageProvider(link, () =>
-    recordStep('The page opened a new tab. Continuing there.')
+  const pages = createExtensionPageProvider(
+    link,
+    () => recordStep('The page opened a new tab. Continuing there.'),
+    taskTabLabel(goal)
   )
   const releaseSession = registerVisionSession(taskId, guard, controller, (_s, status, action) =>
     setState(status, action)

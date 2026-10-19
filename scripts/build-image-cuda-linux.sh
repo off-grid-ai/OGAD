@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Match the Vulkan image runtime source while adding a separate NVIDIA engine.
 ROOT="${OFFGRID_BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-SD_REF=master-920-2f88688
-SD_COMMIT=2f886889e6e8b78738d6b87f7191f6018557c551
+SD_REF=master-968-8cd731e
+SD_COMMIT=8cd731e7b4667eb8f40a153315b9a7125d09a58d
 CUDA_BUILD_IMAGE=nvidia/cuda:12.8.1-devel-ubuntu24.04@sha256:4b9ed5fa8361736996499f64ecebf25d4ec37ff56e4d11323ccde10aa36e0c43
 
 if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
@@ -16,7 +16,7 @@ fi
 # Set OFFGRID_BUILD_IMAGE_CUDA_FROM_SOURCE=1 only when regenerating the archive.
 if [ "${OFFGRID_BUILD_IMAGE_CUDA_FROM_SOURCE:-0}" != 1 ]; then
   IMAGE_ARCHIVE="ogad-sd-${SD_REF}-linux-x64-cuda12.8-multiarch-v1.tar.gz"
-  IMAGE_SHA256=26f3e494a26d8fa3b18c5fb5bdf2865869bbd0e6cbfd14b1815dbaff9b4c7dd6
+  IMAGE_SHA256=884872dee1905cf94a99757e54b76120429471453f3c186af8651778ca3de0ff
   IMAGE_WORK="$(mktemp -d)"
   trap 'rm -rf -- "$IMAGE_WORK"' EXIT
   if [ -n "${OFFGRID_IMAGE_ARCHIVE_CACHE_DIR:-}" ] &&

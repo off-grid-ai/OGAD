@@ -1,9 +1,13 @@
 import { memo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { FilePreview, type FilePreviewState } from '@offgrid/operator-ui/operator/media/file-preview'
+import {
+  FilePreview,
+  type FilePreviewState
+} from '@offgrid/operator-ui/operator/media/file-preview'
 import pdfWorkerUrl from '@offgrid/operator-ui/pdf.worker.min.mjs?url'
 import { captureUrlForPath } from '../../../../../shared/ogcapture-url'
 import { useMediaUrl, type MediaUrlState } from '@renderer/lib/media-url'
+import { AudioClip } from '../../AudioClip'
 
 const ease = [0.16, 1, 0.3, 1] as const
 const PDF_OPTIONS = { useSystemFonts: true }
@@ -44,7 +48,12 @@ function previewFor(
   content: AttachmentViewerContent,
   src: string,
   pdfMedia: MediaUrlState,
-  pdf: { page: number; setPage: (page: number) => void; scale: number; setScale: (s: number) => void }
+  pdf: {
+    page: number
+    setPage: (page: number) => void
+    scale: number
+    setScale: (s: number) => void
+  }
 ): FilePreviewState {
   const missing = (what: string): FilePreviewState => ({
     kind: 'unavailable',
@@ -92,6 +101,10 @@ function AttachmentPreviewComponent({
   const pdfMedia = useMediaUrl(
     content.renderer === 'document' && !framedDocument ? content.path : null
   )
+  // The waveform decodes the clip's bytes, and a page cannot fetch ogcapture://, so a voice note
+  // plays from the media server's http URL, like a PDF does.
+  const voiceMedia = useMediaUrl(content.renderer === 'audio' ? content.path : null)
+  const voiceUrl = voiceMedia.status === 'missing' ? src : voiceMedia.url
   const preview = previewFor(content, src, pdfMedia, { page, setPage, scale, setScale })
 
   return (
@@ -104,10 +117,26 @@ function AttachmentPreviewComponent({
         transition={{ duration: 0.4, ease }}
         // A PDF fills the panel's height; the viewer fits each page to it.
         className={
-          framedDocument ? 'h-full' : preview.kind === 'pdf' ? `h-full ${PREVIEW_SURFACE}` : PREVIEW_SURFACE
+          framedDocument
+            ? 'h-full'
+            : preview.kind === 'pdf'
+              ? `h-full ${PREVIEW_SURFACE}`
+              : PREVIEW_SURFACE
         }
       >
-        {framedDocument ? (
+        {content.renderer === 'audio' && src ? (
+          // A voice note plays in the same waveform player chat uses, starting as it opens.
+          voiceUrl ? (
+            <AudioClip
+              src={voiceUrl}
+              id={content.path ?? content.title}
+              transcript={content.text}
+              autoPlay
+            />
+          ) : (
+            <FilePreview preview={{ kind: 'loading' }} />
+          )
+        ) : framedDocument ? (
           src ? (
             <FramedDocument src={src} title={content.title} />
           ) : (

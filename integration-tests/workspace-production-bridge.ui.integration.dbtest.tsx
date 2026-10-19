@@ -252,7 +252,11 @@ describe('production workspace bridge', () => {
         ['assistant', 'The production bridge persisted this answer.']
       ])
     })
-    expect(await screen.findByPlaceholderText('Check the saved answer (Tab)', undefined, { timeout: SUGGESTION_WAIT_MS })).toBeTruthy()
+    expect(
+      await screen.findByPlaceholderText('Check the saved answer (Tab)', undefined, {
+        timeout: SUGGESTION_WAIT_MS
+      })
+    ).toBeTruthy()
     expect(fake.requests).toHaveLength(2)
   })
 
@@ -303,7 +307,10 @@ describe('production workspace bridge', () => {
       expect(
         await inTranscript('The supported pages were read and the unsupported URL was rejected.')
       ).toBeTruthy()
-      await user.click(await screen.findByRole('button', { name: 'Work done' }, { timeout: 5_000 }))
+      // The turn's last step (reading the unsupported URL) failed, so its work reads Work failed.
+      await user.click(
+        await screen.findByRole('button', { name: 'Work failed' }, { timeout: 5_000 })
+      )
 
       const toolResults = await waitFor(() => {
         const results = screen.getAllByRole('button', {
@@ -387,106 +394,136 @@ describe('production workspace bridge', () => {
     expect(await inTranscript('This reply is still in progress.')).toBeTruthy()
   })
 
-  it('shows and saves a compaction notice with its summary when the chat reaches 80% of its context', async () => {
-    const longAnswer = `Stored answer ${'A'.repeat(54_000)}`
-    const summary = '## Goal\nStart a long conversation.\n## Where we left off\nA long stored answer.'
-    fake.enqueue(
-      { content: longAnswer },
-      { content: 'Continue after the context fills' },
-      { content: summary },
-      { content: 'The next answer still works.' },
-      { content: 'Review the shorter conversation' }
-    )
-    const user = userEvent.setup()
-    renderChat()
+  it(
+    'shows and saves a compaction notice with its summary when the chat reaches 80% of its context',
+    async () => {
+      const longAnswer = `Stored answer ${'A'.repeat(54_000)}`
+      const summary =
+        '## Goal\nStart a long conversation.\n## Where we left off\nA long stored answer.'
+      fake.enqueue(
+        { content: longAnswer },
+        { content: 'Continue after the context fills' },
+        { content: summary },
+        { content: 'The next answer still works.' },
+        { content: 'Review the shorter conversation' }
+      )
+      const user = userEvent.setup()
+      renderChat()
 
-    const composer = await screen.findByPlaceholderText(/^ask /i)
-    await user.click(screen.getByRole('button', { name: 'New chat' }))
-    fireEvent.change(composer, { target: { value: 'Start a long conversation' } })
-    await user.click(screen.getByRole('button', { name: /^send$/i }))
-    expect(await inTranscript(longAnswer)).toBeTruthy()
-    expect(await screen.findByPlaceholderText('Continue after the context fills (Tab)', undefined, { timeout: SUGGESTION_WAIT_MS })).toBeTruthy()
+      const composer = await screen.findByPlaceholderText(/^ask /i)
+      await user.click(screen.getByRole('button', { name: 'New chat' }))
+      fireEvent.change(composer, { target: { value: 'Start a long conversation' } })
+      await user.click(screen.getByRole('button', { name: /^send$/i }))
+      expect(await inTranscript(longAnswer)).toBeTruthy()
+      expect(
+        await screen.findByPlaceholderText('Continue after the context fills (Tab)', undefined, {
+          timeout: SUGGESTION_WAIT_MS
+        })
+      ).toBeTruthy()
 
-    fireEvent.change(composer, { target: { value: 'Continue after the context fills' } })
-    await user.click(screen.getByRole('button', { name: /^send$/i }))
-    expect(await inTranscript('The next answer still works.')).toBeTruthy()
-    expect(
-      await screen.findByText('Compacted conversation to make room for more messages.')
-    ).toBeTruthy()
-    expect(await screen.findByPlaceholderText('Review the shorter conversation (Tab)', undefined, { timeout: SUGGESTION_WAIT_MS })).toBeTruthy()
-    const summaryRequest = JSON.stringify(fake.requests[2])
-    expect(summaryRequest).toContain('## Facts and preferences')
-    const nextModelRequest = JSON.stringify(fake.requests[3])
-    expect(nextModelRequest).toContain('Summary of the earlier conversation')
-    expect(nextModelRequest).toContain('Start a long conversation.')
-    expect(nextModelRequest).not.toContain(longAnswer)
+      fireEvent.change(composer, { target: { value: 'Continue after the context fills' } })
+      await user.click(screen.getByRole('button', { name: /^send$/i }))
+      expect(await inTranscript('The next answer still works.')).toBeTruthy()
+      expect(
+        await screen.findByText('Compacted conversation to make room for more messages.')
+      ).toBeTruthy()
+      expect(
+        await screen.findByPlaceholderText('Review the shorter conversation (Tab)', undefined, {
+          timeout: SUGGESTION_WAIT_MS
+        })
+      ).toBeTruthy()
+      const summaryRequest = JSON.stringify(fake.requests[2])
+      expect(summaryRequest).toContain('## Facts and preferences')
+      const nextModelRequest = JSON.stringify(fake.requests[3])
+      expect(nextModelRequest).toContain('Summary of the earlier conversation')
+      expect(nextModelRequest).toContain('Start a long conversation.')
+      expect(nextModelRequest).not.toContain(longAnswer)
 
-    const { getRagConversations, getRagMessages } = await import('../src/main/database')
-    const conversation = getRagConversations().find(
-      ({ title }) => title === 'Start a long conversation'
-    )
-    expect(conversation).toBeTruthy()
-    const notice = getRagMessages(conversation!.id).find(({ content }) => content === '_Compacted_')
-    expect(notice).toBeTruthy()
-    expect(JSON.parse(String(notice!.context))).toEqual({ notice: true, compactionSummary: summary })
-  }, SUGGESTION_TEST_TIMEOUT_MS)
-
-  it('uses the same chat Thinking control for remote provider requests', async () => {
-    const endpoint = `http://127.0.0.1:${fake.port}/v1`
-    await window.api.setLlmSettings({ reasoningBudget: 1024 })
-    try {
-      for (const provider of ['openrouter', 'ollama', 'lmstudio', 'ogad'] as const) {
-        fake.reset()
-        await window.api.setRemoteVisionServer({ provider, endpoint, model: 'integration-model' })
-        fake.enqueue(
-          { content: `${provider} answered with Thinking on.` },
-          { content: 'Try with Thinking off' },
-          { content: `${provider} answered with Thinking off.` },
-          { content: 'Compare both answers' }
-        )
-        const user = userEvent.setup()
-        renderChat()
-        const composer = await screen.findByPlaceholderText(/^ask /i)
-        await user.click(screen.getByRole('button', { name: 'New chat' }))
-        await user.click(screen.getByRole('button', { name: /^Thinking$/i }))
-        fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking on` } })
-        await user.click(screen.getByRole('button', { name: /^send$/i }))
-        expect(await inTranscript(`${provider} answered with Thinking on.`)).toBeTruthy()
-        expect(await screen.findByPlaceholderText('Try with Thinking off (Tab)', undefined, { timeout: SUGGESTION_WAIT_MS })).toBeTruthy()
-        const onRequest = fake.requests[0]
-        if (provider === 'openrouter') {
-          expect(onRequest?.reasoning).toEqual({ max_tokens: 1024 })
-        } else if (provider === 'ollama') {
-          expect(onRequest?.reasoning_effort).toBe('low')
-        } else {
-          expect(onRequest?.chat_template_kwargs).toEqual({ enable_thinking: true })
-          if (provider === 'ogad') expect(onRequest?.reasoning_budget_tokens).toBe(1024)
-        }
-
-        await user.click(screen.getByRole('button', { name: /^Thinking$/i }))
-        fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking off` } })
-        await user.click(screen.getByRole('button', { name: /^send$/i }))
-        expect(await inTranscript(`${provider} answered with Thinking off.`)).toBeTruthy()
-        expect(await screen.findByPlaceholderText('Compare both answers (Tab)', undefined, { timeout: SUGGESTION_WAIT_MS })).toBeTruthy()
-        const offRequest = fake.requests[2]
-        if (provider === 'openrouter') {
-          expect(offRequest?.reasoning).toEqual({ effort: 'none' })
-        } else if (provider === 'ollama') {
-          expect(offRequest?.reasoning_effort).toBe('none')
-        } else {
-          expect(offRequest?.chat_template_kwargs).toEqual({ enable_thinking: false })
-        }
-        cleanup()
-      }
-    } finally {
-      await window.api.setRemoteVisionServer({
-        provider: 'custom',
-        endpoint,
-        model: 'integration-model'
+      const { getRagConversations, getRagMessages } = await import('../src/main/database')
+      const conversation = getRagConversations().find(
+        ({ title }) => title === 'Start a long conversation'
+      )
+      expect(conversation).toBeTruthy()
+      const notice = getRagMessages(conversation!.id).find(
+        ({ content }) => content === '_Compacted_'
+      )
+      expect(notice).toBeTruthy()
+      expect(JSON.parse(String(notice!.context))).toEqual({
+        notice: true,
+        compactionSummary: summary
       })
-      await window.api.setLlmSettings({ reasoningBudget: 0 })
-    }
-  }, SUGGESTION_TEST_TIMEOUT_MS)
+    },
+    SUGGESTION_TEST_TIMEOUT_MS
+  )
+
+  it(
+    'uses the same chat Thinking control for remote provider requests',
+    async () => {
+      const endpoint = `http://127.0.0.1:${fake.port}/v1`
+      await window.api.setLlmSettings({ reasoningBudget: 1024 })
+      try {
+        for (const provider of ['openrouter', 'ollama', 'lmstudio', 'ogad'] as const) {
+          fake.reset()
+          await window.api.setRemoteVisionServer({ provider, endpoint, model: 'integration-model' })
+          fake.enqueue(
+            { content: `${provider} answered with Thinking on.` },
+            { content: 'Try with Thinking off' },
+            { content: `${provider} answered with Thinking off.` },
+            { content: 'Compare both answers' }
+          )
+          const user = userEvent.setup()
+          renderChat()
+          const composer = await screen.findByPlaceholderText(/^ask /i)
+          await user.click(screen.getByRole('button', { name: 'New chat' }))
+          await user.click(screen.getByRole('button', { name: /^Thinking$/i }))
+          fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking on` } })
+          await user.click(screen.getByRole('button', { name: /^send$/i }))
+          expect(await inTranscript(`${provider} answered with Thinking on.`)).toBeTruthy()
+          expect(
+            await screen.findByPlaceholderText('Try with Thinking off (Tab)', undefined, {
+              timeout: SUGGESTION_WAIT_MS
+            })
+          ).toBeTruthy()
+          const onRequest = fake.requests[0]
+          if (provider === 'openrouter') {
+            expect(onRequest?.reasoning).toEqual({ max_tokens: 1024 })
+          } else if (provider === 'ollama') {
+            expect(onRequest?.reasoning_effort).toBe('low')
+          } else {
+            expect(onRequest?.chat_template_kwargs).toEqual({ enable_thinking: true })
+            if (provider === 'ogad') expect(onRequest?.reasoning_budget_tokens).toBe(1024)
+          }
+
+          await user.click(screen.getByRole('button', { name: /^Thinking$/i }))
+          fireEvent.change(composer, { target: { value: `Test ${provider} with Thinking off` } })
+          await user.click(screen.getByRole('button', { name: /^send$/i }))
+          expect(await inTranscript(`${provider} answered with Thinking off.`)).toBeTruthy()
+          expect(
+            await screen.findByPlaceholderText('Compare both answers (Tab)', undefined, {
+              timeout: SUGGESTION_WAIT_MS
+            })
+          ).toBeTruthy()
+          const offRequest = fake.requests[2]
+          if (provider === 'openrouter') {
+            expect(offRequest?.reasoning).toEqual({ effort: 'none' })
+          } else if (provider === 'ollama') {
+            expect(offRequest?.reasoning_effort).toBe('none')
+          } else {
+            expect(offRequest?.chat_template_kwargs).toEqual({ enable_thinking: false })
+          }
+          cleanup()
+        }
+      } finally {
+        await window.api.setRemoteVisionServer({
+          provider: 'custom',
+          endpoint,
+          model: 'integration-model'
+        })
+        await window.api.setLlmSettings({ reasoningBudget: 0 })
+      }
+    },
+    SUGGESTION_TEST_TIMEOUT_MS
+  )
 
   it('shows Gemini thinking and completes a signed reasoning tool round', async () => {
     const endpoint = `http://127.0.0.1:${fake.port}/v1`

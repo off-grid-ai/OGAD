@@ -1,9 +1,12 @@
 import { memo } from 'react'
+import { Atom, Code, FileHtml, FileSvg, FileText, TreeStructure } from '@phosphor-icons/react'
+import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { AnimatedGroup } from '@offgrid/operator-ui/operator/motion/animated-group'
 import { AnimatedNumber } from '@offgrid/operator-ui/operator/motion/animated-number'
 import { Button } from '@renderer/components/ui/button'
 import { deviceNoun } from '@renderer/lib/device'
 import type { Artifact } from '../../ArtifactCanvas'
+import { artifactTitle } from '../../../../../shared/artifact-title'
 import type { AskBlock, ChatMessage } from '../types'
 
 function ImageMemoryRetryActionComponent({
@@ -36,35 +39,49 @@ function ImageMemoryRetryActionComponent({
   )
 }
 
+const ARTIFACT_ICON = {
+  html: FileHtml,
+  react: Atom,
+  svg: FileSvg,
+  mermaid: TreeStructure,
+  text: FileText
+} as const
+
 function ArtifactCardComponent({
   artifact,
+  building = false,
   onOpen
 }: Readonly<{
   artifact: Artifact | null
+  /** The answer is still streaming this artifact: it can be opened and watched as it renders. */
+  building?: boolean
   onOpen: (artifact: Artifact) => void
 }>): React.JSX.Element | null {
   if (!artifact) return null
+  const Icon = (ARTIFACT_ICON as Partial<Record<string, typeof Code>>)[artifact.kind] ?? Code
+  // Named by what it is (its page title, its component), not by its format.
+  const label = artifact.title || artifactTitle(artifact.kind, artifact.code)
   return (
     <button
       type="button"
       onClick={() => onOpen(artifact)}
-      className="mt-2 flex w-full items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2.5 text-left transition-colors hover:border-green-500/60"
+      className="mt-2 flex w-full min-w-64 items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2.5 text-left transition-colors hover:border-green-500/60"
     >
-      <span className="flex h-9 w-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-          />
-        </svg>
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 text-green-500">
+        <Icon className="h-4 w-4" aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs text-neutral-200">
-          {artifact.title || `${artifact.kind.toUpperCase()} artifact`}
-        </span>
-        <span className="block text-[11px] text-neutral-500">Click to open in the canvas →</span>
+        <span className="block truncate text-xs text-neutral-200">{label}</span>
+        {/* A finished artifact is its name; the icon says what kind it is. */}
+        {building || artifact.partial ? (
+          <span className="block text-[11px] text-neutral-500">
+            {building ? (
+              <TextShimmer as="span">Building. Open to watch it render</TextShimmer>
+            ) : (
+              'Stopped before it finished. Open to see what was made'
+            )}
+          </span>
+        ) : null}
       </span>
     </button>
   )

@@ -205,7 +205,8 @@ test('MCP connector: add, test, rename, remove after confirming', async () => {
   await expect(page.getByRole('heading', { name: 'Synthetic notes' })).toBeVisible()
   await page.getByRole('button', { name: 'Test' }).click()
   await expect(page.getByText('connected', { exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('lookup_note')).toBeVisible()
+  // The server's `lookup_note` tool is listed in words.
+  await expect(page.getByText('Lookup note', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Edit' }).click()
   const form = page.getByRole('form', { name: 'Edit Synthetic notes' })

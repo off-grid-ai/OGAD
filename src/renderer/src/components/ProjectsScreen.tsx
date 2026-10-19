@@ -34,9 +34,10 @@ import {
 } from '@offgrid/operator-ui/operator/coss/empty'
 import { Button } from './ui/button'
 import { GlyphSwap, IconTip } from './IconTip'
-import { ArtifactCanvas, type Artifact } from './ArtifactCanvas'
+import { ArtifactCanvas, parseArtifact, type Artifact } from './ArtifactCanvas'
 import { artifactKindLabel } from '@renderer/lib/artifact-labels'
-import { timeAgo } from '@renderer/lib/time'
+import { parseSqliteUtc, timeAgo } from '@renderer/lib/time'
+import { artifactTitle } from '../../../shared/artifact-title'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
 import {
   PROJECT_DELETE_FALLBACK_REASON,
@@ -52,20 +53,78 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (window as any).api
 
-// Artifacts saved within a project — listed (and openable) from the project view.
-function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElement {
-  const [items, setItems] = useState<(Artifact & { id: string; title: string; created: number })[]>(
-    []
+type ProjectArtifact = Artifact & { id: string; title: string; created: number }
+
+/** How many of the project's most recent chats are read for artifacts their replies hold. */
+const PROJECT_CHATS_READ = 50
+
+/**
+ * The artifacts the project's chats hold, read from their replies. The saved library only has what
+ * was made on this device while the chat was already in the project: a chat moved in later, synced
+ * from another device or restored brought its artifacts with it, and the tab still said 0.
+ */
+async function artifactsInProjectChats(projectId: string): Promise<ProjectArtifact[]> {
+  const conversations: { id: string }[] =
+    (await api.getRagConversations?.(projectId, { limit: PROJECT_CHATS_READ })) ?? []
+  const threads = await Promise.all(
+    conversations.map(async (conversation) => ({
+      conversation,
+      messages: ((await api.getRagMessages?.(conversation.id)) ?? []) as {
+        id: number
+        uuid?: string
+        role: string
+        content: string
+        created_at: string
+      }[]
+    }))
   )
+  return threads.flatMap(({ conversation, messages }) =>
+    messages.flatMap((message) => {
+      if (message.role !== 'assistant') return []
+      const artifact = parseArtifact(message.content)
+      if (!artifact || artifact.partial) return []
+      return [
+        {
+          kind: artifact.kind,
+          code: artifact.code,
+          id: `${conversation.id}:${message.uuid ?? message.id}`,
+          title: artifactTitle(artifact.kind, artifact.code),
+          created: parseSqliteUtc(message.created_at).getTime()
+        }
+      ]
+    })
+  )
+}
+
+// Artifacts made within a project — listed (and openable) from the project view.
+function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElement {
+  const [items, setItems] = useState<ProjectArtifact[]>([])
   const [open, setOpen] = useState<Artifact | null>(null)
   useEffect(() => {
+    const run = { live: true }
     ;(async () => {
       try {
-        setItems((await api.listArtifacts?.({ projectId })) || [])
+        const [saved, inChats] = await Promise.all([
+          api.listArtifacts?.({ projectId }) as Promise<ProjectArtifact[] | undefined>,
+          artifactsInProjectChats(projectId)
+        ])
+        // One entry per artifact: a saved copy and the reply it came from are the same thing.
+        const known = new Set((saved ?? []).map((a) => `${a.kind}\n${a.code}`))
+        const fresh = inChats.filter((a) => {
+          const key = `${a.kind}\n${a.code}`
+          if (known.has(key)) return false
+          known.add(key)
+          return true
+        })
+        const merged = [...(saved ?? []), ...fresh].sort((a, b) => b.created - a.created)
+        if (run.live) setItems(merged)
       } catch {
         /* ignore */
       }
     })()
+    return () => {
+      run.live = false
+    }
   }, [projectId])
   return (
     <div className="w-full px-8 py-6">
@@ -74,8 +133,7 @@ function ProjectArtifacts({ projectId }: { projectId: string }): React.ReactElem
       </div>
       {items.length === 0 ? (
         <p className="py-10 text-center text-sm text-neutral-600">
-          No artifacts yet — generate HTML, React, SVG, Mermaid, or docs in a chat scoped to this
-          project and they’ll appear here.
+          Pages, diagrams and documents made in this project&apos;s chats appear here.
         </p>
       ) : (
         <div className="divide-y divide-neutral-800/80 overflow-hidden rounded-lg border border-neutral-800/80 bg-neutral-900/30">
@@ -168,6 +226,10 @@ export function ProjectsScreen({
   const [localActiveId, setLocalActiveId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  const [projectQuery, setProjectQuery] = useState('')
+  const shownProjects = projectQuery.trim()
+    ? projects.filter((p) => p.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))
+    : projects
   const [view, setView] = useState<'chat' | 'artifacts' | 'config'>('chat')
   const [deleteFailure, setDeleteFailure] = useState('')
 
@@ -249,6 +311,19 @@ export function ProjectsScreen({
             {deleteFailure}
           </p>
         ) : null}
+        {/* Outside the scrolling list, so finding a project never means scrolling back up. */}
+        <div className="px-3 pb-2">
+          <input
+            value={projectQuery}
+            onChange={(e) => setProjectQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setProjectQuery('')
+            }}
+            aria-label="Find a project"
+            placeholder="Find a project"
+            className="w-full rounded-md border border-neutral-800 bg-neutral-900/60 px-2.5 py-1.5 text-xs text-white placeholder-neutral-600 outline-none transition-colors focus:border-green-500"
+          />
+        </div>
         <div className="flex-1 overflow-y-auto px-2">
           {creating && (
             <input
@@ -273,7 +348,7 @@ export function ProjectsScreen({
             </p>
           )}
           <AnimatePresence initial={false}>
-            {projects.map((p) => (
+            {shownProjects.map((p) => (
               <motion.button
                 key={p.id}
                 layout
@@ -429,25 +504,29 @@ function ProjectChats({
       </div>
       {chats.length === 0 ? (
         <p className="py-10 text-center text-sm text-neutral-600">
-          No chats in this project yet. Start one above — it opens in the Chat screen, grounded in
-          this project.
+          No chats in this project yet. Start one above, and it answers from this project&apos;s
+          knowledge.
         </p>
       ) : (
+        // A grid uses the width; the title gets two lines and the count sits under it, so a chat
+        // reads by its title instead of being cut at two dozen characters.
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {chats.map((c) => (
             <Card
               render={<button />}
               key={c.id}
               onClick={() => onOpenChat({ conversationId: c.id })}
-              className="group w-full min-w-0 flex-row items-center gap-2 p-2.5 text-left transition-colors hover:bg-neutral-900/60"
+              className="group w-full min-w-0 flex-row items-start gap-2 p-2.5 text-left transition-colors hover:bg-neutral-900/60"
             >
-              <IconMessage className="h-4 w-4 shrink-0 text-neutral-600 group-hover:text-green-500" />
-              <div className="min-w-0 flex-1 truncate text-sm text-neutral-200">
-                {c.title || 'Untitled chat'}
-              </div>
-              <div className="shrink-0 text-[11px] text-neutral-600">
-                {c.message_count ? `${c.message_count} messages · ` : ''}
-                {timeAgo(c.updated_at)}
+              <IconMessage className="mt-0.5 h-4 w-4 shrink-0 text-neutral-600 group-hover:text-green-500" />
+              <div className="min-w-0 flex-1">
+                <div className="line-clamp-2 text-sm text-neutral-200">
+                  {c.title || 'Untitled chat'}
+                </div>
+                <div className="mt-0.5 text-[11px] tabular-nums text-neutral-600">
+                  {c.message_count ? `${c.message_count} messages · ` : ''}
+                  {timeAgo(c.updated_at)}
+                </div>
               </div>
             </Card>
           ))}
@@ -496,93 +575,101 @@ function ProjectConfig({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="flex items-center justify-end gap-3 border-b border-neutral-800 px-6 py-3">
-        {savedAt && !dirty && <span className="text-[11px] text-neutral-600">{savedAt}</span>}
-        <IconTip label="Save">
-          <Button
-            variant="outline"
-            size="icon-sm"
-            aria-label="Save"
-            aria-busy={saving || undefined}
-            onClick={save}
-            disabled={!dirty || saving}
-            className="border-neutral-700 text-white hover:border-green-500 hover:text-green-500 disabled:opacity-40"
-          >
-            <GlyphSwap glyphKey={saving ? 'busy' : 'idle'}>
-              {saving ? (
-                <IconLoader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <IconDeviceFloppy className="h-4 w-4" />
-              )}
-            </GlyphSwap>
-          </Button>
-        </IconTip>
-        <IconTip label="Delete project">
-          <button
-            onClick={onDelete}
-            title="Delete project"
-            className="rounded-md p-1.5 text-neutral-500 transition-colors hover:text-red-500"
-          >
-            <IconTrash className="h-4 w-4" />
-          </button>
-        </IconTip>
-      </div>
+      {/* Landscape: what the project is on the left, what it knows on the right. Save and delete
+          sit beside the name instead of on a toolbar row of their own. */}
+      <div className="grid w-full gap-x-10 gap-y-8 px-6 py-6 xl:grid-cols-2">
+        <div className="min-w-0 space-y-5">
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <Field label="Name">
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-white outline-none focus:border-green-500"
+                />
+              </Field>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 pb-1">
+              {savedAt && !dirty && <span className="text-[11px] text-neutral-600">{savedAt}</span>}
+              <IconTip label="Save">
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label="Save"
+                  aria-busy={saving || undefined}
+                  onClick={save}
+                  disabled={!dirty || saving}
+                  className="border-neutral-700 text-white hover:border-green-500 hover:text-green-500 disabled:opacity-40"
+                >
+                  <GlyphSwap glyphKey={saving ? 'busy' : 'idle'}>
+                    {saving ? (
+                      <IconLoader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <IconDeviceFloppy className="h-4 w-4" />
+                    )}
+                  </GlyphSwap>
+                </Button>
+              </IconTip>
+              <IconTip label="Delete project">
+                <button
+                  onClick={onDelete}
+                  title="Delete project"
+                  className="rounded-md p-1.5 text-neutral-500 transition-colors hover:text-red-500"
+                >
+                  <IconTrash className="h-4 w-4" />
+                </button>
+              </IconTip>
+            </div>
+          </div>
 
-      <div className="mx-auto w-full max-w-2xl space-y-6 px-6 py-6">
-        <Field label="Name">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-white outline-none focus:border-green-500"
-          />
-        </Field>
+          <Field label="Description">
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              placeholder="What this project is for"
+              className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-white placeholder-neutral-600 outline-none focus:border-green-500"
+            />
+          </Field>
 
-        <Field label="Description" hint="A short note about what this project is for.">
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-            className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-white outline-none focus:border-green-500"
-          />
-        </Field>
+          <Field label="System prompt">
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={8}
+              placeholder="Instructions every chat in this project starts with"
+              className="w-full resize-y rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-white placeholder-neutral-600 outline-none focus:border-green-500"
+            />
+          </Field>
+        </div>
 
-        <Field label="System prompt" hint="Instructions prepended to every chat in this project.">
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            rows={5}
-            placeholder="You are a helpful assistant for this project…"
-            className="w-full resize-none rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm text-white placeholder-neutral-600 outline-none focus:border-green-500"
-          />
-        </Field>
-
-        {/* Captured-memory retrieval is Pro. Core projects retrieve over uploaded
-            documents only — no mention of memory/capture. */}
-        {isPro && (
-          <Field label="Knowledge sources">
-            <button
-              onClick={() => setIncludeMemory((v) => !v)}
-              className="flex items-center gap-3 text-left"
-            >
-              <span
-                className={`h-4 w-7 shrink-0 rounded-full transition-colors ${includeMemory ? 'bg-green-500' : 'bg-neutral-700'}`}
+        <div className="min-w-0 space-y-6">
+          {/* Captured-memory retrieval is Pro. Core projects retrieve over uploaded
+              documents only, with no mention of memory or capture. */}
+          {isPro && (
+            <Field label="Knowledge sources">
+              <button
+                onClick={() => setIncludeMemory((v) => !v)}
+                className="flex items-center gap-3 text-left"
               >
                 <span
-                  className={`block h-3 w-3 rounded-full bg-white transition-transform ${includeMemory ? 'translate-x-3.5' : 'translate-x-0.5'}`}
-                />
-              </span>
-              <span className="text-sm text-neutral-300">
-                Include captured memory
-                <span className="block text-[11px] text-neutral-600">
-                  Retrieval spans uploaded documents
-                  {includeMemory ? ' + everything Off Grid AI has captured' : ' only'}.
+                  className={`h-4 w-7 shrink-0 rounded-full transition-colors ${includeMemory ? 'bg-green-500' : 'bg-neutral-700'}`}
+                >
+                  <span
+                    className={`block h-3 w-3 rounded-full bg-white transition-transform ${includeMemory ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+                  />
                 </span>
-              </span>
-            </button>
-          </Field>
-        )}
-
-        <div className="border-t border-neutral-800 pt-6">
+                <span className="text-sm text-neutral-300">
+                  Include captured memory
+                  <span className="block text-[11px] text-neutral-600">
+                    {includeMemory
+                      ? 'Answers use your documents and everything captured.'
+                      : 'Answers use your documents only.'}
+                  </span>
+                </span>
+              </button>
+            </Field>
+          )}
           <KnowledgeBase projectId={project.id} />
         </div>
       </div>
@@ -745,7 +832,9 @@ function rowTransfer(
 ): ProjectDocumentTransfer | undefined {
   if (!syncId) return undefined
   const own = transfers.filter((transfer) => transfer.syncId === syncId)
-  return own.find(({ status }) => status === 'active') ?? own.find(({ status }) => status === 'failed')
+  return (
+    own.find(({ status }) => status === 'active') ?? own.find(({ status }) => status === 'failed')
+  )
 }
 
 /** A file arriving from a paired device before this device has a row for it. */
@@ -838,12 +927,11 @@ function DocRow({
   const failed = status?.phase === 'failed'
   const ownState = working || failed
   const syncFailed = !ownState && transfer?.status === 'failed'
-  const meta =
-    ownState
-      ? statusLabel(status)
-      : transfer
-        ? projectDocumentTransferLabel(transfer)
-        : readyMeta(doc, live?.pageCount || doc.pageCount)
+  const meta = ownState
+    ? statusLabel(status)
+    : transfer
+      ? projectDocumentTransferLabel(transfer)
+      : readyMeta(doc, live?.pageCount || doc.pageCount)
   const metaTitle = failed
     ? status.error || "Couldn't read this file"
     : syncFailed
@@ -1009,7 +1097,6 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.JSX.Element 
     }
   }, [projectId, refresh])
 
-
   const add = async (): Promise<void> => {
     setBusy(true)
     try {
@@ -1073,8 +1160,7 @@ function KnowledgeBase({ projectId }: { projectId: string }): React.JSX.Element 
         </IconTip>
       </div>
       <p className="mb-3 text-[11px] text-neutral-600">
-        Documents (txt, md, PDF, DOCX), images, audio, or video. Audio is transcribed; video frames
-        are read by the vision model.
+        Documents, images, audio and video. Audio is transcribed; video is read frame by frame.
       </p>
       {docRows.length === 0 && pendingRows.length === 0 && arrivingRows.length === 0 && (
         <p className="text-sm text-neutral-600">No documents yet.</p>

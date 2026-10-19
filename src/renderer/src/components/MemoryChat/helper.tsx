@@ -144,7 +144,9 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     content: projectedTurnContent(turn),
     variants,
     variantIndex: variants
-      ? Number.isInteger(context?.variantIndex) && context!.variantIndex! >= 0 && context!.variantIndex! < variants.length
+      ? Number.isInteger(context?.variantIndex) &&
+        context!.variantIndex! >= 0 &&
+        context!.variantIndex! < variants.length
         ? context!.variantIndex
         : variants.length - 1
       : undefined,
@@ -200,7 +202,8 @@ function mapRagMessage(message: RawRagMessage): ChatMessage[] {
     provenance
   })
   if (!turn || shouldHideProjectedTurn(turn)) return []
-  return [projectChatMessage(turn, context)]
+  const projected = projectChatMessage(turn, context)
+  return [message.versions ? { ...projected, threadVersions: message.versions } : projected]
 }
 
 const groupedTurnCache = new WeakMap<
@@ -248,9 +251,7 @@ export function groupChatTurnWork(messages: ChatMessage[]): ChatMessage[] {
             ...tools[existingToolIndex]!,
             result: entry.content,
             status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
-            ...(entry.generationTimeMs === undefined
-              ? {}
-              : { durationMs: entry.generationTimeMs })
+            ...(entry.generationTimeMs === undefined ? {} : { durationMs: entry.generationTimeMs })
           }
           continue
         }
@@ -259,9 +260,7 @@ export function groupChatTurnWork(messages: ChatMessage[]): ChatMessage[] {
           name: entry.toolName || 'Tool result',
           result: entry.content,
           status: entry.turnStatus === 'failed' ? 'failed' : 'completed',
-          ...(entry.generationTimeMs === undefined
-              ? {}
-              : { durationMs: entry.generationTimeMs })
+          ...(entry.generationTimeMs === undefined ? {} : { durationMs: entry.generationTimeMs })
         })
         continue
       }
@@ -376,14 +375,18 @@ export function mergeDurableAndStreaming(
   current: ChatMessage[]
 ): ChatMessage[] {
   const active = current.filter((message) => message.streaming === true)
-  const replacedIds = new Set(active.map((message) => message.replacementMessageId ?? message.id))
+  const replacedIds = new Set(
+    active.flatMap((message) => [
+      message.replacementMessageId ?? message.id,
+      // A retry streams in place of the saved answer it is a new version of.
+      ...(message.versionOf ? [message.versionOf] : [])
+    ])
+  )
   // Keep the live stream in place while storage still contains the prior answer.
   return [...durable.filter((message) => !replacedIds.has(message.id)), ...active]
 }
 
-export async function stopLiveWebUseForConversation(
-  conversationId: string | null
-): Promise<void> {
+export async function stopLiveWebUseForConversation(conversationId: string | null): Promise<void> {
   if (!conversationId || !window.api.tasks?.list || !window.api.vision?.control) return
   try {
     const tasks = await window.api.tasks.list()
@@ -397,9 +400,7 @@ export async function stopLiveWebUseForConversation(
   }
 }
 
-export async function stopLiveTask(
-  task: Pick<TaskSession, 'taskId' | 'kind'>
-): Promise<boolean> {
+export async function stopLiveTask(task: Pick<TaskSession, 'taskId' | 'kind'>): Promise<boolean> {
   return (await window.api.vision?.control('stop', task.taskId)) ?? false
 }
 
@@ -419,15 +420,36 @@ function documentProgress(attachment: Attachment): { message: string; progress?:
   const progress = attachment.progress
   if (attachment.status !== 'ready' || !progress || progress.phase === 'ready') return null
   if (progress.phase === 'failed') return null
-  const percent = progress.total > 0 ? Math.min(99, Math.round((progress.done / progress.total) * 100)) : undefined
+  const percent =
+    progress.total > 0
+      ? Math.min(99, Math.round((progress.done / progress.total) * 100))
+      : undefined
   if (progress.phase === 'reading')
-    return { message: progress.done ? `Reading page ${progress.done.toLocaleString()}…` : 'Reading…' }
+    return {
+      message: progress.done ? `Reading page ${progress.done.toLocaleString()}…` : 'Reading…'
+    }
   if (progress.phase === 'ocr')
     return {
       message: `Reading scanned pages ${progress.done.toLocaleString()}/${progress.total.toLocaleString()}`,
       ...(percent !== undefined ? { progress: percent } : {})
     }
-  return { message: 'Indexing… ask anytime', ...(percent !== undefined ? { progress: percent } : {}) }
+  return {
+    message: 'Indexing… ask anytime',
+    ...(percent !== undefined ? { progress: percent } : {})
+  }
+}
+
+/**
+ * The name a picked file is shown under. A file picked from Off Grid's own storage carries the id or
+ * timestamp the app filed it under ("7efd8637-...-mobile.pdf", "1786632689682-clip.gif"); the person
+ * knows it by the name after that.
+ */
+export function attachmentDisplayName(fileName: string): string {
+  const shown = fileName.replace(
+    /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{13})[-_]/i,
+    ''
+  )
+  return shown || fileName
 }
 
 export function toProcessingAttachment(attachment: Attachment): ProcessingAttachment {
@@ -457,7 +479,9 @@ export function toProcessingAttachment(attachment: Attachment): ProcessingAttach
           : 'Processing…'
         : attachment.status === 'error'
           ? attachment.error ||
-            (attachment.kind === 'image' ? 'Could not read this image.' : 'Could not read this file.')
+            (attachment.kind === 'image'
+              ? 'Could not read this image.'
+              : 'Could not read this file.')
           : undefined,
     textPreview:
       attachment.kind !== 'image' && status === 'ready' && attachment.text

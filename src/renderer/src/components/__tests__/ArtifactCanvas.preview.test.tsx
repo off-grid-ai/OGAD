@@ -9,11 +9,10 @@ describe('ArtifactCanvas isolated preview', () => {
   it('shows the speech model catalog name instead of its internal routing id', () => {
     const id = 'remote-vision:server:qwen%2Fqwen-audio-3.0-tts-flash'
     expect(
-      artifactSpeechModelName(id, [
-        { id, name: 'Qwen: Qwen-Audio-3.0-TTS Flash', kind: 'speech' }
-      ])
+      artifactSpeechModelName(id, [{ id, name: 'Qwen: Qwen-Audio-3.0-TTS Flash', kind: 'speech' }])
     ).toBe('Qwen: Qwen-Audio-3.0-TTS Flash')
-    expect(artifactSpeechModelName(id, [])).toBe('qwen/qwen-audio-3.0-tts-flash')
+    expect(artifactSpeechModelName(id, [])).toBe('Qwen audio 3.0 tts flash')
+    expect(artifactSpeechModelName('kokoro-82m-v1.0.onnx', [])).toBe('Kokoro TTS 82M')
   })
 
   it('renders executable HTML from the artifact origin and revokes it on close', async () => {

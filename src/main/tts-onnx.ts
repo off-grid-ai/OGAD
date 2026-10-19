@@ -161,6 +161,16 @@ export class OnnxSpeechRuntime {
     await this.close()
   }
 
+  /** Syntheses this worker is running now. */
+  get inFlight(): number {
+    return this.pending.size
+  }
+
+  /** Whether the voice model is loaded (its worker holds it). */
+  isLoaded(): boolean {
+    return this.worker !== null
+  }
+
   async close(): Promise<void> {
     const worker = this.worker
     this.worker = null

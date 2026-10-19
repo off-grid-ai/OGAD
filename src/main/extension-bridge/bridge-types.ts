@@ -46,6 +46,8 @@ export interface BridgeData extends Partial<BridgeMediaData> {
   searchConversations?(params: ConversationSearchParams): Promise<ConversationSearchResult>
   putConversation(conversation: unknown, browser: PairedBrowser): Promise<void>
   deleteConversation(id: string): Promise<void>
+  /** Show the version `direction` steps from shown message `messageId`; the conversation after. */
+  selectConversationVersion?(id: string, messageId: string, direction: number): Promise<unknown>
   listTools(task?: string): Promise<unknown[]>
   /** `tabId`: the browser's tab a web task should start in (browser-start-tab.ts). */
   runTool(

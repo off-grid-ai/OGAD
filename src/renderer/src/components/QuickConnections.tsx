@@ -29,9 +29,12 @@ import { useQuickConnection, type QuickConnectionEntry } from './useQuickConnect
 import { QUICK_CONNECTION_IDS } from './quickConnectionCatalog'
 
 export function QuickConnections({
-  onBusyChange
+  onBusyChange,
+  hideConnected = false
 }: {
   onBusyChange?: (busy: boolean) => void
+  /** Integrations' Disconnected filter: list only what still needs connecting. */
+  hideConnected?: boolean
 }): JSX.Element {
   const [, refreshProviders] = useState(0)
   const [providersFailed, setProvidersFailed] = useState(false)
@@ -190,7 +193,11 @@ export function QuickConnections({
             <ItemGroup role="list">
               {/* The registry returns a stable registered component, not a component factory. */}
               {/* eslint-disable-next-line react-hooks/static-components */}
-              <Providers disabled={!!connection.busy} onBusyChange={setProviderBusy} />
+              <Providers
+                disabled={!!connection.busy}
+                onBusyChange={setProviderBusy}
+                hideConnected={hideConnected}
+              />
             </ItemGroup>
           </section>
         )}
@@ -211,6 +218,7 @@ export function QuickConnections({
               )
               const connected = accounts.length > 0
               const authorizing = connection.busy === id
+              if (hideConnected && connected && !authorizing) return null
               const logo = id === 'notion' ? notionLogo : id === 'jira' ? jiraLogo : linearLogo
               return (
                 <div key={id}>

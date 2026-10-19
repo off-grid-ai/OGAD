@@ -3,9 +3,13 @@ import './assets/onboarding.css'
 import { applyTheme } from './theme'
 import { initFocusModality } from './lib/focus-modality'
 import { initScrollActivity } from './lib/scroll-activity'
+import { cspNonce, initShadowStyleNonce } from './lib/shadow-style-nonce'
 
 // Apply the saved/system theme (dark default) before first paint.
 applyTheme()
+
+// Media players style their shadow DOM with <style> tags; give them the CSP nonce.
+initShadowStyleNonce()
 
 // Show the keyboard focus ring only for keyboard navigation, not on mouse click.
 initFocusModality()
@@ -14,6 +18,8 @@ initFocusModality()
 initScrollActivity()
 
 import { StrictMode, type FC } from 'react'
+import { MotionConfig } from 'motion/react'
+import { CSPProvider } from '@base-ui/react/csp-provider'
 import { createRoot } from 'react-dom/client'
 import { AliveProvider, LivingField } from '@offgrid/operator-ui/operator/alive'
 import App from './App'
@@ -55,30 +61,36 @@ if (isDictation || isGodTwin) {
 // No analytics / telemetry. Off Grid AI is local-first — nothing leaves your device.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {/* Starts the operator-ui alive conductor (pointer light, pulses) for every surface. */}
-    <AliveProvider>
-      {hash === '#ai-activity' ? (
-        <TooltipProvider delayDuration={300}>
-          <AIRequestLogs standalone />
-        </TooltipProvider>
-      ) : isClipPopup ? (
-        <ClipboardPopup />
-      ) : isDictation ? (
-        <DictationOverlay />
-      ) : isCuSupervisor ? (
-        <ComputerUseSupervisor />
-      ) : isGodTwin ? (
-        <GodTwinCompanion />
-      ) : (
-        <>
-          {/* The breathing background lives in the main window only; the floating
+    {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}
+    <MotionConfig nonce={cspNonce()}>
+      {/* Base UI's popups (selects, menus) render <style> tags; same nonce. */}
+      <CSPProvider nonce={cspNonce()}>
+        {/* Starts the operator-ui alive conductor (pointer light, pulses) for every surface. */}
+        <AliveProvider>
+          {hash === '#ai-activity' ? (
+            <TooltipProvider delayDuration={300}>
+              <AIRequestLogs standalone />
+            </TooltipProvider>
+          ) : isClipPopup ? (
+            <ClipboardPopup />
+          ) : isDictation ? (
+            <DictationOverlay />
+          ) : isCuSupervisor ? (
+            <ComputerUseSupervisor />
+          ) : isGodTwin ? (
+            <GodTwinCompanion />
+          ) : (
+            <>
+              {/* The breathing background lives in the main window only; the floating
               overlays above stay transparent. */}
-          <LivingField />
-          <TooltipProvider delayDuration={300}>
-            <App />
-          </TooltipProvider>
-        </>
-      )}
-    </AliveProvider>
+              <LivingField />
+              <TooltipProvider delayDuration={300}>
+                <App />
+              </TooltipProvider>
+            </>
+          )}
+        </AliveProvider>
+      </CSPProvider>
+    </MotionConfig>
   </StrictMode>
 )

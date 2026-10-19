@@ -132,10 +132,15 @@ export function selectedMessageContent(message: ChatMessage): string {
 
 /** The reply's prose once its artifact code moved into the artifact card. */
 export function withoutArtifactFences(content: string): string {
-  return content
-    .replace(ARTIFACT_FENCE, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  return (
+    content
+      .replace(ARTIFACT_FENCE, '')
+      // A block still open (streaming, or stopped) and an unfenced HTML document are in the card too.
+      .replace(/```(?:html|svg|mermaid|jsx|tsx|react)\s*\n[\s\S]*$/i, '')
+      .replace(/(?:^|\n)\s*(?:<!doctype html|<html[\s>])[\s\S]*$/i, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  )
 }
 
 export function renderedMessageContent(message: ChatMessage): string {

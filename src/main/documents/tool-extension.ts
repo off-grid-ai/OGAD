@@ -5,9 +5,20 @@
 // knowledge base and the chat's attachments.
 
 import { describeTurnStatus } from '@offgrid/rag/documents'
-import type { ToolContext, ToolExtension } from '../tools'
+import type { SearchResult } from '../../shared/search-contract'
 import { documentStore, documentTurns } from '.'
-import { foundPassageSource } from './chat-turn'
+import { foundPassageSource, type DocumentsActivity } from './chat-turn'
+
+/**
+ * What these tools read from the tool loop's context (fields of tools.ts's ToolContext). Declared
+ * here, not imported: the tool loop imports this module, so importing it back would be a cycle.
+ */
+export interface DocumentToolContext {
+  conversationId?: string
+  projectId?: string
+  citeDocumentPassage?: (source: SearchResult) => number
+  onActivity?: (activity: DocumentsActivity) => void
+}
 
 const SEARCH = 'search_documents'
 const READ = 'read_pages'
@@ -57,7 +68,7 @@ function where(label: string | undefined, page: number): string {
 }
 
 /** The documents this tool call may see. */
-function scopeOf(context: ToolContext | undefined): { conversationId?: string; projectId?: string } {
+function scopeOf(context: DocumentToolContext | undefined): { conversationId?: string; projectId?: string } {
   return {
     ...(context?.conversationId ? { conversationId: context.conversationId } : {}),
     ...(context?.projectId ? { projectId: context.projectId } : {})
@@ -69,7 +80,7 @@ function scopeOf(context: ToolContext | undefined): { conversationId?: string; p
  * this turn's sources (also used by search_knowledge_base).
  */
 export async function searchDocumentsForTool(
-  context: ToolContext | undefined,
+  context: DocumentToolContext | undefined,
   query: string,
   documentName?: string
 ): Promise<string> {
@@ -87,14 +98,18 @@ export async function searchDocumentsForTool(
   return result.text.slice(0, MAX_CHARS)
 }
 
-export const documentToolExtension: ToolExtension = {
+export const documentToolExtension = {
   id: 'attached-documents',
-  category: 'tool',
+  category: 'tool' as const,
   // Added per turn by toolChat when the conversation has documents, never from the shared list.
-  schemas: () => [],
-  canHandle: (name) => name === SEARCH || name === READ,
-  isReadOnlyTool: () => true,
-  async execute(name, args, context) {
+  schemas: (): unknown[] => [],
+  canHandle: (name: string): boolean => name === SEARCH || name === READ,
+  isReadOnlyTool: (): boolean => true,
+  async execute(
+    name: string,
+    args: Record<string, unknown>,
+    context?: DocumentToolContext
+  ): Promise<string> {
     if (name === SEARCH) {
       const query = typeof args.query === 'string' ? args.query.trim() : ''
       if (!query) return 'Give a query to search for.'
@@ -122,6 +137,6 @@ export const documentToolExtension: ToolExtension = {
       .join('\n\n')
       .slice(0, MAX_CHARS)
   },
-  systemHint: () =>
+  systemHint: (): string =>
     'search_documents and read_pages look further into this chat\'s documents when the passages given are not enough.'
 }

@@ -491,14 +491,25 @@ describe('<MemoryChat/> Desktop voice turn modes', () => {
     expect(await screen.findByText('The review is scheduled again.')).toBeTruthy()
     expect(screen.queryByText('The review is scheduled.')).toBeNull()
     expect(screen.getAllByRole('button', { name: 'Voice message actions' })).toHaveLength(1)
+    // One question; the earlier answer is kept as a version and the chat reads with the new one.
     await waitFor(() =>
       expect(
         boundary.messages['conversation-a']!.map(({ role, content }) => [role, content])
       ).toEqual([
         ['user', 'Schedule the planning review'],
+        ['assistant', 'The review is scheduled.'],
         ['assistant', 'The review is scheduled again.']
       ])
     )
+    expect(
+      (await boundary.api.getRagMessages('conversation-a')).map(({ role, content }) => [
+        role,
+        content
+      ])
+    ).toEqual([
+      ['user', 'Schedule the planning review'],
+      ['assistant', 'The review is scheduled again.']
+    ])
   })
 
   it('shows Copied on a voice note, then returns to the copy action', async () => {

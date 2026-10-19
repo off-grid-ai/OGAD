@@ -60,6 +60,8 @@ interface StorageInfo {
 }
 interface DownloadEntry {
   modelId: string
+  /** The name main resolved for `modelId`. Rows show this, never the id. */
+  modelName: string
   percent?: number
   status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
   currentFile?: string
@@ -456,8 +458,8 @@ export function StoragePanel(): React.ReactElement {
                     className="flex items-center gap-3 py-1.5"
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-mono text-[11px] text-neutral-300">
-                        {d.modelId}
+                      <div className="truncate text-[11px] text-neutral-300">
+                        {d.modelName}
                         {companionDownloadLabel(d.currentFile) && (
                           // A companion-only fetch (e.g. adding a vision projector to a model
                           // already on disk) — say so, or it reads as a full re-download.
@@ -470,7 +472,7 @@ export function StoragePanel(): React.ReactElement {
                         <div className="mt-0.5 text-[10px] text-neutral-500">Queued</div>
                       ) : (
                         <Progress
-                          aria-label={`${d.modelId} download progress`}
+                          aria-label={`${d.modelName} download progress`}
                           value={progress.percentage ?? 0}
                           className="mt-1"
                         >
@@ -505,7 +507,7 @@ export function StoragePanel(): React.ReactElement {
                     <button
                       onClick={() => cancel(d.modelId)}
                       className="rounded-md p-1 text-neutral-500 hover:text-white"
-                      aria-label={`Cancel ${d.modelId}`}
+                      aria-label={`Cancel ${d.modelName}`}
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -525,9 +527,7 @@ export function StoragePanel(): React.ReactElement {
                   className="flex items-center gap-3 py-1.5"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono text-[11px] text-neutral-300">
-                      {d.modelId}
-                    </div>
+                    <div className="truncate text-[11px] text-neutral-300">{d.modelName}</div>
                     <div className="truncate text-[10px] text-neutral-500">
                       {d.error ?? d.status}
                     </div>

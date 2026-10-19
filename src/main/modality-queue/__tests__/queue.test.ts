@@ -47,25 +47,25 @@ describe('ModalityQueue', () => {
     expect(events).toEqual(['a-start', 'a-end', 'b-start', 'b-end'])
   })
 
-  it('evicts a declared engine BEFORE the job, then re-warms it AFTER', async () => {
+  it('evicts a declared engine BEFORE the job, then releases it AFTER without reloading', async () => {
     const q = new ModalityQueue()
     const order: string[] = []
     const evict = vi.fn(async () => {
       order.push('evict')
     })
-    const warm = vi.fn(async () => {
-      order.push('warm')
+    const recover = vi.fn(async () => {
+      order.push('release')
     })
-    q.registerEvictable('llm', { evict, warm })
+    q.registerEvictable('llm', { evict, recover })
 
     await q.run({ tier: 2, label: 'image', evicts: ['llm'] }, async () => {
       order.push('job')
     })
 
     expect(evict).toHaveBeenCalledTimes(1)
-    expect(warm).toHaveBeenCalledTimes(1)
-    // evict before the job, warm after it (mode-aware behavior lives in the hook).
-    expect(order).toEqual(['evict', 'job', 'warm'])
+    expect(recover).toHaveBeenCalledTimes(1)
+    // Evict before the job, clear the block after it; the engine loads on its next use.
+    expect(order).toEqual(['evict', 'job', 'release'])
   })
 
   it('holds admission until an asynchronous eviction has finished', async () => {

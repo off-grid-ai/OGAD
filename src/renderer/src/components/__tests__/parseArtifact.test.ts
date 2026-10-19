@@ -154,3 +154,33 @@ describe('parseArtifact - precedence ordering', () => {
     expect(parseArtifact('intro <svg/> outro')).toBeNull()
   })
 })
+
+describe('parseArtifact - artifacts still being written', () => {
+  it('recognises an html block that has not closed yet, as partial', () => {
+    const artifact = parseArtifact('Here it is:\n```html\n<!doctype html>\n<html><body><canvas')
+    expect(artifact).toMatchObject({ kind: 'html', partial: true })
+    expect(artifact?.code.startsWith('<!doctype html>')).toBe(true)
+  })
+
+  it('recognises an unfenced HTML document, partial until </html> arrives', () => {
+    expect(parseArtifact('<!DOCTYPE html>\n<html lang="en">\n<head>')).toMatchObject({
+      kind: 'html',
+      partial: true
+    })
+    const whole = parseArtifact('<!DOCTYPE html>\n<html><body>hi</body></html>')
+    expect(whole?.kind).toBe('html')
+    expect(whole?.partial).toBeUndefined()
+  })
+
+  it('maps an open jsx block to react', () => {
+    expect(parseArtifact('```jsx\nexport default function App() {')).toMatchObject({
+      kind: 'react',
+      partial: true
+    })
+  })
+
+  it('leaves prose and finished non-artifact code alone', () => {
+    expect(parseArtifact('Plain answer with `<html>` mentioned inline.')).toBeNull()
+    expect(parseArtifact('```python\nprint(1)\n```')).toBeNull()
+  })
+})

@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, vi } from 'vitest'
+import { ThreadStore } from './thread-store'
 import { MemoryChat } from '../../MemoryChat'
 import { TooltipProvider } from '../../ui/tooltip'
 import type {
@@ -151,6 +152,9 @@ export class ChatBoundary {
   readonly stopComputerTask = vi.fn(async () => true)
   readonly guideTask = vi.fn(async () => ({ available: true, accepted: true }))
   readonly saveArtifact = vi.fn(async () => 'artifact-id')
+  /** How main places, reads and chooses versions. */
+  private readonly thread = new ThreadStore()
+
   readonly addRagMessage = vi.fn(
     async (
       conversationId: string,
@@ -165,13 +169,14 @@ export class ChatBoundary {
         this.heldUserWrites.delete(gate)
       }
       this.messages[conversationId] ??= []
+      const placed = this.thread.place(this.messages[conversationId]!, conversationId, role, context)
       const id = this.nextMessageId++
       const uuid = `message-${id}`
       this.messages[conversationId]!.push({
         id: uuid,
         role,
         content,
-        context,
+        context: placed,
         created_at: storedAt(this.nextMessageId)
       })
       const conversation = this.conversations.find((item) => item.id === conversationId)
@@ -262,15 +267,35 @@ export class ChatBoundary {
     }),
     getRagMessages: vi.fn(async (id: string) => {
       await this.pendingConversationReads.get(id)?.promise
-      return (
-        // created_at is filled in where a fixture omitted it, because the table it stands for always has
-        // one and the renderer discards any row that does not.
-        (this.messages[id] ?? []).map((item, index) => ({
-          ...item,
-          created_at: item.created_at ?? storedAt(index)
-        }))
-      )
+      // The shown thread, as main returns it: each turn's chosen version, with its place among them.
+      // created_at is filled in where a fixture omitted it, because the table it stands for always
+      // has one and the renderer discards any row that does not.
+      const rows = (this.messages[id] ?? []).map((item, index) => ({
+        ...item,
+        created_at: item.created_at ?? storedAt(index)
+      }))
+      return this.thread.read(rows)
     }),
+    prepareAnswerVersion: vi.fn(async (conversationId: string, ofUuid: string) =>
+      this.thread.prepareAnswerVersion(this.messages[conversationId] ?? [], conversationId, ofUuid)
+    ),
+    addRagMessageVersion: vi.fn(
+      async (
+        conversationId: string,
+        ofUuid: string,
+        role: 'user' | 'assistant',
+        content: string,
+        context?: unknown
+      ) => {
+        const parent = this.thread.versionParent(this.messages[conversationId] ?? [], ofUuid)
+        if (parent === undefined) return null
+        const base = context && typeof context === 'object' ? context : {}
+        return this.addRagMessage(conversationId, role, content, { ...base, parent })
+      }
+    ),
+    selectRagMessageVersion: vi.fn(async (conversationId: string, uuid: string, direction: number) =>
+      Boolean(this.thread.select(this.messages[conversationId] ?? [], uuid, direction))
+    ),
     createRagConversation: vi.fn(
       async (
         id: string,
@@ -300,7 +325,8 @@ export class ChatBoundary {
       const message = this.messages[conversationId]?.find((entry) => String(entry.id) === messageId)
       if (!message) return false
       message.content = content
-      if (context !== undefined) message.context = context
+      // As main does: the message keeps its place in the thread.
+      if (context !== undefined) message.context = this.thread.update(message, context)
       return true
     },
     truncateRagMessages: this.truncateRagMessages,

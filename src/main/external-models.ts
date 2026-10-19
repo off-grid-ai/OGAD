@@ -4,7 +4,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { isValidGgufFile } from './models/gguf'
 import { isDflashFileName, isMtpFileName } from './models/catalog-logic'
-import { CATALOG } from '@offgrid/models'
+import { CATALOG, cleanModelName } from '@offgrid/models'
 
 const knownPackages = CATALOG.filter((entry) =>
   entry.files.some((file) => file.name.toLowerCase().endsWith('.gguf'))
@@ -101,7 +101,13 @@ function scanGgufTree(
           ? projectors[0]
           : undefined
       if (expectedProjector && !matchedProjector) continue
-      const item = model(file, path.basename(file, path.extname(file)), source, matchedProjector)
+      // A known package reads as its catalog name; any other file reads as a cleaned file name.
+      const item = model(
+        file,
+        known?.name ?? cleanModelName(path.basename(file)),
+        source,
+        matchedProjector
+      )
       if (item) found.push(item)
     }
   }
@@ -171,8 +177,12 @@ export function discoverExternalModels(
                   : path.join(root, 'blobs', projectorDigest)
               })()
             : undefined
-        const name = path.relative(manifestRoot, file).split(path.sep).slice(1).join('/')
-        const item = model(blob, name, 'Ollama', projector)
+        // Ollama names a model "<name>:<tag>" (manifests/<registry>/<namespace>/<name>/<tag>).
+        const [, namespace, modelName, tag] = path.relative(manifestRoot, file).split(path.sep)
+        const ollamaName = modelName
+          ? `${namespace && namespace !== 'library' ? `${namespace}/` : ''}${modelName}${tag && tag !== 'latest' ? `:${tag}` : ''}`
+          : path.basename(file)
+        const item = model(blob, cleanModelName(ollamaName), 'Ollama', projector)
         if (item) found.push(item)
       } catch {
         /* skip incomplete manifests */

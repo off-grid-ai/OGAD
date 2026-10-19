@@ -99,6 +99,7 @@ describe('Models > Storage download rows', () => {
     downloads = [
       {
         modelId: 'Qwen/Qwen3.5-9B',
+        modelName: 'Qwen 3.5 9B',
         status: 'downloading',
         downloadedBytes: 244_000_000,
         totalBytes: 703_000_000,
@@ -114,7 +115,10 @@ describe('Models > Storage download rows', () => {
     expect(screen.getByText(/~3 min left/)).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/NaN|Infinity/)
 
-    await user.click(screen.getByRole('button', { name: 'Cancel Qwen/Qwen3.5-9B' }))
+    // The row names the model; the id stays the cancel key.
+    expect(screen.getByText('Qwen 3.5 9B')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('Qwen/Qwen3.5-9B')
+    await user.click(screen.getByRole('button', { name: 'Cancel Qwen 3.5 9B' }))
     await waitFor(() => expect(cancelModelDownload).toHaveBeenCalledWith('Qwen/Qwen3.5-9B'))
   })
 
@@ -122,6 +126,7 @@ describe('Models > Storage download rows', () => {
     downloads = [
       {
         modelId: 'image/unknown-size',
+        modelName: 'Unknown size',
         status: 'downloading',
         percent: Number.NaN,
         downloadedBytes: Number.POSITIVE_INFINITY,
@@ -134,21 +139,23 @@ describe('Models > Storage download rows', () => {
     expect(await screen.findByText('Downloading')).toBeTruthy()
     expect(screen.getByText('Total size unavailable')).toBeTruthy()
     expect(document.body.textContent).not.toMatch(/NaN|Infinity/)
-    expect(screen.getByRole('button', { name: 'Cancel image/unknown-size' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Cancel Unknown size' })).toBeTruthy()
   })
 
   it('keeps Models and Storage on the same live multi-file job facts', async () => {
-    downloads = [{ modelId: 'Qwen/Qwen3.5-9B', status: 'queued' }]
+    downloads = [{ modelId: 'Qwen/Qwen3.5-9B', modelName: 'Qwen 3.5 9B', status: 'queued' }]
     render(
       <>
         <ModelsScreen />
         <StoragePanel />
       </>
     )
-    await screen.findByText('Qwen 3.5 9B')
+    // Both screens name the model: the Models card and the Storage download row.
+    expect(await screen.findAllByText('Qwen 3.5 9B')).not.toHaveLength(0)
 
     const progress = {
       modelId: 'Qwen/Qwen3.5-9B',
+      modelName: 'Qwen 3.5 9B',
       status: 'downloading',
       currentFile: 'qwen.gguf',
       fileIndex: 1,

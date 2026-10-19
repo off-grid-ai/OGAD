@@ -8,7 +8,7 @@
 // saw a scary red "Down" on a server that was simply warming up. This distinguishes
 // "alive but loading" (starting) from "genuinely not running" (down).
 
-export type ChatHealthStatus = 'ready' | 'starting' | 'down' | 'not_installed'
+export type ChatHealthStatus = 'ready' | 'starting' | 'idle' | 'down' | 'not_installed'
 
 export interface ChatHealthInputs {
   /** /health answered 200 (model loaded, accepting requests). */
@@ -20,7 +20,8 @@ export interface ChatHealthInputs {
   modelsExist: boolean
   /** Name of the active model (shown as detail when ready). */
   activeModel?: string | null
-  /** Human reason the server died on load, if any (from classifyLlamaError). */
+  /** Human reason the server failed or stopped unexpectedly, if any. Without one, a stopped
+   *  server is simply not loaded yet: it loads on first use. */
   lastError?: string | null
 }
 
@@ -33,5 +34,6 @@ export function decideChatStatus(i: ChatHealthInputs): {
   // Alive-but-loading must be checked BEFORE "down" — otherwise the warm-up
   // window reads as a failure.
   if (i.loading) return { status: 'starting', detail: 'Loading model…' }
-  return { status: 'down', detail: i.lastError ?? 'Model installed but server is not running' }
+  if (i.lastError) return { status: 'down', detail: i.lastError }
+  return { status: 'idle', detail: 'Loads when you first chat' }
 }

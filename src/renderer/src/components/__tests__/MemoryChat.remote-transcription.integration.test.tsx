@@ -10,7 +10,9 @@ import { transcribeRemoteAudio } from '../../../../main/remote-media-runtime'
 import { ChatBoundary, installBoundary, renderChat } from './harness/chat-boundary'
 
 class MicrophoneRecording {
-  static isTypeSupported(): boolean { return true }
+  static isTypeSupported(): boolean {
+    return true
+  }
   state: RecordingState = 'inactive'
   mimeType = 'audio/webm'
   ondataavailable: ((event: { data: Blob }) => void) | null = null
@@ -28,11 +30,18 @@ class MicrophoneRecording {
 }
 
 class MicrophoneAudioContext {
-  createMediaStreamSource(): { connect(): void } { return { connect() {} } }
-  createAnalyser(): AnalyserNode {
-    return { fftSize: 2048, getFloatTimeDomainData: (samples: Float32Array) => samples.fill(0.01) } as unknown as AnalyserNode
+  createMediaStreamSource(): { connect(): void } {
+    return { connect() {} }
   }
-  close(): Promise<void> { return Promise.resolve() }
+  createAnalyser(): AnalyserNode {
+    return {
+      fftSize: 2048,
+      getFloatTimeDomainData: (samples: Float32Array) => samples.fill(0.01)
+    } as unknown as AnalyserNode
+  }
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
 }
 
 const originalRecorder = globalThis.MediaRecorder
@@ -58,10 +67,17 @@ describe('<MemoryChat/> with a remote transcription provider', () => {
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-transcription-ui-'))
     try {
       const server: Parameters<typeof transcribeRemoteAudio>[0] = {
-        id: 'transcription-server', name: 'Transcription provider', provider: 'custom',
-        endpoint: 'https://provider.test/v1', model: '', enabled: true,
-        mediaModels: { transcription: 'listener' }, modelCatalog: [],
-        screenFramesAllowed: false, apiKey: '', selectedModel: 'listener'
+        id: 'transcription-server',
+        name: 'Transcription provider',
+        provider: 'custom',
+        endpoint: 'https://provider.test/v1',
+        model: '',
+        enabled: true,
+        mediaModels: { transcription: 'listener' },
+        modelCatalog: [],
+        screenFramesAllowed: false,
+        apiKey: '',
+        selectedModel: 'listener'
       }
       globalThis.MediaRecorder = MicrophoneRecording as unknown as typeof MediaRecorder
       globalThis.AudioContext = MicrophoneAudioContext as unknown as typeof AudioContext
@@ -88,13 +104,20 @@ describe('<MemoryChat/> with a remote transcription provider', () => {
       const boundary = new ChatBoundary()
       installBoundary(boundary)
       window.api.getTranscriptionInfo = async () => ({
-        engine: 'whisper', modelId: 'remote-listener', label: 'Remote listener', language: 'en',
+        engine: 'whisper',
+        modelId: 'remote-listener',
+        label: 'Remote listener',
+        language: 'en',
         languages: [{ code: 'en', label: 'English' }],
-        options: [{ id: 'remote-listener', name: 'Remote listener', active: true }]
+        options: [{ id: 'remote-listener', name: 'Remote listener', active: true }],
+        selectedId: 'remote-listener'
       })
       window.api.transcribeAudio = async (bytes) => {
         const file = path.join(temporary, 'voice.webm')
-        fs.writeFileSync(file, Buffer.from(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes))
+        fs.writeFileSync(
+          file,
+          Buffer.from(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes)
+        )
         return (await transcribeRemoteAudio(server, file)).text
       }
       window.api.cancelTranscription = async () => true
@@ -103,7 +126,9 @@ describe('<MemoryChat/> with a remote transcription provider', () => {
       await user.click(await screen.findByRole('button', { name: 'Record voice' }))
       await user.click(await screen.findByRole('button', { name: 'Stop recording' }))
       await waitFor(() =>
-        expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe('Plan the next meeting')
+        expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe(
+          'Plan the next meeting'
+        )
       )
       expect(receivedFile).toEqual({ model: 'listener', name: 'voice.webm', size: 12 })
 
@@ -111,7 +136,9 @@ describe('<MemoryChat/> with a remote transcription provider', () => {
       await user.click(await screen.findByRole('button', { name: 'Record voice' }))
       await user.click(await screen.findByRole('button', { name: 'Stop recording' }))
       expect((await screen.findByRole('alert')).textContent).toContain('Transcription failed')
-      expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe('Plan the next meeting')
+      expect((screen.getByPlaceholderText(/Ask about/) as HTMLTextAreaElement).value).toBe(
+        'Plan the next meeting'
+      )
     } finally {
       fs.rmSync(temporary, { recursive: true, force: true })
     }

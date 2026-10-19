@@ -41,7 +41,7 @@ import {
   type ComputerTaskTiers
 } from '../accessibility/ax-rail'
 import { getAxRailHost } from '../accessibility/ax-host'
-import { callConnectorTool } from '../mcp'
+import { callConnectorTool, getConnectorMeta } from '../mcp'
 import { makeConnectorRailExecutor } from './connector-rail'
 import { withRemoteScreenGate } from './remote-screen-gate'
 import { getTaskExecutionDevice, getTaskRun, recordTaskRun } from '../tasks/task-history'
@@ -346,7 +346,8 @@ export function getActionsRuntime(): ActionsRuntime {
         return { ok: false, detail: `the '${rail}' rail is not built yet` }
       }
     },
-    gate: gateHost,
+    gate: (request) =>
+      gateHost(request, { connectorName: (connectorId) => getConnectorMeta(connectorId)?.name }),
     attemptTimeoutMs: 30_000, // the helper's own timeout is 20s
     visibilityMs: 24 * 60 * 60 * 1000
   })

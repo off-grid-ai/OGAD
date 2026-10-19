@@ -83,33 +83,39 @@ function SpeechActionComponent({
 
 function VariantNavigationComponent({
   message,
-  onSelect
+  onSelect,
+  noun = 'response'
 }: Readonly<{
   message: ChatMessage
   onSelect: (direction: -1 | 1) => void
+  /** What the versions are of: an answer, or an edited question. */
+  noun?: 'response' | 'question'
 }>): React.JSX.Element | null {
-  if (!message.variants || message.variants.length <= 1) return null
-  const index = message.variantIndex ?? 0
+  // Saved versions (a retry or an edit added one beside the old) come from the thread; a reply
+  // still streaming in this session may carry its versions in memory.
+  const count = message.threadVersions?.count ?? message.variants?.length ?? 0
+  if (count <= 1) return null
+  const index = message.threadVersions?.index ?? message.variantIndex ?? 0
   return (
     <span className="flex items-center gap-1 text-[11px] text-neutral-500">
       <Button
         variant="ghost"
         size="icon-xs"
-        aria-label="Previous response"
+        aria-label={`Previous ${noun}`}
         onClick={() => onSelect(-1)}
         disabled={index <= 0}
       >
         <CaretLeft aria-hidden="true" />
       </Button>
       <span>
-        <AnimatedNumber value={index + 1} />/<AnimatedNumber value={message.variants.length} />
+        <AnimatedNumber value={index + 1} />/<AnimatedNumber value={count} />
       </span>
       <Button
         variant="ghost"
         size="icon-xs"
-        aria-label="Next response"
+        aria-label={`Next ${noun}`}
         onClick={() => onSelect(1)}
-        disabled={index >= message.variants.length - 1}
+        disabled={index >= count - 1}
       >
         <CaretRight aria-hidden="true" />
       </Button>

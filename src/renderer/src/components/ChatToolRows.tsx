@@ -64,7 +64,7 @@ interface ChatToolRowsProps {
   failed?: boolean
 }
 
-type WorkStatus = 'running' | 'complete' | 'failed' | 'needs attention'
+type WorkStatus = 'running' | 'complete' | 'failed' | 'stopped' | 'needs attention'
 
 type ToolEntryState = Extract<ToolTraceEntry, { kind: 'tool' }>['state']
 
@@ -225,6 +225,7 @@ const ENTRY_STATE: Record<WorkStatus, ToolEntryState> = {
   running: 'running',
   complete: 'success',
   failed: 'error',
+  stopped: 'stopped',
   'needs attention': 'pending'
 }
 
@@ -421,7 +422,9 @@ function shortResult(tool: DisplayTool, status = workStatus(tool), taskSummary?:
 
 function taskWorkStatus(task: TaskSession | undefined): WorkStatus | undefined {
   if (!task) return undefined
-  if (task.status === 'failed' || task.status === 'stopped') return 'failed'
+  if (task.status === 'failed') return 'failed'
+  // A task the person stopped did not fail.
+  if (task.status === 'stopped') return 'stopped'
   if (task.status === 'paused' || task.status === 'waiting') return 'needs attention'
   if (task.status === 'running' || task.status === 'reconnecting') return 'running'
   return 'complete'
@@ -506,19 +509,23 @@ export function ChatToolRows({
   const workIsLive =
     live ||
     (!stopped && !failed && !settled && projected.some(({ status }) => status === 'running'))
+  // A turn whose last step failed is a failed turn, even when the caller did not flag the message:
+  // the summary must not read "Work done" over a red, failed step (a Web Use run that stopped).
+  const lastSettledFailed = !workIsLive && projected.at(-1)?.status === 'failed'
   const workState: WorkState = workIsLive
     ? 'working'
     : stopped
       ? 'stopped'
-      : failed
+      : failed || lastSettledFailed
         ? 'failed'
         : 'done'
-  // The caller owns the disclosure: open while the response is live, closed once it settles,
-  // and the person's own toggle holds until the work changes state again.
+  // The caller owns the disclosure: open while the response is live, closed once it settles, and the
+  // person's own toggle holds until it crosses between live and settled. A move between two settled
+  // outcomes (done → failed as a linked task lands) must not snap an opened card shut.
   const [expanded, setExpanded] = useState(workIsLive)
-  const [expandedFor, setExpandedFor] = useState(workState)
-  if (expandedFor !== workState) {
-    setExpandedFor(workState)
+  const [expandedFor, setExpandedFor] = useState(workIsLive)
+  if (expandedFor !== workIsLive) {
+    setExpandedFor(workIsLive)
     setExpanded(workIsLive)
   }
   if (visible.length === 0 && !thinking && !timeline?.length && !stopped && !failed) return null

@@ -1,5 +1,6 @@
 import type { OptionDecision } from '../llm'
 import { currentAIRequest } from '../ai-request-log'
+import { remoteModelUnreachable } from '../llm/remote-chat'
 import type {
   RemoteVisionCatalogModel,
   RemoteVisionProvider
@@ -126,6 +127,10 @@ export async function decideWithOpenRouter(
     })
   } catch (error) {
     if (signal?.aborted) throw error
+    const code =
+      (error instanceof Error && (error.cause as { code?: unknown } | undefined)?.code) || ''
+    const unreachable = remoteModelUnreachable(typeof code === 'string' ? code : '')
+    if (unreachable) throw new Error(unreachable)
     const message = error instanceof Error ? error.message : 'network error'
     throw new Error(`Remote Decision model connection failed: ${message}`)
   }

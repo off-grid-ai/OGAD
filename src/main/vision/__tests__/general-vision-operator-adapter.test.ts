@@ -604,6 +604,16 @@ describe('general vision native tool policy', () => {
       cause: Object.assign(new Error('the peer closed'), { code: 'UND_ERR_SOCKET' })
     })
     expect(remoteVisionTransportError(transport).message).toContain('the peer closed')
+    // A server that is down is said in words, never as the endpoint it was reached at.
+    const refused = remoteVisionTransportError(
+      new Error('fetch failed', {
+        cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:17878'), {
+          code: 'ECONNREFUSED'
+        })
+      })
+    ).message
+    expect(refused).toContain('not answering')
+    expect(refused).not.toContain('127.0.0.1')
     expect(
       remoteVisionProviderError(429, {
         error: { metadata: { raw: 'Rate limited.', provider_name: 'Provider' } }

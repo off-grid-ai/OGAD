@@ -10,6 +10,9 @@ export type ComputerUseModelStrategy =
   | 'text_plus_specialist'
   | 'decision_plus_specialist'
   | 'decision_plus_reasoning'
+  /** Web Use only: trained planner, actor and evaluator models (docs/MODEL_CONTRACT.md). Their
+   *  endpoints are in WebUseSettings.agentModels, not the task model roles. */
+  | 'planner_actor_evaluator'
 
 /** The task models a strategy runs besides Chat. Every place that shows or runs a strategy's
  *  models reads this, so the Models screens, Tasks and a task's run name the same ones. */
@@ -18,6 +21,7 @@ export type TaskModelRole = 'decision' | 'grounding'
 export function strategyTaskRoles(strategy: ComputerUseModelStrategy): readonly TaskModelRole[] {
   switch (strategy) {
     case 'same_as_chat':
+    case 'planner_actor_evaluator':
       return []
     case 'decision_plus_reasoning':
       return ['decision']

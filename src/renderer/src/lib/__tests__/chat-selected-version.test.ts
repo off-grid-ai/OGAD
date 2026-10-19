@@ -105,19 +105,29 @@ it('restores queued attachments through a real settings database reopen', async 
   })
 })
 
-it('repairs legacy selected text-only versions before bridge and search read a reopened database', () => {
+it('turns legacy text-only versions into messages before bridge and search read a reopened database', () => {
   const cid = 'legacy-selected-answer'
   createRagConversation(cid, 'Legacy')
-  addRagMessage(cid, 'assistant', 'legacynewneedle', {
-    variants: ['legacyoldneedle', 'legacynewneedle'],
-    variantIndex: 0,
-    reasoning: 'Newest reasoning'
-  })
+  // A message saved before versions were messages: its versions are a list inside the row.
+  getDB()
+    .prepare(
+      `INSERT INTO rag_messages (uuid, conversation_id, role, content, context, created_at)
+       VALUES ('legacy-selected-row', ?, 'assistant', 'legacynewneedle', ?, CURRENT_TIMESTAMP)`
+    )
+    .run(
+      cid,
+      JSON.stringify({
+        variants: ['legacyoldneedle', 'legacynewneedle'],
+        variantIndex: 0,
+        reasoning: 'Newest reasoning'
+      })
+    )
   getDB().close()
   const rows = getRagMessages(cid)
   expect(rows[0]!.content).toBe('legacyoldneedle')
   expect(toBridgeConversation({ id: cid }, rows).turns[0]!.content).toBe('legacyoldneedle')
   expect(searchRagConversationIds('legacyoldneedle')).toContain(cid)
-  expect(searchRagConversationIds('legacynewneedle')).not.toContain(cid)
+  // The other version is kept as its own message, so search still finds the chat by it.
+  expect(searchRagConversationIds('legacynewneedle')).toContain(cid)
   expect(JSON.parse(rows[0]!.context!)).toHaveProperty('reasoning', 'Newest reasoning')
 })

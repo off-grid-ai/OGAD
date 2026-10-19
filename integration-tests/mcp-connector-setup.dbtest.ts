@@ -84,7 +84,8 @@ describe('<ConnectorsScreen/> connector setup', () => {
 
     await waitFor(() => {
       expect(screen.getByText('connected')).not.toBeNull()
-      expect(screen.getByText('read_status')).not.toBeNull()
+      // The discovered tool reads as words, not its id.
+      expect(screen.getByText('Read status')).not.toBeNull()
     })
     expect(screen.queryByText('not tested')).toBeNull()
 

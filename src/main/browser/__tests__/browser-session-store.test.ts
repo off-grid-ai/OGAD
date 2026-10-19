@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { BrowserSessionStore } from '../browser-session-store'
+import {
+  BrowserSessionStore,
+  historyViewSessionId,
+  isHistoryViewSession
+} from '../browser-session-store'
 
 describe('BrowserSessionStore', () => {
   it('keeps independent Chromium state for manual and agent sessions', () => {
@@ -187,5 +191,26 @@ describe('BrowserSessionStore', () => {
 
     expect(store.clear().map((record) => record.resource)).toEqual(['first', 'second'])
     expect(store.snapshot()).toEqual({ activeSessionId: null, sessions: [] })
+  })
+
+  it('marks a reopened finished task as a view, never as the task run itself', () => {
+    // Viewing a saved task's page must not be recorded as task progress (that re-dated it).
+    const store = new BrowserSessionStore<{ name: string }>()
+    store.create({
+      sessionId: historyViewSessionId('salt-price'),
+      kind: 'task',
+      resource: { name: 'saved page' },
+      task: {
+        taskId: 'salt-price',
+        journeyId: 'chat:salt',
+        goal: 'Find the price',
+        status: 'done',
+        steps: []
+      }
+    })
+    const record = store.findTask('salt-price')
+    expect(record && isHistoryViewSession(record.sessionId)).toBe(true)
+    expect(isHistoryViewSession('task:research')).toBe(false)
+    expect(isHistoryViewSession('manual-1')).toBe(false)
   })
 })

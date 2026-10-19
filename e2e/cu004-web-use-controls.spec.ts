@@ -254,6 +254,11 @@ test('runs Web Use through Pause, Take Over, HITL, Resume, and terminal Stop', a
   await waitForTaskStatus('running')
 
   await releaseUntilUserHandoff()
+  // The live snapshot keeps its details folded; open them to read the current operation.
+  await page
+    .getByRole('region', { name: 'Live task snapshot' })
+    .getByRole('button', { name: 'Show live details', exact: true })
+    .click()
   await expect(
     page
       .getByTestId('task-live-activity')

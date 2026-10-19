@@ -98,9 +98,12 @@ export async function stopChatRun(
   }
   dispatch(detail)
   if (targetRun(streamConvRef.current, convId) !== cancelledRunId) return
+  // Abort the answer on screen even when a run claimed the cancel: the claiming run can be an
+  // older one in this conversation that cancels its own finished stream, and the answer kept
+  // streaming until a tab switch remounted the view. A second abort of the same stream is a no-op.
+  if (streamingId) cancelRag(streamingId)
   if (streamingId && !detail.claimed) {
     cancelledRef.current.add(convId)
-    cancelRag(streamingId)
     await finalizeStoppedTurn(convId, streamingId)
     markGenerating(convId, false)
     cancelledRef.current.delete(convId)

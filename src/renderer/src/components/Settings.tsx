@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ProgressiveBlur } from './ui/progressive-blur'
 import { PageHeader, Section } from '@offgrid/operator-ui/operator/experience'
@@ -54,6 +54,40 @@ export const SETTINGS_DESTINATIONS = Object.entries(SETTINGS_TITLE_IDS).map(
   ([label, subroute]) => ({ label, view: 'settings', subroute })
 )
 
+// Four columns suit a card count whose last row is fuller four-wide than three-wide, so no card
+// sits alone on the last row. A count that fills both equally keeps three.
+function settingsColumns(cards: number): 3 | 4 {
+  const lastRow = (columns: number): number => cards % columns || columns
+  return lastRow(4) / 4 > lastRow(3) / 3 ? 4 : 3
+}
+
+/** The number of Settings cards actually drawn: sections a build does not ship render nothing, and
+ *  full-width rows (the version footer) are not cards. */
+function useSettingsColumns(): [React.RefObject<HTMLDivElement | null>, 3 | 4] {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [columns, setColumns] = useState<3 | 4>(3)
+  useEffect(() => {
+    const grid = ref.current
+    if (!grid) return
+    const count = (): void => {
+      const drawn = [...grid.children].filter(
+        (child) => child.getClientRects().length > 0 && !child.classList.contains('col-span-full')
+      ).length
+      setColumns(settingsColumns(drawn))
+    }
+    count()
+    const observer = new MutationObserver(count)
+    observer.observe(grid, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden', 'style', 'class']
+    })
+    return () => observer.disconnect()
+  }, [])
+  return [ref, columns]
+}
+
 export function Settings({
   initialSection,
   onInitialSectionConsumed,
@@ -82,6 +116,7 @@ export function Settings({
   // God is Pro: its settings card comes from Pro through a slot, looked up once per opening.
   const [GodSettings] = useState(() => getSlot(SLOTS.godSettings))
   const [appVersion, setAppVersion] = useState('')
+  const [gridRef, columns] = useSettingsColumns()
 
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,7 +156,9 @@ export function Settings({
       {/* Scrolling content below the fixed header */}
       <div className="relative flex-1 overflow-y-auto px-1 pt-2 pb-16">
         <motion.div
-          className="grid grid-cols-1 items-start gap-2 lg:grid-cols-2 2xl:grid-cols-3"
+          ref={gridRef}
+          data-columns={columns}
+          className="settings-grid grid grid-cols-1 items-start gap-2 lg:grid-cols-2 xl:grid-cols-3"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -271,7 +308,7 @@ export function Settings({
             {/* Keyboard shortcuts — one reference for every hotkey (core + pro rows). */}
             <SettingsCard
               title="Keyboard shortcuts"
-              summary="Every hotkey in one place — command palette, navigation, window zoom, clipboard, dictation."
+              summary="Every hotkey in one place: command palette, navigation, window zoom, clipboard, dictation."
               delay={0.45}
             >
               <KeyboardShortcuts />

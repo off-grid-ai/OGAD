@@ -4,10 +4,9 @@ import {
   formatParams,
   isModelWeightFile,
   modelFileGuidance,
-  modelNameForFile,
-  resolveActiveTextModel,
-  resolveModelName
+  resolveActiveTextModel
 } from '../model-summary'
+import { modelDisplayName } from '@offgrid/models'
 
 describe('model file guidance', () => {
   const file = (
@@ -117,26 +116,42 @@ describe('formatContextWindow', () => {
   })
 })
 
-describe('resolveModelName', () => {
+// The screen helpers resolveModelName and modelNameForFile gave way to the shared resolver; the
+// cases they covered still hold for the names desktop screens show.
+describe('model names on desktop screens', () => {
   const models = [
     { id: 'qwen3-vl-2b', name: 'Qwen3-VL 2B' },
     { id: 'gemma-4-e2b', name: 'Gemma 4 E2B' }
   ]
 
   it('maps an active id to its display name', () => {
-    expect(resolveModelName(models, 'qwen3-vl-2b')).toBe('Qwen3-VL 2B')
+    expect(modelDisplayName('qwen3-vl-2b', { catalog: models })).toBe('Qwen3-VL 2B')
   })
 
-  it('falls back to the id for an unknown model, null for no active id', () => {
-    expect(resolveModelName(models, 'just-imported.gguf')).toBe('just-imported.gguf')
-    expect(resolveModelName(models, null)).toBeNull()
-    expect(resolveModelName(models, undefined)).toBeNull()
+  it('reads an unknown model as a name, and no model as null', () => {
+    expect(modelDisplayName('just-imported.gguf', { catalog: models })).toBe('Just imported')
+    expect(modelDisplayName(null, { catalog: models })).toBeNull()
+    expect(modelDisplayName(undefined, { catalog: models })).toBeNull()
   })
 
-  it('shows the provider model id instead of an internal remote routing id', () => {
+  it('names a remote model by its provider model, never the internal routing id', () => {
     expect(
-      resolveModelName([], 'remote-vision:0e535f87-8fff-4fa3-a8bf-6da96e4a6ac4:qwen%2Fqwen-image-3')
-    ).toBe('qwen/qwen-image-3')
+      modelDisplayName('remote-vision:0e535f87-8fff-4fa3-a8bf-6da96e4a6ac4:qwen%2Fqwen-image-3')
+    ).toBe('Qwen image 3')
+  })
+
+  it('names a catalogued image model file by its catalog name, from a file name or a path', () => {
+    expect(modelDisplayName('dreamshaper-xl-v2-turbo-Q8_0.gguf')).toBe(
+      'DreamShaper XL v2 Turbo (versatile)'
+    )
+    expect(modelDisplayName('/Users/a/models/image/dreamshaper-xl-v2-turbo-Q8_0.gguf')).toBe(
+      'DreamShaper XL v2 Turbo (versatile)'
+    )
+  })
+
+  it('reads a file the catalog does not know as a cleaned name', () => {
+    expect(modelDisplayName('my-own-merge.gguf')).toBe('My own merge')
+    expect(modelDisplayName('')).toBeNull()
   })
 })
 
@@ -157,7 +172,18 @@ describe('resolveActiveTextModel', () => {
         'gemma',
         new Set(['gemma', 'remote:openrouter:stealth/ox-alpha'])
       )
-    ).toEqual({ name: 'stealth/ox-alpha', remote: true })
+    ).toEqual({ name: 'Ox alpha', remote: true })
+  })
+
+  it('names a local model the list does not hold by the shared resolver, never by its file', () => {
+    expect(resolveActiveTextModel(models, 'ggml-large-v3-turbo.bin', new Set())).toEqual({
+      name: 'Whisper Large v3 Turbo',
+      remote: false
+    })
+    expect(resolveActiveTextModel(models, 'my-own-merge-Q4_K_M.gguf', new Set())).toEqual({
+      name: 'My own merge',
+      remote: false
+    })
   })
 
   it('uses the local model when no remote text model is active', () => {
@@ -191,22 +217,6 @@ describe('resolveActiveTextModel', () => {
         new Set(['tts', 'chat'])
       )
     ).toEqual({ name: 'Remote chat', remote: true })
-  })
-})
-
-describe('modelNameForFile', () => {
-  it('names a catalogued image model file by its catalog name', () => {
-    expect(modelNameForFile('dreamshaper-xl-v2-turbo-Q8_0.gguf')).toBe(
-      'DreamShaper XL v2 Turbo (versatile)'
-    )
-    expect(modelNameForFile('/Users/a/models/image/dreamshaper-xl-v2-turbo-Q8_0.gguf')).toBe(
-      'DreamShaper XL v2 Turbo (versatile)'
-    )
-  })
-
-  it('keeps the file name of a model the catalog does not know', () => {
-    expect(modelNameForFile('my-own-merge.gguf')).toBe('my-own-merge.gguf')
-    expect(modelNameForFile('')).toBeNull()
   })
 })
 

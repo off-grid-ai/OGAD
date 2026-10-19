@@ -7,7 +7,7 @@ import shutil
 import sys
 import zipfile
 
-EXPECTED_SHA256 = "af520ddd034d985b55dfeea3e465ed93653ba2aee1a55e865033edc548c272a7"
+EXPECTED_SHA256 = "afef0b881c500958921c3f5523b50e59ee2ec9b6f5cbd25b324c51ed308a957a"
 REQUIRED = {
     "whisper-cli.exe",
     "ggml-cuda.dll",

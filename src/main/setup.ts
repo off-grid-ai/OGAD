@@ -18,8 +18,10 @@ import {
   setActiveModel,
   setActiveModalChoice,
   BONSAI_2,
-  desktopCatalog
+  desktopCatalog,
+  displayModelName
 } from './models-manager'
+import { getAllActiveModals } from './active-models'
 import { getGatewayPort } from './model-server'
 import { deviceNoun } from '../shared/device'
 import type {
@@ -102,13 +104,13 @@ export async function getChatHealth(): Promise<HealthComponent> {
     healthy: !!llamaHealth && llm.isReady(),
     loading: llm.isStarting(),
     modelsExist,
-    activeModel,
+    activeModel: displayModelName(activeModel),
     lastError: llm.lastError()
   })
 
   return {
     id: 'chat',
-    label: 'Chat model (llama-server)',
+    label: 'Chat model',
     status,
     detail,
     port: llm.getPort(),
@@ -144,6 +146,11 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     return v === 'ready' ? 'ready' : v === 'not_installed' ? 'not_installed' : 'down'
   }
 
+  const activeModals = getAllActiveModals()
+  const namedDetail = (ref: string | null | undefined): { detail?: string } => {
+    const name = displayModelName(ref)
+    return name ? { detail: name } : {}
+  }
   const components: HealthComponent[] = [
     chatHealth,
     {
@@ -160,8 +167,18 @@ export async function getSystemHealth(): Promise<SystemHealth> {
       status: modality('vision_understanding')
     },
     { id: 'embeddings', label: 'Embeddings (search/RAG)', status: modality('embeddings') },
-    { id: 'transcription', label: 'Speech-to-text (whisper)', status: modality('transcription') },
-    { id: 'speech', label: 'Text-to-speech', status: modality('speech') },
+    {
+      id: 'transcription',
+      label: 'Speech to text',
+      status: modality('transcription'),
+      ...namedDetail(activeModals.transcription)
+    },
+    {
+      id: 'speech',
+      label: 'Text to speech',
+      status: modality('speech'),
+      ...namedDetail(activeModals.speech)
+    },
     {
       id: 'image',
       label: 'Image generation',
@@ -174,16 +191,20 @@ export async function getSystemHealth(): Promise<SystemHealth> {
         id,
         label: id === 'grounding' ? 'Computer Use grounding' : 'Computer / Web Use decision',
         status:
-          runtime?.state === 'loaded' ? 'ready'
-            : runtime?.state === 'loading' ? 'starting'
-              : runtime?.state === 'error' ? 'down' : 'idle',
+          runtime?.state === 'loaded'
+            ? 'ready'
+            : runtime?.state === 'loading'
+              ? 'starting'
+              : runtime?.state === 'error'
+                ? 'down'
+                : 'idle',
         detail: runtime?.state === 'error' ? runtime.detail : undefined
       }
     }),
     ...getNativeHelperHealth()
   ]
 
-  return { ramGb: ramGb(), activeModel, components }
+  return { ramGb: ramGb(), activeModel, activeModelName: displayModelName(activeModel), components }
 }
 
 /** Choose the best chat/vision model that fits this machine's RAM. Prefers a

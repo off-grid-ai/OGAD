@@ -191,9 +191,14 @@ async function processFileAt(
   }
   if (AUDIO_EXT.includes(ext)) {
     const text = await mediaText.transcribeAudio(tmp)
-    return options.persistPreview === false
-      ? { name, kind: 'audio', text }
-      : ingestTextDocument(name, 'audio', text)
+    if (options.persistPreview === false) return { name, kind: 'audio', text }
+    // Kept like an image, so the recording can be played from the chat and not only read: with
+    // only its transcript, opening it showed text and no player.
+    const dir = uploadsDir()
+    await fs.promises.mkdir(dir, { recursive: true })
+    const dest = path.join(dir, `${Date.now()}-${safe}`)
+    await fs.promises.copyFile(tmp, dest)
+    return { ...(await ingestTextDocument(name, 'audio', text)), path: dest }
   }
   if (VIDEO_EXT.includes(ext)) {
     // ~1 frame/second, capped so a long clip doesn't run the vision model forever.
@@ -224,13 +229,15 @@ async function processFileAt(
         {
           signal: enough.signal,
           onPages: (pages) => {
-            for (const page of pages) if (page.text.trim()) text += `${text ? '\n\n' : ''}${page.text.trim()}`
+            for (const page of pages)
+              if (page.text.trim()) text += `${text ? '\n\n' : ''}${page.text.trim()}`
             if (text.length >= PREVIEW_CHARS) enough.abort()
           }
         }
       )
     } catch (e) {
-      if (!text) console.warn('[files] extraction failed; attaching without text:', (e as Error).message)
+      if (!text)
+        console.warn('[files] extraction failed; attaching without text:', (e as Error).message)
     }
     return { name, kind, text: text.slice(0, PREVIEW_CHARS) }
   }

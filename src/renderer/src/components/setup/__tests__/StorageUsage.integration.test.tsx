@@ -161,6 +161,7 @@ describe('rendered storage usage', () => {
     api.listDownloads.mockResolvedValue([
       {
         modelId: 'synthetic/text-model',
+        modelName: 'Text model',
         status: 'failed',
         percent: 41,
         error: diskFullMessage
@@ -170,7 +171,7 @@ describe('rendered storage usage', () => {
 
     render(<StoragePanel />)
 
-    expect(await screen.findByText('synthetic/text-model')).toBeTruthy()
+    expect(await screen.findByText('Text model')).toBeTruthy()
     expect(screen.getByText(diskFullMessage)).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(api.retryDownload).toHaveBeenCalledWith('synthetic/text-model')
@@ -178,11 +179,11 @@ describe('rendered storage usage', () => {
 
   it('shows manager-owned running and queued counts and can cancel a queued item (#22)', async () => {
     api.listDownloads.mockResolvedValue([
-      { modelId: 'model-running-1', status: 'downloading', percent: 15 },
-      { modelId: 'model-running-2', status: 'downloading', percent: 30 },
-      { modelId: 'model-running-3', status: 'downloading', percent: 45 },
-      { modelId: 'model-queued-1', status: 'queued', percent: 0 },
-      { modelId: 'model-queued-2', status: 'queued', percent: 0 }
+      { modelId: 'model-running-1', modelName: 'Running 1', status: 'downloading', percent: 15 },
+      { modelId: 'model-running-2', modelName: 'Running 2', status: 'downloading', percent: 30 },
+      { modelId: 'model-running-3', modelName: 'Running 3', status: 'downloading', percent: 45 },
+      { modelId: 'model-queued-1', modelName: 'Queued model 1', status: 'queued', percent: 0 },
+      { modelId: 'model-queued-2', modelName: 'Queued model 2', status: 'queued', percent: 0 }
     ])
     const user = userEvent.setup()
 
@@ -190,7 +191,7 @@ describe('rendered storage usage', () => {
 
     expect(await screen.findByText('3 running · 2 queued')).toBeTruthy()
     expect(screen.getAllByText('Queued')).toHaveLength(2)
-    await user.click(screen.getByRole('button', { name: 'Cancel model-queued-2' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel Queued model 2' }))
     expect(api.cancelModelDownload).toHaveBeenCalledWith('model-queued-2')
   })
 

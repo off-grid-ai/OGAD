@@ -44,6 +44,6 @@ describe('<MemoryChat/> speakable message integration', () => {
     })
     await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
     await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
-    expect(boundary.api.speak).toHaveBeenCalledWith('Release ready.')
+    expect(boundary.api.speak).toHaveBeenCalledWith('Release ready.', undefined, expect.any(Function))
   })
 })

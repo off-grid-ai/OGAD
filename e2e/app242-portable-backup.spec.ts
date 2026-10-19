@@ -135,10 +135,15 @@ async function createProjectWithKnowledge(): Promise<void> {
 
   await chooseOpenPath(knowledgePath)
   await page.getByRole('button', { name: 'Add files', exact: true }).click()
-  await expect(page.getByText(`${DOCUMENT}: indexed`, { exact: true })).toBeVisible({
+  // The stored row (only it has a Delete control; the upload row does not), listed once, and done
+  // once its indexing progress bar has gone.
+  await expect(page.getByRole('button', { name: `Delete ${DOCUMENT}`, exact: true })).toBeVisible({
     timeout: 60_000
   })
-  await expect(page.getByText(DOCUMENT, { exact: true })).toBeVisible()
+  await expect(page.getByText(DOCUMENT, { exact: true })).toHaveCount(1, { timeout: 60_000 })
+  await expect(page.getByRole('progressbar', { name: `Indexing ${DOCUMENT}` })).toHaveCount(0, {
+    timeout: 60_000
+  })
 }
 
 async function askProjectQuestion(): Promise<void> {

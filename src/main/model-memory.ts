@@ -43,6 +43,15 @@ export function registerModelEvictor(role: ModelRole, evict: () => Promise<void>
   evictors.set(role, evict)
 }
 
+/** Unload a task model now (the Unload button). It reloads on its next use. False when no runtime
+ *  for that role exists in this process. */
+export async function unloadModelRole(role: 'decision' | 'grounding'): Promise<boolean> {
+  const evict = evictors.get(role)
+  if (!evict) return false
+  await evict()
+  return true
+}
+
 /** Await process exit before allocating the next model, including nested tool calls. */
 export async function prepareModelMemory(role: ModelRole): Promise<void> {
   if (!exclusive.getStore()) return

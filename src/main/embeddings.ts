@@ -320,12 +320,12 @@ class EmbeddingService {
    */
   async embedDocumentTexts(
     texts: string[],
-    opts: { interactive?: boolean } = {}
+    opts: { interactive?: boolean; source?: string } = {}
   ): Promise<number[][]> {
     return this.embed(texts, {
       ...opts,
       model: DOCUMENT_EMBEDDER,
-      source: texts.length === 1 ? 'Document question embedding' : 'Document indexing'
+      source: opts.source ?? (texts.length === 1 ? 'Document question embedding' : 'Document indexing')
     })
   }
 

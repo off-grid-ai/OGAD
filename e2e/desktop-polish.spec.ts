@@ -16,12 +16,48 @@ async function finishOnboarding(): Promise<void> {
   }
 }
 
+/** The field slots the focus beam runs round (operator-ui alive/field-slots). */
+const FIELD_SLOTS = [
+  '[data-slot=input-control]',
+  '[data-slot=textarea-control]',
+  '[data-slot=select-trigger]',
+  '[data-slot=combobox-input-group]',
+  '[data-slot=autocomplete-input-group]',
+  '[data-slot=number-field-group]',
+  '[data-slot=input-group]'
+].join(',')
+
 async function expectVisibleKeyboardFocus(
   locator: Locator,
   label: string,
   outlineOffset = '2px'
 ): Promise<void> {
   await expect(locator, `${label} receives focus in the expected order`).toBeFocused()
+  // A text field or picker is marked by the focus beam round its outermost field slot, and by
+  // nothing else (main.css; operator-ui alive/field-focus). Every other control keeps the ring.
+  const beamed = await locator.evaluate((element) => element.closest(FIELD_SLOTS) !== null)
+  if (beamed) {
+    await expect
+      .poll(
+        () =>
+          locator.evaluate((element, slots) => {
+            let field = element.closest(slots)!
+            for (let outer = field.parentElement?.closest(slots); outer;) {
+              field = outer
+              outer = field.parentElement?.closest(slots)
+            }
+            const beam = field.querySelector('[data-slot="field-focus-beam"]')
+            return {
+              focusVisible: element.matches(':focus-visible'),
+              ownOutline: getComputedStyle(element).outlineStyle,
+              beamLit: beam !== null && getComputedStyle(beam).opacity === '1'
+            }
+          }, FIELD_SLOTS),
+        { message: `${label} settles to the focus beam alone` }
+      )
+      .toEqual({ focusVisible: true, ownOutline: 'none', beamLit: true })
+    return
+  }
   const primaryColor = await page.evaluate(() => {
     const probe = document.createElement('span')
     probe.style.color = 'var(--og-primary)'
@@ -122,6 +158,9 @@ test('window resize adds collection columns while filter context remains reachab
 })
 
 test('keyboard focus follows navigation, form, dialog, and primary-action order (#151)', async () => {
+  // A long keyboard walk (every stop on Models, Settings and the palette), about 90 s on this Mac;
+  // the default 60 s budget is for single journeys.
+  test.setTimeout(180_000)
   const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
   await navigation.getByRole('img', { name: 'Off Grid AI', exact: true }).click()
   await page.keyboard.press('Tab')

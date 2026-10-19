@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { prepareModelMemory, registerModelEvictor, withExclusiveModelMemory } from '../model-memory'
+import {
+  prepareModelMemory,
+  registerModelEvictor,
+  unloadModelRole,
+  withExclusiveModelMemory
+} from '../model-memory'
 
 const events: string[] = []
 beforeEach(() => {
@@ -83,5 +88,14 @@ describe('exclusive model memory for Kev tasks', () => {
     release()
     await run
     expect(load).toHaveBeenCalledOnce()
+  })
+})
+
+describe('Unload for a task model', () => {
+  it('stops only the role asked for, through the same evictor task memory uses', async () => {
+    expect(await unloadModelRole('grounding')).toBe(true)
+    expect(events).toEqual(['stop:grounding'])
+    expect(await unloadModelRole('decision')).toBe(true)
+    expect(events).toEqual(['stop:grounding', 'stop:decision'])
   })
 })

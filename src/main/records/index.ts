@@ -126,6 +126,20 @@ export async function recordSearch(
   return recordService().search(question, search)
 }
 
+/** A snippet reads as prose: chat and notes are stored as markdown, and a result list that
+ *  shows `**bold**`, fences or `<html>` tags reads as source code. Capped at 280 chars. */
+export function plainSnippet(text: string): string {
+  return (text || '')
+    .replace(/```[\w-]*\n?/g, ' ')
+    .replace(/<\/?[a-z!][^<>\n]{0,200}>/gi, ' ')
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}(?:#{1,6}|>|[-*+]|\d+\.)\s+/gm, '')
+    .replace(/(?<!\w)(\*\*|__|\*|_|~~|`)(?=\S)(.*?\S)\1(?!\w)/g, '$2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 280)
+}
+
 /** A record as a universal-search result (the shape the renderer, citations and Sources use). */
 export function recordToSearchResult(hit: RecordHit & { score?: number }): SearchResult {
   const desktop = hit as DesktopRecordHit & { score?: number }
@@ -136,10 +150,7 @@ export function recordToSearchResult(hit: RecordHit & { score?: number }): Searc
     refId: typeof hit.refId === 'number' ? hit.refId : Number(hit.refId) || 0,
     title: hit.title || hit.kind,
     // A moment's card shows its summary; the on-screen words after it are for ranking.
-    snippet: (hit.key.startsWith('obs:') ? (hit.text.split('\n', 1)[0] ?? '') : hit.text).slice(
-      0,
-      280
-    ),
+    snippet: plainSnippet(hit.key.startsWith('obs:') ? (hit.text.split('\n', 1)[0] ?? '') : hit.text),
     surface: hit.surface ?? '',
     url: hit.url ?? null,
     ts: hit.ts || 0,

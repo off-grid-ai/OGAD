@@ -38,7 +38,12 @@ let userDataDir: string
 let binDir: string
 
 const nav = async (label: string): Promise<void> => {
-  await page.getByRole('button', { name: label, exact: true }).first().click()
+  // The sidebar destination, not a same-named control on the current screen (Day has Replay links
+  // that open Replay at a moment).
+  await page
+    .getByRole('navigation', { name: 'Primary navigation' })
+    .getByRole('button', { name: label, exact: true })
+    .click()
   await page.waitForTimeout(500)
 }
 

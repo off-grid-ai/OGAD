@@ -21,10 +21,14 @@ export function restoredStreamMessage(
   // In its image phase the stream no longer carries the answer: that is already saved, versions
   // and all, and the stream names the image row it will write instead.
   const answering = stream.phase !== 'loading_image_model' && stream.phase !== 'generating_image'
-  const replaces = answering && live?.id === stream.streamId ? live.replacementMessageId : undefined
+  const ownView = answering && live?.id === stream.streamId ? live : undefined
+  const replaces = ownView?.replacementMessageId
+  // A retry streams beside the saved answer it is a new version of, and is drawn in its place.
+  const versionOf = ownView?.versionOf
   return {
     id: stream.streamId,
     replacementMessageId: replaces ?? stream.messageId,
+    ...(versionOf ? { versionOf } : {}),
     role: 'assistant',
     content: stream.content,
     reasoning: stream.reasoning,
@@ -35,7 +39,7 @@ export function restoredStreamMessage(
       ...(stream.reasoning.trim() ? [{ kind: 'thinking' as const, text: stream.reasoning }] : []),
       ...toolCalls.map((_, toolIndex) => ({ kind: 'tool' as const, toolIndex }))
     ],
-    ...(replaces && live?.variants?.length
+    ...((replaces || versionOf) && live?.variants?.length
       ? { variants: live.variants, variantIndex: live.variantIndex ?? live.variants.length - 1 }
       : {})
   }
@@ -44,7 +48,9 @@ export function restoredStreamMessage(
 /** Put a restored stream into a conversation in place of the saved answer it replaces. */
 export function withRestoredStream(previous: ChatMessage[], restored: ChatMessage): ChatMessage[] {
   const kept = previous.filter(
-    (message) => message.id === restored.id || message.id !== restored.replacementMessageId
+    (message) =>
+      message.id === restored.id ||
+      (message.id !== restored.replacementMessageId && message.id !== restored.versionOf)
   )
   const index = kept.findIndex((message) => message.id === restored.id)
   if (index < 0) return [...kept, restored]

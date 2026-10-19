@@ -9,6 +9,7 @@ import {
   type DocumentTurnSummary,
   type FoundPassage
 } from '@offgrid/rag/documents'
+import { projectDocumentsMode } from './project-knowledge-mode'
 import type { SearchResult } from '../../shared/search-contract'
 import { attachmentSource } from './conversation-documents'
 import {
@@ -90,12 +91,19 @@ export async function prepareTurnDocuments(input: {
     ...(input.conversationId ? { conversationId: input.conversationId } : {}),
     ...(input.projectId ? { projectId: input.projectId } : {})
   }
-  const sources = await documentTurns.documentsFor(scope, current)
+  const { getSetting } = await import('../database')
+  const projectDocuments = projectDocumentsMode(getSetting<unknown>('knowledgeBaseRetrieval', null))
+  // When needed: a project's knowledge base is not opened for the turn; the model searches it.
+  const sources = await documentTurns.documentsFor(scope, current, {
+    includeProject: projectDocuments !== 'when-needed'
+  })
   if (!sources.length) return null
   const { getActiveRemoteVisionServer } = await import('../vision/remote-vision-server')
   const result = await documentTurns.prepare({
     ...scope,
     current,
+    // Settings → Text → Project knowledge.
+    projectDocuments,
     onStatus: (status) =>
       input.onActivity?.({ kind: 'documents', label: describeTurnStatus(status) }),
     question: input.question,

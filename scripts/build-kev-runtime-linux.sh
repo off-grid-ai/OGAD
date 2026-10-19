@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/build/linux-bin/kev-runtime"
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || { echo 'Linux x64 is required' >&2; exit 1; }
-PYTHON_URL='https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.12.14%2B20260924-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz'
-PYTHON_SHA256='269b2c99e4db15b242bf01832f4fea1e8f1a664f273cff519393f296e9820b41'
-KEV_REF='9145646c4188e1ed929fb6478d93df437cb57cf7'
+PYTHON_URL='https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.12.15%2B20261013-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz'
+PYTHON_SHA256='178d3d83b6e8e99285a65d3fce9c16b87952cc5efdb4d1a0e3ff3be18ff0fc9c'
+KEV_REF='6b719c3c3f367295f6ef336f4f751cf5ff970abc'
 git -C "$ROOT" lfs pull --include='resources/bin/kev-local-server.py' --exclude=''
 if head -n 1 "$ROOT/resources/bin/kev-local-server.py" | grep -q '^version https://git-lfs.github.com/spec/'; then
   echo 'Kev launcher is still an LFS pointer' >&2

@@ -4,6 +4,7 @@
 // (LLM for artifacts, image-gen for the picture); otherwise it falls back to
 // curated content so it always completes. Idempotent. On-brand, Off Grid AI only.
 
+import { modelDisplayName } from '@offgrid/models'
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -30,7 +31,10 @@ import {
 } from './tasks/task-history'
 import { encodeTaskExecutionPlan, encodeTaskPhase } from '../shared/task-execution-plan'
 import sharp from 'sharp'
-import { getRemoteVisionServerSettings, setRemoteVisionServerSettings } from './vision/remote-vision-server'
+import {
+  getRemoteVisionServerSettings,
+  setRemoteVisionServerSettings
+} from './vision/remote-vision-server'
 
 const PROJECT_ID = 'offgrid-demo'
 
@@ -433,12 +437,7 @@ export async function seedDemo(live = false): Promise<void> {
       'a serene off-grid cabin on a forested mountain at dawn, misty valley, warm light, highly detailed, no text'
     const imgDir = path.join(app.getPath('userData'), 'generated-images')
     fs.mkdirSync(imgDir, { recursive: true })
-    const pretty = (m: string): string =>
-      m
-        .replace(/\.(gguf|safetensors)$/i, '')
-        .replace(/-Q\d.*$/i, '')
-        .replace(/[-_]/g, ' ')
-        .trim()
+    const pretty = (m: string): string => modelDisplayName(m) ?? m
     const slugify = (m: string): string =>
       m
         .toLowerCase()

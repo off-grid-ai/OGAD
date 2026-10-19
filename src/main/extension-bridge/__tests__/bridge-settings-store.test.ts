@@ -122,11 +122,12 @@ describe('a paired browser’s view of the desktop settings', () => {
       grounding: 'kept-on-desktop',
       groundingChoices: [
         { id: 'grounder-7b', label: 'Grounder 7B' },
-        { id: expect.stringContaining('ui-tars'), label: 'ui-tars - Lab' }
+        // The model's name, never the server's: the server rides beside it.
+        { id: expect.stringContaining('ui-tars'), label: 'Ui tars', server: 'Lab' }
       ],
       decisionChoices: [
         { id: 'decider-2b', label: 'Decider 2B' },
-        { id: expect.stringContaining('decider'), label: 'decider - Lab' }
+        { id: expect.stringContaining('decider'), label: 'Decider', server: 'Lab' }
       ]
     })
   })

@@ -13,6 +13,19 @@ const isTaskId = (value: unknown): value is string =>
   typeof value === 'string' && /^[\w-]{1,128}$/.test(value)
 type Handler = (params: Record<string, unknown>, browser: PairedBrowser) => Promise<unknown>
 
+/** End a browser's pairing: its runs stop, its key is forgotten and its live socket closes.
+ *  The browser asks for this itself (unpair), or the person removes it on Desktop. */
+export async function unpairBrowser(
+  deps: BridgeDeps,
+  browser: PairedBrowser,
+  forgetSession: (id: string) => void
+): Promise<void> {
+  await deps.data.chat?.({ action: 'disconnect' }, browser).catch(() => undefined)
+  const all = await deps.store.list()
+  await deps.store.save(all.filter((b) => b.id !== browser.id))
+  forgetSession(browser.id)
+}
+
 export function rpcHandlers(
   deps: BridgeDeps,
   forgetSession: (id: string) => void
@@ -46,6 +59,19 @@ export function rpcHandlers(
     'conversations.put': async (p, browser) => {
       await deps.data.putConversation(p.conversation, browser)
       return true
+    },
+    'conversations.selectVersion': async (p) => {
+      if (
+        typeof p.id !== 'string' ||
+        !p.id ||
+        typeof p.messageId !== 'string' ||
+        !p.messageId ||
+        (p.direction !== 1 && p.direction !== -1)
+      ) {
+        throw new Error('invalid')
+      }
+      if (!deps.data.selectConversationVersion) throw new Error('chats_unavailable')
+      return deps.data.selectConversationVersion(p.id, p.messageId, p.direction)
     },
     'conversations.delete': async (p) => {
       if (typeof p.id !== 'string' || !p.id) {
@@ -133,10 +159,7 @@ export function rpcHandlers(
       return { version: await nextSettingsVersion(since, SETTINGS_WATCH_MS) }
     },
     unpair: async (_p, browser) => {
-      await deps.data.chat?.({ action: 'disconnect' }, browser).catch(() => undefined)
-      const all = await deps.store.list()
-      await deps.store.save(all.filter((b) => b.id !== browser.id))
-      forgetSession(browser.id)
+      await unpairBrowser(deps, browser, forgetSession)
       return true
     }
   }

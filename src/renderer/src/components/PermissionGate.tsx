@@ -1,4 +1,5 @@
 import { replaceAppLocation } from '@renderer/lib/app-location'
+import { modelDisplayName } from '@offgrid/models'
 import { useState, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { X, Cpu, ArrowLeft } from '@phosphor-icons/react'
@@ -75,8 +76,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
         window.api.getModelCatalog().catch(() => undefined)
       ])
       const status = capture as
-        | { running?: boolean; paused?: boolean; visionReady?: boolean }
-        | undefined
+        { running?: boolean; paused?: boolean; visionReady?: boolean } | undefined
       if (!status?.running || status.paused || status.visionReady) {
         setVisionIssue(null)
         return
@@ -85,11 +85,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
       const catalogModels = (
         catalog as { models?: Array<{ id: string; name?: string }> } | undefined
       )?.models
-      const activeModelName = activeId
-        ? catalogModels?.find((model) => model.id === activeId)?.name?.trim() ||
-          activeId.split('/').pop() ||
-          activeId
-        : null
+      const activeModelName = modelDisplayName(activeId, { catalog: catalogModels ?? [] })
       if (activeId && activeStatus?.supportsVision && !activeStatus.projectorInstalled) {
         setVisionIssue({
           kind: 'missing-projector',

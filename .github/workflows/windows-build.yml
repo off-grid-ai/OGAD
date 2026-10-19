@@ -171,6 +171,8 @@ jobs:
           mv _shared ../shared
           npm --prefix ../shared ci
           npm --prefix ../shared/packages/models run build
+          # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
+          npm --prefix ../shared/packages/rag run build
           npm --prefix ../shared/packages/sync run build
           npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/automation run build

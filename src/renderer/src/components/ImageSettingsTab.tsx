@@ -6,7 +6,7 @@ import {
   type ImageParamStore
 } from '@renderer/lib/image-params'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
-import { resolveModelName } from '@renderer/lib/model-summary'
+import { modelDisplayName } from '@offgrid/models'
 import { useRuntimeBackends } from '@renderer/hooks/useRuntimeBackends'
 import { SettingsSelect } from './SettingsSelect'
 import { BackendPreferencesSection } from './ProcessingControls'
@@ -34,9 +34,6 @@ const typedText = (value: number | null, details: { reason: string; event: Event
   details.reason === 'input-change'
     ? ((details.event.target as HTMLInputElement | null)?.value ?? '')
     : String(value ?? '')
-
-const modelLabel = (model: string): string =>
-  (resolveModelName([], model) ?? model).replace(/\.gguf$/i, '').replace(/-Q\d.*$/i, '')
 
 export function ImageSettingsTab(): React.JSX.Element {
   const [models, setModels] = useState<{ value: string; label: string }[]>([])
@@ -72,11 +69,14 @@ export function ImageSettingsTab(): React.JSX.Element {
         const available: string[] = status?.models ?? []
         const active = status?.active ?? available[0] ?? ''
         const saved = settings as ImageSettings
-        const names = new Map(
-          (catalog.models as { id: string; name?: string }[]).map((entry) => [entry.id, entry.name])
-        )
+        // Main names each runtime file; the catalog resolves anything it did not name.
+        const names: Record<string, string> = status?.modelNames ?? {}
+        const sources = { catalog: catalog.models as { id: string; name?: string }[] }
         setModels(
-          available.map((item) => ({ value: item, label: names.get(item) || modelLabel(item) }))
+          available.map((item) => ({
+            value: item,
+            label: names[item] ?? modelDisplayName(item, sources) ?? item
+          }))
         )
         setModel(active)
         setParams(saved.imageParams ?? {})
@@ -151,7 +151,8 @@ export function ImageSettingsTab(): React.JSX.Element {
     )
   }
 
-  const modelName = models.find((item) => item.value === model)?.label ?? modelLabel(model)
+  const modelName =
+    models.find((item) => item.value === model)?.label ?? modelDisplayName(model) ?? ''
   const generationSummary = `${modelName} · ${effective.size} × ${effective.size}`
   const tuningSummary = `${effective.steps} steps · guidance ${effective.cfgScale} · ${seed ? `seed ${seed}` : 'random seed'}`
   const promptsSummary = `${enhance ? 'Enhanced by the chat model' : 'Sent as written'} · ${negativePrompt.trim() ? 'negative prompt set' : 'no negative prompt'}`

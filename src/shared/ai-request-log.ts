@@ -14,6 +14,8 @@ export interface AIRequestSummary {
   durationMs?: number
   preview: string
   error?: string
+  /** The name of the gateway API key that sent the request (never the key itself). */
+  keyName?: string
 }
 export interface AIRequestRecord extends AIRequestSummary {
   request?: unknown

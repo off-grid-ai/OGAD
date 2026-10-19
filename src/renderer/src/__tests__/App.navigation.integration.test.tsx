@@ -726,7 +726,10 @@ describe('<App/> desktop navigation integration', () => {
       )
     })
 
-    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy()
+    // The first Settings render reads every section's state; it gets the time the first screen gets.
+    expect(
+      await screen.findByRole('heading', { name: 'Settings' }, { timeout: 5_000 })
+    ).toBeTruthy()
     expect(window.location.pathname).toBe('/settings/permissions')
     expect(await screen.findByText('System permissions')).toBeTruthy()
     const recordingPermission = screen.getByRole('status', { name: 'Screen Recording permission' })

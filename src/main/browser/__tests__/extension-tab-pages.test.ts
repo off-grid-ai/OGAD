@@ -6,7 +6,7 @@ import type { BrowserLink } from '../../extension-bridge/bridge-socket'
 import type { SocketEvent, SocketOp } from '../../extension-bridge/bridge-socket-protocol'
 import { ElectronPlaywrightAttachments } from '../electron-playwright-attachments'
 import type { CdpEvent } from '../electron-playwright-relay-protocol'
-import { createExtensionPageProvider } from '../extension-tab-pages'
+import { createExtensionPageProvider, taskTabLabel } from '../extension-tab-pages'
 
 // The relay's real attachment code driving browser tabs through a stand-in for the paired
 // extension's link. The link records what the desktop asked the browser to do and lets the
@@ -314,5 +314,16 @@ describe('extension tab pages under the Playwright relay', () => {
     link.emit({ event: 'tab.updated', tabId: next.tabId, data: { title: 'Next task' } })
     expect(provider.active()?.getTitle()).toBe('Next task')
     await provider.closeAll()
+  })
+})
+
+describe('taskTabLabel', () => {
+  it('names the task in a few words for its tab group', () => {
+    expect(
+      taskTabLabel(
+        "Use Web Use: open en.wikipedia.org and tell me the title of today's featured article. Do not log in."
+      )
+    ).toBe('Open en.wikipedia.org and tell…')
+    expect(taskTabLabel('Compare salt prices.')).toBe('Compare salt prices')
   })
 })

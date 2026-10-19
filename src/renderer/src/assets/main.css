@@ -232,11 +232,51 @@ button:disabled,
   outline-offset: 2px;
 }
 
-/* Composite editors own one focus boundary. Do not draw a second, partial
-   outline around the textarea inside the editor. */
-:root[data-user-modality='keyboard'] [data-focus-surface]:focus-within {
-  outline: 2px solid var(--og-primary);
-  outline-offset: 2px;
+/* A field's focus is the border beam AliveProvider runs round its outermost field slot. A square
+   outline on top of it drew a second, hard-cornered frame round the chat composer. Text fields in
+   a beamed slot draw no outline; buttons inside the slot (attach, model, mic) keep the ring above,
+   since the beam does not mark them. Slots: operator-ui alive/field-slots. */
+:root[data-user-modality='keyboard']
+  :is([data-slot='input-control'], [data-slot='textarea-control'], [data-slot='select-trigger']):focus-visible,
+:root[data-user-modality='keyboard']
+  :is(
+    [data-slot='input-group'],
+    [data-slot='combobox-input-group'],
+    [data-slot='autocomplete-input-group'],
+    [data-slot='number-field-group']
+  )
+  :is(input, textarea):focus-visible {
+  outline: none;
+}
+
+/* The beam is a field's only focus mark. Two more were drawn inside it, each with its own corners —
+   the "square border" round the search bar: the library's ring (has-focus-visible:ring-[3px] plus
+   border-ring) and the OGAD skin's glow on a bordered box holding a focused input. Clear both on
+   every beamed slot, mouse or keyboard alike, since a clicked text field matches :focus-visible too;
+   the library already drops the slot's resting shadow on focus, so nothing else is lost. An invalid
+   field keeps its red border and ring: that marks an error, not focus. Same slots as the beam
+   itself (operator-ui alive/field-slots), so a field the beam marks never shows a second frame. */
+:is(
+    [data-slot='input-control'],
+    [data-slot='textarea-control'],
+    [data-slot='select-trigger'],
+    [data-slot='combobox-input-group'],
+    [data-slot='autocomplete-input-group'],
+    [data-slot='number-field-group'],
+    [data-slot='input-group']
+  ):is(:focus-visible, :has(:focus-visible)):not([aria-invalid='true'], :has([aria-invalid='true'])) {
+  box-shadow: none;
+  border-color: var(--color-input);
+}
+
+/* The beam takes its corners from the outermost field slot (borderRadius: inherit). A combobox or
+   autocomplete wraps its rounded control (input-control, rounded-lg) in a group slot with no
+   radius, so the beam traced a square box round a rounded field. Give the group the control's
+   corners, so the beam follows the field it marks. */
+:is([data-slot='combobox-input-group'], [data-slot='autocomplete-input-group']):has(
+    > [data-slot='input-control']
+  ) {
+  border-radius: var(--radius-lg);
 }
 
 /* The surface drew the boundary; the field inside it must not draw a second, partial one.
@@ -244,6 +284,14 @@ button:disabled,
    bordered box, so ringing the bare input leaves the icon outside the ring. */
 :root[data-user-modality='keyboard'] [data-focus-surface] :is(input, textarea):focus-visible {
   outline: none;
+}
+
+/* Settings lays its cards out in three columns, or four when the cards this build draws fill
+   four-wide rows better (Settings.tsx counts them; an open card is the only one drawn). */
+@media (min-width: 1536px) {
+  .settings-grid[data-columns='4'] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 /* The inline-code box is for code in running text. Inside a code block it would box every line. */

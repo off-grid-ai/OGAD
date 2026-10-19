@@ -175,6 +175,8 @@ it('creates, replaces, and revokes keys from Gateway with one-time disclosure', 
   // secret storage, and HTTP gateway are real.
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     gatewayApiKeys: async () => gatewayApiKeySettings(),
+    // The Gateway screen also reads who it serves; this journey runs it for one person.
+    getLlmSettings: async () => ({ gatewayMode: 'single' }),
     createGatewayApiKey: async (...args: Parameters<typeof createGatewayApiKey>) =>
       createGatewayApiKey(...args),
     revokeGatewayApiKey: async (id: string) => revokeGatewayApiKey(id),
@@ -227,10 +229,10 @@ it('creates, replaces, and revokes keys from Gateway with one-time disclosure', 
         ).status
     )
     .toBe(401)
-  await user.click(section.getByRole('button', { name: 'Turn off authentication' }))
+  await user.click(section.getByRole('switch', { name: /^Require an API key/ }))
   await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
   expect((await fetch(`${base}/v1/requests`)).status).toBe(401)
-  await user.click(section.getByRole('button', { name: 'Turn off authentication' }))
+  await user.click(section.getByRole('switch', { name: /^Require an API key/ }))
   await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Confirm' }))
   await section.findByText('API key not required')
   expect((await fetch(`${base}/v1/requests`)).status).toBe(200)
@@ -247,7 +249,8 @@ it('creates, replaces, and revokes keys from Gateway with one-time disclosure', 
 
 it('keeps Gateway visible when API key storage is locked on entry', async () => {
   ;(window as unknown as { api: Record<string, unknown> }).api = {
-    gatewayApiKeys: async () => gatewayApiKeySettings()
+    gatewayApiKeys: async () => gatewayApiKeySettings(),
+    getLlmSettings: async () => ({ gatewayMode: 'single' })
   }
   keychainLocked = true
   try {

@@ -17,6 +17,7 @@ import {
   setRagDocumentIndexed
 } from './store'
 import { AUDIO_EXT, IMAGE_EXT, VIDEO_EXT } from '../files-classify'
+import { setMissingDocumentIndexer } from '../documents/project-documents'
 import {
   emitKnowledgeDocumentMutation,
   type KnowledgeDocumentSnapshot
@@ -200,5 +201,7 @@ export const knowledgeBase = {
     if (document) await knowledgeBase.deleteDocument(document.id, { origin: 'sync' })
   }
 }
+
+setMissingDocumentIndexer((document, wait) => knowledgeBase.documentIdFor(document, wait))
 
 export * from './store'

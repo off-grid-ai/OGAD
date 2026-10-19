@@ -54,9 +54,9 @@ describe('decideChatStatus', () => {
     expect(r.detail).toMatch(/engine library/i)
   })
 
-  it('down with a generic message when there is no captured reason', () => {
+  it('idle, not down, when the model is installed but not loaded yet (it loads on first use)', () => {
     const r = decideChatStatus({ healthy: false, loading: false, modelsExist: true })
-    expect(r.status).toBe('down')
-    expect(r.detail).toMatch(/not running/i)
+    expect(r.status).toBe('idle')
+    expect(r.detail).toMatch(/first chat/i)
   })
 })

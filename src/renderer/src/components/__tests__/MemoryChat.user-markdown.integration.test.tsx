@@ -78,7 +78,7 @@ describe('<MemoryChat/> sent-message Markdown', () => {
     const message = await screen.findByTestId('chat-message-3')
     expect(within(message).getByText('Here is the rollout flow.')).toBeTruthy()
     expect(within(message).getByText('Priya owns the first step.')).toBeTruthy()
-    expect(within(message).getByText(/MERMAID artifact/i)).toBeTruthy()
+    expect(within(message).getByRole('button', { name: 'Diagram' })).toBeTruthy()
     expect(within(message).queryByText(/graph TD/)).toBeNull()
   })
 })

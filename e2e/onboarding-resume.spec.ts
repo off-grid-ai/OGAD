@@ -14,6 +14,8 @@ import path from 'path'
 
 interface InterruptedFixture {
   modelId: string
+  /** The catalog name the screen shows; the repo id never reaches it. */
+  modelName: string
   fileName: string
   partial: Buffer
 }
@@ -102,8 +104,9 @@ test('relaunch resumes onboarding progress and one interrupted transfer (#12)', 
     const selected = plan.items.find((item) => !item.installed) ?? plan.items[0]
     const entry = catalog.models.find((model) => model.id === selected?.id)
     const fileName = entry?.files[0]?.name
-    if (!selected || !fileName) throw new Error('Setup plan did not expose a downloadable model')
-    return { modelId: selected.id, fileName }
+    if (!selected || !entry || !fileName)
+      throw new Error('Setup plan did not expose a downloadable model')
+    return { modelId: selected.id, modelName: entry.name, fileName }
   })
   const interrupted: InterruptedFixture = {
     ...fixture,
@@ -152,7 +155,8 @@ test('relaunch resumes onboarding progress and one interrupted transfer (#12)', 
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
   await page.getByRole('button', { name: /Setup & health/ }).click()
 
-  await expect(page.getByText(interrupted.modelId, { exact: true })).toBeVisible()
+  await expect(page.getByText(interrupted.modelName, { exact: true })).toBeVisible()
+  await expect(page.getByText(interrupted.modelId)).toHaveCount(0)
   await expect(page.getByText('interrupted - retry to resume', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
   expect(await page.evaluate(async () => (await window.api.listDownloads()).length)).toBe(1)

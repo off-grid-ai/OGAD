@@ -12,6 +12,7 @@ import https from 'https'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { randomUUID } from 'crypto'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -29,6 +30,16 @@ import { authorizeActionRequest } from './mcp-auth'
 import { taskOriginFromRequestMeta } from '@offgrid/sync'
 import { mayRunRemoteTask } from './remote-task-permission'
 import { getTaskExecutionDevice } from './tasks/task-history'
+import { embedCoalesced, teamConcurrency, teamMode, withTurn } from './model-server/team-runtimes'
+
+/** Team gateway mode: MCP tools take the same per-runtime turns as the HTTP routes. Single mode
+ *  runs `work` exactly as before. */
+function onTurn<T>(
+  runtime: Parameters<typeof withTurn>[0],
+  work: (team: boolean) => Promise<T>
+): Promise<T> {
+  return teamMode() ? withTurn(runtime, () => work(true)) : work(false)
+}
 
 const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
@@ -38,7 +49,9 @@ async function materialize(ref: string, fallbackExt: string): Promise<string> {
   const url = ref.trim()
   if (url.startsWith('data:')) {
     const { data, ext } = parseDataUrl(url, fallbackExt)
-    const p = path.join(os.tmpdir(), `offgrid-mcp-${process.pid}-${Date.now()}.${ext}`)
+    // Team mode runs tools side by side: two in the same millisecond must not share a file.
+    const unique = teamMode() ? `-${randomUUID()}` : ''
+    const p = path.join(os.tmpdir(), `offgrid-mcp-${process.pid}-${Date.now()}${unique}.${ext}`)
     await fs.promises.writeFile(p, data)
     return p
   }
@@ -59,7 +72,9 @@ async function materialize(ref: string, fallbackExt: string): Promise<string> {
         .on('error', reject)
     })
     const ext = path.extname(new URL(url).pathname).slice(1) || fallbackExt
-    const p = path.join(os.tmpdir(), `offgrid-mcp-${process.pid}-${Date.now()}.${ext}`)
+    // Team mode runs tools side by side: two in the same millisecond must not share a file.
+    const unique = teamMode() ? `-${randomUUID()}` : ''
+    const p = path.join(os.tmpdir(), `offgrid-mcp-${process.pid}-${Date.now()}${unique}.${ext}`)
     await fs.promises.writeFile(p, data)
     return p
   }
@@ -101,7 +116,12 @@ export function buildMcpServer(
     },
     async ({ prompt, system, max_tokens }) => {
       const msg = system ? `${system}\n\n${prompt}` : prompt
-      const text = await llm.chat(msg, [], 300000, max_tokens ?? 2048, { disableThinking: true })
+      const text = await onTurn('chat', (shared) =>
+        llm.chat(msg, [], 300000, max_tokens ?? 2048, {
+          disableThinking: true,
+          ...(shared ? { shared } : {})
+        })
+      )
       return TEXT(text)
     }
   )
@@ -122,9 +142,12 @@ export function buildMcpServer(
     },
     async ({ image, prompt }) => {
       const p = await materialize(image, 'png')
-      const text = await llm.chat(prompt || 'Describe this image in detail.', [p], 300000, 1024, {
-        disableThinking: true
-      })
+      const text = await onTurn('chat', (shared) =>
+        llm.chat(prompt || 'Describe this image in detail.', [p], 300000, 1024, {
+          disableThinking: true,
+          ...(shared ? { shared } : {})
+        })
+      )
       return TEXT(text)
     }
   )
@@ -147,15 +170,17 @@ export function buildMcpServer(
     async ({ prompt, negative_prompt, width, height, steps, seed, model }) => {
       const status = imageGenStatus()
       if (!status.available) throw new Error(`Image generation unavailable: ${status.reason}.`)
-      const out = await generateImage({
-        prompt,
-        negativePrompt: negative_prompt,
-        width,
-        height,
-        steps,
-        seed,
-        model
-      })
+      const out = await onTurn('image', () =>
+        generateImage({
+          prompt,
+          negativePrompt: negative_prompt,
+          width,
+          height,
+          steps,
+          seed,
+          model
+        })
+      )
       const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
       return { content: [{ type: 'image', data: b64, mimeType: 'image/png' }] }
     }
@@ -183,7 +208,7 @@ export function buildMcpServer(
       if (!status.available) throw new Error(`Image generation unavailable: ${status.reason}.`)
       const initImage = await materialize(image, 'png')
       try {
-        const out = await generateImage({ prompt, initImage, strength })
+        const out = await onTurn('image', () => generateImage({ prompt, initImage, strength }))
         const b64 = out.dataUrl.slice(out.dataUrl.indexOf(',') + 1)
         return { content: [{ type: 'image', data: b64, mimeType: 'image/png' }] }
       } finally {
@@ -205,7 +230,17 @@ export function buildMcpServer(
     async ({ audio }) => {
       const p = await materialize(audio, 'wav')
       try {
-        const text = (await mediaText.transcribeAudio(p)).trim()
+        const text = (
+          await onTurn('transcription', async (team) => {
+            // Team mode: a resident whisper-server lane when Whisper is the active engine.
+            const onLane = team
+              ? await (
+                  await import('./transcription/team-lanes')
+                ).transcribeOnTeamLane({ path: p }, {}, teamConcurrency().transcription)
+              : null
+            return onLane ? onLane.text : mediaText.transcribeAudio(p)
+          })
+        ).trim()
         return TEXT(text)
       } finally {
         if (p.includes('offgrid-mcp-')) fs.promises.unlink(p).catch(() => {})
@@ -225,7 +260,13 @@ export function buildMcpServer(
       }
     },
     async ({ text, voice }) => {
-      const { dataUrl } = await tts.synthesize(text, voice)
+      const { dataUrl } = await onTurn('speech', (team) =>
+        team
+          ? tts.synthesize(text, voice, undefined, {
+              parallel: { workers: teamConcurrency().speech }
+            })
+          : tts.synthesize(text, voice)
+      )
       const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
       return { content: [{ type: 'audio', data: b64, mimeType: 'audio/wav' }] }
     }
@@ -240,7 +281,9 @@ export function buildMcpServer(
       inputSchema: { input: z.string() }
     },
     async ({ input }) => {
-      const [embedding = []] = await embeddings.embed([input], { model: DEFAULT_EMBEDDER.model })
+      const embedding = teamMode()
+        ? (await embedCoalesced([input]))[0]!
+        : await embeddings.generateEmbedding(input)
       return {
         content: [{ type: 'text', text: JSON.stringify(embedding) }],
         structuredContent: {

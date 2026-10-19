@@ -34,9 +34,12 @@ interface ChatVoiceTurnOptions {
   saveRecording?: (audio: Uint8Array, extension: string) => Promise<string>
   cancelTranscription?: (requestId: string) => Promise<boolean>
   getTranscriptionLabel?: () => Promise<{ label: string }>
-  onTranscript: (text: string, clip: ChatVoiceClip | null) => void
-  /** The chat a turn belongs to. A turn finishing after the user moved to another chat is not
-   *  delivered there: what was said in one chat never lands in another. */
+  /** `owner` is the chat the turn was recorded in. It differs from `ownerId` when the user moved
+   *  to another chat while it was transcribed; only a voice-mode turn (a clip) is delivered then,
+   *  and it goes to `owner`, never to the chat now open. Returns false when it could not be
+   *  delivered there. */
+  onTranscript: (text: string, clip: ChatVoiceClip | null, owner: string | null) => boolean | void
+  /** The chat a turn belongs to. What was said in one chat never lands in another. */
   ownerId?: string | null
 }
 
@@ -272,12 +275,15 @@ export function useChatVoiceTurns(options: ChatVoiceTurnOptions): ChatVoiceTurns
           }
         }
         if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return
-        if (!sameChat()) {
+        const elsewhere = !sameChat()
+        // A turn recorded in another chat is answered there, not in the one now open.
+        if (elsewhere) setAwaitingReply(false)
+        const delivered =
+          elsewhere && !clip ? false : optionsRef.current.onTranscript(text, clip, owner) !== false
+        if (!delivered) {
           setError('That voice note was recorded in another chat, so it was not sent here.')
           updatePhase('idle')
-          return
         }
-        optionsRef.current.onTranscript(text, clip)
       } catch (cause) {
         console.error('Transcription failed', cause)
         if (!(mountedRef.current as boolean) || sequence !== sequenceRef.current) return

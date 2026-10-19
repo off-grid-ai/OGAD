@@ -12,18 +12,11 @@ const nav = (name: string): Locator =>
   page
     .getByRole('navigation', { name: 'Primary navigation' })
     .getByRole('button', { name, exact: true })
-async function grid(list: Locator, columns: number): Promise<void> {
-  await expect(list).toBeVisible()
-  await expect
-    .poll(async () =>
-      list.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)
-    )
-    .toBe(columns)
-  for (const card of await list.getByRole('listitem').all()) {
-    const bounds = await card.boundingBox()
-    expect(bounds!.width).toBeGreaterThan(180)
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
-  }
+async function fits(table: Locator): Promise<void> {
+  // Actions and Entities are tables: they fill the content width and never scroll the page sideways.
+  await expect(table).toBeVisible()
+  const bounds = await table.boundingBox()
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 }
 async function theme(mode: 'Light' | 'Dark'): Promise<void> {
@@ -63,10 +56,14 @@ test.describe('Actions and Entities card journeys', () => {
     if (profile) fs.rmSync(profile, { recursive: true, force: true })
   })
 
-  test('to-do cards retain sorting, source, filters, done, dismiss and restore', async () => {
+  test('to-do table retains sorting, source, filters, done, dismiss and restore', async () => {
     await nav('Actions').click()
-    const list = page.getByRole('list', { name: 'To-dos', exact: true })
-    await grid(list, 3)
+    const list = page.getByRole('table', { name: 'To-dos', exact: true })
+    await fits(list)
+    // A to-do's own row; its citation and dismiss form live in the row beneath it.
+    const todoRows = list
+      .getByRole('row')
+      .filter({ has: page.getByRole('button', { name: 'Dismiss', exact: true }) })
     const titles = (): Promise<string[]> =>
       list
         .getByRole('button', {
@@ -75,9 +72,7 @@ test.describe('Actions and Entities card journeys', () => {
         .allTextContents()
     const original = await titles()
     expect(original).toHaveLength(6)
-    const sort = page
-      .getByRole('group', { name: 'Sort to-dos' })
-      .getByRole('button', { name: 'To do', exact: true })
+    const sort = list.getByRole('columnheader').getByRole('button', { name: 'To do', exact: true })
     await sort.click()
     await expect
       .poll(titles)
@@ -88,30 +83,28 @@ test.describe('Actions and Entities card journeys', () => {
       .toEqual([...original].sort((a, b) => b.localeCompare(a, undefined, { sensitivity: 'base' })))
     await sort.click()
     await expect.poll(titles).toEqual(original)
-    const board = list.getByRole('listitem').filter({ hasText: 'Send the Q3 board update' })
+    const board = list.getByRole('row').filter({ hasText: 'Send the Q3 board update' })
     await board.getByRole('button', { name: /^Send the Q3/ }).click()
-    await expect(
-      board.getByText('Detected from your communication', { exact: false })
-    ).toBeVisible()
+    await expect(list.getByText('Detected from your communication', { exact: false })).toBeVisible()
     await board.getByRole('button', { name: 'Northwind Capital', exact: true }).click()
-    await expect(list.getByRole('listitem')).toHaveCount(1)
+    await expect(todoRows).toHaveCount(1)
     await page.getByRole('button', { name: 'Clear filter', exact: true }).click()
     await board.getByRole('button', { name: 'Toggle done' }).click()
     await expect(board).toHaveCount(0)
     await page.getByRole('radio', { name: /^done /i }).click()
     await page
-      .getByRole('listitem')
+      .getByRole('row')
       .filter({ hasText: 'Send the Q3 board update' })
       .getByRole('button', { name: 'Toggle done' })
       .click()
     await page.getByRole('radio', { name: /^open /i }).click()
     await board.getByRole('button', { name: 'Dismiss', exact: true }).click()
-    await board.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await list.getByRole('button', { name: 'Cancel', exact: true }).click()
     await board.getByRole('button', { name: 'Dismiss', exact: true }).click()
-    await board.getByRole('button', { name: 'Dismiss', exact: true }).last().click()
+    await list.getByRole('button', { name: 'Dismiss', exact: true }).last().click()
     await page.getByRole('radio', { name: /^dismissed /i }).click()
     await page
-      .getByRole('listitem')
+      .getByRole('row')
       .filter({ hasText: 'Send the Q3 board update' })
       .getByRole('button', { name: 'Restore', exact: true })
       .click()
@@ -121,38 +114,45 @@ test.describe('Actions and Entities card journeys', () => {
     await page.screenshot({ path: test.info().outputPath('actions-dark-wide.png') })
     await theme('Light')
     await page.setViewportSize({ width: 760, height: 900 })
-    await grid(list, 1)
+    await fits(list)
     await page.screenshot({ path: test.info().outputPath('actions-light-narrow.png') })
   })
 
-  test('approval cards retain details, rejection cancellation and history', async () => {
+  test('approval table retains details, rejection cancellation and history', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 })
     await nav('Actions').click()
     await theme('Light')
     await page.getByRole('radio', { name: /^Approvals/ }).click()
-    const list = page.getByRole('list', { name: 'Approvals', exact: true })
-    await grid(list, 3)
-    await expect(list.getByRole('listitem')).toHaveCount(3)
-    const card = list.getByRole('listitem').filter({ hasText: 'Draft a reply to Sam Okafor' })
+    const list = page.getByRole('table', { name: 'Approvals', exact: true })
+    await fits(list)
+    const requests = list
+      .getByRole('row')
+      .filter({ has: page.getByRole('button', { name: /details$/ }) })
+    await expect(requests).toHaveCount(3)
+    const card = list.getByRole('row').filter({ hasText: 'Draft a reply to Sam Okafor' })
     await expect(card.getByRole('button', { name: 'Review in Chat' })).toBeVisible()
-    await card.getByRole('button', { name: 'details', exact: true }).click()
-    await expect(card.locator('pre')).toBeVisible()
+    await card.getByRole('button', { name: 'Show details', exact: true }).click()
+    // Saved fields read as labelled lines, never as JSON.
+    await expect(list.locator('dl')).toBeVisible()
+    await expect(list.locator('pre')).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(card.getByRole('button', { name: 'Show details', exact: true })).toBeVisible()
     await card.getByRole('button', { name: 'Reject', exact: true }).click()
-    await card.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await list.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(card.getByRole('button', { name: 'Reject', exact: true })).toBeVisible()
     await page.screenshot({ path: test.info().outputPath('approvals-light-wide.png') })
-    await page.getByRole('radio', { name: 'history', exact: true }).click()
-    await expect(list.getByRole('listitem')).toHaveCount(3)
+    await page.getByRole('radio', { name: 'History', exact: true }).click()
+    await expect(requests).toHaveCount(3)
     await expect(list.getByRole('button', { name: 'Reject', exact: true })).toHaveCount(0)
   })
 
-  test('entity cards retain hierarchy, dossier keyboard access, merge and hide controls', async () => {
+  test('entity tables retain hierarchy, dossier keyboard access, merge and hide controls', async () => {
     await nav('Entities').click()
     await theme('Light')
-    const projects = page.getByRole('list', { name: 'Project entities' })
-    await grid(projects, 3)
+    const projects = page.getByRole('table', { name: 'Project entities' })
+    await fits(projects)
     const parent = projects
-      .getByRole('listitem')
+      .getByRole('row')
       .filter({ has: page.getByRole('button', { name: 'Open Off Grid AI', exact: true }) })
     await expect(
       page.getByRole('button', { name: 'Open Off Grid AI Mobile', exact: true })
@@ -173,7 +173,7 @@ test.describe('Actions and Entities card journeys', () => {
     await page.keyboard.press('Enter')
     await expect(page.getByLabel('Maya Chen dossier', { exact: true })).toBeVisible()
     await page.keyboard.press('Escape')
-    const card = page.getByRole('listitem').filter({ has: maya })
+    const card = page.getByRole('row').filter({ has: maya })
     await card.getByRole('button', { name: 'Merge into another entity' }).click()
     await expect(page.getByPlaceholder('Search the survivor entity…')).toBeVisible()
     await page.keyboard.press('Escape')
@@ -187,22 +187,21 @@ test.describe('Actions and Entities card journeys', () => {
     await theme('Dark')
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.setViewportSize({ width: 760, height: 900 })
-    await grid(projects, 1)
+    await fits(projects)
     await page.screenshot({ path: test.info().outputPath('entities-dark-narrow.png') })
   })
-  test('grids fit two and four columns with the sidebar open', async () => {
+  test('tables fit the content width with the sidebar open', async () => {
     const pin = page.getByRole('button', { name: 'Pin sidebar', exact: true })
     if (await pin.isVisible()) await pin.click()
     for (const width of [900, 1600]) {
       await page.setViewportSize({ width, height: 1000 })
-      const columns = width === 900 ? 2 : 4
       await nav('Entities').click()
-      await grid(page.getByRole('list', { name: 'Person entities' }), columns)
+      await fits(page.getByRole('table', { name: 'Person entities' }))
       await nav('Actions').click()
       await page.getByRole('radio', { name: /^To do/ }).click()
-      await grid(page.getByRole('list', { name: 'To-dos', exact: true }), columns)
+      await fits(page.getByRole('table', { name: 'To-dos', exact: true }))
       await page.getByRole('radio', { name: /^Approvals/ }).click()
-      await grid(page.getByRole('list', { name: 'Approvals', exact: true }), columns)
+      await fits(page.getByRole('table', { name: 'Approvals', exact: true }))
     }
   })
 })

@@ -4,7 +4,8 @@ import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { Message, MessageContent } from '@offgrid/operator-ui/operator/elements/message-core'
 import { hasLiveStreamActivity } from '@renderer/lib/stream-reducer'
 import { type TaskSession, useGuidanceTaskForJourney } from '@renderer/lib/task-session-store'
-import { captureUrlForPath } from '../../../../../shared/ogcapture-url'
+import { captureUrlForPath, capturePathFromUrl } from '../../../../../shared/ogcapture-url'
+import { useMediaUrl } from '@renderer/lib/media-url'
 import { ChatThinkingBlock } from '../../ChatThinkingBlock'
 import { ChatToolRows } from '../../ChatToolRows'
 import { VoiceBubble } from '../../VoiceBubble'
@@ -168,7 +169,7 @@ function VoiceMessageRow({
   const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const alignment = message.role === 'user' ? 'items-end' : 'items-start'
   const reduceMotion = useReducedMotion()
-  const audioUrl = recordedClipUrl(message)
+  const audioUrl = useRecordedClipUrl(message)
   const reportPlayback = useCallback(
     (active: boolean) => onPlaybackStateChange(message.id, active),
     [message.id, onPlaybackStateChange]
@@ -245,7 +246,7 @@ function VoiceMessageRow({
         messageId={message.id}
         isUser
         transcript={messageToSpeakable(message.content)}
-        audioUrl={recordedClipUrl(message)}
+        audioUrl={audioUrl}
         durationSeconds={message.audioDuration}
         synthesize={(text) => window.api.speak(text)}
         onPlaybackStateChange={reportPlayback}
@@ -487,7 +488,8 @@ function MessageBubble({
           src={message.image}
           path={message.imagePath}
           metadata={message.imageMetadata}
-          className="mb-2 w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"
+          className="w-full max-w-full cursor-zoom-in rounded-md border border-neutral-800 object-contain transition-opacity hover:opacity-90"
+          spacing="mb-2"
           fill
           onOpen={actions.openImage}
         />
@@ -510,7 +512,11 @@ function MessageBubble({
           onRetry={actions.retryImageMemory}
         />
       ) : null}
-      <ArtifactCard artifact={artifact} onOpen={actions.openArtifact} />
+      <ArtifactCard
+        artifact={artifact}
+        building={Boolean(message.streaming && artifact?.partial)}
+        onOpen={(opened) => actions.openArtifact(opened, message.id)}
+      />
       {ask ? (
         <AskCard
           ask={ask}
@@ -619,6 +625,11 @@ function StandardMessageRow({
         ) : null}
         {message.role === 'user' ? (
           <div className="mt-1.5 flex items-center justify-end gap-2 pr-1">
+            <VariantNavigation
+              message={message}
+              noun="question"
+              onSelect={(direction) => actions.selectVariant(message.id, direction)}
+            />
             <MessageTime message={message} />
             {message.context?.taskGuidance ? (
               <MessageActionsMenu>
@@ -665,7 +676,7 @@ function StandardMessageRow({
             speechError={speechError}
             speechEnabled={state.ttsEnabled}
             onCopy={() => actions.copy(message.content, message.id)}
-            onOpenArtifact={actions.openArtifact}
+            onOpenArtifact={(opened) => actions.openArtifact(opened, message.id)}
             onRegenerate={() => actions.regenerate(message.id)}
             onSelectVariant={(direction) => actions.selectVariant(message.id, direction)}
             onSpeak={() => actions.speak(message.id, message.content)}
@@ -711,12 +722,30 @@ function StandardMessageRow({
  * Kind comes from the shared attachment-kind rule rather than an extension check here, so desktop
  * and mobile agree on what counts as audio.
  */
-function recordedClipUrl(message: ChatMessage): string | undefined {
-  if (message.audioUrl) return message.audioUrl
+function recordedClipPath(message: ChatMessage): string | undefined {
+  if (message.audioUrl)
+    return isCaptureUrl(message.audioUrl) ? capturePathFromUrl(message.audioUrl) : undefined
   const clip = message.attachments?.find(
     (a) => !!a.path && (a.kind === 'audio' || attachmentKindFor({ fileName: a.name }) === 'audio')
   )
-  return clip?.path ? captureUrlForPath(clip.path) : undefined
+  return clip?.path
+}
+
+const isCaptureUrl = (url: string): boolean => url.startsWith('ogcapture:')
+
+/**
+ * A URL the page can FETCH for the clip. The player decodes the bytes to draw the waveform (and
+ * Transcribe again reads them), and a page cannot fetch ogcapture://, so every saved voice note
+ * logged a blocked request and drew no waveform. The media server's http URL, as attachments use.
+ */
+function useRecordedClipUrl(message: ChatMessage): string | undefined {
+  const path = recordedClipPath(message)
+  const media = useMediaUrl(path ?? null)
+  if (message.audioUrl && !isCaptureUrl(message.audioUrl)) return message.audioUrl
+  if (!path) return undefined
+  if (media.status === 'ready') return media.url
+  // Nothing to resolve it through: the capture URL still plays, without a waveform.
+  return media.status === 'missing' ? captureUrlForPath(path) : undefined
 }
 
 function MessageRowComponent({

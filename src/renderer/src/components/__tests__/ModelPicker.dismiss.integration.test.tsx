@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { ModelPicker } from '../ModelPicker'
 import { withTaskRoles } from './harness/task-roles'
 import { OPEN_MODEL_SETTINGS_PANEL_EVENT } from '@renderer/lib/model-settings-panel'
@@ -23,7 +24,7 @@ function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
         }
       ]
     }),
-    getInstalledModels: vi.fn().mockResolvedValue(['local/qwen']),
+    getInstalledModels: vi.fn().mockResolvedValue(['local/qwen', 'local/ui-tars']),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({}),
     getActiveModelIds: vi.fn().mockResolvedValue([]),
@@ -52,7 +53,12 @@ function renderPicker(onClose = vi.fn()): ReturnType<typeof vi.fn> {
 }
 
 function renderPickerWithRemote(): ReturnType<typeof vi.fn> {
-  const activateModel = vi.fn().mockResolvedValue({ success: true })
+  // The bridge remembers the selection, as main does.
+  let activeIds: string[] = []
+  const activateModel = vi.fn(async (id: string) => {
+    activeIds = [id]
+    return { success: true }
+  })
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     getModelCatalog: vi.fn().mockResolvedValue({
       models: [
@@ -68,10 +74,7 @@ function renderPickerWithRemote(): ReturnType<typeof vi.fn> {
     getInstalledModels: vi.fn().mockResolvedValue(['remote-vision:home:google%2Fgemma-4']),
     getActiveModel: vi.fn().mockResolvedValue(null),
     getActiveModalities: vi.fn().mockResolvedValue({}),
-    getActiveModelIds: vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce(['remote-vision:home:google%2Fgemma-4']),
+    getActiveModelIds: vi.fn(async () => activeIds),
     getComputerUseActiveModels: vi.fn().mockResolvedValue({
       strategy: 'same_as_chat',
       strategyLabel: 'Same as Chat',
@@ -132,25 +135,28 @@ describe('<ModelPicker/> dismissal', () => {
 
     render(<ModelPicker onClose={() => {}} />)
 
-    const picker = await screen.findByRole('combobox', {
-      name: 'Computer Use Grounding specialist'
-    })
-    expect(picker.textContent).toContain('UI-Mate 9B')
-    expect(picker.textContent).not.toContain('model-package-v1:')
+    const card = await screen.findByLabelText('Computer Use Grounding specialist active model')
+    expect(card.textContent).toContain('UI-Mate 9B')
+    expect(card.textContent).not.toContain('model-package-v1:')
   })
 
   it('shows and activates a saved remote model through the shared model seam', async () => {
+    const user = userEvent.setup()
     const activateModel = renderPickerWithRemote()
-    const button = (await screen.findByText('google/gemma-4')).closest('button')
-    expect(button).toBeTruthy()
-    fireEvent.click(button as HTMLButtonElement)
+    const card = (): HTMLElement => screen.getByLabelText('Text & Vision active model')
+    await waitFor(() => expect(card().textContent).toContain('None selected'))
+    await user.click(screen.getByRole('combobox', { name: 'Text & Vision model' }))
+    // The row now also carries capability icons, so match the model by name within the option.
+    await user.click(await screen.findByRole('option', { name: /google\/gemma-4 · Remote/ }))
     await waitFor(() =>
       expect(activateModel).toHaveBeenCalledWith('remote-vision:home:google%2Fgemma-4')
     )
-    expect(await screen.findByText('Remote')).toBeTruthy()
+    await waitFor(() => expect(card().textContent).toContain('google/gemma-4'))
+    // Remote now reads as a cloud icon, not the word — its accessible name still says "Remote".
+    expect(within(card()).getByLabelText('Remote')).toBeTruthy()
   })
 
-  it('shows the selected remote voice model and activates it through the shared model seam', async () => {
+  it('offers a remote voice model and activates it through the shared model seam', async () => {
     const voiceId = 'remote-vision:home:google%2Flyria-3-pro-preview'
     const activateModel = vi.fn().mockResolvedValue({ success: true })
     ;(window as unknown as { api: Record<string, unknown> }).api = {
@@ -167,19 +173,20 @@ describe('<ModelPicker/> dismissal', () => {
       }),
       getInstalledModels: vi.fn().mockResolvedValue([voiceId]),
       getActiveModel: vi.fn().mockResolvedValue(null),
-      getActiveModalities: vi.fn().mockResolvedValue({ speech: voiceId }),
-      getActiveModelIds: vi.fn().mockResolvedValue([voiceId]),
+      getActiveModalities: vi.fn().mockResolvedValue({}),
+      getActiveModelIds: vi.fn().mockResolvedValue([]),
       getComputerUseActiveModels: vi.fn().mockResolvedValue(null),
       activateModel
     }
 
     withTaskRoles((window as unknown as { api: Record<string, unknown> }).api)
 
+    const user = userEvent.setup()
     render(<ModelPicker onClose={vi.fn()} />)
-    const voice = (await screen.findByText('Google: Lyria 3 Pro Preview')).closest('button')
-    expect(voice?.querySelector('svg')).toBeTruthy()
-    expect(voice?.textContent).toContain('Remote')
-    fireEvent.click(voice as HTMLButtonElement)
+    await user.click(await screen.findByRole('combobox', { name: 'Voice model' }))
+    await user.click(
+      await screen.findByRole('option', { name: 'Google: Lyria 3 Pro Preview · Remote' })
+    )
     await waitFor(() => expect(activateModel).toHaveBeenCalledWith(voiceId))
   })
 
@@ -238,7 +245,7 @@ describe('<ModelPicker/> dismissal', () => {
     panel.appendChild(disabled)
 
     await waitFor(() => expect(document.activeElement).toBe(panel))
-    await screen.findByRole('button', { name: /Qwen 3\.5 2B/ })
+    await screen.findByRole('combobox', { name: 'Text & Vision model' })
     const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>('button:not([disabled])'))
     const first = buttons[0]
     const last = buttons[buttons.length - 1]

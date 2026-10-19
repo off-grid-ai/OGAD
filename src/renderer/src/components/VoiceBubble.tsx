@@ -241,10 +241,11 @@ function playbackProgress(input: {
   return { totalDuration, progress }
 }
 
-/** A decoded envelope, and the clip it was decoded from. */
+/** A decoded envelope and length, and the clip they were decoded from. */
 interface DecodedWave {
   readonly url: string
   readonly wave: number[]
+  readonly duration: number
 }
 
 /**
@@ -258,8 +259,14 @@ function waveForClip(audioUrl: string | undefined, decoded: DecodedWave | null):
   return decoded.wave
 }
 
-/** Decode a real audio file's envelope once (recordings). */
-async function decodeFileWaveform(url: string, points: number): Promise<number[]> {
+/**
+ * Decode a real audio file's envelope and length once (recordings). The length matters because a
+ * MediaRecorder webm carries no duration header: its audio element reports Infinity.
+ */
+async function decodeFileWaveform(
+  url: string,
+  points: number
+): Promise<{ wave: number[]; duration: number }> {
   try {
     const res = await fetch(url)
     const buf = await res.arrayBuffer()
@@ -275,9 +282,9 @@ async function decodeFileWaveform(url: string, points: number): Promise<number[]
       out.push(sum / block)
     }
     void ctx.close()
-    return out
+    return { wave: out, duration: audio.duration }
   } catch {
-    return []
+    return { wave: [], duration: 0 }
   }
 }
 
@@ -738,8 +745,8 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   useEffect(() => {
     if (!audioUrl) return
     let cancelled = false
-    void decodeFileWaveform(audioUrl, WAVEFORM_POINTS).then((wave) => {
-      if (!cancelled) setDecodedWave({ url: audioUrl, wave })
+    void decodeFileWaveform(audioUrl, WAVEFORM_POINTS).then((decoded) => {
+      if (!cancelled) setDecodedWave({ url: audioUrl, ...decoded })
     })
     return () => {
       cancelled = true
@@ -753,11 +760,13 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
   }, [fileWave, transcript])
 
   // Estimate duration before the audio element reports a real value.
+  const decodedDuration = decodedWave && decodedWave.url === audioUrl ? decodedWave.duration : 0
   const estDuration = useMemo(() => {
     if (durationSeconds) return durationSeconds
+    if (decodedDuration > 0) return decodedDuration
     const words = transcript.trim().split(/\s+/).filter(Boolean).length
     return Math.max(1, words / (2.5 * speed))
-  }, [durationSeconds, transcript, speed])
+  }, [durationSeconds, decodedDuration, transcript, speed])
   const { totalDuration, progress } = playbackProgress({ loadedDuration, estDuration, currentTime })
   const segments = useMemo(
     () => phraseSegments(transcript, totalDuration),

@@ -123,6 +123,25 @@ const LOGO_SLUGS: Record<string, string> = {
   zapier: 'zapier'
 }
 
+/** Where a custom server lives, in a word: its host for a web server, its program for a local one.
+ *  The full address (paths, query strings) and argument list stay in Edit. */
+function serverHost(connector: Pick<Connector, 'transport' | 'url' | 'command'>): string {
+  if (connector.transport === 'http') {
+    try {
+      return new URL(connector.url ?? '').hostname
+    } catch {
+      return ''
+    }
+  }
+  return (connector.command ?? '').split(/[\\/]/).pop() ?? ''
+}
+
+/** A tool's id as words: `search_messages` reads "Search messages". */
+function toolLabel(name: string): string {
+  const words = name.replace(/[_-]+/g, ' ').trim()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : name
+}
+
 // How to obtain credentials for token-based connectors (shown in the connect form).
 
 // Turn raw transport errors into something human.
@@ -190,13 +209,19 @@ function ConnectorConnectControls({
   const progressLabel = isAuthorizing ? 'Authorize in browser…' : 'Connecting…'
 
   return (
-    <div className="space-y-1.5">
+    <div className="flex shrink-0 flex-col items-end gap-1">
       <div className="flex gap-1.5">
         <button
           onClick={onConnect}
           disabled={byoBlocked || connecting}
-          title={byoBlocked ? 'Set up your Google client first' : undefined}
-          className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-neutral-700 py-1.5 text-xs text-neutral-200 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:text-neutral-200"
+          title={
+            byoBlocked
+              ? 'Set up your Google client first'
+              : entry.auth === 'oauth'
+                ? 'Opens your browser to sign in'
+                : undefined
+          }
+          className="flex h-7 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-200 transition-all duration-150 hover:border-green-500 hover:text-green-500 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:text-neutral-200"
         >
           {connecting ? (
             <>
@@ -205,7 +230,6 @@ function ConnectorConnectControls({
           ) : (
             <>
               <IconPlugConnected className="h-3.5 w-3.5" /> Connect
-              {entry.auth === 'oauth' ? ' with OAuth' : ''}
             </>
           )}
         </button>
@@ -221,7 +245,9 @@ function ConnectorConnectControls({
           </button>
         )}
       </div>
-      {error && <p className="text-[11px] leading-relaxed text-red-400/80">{error}</p>}
+      {error && (
+        <p className="max-w-56 text-right text-[11px] leading-relaxed text-red-400/80">{error}</p>
+      )}
     </div>
   )
 }
@@ -259,7 +285,6 @@ async function settleConnectionAttempt(
   return { connected: false, error: cleanError(result?.error ?? 'Could not connect') }
 }
 
-
 /**
  * A stdio server's arguments as tags, in order, repeats kept (`--allow a --allow b`). The stored
  * form stays the space-separated string the save path splits on whitespace, so a tag is one
@@ -289,7 +314,9 @@ function ArgsTagsField({
       className="w-full gap-1"
     >
       {label ? (
-        <TagsInputLabel className="text-[11px] font-normal text-neutral-500">{label}</TagsInputLabel>
+        <TagsInputLabel className="text-[11px] font-normal text-neutral-500">
+          {label}
+        </TagsInputLabel>
       ) : null}
       <TagsInputList className="min-h-9 border-neutral-800 bg-neutral-950 px-2 py-1.5 transition-[border-color,box-shadow] duration-300 focus-within:border-neutral-600 focus-within:ring-0">
         {args.map((arg, index) => (
@@ -302,7 +329,10 @@ function ArgsTagsField({
             {arg}
           </TagsInputItem>
         ))}
-        <TagsInputInput placeholder={placeholder} className="min-w-24 px-1 text-sm text-neutral-200" />
+        <TagsInputInput
+          placeholder={placeholder}
+          className="min-w-24 px-1 text-sm text-neutral-200"
+        />
       </TagsInputList>
     </TagsInput>
   )
@@ -360,6 +390,31 @@ export function ConnectorsScreen(): ReactElement {
     window.addEventListener(CONNECTIONS_CHANGED_EVENT, changed)
     return () => window.removeEventListener(CONNECTIONS_CHANGED_EVENT, changed)
   }, [load])
+
+  // One way out of a connector's detail, shared by the back button and Escape.
+  const closeDetail = useCallback((): void => {
+    setDetailId(null)
+    setEditing(false)
+    setChangingToken(false)
+    setConfirmRemove(false)
+    void load()
+  }, [load])
+  useEffect(() => {
+    if (detailId == null) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      // Escape first dismisses what is open inside the detail (edit form, remove question).
+      if (editing || confirmRemove || changingToken) {
+        setEditing(false)
+        setConfirmRemove(false)
+        setChangingToken(false)
+        return
+      }
+      closeDetail()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [detailId, editing, confirmRemove, changingToken, closeDetail])
 
   // The gallery is every ready catalog connector that is not installed and not offered as a
   // direct account connection. It changes only when the installed list changes.
@@ -601,7 +656,7 @@ export function ConnectorsScreen(): ReactElement {
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-10">
         {detailId == null && tab !== 'connected' && (
           <div className="mb-10">
-            <QuickConnections />
+            <QuickConnections hideConnected={tab === 'disconnected'} />
           </div>
         )}
         {(() => {
@@ -622,13 +677,7 @@ export function ConnectorsScreen(): ReactElement {
                     variant="ghost"
                     size="icon-sm"
                     aria-label="All integrations"
-                    onClick={() => {
-                      setDetailId(null)
-                      setEditing(false)
-                      setChangingToken(false)
-                      setConfirmRemove(false)
-                      load()
-                    }}
+                    onClick={closeDetail}
                     className="text-neutral-400 hover:text-white"
                   >
                     <IconChevronLeft className="h-4 w-4" />
@@ -655,10 +704,10 @@ export function ConnectorsScreen(): ReactElement {
                         <span className="text-[11px] text-neutral-600">not tested</span>
                       )}
                     </div>
+                    {/* What it is, in words. The server address or command is an internal detail; it
+                        stays in Edit for a custom server. */}
                     <div className="truncate text-[11px] text-neutral-500">
-                      {detail.transport === 'http'
-                        ? detail.url
-                        : `${detail.command ?? ''} ${detail.args ? (JSON.parse(detail.args) as string[]).join(' ') : ''}`}
+                      {dcat ? dcat.blurb : serverHost(detail)}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
@@ -883,11 +932,11 @@ export function ConnectorsScreen(): ReactElement {
                   {/* Synced data — the meat (wide) */}
                   <section className="lg:col-span-2">
                     <h3 className="mb-2 text-[11px] uppercase tracking-wide text-neutral-500">
-                      Synced data · {detail.synced_count ?? 0} items
+                      Synced data · {(detail.synced_count ?? 0).toLocaleString()} items
                     </h3>
                     {syncedItems.length === 0 ? (
                       <p className="text-xs text-neutral-600">
-                        Nothing yet — hit Sync, or Pull something specific.
+                        Nothing yet. Sync, or pull something specific.
                       </p>
                     ) : (
                       <div className="space-y-1.5">
@@ -925,7 +974,7 @@ export function ConnectorsScreen(): ReactElement {
                             title={t.description}
                             className="rounded-sm bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400"
                           >
-                            {t.name}
+                            {toolLabel(t.name)}
                           </span>
                         ))}
                       </div>
@@ -1013,7 +1062,7 @@ export function ConnectorsScreen(): ReactElement {
                             key={e.id}
                             className={`flex flex-col gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-3 ${!e.ready ? 'opacity-55' : ''}`}
                           >
-                            <div className="flex items-start gap-3">
+                            <div className="flex items-center gap-3">
                               <Badge id={e.id} color={e.color} letter={e.letter} />
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
@@ -1026,6 +1075,18 @@ export function ConnectorsScreen(): ReactElement {
                                 </div>
                                 <p className="truncate text-[11px] text-neutral-500">{e.blurb}</p>
                               </div>
+                              {/* Connect sits on the row, as it does for the tools above; only a
+                                  token form opens below it. */}
+                              {e.ready && tokenFor?.id !== e.id ? (
+                                <ConnectorConnectControls
+                                  entry={e}
+                                  byoReady={Boolean(byoReady[e.id])}
+                                  connecting={connecting === e.id}
+                                  error={errorFor[e.id] ?? ''}
+                                  onConnect={() => onConnect(e)}
+                                  onCancel={() => void cancelConnect(e.id)}
+                                />
+                              ) : null}
                             </div>
                             {e.ready && (
                               <ConnectorSetup
@@ -1036,7 +1097,7 @@ export function ConnectorsScreen(): ReactElement {
                               />
                             )}
                             {/* The "disabled" badge beside the name is the one indicator here. */}
-                            {!e.ready ? null : tokenFor?.id === e.id ? (
+                            {e.ready && tokenFor?.id === e.id ? (
                               <div className="space-y-2">
                                 {(setupHintFor(e.id) || e.docsUrl) && (
                                   <p className="text-[11px] leading-relaxed text-neutral-500">
@@ -1060,16 +1121,7 @@ export function ConnectorsScreen(): ReactElement {
                                   connecting={connecting === e.id}
                                 />
                               </div>
-                            ) : (
-                              <ConnectorConnectControls
-                                entry={e}
-                                byoReady={Boolean(byoReady[e.id])}
-                                connecting={connecting === e.id}
-                                error={errorFor[e.id] ?? ''}
-                                onConnect={() => onConnect(e)}
-                                onCancel={() => void cancelConnect(e.id)}
-                              />
-                            )}
+                            ) : null}
                           </div>
                         ))}
                       </div>

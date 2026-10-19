@@ -109,6 +109,10 @@ async function setup(
     deleteConversation: async (id) => {
       calls.push(`delete:${id}`)
     },
+    selectConversationVersion: async (id, messageId, direction) => {
+      calls.push(`select:${id}:${messageId}:${direction}`)
+      return { id, title: 'Chat', createdAt: 1, updatedAt: 2, origin: 'desktop', turns: [] }
+    },
     // Desktop's bridge list contains only available read-only tools.
     listTools: async () => ((opts.features ?? PRO).tools ? [{ name: 'calculator' }] : []),
     runTool: async (name, _args, _browser, tabId) => ({
@@ -613,6 +617,41 @@ describe('sealed rpc', () => {
     expect((await s.call('device000001', 'unpair')).body).toMatchObject({ ok: true })
     expect(s.saved()).toEqual([])
     expect((await s.call('device000001', 'state')).status).toBe(401)
+  })
+
+  it('chooses a version of a message in Desktop, and refuses a malformed choice', async () => {
+    const s = await setup()
+    await s.pair()
+    expect(
+      (
+        await s.call('device000001', 'conversations.selectVersion', {
+          id: 'c1',
+          messageId: 'm2',
+          direction: -1
+        })
+      ).body
+    ).toMatchObject({ ok: true, result: { id: 'c1' } })
+    expect(s.calls).toEqual(['select:c1:m2:-1'])
+    for (const params of [
+      { id: 'c1', messageId: 'm2', direction: 2 },
+      { id: '', messageId: 'm2', direction: 1 },
+      { id: 'c1', direction: 1 }
+    ]) {
+      expect(
+        (await s.call('device000001', 'conversations.selectVersion', params)).body
+      ).toMatchObject({ ok: false, error: 'invalid' })
+    }
+    expect(s.calls).toHaveLength(1)
+  })
+
+  it('Desktop can remove a paired browser: its key stops working at once', async () => {
+    const s = await setup()
+    await s.pair()
+    expect(await s.bridge.removeBrowser('device000001')).toBe(true)
+    expect(s.saved()).toEqual([])
+    expect(await s.bridge.linkKey('device000001')).toBeNull()
+    expect((await s.call('device000001', 'state')).status).toBe(401)
+    expect(await s.bridge.removeBrowser('device000001')).toBe(false)
   })
 
   it('unpair removes the browser; its key stops working', async () => {

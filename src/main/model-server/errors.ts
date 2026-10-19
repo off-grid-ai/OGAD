@@ -26,6 +26,8 @@ export function errMeta(e: unknown): { status: number; type: string; message: st
         ? 'upstream_error'
         : status === 400
           ? 'invalid_request_error'
-          : 'server_error'
+          : status === 429
+            ? 'rate_limit_error'
+            : 'server_error'
   return { status, type, message }
 }

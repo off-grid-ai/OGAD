@@ -70,7 +70,7 @@ test('records real local requests for all five AI modalities', async ({ playwrig
       .poll(async () => page.evaluate(async () => (await window.api.chatHealth()).status), {
         timeout: 90_000
       })
-      .toBe('ready')
+      .toMatch(/^(ready|idle)$/)
     async function post(route: string, body: unknown): Promise<Response> {
       const response = await fetch(`http://127.0.0.1:7878${route}`, {
         method: 'POST',

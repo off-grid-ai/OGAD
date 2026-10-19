@@ -34,6 +34,7 @@ export function remoteScreenDecision(input: {
     | 'text_plus_specialist'
     | 'decision_plus_specialist'
     | 'decision_plus_reasoning'
+    | 'planner_actor_evaluator'
   activeServer: Pick<
     RemoteVisionSavedServer,
     'name' | 'provider' | 'endpoint' | 'screenFramesAllowed'

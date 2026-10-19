@@ -155,3 +155,48 @@ export function presentActionApproval(
       : {})
   }
 }
+
+/** Tools whose ids are a whole job, not "<verb> <object>": say what they do. */
+const TOOL_PHRASES: Record<string, string> = {
+  computer_use: 'Use the computer',
+  web_use: 'Browse the web'
+}
+
+/**
+ * A connector tool id as words. The id names the tool for the machine (`notion-create-pages`,
+ * `ask_question`); people see what it does ("Create pages", "Ask question"). A prefix repeating
+ * the app's own name is dropped, since the app is shown beside it.
+ */
+export function toolActionLabel(tool: string, connector?: string | null): string {
+  const phrase = TOOL_PHRASES[tool]
+  if (phrase) return phrase
+  let id = tool.trim()
+  const app = connector?.trim().toLowerCase().replace(/\s+/g, '-')
+  if (app && id.toLowerCase().startsWith(`${app}-`)) id = id.slice(app.length + 1)
+  if (app && id.toLowerCase().startsWith(`${app}_`)) id = id.slice(app.length + 1)
+  return sentence(id.replace(/[_-]+/g, ' ')) || tool
+}
+
+/**
+ * The title an approval is listed under. Titles written by the model are kept; a title that is
+ * only the tool id ("ask_question via DeepWiki") becomes the action in words ("Ask question in
+ * DeepWiki").
+ */
+export function approvalListTitle(approval: {
+  title: string | null
+  tool: string | null
+  connector: string | null
+}): string {
+  const title = approval.title?.trim() ?? ''
+  const tool = approval.tool?.trim() ?? ''
+  if (!tool) return title ? sentence(title) : 'Review this action'
+  const raw =
+    !title ||
+    title === tool ||
+    title.startsWith(`${tool} via `) ||
+    title.startsWith(`${tool} on `) ||
+    title.startsWith(`${tool} in `)
+  if (!raw) return sentence(title)
+  const action = toolActionLabel(tool, approval.connector)
+  return approval.connector ? `${action} in ${approval.connector}` : action
+}

@@ -129,6 +129,10 @@ export type ChatMessage = {
     documentId?: string
     pages?: number
   }[]
+  /** This message's place among its saved versions (a retried answer, an edited question). */
+  threadVersions?: { index: number; count: number }
+  /** A streaming retry: the saved answer it is a new version of, drawn in its place meanwhile. */
+  versionOf?: string
   variants?: ResponseVersion[]
   variantIndex?: number
   audioUrl?: string
@@ -194,13 +198,16 @@ export type RawRagMessage = {
   created_at?: string
   origin_device_id?: unknown
   origin_device_name?: unknown
+  /** Where this shown message sits among its versions, when it has others (main's thread). */
+  versions?: { index: number; count: number }
 }
 
 export type ProjectedTurn = NonNullable<
   ReturnType<typeof import('@offgrid/sync').projectSyncedMessageTurn>
 >
 export type StoredMessageAttachment = NonNullable<ChatMessage['attachments']>[number]
-export type OpenImage = { url: string; path?: string }
+/** `title` names a picture the user shared; without it the image is one Off Grid generated. */
+export type OpenImage = { url: string; path?: string; title?: string }
 
 export type ContextNavigation = Readonly<{
   /** Open a to-do on the Actions screen (Pro). */
@@ -255,7 +262,8 @@ export type MessageRowActions = Readonly<{
   saveEdit: (messageId: string, text: string) => void
   updateVoiceTranscript: (message: ChatMessage, text: string) => Promise<void>
   retryImageMemory: (retry: NonNullable<ChatMessage['imageMemoryRetry']>) => void
-  openArtifact: (artifact: Artifact) => void
+  /** `messageId`: the canvas follows that message, so a streaming artifact renders as it arrives. */
+  openArtifact: (artifact: Artifact, messageId?: string) => void
   selectAskOption: (selection: AskOptionSelection) => void
   submitAsk: (selected: readonly string[]) => void
   speak: (messageId: string, content: string) => void

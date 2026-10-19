@@ -213,23 +213,25 @@ export function CommandPalette({
               )}
             </CommandList>
           </CommandPanel>
+          {/* Keyboard hints, as the library's command bar shows them. The footer must be the panel's
+              next sibling: the panel squares its bottom corners only then, and meets the footer's
+              divider flush instead of curving in above it. */}
+          <CommandFooter>
+            <span className="flex items-center gap-2">
+              <KbdGroup>
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd>
+              </KbdGroup>
+              to move
+              <Kbd className="ms-2">↵</Kbd>
+              to open
+            </span>
+            <span className="flex items-center gap-2">
+              <Kbd>Esc</Kbd>
+              to close
+            </span>
+          </CommandFooter>
         </Command>
-        {/* Keyboard hints, as the library's command bar shows them. */}
-        <CommandFooter>
-          <span className="flex items-center gap-2">
-            <KbdGroup>
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd>
-            </KbdGroup>
-            to move
-            <Kbd className="ms-2">↵</Kbd>
-            to open
-          </span>
-          <span className="flex items-center gap-2">
-            <Kbd>Esc</Kbd>
-            to close
-          </span>
-        </CommandFooter>
       </CommandDialogPopup>
     </CommandDialog>
   )

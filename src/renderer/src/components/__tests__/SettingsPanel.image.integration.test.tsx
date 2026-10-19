@@ -21,7 +21,12 @@ describe('<SettingsPanel/> image settings', () => {
       imageGenStatus: async () => ({
         available: true,
         active: 'dreamshaper-xl-v2-turbo.gguf',
-        models: ['dreamshaper-xl-v2-turbo.gguf', 'juggernaut-xl-v9.gguf']
+        models: ['dreamshaper-xl-v2-turbo.gguf', 'juggernaut-xl-v9.gguf'],
+        // Main names each runtime file (imagegen:status); the panel shows these names.
+        modelNames: {
+          'dreamshaper-xl-v2-turbo.gguf': 'DreamShaper XL v2 Turbo',
+          'juggernaut-xl-v9.gguf': 'Juggernaut XL v9'
+        }
       }),
       getSettings: async () => ({
         imageParams: {
@@ -49,7 +54,8 @@ describe('<SettingsPanel/> image settings', () => {
 
     const user = userEvent.setup()
     const model = await screen.findByRole('combobox', { name: 'Active image model' })
-    expect(model.textContent).toContain('dreamshaper-xl-v2-turbo')
+    expect(model.textContent).toContain('DreamShaper XL v2 Turbo')
+    expect(model.textContent).not.toContain('.gguf')
     await user.click(screen.getByRole('button', { name: /^Fine tuning/ }))
     expect((screen.getByRole('textbox', { name: 'Image steps' }) as HTMLInputElement).value).toBe(
       '12'
@@ -81,7 +87,7 @@ describe('<SettingsPanel/> image settings', () => {
     )
 
     await user.click(model)
-    await user.click(await screen.findByRole('option', { name: 'juggernaut-xl-v9' }))
+    await user.click(await screen.findByRole('option', { name: 'Juggernaut XL v9' }))
     expect(selectedModels).toContainEqual(['image', 'juggernaut-xl-v9.gguf'])
   })
 
@@ -96,7 +102,8 @@ describe('<SettingsPanel/> image settings', () => {
       imageGenStatus: async () => ({
         available: true,
         active: 'dreamshaper-xl-v2-turbo.gguf',
-        models: ['dreamshaper-xl-v2-turbo.gguf']
+        models: ['dreamshaper-xl-v2-turbo.gguf'],
+        modelNames: { 'dreamshaper-xl-v2-turbo.gguf': 'DreamShaper XL v2 Turbo' }
       }),
       getSettings: async () => settings,
       saveSetting: async (key: string, value: unknown) => {
@@ -144,7 +151,8 @@ describe('<SettingsPanel/> image settings', () => {
       imageGenStatus: async () => ({
         available: true,
         active: 'dreamshaper-xl-v2-turbo.gguf',
-        models: ['dreamshaper-xl-v2-turbo.gguf']
+        models: ['dreamshaper-xl-v2-turbo.gguf'],
+        modelNames: { 'dreamshaper-xl-v2-turbo.gguf': 'DreamShaper XL v2 Turbo' }
       }),
       getSettings: async () => ({
         imageParams: { 'dreamshaper-xl-v2-turbo.gguf': { size: 768, steps: 12, cfgScale: 3 } },

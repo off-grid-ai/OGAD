@@ -127,11 +127,13 @@ async function save(record: AIRequestRecord): Promise<void> {
     finishedAt: record.finishedAt,
     durationMs: record.durationMs,
     preview: record.preview,
-    error: record.error
+    error: record.error,
+    ...(record.keyName !== undefined ? { keyName: record.keyName } : {})
   }
   const detail = JSON.stringify(record)
   const search = [
     record.source,
+    record.keyName,
     record.model,
     record.backend,
     JSON.stringify(record.request),

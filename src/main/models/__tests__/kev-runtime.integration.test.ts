@@ -6,6 +6,7 @@ import { configureRuntime } from '../../runtime-env'
 import {
   KEV_4B_ID,
   KEV_CHECKPOINT_PREFIX,
+  KEV_MODELS,
   desktopCatalog,
   downloadModel,
   listInstalled,
@@ -32,17 +33,41 @@ function sparseFile(filePath: string, size: number): void {
   fs.closeSync(descriptor)
 }
 
+/** A base folder as a download leaves it: every file at its catalog size, and a readable
+ *  SafeTensors index (padded to its catalog size) that names the shards. */
+function writeBase(
+  directory: string,
+  files: readonly { name: string; sizeBytes?: number }[],
+  omit?: string
+): void {
+  const baseFiles = files.filter((file) => file.name.includes('/base/'))
+  const shards = baseFiles
+    .map((file) => path.basename(file.name))
+    .filter((name) => /^model\.safetensors-\d+-of-\d+\.safetensors$/.test(name))
+  for (const file of baseFiles) {
+    const name = path.basename(file.name)
+    if (name === omit) continue
+    const target = path.join(directory, name)
+    if (name !== 'model.safetensors.index.json') {
+      sparseFile(target, file.sizeBytes ?? 0)
+      continue
+    }
+    const index = JSON.stringify({
+      metadata: { total_size: 1 },
+      weight_map: Object.fromEntries(shards.map((shard, i) => [`layer.${i}.weight`, shard]))
+    })
+    fs.mkdirSync(directory, { recursive: true })
+    fs.writeFileSync(target, index.padEnd(file.sizeBytes ?? index.length, ' '))
+  }
+}
+
 beforeEach(async () => {
   fs.rmSync(models, { recursive: true, force: true })
   fs.rmSync(decisions, { recursive: true, force: true })
   configureRuntime({ dataDir: root, binRoots: [bin] })
   const kev = (await desktopCatalog()).find((model) => model.id === KEV_4B_ID)
   if (!kev) throw new Error('Kev catalog entry is missing')
-  for (const file of kev.files) {
-    if (file.name.startsWith('kev-4b/base/')) {
-      sparseFile(path.join(base, file.name.slice('kev-4b/base/'.length)), file.sizeBytes ?? 0)
-    }
-  }
+  writeBase(base, kev.files)
   for (const [name, size] of Object.entries(LEGACY_CHECKPOINT_SIZES)) {
     sparseFile(path.join(decisions, 'kev-4b-qwen3.5', name), size)
     sparseFile(path.join(models, 'kev-4b', 'checkpoint', name), size)
@@ -173,3 +198,52 @@ describe('Kev v1.0 catalog and runtime', () => {
     }
   })
 })
+
+describe.each(KEV_MODELS.map((model) => [model.name, model] as const))(
+  '%s package',
+  (_name, model) => {
+    const folder = model.files[0]!.name.split('/')[0]!
+    const ownBase = path.join(models, folder, 'base')
+    const ownCheckpoint = path.join(models, folder, 'checkpoint-v1.0') + path.sep
+
+    beforeEach(() => {
+      // Only its own folder: no pre-catalog base to borrow.
+      fs.rmSync(decisions, { recursive: true, force: true })
+      sparseFile(path.join(source, '.venv', 'bin', 'python'), 1)
+      for (const file of model.files.filter((file) => file.name.includes('/checkpoint-v1.0/'))) {
+        sparseFile(path.join(models, file.name), file.sizeBytes ?? 0)
+      }
+    })
+
+    it.runIf(supportedRuntime)(
+      'runs from its own folder once every indexed shard is there',
+      async () => {
+        writeBase(ownBase, model.files)
+        expect(await listInstalled()).toContain(model.id)
+        expect(resolveKevRuntimeArtifact(model.id)).toMatchObject({
+          checkpoint: ownCheckpoint,
+          base: ownBase
+        })
+      }
+    )
+
+    it('is neither installed nor runnable with a shard missing', async () => {
+      const shards = model.files.filter((file) => /safetensors-\d+-of-/.test(file.name))
+      expect(shards.length).toBeGreaterThan(1)
+      writeBase(ownBase, model.files, path.basename(shards.at(-1)!.name))
+      expect(await listInstalled()).not.toContain(model.id)
+      expect(resolveKevRuntimeArtifact(model.id)).toBeNull()
+    })
+
+    it('pins every file to a revision, a size and a SHA-256 digest', () => {
+      for (const file of model.files) {
+        expect(file.name.startsWith(`${folder}/`)).toBe(true)
+        expect(file.url).toMatch(
+          /^https:\/\/huggingface\.co\/[^/]+\/[^/]+\/resolve\/[a-f0-9]{40}\//
+        )
+        expect(file.sizeBytes).toBeGreaterThan(0)
+        expect(file.sha256).toMatch(/^[a-f0-9]{64}$/)
+      }
+    })
+  }
+)

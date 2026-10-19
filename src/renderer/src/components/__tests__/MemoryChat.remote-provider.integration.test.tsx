@@ -24,17 +24,29 @@ describe('<MemoryChat/> with a remote image provider', () => {
       }
       const chunks: Buffer[] = []
       for await (const chunk of request) chunks.push(Buffer.from(chunk))
-      const body = JSON.parse(Buffer.concat(chunks).toString()) as { prompt: string; allow_unsafe_memory_override?: boolean }
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+        prompt: string
+        allow_unsafe_memory_override?: boolean
+      }
       requests.push(body.allow_unsafe_memory_override === true)
       requestPaths.push(request.url ?? '')
       response.setHeader('Content-Type', 'application/json')
       if (!body.allow_unsafe_memory_override && body.prompt === 'A green coast') {
         response.writeHead(409)
-        response.end(JSON.stringify({ error: { code: 'OFFGRID_IMAGE_MEMORY_LIMIT', message: 'Server needs more image memory.' } }))
+        response.end(
+          JSON.stringify({
+            error: {
+              code: 'OFFGRID_IMAGE_MEMORY_LIMIT',
+              message: 'Server needs more image memory.'
+            }
+          })
+        )
       } else if (body.prompt === 'A green coast') {
         const address = provider.address()
         if (!address || typeof address === 'string') throw new Error('Test provider has no port')
-        response.end(JSON.stringify({ data: [{ url: `http://127.0.0.1:${address.port}/image.png` }] }))
+        response.end(
+          JSON.stringify({ data: [{ url: `http://127.0.0.1:${address.port}/image.png` }] })
+        )
       } else {
         response.end(JSON.stringify({ data: [{ b64_json: imageBytes.toString('base64') }] }))
       }
@@ -44,27 +56,41 @@ describe('<MemoryChat/> with a remote image provider', () => {
       const address = provider.address()
       if (!address || typeof address === 'string') throw new Error('Test provider has no port')
       const server: Parameters<typeof generateRemoteImage>[0] = {
-        id: 'provider', name: 'Image provider', provider: 'custom',
-        endpoint: `http://127.0.0.1:${address.port}/v1`, model: '',
-        enabled: true, mediaModels: { image: 'image-maker' }, modelCatalog: [],
-        screenFramesAllowed: false, apiKey: '', selectedModel: 'image-maker'
+        id: 'provider',
+        name: 'Image provider',
+        provider: 'custom',
+        endpoint: `http://127.0.0.1:${address.port}/v1`,
+        model: '',
+        enabled: true,
+        mediaModels: { image: 'image-maker' },
+        modelCatalog: [],
+        screenFramesAllowed: false,
+        apiKey: '',
+        selectedModel: 'image-maker'
       }
       const boundary = new ChatBoundary()
       installBoundary(boundary)
       window.api.imageGenStatus = async () => ({
         available: true,
-        models: [{ id: 'remote-image:provider:image-maker', name: 'Image Maker' }],
-        active: 'remote-image:provider:image-maker'
+        models: ['remote-image:provider:image-maker'],
+        active: 'remote-image:provider:image-maker',
+        modelNames: { 'remote-image:provider:image-maker': 'Image Maker' }
       })
       window.api.generateImage = async (request: ImageGenerationRequestContract) => {
         const result = await generateRemoteImage(
-          server, request.prompt, request.width, request.height,
+          server,
+          request.prompt,
+          request.width,
+          request.height,
           request.allowUnsafeMemoryOverride === true
         )
         return {
           dataUrl: `data:${result.mime};base64,${result.bytes.toString('base64')}`,
-          path: '/synthetic/generated.png', syncId: 'synthetic-image',
-          prompt: request.prompt, seed: 1, model: 'remote-image:provider:image-maker'
+          path: '/synthetic/generated.png',
+          syncId: 'synthetic-image',
+          prompt: request.prompt,
+          seed: 1,
+          model: 'remote-image:provider:image-maker'
         }
       }
       ;(Element.prototype as unknown as { scrollIntoView(): void }).scrollIntoView = () => {}

@@ -5,6 +5,7 @@ import { nativeBinaryInstalled } from '../backend-facts'
 // ffmpeg 16 kHz-mono re-encode are defined once and reused by dictation interim
 // ticks, final passes, file ingest, and meeting transcription alike.
 
+import { randomUUID } from 'crypto'
 import fs from 'fs'
 import { recordAIRequest } from '../ai-request-log'
 import os from 'os'
@@ -221,7 +222,7 @@ class WhisperCliTranscription implements TranscriptionService {
         if (!opts.alreadyWav16k) {
           const ff = ffmpegBin()
           if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
-          tmp = path.join(os.tmpdir(), `offgrid-stt-${Date.now()}-${process.pid}.wav`)
+          tmp = path.join(os.tmpdir(), `offgrid-stt-${Date.now()}-${process.pid}-${randomUUID()}.wav`)
           // 16 kHz mono PCM WAV; -vn drops any video track so A/V files work too.
           // Cap the decode so a malformed/streaming input can't hang the process forever.
           try {

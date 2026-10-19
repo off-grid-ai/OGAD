@@ -10,6 +10,7 @@ const api = (): any => (window as any).api
 export {
   isGroundingSpecialist,
   isDecisionModel,
+  isStagedDecisionModel,
   type TaskModelChoice
 } from '../../../shared/task-model-rules'
 

@@ -92,3 +92,17 @@ export function parseDecisionChatMessages(messages: unknown): {
   if (!match[3]!.startsWith('0: ')) throw new Error('Decision options must start at zero.')
   return { context: match[1]!, question: match[2]!, options: rows.map((row) => row[2]!.trimEnd()) }
 }
+
+/** What a chat request's prompt weighs for team-mode admission: its characters without any inline
+ *  image data (a base64 picture is not prompt text) and how many images it carries. */
+export function chatPromptShape(body: unknown): { chars: number; images: number } {
+  let images = 0
+  const json = JSON.stringify(body, (_key, value: unknown) => {
+    if (typeof value === 'string' && value.startsWith('data:image/')) {
+      images += 1
+      return ''
+    }
+    return value
+  })
+  return { chars: json.length, images }
+}

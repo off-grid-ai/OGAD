@@ -4,7 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   parseGgufMetadata,
+  parseGgufChatTemplate,
+  chatTemplateDeclaresTools,
+  readGgufTemplateTraits,
   readGgufContextLength,
+  readGgufKvShape,
   GGUF_METADATA_PREFIX_BYTES
 } from '../gguf-metadata'
 
@@ -145,5 +149,160 @@ describe('readGgufContextLength (real temp file, real fs)', () => {
 
   it('exposes a multi-MB default prefix (cheap vs a multi-GB model, ample for the arch block)', () => {
     expect(GGUF_METADATA_PREFIX_BYTES).toBeGreaterThanOrEqual(1024 * 1024)
+  })
+})
+
+describe('tool-calling detection from the chat template', () => {
+  it('extracts the chat template, and returns null when it sits past the read window', () => {
+    const template = '{% for m in messages %}{{ m.content }}{% endfor %}'
+    const found = buildGguf([
+      kvString('general.architecture', 'qwen3'),
+      kvString('tokenizer.chat_template', template)
+    ])
+    expect(parseGgufChatTemplate(found)).toBe(template)
+    // A token array so large the walk runs off the buffer → null, never a crash.
+    const truncated = buildGguf([
+      kvOversizedStringArray('tokenizer.ggml.tokens'),
+      kvString('tokenizer.chat_template', template)
+    ])
+    expect(parseGgufChatTemplate(truncated)).toBeNull()
+  })
+
+  it('reads tools from templates that wire up tool calling, and not from plain ones', () => {
+    const toolTemplate =
+      '{% if tools %}{% for t in tools %}{{ t.function.name }}{% endfor %}{% endif %}' +
+      '{% if message.tool_calls %}<tool_call>{% endif %}'
+    const plainTemplate = '{% for m in messages %}{{ m.role }}: {{ m.content }}{% endfor %}'
+    expect(chatTemplateDeclaresTools(toolTemplate)).toBe(true)
+    expect(chatTemplateDeclaresTools(plainTemplate)).toBe(false)
+  })
+})
+
+describe('readGgufTemplateTraits (real temp file, real fs)', () => {
+  const withFile = async (bytes: Buffer, run: (p: string) => Promise<void>): Promise<void> => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gguf-traits-'))
+    const p = path.join(dir, 'model.gguf')
+    try {
+      fs.writeFileSync(p, bytes)
+      await run(p)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('reads tool calling and a thinking control off the template on disk', async () => {
+    const template =
+      '{% if enable_thinking %}<think>{% endif %}{% for t in tools %}{{ t.name }}{% endfor %}'
+    await withFile(buildGguf([kvString('tokenizer.chat_template', template)]), async (p) => {
+      expect(await readGgufTemplateTraits(p)).toEqual({ tools: true, reasoning: true })
+    })
+  })
+
+  it('reports neither trait for a plain chat template', async () => {
+    const template = '{% for m in messages %}{{ m.role }}: {{ m.content }}{% endfor %}'
+    await withFile(buildGguf([kvString('tokenizer.chat_template', template)]), async (p) => {
+      expect(await readGgufTemplateTraits(p)).toEqual({ tools: false, reasoning: false })
+    })
+  })
+
+  it('is unknown (null), not false, when there is no template or no file', async () => {
+    await withFile(buildGguf([kvString('general.architecture', 'llama')]), async (p) => {
+      expect(await readGgufTemplateTraits(p)).toBeNull()
+    })
+    expect(await readGgufTemplateTraits(path.join(os.tmpdir(), 'no-such-model.gguf'))).toBeNull()
+  })
+
+  it('reads a new file version again instead of serving the cached answer', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gguf-traits-'))
+    const p = path.join(dir, 'model.gguf')
+    try {
+      fs.writeFileSync(p, buildGguf([kvString('tokenizer.chat_template', '{{ m.content }}')]))
+      expect(await readGgufTemplateTraits(p)).toEqual({ tools: false, reasoning: false })
+      fs.writeFileSync(
+        p,
+        buildGguf([kvString('tokenizer.chat_template', '{% for t in tools %}{% endfor %}x')])
+      )
+      fs.utimesSync(p, new Date(), new Date(Date.now() + 5_000))
+      expect(await readGgufTemplateTraits(p)).toEqual({ tools: true, reasoning: false })
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('readGgufKvShape', () => {
+  const kvU8Array = (key: string, values: number[]): Buffer =>
+    Buffer.concat([
+      gstr(key),
+      u32(9 /* ARRAY */),
+      u32(0 /* UINT8 */),
+      u64(values.length),
+      Buffer.from(values)
+    ])
+  const write = (kvs: Buffer[]): string => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gguf-kv-')), 'model.gguf')
+    fs.writeFileSync(file, buildGguf(kvs))
+    return file
+  }
+
+  it('counts only the full-attention layers of a hybrid model (Qwen3.5 layout)', () => {
+    const file = write([
+      kvString('general.architecture', 'qwen35'),
+      kvU32('qwen35.block_count', 33),
+      kvU32('qwen35.attention.head_count', 16),
+      kvU32('qwen35.attention.head_count_kv', 4),
+      kvU32('qwen35.attention.key_length', 256),
+      kvU32('qwen35.attention.value_length', 256),
+      kvU32('qwen35.full_attention_interval', 4)
+    ])
+    // The bundled engine reports 8 KV layers for this model.
+    expect(readGgufKvShape(file, fs)).toEqual({
+      attentionLayers: 8,
+      kvHeads: 4,
+      keyDim: 256,
+      valueDim: 256
+    })
+  })
+
+  it('counts the non-sliding layers that own a cache (Gemma 4 layout)', () => {
+    const pattern = Array.from({ length: 42 }, (_, i) => ((i + 1) % 6 === 0 ? 0 : 1))
+    const file = write([
+      kvString('general.architecture', 'gemma4'),
+      kvU32('gemma4.block_count', 42),
+      kvU32('gemma4.attention.head_count', 8),
+      kvU32('gemma4.attention.head_count_kv', 2),
+      kvU32('gemma4.attention.key_length', 512),
+      kvU32('gemma4.attention.value_length', 512),
+      kvU32('gemma4.attention.shared_kv_layers', 18),
+      kvU8Array('gemma4.attention.sliding_window_pattern', pattern)
+    ])
+    expect(readGgufKvShape(file, fs)).toEqual({
+      attentionLayers: 4,
+      kvHeads: 2,
+      keyDim: 512,
+      valueDim: 512
+    })
+  })
+
+  it('falls back to embedding / heads for the head dim of a dense model', () => {
+    const file = write([
+      kvString('general.architecture', 'llama'),
+      kvU32('llama.block_count', 32),
+      kvU32('llama.embedding_length', 4096),
+      kvU32('llama.attention.head_count', 32),
+      kvU32('llama.attention.head_count_kv', 8)
+    ])
+    expect(readGgufKvShape(file, fs)).toEqual({
+      attentionLayers: 32,
+      kvHeads: 8,
+      keyDim: 128,
+      valueDim: 128
+    })
+  })
+
+  it('returns null for a file that is not GGUF', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gguf-kv-')), 'x.gguf')
+    fs.writeFileSync(file, 'not a model')
+    expect(readGgufKvShape(file, fs)).toBeNull()
   })
 })

@@ -1,0 +1,12 @@
+{
+  "url": "http://blog.farm.test",
+  "server": { "port": 7136, "host": "127.0.0.1" },
+  "database": { "client": "sqlite3", "connection": { "filename": "/dev/shm/clone-farm/ghost/ghost.db" }, "useNullAsDefault": true, "debug": false },
+  "mail": { "transport": "SMTP", "options": { "host": "127.0.0.1", "port": 25, "secure": false, "ignoreTLS": true } },
+  "logging": { "transports": ["stdout"], "level": "warn" },
+  "process": "local",
+  "privacy": { "useUpdateCheck": false, "useGravatar": false, "useRpcPing": false, "useStructuredData": true },
+  "paths": { "contentPath": "/opt/clone-farm/ghost/content" },
+  "security": { "staffDeviceVerification": false },
+  "labs": {}
+}

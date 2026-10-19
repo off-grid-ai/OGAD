@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import sharp from 'sharp'
 import { COLORS_DARK, COLORS_LIGHT } from '@offgrid/design'
 import { llm } from '../llm'
+import { remoteModelUnreachable } from '../llm/remote-chat'
 import { TASK_GUIDANCE_APPLIED_TRACE } from '../tasks/task-guide'
 import type { VisionGroundingInput, VisionGroundingResult } from './vision-agent'
 import type { VisionAction } from './vision-action'
@@ -73,6 +74,8 @@ export function remoteVisionTransportError(error: unknown): Error {
   const message = typeof detail.message === 'string' ? detail.message.trim() : ''
   const code = typeof detail.code === 'string' ? detail.code.trim() : ''
   if (!message && !code) return error
+  const unreachable = remoteModelUnreachable(code)
+  if (unreachable) return new Error(unreachable)
   return new Error(
     `Remote model connection failed: ${message || 'network error'}${code ? ` (${code})` : ''}.`
   )

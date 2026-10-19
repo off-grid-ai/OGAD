@@ -8,7 +8,7 @@
 # The env is large (~1-2GB) and is gitignored — rebuild via this script.
 set -euo pipefail
 
-MFLUX_VERSION="${MFLUX_VERSION:-}"   # empty = latest on PyPI; or pin e.g. 0.10.0
+MFLUX_VERSION="${MFLUX_VERSION:-0.23.0}"   # pinned; set MFLUX_VERSION to build another release
 PYTHON_SERIES="3.11"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

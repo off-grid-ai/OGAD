@@ -26,11 +26,13 @@ const dismissOptionalSetupNudge = async (page: Page): Promise<void> => {
     .waitFor({ state: 'visible', timeout: 5_000 })
     .then(() => true)
     .catch(() => false)
-  // The setup notice can close when the model becomes ready during startup.
+  // The setup notice can also close by itself when the model becomes ready during startup, and a
+  // click can land while it is still moving in. Click until it is gone, whichever way it goes.
   if (visible)
-    await dismiss.click({ timeout: 1_000 }).catch(async () => {
-      await expect(dismiss).toBeHidden()
-    })
+    await expect(async () => {
+      if (await dismiss.isVisible()) await dismiss.click({ timeout: 2_000 })
+      await expect(dismiss).toBeHidden({ timeout: 1_000 })
+    }).toPass({ timeout: 15_000 })
 }
 
 export const completeOnboarding = async (page: Page, maxSteps = 10): Promise<void> => {

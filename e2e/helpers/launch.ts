@@ -1,4 +1,9 @@
-import { _electron as electron, type ElectronApplication } from '@playwright/test'
+import {
+  _electron as electron,
+  type ElectronApplication,
+  type Locator,
+  type Page
+} from '@playwright/test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -112,6 +117,8 @@ const withCoverage = (env: Record<string, string>): Record<string, string> => {
 
 export interface LaunchOptions {
   env?: Record<string, string | undefined>
+  /** Leave launch-time offers (Tidy up) for the spec to answer, instead of "Not now". */
+  keepLaunchOffers?: boolean
   /** Extra Chromium/Electron flags (e.g. fake media devices). Applied to both targets. */
   extraArgs?: string[]
   /** Working directory for the DEV target's app process. The native actions
@@ -124,6 +131,28 @@ export interface LaunchOptions {
   appEntry?: string
 }
 
+/** The Tidy up offer: it opens at launch when stored data predates the current rules, which the
+ *  seeded fixtures do. A spec about Tidy up itself launches with keepLaunchOffers. */
+export const tidyUpDialog = (page: Page): Locator =>
+  page.getByRole('dialog', { name: 'Tidy up your timeline, people and to-dos' })
+
+/** Answer launch-time offers the way a person would ("Not now"), whenever one covers the window,
+ *  so a spec about something else is not blocked by a modal it never asked about. */
+const answerLaunchOffers = (app: ElectronApplication): ElectronApplication => {
+  const register = (page: Page): void => {
+    void page
+      .addLocatorHandler(tidyUpDialog(page), async (dialog) => {
+        await dialog.getByRole('button', { name: 'Not now', exact: true }).click()
+      })
+      .catch(() => {
+        /* the window closed first */
+      })
+  }
+  for (const page of app.windows()) register(page)
+  app.on('window', register)
+  return app
+}
+
 export const launchOffGrid = async (options: LaunchOptions = {}): Promise<ElectronApplication> => {
   const env = withCoverage({ ...process.env, ...options.env } as Record<string, string>)
   // A runner that itself lives inside Electron (VS Code tasks, agent
@@ -133,6 +162,8 @@ export const launchOffGrid = async (options: LaunchOptions = {}): Promise<Electr
   // run as node.
   delete env.ELECTRON_RUN_AS_NODE
   const extraArgs = options.extraArgs ?? []
+  const offers = (app: ElectronApplication): ElectronApplication =>
+    options.keepLaunchOffers ? app : answerLaunchOffers(app)
 
   if (targetIsPackaged()) {
     const unavailable = packagedTargetUnavailable()
@@ -140,7 +171,9 @@ export const launchOffGrid = async (options: LaunchOptions = {}): Promise<Electr
     // A packaged build ignores OFFGRID_PRO=1, so pro specs need a real cached license.
     seedLicense(env)
     // A packaged app loads its own app.asar — passing '.' would point it at the repo instead.
-    return electron.launch({ executablePath: packagedExecutable(), args: extraArgs, env })
+    return offers(
+      await electron.launch({ executablePath: packagedExecutable(), args: extraArgs, env })
+    )
   }
   // The DEV target needs it too, and for a different reason than pro activation: OFFGRID_PRO=1 unlocks
   // the pro SURFACES, but joining a mesh consumes a licensed seat, so pairing asks the entitlement layer
@@ -149,9 +182,11 @@ export const launchOffGrid = async (options: LaunchOptions = {}): Promise<Electr
   // assert free-tier UI stay unlicensed and deterministic.
   seedLicense(env)
   // The app path must stay absolute once a spec overrides cwd.
-  return electron.launch({
-    args: [path.resolve(options.appEntry ?? '.'), ...extraArgs],
-    env,
-    cwd: options.cwd
-  })
+  return offers(
+    await electron.launch({
+      args: [path.resolve(options.appEntry ?? '.'), ...extraArgs],
+      env,
+      cwd: options.cwd
+    })
+  )
 }

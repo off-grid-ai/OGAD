@@ -14,7 +14,8 @@ import {
   ListMagnifyingGlass,
   ArrowCounterClockwise,
   CaretLeft,
-  CaretRight
+  CaretRight,
+  Key as KeyIcon
 } from '@phosphor-icons/react'
 import {
   AI_LOG_POLICY,
@@ -59,7 +60,7 @@ import { SettingsSelect } from './SettingsSelect'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible'
 import { Checkbox } from '@offgrid/operator-ui/operator/animate/checkbox'
 import { CopyButton } from './ui/CopyButton'
-import { WaveformPlayer } from '@offgrid/operator-ui/operator/media/waveform-player'
+import { AudioClip } from './AudioClip'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -256,7 +257,7 @@ function Attachment({
             className="max-h-96 max-w-full rounded-md object-contain"
           />
         ) : (
-          <WaveformPlayer src={url} size="compact" />
+          <AudioClip src={url} />
         ))}
     </div>
   )
@@ -289,6 +290,7 @@ function RequestDetail({
     parentId: record.parentId,
     modality: record.modality,
     source: record.source,
+    ...(record.keyName ? { keyName: record.keyName } : {}),
     status: record.status,
     ...(display.model ? { model: record.model, backend: record.backend } : {}),
     ...(display.request
@@ -317,6 +319,12 @@ function RequestDetail({
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span>{new Date(record.startedAt).toLocaleString()}</span>
           <span>{record.status}</span>
+          {record.keyName && (
+            <span className="inline-flex items-center gap-1" title="API key">
+              <KeyIcon aria-label="API key" className="size-3" />
+              {record.keyName}
+            </span>
+          )}
           {display.details && <span>{duration(record.durationMs)}</span>}
         </div>
         {display.model && (
@@ -922,6 +930,7 @@ export function AIRequestLogs({
                             <span className="block truncate text-[11px] text-muted-foreground">
                               {labels[row.modality]}
                               {row.source ? ` · ${row.source}` : ''}
+                              {row.keyName ? ` · ${row.keyName}` : ''}
                               {row.parentId ? ' · Attempt / child' : ''}
                             </span>
                             <span className="my-1 block truncate text-sm transition-transform duration-300 group-hover:translate-x-0.5">

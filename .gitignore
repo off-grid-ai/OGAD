@@ -83,6 +83,7 @@ marketing/emails/pro-earlybird/
 
 # Coverage report from the DB journey suite (npm run test:db --coverage)
 coverage-db/
+coverage-heavy/
 
 # Raw V8 output and the converted report from the e2e coverage capture
 coverage-e2e-raw/
@@ -95,3 +96,7 @@ coverage-native-raw/
 coverage-native/
 coverage-native-desktop-raw/
 coverage-native-desktop/
+
+# Local scratch: generated PDFs and their helper scripts
+/output/
+/tmp/

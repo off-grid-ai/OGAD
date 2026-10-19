@@ -59,7 +59,9 @@ function MessageAttachmentsComponent({
               // Thumbnails in a row, the way a chat shows shared screenshots: a few files stay one
               // line high, and the whole picture is one click away.
               className="size-24 cursor-zoom-in rounded-md border border-neutral-800 object-cover object-top transition-opacity hover:opacity-90"
-              onOpen={onOpenImage}
+              onOpen={(image) =>
+                onOpenImage({ ...image, title: attachment.name || 'Shared image' })
+              }
             />
           )
         }
@@ -68,7 +70,9 @@ function MessageAttachmentsComponent({
           fileName: attachment.name,
           mimeType: (attachment as { mimeType?: string }).mimeType,
           path: attachment.path,
-          text: attachment.text
+          text: attachment.text,
+          // A recorded voice note is saved as .webm; its stored kind keeps it audio.
+          recordedKind: attachment.kind
         })
         const viewable = view.viewable
         return (

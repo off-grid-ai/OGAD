@@ -71,7 +71,7 @@ describe('remote model inventory ids', () => {
     ).toEqual([
       expect.objectContaining({
         id: 'remote-vision:home:google%2Fgemma-4',
-        name: 'google/gemma-4',
+        name: 'Gemma 4',
         kind: 'vision',
         org: 'Home server',
         files: [],
@@ -121,13 +121,13 @@ describe('remote model display names', () => {
     [
       '/workspace/models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf',
       undefined,
-      'Qwen3.8 Flash Next GSQ RCO IQ3_XXS'
+      'Qwen3.8 Flash Next GSQ RCO'
     ],
-    ['/workspace/models/Qwen-Q4_K.gguf', '/workspace/models/Qwen-Q4_K.gguf', 'Qwen Q4_K'],
-    ['C:\\models\\Qwen-Q4_K.gguf', undefined, 'Qwen Q4_K'],
+    ['/workspace/models/Qwen-Q4_K.gguf', '/workspace/models/Qwen-Q4_K.gguf', 'Qwen'],
+    ['C:\\models\\Qwen-Q4_K.gguf', undefined, 'Qwen'],
     ['/workspace/models/Qwen-Q4_K.gguf', 'My Qwen model', 'My Qwen model'],
-    ['vendor/model-name', undefined, 'vendor/model-name'],
-    ['vendor/model-name', '  ', 'vendor/model-name']
+    ['vendor/model-name', undefined, 'Model name'],
+    ['vendor/model-name', '  ', 'Model name']
   ])('shows a name for %s while preserving its routing ID', (id, name, expected) => {
     const [model] = remoteVisionInventoryModels([
       {

@@ -1,7 +1,7 @@
 // Branch fill for ModalityQueue. queue.test.ts covers ordering / eviction / coexist;
 // this drives the error-and-edge paths: a declared-but-unregistered evictable is
-// skipped, an evict failure rejects admission, a warm failure is caught, an
-// evictable with no warm hook is not re-warmed, and an onChange listener that throws
+// skipped, an evict failure rejects admission, a release failure is caught, an
+// evictable with no release hook is skipped, and an onChange listener that throws
 // is isolated. Real ModalityQueue, no mocks of its own logic.
 import { describe, it, expect, vi } from 'vitest'
 import { ModalityQueue } from '../queue'
@@ -34,23 +34,23 @@ describe('ModalityQueue error + edge branches', () => {
     await expect(q.run({ tier: 2, label: 'next' }, async () => 7)).resolves.toBe(7)
   })
 
-  it('does not re-warm an evictable that has no warm hook', async () => {
+  it('finishes a job whose evictable has no release hook', async () => {
     const q = new ModalityQueue()
     const evict = vi.fn()
-    q.registerEvictable('llm', { evict }) // no warm
-    await q.run({ tier: 2, label: 'x', evicts: ['llm'] }, async () => {})
-    expect(evict).toHaveBeenCalledTimes(1) // reached the "no warm -> continue" branch
+    q.registerEvictable('llm', { evict }) // no recover
+    await expect(q.run({ tier: 2, label: 'x', evicts: ['llm'] }, async () => 7)).resolves.toBe(7)
+    expect(evict).toHaveBeenCalledTimes(1)
   })
 
-  it('catches a warm that throws in the finally cleanup', async () => {
+  it('catches a release that throws in the finally cleanup', async () => {
     const q = new ModalityQueue()
-    const warm = vi.fn(async () => {
-      throw new Error('warm boom')
+    const recover = vi.fn(async () => {
+      throw new Error('release boom')
     })
-    q.registerEvictable('llm', { evict: vi.fn(), warm })
-    // The rejection from warm must be swallowed - run() still resolves.
+    q.registerEvictable('llm', { evict: vi.fn(), recover })
+    // The rejection from release must be swallowed - run() still resolves.
     await expect(q.run({ tier: 2, label: 'x', evicts: ['llm'] }, async () => 7)).resolves.toBe(7)
-    expect(warm).toHaveBeenCalledTimes(1)
+    expect(recover).toHaveBeenCalledTimes(1)
   })
 
   it('isolates an onChange listener that throws (scheduler survives)', async () => {

@@ -13,7 +13,7 @@ import { parakeetTranscription as parakeet } from './parakeet-cli'
 import { whisperServer } from './whisper-server'
 import { whisperServerTranscription as whisperResident } from './whisper-server-transcription'
 import { getActiveModal } from '../active-models'
-import { modelsByKind } from '@offgrid/models'
+import { modelDisplayName, modelsByKind } from '@offgrid/models'
 import { transcriptionLanguages, type SpeechLanguage } from '@offgrid/speech'
 import type { ManagedRuntime } from '../runtime-manager'
 import { getSetting } from '../database'
@@ -172,6 +172,26 @@ export function getLocalTranscription(
   return withConfiguredTranscriptionLanguage(getTranscription(engine), language)
 }
 
+/**
+ * Team gateway mode: this machine's Whisper transcriptions on a resident whisper-server `lane` (the
+ * model stays loaded) instead of a whisper-cli process per call, with the same language hint. Null
+ * when a remote server is chosen, the active engine is not Whisper, or whisper-server is missing.
+ */
+export function getTeamLaneTranscription(
+  lane: TranscriptionService,
+  readSetting: TranscriptionSettingReader = getSetting
+): TranscriptionService | null {
+  if (getActiveRemoteVisionServerForModality('transcription')) return null
+  const active = getActiveModal('transcription')
+  const engine = engineForActiveModel(active, modelsByKind('transcription'))
+  if (engine !== 'whisper' || !lane.isAvailable()) return null
+  const language = resolveConfiguredTranscriptionLanguage(
+    readSetting('sttLanguage', 'auto'),
+    transcriptionLanguages(engine, active)
+  )
+  return withConfiguredTranscriptionLanguage(lane, language)
+}
+
 /** Apply the user's language hint at the shared transcription seam. An explicit
  *  call-site hint still wins, so specialized import flows can override it. */
 export function withConfiguredTranscriptionLanguage(
@@ -203,17 +223,25 @@ export function transcriptionActiveInfo(
   language: string
   languages: readonly SpeechLanguage[]
   options: ReturnType<typeof transcriptionModelOptions>
+  /** The option that is active, matched by id or file name, so a picker never compares raw ids. */
+  selectedId: string | null
 } {
   const activeEntry = installed.find((entry) => transcriptionEntryMatches(entry, info.modelId))
   const languages = transcriptionLanguages(
     info.engine === 'remote' ? 'whisper' : info.engine,
     activeEntry?.familyId ?? info.modelId
   )
+  const options = transcriptionModelOptions(info.modelId, installed)
   return {
     ...info,
+    // The installed entry carries the desktop catalog's name, which the shared catalog may lack.
+    ...(activeEntry?.name && info.engine !== 'remote'
+      ? { label: `${ENGINE_LABEL[info.engine]} · ${activeEntry.name}` }
+      : {}),
     language: resolveConfiguredTranscriptionLanguage(configuredLanguage, languages),
     languages,
-    options: transcriptionModelOptions(info.modelId, installed)
+    options,
+    selectedId: options.find((option) => option.active)?.id ?? null
   }
 }
 
@@ -251,7 +279,7 @@ export function transcriptionProvenance(
   const entry = active
     ? entries.find((e) => e.id === active || e.files.some((f) => f.name === active))
     : undefined
-  const modelLabel = entry?.name ?? active ?? 'built-in'
+  const modelLabel = entry?.name ?? modelDisplayName(active, { catalog: entries }) ?? 'built-in'
   return { engine, modelId: active, label: `${ENGINE_LABEL[engine]} · ${modelLabel}` }
 }
 
@@ -263,7 +291,9 @@ export function getActiveTranscriptionInfo(): ActiveTranscriptionInfo {
     return {
       engine: 'remote',
       modelId: remoteVisionModelId(remote.id, remote.selectedModel),
-      label: `Remote · ${remote.selectedModel}`
+      label: `Remote · ${modelDisplayName(remoteVisionModelId(remote.id, remote.selectedModel), {
+        remote: [{ serverId: remote.id, models: remote.modelCatalog ?? [] }]
+      })}`
     }
   const active = getActiveModal('transcription')
   const entries = modelsByKind('transcription')
@@ -310,7 +340,7 @@ export function transcriptionModelOptions(
     { id: null, name: 'Whisper (built-in)', active: active == null || !hasInstalledActive },
     ...installed.map((e) => ({
       id: e.id,
-      name: e.name ?? e.id,
+      name: e.name ?? modelDisplayName(e.id) ?? e.id,
       active: transcriptionEntryMatches(e, active)
     }))
   ]
@@ -343,19 +373,32 @@ export function residentWhisperAvailable(): boolean {
 
 /** STT as a ManagedRuntime for the shared residency seam. The only resident STT
  *  holder is the whisper-server; the whisper-cli and Parakeet paths are one-shot
- *  CLIs that free their model on exit. So evict stops the server; warm/release are
- *  no-ops (it lazily re-spawns via ensureUp on the next resident transcription). */
+ *  CLIs that free their model on exit. So evict stops the server; it lazily re-spawns
+ *  via ensureUp on the next resident transcription. */
 export const sttRuntime: ManagedRuntime = {
   modality: 'stt',
+  // Team mode's extra whisper-server lanes hold a model copy each: counted and freed with it.
+  footprintMB: () => whisperServer.residentMB() + (extraLanes?.residentMB() ?? 0),
   evict: () => {
+    extraLanes?.stop()
     whisperServer.stop()
-  },
-  warm: () => {
-    /* lazily re-spawned by whisper-server ensureUp on next use */
   },
   release: () => {
+    extraLanes?.stop()
     whisperServer.stop()
   }
+}
+
+/** Team mode's extra transcription lanes, as the memory planner sees them. */
+export interface ExtraTranscriptionLanes {
+  residentMB(): number
+  stop(): void
+}
+let extraLanes: ExtraTranscriptionLanes | null = null
+
+/** The team-mode lanes register here, so the residency seam counts and frees them. */
+export function registerExtraTranscriptionLanes(lanes: ExtraTranscriptionLanes | null): void {
+  extraLanes = lanes
 }
 
 /** The Transcription settings tab's view: active model, language, and choices. Shared by the

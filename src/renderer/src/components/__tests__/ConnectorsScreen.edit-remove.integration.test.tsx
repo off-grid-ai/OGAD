@@ -149,4 +149,28 @@ describe('connector edit and remove', () => {
     await waitFor(() => expect(service.rows).toHaveLength(0))
     await waitFor(() => expect(screen.queryByRole('button', { name: /Team notes/ })).toBeNull())
   })
+
+  it('names a custom server by its host and its tools in words, and Escape steps back out', async () => {
+    installConnectorService()
+    const { ConnectorsScreen } = await import('../ConnectorsScreen')
+    const user = userEvent.setup()
+    render(<ConnectorsScreen />)
+
+    await user.click(await screen.findByRole('button', { name: /Team notes.*connected/i }))
+    expect(await screen.findByRole('heading', { name: 'Team notes' })).toBeTruthy()
+    // The host, not the full address with its path; the tool id reads as words.
+    expect(screen.getByText('notes.example.test')).toBeTruthy()
+    expect(screen.queryByText('https://notes.example.test/mcp')).toBeNull()
+    expect(screen.getByText('Search notes')).toBeTruthy()
+
+    // Escape first closes what is open inside the detail, then the detail itself.
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    expect(screen.getByRole('form', { name: 'Edit Team notes' })).toBeTruthy()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('form', { name: 'Edit Team notes' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Team notes' })).toBeTruthy()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Team notes' })).toBeNull())
+    expect(await screen.findByRole('button', { name: /Team notes.*connected/i })).toBeTruthy()
+  })
 })

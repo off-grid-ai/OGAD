@@ -11,7 +11,6 @@ import {
 } from '@phosphor-icons/react'
 import { cn } from '@renderer/lib/utils'
 import { Section } from '@offgrid/operator-ui/operator/experience'
-import { resolveModelName } from '@renderer/lib/model-summary'
 import {
   SYSTEM_HEALTH_STATUS_LABELS,
   type SystemHealthComponentStatusContract,
@@ -277,7 +276,7 @@ export function HealthPanel(): React.ReactElement {
         {health && (
           <div className="border-t border-neutral-800/60 px-4 py-2 text-[10px] text-neutral-600">
             {health.ramGb} GB RAM
-            {health.activeModel ? ` · active: ${resolveModelName([], health.activeModel)}` : ''}
+            {health.activeModelName ? ` · active: ${health.activeModelName}` : ''}
           </div>
         )}
       </div>

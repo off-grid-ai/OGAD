@@ -22,6 +22,30 @@ let sink: Sink | undefined
 let epoch = 0
 const context = new AsyncLocalStorage<AIRequestHandle>()
 const unrecorded = new AsyncLocalStorage<true>()
+/** The gateway request a record belongs to: which API key sent it, once the key is checked. */
+const gatewayCaller = new AsyncLocalStorage<{ keyName?: string }>()
+
+/** Run one gateway request; records it starts can then be told which API key sent it. */
+export function withGatewayRequestScope<T>(fn: () => T): T {
+  return gatewayCaller.run({}, fn)
+}
+
+/** The API key that sent the current gateway request, by its name (never the key itself). */
+export function setGatewayRequestKeyName(name: string): void {
+  const caller = gatewayCaller.getStore()
+  if (caller) caller.keyName = name
+}
+
+/** The current gateway request's API key name, if one sent it. */
+export function gatewayRequestKeyName(): string | undefined {
+  return gatewayCaller.getStore()?.keyName
+}
+
+/** Run `fn` as if a request with this key name (or none) sent it: work shared by several
+ *  requests (a coalesced batch) names a key only when every one of them came with it. */
+export function withGatewayRequestKeyName<T>(name: string | undefined, fn: () => T): T {
+  return gatewayCaller.run(name === undefined ? {} : { keyName: name }, fn)
+}
 
 /** No database, Electron, network, or synchronous disk access in inference paths. */
 export function setAIRequestSink(next: Sink | undefined): void {
@@ -112,6 +136,8 @@ export class AIRequestHandle {
       preview: '',
       request: this.enabled ? snapshotAIValue(meta.request) : undefined
     }
+    const keyName = gatewayCaller.getStore()?.keyName
+    if (keyName !== undefined) this.record.keyName = keyName
     this.publish()
   }
   private publish(): void {

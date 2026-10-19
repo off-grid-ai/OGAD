@@ -371,9 +371,15 @@ describe('transcriptionProvenance — display label for the active STT choice', 
     expect(info).toEqual({ engine: 'whisper', modelId: null, label: 'Whisper · built-in' })
   })
 
-  it('falls back to the raw id when the active model is not in the catalog', () => {
+  it('reads an unknown file as a name, never the file name', () => {
     expect(transcriptionProvenance('whisper', 'mystery.bin', catalog).label).toBe(
-      'Whisper · mystery.bin'
+      'Whisper · Mystery'
+    )
+  })
+
+  it('names a whisper file the shared catalog ships by its catalog name', () => {
+    expect(transcriptionProvenance('whisper', 'ggml-large-v3.bin', []).label).toBe(
+      'Whisper · Whisper Large v3'
     )
   })
 })
@@ -412,8 +418,8 @@ describe('transcriptionModelOptions — switchable models for the picker', () =>
     expect(transcriptionModelOptions(null, installed).find((o) => o.active)?.id).toBeNull()
   })
 
-  it('falls back to the id as the name when a catalog entry has none', () => {
+  it('reads the id as a name when a catalog entry has none', () => {
     const opts = transcriptionModelOptions(null, [{ id: 'x/y', files: [{ name: 'y.bin' }] }])
-    expect(opts[1]).toEqual({ id: 'x/y', name: 'x/y', active: false })
+    expect(opts[1]).toEqual({ id: 'x/y', name: 'Y', active: false })
   })
 })

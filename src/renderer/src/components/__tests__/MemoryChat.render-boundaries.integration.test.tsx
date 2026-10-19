@@ -16,6 +16,9 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  // Chat remembers its open tabs and active chat in localStorage; without this a chat one test
+  // opened is still active in the next, and a first message goes to it instead of a new chat.
+  window.localStorage.clear()
   if (originalOffsetHeight) {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)
   }
@@ -64,7 +67,7 @@ it('shows a completed artifact card without its raw HTML', async () => {
   installBoundary(boundary)
   renderChat({ conversationId: 'conversation-a' })
 
-  expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: 'HTML page' })).toBeTruthy()
   expect(screen.queryByText(/ARTIFACT_ONLY_MARKER/)).toBeNull()
 })
 
@@ -75,15 +78,13 @@ it('restores completed work with a saved artifact', async () => {
     'assistant',
     '```html\n<!doctype html><html><body>COMIC</body></html>\n```',
     {
-      toolCalls: [
-        { name: 'generate_image', result: 'Created comic page 1.', status: 'completed' }
-      ]
+      toolCalls: [{ name: 'generate_image', result: 'Created comic page 1.', status: 'completed' }]
     }
   )
   installBoundary(boundary)
   renderChat({ conversationId: 'conversation-a' })
 
-  expect(await screen.findByRole('button', { name: /HTML artifact/i })).toBeTruthy()
+  expect(await screen.findByRole('button', { name: 'HTML page' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Work done' })).toBeTruthy()
 })
 
@@ -230,4 +231,72 @@ it('switches between saved chats and shows a peer update to an inactive chat', a
   expect(screen.queryByText('Answer in the first chat')).toBeNull()
   expect(screen.getAllByTitle('Close tab')).toHaveLength(1)
   expect(screen.getByTitle('Close tab').parentElement?.textContent).toContain('Conversation B')
+})
+
+it('shows an artifact card while the page is still being written, and the open canvas follows it', async () => {
+  const boundary = new ChatBoundary()
+  installBoundary(boundary)
+  const user = userEvent.setup()
+  renderChat({ conversationId: 'conversation-a' })
+
+  await send('Build a page about the orb', user)
+  await waitFor(() => expect(boundary.calls).toHaveLength(1))
+  act(() => boundary.emit(0, 'Here it is:\n```html\n<!doctype html><html><head>'))
+
+  // The block has not closed: a card at once, never the raw code.
+  const card = await screen.findByRole('button', { name: /^HTML page/ })
+  expect(within(card).getByText('Building. Open to watch it render')).toBeTruthy()
+  expect(screen.queryByText(/<!doctype html>/)).toBeNull()
+
+  await user.click(card)
+  expect(await screen.findByRole('dialog', { name: 'HTML page' })).toBeTruthy()
+
+  // More of the page arrives; the canvas re-reads it and takes the page's own title.
+  act(() => boundary.emit(0, '<title>Liquid Orb</title></head><body>orb</body></html>\n```'))
+  await new Promise((r) => setTimeout(r, 900))
+  console.log(
+    'DIALOGS',
+    screen.queryAllByRole('dialog').map((d) => d.getAttribute('aria-label')),
+    screen.getByTestId('side-panel-layer').getAttribute('aria-label'),
+    document.body.textContent?.slice(0, 600)
+  )
+  expect(await screen.findByRole('dialog', { name: 'Liquid Orb' }, { timeout: 2000 })).toBeTruthy()
+
+  await act(async () =>
+    boundary.resolve(
+      0,
+      'Here it is:\n```html\n<!doctype html><html><head><title>Liquid Orb</title></head><body>orb</body></html>\n```'
+    )
+  )
+  // Finished: the card is the page's name, with no "Building" line.
+  const done = await screen.findByRole('button', { name: 'Liquid Orb' })
+  expect(within(done).queryByText(/Building/)).toBeNull()
+})
+
+it('says an artifact stopped before it finished, and still opens what was made', async () => {
+  const boundary = new ChatBoundary()
+  await boundary.addRagMessage(
+    'conversation-a',
+    'assistant',
+    'Working on it:\n```html\n<!doctype html><html><head><title>Half Page</title></head><body>'
+  )
+  installBoundary(boundary)
+  renderChat({ conversationId: 'conversation-a' })
+
+  const card = await screen.findByRole('button', { name: /^Half Page/ })
+  expect(
+    within(card).getByText('Stopped before it finished. Open to see what was made')
+  ).toBeTruthy()
+  expect(screen.getByText('Working on it:')).toBeTruthy()
+})
+
+it('names a new chat by what was asked, not by the action marker that steers it', async () => {
+  const boundary = new ChatBoundary()
+  installBoundary(boundary)
+  const user = userEvent.setup()
+  renderChat({})
+
+  await send('<!-- offgrid-action:comic-book -->Make a comic about the orb', user)
+  await waitFor(() => expect(boundary.calls).toHaveLength(1))
+  expect(boundary.conversations[0]!.title).toBe('Make a comic about the orb')
 })

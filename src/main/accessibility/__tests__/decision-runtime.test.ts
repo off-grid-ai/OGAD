@@ -40,7 +40,8 @@ vi.mock('../../backend-preferences', () => ({ getBackendPreference: () => 'auto'
 vi.mock('../../free-port', () => ({ isPortFree: vi.fn(), pickFreePort: mocks.pickPort }))
 vi.mock('../../kill-orphan-port', () => ({ reapOrphanProcessesOnPort: mocks.reap }))
 vi.mock('../../models-manager', () => ({
-  KEV_4B_ID: 'offgrid/kev-4b',
+  KEV_9B_ID: 'offgrid/kev-9b',
+  isKevModel: (id: string | null | undefined) => id === 'offgrid/kev-4b' || id === 'offgrid/kev-9b',
   resolveComputerUseModelArtifact: mocks.artifact,
   resolveKevRuntimeArtifact: mocks.kevArtifact
 }))
@@ -165,6 +166,44 @@ describe('DecisionRuntime', () => {
       ['/runtime/server.py', '--run', '/models/kev', '--port', '8460'],
       expect.objectContaining({ cwd: '/models/kev' })
     )
+    await runtime.shutdown()
+  })
+
+  it('runs Kev 9B on its own installed checkpoint through the same Kev endpoint', async () => {
+    const runtime = new DecisionRuntime()
+    mocks.kevArtifact.mockImplementation((modelId: string) => ({
+      checkpoint: `/models/${modelId.split('/')[1]}`,
+      base: '/models/base-9b',
+      python: '/runtime/python',
+      script: '/runtime/server.py'
+    }))
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          answers: { decision: { choice: 'option_0', probabilities: { option_0: 3, option_1: 1 } } }
+        })
+      } as Response)
+
+    await runtime.start('offgrid/kev-9b')
+    expect(mocks.kevArtifact).toHaveBeenCalledWith('offgrid/kev-9b')
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      '/runtime/python',
+      ['/runtime/server.py', '--run', '/models/kev-9b', '--port', '8460'],
+      expect.objectContaining({
+        cwd: '/models/kev-9b',
+        env: expect.objectContaining({ KEV_LOCAL_BASE: '/models/base-9b' })
+      })
+    )
+    expect(vi.mocked(fetch).mock.calls[0]![0]).toBe('http://127.0.0.1:8460/v1/models')
+    await expect(runtime.decide('screen', 'next?', ['A', 'B'])).resolves.toEqual({
+      choice: 0,
+      confidence: 0.75,
+      probabilities: [0.75, 0.25]
+    })
+    expect(vi.mocked(fetch).mock.calls[1]![0]).toBe('http://127.0.0.1:8460/v1/systemone')
     await runtime.shutdown()
   })
 

@@ -20,6 +20,7 @@
  */
 import type { ActionRecord, GateDecision, Rail } from '@offgrid/use'
 import { proposeActionApproval, type ActionKind } from './approval'
+import { connectorActionArgs } from './connector-rail'
 
 /** The engine's rails, translated to the approval UI's executor kinds. */
 export function railToKind(rail: Rail | undefined): ActionKind {
@@ -181,8 +182,26 @@ export function approvalConversation(
   return action.source === 'chat' && sourceRef ? sourceRef : null
 }
 
+export interface GateHostDeps {
+  /** The connector's name as the user knows it, for the approval's app column and title. */
+  connectorName?: (connectorId: number) => string | undefined
+}
+
+/** A connector write is queued with its connector and tool, so the approval reads as the
+ *  action in words in that app, never as the tool id. */
+function connectorFields(action: ActionRecord, deps: GateHostDeps): Record<string, unknown> {
+  if (action.rail !== 'connector') return {}
+  const call = connectorActionArgs(action.args)
+  if (!call) return {}
+  const connector = deps.connectorName?.(call.connectorId)
+  return { connectorId: call.connectorId, tool: call.tool, ...(connector ? { connector } : {}) }
+}
+
 /** The GateCallback the engine host is constructed with. */
-export async function gateHost({ action }: { action: ActionRecord }): Promise<GateDecision> {
+export async function gateHost(
+  { action }: { action: ActionRecord },
+  deps: GateHostDeps = {}
+): Promise<GateDecision> {
   // Native semantic actions run straight through this gate. The env flag bypasses
   // source approval for headless testing.
   if (approvalBypassed() || (!needsApproval(action) && !unattended(action))) {
@@ -199,6 +218,7 @@ export async function gateHost({ action }: { action: ActionRecord }): Promise<Ga
     risk: action.risk,
     args: action.args,
     source: action.source,
+    ...connectorFields(action, deps),
     // Engine-specific fields the approval card needs to resolve the gate
     // and to show exactly what was bound.
     actionId: action.id,

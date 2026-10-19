@@ -32,6 +32,7 @@ import {
 import { AnimatedNumber } from '@offgrid/operator-ui/operator/motion/animated-number'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
+import { Alert } from '@offgrid/operator-ui/operator/coss/alert'
 
 type Mode = 'conservative' | 'balanced' | 'extreme'
 
@@ -97,6 +98,15 @@ function reportSetupFailure(operation: string, error: unknown): void {
   console.error(`[setup] ${operation} failed`, error)
 }
 
+const modeLabel = (id: Mode): string => MODES.find((entry) => entry.id === id)?.label ?? id
+
+/** The mode the engine runs after a failed switch: it restores the last mode that started. */
+async function modeInUse(api: Window['api'], fallback: Mode): Promise<Mode> {
+  const settings = (await api.getLlmSettings().catch(() => undefined)) as
+    { performanceMode?: Mode } | undefined
+  return settings?.performanceMode ?? fallback
+}
+
 /** The reusable setup surface: pick a resource mode, see exactly which model it'll
  *  install, then one-click Configure. Used on the first-run gate and in Settings. */
 export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React.ReactElement {
@@ -105,6 +115,7 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const [progress, setProgress] = useState<SetupProgress | null>(null)
   const [mode, setMode] = useState<Mode>('balanced')
   const [savingMode, setSavingMode] = useState(false)
+  const [modeError, setModeError] = useState('')
   const [plan, setPlan] = useState<SetupPlan | null>(null)
   const firedConfigured = useRef(false)
   const downloadProgress = progress?.phase === 'download' ? projectProgress(progress) : null
@@ -155,12 +166,16 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
   const pickMode = async (m: Mode): Promise<void> => {
     if (savingMode || m === mode) return
     setSavingMode(true)
+    setModeError('')
     try {
       await api.setLlmSettings({ performanceMode: m })
       setMode(m)
       await loadPlan(m)
     } catch (error) {
       reportSetupFailure('resource-mode persistence', error)
+      const kept = await modeInUse(api, mode)
+      setMode(kept)
+      setModeError(`${modeLabel(m)} could not start the model. ${modeLabel(kept)} is still in use.`)
     } finally {
       setSavingMode(false)
     }
@@ -258,6 +273,11 @@ export function SetupPanel({ onConfigured, hideHealth }: SetupPanelProps): React
               options={MODES.map((m) => ({ id: m.id, label: m.label, disabled: savingMode }))}
             />
           </SettingsRow>
+          {modeError && (
+            <Alert role="alert" className="mt-2 py-2 text-xs">
+              {modeError}
+            </Alert>
+          )}
         </div>
 
         {/* Exactly which models it will set up — the full baseline, no surprises */}

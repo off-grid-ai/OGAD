@@ -10,6 +10,7 @@ import { deleteSecret, deleteSecretsByPrefix, getSecret, setSecret } from './sec
 import { makeOAuthProvider, ensureLoopback, hasOAuthTokens } from './mcp-oauth'
 import { cancelOAuthAuthorization } from './mcp-oauth-cancellation'
 import { callHook, HOOKS } from './bootstrap/hookRegistry'
+import { notifyConnectorsChanged } from './connector-events'
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -219,9 +220,13 @@ export function setConnectorStatus(
   detail?: string | null
 ): void {
   ensure()
-  getDB()
-    .prepare('UPDATE connectors SET status = ?, status_detail = ? WHERE id = ?')
-    .run(status, detail ?? null, id)
+  const changed = getDB()
+    .prepare(
+      'UPDATE connectors SET status = ?, status_detail = ? WHERE id = ? AND (status IS NOT ? OR status_detail IS NOT ?)'
+    )
+    .run(status, detail ?? null, id, status, detail ?? null).changes
+  // An account that needs a new sign-in must say so on a card that is already open.
+  if (changed) notifyConnectorsChanged(id)
 }
 
 export function removeConnector(id: number): void {

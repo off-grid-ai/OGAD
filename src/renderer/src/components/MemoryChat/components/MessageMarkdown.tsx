@@ -67,6 +67,11 @@ function remarkBareDomains(): (tree: MarkdownNode) => void {
   return linkBareDomains
 }
 
+/** The default transform drops links with a protocol it does not know, which is every `cite:N`
+ *  link an answer's [S#] tags become. Those are kept for the citation pills; the rest is unchanged. */
+const keepCitations = (url: string): string =>
+  /^cite:\d+$/.test(url) ? url : defaultUrlTransform(url)
+
 function makeCiteComponents(
   unified: RagContext['unified'],
   navigation: ContextNavigation
@@ -190,11 +195,6 @@ function makeUserMessageComponents(navigation: ContextNavigation): Components {
   }
 }
 
-/** Keeps `cite:N` links (the answer's `[S#]` tags) that react-markdown would otherwise blank. */
-function keepCitationLinks(url: string): string {
-  return /^cite:\d+$/.test(url) ? url : defaultUrlTransform(url)
-}
-
 function MessageMarkdownComponent({
   message,
   navigation,
@@ -226,7 +226,7 @@ function MessageMarkdownComponent({
           : [remarkGfm, remarkBreaks]
       }
       components={components}
-      urlTransform={keepCitationLinks}
+      urlTransform={keepCitations}
     >
       {content}
     </ReactMarkdown>

@@ -189,13 +189,31 @@ export class ExtensionTabContents implements RelayContents {
 }
 
 /**
+ * A few words naming a task, for the group its tabs sit in ("OGA: Open en.wikipedia.org and…"):
+ * the goal's first sentence, without a leading "Use Web Use:", cut at a word near 32 characters.
+ */
+export function taskTabLabel(goal: string): string {
+  const sentence = goal
+    .replace(/^\s*(?:please\s+)?(?:use\s+)?(?:web|computer)\s+use\s*[:,-]?\s*/i, '')
+    .split(/(?<=[.!?])\s/)[0]!
+    .replace(/[.!?]+$/, '')
+    .trim()
+  const label = sentence.charAt(0).toUpperCase() + sentence.slice(1)
+  if (label.length <= 32) return label
+  const cut = label.slice(0, 32)
+  return `${cut.slice(0, cut.lastIndexOf(' ') > 12 ? cut.lastIndexOf(' ') : 32)}…`
+}
+
+/**
  * The tabs one task owns in the user's browser. It starts with the tab it opens, or the tab the
  * browser offered for it (browser-start-tab.ts), and grows with tabs opened by the page or
  * through Playwright. It never sees the user's other tabs.
  */
 export function createExtensionPageProvider(
   link: BrowserLink,
-  onFollow?: () => void
+  onFollow?: () => void,
+  /** A few words naming the task, shown on its tabs' group (taskTabLabel). */
+  label?: string
 ): ElectronPlaywrightPageProvider & {
   open(url: string): Promise<ExtensionTabContents>
   /** Start in the offered tab instead of a new one, at `url` when the task names one. */
@@ -213,7 +231,10 @@ export function createExtensionPageProvider(
     return contents
   }
   const open = async (url: string): Promise<ExtensionTabContents> =>
-    track(await link.request('tab.create', { url }), 'The browser did not open a tab.')
+    track(
+      await link.request('tab.create', { url, ...(label ? { label } : {}) }),
+      'The browser did not open a tab.'
+    )
   const adopt = async (
     tabId: number,
     taskId: string,

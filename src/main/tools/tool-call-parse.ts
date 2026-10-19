@@ -139,6 +139,19 @@ export function parseToolCallsFromText(text: string): ParsedCall[] {
 
   if (!text.includes('{')) return []
 
+  // Gemma 4's own form: `<|tool_call>call:web_use{url:<|"|>https://…<|"|>}<tool_call|>`. The body
+  // is the tool name then an object with bare keys, its strings quoted with `<|"|>` (or plain `"`).
+  const gemmaCall = /call:([A-Za-z_][\w.-]*)\s*(?=\{)/g
+  let gemmaMatch: RegExpExecArray | null
+  while ((gemmaMatch = gemmaCall.exec(text))) {
+    const body = balancedObjects(text.slice(gemmaCall.lastIndex).replace(/<\|"\|>/g, '"'))[0]
+    const args = body ? parseLenient(body) : null
+    if (args && typeof args === 'object' && !Array.isArray(args)) {
+      calls.push({ name: gemmaMatch[1]!, args: args as Record<string, unknown> })
+    }
+  }
+  if (calls.length) return calls
+
   // 1. Explicit tool-call tags: <tool_call>…</tool_call>, <|tool_call|>…, <invoke …>.
   //    Grab everything after each opener; balancedObjects finds the JSON inside.
   const tagged = text.match(/<\|?tool_call\|?>|<invoke\b[^>]*>/gi)

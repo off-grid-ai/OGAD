@@ -187,7 +187,7 @@ test.describe('Desktop queue and saved response versions', () => {
     ).toEqual(['Hold this reply open.'])
   })
 
-  test('resend and regenerate keep versions; edit starts a new branch after restart', async () => {
+  test('resend, regenerate and edit keep every version and the turns after it, after restart', async () => {
     await submit('Keep each response version.')
     await answer('Original answer version 1.')
     await page.getByRole('button', { name: 'Message actions', exact: true }).first().click()
@@ -203,27 +203,35 @@ test.describe('Desktop queue and saved response versions', () => {
     await answer('Original answer version 3.')
     await expect(page.getByText('3/3', { exact: true })).toBeVisible()
     await submit('Add a later turn.')
-    await answer('The later answer will be removed by the edit.')
+    await answer('The later answer stays with its version.')
 
+    // Editing the question adds a version of it; the old question keeps its answers and later turn.
     await page.getByRole('button', { name: 'Message actions', exact: true }).first().click()
     await page.getByRole('menuitem', { name: 'Edit', exact: true }).click()
     await page.locator('textarea:not([placeholder])').fill('Keep the edited response too.')
     await page.getByRole('button', { name: 'Save & submit', exact: true }).click()
     await answer('Edited answer version 4.')
     await expect(page.getByRole('button', { name: 'Previous response' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Previous question' })).toBeVisible()
     await expect(
-      page.getByText('The later answer will be removed by the edit.', { exact: true })
+      page.getByText('The later answer stays with its version.', { exact: true })
     ).toHaveCount(0)
     expect(
       audit()
         .filter((entry) => entry.event === 'request')
         .at(-1)?.messages
     ).toEqual([{ role: 'user', content: 'Keep the edited response too.' }])
+
     await closeApp()
     await launchApp()
-    await expect(page.getByRole('button', { name: 'Previous response' })).toHaveCount(0)
-    await expect(page.getByText('Original answer version 3.', { exact: true })).toHaveCount(0)
     await expect(page.getByText('Edited answer version 4.', { exact: true }).last()).toBeVisible()
+    await page.getByRole('button', { name: 'Previous question' }).click()
+    await expect(page.getByText('Keep each response version.', { exact: true }).last()).toBeVisible()
+    await expect(page.getByText('Original answer version 3.', { exact: true }).last()).toBeVisible()
+    await expect(page.getByText('3/3', { exact: true })).toBeVisible()
+    await expect(
+      page.getByText('The later answer stays with its version.', { exact: true }).last()
+    ).toBeVisible()
   })
 
   test('keeps the saved answer when the app closes during resend', async () => {
@@ -360,7 +368,7 @@ test.describe('Desktop queue and saved response versions', () => {
     await page.getByRole('button', { name: 'Previous response' }).click()
     await expect(page.getByText('1/2', { exact: true })).toBeVisible()
     await submit('Add a later turn.')
-    await answer('The later answer will be removed by the edit.')
+    await answer('The later answer stays with its version.')
     expect(
       audit()
         .filter((entry) => entry.event === 'request')

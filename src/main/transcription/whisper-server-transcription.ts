@@ -1,4 +1,5 @@
 import { nativeBinaryInstalled } from '../backend-facts'
+import { randomUUID } from 'crypto'
 import fs from 'fs'
 import { recordAIRequest } from '../ai-request-log'
 import os from 'os'
@@ -42,7 +43,7 @@ export class WhisperServerTranscription implements TranscriptionService {
         if (!opts.alreadyWav16k) {
           const ff = ffmpegBin()
           if (!ff) throw new Error('ffmpeg is required to decode audio and was not found.')
-          tmp = path.join(os.tmpdir(), `offgrid-stt-srv-${Date.now()}-${process.pid}.wav`)
+          tmp = path.join(os.tmpdir(), `offgrid-stt-srv-${Date.now()}-${process.pid}-${randomUUID()}.wav`)
           try {
             await runNativeTranscriptionProcess(ff, decodeToWavArgs(input.path, tmp), {
               timeout: DECODE_TIMEOUT_MS,

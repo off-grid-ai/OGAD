@@ -4,6 +4,7 @@ import { getComputerUseSettings } from '../computer-use-settings'
 import { getWebUseSettings } from '../web-use-settings'
 import {
   DECIDER_2B,
+  displayModelName,
   getActiveModel,
   resolveModelIdentity,
   type ModelIdentity
@@ -121,7 +122,13 @@ export async function getComputerUseActiveModelProjection(
     ? remoteVisionModelId(remote.id, remote.model)
     : dependencies.selectedChatId()
   const specialistModelId = dependencies.selectedSpecialistId()
-  const remoteSpecialist = getRemoteVisionServerForModel(specialistModelId, 'grounding')
+  // A remote-vision id is remote by its own shape, even when its server is offline or has been
+  // removed. Deriving remoteness only from a live server lookup made such a model read as a local
+  // one that was "not downloaded" — the contradiction the Active Models cards used to show.
+  const isRemoteId = (id: string): boolean => parseRemoteVisionModelId(id) != null
+  const remoteSpecialist =
+    Boolean(getRemoteVisionServerForModel(specialistModelId, 'grounding')) ||
+    isRemoteId(specialistModelId)
   if (strategy === 'same_as_chat') {
     return {
       strategy,
@@ -139,7 +146,7 @@ export async function getComputerUseActiveModelProjection(
         await projectedModel(
           'grounding_specialist',
           specialistModelId,
-          Boolean(remoteSpecialist),
+          remoteSpecialist,
           dependencies
         )
       ]
@@ -147,9 +154,11 @@ export async function getComputerUseActiveModelProjection(
   }
   if (strategy === 'decision_plus_specialist') {
     const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
-    const remoteDecision = getRemoteVisionServerForModel(decisionModelId, 'decision')
+    const remoteDecision =
+      Boolean(getRemoteVisionServerForModel(decisionModelId, 'decision')) ||
+      isRemoteId(decisionModelId)
     const models: ComputerUseActiveModel[] = [
-      await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies)
+      await projectedModel('decision', decisionModelId, remoteDecision, dependencies)
     ]
     if (chatModelId) {
       models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
@@ -158,7 +167,7 @@ export async function getComputerUseActiveModelProjection(
       await projectedModel(
         'grounding_specialist',
         specialistModelId,
-        Boolean(remoteSpecialist),
+        remoteSpecialist,
         dependencies
       )
     )
@@ -170,9 +179,11 @@ export async function getComputerUseActiveModelProjection(
   }
   if (strategy === 'decision_plus_reasoning') {
     const decisionModelId = dependencies.selectedDecisionId?.() ?? selectedDecisionModelId()
-    const remoteDecision = getRemoteVisionServerForModel(decisionModelId, 'decision')
+    const remoteDecision =
+      Boolean(getRemoteVisionServerForModel(decisionModelId, 'decision')) ||
+      isRemoteId(decisionModelId)
     const models: ComputerUseActiveModel[] = [
-      await projectedModel('decision', decisionModelId, Boolean(remoteDecision), dependencies)
+      await projectedModel('decision', decisionModelId, remoteDecision, dependencies)
     ]
     if (chatModelId) {
       models.push(await projectedModel('reasoner', chatModelId, Boolean(remote), dependencies))
@@ -187,7 +198,7 @@ export async function getComputerUseActiveModelProjection(
     await projectedModel(
       'grounding_specialist',
       specialistModelId,
-      Boolean(remoteSpecialist),
+      remoteSpecialist,
       dependencies
     )
   )
@@ -209,6 +220,31 @@ export function activeModelProjectionIdentity(
 
 /** Web Use has its own strategy settings but shares the installed model runtimes. */
 export function getWebUseActiveModelProjection(): Promise<ComputerUseActiveModelProjection> {
+  const strategy =
+    currentRemoteScreenTaskSession()?.modelStrategy ?? getWebUseSettings().modelStrategy
+  if (strategy === 'planner_actor_evaluator') {
+    // The four contract models (planner, actor, evaluator, answer), named as configured.
+    const { planner, actor, evaluator, answerer } = getWebUseSettings().agentModels
+    const remote = (url: string): boolean => !/^https?:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(url)
+    const named = (
+      endpoint: { model: string; baseUrl: string },
+      role: string
+    ): { modelId: string; modelName: string; remote: boolean } => ({
+      modelId: endpoint.model,
+      modelName: `${displayModelName(endpoint.model) ?? endpoint.model} (${role})`,
+      remote: remote(endpoint.baseUrl)
+    })
+    return Promise.resolve({
+      strategy,
+      strategyLabel: 'Planner + Actor + Evaluator',
+      models: [
+        { role: 'reasoner', ...named(planner, 'planner') },
+        { role: 'grounding_specialist', ...named(actor, 'actor') },
+        { role: 'decision', ...named(evaluator, 'evaluator') },
+        ...(answerer ? [{ role: 'reasoner' as const, ...named(answerer, 'answer') }] : [])
+      ]
+    })
+  }
   return getComputerUseActiveModelProjection({
     ...productionDependencies,
     strategy: () =>

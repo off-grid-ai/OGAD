@@ -10,6 +10,7 @@ import { modelShowsOnTab } from '../../shared/model-settings-rules'
 // local models plus each saved remote server's role models. Pure, so it is tested without
 // Electron.
 
+import { modelDisplayName } from '@offgrid/models'
 import { remoteVisionModelId } from '../../shared/remote-vision-server'
 import type { ModelChoice, RemoteSettings } from './bridge-settings'
 
@@ -33,7 +34,9 @@ function hostOf(endpoint: string): string {
 }
 
 const modelName = (server: SavedServer, id: string): string =>
-  server.modelCatalog?.find((m) => m.id === id)?.name ?? id
+  modelDisplayName(remoteVisionModelId(server.id, id), {
+    remote: [{ serverId: server.id, models: server.modelCatalog ?? [] }]
+  }) ?? id
 
 export function remoteView(
   servers: readonly SavedServer[],
@@ -79,7 +82,7 @@ function remoteChoices(servers: readonly SavedServer[], role: string): ModelChoi
     if (!id || s.enabled === false) {
       return []
     }
-    return [{ id: remoteVisionModelId(s.id, id), label: `${modelName(s, id)} - ${s.name}` }]
+    return [{ id: remoteVisionModelId(s.id, id), label: modelName(s, id), server: s.name }]
   })
 }
 

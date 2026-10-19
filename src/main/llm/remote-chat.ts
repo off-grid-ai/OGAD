@@ -179,6 +179,24 @@ interface RemoteErrorBody {
   }
 }
 
+/** Network codes that mean the server is not answering at all. Their messages carry the
+ * endpoint ("connect ECONNREFUSED 127.0.0.1:17878"), so they are said in words instead. */
+const UNREACHABLE_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ETIMEDOUT',
+  'EAI_AGAIN'
+])
+
+/** The plain reason for an unreachable remote model, or null when the code means something else. */
+export function remoteModelUnreachable(code: string): string | null {
+  return UNREACHABLE_CODES.has(code)
+    ? "The remote model's server is not answering. Check that it is running, or choose a local model."
+    : null
+}
+
 /** Keep remote transport errors useful without exposing the endpoint, headers,
  * API key, or request body. */
 function remoteTextModelTransportError(error: unknown): Error {
@@ -190,6 +208,8 @@ function remoteTextModelTransportError(error: unknown): Error {
   const detail = cause as { message?: unknown; code?: unknown }
   const message = typeof detail.message === 'string' ? detail.message.trim() : ''
   const code = typeof detail.code === 'string' ? detail.code.trim() : ''
+  const unreachable = remoteModelUnreachable(code)
+  if (unreachable) return new Error(unreachable)
   return new Error(
     `Remote text model connection failed: ${message || error.message || 'network error'}${code ? ` (${code})` : ''}.`
   )
@@ -276,9 +296,7 @@ function completionRequestBody(
       ? {}
       : { repeat_penalty: request.repeatPenalty, repetition_penalty: request.repeatPenalty }),
     ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
-    ...(request.tools?.length
-      ? { tools: request.tools, tool_choice: toolChoice }
-      : {}),
+    ...(request.tools?.length ? { tools: request.tools, tool_choice: toolChoice } : {}),
     ...reasoning,
     stream: true
   })
@@ -388,10 +406,14 @@ export async function streamRemoteChatCompletion(input: {
       ? { source: screenTaskRequestSource('Grounding specialist', 'grounding') }
       : {})
   })
-  const accumulator = createCompletionStreamAccumulator((text, kind) => {
-    log?.delta(text, kind)
-    input.onDelta(text, kind)
-  }, options.onToolCallStart, options.onToolCallReady)
+  const accumulator = createCompletionStreamAccumulator(
+    (text, kind) => {
+      log?.delta(text, kind)
+      input.onDelta(text, kind)
+    },
+    options.onToolCallStart,
+    options.onToolCallReady
+  )
   if (options.signal?.aborted) return accumulator.finish()
 
   if (request.tools?.length) {

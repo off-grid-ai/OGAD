@@ -8,6 +8,7 @@ import path from 'path'
 import fs from 'fs'
 import { createHash } from 'crypto'
 import type { ArtifactKindContract } from '../shared/ipc-contracts'
+import { artifactTitle } from '../shared/artifact-title'
 
 function artifactsDir(): string {
   const roots = app.isPackaged
@@ -70,35 +71,6 @@ function libraryDir(): string {
   return d
 }
 
-/** A human label for an artifact, pulled from its content when possible. */
-function deriveTitle(kind: ArtifactKind, code: string): string {
-  if (kind === 'html') {
-    const t =
-      /<title[^>]*>([^<]+)<\/title>/i.exec(code)?.[1] || /<h1[^>]*>([^<]+)<\/h1>/i.exec(code)?.[1]
-    if (t) return t.trim().slice(0, 80)
-  }
-  if (kind === 'mermaid')
-    return (
-      code
-        .split('\n')[0]!
-        .replace(/^\s*%%.*/, '')
-        .trim()
-        .slice(0, 60) || 'Diagram'
-    )
-  if (kind === 'react') {
-    const fn = /function\s+([A-Za-z0-9_]+)/.exec(code)?.[1]
-    if (fn && fn !== 'App') return fn
-  }
-  return {
-    html: 'HTML page',
-    svg: 'SVG graphic',
-    mermaid: 'Diagram',
-    react: 'React component',
-    text: 'Document',
-    image: 'Image'
-  }[kind]
-}
-
 /** Persist an artifact (deduped by content + chat). Returns the saved record. */
 export function saveArtifact(a: {
   kind: ArtifactKind
@@ -124,7 +96,7 @@ export function saveArtifact(a: {
     id,
     kind: a.kind,
     code: a.code,
-    title: (a.title || deriveTitle(a.kind, a.code)).trim(),
+    title: (a.title || artifactTitle(a.kind, a.code)).trim(),
     created: Date.now(),
     conversationId: a.conversationId,
     projectId: a.projectId ?? null

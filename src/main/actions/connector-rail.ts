@@ -25,7 +25,7 @@ export interface ConnectorActionArgs {
   args: Record<string, unknown>
 }
 
-function connectorActionArgs(value: Record<string, unknown>): ConnectorActionArgs | null {
+export function connectorActionArgs(value: Record<string, unknown>): ConnectorActionArgs | null {
   const connectorId = value.connectorId
   const tool = value.tool
   const args = value.args

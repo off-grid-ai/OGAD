@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { totalmem } from 'node:os'
 import path from 'node:path'
 import { Mutex } from 'async-mutex'
 import { prepareModelMemory, registerModelEvictor } from '../model-memory'
@@ -113,7 +114,12 @@ export class GrounderRuntime {
       threads: undefined,
       batchSize: 1_024,
       imageMinTokens: 1_024,
-      reportModelPlacement: true
+      reportModelPlacement: true,
+      // Team gateway mode opens slots here too, so several clients can ground at once.
+      // (Single mode passes nothing new, so its argv is unchanged.)
+      ...(llm.gatewayMode() === 'team'
+        ? { gatewayMode: 'team' as const, totalRamBytes: totalmem() }
+        : {})
     }
     await this.runtime.start()
   }

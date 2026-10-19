@@ -75,6 +75,7 @@ fi
 `
   )
   writeExecutable(path.join(fakeBin, 'sysctl'), '#!/usr/bin/env bash\nprintf "4\\n"\n')
+  writeExecutable(path.join(fakeBin, 'lipo'), '#!/usr/bin/env bash\nprintf "x86_64 arm64\\n"\n')
   writeExecutable(
     path.join(fakeBin, 'install_name_tool'),
     `#!/usr/bin/env bash
@@ -158,6 +159,7 @@ describe('pinned Whisper CLI build and staging', () => {
     expect(cmake).toContain('-DGGML_OPENMP=OFF')
     expect(cmake).toContain('-DGGML_BLAS=OFF')
     expect(cmake).toContain('-DBUILD_SHARED_LIBS=ON')
+    expect(cmake).toContain('-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64')
     expect(cmake).toContain('--target whisper-cli')
     expect(result.stdout).toContain('built whisper-cli minos=13.0 (want <= 13.0)')
     expect(result.stdout).toContain('@loader_path only, no foreign deps, all @rpath libs present')

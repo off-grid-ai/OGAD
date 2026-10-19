@@ -138,8 +138,8 @@ jobs:
       - name: Stage pinned macOS native engines
         run: |
           curl -fL --retry 3 -o "$RUNNER_TEMP/mac-native.tar.gz" \
-            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-mac-native-2026-09-arm64-v1.tar.gz'
-          echo 'ef1880daac727595bf825a254b1ebbc2a0c15c0cecd8da422c499b1568db0ad0  '"$RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
+            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-mac-native-2026-10-v2.tar.gz'
+          echo '50f13dc0b6318eb0c036ccd9ebe0f21d931912992bf828f1cd56de4113e9e48c  '"$RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
       - name: Build macOS image engine for macOS 13
         run: bash scripts/build-sd-mac.sh
@@ -275,6 +275,8 @@ jobs:
           npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
+          # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
+          npm --prefix ../shared/packages/rag run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
       - name: Check out the private Desktop speech runtime
@@ -282,6 +284,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: true # Mac releases bundle the default English voices for offline first use.
           submodules: recursive
@@ -635,6 +638,8 @@ jobs:
           npm --prefix ../shared/packages/use run build
           npm --prefix ../shared/packages/automation run build
           npm --prefix ../shared/packages/models run build
+          # @offgrid/rag (the document engine) ships a built dist/ like sync and models.
+          npm --prefix ../shared/packages/rag run build
           npm --prefix ../shared/packages/speech run build
           npm --prefix ../shared/packages/ui run build
       - name: Check out the private Desktop speech package
@@ -642,6 +647,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
+          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: false # The current native speech engine is macOS-only.
           persist-credentials: false
@@ -883,7 +889,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: e3b471e6ea8504f3877cd9f27a11bfe98ce3b3b5
+          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9
           path: _executorch_speech
           lfs: false # Build the Linux executable from the pinned source.
           submodules: recursive
@@ -895,8 +901,8 @@ jobs:
       - name: Stage pinned Linux native engines
         run: |
           curl -fL --retry 3 -o "$RUNNER_TEMP/linux-native.tar.gz" \
-            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-linux-native-2026-09-x64-v1.tar.gz'
-          echo '11f57bddc8b7b4c5efa4b4c298b8a000aaf0f203567f6c18953a6aff7a4e4b54  '"$RUNNER_TEMP/linux-native.tar.gz" | sha256sum -c -
+            'https://github.com/off-grid-ai/OGAD/releases/download/native-deps-2026-09/ogad-linux-native-2026-10-x64-v1.tar.gz'
+          echo 'd043e3d12c68a07a6059a3e62e1283ea2cb2a23bf4a448d742149ad45586a6cf  '"$RUNNER_TEMP/linux-native.tar.gz" | sha256sum -c -
           mkdir -p build/linux-bin
           tar -xzf "$RUNNER_TEMP/linux-native.tar.gz" -C build/linux-bin
           git lfs pull --include="resources/bin/kev-local-server.py" --exclude=""

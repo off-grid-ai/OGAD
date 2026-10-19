@@ -4,15 +4,23 @@ import type { AIRequestHandle } from './ai-request-log'
 import { createCompletionStreamAccumulator } from './llm/stream'
 import { AI_LOG_POLICY } from '../shared/ai-request-log'
 
-/** Passive observer: forwarding, backpressure and cancellation remain owned by the gateway. */
+/** Passive observer: forwarding, backpressure and cancellation remain owned by the gateway.
+ *  `deferred` (team mode, many streams at once): collect the reply's text in parts and hand it to
+ *  the log once when the stream ends, instead of re-copying the whole growing text on every chunk.
+ *  Events are still read as they arrive, so the recorded timings and reply are the same. */
 export function observeAIResponse(
   response: IncomingMessage,
   client: ServerResponse,
-  log?: AIRequestHandle
+  log?: AIRequestHandle,
+  options: { deferred?: boolean } = {}
 ): void {
   if (!log) return
   const sse = String(response.headers['content-type']).includes('text/event-stream')
-  const accumulator = createCompletionStreamAccumulator((text, kind) => log.delta(text, kind))
+  const deferred = options.deferred === true
+  const parts = { content: [] as string[], reasoning: [] as string[] }
+  const accumulator = createCompletionStreamAccumulator((text, kind) =>
+    deferred ? parts[kind].push(text) : log.delta(text, kind)
+  )
   let body = ''
   let retained = 0
   let truncated = false
@@ -42,6 +50,10 @@ export function observeAIResponse(
       /* Plain text error body. */
     }
     if (truncated) result = { partial: result, note: 'Truncated: log size limit' }
+    if (deferred) {
+      if (parts.content.length) log.delta(parts.content.join(''), 'content')
+      if (parts.reasoning.length) log.delta(parts.reasoning.join(''), 'reasoning')
+    }
     log.finish(
       result,
       error ??

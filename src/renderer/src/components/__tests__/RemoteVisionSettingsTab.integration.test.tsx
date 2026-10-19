@@ -251,7 +251,7 @@ describe('<RemoteVisionSettingsTab/>', () => {
     expect(await screen.findByText('1 saved · Models example active')).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Saved servers/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Server/ })).toBeTruthy()
-    expect(screen.getByText('Models example · vision-model')).toBeTruthy()
+    expect(screen.getByText('Models example · Vision model')).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Other models/ })).toBeTruthy()
     expect(screen.getByText('Image: Image Maker · Transcription: none · Voice: none')).toBeTruthy()
     expect(screen.queryByRole('combobox', { name: 'image model' })).toBeNull()

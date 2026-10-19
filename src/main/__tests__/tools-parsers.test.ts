@@ -70,3 +70,13 @@ describe('decodeDdgHref', () => {
     expect(decodeDdgHref('https://example.com/foo')).toBe('https://example.com/foo')
   })
 })
+
+describe('page text never carries markup it did not show', () => {
+  it('decodes an escaped entity once, as the text the page shows', () => {
+    expect(decodeEntities('&amp;lt;b&amp;gt;')).toBe('&lt;b&gt;')
+  })
+
+  it('drops a script whose closing tag has a space', () => {
+    expect(htmlToText('<p>Kept</p><script>steal()</script >')).toBe('Kept')
+  })
+})

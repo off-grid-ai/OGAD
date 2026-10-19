@@ -53,7 +53,7 @@ describe('browser authorization cancellation', () => {
     const calendarCard = (await screen.findByText('Vercel')).closest('div.flex.flex-col')
     expect(calendarCard).toBeTruthy()
     await user.click(
-      within(calendarCard as HTMLElement).getByRole('button', { name: /Connect with OAuth/i })
+      within(calendarCard as HTMLElement).getByRole('button', { name: /^Connect$/i })
     )
 
     const authorizing = await within(calendarCard as HTMLElement).findByRole('button', {
@@ -69,7 +69,7 @@ describe('browser authorization cancellation', () => {
     await waitFor(() => expect(mcpRemove).toHaveBeenCalledWith(42))
     expect(
       await within(calendarCard as HTMLElement).findByRole('button', {
-        name: /Connect with OAuth/i
+        name: /^Connect$/i
       })
     ).toBeTruthy()
     expect(within(calendarCard as HTMLElement).queryByText(/Authorization cancelled/i)).toBeNull()

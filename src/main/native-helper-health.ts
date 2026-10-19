@@ -15,7 +15,7 @@ const NATIVE_HELPERS: readonly NativeHelperOwner[] = [
   { id: 'helper-ffmpeg', label: 'Audio decoder (ffmpeg)', resolve: ffmpegBin },
   {
     id: 'helper-whisper',
-    label: 'Speech-to-text helper (whisper)',
+    label: 'Speech to text helper',
     resolve: () => (nativeBinaryInstalled('stt', 'whisper-cli') ? 'whisper-cli' : null)
   }
 ]

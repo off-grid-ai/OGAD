@@ -20,9 +20,9 @@ set -euo pipefail
 # Reuses the existing ggml whisper models the app already downloads - this builds
 # ONLY the server binary, no new model download.
 #
-#   WHISPER_REF=v1.7.4 MACOS_DEPLOYMENT_TARGET=13.0 scripts/build-whisper.sh
+#   WHISPER_REF=v1.9.5 MACOS_DEPLOYMENT_TARGET=13.0 scripts/build-whisper.sh
 
-WHISPER_REF="${WHISPER_REF:-v1.7.4}"                  # whisper.cpp tag with examples/server
+WHISPER_REF="${WHISPER_REF:-v1.9.5}"                  # whisper.cpp tag with examples/server
 TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"             # runs on macOS 13+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/resources/bin/whisper-server"
@@ -39,6 +39,7 @@ cd "$WORK/src"
 # users' Macs. WHISPER_BUILD_SERVER=ON builds the examples/server target.
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$TARGET" \
+  -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DGGML_NATIVE=OFF \
   -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
   -DGGML_OPENMP=OFF \
   -DWHISPER_BUILD_SERVER=ON \

@@ -75,6 +75,9 @@ function ConversationSidebarComponent({
     count: rows.length,
     getScrollElement: () => listRef.current,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 28 : 58),
+    // A small gap between rows: lit edges of neighbouring chats never touch. The virtualizer
+    // spaces them, so each row's measured size stays its own.
+    gap: 4,
     getItemKey: (index) => rows[index]?.key ?? index,
     overscan: 8
   })

@@ -2,8 +2,7 @@
 // without the app: format the running context window and resolve a model id to its
 // display name. The hook (useActiveModelSummary) does the IPC and delegates here.
 
-import { CATALOG, isMMProjFile } from '@offgrid/models'
-import { parseRemoteVisionModelId } from '../../../shared/remote-vision-server'
+import { isMMProjFile, modelDisplayName } from '@offgrid/models'
 import { fitLevel } from '../../../shared/model-fit'
 
 /** Support GGUFs are not runnable model choices. */
@@ -44,7 +43,7 @@ export function modelFileGuidance(
     const quant =
       file.fileName
         .match(
-          /(?:^|[-/])((?:BF16|FP16|F16|F32|MXFP4_MOE|(?:IQ|Q)\d+(?:_[A-Z0-9]+)*))(?=\.|-\d{5}-of-|$)/i
+          /(?:^|[-/])((?:BF16|FP16|F16|F32|MXFP4_MOE|(?:IQ|PTQ|PQ|TQ|Q)\d+(?:_[A-Z0-9]+)*))(?=\.|-\d{5}-of-|$)/i
         )?.[1]
         ?.toUpperCase() ?? file.quant.toUpperCase()
     const bits = /^(?:BF16|FP16|F16)$/.test(quant)
@@ -53,7 +52,7 @@ export function modelFileGuidance(
         ? 32
         : quant === 'MXFP4_MOE'
           ? 4
-          : Number(quant.match(/^(?:IQ|Q)(\d+)(?:_|$)/)?.[1]) || null
+          : Number(quant.match(/^(?:IQ|PTQ|PQ|TQ|Q)(\d+)(?:_|$)/)?.[1]) || null
     const split = file.fileName.match(/^(.*)-(\d{5})-of-(\d{5})\.gguf$/i)
     const parts = split
       ? files.filter((part) => {
@@ -128,29 +127,6 @@ export function formatParams(billions: number): string {
   return billions < 1 ? `${Math.round(billions * 1000)}M` : `${billions}B`
 }
 
-/** Resolve an active model id to its catalog display name; falls back to the id when
- *  the catalog has no match (a just-imported model), null when there is no active id. */
-export function resolveModelName(
-  models: ReadonlyArray<{ id: string; name?: string }>,
-  id: string | null | undefined
-): string | null {
-  if (!id) {
-    return null
-  }
-  return models.find((m) => m.id === id)?.name ?? parseRemoteVisionModelId(id)?.modelId ?? id
-}
-
-/** Name a model by the file it ran from: "dreamshaper-xl-v2-turbo-Q8_0.gguf" reads as the
- *  catalog's name for that download. A file the catalog does not know keeps its own name. */
-export function modelNameForFile(file: string | null | undefined): string | null {
-  const fileName = file?.split(/[\\/]/).pop()?.trim()
-  if (!fileName) return null
-  const entry = CATALOG.find((model) =>
-    model.files.some((candidate) => candidate.name === fileName)
-  )
-  return entry?.name ?? resolveModelName([], fileName)
-}
-
 interface TextModelSummaryEntry {
   id: string
   name?: string
@@ -171,6 +147,6 @@ export function resolveActiveTextModel(
       (model.kind === undefined || model.kind === 'text' || model.kind === 'vision') &&
       activeIds.has(model.id)
   )
-  if (remote) return { name: remote.name ?? remote.id, remote: true }
-  return { name: resolveModelName(models, localActiveId), remote: false }
+  if (remote) return { name: modelDisplayName(remote.id, { catalog: models }), remote: true }
+  return { name: modelDisplayName(localActiveId, { catalog: models }), remote: false }
 }

@@ -17,6 +17,8 @@ const MCP_SERVER = path.resolve('e2e/fixtures/app143-approval-connector.mjs')
 const APPROVAL_TITLE = 'Create APP-143 release task'
 const EXTERNAL_TITLE = 'Ship guarded approval journey'
 const EXTERNAL_PROJECT = 'Desktop P0'
+// The evidence the secretary cites: an open to-do the proposed connector write would complete.
+const TODO_TEXT = `Ship guarded approval journey in ${EXTERNAL_PROJECT}`
 
 interface AuditEntry {
   action: string
@@ -32,6 +34,7 @@ interface App143RendererApi {
   }) => Promise<number>
   mcpTest: (id: number) => Promise<unknown>
   proInvoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+  crmAddTodo: (text: string) => Promise<unknown>
   approvalsApprove: (id: number) => Promise<void>
   approvalsAudit: (limit: number) => Promise<AuditEntry[]>
 }
@@ -133,35 +136,42 @@ test('holds a connector write until approval, then executes it once with visible
   await page.getByRole('radio', { name: /^Approvals/ }).click()
   await expect(page.getByText('Nothing waiting for approval.')).toBeVisible()
 
-  const approvalId = await page.evaluate(
-    async ({ id, title, externalTitle, externalProject }) => {
-      const api = (window as unknown as { api: App143RendererApi }).api
-      return api.proInvoke('approvals:propose', {
-        title,
-        detail: 'Create exactly one external task after the user reviews this request.',
-        connector: 'APP-143 guarded connector',
-        connectorId: id,
-        tool: 'create_external_task',
-        args: { title: externalTitle, project: externalProject },
-        entityName: 'Off Grid AI Desktop',
-        source: 'APP-143 rendered E2E'
-      }) as Promise<number>
-    },
-    {
-      id: connectorId,
-      title: APPROVAL_TITLE,
-      externalTitle: EXTERNAL_TITLE,
-      externalProject: EXTERNAL_PROJECT
-    }
+  // A connector write reaches the approval queue the way it does for a user: an open to-do is the
+  // evidence, and "Suggest actions" asks the secretary to propose the write that completes it.
+  await page.evaluate(
+    async (text) => (window as unknown as { api: App143RendererApi }).api.crmAddTodo(text),
+    TODO_TEXT
   )
+  await page.getByRole('button', { name: 'Suggest actions', exact: true }).click()
+  await expect(page.getByText('Proposed 1 action for your review.', { exact: true })).toBeVisible({
+    timeout: 60_000
+  })
+  const approvalId = await page.evaluate(async (title) => {
+    const api = (window as unknown as { api: App143RendererApi }).api
+    const pending = (await api.proInvoke('approvals:list', 'pending')) as {
+      id: number
+      title: string
+    }[]
+    const proposal = pending.find((approval) => approval.title === title)
+    if (!proposal) throw new Error(`No pending approval titled ${title}`)
+    return proposal.id
+  }, APPROVAL_TITLE)
 
   // This fresh profile contains one proposal, so the visible controls are unique.
   await expect(page.getByRole('paragraph').filter({ hasText: APPROVAL_TITLE })).toBeVisible()
-  const pendingLabels = page.getByText('pending', { exact: true })
-  // The pending filter and the proposal's status must both be visible.
-  await expect(pendingLabels).toHaveCount(2)
-  for (const label of await pendingLabels.all()) await expect(label).toBeVisible()
-  await expect(page.getByText('APP-143 guarded connector · create_external_task')).toBeVisible()
+  // It waits under the Pending filter, named by the app it acts in; the tool id stays internal.
+  await expect(page.getByRole('radio', { name: 'Pending', exact: true })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  const row = page
+    .getByRole('table', { name: 'Approvals', exact: true })
+    .getByRole('row')
+    .filter({ hasText: APPROVAL_TITLE })
+  await expect(
+    row.getByRole('cell', { name: 'APP-143 guarded connector', exact: true })
+  ).toBeVisible()
+  await expect(row).not.toContainText('create_external_task')
   await expect(page.getByRole('button', { name: 'Review in Chat', exact: true })).toBeVisible()
 
   // The proposal has traversed production IPC and is visibly waiting in the real queue. Give the
@@ -173,9 +183,12 @@ test('holds a connector write until approval, then executes it once with visible
     fullPage: true
   })
 
-  await page.getByRole('button', { name: 'details' }).click()
-  await expect(page.getByText(`"title": "${EXTERNAL_TITLE}"`)).toBeVisible()
-  await expect(page.getByText(`"project": "${EXTERNAL_PROJECT}"`)).toBeVisible()
+  await page.getByRole('button', { name: 'Show details', exact: true }).click()
+  // The saved fields read as labelled lines, never as JSON.
+  const fields = page.getByRole('table', { name: 'Approvals', exact: true }).locator('dl')
+  await expect(fields.getByText(EXTERNAL_TITLE, { exact: true })).toBeVisible()
+  await expect(fields.getByText(EXTERNAL_PROJECT, { exact: true })).toBeVisible()
+  await expect(page.getByText(`"title": "${EXTERNAL_TITLE}"`)).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Review in Chat', exact: true }).click()
   // Pro 99146f6 and core ca04e4f8b route local approvals through this Chat form.
@@ -205,7 +218,7 @@ test('holds a connector write until approval, then executes it once with visible
 
   await page.getByRole('button', { name: 'Actions', exact: true }).click()
   await page.getByRole('radio', { name: /^Approvals/ }).click()
-  await page.getByRole('radio', { name: 'history', exact: true }).click()
+  await page.getByRole('radio', { name: 'History', exact: true }).click()
 
   await expect(page.getByRole('paragraph').filter({ hasText: APPROVAL_TITLE })).toBeVisible()
   await expect(page.getByText('executed', { exact: true })).toBeVisible({ timeout: 10_000 })

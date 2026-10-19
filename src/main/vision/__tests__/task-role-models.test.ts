@@ -9,6 +9,7 @@ import {
   strategyTaskRoles,
   type ComputerUseModelStrategy
 } from '../../../shared/computer-use-settings'
+import { remoteVisionModelId } from '../../../shared/remote-vision-server'
 
 const STRATEGIES: ComputerUseModelStrategy[] = [
   'same_as_chat',
@@ -36,5 +37,17 @@ describe('task role models', () => {
       .filter((model) => model.role !== 'reasoner')
       .map((model) => (model.role === 'grounding_specialist' ? 'grounding' : model.role))
     expect(projected).toEqual(strategyTaskRoles(s))
+  })
+
+  it('a decision model from a remote server reads as remote even when the server is gone', async () => {
+    // The role points at a remote-vision model whose server is offline or removed, so the live
+    // server lookup finds nothing. The id itself is still remote — the card must not call it local.
+    const deps = {
+      ...dependencies('decision_plus_specialist'),
+      selectedDecisionId: () => remoteVisionModelId('ghost-server', 'jaredpalmer/kev-4b')
+    } as unknown as VisionTaskModelStrategyDependencies
+    const projection = await getComputerUseActiveModelProjection(deps)
+    const decision = projection.models.find((model) => model.role === 'decision')
+    expect(decision?.remote).toBe(true)
   })
 })

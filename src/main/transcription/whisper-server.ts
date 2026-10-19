@@ -26,6 +26,7 @@ import { findWhisperBinary, findWhisperBinaries, whisperRuntimeLibraryEnv } from
 import type { Transcript } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
 import { Mutex } from 'async-mutex'
+import { filesMB } from '../model-footprint'
 
 // Off the LLM (8439) and image (8440) ports so the resident STT engine can bind
 // alongside them - they may all be warm at once (chat + dictation together).
@@ -122,6 +123,7 @@ export class WhisperServerService {
   private backendState?: ReturnType<typeof beginRuntimeBackend>
   private readonly inferenceMutex = new Mutex()
   private activeKey: string | null = null // whisperContextKey of the loaded model, null when down
+  private activeModelPath: string | null = null
   private startPromise: Promise<void> | null = null
   private startEpoch = 0
   private idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -253,6 +255,12 @@ export class WhisperServerService {
       throw error
     }
     this.activeKey = key
+    this.activeModelPath = ctx.modelPath
+  }
+
+  /** Memory the loaded model holds, in MB (weights plus a small decode allowance). 0 when down. */
+  residentMB(): number {
+    return this.isUp() && this.activeModelPath ? filesMB([this.activeModelPath]) + 200 : 0
   }
 
   private async waitForReady(timeoutMs = 60_000): Promise<void> {

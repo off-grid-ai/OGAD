@@ -30,9 +30,20 @@ Module._load = function (id, ...args) {
         return {
           async generate(text) {
             fs.writeFileSync(process.env.OFFGRID_TTS_CAPTURE, text)
+            // Optional: one JSON line per pass, a per-pass delay and clip length, so a spec can see
+            // how a long reply is split and when each pass is ready.
+            const seconds = Number(process.env.OFFGRID_TTS_PASS_SECONDS) || 10
+            const delay = Number(process.env.OFFGRID_TTS_PASS_DELAY_MS) || 0
+            if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+            if (process.env.OFFGRID_TTS_PASS_LOG) {
+              fs.appendFileSync(
+                process.env.OFFGRID_TTS_PASS_LOG,
+                `${JSON.stringify({ text, seconds, readyAt: Date.now() })}\n`
+              )
+            }
             const sampling_rate = 16_000
             const data = Float32Array.from(
-              { length: sampling_rate * 10 },
+              { length: sampling_rate * seconds },
               (_, index) => Math.sin((index / sampling_rate) * Math.PI * 440) * 0.12
             )
             return { data, sampling_rate }

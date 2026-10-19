@@ -7,12 +7,12 @@ describe('parseSessionId — split a session id into display parts', () => {
     expect(p.modelName).toBe('gemma')
     expect(p.chatTitle).toBe('my first chat')
     expect(p.readableTitle).toBe('My first chat') // first letter capitalized
-    expect(p.llmLabel).toBe('gemma')
+    expect(p.llmLabel).toBe('Gemma')
   })
 
-  it('turns underscores in the model segment into spaces for the label', () => {
-    // model = everything before the FIRST dash; underscores in it become spaces.
-    expect(parseSessionId('llama_3_1-a-chat').llmLabel).toBe('llama 3 1')
+  it('names the model segment with the shared resolver', () => {
+    // model = everything before the FIRST dash; the label reads as a name, not a token.
+    expect(parseSessionId('llama_3_1-a-chat').llmLabel).toBe('Llama 3 1')
   })
 
   it('has no model and labels LLM when there is no dash', () => {

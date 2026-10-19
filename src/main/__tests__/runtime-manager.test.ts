@@ -1,20 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  warmActionForMode,
   registerRuntime,
   unloadRuntime,
   registeredModalities,
+  liveMemory,
   type ManagedRuntime
 } from '../runtime-manager'
 import { ModalityQueue } from '../modality-queue/queue'
 import type { Modality, ResidencyMode } from '../runtime-residency'
-
-describe('warmActionForMode', () => {
-  it('resident re-warms (reload), on-demand releases (stay down, lazy load)', () => {
-    expect(warmActionForMode('resident')).toBe('warm')
-    expect(warmActionForMode('on-demand')).toBe('release')
-  })
-})
 
 // A real, minimal runtime that records the order of lifecycle calls. Not a mock of
 // our logic — it's a stand-in engine; the REAL ModalityQueue drives it end to end.
@@ -24,17 +17,14 @@ function recordingRuntime(modality: Modality, log: string[]): ManagedRuntime {
     evict: () => {
       log.push('evict')
     },
-    warm: () => {
-      log.push('warm')
-    },
     release: () => {
       log.push('release')
     }
   }
 }
 
-describe('registerRuntime (single mode-aware seam, real queue)', () => {
-  it('resident: evict before the displacing job, warm (reload) after', async () => {
+describe('registerRuntime (single seam, real queue)', () => {
+  it('resident: evict before the displacing job, release (no reload) after', async () => {
     const q = new ModalityQueue()
     const log: string[] = []
     registerRuntime(recordingRuntime('llm', log), { queue: q, readMode: () => 'resident' })
@@ -43,10 +33,10 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
       log.push('job')
     })
 
-    expect(log).toEqual(['evict', 'job', 'warm'])
+    expect(log).toEqual(['evict', 'job', 'release'])
   })
 
-  it('on-demand: same evict/job order, but release (no reload) after', async () => {
+  it('on-demand: the same evict, job, release order', async () => {
     const q = new ModalityQueue()
     const log: string[] = []
     registerRuntime(recordingRuntime('llm', log), { queue: q, readMode: () => 'on-demand' })
@@ -69,9 +59,6 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
           log.push('image-evict-failed')
           throw new Error('image server still running')
         },
-        warm: () => {
-          log.push('image-warm')
-        },
         release: () => {
           log.push('image-release')
         }
@@ -88,10 +75,9 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
     expect(q.getState().running).toHaveLength(0)
   })
 
-  it('clears the failed engine pause without warming it', async () => {
+  it('clears the failed engine pause without loading it', async () => {
     const q = new ModalityQueue()
     let paused = false
-    const warm = vi.fn()
     registerRuntime(
       {
         modality: 'llm',
@@ -99,7 +85,6 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
           paused = true
           throw new Error('chat port still occupied')
         },
-        warm,
         release: () => {
           paused = false
         }
@@ -112,11 +97,10 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
       'chat port still occupied'
     )
     expect(paused).toBe(false)
-    expect(warm).not.toHaveBeenCalled()
     expect(run).not.toHaveBeenCalled()
   })
 
-  it('every modality flows through the SAME seam — mode alone changes behavior', async () => {
+  it('every modality flows through the SAME seam and is never reloaded after a job', async () => {
     // The point of the abstraction: the wiring is identical per engine; only the
     // persisted mode differs. Same registration path, same queue, uniform result.
     const modes: Record<Modality, ResidencyMode> = {
@@ -135,8 +119,116 @@ describe('registerRuntime (single mode-aware seam, real queue)', () => {
       await q.run({ tier: 2, label: 'x', evicts: [modality] }, async () => {
         log.push('job')
       })
-      expect(log).toEqual(['evict', 'job', modes[modality] === 'resident' ? 'warm' : 'release'])
+      expect(log).toEqual(['evict', 'job', 'release'])
     }
+  })
+})
+
+describe('residents stay loaded while they fit', () => {
+  const imageJob = {
+    tier: 2 as const,
+    label: 'image',
+    evicts: ['llm'],
+    uses: { id: 'image', expectedMB: 2_000 }
+  }
+  const sized = (log: string[]): ManagedRuntime => ({
+    ...recordingRuntime('llm', log),
+    footprintMB: () => 4_000,
+    expectedMB: () => 4_000
+  })
+
+  it('keeps a resident chat model through an image job when memory allows', async () => {
+    const q = new ModalityQueue()
+    q.setMemoryProbe(() => ({ availableMB: 48_000, totalMB: 64_000 }))
+    const log: string[] = []
+    registerRuntime(sized(log), { queue: q, readMode: () => 'resident' })
+    await q.run(imageJob, async () => void log.push('job'))
+    expect(log).not.toContain('evict')
+    expect(log).toContain('job')
+  })
+
+  it('evicts it when the image model would not fit beside it', async () => {
+    const q = new ModalityQueue()
+    q.setMemoryProbe(() => ({ availableMB: 1_000, totalMB: 16_000 }))
+    const log: string[] = []
+    registerRuntime(sized(log), { queue: q, readMode: () => 'resident' })
+    await q.run(imageJob, async () => void log.push('job'))
+    expect(log.slice(0, 2)).toEqual(['evict', 'job'])
+  })
+
+  // As mobile counts it: what an engine holds now, whatever its mode. An on-demand engine can stay
+  // loaded after its job (Whisper keeps its server for five minutes), so it counts while loaded.
+  it('a loaded on-demand engine counts, and is freed when the job needs its memory', async () => {
+    const q = new ModalityQueue()
+    q.setMemoryProbe(() => ({ availableMB: 1_000, totalMB: 16_000 }))
+    const log: string[] = []
+    registerRuntime(sized(log), { queue: q, readMode: () => 'on-demand' })
+    await q.run(imageJob, async () => void log.push('job'))
+    expect(log.slice(0, 2)).toEqual(['evict', 'job'])
+  })
+
+  it('an on-demand engine that is down takes no room', async () => {
+    const q = new ModalityQueue()
+    q.setMemoryProbe(() => ({ availableMB: 1_000, totalMB: 16_000 }))
+    const log: string[] = []
+    registerRuntime(
+      { ...sized(log), footprintMB: () => 0 },
+      { queue: q, readMode: () => 'on-demand' }
+    )
+    await q.run(imageJob, async () => void log.push('job'))
+    expect(log).not.toContain('evict')
+  })
+
+  /** A stand-in engine of `modality` holding `heldMB` now. */
+  const holding = (modality: Modality, heldMB: number, log: string[]): ManagedRuntime => ({
+    modality,
+    evict: () => void log.push(`evict ${modality}`),
+    release: () => undefined,
+    footprintMB: () => heldMB,
+    expectedMB: () => heldMB
+  })
+
+  // As mobile plans it: any idle engine may be freed, sidecars first, not only the one a job names.
+  it('frees an idle transcription engine the job did not name, and keeps the chat model', async () => {
+    const q = new ModalityQueue()
+    // 4.2 GB free beside 5.5 GB held, less 3 GB headroom: the 2 GB image model fits once the
+    // 1.5 GB transcription engine goes; the chat model can stay.
+    q.setMemoryProbe(() => ({ availableMB: 4_200, totalMB: 16_000 }))
+    const log: string[] = []
+    registerRuntime(holding('llm', 4_000, log), { queue: q, readMode: () => 'resident' })
+    registerRuntime(holding('stt', 1_500, log), { queue: q, readMode: () => 'on-demand' })
+    await q.run(imageJob, async () => void log.push('job'))
+    expect(log).toEqual(['evict stt', 'job'])
+  })
+
+  it('never frees an engine a running job is using', async () => {
+    const q = new ModalityQueue()
+    // 2 GB free beside 7 GB held: dictation's 1.5 GB fits once one model goes. The image model is
+    // the lower-priority one, but an image job is using it, so the idle chat model goes instead.
+    q.setMemoryProbe(() => ({ availableMB: 2_000, totalMB: 16_000 }))
+    const log: string[] = []
+    registerRuntime(holding('llm', 4_000, log), { queue: q, readMode: () => 'resident' })
+    registerRuntime(holding('image', 3_000, log), { queue: q, readMode: () => 'resident' })
+    let finishImage = (): void => undefined
+    const imageRunning = q.run(
+      { tier: 2, label: 'image', uses: { id: 'image', expectedMB: 3_000 } },
+      () => new Promise<void>((resolve) => (finishImage = resolve))
+    )
+    await vi.waitFor(() => expect(q.getState().running).toHaveLength(1))
+    await q.run(
+      { tier: 1, label: 'dictation', uses: { id: 'stt', expectedMB: 1_500 } },
+      async () => void log.push('dictation')
+    )
+    finishImage()
+    await imageRunning
+    expect(log).toEqual(['evict llm', 'dictation'])
+  })
+
+  it('reads live memory as available within total', () => {
+    const { availableMB, totalMB } = liveMemory()
+    expect(totalMB).toBeGreaterThan(0)
+    expect(availableMB).toBeGreaterThan(0)
+    expect(availableMB).toBeLessThanOrEqual(totalMB)
   })
 })
 

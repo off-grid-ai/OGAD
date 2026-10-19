@@ -14,10 +14,11 @@ import { HealthPanel } from '../HealthPanel'
 const HEALTH: SystemHealthContract = {
   ramGb: 16,
   activeModel: 'gemma-4-E2B',
+  activeModelName: 'Gemma 4 E2B',
   components: [
     {
       id: 'chat',
-      label: 'Chat model (llama-server)',
+      label: 'Chat model',
       status: 'ready',
       port: 8439,
       canRestart: true
@@ -78,7 +79,9 @@ describe('<HealthPanel/> Free engine control', () => {
       systemHealth: async () => HEALTH,
       runtimeBackends: async () => {
         if (unavailable) throw new Error('IPC connection unavailable')
-        return [{ id: 'chat' as const, state: 'loaded' as const, backend: 'Vulkan', device: 'GPU 0' }]
+        return [
+          { id: 'chat' as const, state: 'loaded' as const, backend: 'Vulkan', device: 'GPU 0' }
+        ]
       }
     }
     Object.defineProperty(window, 'api', { configurable: true, writable: true, value: api })
@@ -89,7 +92,7 @@ describe('<HealthPanel/> Free engine control', () => {
     fireEvent.focus(window)
     expect(await screen.findByText('Status unavailable')).toBeTruthy()
     expect(screen.queryByText('Vulkan · GPU 0')).toBeNull()
-    expect(screen.getByRole('status', { name: 'Chat model (llama-server)' })).toBeTruthy()
+    expect(screen.getByRole('status', { name: 'Chat model' })).toBeTruthy()
 
     unavailable = false
     fireEvent.focus(window)
@@ -117,7 +120,7 @@ describe('<HealthPanel/> Free engine control', () => {
     const api = installApi(async () => ({ outcome: 'graceful', portFree: true }))
     const user = userEvent.setup()
     render(<HealthPanel />)
-    await screen.findByRole('status', { name: 'Chat model (llama-server)' })
+    await screen.findByRole('status', { name: 'Chat model' })
 
     await user.click(screen.getByRole('button', { name: 'Free engine' }))
 
@@ -129,7 +132,7 @@ describe('<HealthPanel/> Free engine control', () => {
     installApi(async () => ({ outcome: 'stuck', portFree: false }))
     const user = userEvent.setup()
     render(<HealthPanel />)
-    await screen.findByRole('status', { name: 'Chat model (llama-server)' })
+    await screen.findByRole('status', { name: 'Chat model' })
 
     await user.click(screen.getByRole('button', { name: 'Free engine' }))
 

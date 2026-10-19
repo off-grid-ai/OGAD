@@ -91,4 +91,13 @@ describe('parseToolCallsFromText', () => {
     // A model that replies with structured data must not be mistaken for a call.
     expect(parseToolCallsFromText('{"name": "Dishit", "role": "engineer"}')).toEqual([])
   })
+  it('recovers Gemma 4\'s own call:name{...} form, with plain or <|"|> quotes', () => {
+    // Real Gemma 4 E4B output on the content channel.
+    expect(
+      parseToolCallsFromText('<|tool_call>call:web_use{url: "https://en.wikipedia.org"}\n')
+    ).toEqual([{ name: 'web_use', args: { url: 'https://en.wikipedia.org' } }])
+    expect(
+      parseToolCallsFromText('<|tool_call>call:web_use{goal:<|"|>Find the price<|"|>}<tool_call|>')
+    ).toEqual([{ name: 'web_use', args: { goal: 'Find the price' } }])
+  })
 })

@@ -42,6 +42,8 @@ vi.mock('../../web-use-settings', () => ({ getWebUseSettings: mocks.webSettings 
 vi.mock('../../models-manager', () => ({
   DECIDER_2B: { id: 'offgrid/default-decider' },
   KEV_4B_ID: 'offgrid/kev-4b',
+  isKevModel: (id: string | null | undefined) => id === 'offgrid/kev-4b' || id === 'offgrid/kev-9b',
+  displayModelName: (id: string) => (id === 'offgrid/selected-decider' ? 'Selected Decider' : id),
   listInstalled: mocks.installed,
   loadComputerUseModel: mocks.load
 }))
@@ -118,6 +120,20 @@ describe('decision model lifecycle', () => {
     expect(mocks.load).not.toHaveBeenCalled()
   })
 
+  it('runs a selected Kev 9B on its own runtime, without the shared fallback', async () => {
+    mocks.settings.mockReturnValue({ decisionModelId: 'offgrid/kev-9b' })
+    mocks.installed.mockResolvedValue(['offgrid/kev-9b'])
+    await withDecisionModel(() => decideWithDecisionModel('page', 'next?', ['A', 'B']))
+    expect(mocks.runtime.start).toHaveBeenCalledWith('offgrid/kev-9b')
+    expect(mocks.load).not.toHaveBeenCalled()
+
+    mocks.runtime.start.mockRejectedValueOnce(
+      new mocks.DecisionRuntimeError('Kev 9B failed', 'out_of_memory')
+    )
+    await expect(withDecisionModel(async () => 'never')).rejects.toThrow('Kev 9B failed')
+    expect(mocks.load).not.toHaveBeenCalled()
+  })
+
   it('does not inherit the Computer Use selection when Web Use has no selection', () => {
     mocks.session.mockReturnValue({ taskKind: 'web_use' })
     mocks.webSettings.mockReturnValue({ decisionModelId: null })
@@ -131,7 +147,9 @@ describe('decision model lifecycle', () => {
     expect(selectedDecisionModelId()).toBe('offgrid/default-decider')
 
     mocks.installed.mockResolvedValueOnce([])
-    await expect(withDecisionModel(async () => 'never')).rejects.toThrow('not downloaded')
+    await expect(withDecisionModel(async () => 'never')).rejects.toThrow(
+      'The selected Decision model is not downloaded: Selected Decider.'
+    )
   })
 
   it('keeps one dedicated runtime for nested decisions and shuts it down afterward', async () => {

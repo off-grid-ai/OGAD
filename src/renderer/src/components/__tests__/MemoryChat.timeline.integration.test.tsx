@@ -11,8 +11,7 @@ type Event = {
   type: 'reasoning' | 'content' | 'step' | 'tool_result'
   text?: string
   step?:
-  | { kind: 'running_tool'; name: string }
-  | { kind: 'model_changed'; failed: string; next: string }
+    { kind: 'running_tool'; name: string } | { kind: 'model_changed'; failed: string; next: string }
   call?: { name: string; result: string; status: 'completed' }
 }
 
@@ -47,16 +46,16 @@ function chatBoundary(
     context?: unknown
     created_at: string
   }> = [
-      {
-        id: 'earlier-message',
-        uuid: 'earlier-message',
-        role: 'user',
-        content: 'Earlier question',
-        context: options?.userContext,
-        created_at: '2026-09-13 09:00:00'
-      },
-      ...(savedReply
-        ? [
+    {
+      id: 'earlier-message',
+      uuid: 'earlier-message',
+      role: 'user',
+      content: 'Earlier question',
+      context: options?.userContext,
+      created_at: '2026-09-13 09:00:00'
+    },
+    ...(savedReply
+      ? [
           {
             id: 'saved-reply',
             uuid: 'saved-reply',
@@ -66,8 +65,8 @@ function chatBoundary(
             created_at: '2026-09-13 09:00:01'
           }
         ]
-        : [])
-    ]
+      : [])
+  ]
   let streamId = ''
   let onStream: ((event: Event) => void) | undefined
   let finishTurn: ((result: unknown) => void) | undefined
@@ -77,14 +76,26 @@ function chatBoundary(
   const api = {
     isPro: false,
     imageGenStatus: async () => ({ available: false, models: [], active: '' }),
-    onImageGenProgress: () => () => { },
+    onImageGenProgress: () => () => {},
     getRagConversations: async () => [conversation],
     getRagConversation: async () => conversation,
     getRagMessages: async () => messages.map((message) => ({ ...message })),
     getActiveRagStreams: async () => options?.activeStreams ?? [],
-    onImageGenJobState: () => () => { },
-    onImageGenConversationUpdated: () => () => { },
-    imageGenJobStatus: async () => ({ id: null, phase: 'idle' as const, conversationId: null, projectId: null, stage: null, enhancedPrompt: '', progress: null, outputPath: null, error: null, startedAt: null, finishedAt: null }),
+    onImageGenJobState: () => () => {},
+    onImageGenConversationUpdated: () => () => {},
+    imageGenJobStatus: async () => ({
+      id: null,
+      phase: 'idle' as const,
+      conversationId: null,
+      projectId: null,
+      stage: null,
+      enhancedPrompt: '',
+      progress: null,
+      outputPath: null,
+      error: null,
+      startedAt: null,
+      finishedAt: null
+    }),
     ...(options?.imageJob ? { imageGenJobStatus: async () => options.imageJob } : {}),
     // Documents in a chat (preload `documents`): none attached.
     documents: {
@@ -99,7 +110,7 @@ function chatBoundary(
         onStream = undefined
       }
     },
-    onRagConversationsChanged: () => () => { },
+    onRagConversationsChanged: () => () => {},
     addRagMessage: async (
       _conversationId: string,
       role: 'user' | 'assistant',
@@ -133,7 +144,7 @@ function chatBoundary(
       { id: 'af_heart', label: 'Heart', language: 'en-US' },
       { id: 'am_michael', label: 'Michael', language: 'en-US' }
     ],
-    onTtsVoiceProgress: () => () => { },
+    onTtsVoiceProgress: () => () => {},
     prepareTtsVoice: async () => ({ ready: true }),
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     listTools: async () => [],
@@ -146,7 +157,7 @@ function chatBoundary(
       syntheses.push(selectedVoice)
       return { dataUrl: `data:audio/wav;base64,${btoa(selectedVoice)}` }
     },
-    tasks: { list: async () => [], onChanged: () => () => { } },
+    tasks: { list: async () => [], onChanged: () => () => {} },
     toolChat: async (_query: string, _history: unknown[], options: { streamId: string }) => {
       streamId = options.streamId
       return new Promise((resolve) => {
@@ -157,7 +168,7 @@ function chatBoundary(
       throw new Error('The tool turn used the memory-chat path')
     }
   }
-    ; (window as unknown as { api: unknown }).api = api
+  ;(window as unknown as { api: unknown }).api = api
   return {
     status: () => ({
       streamId,
@@ -210,7 +221,7 @@ afterEach(cleanup)
 
 describe('<MemoryChat/> ordered tool turn', () => {
   it('keeps synced input and generated images visible when the user switches to voice mode', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     chatBoundary(
       {
         content:
@@ -264,12 +275,9 @@ describe('<MemoryChat/> ordered tool turn', () => {
     expect(await screen.findByAltText('synced-input.jpg')).toBeTruthy()
     expect(await screen.findByAltText('Generated')).toBeTruthy()
     await openCompletedWork()
-    expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual([
-      'Reasoning',
-      'Generated image',
-      'Reasoning',
-      'Enhanced prompt'
-    ])
+    expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual(
+      ['Reasoning', 'Generated image', 'Reasoning', 'Enhanced prompt']
+    )
 
     await user.click(screen.getByRole('button', { name: 'Voice' }))
 
@@ -279,16 +287,13 @@ describe('<MemoryChat/> ordered tool turn', () => {
     expect(screen.getByText('Generated for: a horse')).toBeTruthy()
     expect(screen.getAllByRole('button', { name: 'Play voice note' })).toHaveLength(2)
     await openCompletedWork()
-    expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual([
-      'Reasoning',
-      'Generated image',
-      'Reasoning',
-      'Enhanced prompt'
-    ])
+    expect(timelineLabels().map((label) => label.split('Created the requested image.')[0])).toEqual(
+      ['Reasoning', 'Generated image', 'Reasoning', 'Enhanced prompt']
+    )
   })
 
   it('keeps enhanced prompt and active image progress in the timeline before its footer', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     chatBoundary(
       {
         content: '',
@@ -341,13 +346,15 @@ describe('<MemoryChat/> ordered tool turn', () => {
     ])
     expect(screen.queryByRole('button', { name: 'Tools sent in request (1)' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Generation details' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Working' }).getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Working' }).getAttribute('aria-expanded')).toBe(
+      'true'
+    )
     expect(progress).toBeTruthy()
     expect(screen.getAllByText('Off Grid AI')).toHaveLength(1)
   })
 
   it('replaces failed model text with the new answer and keeps the model-change row after reload', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     const boundary = chatBoundary(undefined, false, true, { agentic: true })
     const user = userEvent.setup()
     const chat = render(
@@ -402,7 +409,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
   })
 
   it('interleaves reasoning with tools live and keeps the same completed timeline after reload', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     const boundary = chatBoundary(undefined, false, false, { agentic: true })
     const user = userEvent.setup()
     const chat = render(
@@ -472,7 +479,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
   })
 
   it('keeps the existing layout for saved replies without an ordered timeline', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     chatBoundary({
       content: 'An older answer.',
       context: {
@@ -502,7 +509,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
   it.each([false, true])(
     'shows memory source cards inside the tool row without a second search section (voice mode: %s)',
     async (voiceMode) => {
-      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+      ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
       chatBoundary(
         {
           content: 'The release is planned for Friday. [S1]',
@@ -551,7 +558,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
   )
 
   it('shows saved generation details below a voice reply when enabled', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     chatBoundary(
       {
         content: 'The answer is ready.',
@@ -577,9 +584,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
 
     expect(await screen.findByText('The answer is ready.')).toBeTruthy()
     expect(screen.queryByTestId('generation-metrics')).toBeNull()
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Tools sent in request (2)' })
-    )
+    await userEvent.click(await screen.findByRole('button', { name: 'Tools sent in request (2)' }))
     expect(screen.getByText('web_search')).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Generation details' }))
     expect(screen.queryByText('web_search')).toBeNull()
@@ -591,7 +596,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
   })
 
   it('plays an existing voice reply with the newly selected voice, then caches that voice', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     const boundary = chatBoundary({ content: 'The answer is ready.', context: {} }, true)
     const playedSources: string[] = []
     const originalAudio = globalThis.Audio
@@ -602,7 +607,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
       playbackRate = 1
       onended: (() => void) | null = null
 
-      constructor(public src: string) { }
+      constructor(public src: string) {}
 
       async play(): Promise<void> {
         playedSources.push(this.src)
@@ -633,7 +638,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
       expect(boundary.status().syntheses).toEqual(['af_heart'])
       await user.click(replyPlayback) // pause before changing voice
 
-      await user.click(screen.getByTitle('Settings'))
+      await user.click(screen.getByRole('button', { name: 'Settings' }))
       await user.click(screen.getByRole('radio', { name: 'voice' }))
       const voiceSelect = await screen.findByRole('combobox', { name: 'Voice selection' })
       await waitFor(() => expect((voiceSelect as HTMLButtonElement).disabled).toBe(false))
@@ -665,7 +670,7 @@ describe('<MemoryChat/> ordered tool turn', () => {
   })
 
   it('keeps a failed memory search readable when a later search found sources', async () => {
-    ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
     chatBoundary({
       content: 'The release is planned for Friday. [S1]',
       context: {

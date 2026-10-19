@@ -24,7 +24,7 @@ describe('external model discovery', () => {
     gguf(path.join(folder, 'mtp-chat-Q8_0.gguf'))
     gguf(path.join(folder, 'chat-dflash.gguf'))
     const models = discoverExternalModels(home, path.join(home, 'missing'), undefined, [folder])
-    expect(models.map((item) => item.name)).toEqual(['chat'])
+    expect(models.map((item) => item.name)).toEqual(['Chat'])
     expect(fs.readdirSync(folder)).toHaveLength(3)
   })
 
@@ -35,9 +35,24 @@ describe('external model discovery', () => {
     gguf(path.join(folder, 'model.gguf'))
     gguf(path.join(folder, 'mmproj-model.gguf'))
     const models = discoverExternalModels(home, path.join(home, 'missing'))
-    expect(models).toMatchObject([{ name: 'model', source: 'LM Studio', kind: 'vision' }])
+    expect(models).toMatchObject([{ name: 'Model', source: 'LM Studio', kind: 'vision' }])
     expect(models[0]?.primary).toBe(fs.realpathSync(path.join(folder, 'model.gguf')))
     expect(models[0]?.mmproj).toBe(fs.realpathSync(path.join(folder, 'mmproj-model.gguf')))
+  })
+
+  it('names a known model file by its catalog name, never its file name', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'og-external-'))
+    roots.push(home)
+    const known = CATALOG.find(
+      (entry) =>
+        entry.kind === 'text' &&
+        entry.files.length === 1 &&
+        entry.files[0]!.name.toLowerCase().endsWith('.gguf')
+    )!
+    const folder = path.join(home, '.lmstudio', 'models', 'publisher', 'known')
+    gguf(path.join(folder, known.files[0]!.name))
+    const models = discoverExternalModels(home, path.join(home, 'missing'))
+    expect(models.map((item) => item.name)).toEqual([known.name])
   })
 
   it('does not attach one projector to several weights in the same folder', () => {
@@ -85,7 +100,7 @@ describe('external model discovery', () => {
     )
     expect(discoverExternalModels(home, root)).toMatchObject([
       {
-        name: 'library/example/latest',
+        name: 'Example',
         source: 'Ollama',
         primary: fs.realpathSync(blob),
         mmproj: fs.realpathSync(projector),
@@ -101,7 +116,7 @@ describe('external model discovery', () => {
     gguf(path.join(selected, 'managed.gguf'))
     gguf(path.join(selected, 'publisher', 'model.gguf'))
     const models = discoverExternalModels(home, path.join(home, 'missing'), selected)
-    expect(models).toMatchObject([{ name: 'model', source: 'Selected folder' }])
+    expect(models).toMatchObject([{ name: 'Model', source: 'Selected folder' }])
   })
 
   it('does not offer image or incomplete vision packages as chat models', () => {

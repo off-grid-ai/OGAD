@@ -4,10 +4,11 @@ import { AnimatePresence, motion } from 'motion/react'
 import AIArtifact from '@offgrid/operator-ui/operator/ai-artifact'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { ARTIFACT_KIND_LABELS, type ArtifactKind } from '@renderer/lib/artifact-labels'
-import { resolveModelName } from '@renderer/lib/model-summary'
+import { artifactTitle } from '../../../shared/artifact-title'
+import { modelDisplayName } from '@offgrid/models'
 import { capturePathFromUrl } from '../../../shared/ogcapture-url'
 import { SidePanel } from './SidePanel'
-import { DownloadSimple, X } from '@phosphor-icons/react'
+import { ArrowLeft, DownloadSimple, X } from '@phosphor-icons/react'
 import { Button } from './ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
@@ -19,13 +20,25 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 
 // 'text'/'image' are catalogued inputs (uploaded file / pasted block / image) —
 // shown as plain text or a thumbnail, never executed in the sandbox.
-export type Artifact = { kind: ArtifactKind; code: string; title?: string }
+export type Artifact = {
+  kind: ArtifactKind
+  code: string
+  title?: string
+  /** Its block has not closed: still streaming, or the answer stopped before it finished. */
+  partial?: boolean
+}
 
 const KIND_LABEL = ARTIFACT_KIND_LABELS
 
 function escapeForHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
+
+/**
+ * A component draws only its own box; the page around it stayed the frame's white, so a dark hero
+ * sat on a bright block filling the rest of the canvas. The page takes the component's background.
+ */
+const REACT_PAGE_FILL = `<script>(function(){var root=document.getElementById('root');function fill(){var c=root&&root.firstElementChild;if(!c)return;var bg=getComputedStyle(c).backgroundColor;if(!bg||bg==='transparent'||bg==='rgba(0, 0, 0, 0)')return;document.documentElement.style.background=bg;document.body.style.background=bg}new MutationObserver(fill).observe(root,{childList:true});})();</script>`
 
 function revokePreview(url: string): void {
   void window.api.revokeArtifactPreview(url).catch(() => {})
@@ -44,15 +57,21 @@ export function artifactSpeechModelName(
   activeModel: string | null | undefined,
   models: readonly ArtifactModelLabel[]
 ): string {
-  if (!activeModel) return 'Default'
-  const catalogModel = models.find(
-    (model) =>
-      model.id === activeModel ||
-      model.primary === activeModel ||
-      model.files?.some((file) => file.name === activeModel)
-  )
-  if (catalogModel?.name) return catalogModel.name
-  return resolveModelName([], activeModel) ?? activeModel
+  // The active speech pick is stored as an id or a file name: the shared resolver reads both.
+  const catalog = models
+    .flatMap((model) => (model.id ? [{ ...model, id: model.id }] : []))
+    .map((model) => ({
+      id: model.id,
+      name: model.name,
+      kind: model.kind,
+      files: [
+        ...(model.primary ? [{ name: model.primary }] : []),
+        ...(model.files ?? []).flatMap((file) =>
+          file.name ? [{ name: file.name, role: file.role }] : []
+        )
+      ]
+    }))
+  return modelDisplayName(activeModel, { catalog }) ?? 'Default'
 }
 
 // npm packages a React artifact imports beyond react/react-dom (loaded from esm.sh).
@@ -73,11 +92,14 @@ function extractPkgs(code: string): string[] {
 export function ArtifactCanvas({
   artifact,
   onClose,
+  onBack,
   width,
   onResize
 }: {
   artifact: Artifact
   onClose: () => void
+  /** Given when the canvas was opened from a list (the Gallery): returns to that list. */
+  onBack?: () => void
   width?: number | null
   onResize?: (w: number) => void
 }): React.JSX.Element {
@@ -183,7 +205,7 @@ export function ArtifactCanvas({
       return `<!doctype html><html><head>${base}
 <script type="importmap">${JSON.stringify({ imports })}</script>
 <script>${runtime.babel || ''}</script>
-</head><body><div id="root"></div>
+</head><body><div id="root"></div>${REACT_PAGE_FILL}
 <script>
 (async () => {
   try {
@@ -215,7 +237,7 @@ export function ArtifactCanvas({
   window.addEventListener('unhandledrejection',function(ev){ __ogShow(ev.reason&&ev.reason.stack||ev.reason); });
 </script>
 <script>${runtime.react || ''}</script><script>${runtime.reactDom || ''}</script><script>${runtime.babel || ''}</script>
-</head><body><div id="root"></div><script type="text/babel" data-presets="react">
+</head><body><div id="root"></div>${REACT_PAGE_FILL}<script type="text/babel" data-presets="react">
 var __ogDefault;
 const { useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext, useLayoutEffect, createContext, Fragment, memo } = React;
 ${stripped}
@@ -310,8 +332,7 @@ else { __ogShow('No React component found — define a component named App or a 
     const onMessage = (event: MessageEvent): void => {
       if (event.source !== previewFrameRef.current?.contentWindow) return
       const message = event.data as
-        | { __ogComicTts?: string; text?: unknown; voice?: unknown; model?: unknown }
-        | undefined
+        { __ogComicTts?: string; text?: unknown; voice?: unknown; model?: unknown } | undefined
       if (!message?.__ogComicTts) return
       if (message.__ogComicTts === 'catalog') {
         void sendCatalog().catch(() => {
@@ -497,7 +518,7 @@ else { __ogShow('No React component found — define a component named App or a 
   return (
     <SidePanel
       modal={false}
-      ariaLabel={artifact.title || KIND_LABEL[artifact.kind]}
+      ariaLabel={artifact.title || artifactTitle(artifact.kind, artifact.code)}
       onClose={onClose}
       className="min-w-[360px] max-w-[90vw]"
       style={{ width: width ? `${width}px` : '30vw' }}
@@ -516,9 +537,24 @@ else { __ogShow('No React component found — define a component named App or a 
           mousemove events — without it the drag stalls and jumps. */}
       {resizing && <div className="fixed inset-0 z-[60] cursor-col-resize select-none" />}
       <div className="flex items-center justify-between gap-4 border-b border-border/60 px-6 py-3">
-        <span className="min-w-0 truncate text-sm text-foreground">
-          {artifact.title || 'Canvas'}
-        </span>
+        <div className="flex min-w-0 items-center gap-2">
+          {onBack ? (
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Back to gallery"
+              title="Back to gallery"
+              onClick={onBack}
+              className="-ml-2 shrink-0"
+            >
+              <ArrowLeft />
+            </Button>
+          ) : null}
+          <span className="min-w-0 truncate text-sm text-foreground">
+            {artifact.title || artifactTitle(artifact.kind, artifact.code)}
+          </span>
+        </div>
         {/* Its own provider: the canvas can open outside the app shell's provider. */}
         <TooltipProvider delayDuration={300}>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -570,7 +606,7 @@ else { __ogShow('No React component found — define a component named App or a 
               preview={previewPane}
               code={artifact.code}
               copyText={artifact.code}
-              className="flex min-h-0 flex-1 flex-col border-border/60 bg-background/60 [&>div:last-child>div>div]:h-full [&>div:last-child>div>div]:p-0 [&>div:last-child>div]:h-full [&>div:last-child]:min-h-0 [&>div:last-child]:flex-1 [&_pre]:h-full [&_pre]:overflow-auto"
+              className="flex min-h-0 flex-1 flex-col border-border/60 bg-background/60 [&>div:last-child>div>div]:h-full [&>div:last-child>div>div]:p-0 [&>div:last-child>div]:h-full [&>div:last-child]:min-h-0 [&>div:last-child]:flex-1 [&_pre]:h-full [&_pre]:overflow-auto [&_pre]:whitespace-pre-wrap [&_pre]:break-words"
             />
           </motion.div>
         </AnimatePresence>
@@ -617,5 +653,27 @@ export function parseArtifact(content: string): Artifact | null {
   // A fenced markdown/doc block becomes a rendered document artifact.
   const md = content.match(/```(?:markdown|md)\s*\n([\s\S]*?)```/i)
   if (md) return { kind: 'text', code: md[1]!.trim() }
+  return partialArtifact(content)
+}
+
+/**
+ * An artifact whose block is still open: the answer is streaming it, or stopped before it closed.
+ * Recognised from its first line so the chat shows the artifact card at once (and the canvas can
+ * render it as it arrives) instead of a wall of raw code. A whole HTML document with no fence at
+ * all counts too.
+ */
+function partialArtifact(content: string): Artifact | null {
+  const open = content.match(/```(html|svg|mermaid|jsx|tsx|react)\s*\n([\s\S]*)$/i)
+  if (open) {
+    const lang = open[1]!.toLowerCase()
+    const kind: ArtifactKind =
+      lang === 'svg' ? 'svg' : lang === 'mermaid' ? 'mermaid' : lang === 'html' ? 'html' : 'react'
+    return { kind, code: open[2]!.trim(), partial: true }
+  }
+  const bare = content.match(/(?:^|\n)\s*(<!doctype html[\s\S]*|<html[\s>][\s\S]*)$/i)
+  if (bare) {
+    const code = bare[1]!.trim()
+    return { kind: 'html', code, ...(/<\/html>\s*$/i.test(code) ? {} : { partial: true }) }
+  }
   return null
 }

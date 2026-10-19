@@ -297,7 +297,7 @@ export function VoiceSettingsTab(): React.JSX.Element {
         'This is the Off Grid AI voice.',
         voices.length ? voice : undefined
       )
-      if (!result?.dataUrl) throw new Error('No audio returned')
+      if (!result.dataUrl) throw new Error('No audio returned')
       const audio = new Audio(result.dataUrl)
       testAudioRef.current = audio
       audio.playbackRate = preferences.speed

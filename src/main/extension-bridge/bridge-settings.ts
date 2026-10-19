@@ -30,7 +30,10 @@ export const isSettingsSection = (v: unknown): v is SettingsSection =>
 
 export interface ModelChoice {
   readonly id: string
+  /** The model's name. Never carries the server's name: that is `server`. */
   readonly label: string
+  /** The remote server that runs this model, shown beside the name. */
+  readonly server?: string
 }
 
 /** Desktop's text settings and derived choices. No runtime paths leave Desktop. */

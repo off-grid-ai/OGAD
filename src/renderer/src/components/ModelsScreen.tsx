@@ -90,6 +90,9 @@ import {
   hasActiveFilters,
   initialFilterState,
   recommendedImageModelId,
+  collapseQuantizations,
+  huggingFaceRepoFor,
+  isOffGridHfRepo,
   type FilterState,
   type Credibility,
   type ModelKind
@@ -103,6 +106,7 @@ import {
   internalTabRoutes,
   internalTabSubroute
 } from '@renderer/lib/internal-tab-route'
+import offGridLogo from '@/assets/logo.png'
 
 function Sel({
   value,
@@ -184,12 +188,17 @@ interface ModelEntry {
   tags?: string[]
   releaseDate?: string
   quant?: string
+  /** Another quantization of this catalog model (one card; the size is picked in the side panel). */
+  quantOf?: string
+  quantLabel?: string
   availability?: 'ready' | 'coming_soon'
   availabilityNote?: string
   grounder?: boolean
   remoteServerId?: string
   remoteModelId?: string
 }
+/** A card's model: one catalog entry, with every quantization of it when there is more than one. */
+type ShownModel = ModelEntry & { quantOptions?: ModelEntry[] }
 
 interface UseCase {
   id: string
@@ -245,7 +254,36 @@ function fmtReleaseDate(iso?: string): string {
 }
 
 const BONSAI_2_ID = 'prism-ml/Ternary-Bonsai-2-27B-gguf'
-const KEV_4B_ID = 'jaredpalmer/kev-4b'
+/** Kev releases (jaredpalmer/kev-4b, kev-9b): SafeTensors packages, not GGUF repositories. */
+const isKevModel = (id: string): boolean => id.startsWith('jaredpalmer/kev-')
+
+const COUNT_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight']
+
+/** What a Kev release is made of, read from its own files: its base, how many shards, the sizes. */
+function kevFormat(m: { params?: number; files: ModelFile[] }): {
+  base: string
+  chat: string
+  shards: string
+  baseSize: string
+  adapterSize: string
+} {
+  const baseFiles = m.files.filter((file) => file.name.includes('/base/'))
+  const shards = baseFiles.filter((file) =>
+    /model\.safetensors-\d+-of-\d+\.safetensors$/.test(file.name)
+  ).length
+  const bytes = (files: ModelFile[]): number =>
+    files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
+  const repo = baseFiles
+    .map((file) => /huggingface\.co\/[^/]+\/([^/]+)\/resolve\//.exec(file.url)?.[1])
+    .find(Boolean)
+  return {
+    base: repo ?? `Qwen3.5-${m.params ?? ''}B-Base`,
+    chat: `Qwen 3.5 ${m.params ?? ''}B`,
+    shards: `${COUNT_WORDS[shards] ?? shards} SafeTensors file${shards === 1 ? '' : 's'}`,
+    baseSize: `${(bytes(baseFiles) / 1e9).toFixed(2)} GB`,
+    adapterSize: `${Math.round(bytes(m.files.filter((file) => file.name.includes('/checkpoint-'))) / 1e6)} MB`
+  }
+}
 
 function featureRank(
   m: { id?: string; sourceModelId?: string; credibility?: string; tags?: string[] },
@@ -352,6 +390,11 @@ const ACTIVE_RING =
   'shadow-[inset_0_0_0_1px_rgb(var(--og-rgb-primary)/0.55),0_0_28px_-10px_rgb(var(--og-rgb-primary)/0.8)]'
 const MotionRow = motion.create(TableRow)
 
+/** Off Grid AI's own conversions (huggingface.co/off-grid-ai) carry its mark beside the name. */
+function isOffGridModel(id: string): boolean {
+  return isOffGridHfRepo(id)
+}
+
 export function ModelsScreen({
   navigationSubroute,
   onNavigateSubroute
@@ -429,7 +472,7 @@ export function ModelsScreen({
   useEffect(() => {
     setSelectedTags([])
   }, [activeKind])
-  const [detail, setDetail] = useState<ModelEntry | null>(null)
+  const [detail, setDetail] = useState<ShownModel | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [mtpDownloads, setMtpDownloads] = useState(false)
@@ -462,7 +505,7 @@ export function ModelsScreen({
   const [sizeBucket, setSizeBucket] = useState<number | null>(null)
   const SIZE_BUCKETS = [2, 4, 6, 8, 16] as const
 
-  const openDetail = useCallback((m: ModelEntry) => {
+  const openDetail = useCallback((m: ShownModel) => {
     setDetailFiles([])
     setDetailFilesError(null)
     setDetailFilesLoading(true)
@@ -485,7 +528,7 @@ export function ModelsScreen({
   useEffect(() => {
     if (
       !detail ||
-      detail.id === KEV_4B_ID ||
+      isKevModel(detail.id) ||
       detail.id.startsWith('local:') ||
       !['text', 'vision', 'computer_use'].includes(detail.kind)
     ) {
@@ -641,10 +684,20 @@ export function ModelsScreen({
     }
   }
   const removeModel = async (id: string, label: string): Promise<void> => {
-    if (!window.confirm(`Delete "${label}"? This removes its files from disk.`)) return
+    const external = id.startsWith('external:')
+    if (
+      !window.confirm(
+        external
+          ? `Move "${label}" to the Trash? Its files are in another app's folder; you can restore them from the Trash.`
+          : `Delete "${label}"? This removes its files from disk.`
+      )
+    )
+      return
     setDeleting(id)
     try {
-      await api.deleteModel?.(id)
+      const result = (await api.deleteModel?.(id)) as
+        { success?: boolean; error?: string } | undefined
+      if (result && result.success === false && result.error) window.alert(result.error)
       setInstalled(await api.getInstalledModels?.())
       refreshActive()
     } finally {
@@ -811,6 +864,24 @@ export function ModelsScreen({
     ]
   )
 
+  // One card per model: its quantizations (Full quality, Light) are picked in the side panel. The card
+  // stands for the option sorted first (active, installed, recommended), or the one downloading when
+  // none is installed yet.
+  const displayedModels = useMemo(
+    () =>
+      collapseQuantizations(displayedCatalog, list, (option) => {
+        const p = progress[option.id]
+        const isDownloading = !!p && p.status !== 'completed' && p.status !== 'failed'
+        const familyInstalled = list.some(
+          (entry) =>
+            (entry.quantOf ?? entry.id) === (option.quantOf ?? option.id) &&
+            installed.includes(entry.id)
+        )
+        return isDownloading && !familyInstalled
+      }),
+    [displayedCatalog, list, progress, installed]
+  )
+
   const tabs = internalTabRoutes('models').filter(
     ({ id }) => id === 'storage' || kinds.includes(id)
   )
@@ -834,22 +905,35 @@ export function ModelsScreen({
   }
 
   const renderCard = (
-    m: ModelEntry & { credibility?: string; params?: number; org?: string },
+    m: ShownModel & { credibility?: string; params?: number; org?: string },
     isHf = false
   ): React.JSX.Element => {
+    // A model with several quantizations is one card, named for the model; the size is chosen in
+    // the side panel.
+    const choosesQuant = (m.quantOptions?.length ?? 0) > 1
     const useMtpDownloads = mtpDownloads && ['text', 'vision', 'computer_use'].includes(activeKind)
     const mtpRepository = MTP_DOWNLOAD_REPOS[m.id]
-    if (useMtpDownloads && !visionSt[m.id]?.mtpInstalled && mtpRepository) {
-      const mtpEntry = models.find((model) => model.id === mtpRepository)
+    const mtpEntry = mtpRepository ? models.find((model) => model.id === mtpRepository) : undefined
+    // "MTP downloads" changes what a NEW download fetches. An installed model keeps its own card (Use,
+    // Delete, active state), and a variant that is not ready yet is never offered in its place:
+    // swapping either in left an active model looking uninstalled, "coming soon", and unchangeable.
+    if (
+      useMtpDownloads &&
+      mtpEntry &&
+      mtpEntry.availability !== 'coming_soon' &&
+      !installed.includes(m.id) &&
+      !visionSt[m.id]?.mtpInstalled
+    ) {
       m = {
         ...m,
-        id: mtpRepository,
+        id: mtpEntry.id,
         name: `${m.name} MTP`,
-        files: mtpEntry?.files ?? [],
-        availability: mtpEntry?.availability ?? m.availability,
-        availabilityNote: mtpEntry?.availabilityNote ?? m.availabilityNote
+        files: mtpEntry.files,
+        availability: mtpEntry.availability ?? m.availability,
+        availabilityNote: mtpEntry.availabilityNote ?? m.availabilityNote
       }
     }
+    const displayName = choosesQuant ? m.quantOptions![0]!.name : m.name
     const isInstalled =
       installed.includes(m.id) &&
       (!useMtpDownloads || !m.id.endsWith('+MTP') || !!visionSt[m.id]?.mtpInstalled)
@@ -896,11 +980,19 @@ export function ModelsScreen({
     // piece below, so a state (downloading, failed, active) reads the same in either view.
     const nameRow = (
       <div className="flex flex-wrap items-center gap-1">
+        {isOffGridModel(m.id) && (
+          <img
+            src={offGridLogo}
+            alt="Made by Off Grid AI"
+            title="Made by Off Grid AI"
+            className="size-3 shrink-0 rounded-[3px]"
+          />
+        )}
         <button
           onClick={() => openDetail(m)}
           className="truncate text-left text-xs text-neutral-100 transition-colors duration-100 hover:text-emerald-500"
         >
-          {m.name}
+          {displayName}
         </button>
         {worksBest && (
           <span className="shrink-0 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
@@ -1112,7 +1204,13 @@ export function ModelsScreen({
               size="icon-xs"
               variant="ghost"
               aria-label={mtpUnavailable ? 'MTP unavailable' : 'Download'}
-              onClick={() => (isHf || useMtpDownloads ? void chooseVariant(m) : download(m.id))}
+              onClick={() =>
+                choosesQuant
+                  ? openDetail(m)
+                  : isHf || useMtpDownloads
+                    ? void chooseVariant(m)
+                    : download(m.id)
+              }
               disabled={mtpUnavailable}
               className="text-neutral-300 hover:text-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -1133,11 +1231,18 @@ export function ModelsScreen({
             </Button>
           </IconTip>
         )}
-        {isInstalled && !isRemote && !m.id.startsWith('external:') && (
+        {isInstalled && !isRemote && (
           <button
             onClick={() => removeModel(m.id, m.name)}
             disabled={deleting === m.id || active}
-            title={active ? 'Switch to another model before deleting' : 'Delete from disk'}
+            aria-label="Delete"
+            title={
+              active
+                ? 'Switch to another model before deleting'
+                : m.id.startsWith('external:')
+                  ? 'Move to the Trash'
+                  : 'Delete from disk'
+            }
             className="rounded p-1 text-neutral-700 transition-all duration-150 hover:text-red-400 active:scale-90 disabled:opacity-30 group-hover:text-neutral-500"
           >
             {deleting === m.id ? (
@@ -1147,13 +1252,12 @@ export function ModelsScreen({
             )}
           </button>
         )}
+        {/* A table row keeps the delete slot when there is no delete, so "Use" lines up down
+            the column instead of shifting by one icon on rows that cannot be deleted. */}
+        {view === 'list' && !(isInstalled && !isRemote) ? (
+          <span aria-hidden="true" className="w-5" />
+        ) : null}
       </div>
-    )
-    const actionRow = (
-      <>
-        {statusNode ?? <span />}
-        {actionIcons}
-      </>
     )
     const repairActions = (
       <>
@@ -1219,27 +1323,29 @@ export function ModelsScreen({
           exit={{ opacity: 0, x: 8 }}
           transition={COLLECTION_SPRING}
           data-state={active ? 'selected' : undefined}
-          className="group align-top transition-colors"
+          className="group align-middle transition-colors"
         >
-          <TableCell className="whitespace-normal py-2">
+          <TableCell className="whitespace-normal py-1.5">
             {nameRow}
             {metaLine}
           </TableCell>
-          <TableCell className="whitespace-normal py-2">
+          {/* Labels, then whatever the model is doing (downloading, failed, needs a part): one
+              column, since a separate Status column stood empty on almost every row. */}
+          <TableCell className="whitespace-normal py-1.5">
             {badgeRow}
             {availabilityNote}
-          </TableCell>
-          <TableCell className="whitespace-normal py-2">
-            {/* Status, actions and any repair on one line; only a running download adds its bar. */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                {actionRow}
-              </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 empty:hidden">
+              {statusNode}
               {repairActions}
-              {downloading ? <div className="basis-full">{progressBar}</div> : null}
+            </div>
+            {downloading ? <div className="mt-1">{progressBar}</div> : null}
+          </TableCell>
+          <TableCell className="py-1.5">
+            <div className="flex items-center justify-end gap-1">
+              {actionIcons}
+              {detailsButton}
             </div>
           </TableCell>
-          <TableCell className="py-2">{detailsButton}</TableCell>
         </MotionRow>
       )
     }
@@ -1295,11 +1401,10 @@ export function ModelsScreen({
         <Table aria-label={label} className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[34%]">Model</TableHead>
-              <TableHead className="w-[24%]">Labels</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-10">
-                <span className="sr-only">Details</span>
+              <TableHead className="w-[40%]">Model</TableHead>
+              <TableHead>Labels</TableHead>
+              <TableHead className="w-48">
+                <span className="sr-only">Actions</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -1759,12 +1864,12 @@ export function ModelsScreen({
                     )
                   })
                 }
-                if (activeKind !== 'computer_use') return <>{cardRows(displayedCatalog)}</>
+                if (activeKind !== 'computer_use') return <>{cardRows(displayedModels)}</>
                 // Tasks: grounding specialists and decision models are different jobs, run side by
                 // side, so they are listed apart.
                 const groups: Array<[string, ModelEntry[]]> = [
-                  ['Grounding specialists', displayedCatalog.filter((m) => !isDecisionModel(m))],
-                  ['Decision models', displayedCatalog.filter((m) => isDecisionModel(m))]
+                  ['Grounding specialists', displayedModels.filter((m) => !isDecisionModel(m))],
+                  ['Decision models', displayedModels.filter((m) => isDecisionModel(m))]
                 ]
                 return (
                   <>
@@ -1791,7 +1896,7 @@ export function ModelsScreen({
           (() => {
             const m = detail
             const isLocal = m.id.startsWith('local:')
-            const hfRepo = m.sourceModelId ?? m.id
+            const hfRepo = huggingFaceRepoFor(m.sourceModelId ?? m.id)
             const hfUrl =
               !isLocal && hfRepo.includes('/') ? `https://huggingface.co/${hfRepo}` : null
             const bytes = totalBytes(m)
@@ -1801,6 +1906,7 @@ export function ModelsScreen({
             const downloading = prog && prog.status !== 'completed' && prog.status !== 'failed'
             const comingSoon = m.availability === 'coming_soon'
             const downloadProgress = prog ? projectProgress(prog) : null
+            const quantChoices = (m.quantOptions?.length ?? 0) > 1 ? m.quantOptions! : null
             const rows: [string, string | null][] = [
               ['Source', m.org || (isLocal ? 'Imported' : '—')],
               ['Parameters', m.params ? formatParams(m.params) : null],
@@ -1818,7 +1924,17 @@ export function ModelsScreen({
                 <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <h2 className="truncate text-sm text-white">{m.name}</h2>
+                      {isOffGridModel(m.id) && (
+                        <img
+                          src={offGridLogo}
+                          alt="Made by Off Grid AI"
+                          title="Made by Off Grid AI"
+                          className="size-3.5 shrink-0 rounded-[3px]"
+                        />
+                      )}
+                      <h2 className="truncate text-sm text-white">
+                        {quantChoices ? quantChoices[0]!.name : m.name}
+                      </h2>
                       {m.kind === 'vision' && (
                         <span className="flex items-center gap-0.5 rounded-sm border border-green-500/60 px-1 py-px text-[8px] uppercase tracking-wide text-green-500">
                           <IconEye className="h-2.5 w-2.5" /> Vision
@@ -1866,6 +1982,59 @@ export function ModelsScreen({
                         </div>
                       ))}
                   </dl>
+                  {quantChoices && (
+                    <section aria-label="Quantization" className="mt-3">
+                      <p className="text-[9px] uppercase tracking-wide text-neutral-600">
+                        Quantization
+                      </p>
+                      <div
+                        role="radiogroup"
+                        aria-label="Quantization"
+                        className="mt-1.5 space-y-1.5"
+                      >
+                        {quantChoices.map((option) => {
+                          const chosen = option.id === m.id
+                          const optionState = isActive(option.id)
+                            ? 'Active'
+                            : installed.includes(option.id)
+                              ? 'Installed'
+                              : option.id === recommendedImageId
+                                ? 'Recommended for you'
+                                : null
+                          return (
+                            <button
+                              key={option.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={chosen}
+                              onClick={() => setDetail({ ...option, quantOptions: quantChoices })}
+                              className={`flex w-full items-center justify-between gap-2 rounded border px-3 py-2 text-left transition-colors duration-150 ${
+                                chosen
+                                  ? 'border-green-500/60 bg-green-500/5'
+                                  : 'border-neutral-800 hover:border-neutral-600'
+                              }`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block text-xs text-neutral-200">
+                                  {option.quantLabel ?? option.quant ?? option.name}
+                                </span>
+                                <span className="block text-[10px] text-neutral-500">
+                                  {[option.quant, formatSize(totalBytes(option))]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                </span>
+                              </span>
+                              {optionState && (
+                                <span className="shrink-0 text-[9px] uppercase tracking-wide text-green-500">
+                                  {optionState}
+                                </span>
+                              )}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </section>
+                  )}
                   {ramGb && bytes > 0 && (
                     <p className="mt-3 text-[10px] text-neutral-500">
                       {fitLevel(bytes / 1e9, ramGb) === 'ok'
@@ -1899,28 +2068,32 @@ export function ModelsScreen({
                       <IconExternalLink className="h-3 w-3" /> View on Hugging Face
                     </button>
                   )}
-                  {m.id === KEV_4B_ID && (
-                    <section
-                      aria-label="Kev model format"
-                      className="mt-3 border-t border-neutral-800 pt-3"
-                    >
-                      <h3 className="text-[10px] uppercase tracking-wide text-neutral-400">
-                        Model format
-                      </h3>
-                      <p className="mt-2 text-[10px] leading-relaxed text-neutral-400">
-                        Kev uses the original Qwen3.5-4B-Base SafeTensors weights. The Qwen 3.5 4B
-                        GGUF chat model cannot be reused. GGUF contains quantized weights for
-                        llama.cpp, while Kev loads SafeTensors through MLX or Torch.
-                      </p>
-                      <p className="mt-2 text-[10px] leading-relaxed text-neutral-500">
-                        One Qwen base: 9.34 GB across two SafeTensors files, plus a 135 MB Kev
-                        adapter. If the compatible SafeTensors base is already on this device, Off
-                        Grid AI reuses it.
-                      </p>
-                    </section>
-                  )}
+                  {isKevModel(m.id) &&
+                    (() => {
+                      const format = kevFormat(m)
+                      return (
+                        <section
+                          aria-label="Kev model format"
+                          className="mt-3 border-t border-neutral-800 pt-3"
+                        >
+                          <h3 className="text-[10px] uppercase tracking-wide text-neutral-400">
+                            Model format
+                          </h3>
+                          <p className="mt-2 text-[10px] leading-relaxed text-neutral-400">
+                            Kev uses the original {format.base} SafeTensors weights. The{' '}
+                            {format.chat} GGUF chat model cannot be reused. GGUF contains quantized
+                            weights for llama.cpp, while Kev loads SafeTensors through MLX or Torch.
+                          </p>
+                          <p className="mt-2 text-[10px] leading-relaxed text-neutral-500">
+                            One Qwen base: {format.baseSize} across {format.shards}, plus a{' '}
+                            {format.adapterSize} Kev adapter. If the compatible SafeTensors base is
+                            already on this device, Off Grid AI reuses it.
+                          </p>
+                        </section>
+                      )
+                    })()}
                   {hfUrl &&
-                    m.id !== KEV_4B_ID &&
+                    !isKevModel(m.id) &&
                     ['text', 'vision', 'computer_use'].includes(m.kind) && (
                       <section
                         aria-label="Available model files"
@@ -2150,7 +2323,7 @@ export function ModelsScreen({
                           download(variantModel.id, variant.fileName)
                           setVariantModel(null)
                         }}
-                        className="h-auto w-full flex-col items-start gap-1 whitespace-normal rounded px-3 py-2 text-left leading-normal shadow-none"
+                        className="h-auto w-full flex-col sm:h-auto items-start gap-1 whitespace-normal rounded px-3 py-2 text-left leading-normal shadow-none"
                       >
                         <span className="break-all text-[11px] text-neutral-200">
                           {variant.fileName}

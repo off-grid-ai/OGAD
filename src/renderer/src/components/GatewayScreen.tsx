@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { UserIcon, UsersIcon } from '@phosphor-icons/react'
 import { IconExternalLink, IconServer2 } from '@tabler/icons-react'
 import { GATEWAY_HOST, GATEWAY_PORT } from '@offgrid/core/shared/ports'
 import { CopyButton } from './ui/CopyButton'
@@ -13,6 +14,7 @@ import {
 } from '@offgrid/operator-ui/operator/coss/input-group'
 import { Button } from './ui/button'
 import { IconTip } from './IconTip'
+import { SettingsSelect } from './SettingsSelect'
 
 // Explains the local OpenAI-compatible gateway with copyable quick-start snippets
 // and a link to the interactive playground the gateway serves. Core feature.
@@ -99,6 +101,103 @@ console.log(resp.choices[0].message.content);`
   }
 ]
 
+type GatewayMode = 'single' | 'team'
+
+interface GatewaySettings {
+  gatewayMode?: GatewayMode
+  gatewaySlots?: number
+  gatewaySlotsMax?: number
+  gatewayClients?: number | null
+}
+
+/** Who the gateway serves: one person at full speed, or several clients at once. Team mode's
+ *  "at once" is Auto (the memory rule's value) or a number up to that safe maximum. Either change
+ *  relaunches the chat engine with the new slot count; it applies to the next request. */
+function GatewayModeControl(): React.ReactElement | null {
+  const [settings, setSettings] = useState<GatewaySettings | null>(null)
+  useEffect(() => {
+    let mounted = true
+    void window.api.getLlmSettings().then((s: GatewaySettings) => {
+      if (mounted) setSettings(s)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
+  if (!settings) return null
+  const mode = settings.gatewayMode ?? 'single'
+  const save = (patch: { gatewayMode?: GatewayMode; gatewayClients?: number | null }): void => {
+    const previous = settings
+    setSettings({ ...settings, ...patch })
+    void window.api
+      .setLlmSettings(patch)
+      .then((s: GatewaySettings) => setSettings(s))
+      .catch(() => setSettings(previous))
+  }
+  const option = (
+    id: GatewayMode,
+    label: string,
+    tip: string,
+    icon: React.ReactNode
+  ): { id: GatewayMode; label: string; icon: React.ReactNode } => ({
+    id,
+    label,
+    icon: (
+      <IconTip label={tip}>
+        <span className="flex items-center gap-1.5">
+          {icon}
+          {label}
+        </span>
+      </IconTip>
+    )
+  })
+  const max = Math.max(1, settings.gatewaySlotsMax ?? 1)
+  const clients = settings.gatewayClients ?? null
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Segmented
+        label="Who uses the gateway"
+        size="sm"
+        value={mode}
+        onValueChange={(next) => save({ gatewayMode: next })}
+        options={[
+          option(
+            'single',
+            'Just me',
+            'One request at a time, full speed',
+            <UserIcon aria-hidden="true" />
+          ),
+          option(
+            'team',
+            'Team',
+            'Several clients at once; extras wait their turn',
+            <UsersIcon aria-hidden="true" />
+          )
+        ]}
+      />
+      {mode === 'team' && (
+        <div className="w-36">
+          <SettingsSelect
+            id="gateway-clients"
+            label="Requests at once"
+            value={clients === null ? 'auto' : String(Math.min(clients, max))}
+            onValueChange={(value) =>
+              save({ gatewayClients: value === 'auto' ? null : Number(value) })
+            }
+            options={[
+              { value: 'auto', label: `Auto (${max})` },
+              ...Array.from({ length: max }, (_, i) => ({
+                value: String(i + 1),
+                label: `${i + 1} at once`
+              }))
+            ]}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function GatewayScreen(): React.ReactElement {
   const [tab, setTab] = useState(SNIPPETS[0]!.id)
   const open = (p: string): void => {
@@ -111,7 +210,7 @@ export function GatewayScreen(): React.ReactElement {
       <div className="flex w-full flex-col px-8 pt-8 pb-16">
         <PageHeader
           title="Gateway"
-          description="One OpenAI-compatible API for text, vision, image and voice. Local models process data on your device. If you select a remote model server, requests go to that server."
+          description="One OpenAI-compatible API for every model on this Mac."
           actions={
             <IconTip label="Interactive playground">
               <Button
@@ -126,71 +225,76 @@ export function GatewayScreen(): React.ReactElement {
           }
         />
 
-        <div className="space-y-12">
-          <Section
-            label="Base URL"
-            description="Point any OpenAI client here. Supply a key when authentication is enabled."
-          >
-            <InputGroup>
-              <InputGroupAddon>
-                <IconServer2 aria-hidden="true" />
-              </InputGroupAddon>
-              <InputGroupInput
-                readOnly
-                aria-label="Gateway base URL"
-                value={`${BASE}/v1`}
-                className="font-mono text-emerald-400"
+        {/* A landscape screen: how to connect on the left, who may connect on the right. */}
+        <div className="grid gap-x-10 gap-y-8 xl:grid-cols-2">
+          <div className="min-w-0 space-y-8">
+            <Section label="Base URL">
+              <InputGroup>
+                <InputGroupAddon>
+                  <IconServer2 aria-hidden="true" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  readOnly
+                  aria-label="Gateway base URL"
+                  value={`${BASE}/v1`}
+                  className="font-mono text-emerald-400"
+                />
+                <InputGroupAddon align="inline-end">
+                  <CopyButton text={`${BASE}/v1`} />
+                </InputGroupAddon>
+              </InputGroup>
+              <p className="mt-2 text-[11px] text-neutral-500">
+                Headless: run with <code className="text-neutral-300">--server-only</code>.
+              </p>
+            </Section>
+
+            <Section label="Quick start" actions={<CopyButton text={active.code} />}>
+              <Segmented
+                label="Quick start language"
+                size="sm"
+                tone="quiet"
+                value={tab}
+                onValueChange={setTab}
+                options={SNIPPETS.map((s) => ({ id: s.id, label: s.label }))}
               />
-              <InputGroupAddon align="inline-end">
-                <CopyButton text={`${BASE}/v1`} />
-              </InputGroupAddon>
-            </InputGroup>
-            <p className="mt-3 text-xs leading-relaxed text-neutral-500">
-              Run it headless with <code className="text-neutral-300">--server-only</code> to deploy
-              just the gateway.
-            </p>
-          </Section>
+              <pre className="mt-3 overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-xs leading-relaxed text-neutral-200">
+                <code>{active.code}</code>
+              </pre>
+            </Section>
+          </div>
 
-          <Section label="API keys">
-            <section aria-label="API keys">
-              <GatewayApiKeysSettings />
-            </section>
-          </Section>
+          <div className="min-w-0 space-y-8">
+            <Section label="Clients">
+              <section aria-label="Clients">
+                <GatewayModeControl />
+              </section>
+            </Section>
 
-          <Section label="Quick start" actions={<CopyButton text={active.code} />}>
-            <Segmented
-              label="Quick start language"
-              size="sm"
-              tone="quiet"
-              value={tab}
-              onValueChange={setTab}
-              options={SNIPPETS.map((s) => ({ id: s.id, label: s.label }))}
-            />
-            <pre className="mt-3 overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-xs leading-relaxed text-neutral-200">
-              <code>{active.code}</code>
-            </pre>
-          </Section>
+            <Section label="API keys">
+              <section aria-label="API keys">
+                <GatewayApiKeysSettings />
+              </section>
+            </Section>
 
-          <Section label="Endpoints">
-            <AnimatedGroup preset="blur-slide" className="grid gap-2 sm:grid-cols-2">
-              {ENDPOINTS.map((e) => (
-                <button
-                  key={e.path}
-                  onClick={() => open(e.path)}
-                  className="flex h-full w-full flex-col gap-1 rounded-xl border border-neutral-800 bg-neutral-900/40 p-3 text-left transition-colors hover:border-green-500/40"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+            <Section label="Endpoints">
+              <AnimatedGroup preset="blur-slide" className="grid gap-2 2xl:grid-cols-2">
+                {ENDPOINTS.map((e) => (
+                  <button
+                    key={e.path}
+                    onClick={() => open(e.path)}
+                    title={e.note}
+                    className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-left transition-colors hover:border-green-500/40"
+                  >
+                    <span className="shrink-0 rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
                       {e.method}
                     </span>
-                    <span className="text-sm text-neutral-200">{e.label}</span>
-                  </div>
-                  <code className="text-xs text-neutral-500">{e.path}</code>
-                  <span className="text-[11px] text-neutral-600">{e.note}</span>
-                </button>
-              ))}
-            </AnimatedGroup>
-          </Section>
+                    <span className="shrink-0 text-xs text-neutral-200">{e.label}</span>
+                    <code className="min-w-0 truncate text-[11px] text-neutral-500">{e.path}</code>
+                  </button>
+                ))}
+              </AnimatedGroup>
+            </Section>
+          </div>
         </div>
       </div>
     </div>

@@ -24,6 +24,7 @@ TEXT -> SPEECH (TTS)  POST ${b}/v1/audio/speech        {input, voice?}  -> audio
 TEXT -> IMAGE         POST ${b}/v1/images              {prompt, aspect_ratio?, resolution?, seed?}
 IMAGE -> IMAGE        POST ${b}/v1/images              {prompt, input_references:[{image_url:{url}}]}
   (OpenAI aliases)    POST ${b}/v1/images/generations  |  POST ${b}/v1/images/edits (multipart)
+GATEWAY STATUS        GET  ${b}/v1/gateway/status       mode, slots; per runtime running, waiting, refused
 
 Open ${b}/docs in a browser for the interactive playground. Repo: docs/API.md.
 `
@@ -264,6 +265,31 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
           },
           responses: {
             '200': { description: 'OpenAI chat.completion object' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/gateway/status': {
+        get: {
+          tags: ['Gateway'],
+          summary: 'Mode, requests at once, and each runtime\'s running, waiting and refused (429) counts',
+          responses: {
+            '200': {
+              description:
+                'Team mode reads each runtime\'s line; single mode shows its one-at-a-time queue (null where none applies)',
+              content: {
+                'application/json': {
+                  schema: { type: 'object' },
+                  example: {
+                    object: 'gateway.status',
+                    mode: 'team',
+                    requests_at_once: 'auto',
+                    slots: 4,
+                    runtimes: { chat: { capacity: 4, running: 2, waiting: 0, refused: 0 } }
+                  }
+                }
+              }
+            },
             default: errorResponse
           }
         }

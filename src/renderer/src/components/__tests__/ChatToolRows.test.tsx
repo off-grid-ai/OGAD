@@ -35,7 +35,9 @@ afterEach(() => {
 })
 
 async function openCompletedWork(): Promise<void> {
-  await userEvent.click(screen.getByRole('button', { name: 'Work done' }))
+  // The disclosure names the turn's outcome — "Work done", or "Work failed" when the last step
+  // failed — so expand it by whichever work label it carries.
+  await userEvent.click(screen.getByRole('button', { name: /^Work (done|failed|stopped)/ }))
 }
 
 describe('<ChatToolRows/> work disclosure', () => {
@@ -56,6 +58,37 @@ describe('<ChatToolRows/> work disclosure', () => {
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByRole('list', { name: 'Thinking and tool calls' })).toBeNull()
     expect(screen.queryByText('Compare the two flight options first.')).toBeNull()
+  })
+
+  it('names a settled turn whose last step failed as failed work, even when the message is not flagged', () => {
+    render(
+      <ChatToolRows
+        settled
+        tools={[
+          { name: 'web_search', status: 'completed', result: 'Search results are ready.' },
+          {
+            name: 'web_use',
+            status: 'failed',
+            result: 'Web Use stopped: the decision model did not answer.'
+          }
+        ]}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Work failed' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Work done' })).toBeNull()
+  })
+
+  it('names the turn done when an earlier step failed but the last one finished', () => {
+    render(
+      <ChatToolRows
+        settled
+        tools={[
+          { name: 'web_search', status: 'failed', result: 'Error: offline' },
+          { name: 'web_search', status: 'completed', result: 'Search results are ready.' }
+        ]}
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Work done' })).toBeTruthy()
   })
 
   it('opens and folds the reasoning and steps on click', async () => {

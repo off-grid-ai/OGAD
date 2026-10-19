@@ -35,9 +35,9 @@ function installApi(): {
       onProgress: (): (() => void) => () => undefined
     },
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
-    onImageGenProgress: vi.fn(() => () => { }),
-    onImageGenJobState: vi.fn(() => () => { }),
-    onImageGenConversationUpdated: vi.fn(() => () => { }),
+    onImageGenProgress: vi.fn(() => () => {}),
+    onImageGenJobState: vi.fn(() => () => {}),
+    onImageGenConversationUpdated: vi.fn(() => () => {}),
     imageGenJobStatus: vi.fn(async () => ({
       id: null,
       phase: 'idle' as const,
@@ -51,7 +51,7 @@ function installApi(): {
       startedAt: null,
       finishedAt: null
     })),
-    onRagStream: vi.fn(() => () => { }),
+    onRagStream: vi.fn(() => () => {}),
     getRagConversations: vi.fn(async () => [conversation]),
     getRagConversation: vi.fn(async () => conversation),
     // created_at is not decoration: the renderer projects every row through projectSyncedMessageTurn,
@@ -81,13 +81,13 @@ function installApi(): {
       }
     ]),
     getSettings: vi.fn(async () => ({})),
-    saveSetting: vi.fn(async () => { }),
+    saveSetting: vi.fn(async () => {}),
     listProjects: vi.fn(async () => []),
     styleThumbs: vi.fn(async () => ({})),
     listSkills: vi.fn(async () => []),
     writeClipboardText: bridgeWrite
   }
-    ; (globalThis as unknown as { window: { api: unknown } }).window.api = api
+  ;(globalThis as unknown as { window: { api: unknown } }).window.api = api
   return { bridgeWrite, browserWrite }
 }
 
@@ -108,7 +108,7 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
   beforeEach(() => {
     cleanup()
     vi.clearAllMocks()
-      ; (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => { }
+    ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
   })
 
   it('copies the exact assistant reply through the available clipboard boundary (#46)', async () => {
@@ -167,13 +167,13 @@ describe('<MemoryChat/> clipboard and preview accessibility', () => {
     renderConversation()
 
     await user.click(await screen.findByAltText('Generated'))
-    expect(screen.getByRole('dialog', { name: 'Generated image preview' })).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'Generated image' })).toBeTruthy()
     await user.keyboard('{Escape}')
-    expect(screen.queryByRole('dialog', { name: 'Generated image preview' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Generated image' })).toBeNull()
 
     await user.click(screen.getByAltText('Generated'))
-    const dialog = screen.getByRole('dialog', { name: 'Generated image preview' })
+    const dialog = screen.getByRole('dialog', { name: 'Generated image' })
     await user.click(within(dialog).getByRole('button', { name: 'Close' }))
-    expect(screen.queryByRole('dialog', { name: 'Generated image preview' })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Generated image' })).toBeNull()
   })
 })

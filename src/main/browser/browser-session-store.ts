@@ -16,6 +16,21 @@ export interface BrowserSessionRecord<Resource> {
   task?: BrowserTaskPointer
 }
 
+/**
+ * A finished task's saved page, reopened only so the person can look at it. Looking is not a run:
+ * navigation in such a session must never be written back as task progress (it re-dated the task,
+ * moved it to the top of history, and rewrote "stopped" as "failed").
+ */
+const HISTORY_VIEW_PREFIX = 'history:'
+
+export function historyViewSessionId(taskId: string): string {
+  return `${HISTORY_VIEW_PREFIX}${taskId}`
+}
+
+export function isHistoryViewSession(sessionId: string): boolean {
+  return sessionId.startsWith(HISTORY_VIEW_PREFIX)
+}
+
 const EMPTY_CHROME: BrowserChromeState = {
   url: '',
   title: 'New tab',

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { isGrounderModel } from '@offgrid/models'
+import { isGrounderModel, modelDisplayName } from '@offgrid/models'
 import {
   remoteVisionApiBase,
+  remoteVisionModelId,
   remoteVisionProviderForEndpoint,
   type RemoteVisionConnectionResult,
   type RemoteVisionCatalogModel,
@@ -100,6 +101,15 @@ function normalizeSettings(value: RemoteVisionServerSettings): RemoteVisionServe
   }
 }
 
+/** A model's name, read by the shared resolver: the server's advertised name, else a clean id. */
+function catalogModelName(catalog: RemoteVisionCatalogModel[] | undefined, id: string): string {
+  return (
+    modelDisplayName(remoteVisionModelId('form', id), {
+      remote: [{ serverId: 'form', models: catalog ?? [] }]
+    }) ?? id
+  )
+}
+
 export function RemoteVisionSettingsTab(): React.JSX.Element {
   const [settings, setSettings] = useState(EMPTY_SETTINGS)
   const [form, setForm] = useState<ServerForm>(EMPTY_FORM)
@@ -118,7 +128,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       server.modelCatalog ??
         (server.model ? [{ id: server.model, name: server.model, kind: 'text' }] : [])
     )
-    setModelQuery(server.model)
+    setModelQuery(catalogModelName(server.modelCatalog, server.model))
     setShowModels(false)
     setStatus(server.id === settings.activeServerId ? 'This server is active.' : 'Ready to edit.')
   }
@@ -154,7 +164,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
             selected.modelCatalog ??
               (selected.model ? [{ id: selected.model, name: selected.model, kind: 'text' }] : [])
           )
-          setModelQuery(selected.model)
+          setModelQuery(catalogModelName(selected.modelCatalog, selected.model))
         }
         setStatus(normalized.activeServerId ? 'Remote server is active.' : 'Local model is active.')
       })
@@ -169,7 +179,10 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
           model.kind === 'text' &&
           !model.outputModalities?.includes('decisions') &&
           !isGrounderModel(model.id) &&
-          (!query || `${model.name} ${model.id}`.toLowerCase().includes(query))
+          (!query ||
+            `${model.name} ${model.id} ${catalogModelName(models, model.id)}`
+              .toLowerCase()
+              .includes(query))
       )
       .slice(0, 75)
   }, [modelQuery, models])
@@ -233,7 +246,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
           })
         ) as RemoteVisionRoleSelections
       }))
-      setModelQuery(nextModel)
+      setModelQuery(catalogModelName(discovered, nextModel))
       setShowModels(true)
       setStatus(
         discovered.length > 0
@@ -336,11 +349,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
     settings.servers.length === 0
       ? 'No saved servers'
       : `${settings.servers.length} saved · ${activeServer ? `${activeServer.name} active` : 'none active'}`
-  const serverSummary = remoteEnabled
-    ? [form.name || 'New server', form.model || 'no text model'].join(' · ')
-    : 'Off: uses models on this device'
   const modelName = (id: string | undefined): string =>
-    (id && models.find((model) => model.id === id)?.name) || id || 'none'
+    (id && catalogModelName(models, id)) || 'none'
+  const serverSummary = remoteEnabled
+    ? [form.name || 'New server', form.model ? modelName(form.model) : 'no text model'].join(' · ')
+    : 'Off: uses models on this device'
   const otherModelsSummary = `Image: ${modelName(form.mediaModels.image)} · Transcription: ${modelName(form.mediaModels.transcription)} · Voice: ${modelName(form.mediaModels.voice)}`
 
   return (
@@ -555,7 +568,9 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
               <Row
                 label="Text + Vision"
                 controlId="remote-server-model-search"
-                hint={form.model ? `Selected: ${form.model}` : 'Search and select one model.'}
+                hint={
+                  form.model ? `Selected: ${modelName(form.model)}` : 'Search and select one model.'
+                }
               >
                 <div className="relative">
                   <input
@@ -588,14 +603,16 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                                 model: model.id,
                                 mediaModels: { ...current.mediaModels, text: model.id }
                               }))
-                              setModelQuery(model.name)
+                              setModelQuery(catalogModelName(models, model.id))
                               setShowModels(false)
                               setStatus('Not saved.')
                             }}
                             className="block w-full px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-neutral-900 hover:text-white"
                           >
-                            <span className="block truncate">{model.name}</span>
-                            {model.name !== model.id ? (
+                            <span className="block truncate">
+                              {catalogModelName(models, model.id)}
+                            </span>
+                            {catalogModelName(models, model.id) !== model.id ? (
                               <span className="block truncate text-[9px] text-neutral-600">
                                 {model.id}
                               </span>

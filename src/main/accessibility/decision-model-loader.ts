@@ -3,7 +3,13 @@ import { getResidencyMode } from '../runtime-residency'
 import { recordAIRequest } from '../ai-request-log'
 import { getComputerUseSettings } from '../computer-use-settings'
 import { getWebUseSettings } from '../web-use-settings'
-import { DECIDER_2B, KEV_4B_ID, listInstalled, loadComputerUseModel } from '../models-manager'
+import {
+  DECIDER_2B,
+  displayModelName,
+  isKevModel,
+  listInstalled,
+  loadComputerUseModel
+} from '../models-manager'
 import { decisionRuntime, DecisionRuntimeError } from './decision-runtime'
 import { withExclusiveModelMemory } from '../model-memory'
 import { modalityQueue, CHAT_JOB } from '../modality-queue/queue'
@@ -29,7 +35,7 @@ async function ensureDedicatedRuntime(
 ): Promise<void> {
   if (decisionRuntime.running) return
   if (
-    session.modelId === KEV_4B_ID &&
+    isKevModel(session.modelId) &&
     !decisionRuntime.memoryEvicted &&
     session.restartsRemaining <= 0
   ) {
@@ -39,7 +45,7 @@ async function ensureDedicatedRuntime(
     )
   }
   // The shared llama runtime owns its restart budget. Keep Kev unchanged.
-  if (session.modelId === KEV_4B_ID && !decisionRuntime.memoryEvicted)
+  if (isKevModel(session.modelId) && !decisionRuntime.memoryEvicted)
     session.restartsRemaining -= 1
   console.log('[computer-use] loading Decision runtime after eviction or recovery')
   await decisionRuntime.start(session.modelId)
@@ -57,7 +63,7 @@ export function selectedDecisionModelId(): string {
  * shared llama.cpp process to the saved Chat model before vision recovery. */
 export async function withDecisionModel<T>(task: () => Promise<T>): Promise<T> {
   const modelId = selectedDecisionModelId()
-  if (modelId === KEV_4B_ID) {
+  if (isKevModel(modelId)) {
     return modalityQueue.run(CHAT_JOB, () =>
       withExclusiveModelMemory(() => runWithDecisionModel(task, modelId))
     )
@@ -72,7 +78,7 @@ async function runWithDecisionModel<T>(task: () => Promise<T>, modelId: string):
   if (remote) return task()
   if (!(await listInstalled()).includes(modelId)) {
     throw new Error(
-      `The selected Decision model is not downloaded: ${modelId}. Download it from the Computer Use catalog first.`
+      `The selected Decision model is not downloaded: ${displayModelName(modelId) ?? modelId}. Download it from the Computer Use catalog first.`
     )
   }
   if (dedicatedSession) {
@@ -94,7 +100,7 @@ async function runWithDecisionModel<T>(task: () => Promise<T>, modelId: string):
     await decisionRuntime.start(modelId)
   } catch (error) {
     if (
-      modelId === KEV_4B_ID ||
+      isKevModel(modelId) ||
       !(error instanceof DecisionRuntimeError) ||
       error.code !== 'out_of_memory'
     )

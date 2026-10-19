@@ -125,12 +125,15 @@ async function createProject(project: string, document: string, content: string)
   fs.writeFileSync(filePath, content)
   await chooseFile(filePath)
   await page.getByRole('button', { name: 'Add files', exact: true }).click()
-  // Indexed: the row's progress bar is gone and it shows the ready line ("text  ·  62 B").
-  await expect(page.getByRole('progressbar', { name: `Indexing ${document}` })).toBeHidden({
+  // The stored row (only it has a Delete control; the upload row does not), listed once, and done
+  // once its indexing progress bar has gone.
+  await expect(page.getByRole('button', { name: `Delete ${document}`, exact: true })).toBeVisible({
     timeout: 60_000
   })
-  await expect(page.getByText(/^text\s+·\s+\d+ B$/).first()).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByText(document, { exact: true })).toBeVisible()
+  await expect(page.getByText(document, { exact: true })).toHaveCount(1, { timeout: 60_000 })
+  await expect(page.getByRole('progressbar', { name: `Indexing ${document}` })).toHaveCount(0, {
+    timeout: 60_000
+  })
 }
 
 async function startFreshProjectChat(project: string): Promise<void> {

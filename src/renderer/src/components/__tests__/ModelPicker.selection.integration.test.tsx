@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { ModelPicker } from '../ModelPicker'
 import { useActiveModelSummary } from '../../hooks/useActiveModelSummary'
 
@@ -51,23 +52,24 @@ afterEach(() => {
 describe('model selection with remote voice active', () => {
   it('shows the local selection and updates the text summary while the picker stays open', async () => {
     Object.defineProperty(window, 'api', { configurable: true, value: bridge() })
+    const user = userEvent.setup()
     render(
       <>
         <Summary />
         <ModelPicker onClose={() => {}} />
       </>
     )
-    const previous = await screen.findByRole('button', { name: /Previous chat/ })
-    expect(previous.getAttribute('aria-pressed')).toBe('true')
-    const qwen = screen.getByRole('button', { name: /Qwen 3.5 9B/ })
-    fireEvent.click(qwen)
+    const textCard = (): HTMLElement => screen.getByLabelText('Text & Vision active model')
+    await waitFor(() => expect(textCard().textContent).toContain('Previous chat'))
+    await user.click(screen.getByRole('combobox', { name: 'Text & Vision model' }))
+    await user.click(await screen.findByRole('option', { name: 'Qwen 3.5 9B' }))
     await waitFor(() => {
-      expect(qwen.getAttribute('aria-pressed')).toBe('true')
+      expect(textCard().textContent).toContain('Qwen 3.5 9B')
       expect(screen.getByLabelText('Current text model').textContent).toBe('Qwen 3.5 9B')
     })
-    expect(
-      screen.getByRole('button', { name: /Qwen Audio TTS/ }).getAttribute('aria-pressed')
-    ).toBe('true')
+    expect(textCard().textContent).not.toContain('Previous chat')
+    // The remote voice selection is untouched by the text switch.
+    expect(screen.getByLabelText('Voice active model').textContent).toContain('Qwen Audio TTS')
     expect(screen.getByRole('dialog', { name: 'Active models' })).toBeTruthy()
   })
 
@@ -76,11 +78,13 @@ describe('model selection with remote voice active', () => {
       configurable: true,
       value: bridge('Model file is not available.')
     })
+    const user = userEvent.setup()
     render(<ModelPicker onClose={() => {}} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Qwen 3.5 9B/ }))
+    await user.click(await screen.findByRole('combobox', { name: 'Text & Vision model' }))
+    await user.click(await screen.findByRole('option', { name: 'Qwen 3.5 9B' }))
     expect((await screen.findByRole('alert')).textContent).toBe('Model file is not available.')
-    expect(screen.getByRole('button', { name: /Previous chat/ }).getAttribute('aria-pressed')).toBe(
-      'true'
+    expect(screen.getByLabelText('Text & Vision active model').textContent).toContain(
+      'Previous chat'
     )
   })
 })

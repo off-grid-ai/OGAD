@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 
 export interface ModelDownloadProgressEvent {
   modelId: string
+  /** The name main resolved for `modelId`. Screens show this, never the id. */
+  modelName: string
   percent?: number
   status?: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
   currentFile?: string

@@ -6,8 +6,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger
 } from '@renderer/components/ui/collapsible'
-import { resolveModelName } from '@renderer/lib/model-summary'
-import { formatGenerationMetrics, type GenerationMetrics } from '../../../../../shared/generation-metrics'
+import { modelDisplayName } from '@offgrid/models'
+import {
+  formatGenerationMetrics,
+  type GenerationMetrics
+} from '../../../../../shared/generation-metrics'
 import type { ResponseCutoffContract } from '../../../../../shared/ipc-contracts'
 
 function GenerationMetricsRowComponent({
@@ -20,7 +23,7 @@ function GenerationMetricsRowComponent({
   onOpenChange: (open: boolean) => void
 }>): React.JSX.Element | null {
   const displayMetrics = metrics?.modelName
-    ? { ...metrics, modelName: resolveModelName([], metrics.modelName) ?? metrics.modelName }
+    ? { ...metrics, modelName: modelDisplayName(metrics.modelName) ?? metrics.modelName }
     : metrics
   const parts = displayMetrics ? formatGenerationMetrics(displayMetrics) : []
   const contextWindowTokens = metrics?.contextWindowTokens

@@ -1,3 +1,5 @@
+import { describeModel, remoteServerDisplayName } from '@offgrid/models'
+
 export const REMOTE_VISION_PROVIDERS = [
   'local',
   'ollama',
@@ -90,23 +92,20 @@ export function remoteVisionInventoryModels(
       catalogKind: RemoteVisionModality,
       tags: readonly string[] = ['Remote']
     ): RemoteVisionInventoryModel => {
-      const advertisedName = server.modelCatalog
-        ?.find((model) => model.id === modelId && model.kind === catalogKind)
-        ?.name?.trim()
-      const label = advertisedName || modelId
-      // File paths are routing IDs, not display names. Retain provider IDs and
-      // explicit names; shorten only GGUF filenames, including split suffixes.
-      const name = /\.gguf$/i.test(label)
-        ? (label.split(/[\\/]/).pop() || label)
-            .replace(/(?:-\d{5}-of-\d{5})?\.gguf$/i, '')
-            .replace(/-/g, ' ')
-        : label
+      // The shared resolver names it: the advertised name for this kind, else a catalog
+      // name, else a cleaned provider id. Never a file path or the server's name.
+      const advertised = server.modelCatalog?.filter(
+        (model) => model.id === modelId && model.kind === catalogKind
+      )
+      const name = describeModel(remoteVisionModelId(server.id, modelId), {
+        remote: [{ serverId: server.id, models: advertised ?? [] }]
+      }).displayName
       return {
         id: remoteVisionModelId(server.id, modelId),
         name,
         kind,
-        org: server.name,
-        description: `Runs through ${server.name}.`,
+        org: remoteServerDisplayName(server.name),
+        description: `Runs through ${remoteServerDisplayName(server.name)}.`,
         files: [] as [],
         tags,
         remoteServerId: server.id,

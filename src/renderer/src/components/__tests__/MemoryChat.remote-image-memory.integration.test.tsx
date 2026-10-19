@@ -48,8 +48,9 @@ describe('<MemoryChat/> remote image memory refusal', () => {
     }
     window.api.imageGenStatus = async () => ({
       available: true,
-      models: [{ id: 'remote-image:server:flux', name: 'Flux' }],
-      active: 'remote-image:server:flux'
+      models: ['remote-image:server:flux'],
+      active: 'remote-image:server:flux',
+      modelNames: { 'remote-image:server:flux': 'Flux' }
     })
     window.api.generateImage = async (request) => {
       requests.push(request)
@@ -72,7 +73,10 @@ describe('<MemoryChat/> remote image memory refusal', () => {
     await user.click(screen.getByRole('button', { name: 'Run anyway' }))
   }
 
-  async function sendImagePrompt(text: string, user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  async function sendImagePrompt(
+    text: string,
+    user: ReturnType<typeof userEvent.setup>
+  ): Promise<void> {
     const input = await screen.findByPlaceholderText('Describe an image to generate…')
     ;(input as HTMLTextAreaElement).focus()
     await user.type(input, text, { skipClick: true })

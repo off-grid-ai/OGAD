@@ -1,4 +1,4 @@
-import { rpcHandlers } from './bridge-rpc-handlers'
+import { rpcHandlers, unpairBrowser } from './bridge-rpc-handlers'
 import type { BridgeDeps, BridgeReply, PairedBrowser } from './bridge-types'
 // The extension bridge, as pure logic: pairing and the sealed RPC loop. Everything it touches
 // (key storage, the native confirm dialog, the chat database, tools, the vault) is injected,
@@ -47,6 +47,8 @@ export interface BridgeService {
   linkKey(deviceId: string): Promise<{ browser: PairedBrowser; key: CryptoKey } | null>
   /** True the first time a socket hello nonce is seen inside the freshness window. */
   acceptNonce(deviceId: string, nonce: string): boolean
+  /** The person removed this browser on Desktop. False when it is not paired. */
+  removeBrowser(deviceId: string): Promise<boolean>
 }
 
 export function createBridgeService(deps: BridgeDeps): BridgeService {
@@ -71,7 +73,8 @@ export function createBridgeService(deps: BridgeDeps): BridgeService {
     return derived
   }
 
-  const handlers = rpcHandlers(deps, (id) => void sessionKeys.delete(id))
+  const forgetSession = (id: string): void => void sessionKeys.delete(id)
+  const handlers = rpcHandlers(deps, forgetSession)
 
   return {
     /** Unauthenticated: the desktop's public key and protocol version. Nothing private. */
@@ -168,6 +171,13 @@ export function createBridgeService(deps: BridgeDeps): BridgeService {
 
     acceptNonce(deviceId: string, nonce: string): boolean {
       return replay.accept(`${deviceId}:hello:${nonce}`, deps.now())
+    },
+
+    async removeBrowser(deviceId: string): Promise<boolean> {
+      const browser = (await deps.store.list()).find((b) => b.id === deviceId)
+      if (!browser) return false
+      await unpairBrowser(deps, browser, forgetSession)
+      return true
     }
   }
 }

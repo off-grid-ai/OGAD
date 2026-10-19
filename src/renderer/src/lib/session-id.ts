@@ -3,6 +3,8 @@
 // title. ChatDetail and ChatList each parsed this inline, identically — extracted
 // here so the two views can't drift on how a title/model label is derived.
 
+import { modelDisplayName } from '@offgrid/models'
+
 export interface ParsedSessionId {
   /** The model segment before the first dash, if any. */
   modelName?: string
@@ -10,7 +12,7 @@ export interface ParsedSessionId {
   chatTitle: string
   /** Title capitalized for display; falls back to the raw id when empty. */
   readableTitle: string
-  /** Model label with -/_ turned to spaces, or 'LLM' when there's no model. */
+  /** The model's name from the shared resolver, or 'LLM' when there's no model. */
   llmLabel: string
 }
 
@@ -22,6 +24,6 @@ export function parseSessionId(sessionId: string): ParsedSessionId {
   const readableTitle = chatTitle
     ? `${chatTitle.charAt(0).toUpperCase()}${chatTitle.slice(1)}`
     : sessionId
-  const llmLabel = modelName ? modelName.replace(/[-_]/g, ' ') : 'LLM'
+  const llmLabel = modelDisplayName(modelName) ?? 'LLM'
   return { modelName, chatTitle, readableTitle, llmLabel }
 }
