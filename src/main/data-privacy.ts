@@ -192,7 +192,10 @@ const CORE_PERSONAL: PersonalStore[] = [
   { tables: ['user_profile'], dirs: [] },
   { tables: [], dirs: ['captures'] },
   { tables: [], dirs: ['meetings'] },
-  { tables: [], dirs: ['generated-images', 'artifacts-library', 'style-thumbs'] }
+  { tables: [], dirs: ['generated-images', 'artifacts-library', 'style-thumbs'] },
+  // The retired LanceDB index held a plaintext copy of captured text. The record schema removes it
+  // at first launch without waiting; a wipe erases it too, in case that removal did not finish.
+  { tables: [], dirs: ['lancedb'] }
 ]
 const personalStores: PersonalStore[] = [...CORE_PERSONAL]
 

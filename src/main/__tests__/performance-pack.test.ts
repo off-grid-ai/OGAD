@@ -11,11 +11,11 @@ vi.mock('../runtime-env', () => ({
   dataDir: () => fixture.root,
   resourceFile: () => path.join(fixture.root, 'performance-packs.json')
 }))
-vi.mock('../backend-facts', () => ({
+vi.mock('../nvidia-driver', () => ({
+  cachedNvidiaDriverVersion: () => fixture.driverVersion,
   hasLinuxNvidiaDriver: () => fixture.driver,
   hasWindowsNvidiaDriver: () => fixture.driver
 }))
-vi.mock('../nvidia-driver', () => ({ cachedNvidiaDriverVersion: () => fixture.driverVersion }))
 
 const version = 'test-v1'
 const url = `https://runtime.getoffgridai.co/desktop/cuda/linux/${version}.tar.gz`

@@ -18,28 +18,17 @@ import { binRoots, exe } from './runtime-env'
 import { gpuDeviceAvailable } from './llm/gpu-device-probe'
 import { performancePackStatus, installedPerformancePackBin } from './performance-pack'
 import { getBackendPreference } from './backend-preferences'
-import { cachedNvidiaDriverVersion } from './nvidia-driver'
-import { onnxCudaVerified } from './onnx-host/onnx-cuda-probe'
+import { demoted, probes } from './backend-facts-cache'
+import {
+  cachedNvidiaDriverVersion,
+  hasLinuxNvidiaDriver,
+  hasWindowsNvidiaDriver
+} from './nvidia-driver'
+import { onnxCudaVerified } from './onnx-host/onnx-cuda-verified'
 
-const demoted: BackendFacts['demoted'] = {}
-const probes = new Map<string, Promise<boolean>>()
 /** The installed NVIDIA driver version, as last read (nvidia-driver.ts). */
 export function nvidiaDriverVersion(): string | null {
   return cachedNvidiaDriverVersion()
-}
-
-export function hasWindowsNvidiaDriver(
-  windowsDir = process.env.WINDIR ?? process.env.SystemRoot ?? 'C:\\Windows'
-): boolean {
-  return fs.existsSync(path.join(windowsDir, 'System32', 'nvcuda.dll'))
-}
-
-export function hasLinuxNvidiaDriver(): boolean {
-  try {
-    return fs.readdirSync('/dev').some((name) => /^nvidia\d+$/.test(name))
-  } catch {
-    return false
-  }
 }
 
 function hasLinuxGpuDevice(): boolean {
@@ -209,17 +198,7 @@ export async function backendFacts(modality?: BackendModality): Promise<BackendF
   return facts
 }
 
-export function demoteBackend(modality: BackendModality, backend: NativeBackend): void {
-  const backends = (demoted[modality] ??= [])
-  if (!backends.includes(backend)) backends.push(backend)
-}
-export function clearDemotions(modality?: BackendModality): void {
-  for (const value of modality ? [modality] : BACKEND_MODALITIES) delete demoted[value]
-}
-/** Forget cached device answers after a pack install, a driver change or wake. */
-export function invalidateBackendFacts(): void {
-  probes.clear()
-}
+export { clearDemotions, demoteBackend, invalidateBackendFacts } from './backend-facts-cache'
 /** One rung of a native engine ladder: the binary, what it was built for, and whether it must run
  *  CPU-only (llama `--device none`, whisper `-ng`, sd `--backend cpu`). */
 export interface NativeStep {

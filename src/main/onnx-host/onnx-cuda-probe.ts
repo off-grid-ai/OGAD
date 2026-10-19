@@ -5,47 +5,19 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import type { BackendReason } from '@offgrid/models'
-import { installedPerformancePackBin } from '../performance-pack'
-import { nvidiaDriverVersion } from '../backend-facts'
+import { cachedNvidiaDriverVersion } from '../nvidia-driver'
+import {
+  matches,
+  onnxCudaVerified,
+  packRoot,
+  readRecord,
+  type ProbeRecord
+} from './onnx-cuda-verified'
 import { resolveTransformersPackage, modelReadDirectories } from '../model-paths'
 import { chosenModelsDir, modelsDir } from '../runtime-env'
 import { DEFAULT_EMBEDDER } from '../embedding-models'
 
 const PROBE_TIMEOUT_MS = 120_000
-
-interface ProbeRecord {
-  packRoot: string
-  driver: string | null
-  at: string
-  error?: string
-}
-
-function packRoot(): string | null {
-  const bin = installedPerformancePackBin()
-  return bin ? path.dirname(bin) : null
-}
-
-function readRecord(file: string): ProbeRecord | null {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as ProbeRecord
-  } catch {
-    return null
-  }
-}
-
-function matches(record: ProbeRecord | null, root: string): boolean {
-  return !!record && record.packRoot === root && record.driver === nvidiaDriverVersion()
-}
-
-/** Whether helpers may load the CUDA addon on this machine (Windows only). */
-export function onnxCudaVerified(): { usable: boolean; reason?: BackendReason } {
-  if (process.platform !== 'win32') return { usable: false, reason: { code: 'no-device' } }
-  const root = packRoot()
-  if (!root) return { usable: false, reason: { code: 'needs-pack' } }
-  if (matches(readRecord(path.join(root, 'onnx-cuda-verified.json')), root)) return { usable: true }
-  return { usable: false, reason: { code: 'not-verified' } }
-}
 
 function needsProbe(root: string): boolean {
   return (
@@ -86,7 +58,7 @@ async function runProbe(root: string): Promise<boolean> {
   const entry = path.join(__dirname, 'embeddings-worker.js')
   const record: ProbeRecord = {
     packRoot: root,
-    driver: nvidiaDriverVersion(),
+    driver: cachedNvidiaDriverVersion(),
     at: new Date().toISOString()
   }
   let helper: Awaited<ReturnType<typeof forkHelper>> | null = null

@@ -10,8 +10,11 @@ import type {
   PerformancePackStatus
 } from '../shared/performance-pack'
 import { dataDir, resourceFile } from './runtime-env'
-import { hasWindowsNvidiaDriver, hasLinuxNvidiaDriver } from './backend-facts'
-import { cachedNvidiaDriverVersion } from './nvidia-driver'
+import {
+  cachedNvidiaDriverVersion,
+  hasLinuxNvidiaDriver,
+  hasWindowsNvidiaDriver
+} from './nvidia-driver'
 import { hasGpuDevice } from './llm/gpu-device-probe'
 import { engineSpawnEnv } from './llm/spawn-env'
 
@@ -216,6 +219,15 @@ export function onPerformancePackChanged(callback: (status: PerformancePackStatu
   notify = callback
 }
 
+const installedListeners = new Set<() => void>()
+
+/** Called once a pack is installed and active. The owners of the engines that use it (voice,
+ *  search, best settings) refresh from here; this module does not know them. */
+export function onPerformancePackInstalled(listener: () => void): () => void {
+  installedListeners.add(listener)
+  return () => installedListeners.delete(listener)
+}
+
 async function digest(file: string): Promise<string> {
   const hash = createHash('sha256')
   for await (const chunk of fs.createReadStream(file)) hash.update(chunk)
@@ -405,28 +417,8 @@ async function fetchPack(asset: PerformancePackAsset, signal: AbortSignal): Prom
     fs.rmSync(archive, { force: true })
     installedDevice = device
     activateInstalledPerformancePack()
-    // Engines read the pack at their next spawn; voice and search helpers restart onto it, and
-    // Windows tests its ONNX CUDA addon first. No app restart.
-    void (async () => {
-      const [{ invalidateBackendFacts }, { probeOnnxCuda }, { embeddings }, { ttsOnnxRuntime }] =
-        await Promise.all([
-          import('./backend-facts'),
-          import('./onnx-host/onnx-cuda-probe'),
-          import('./embeddings'),
-          import('./tts')
-        ])
-      invalidateBackendFacts()
-      await probeOnnxCuda()
-      invalidateBackendFacts()
-      await Promise.all([embeddings.restart(), ttsOnnxRuntime.restart()])
-    })().catch((error: unknown) => console.warn('[performance-pack] helper restart failed', error))
-    // The CUDA engine is now available: auto-managed installs move onto it.
-    void import('./best-settings')
-      .then((m) => {
-        m.forgetDetectedMachine()
-        return m.ensureBestSettings()
-      })
-      .catch((error: unknown) => console.warn('[best-settings] CUDA refresh failed', error))
+    // Engines read the pack at their next spawn; their owners refresh onto it. No app restart.
+    for (const listener of installedListeners) listener()
   } catch (error) {
     fs.rmSync(staging, { recursive: true, force: true })
     throw error

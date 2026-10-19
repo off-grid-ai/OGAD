@@ -1,5 +1,5 @@
 import { normalizeBackendPreference } from '@offgrid/models'
-import { invalidateBackendFacts, clearDemotions } from './backend-facts'
+import { clearDemotions, invalidateBackendFacts } from './backend-facts-cache'
 import { getSetting, saveSetting } from './database'
 import {
   BACKEND_MODALITIES,

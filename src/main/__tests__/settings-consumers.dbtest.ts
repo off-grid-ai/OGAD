@@ -45,15 +45,15 @@ describe('prompt persistence', () => {
   })
 
   it('reads, fills, and resets a persisted custom template', () => {
-    db.saveSetting('prompt:ragChat', 'Question: {{QUERY}}')
+    db.saveSetting('prompt:sessionSummary', 'Summarize: {{CONVERSATION_TEXT}}')
 
-    expect(getPrompt('ragChat', { QUERY: 'where is the data?' })).toBe(
-      'Question: where is the data?'
+    expect(getPrompt('sessionSummary', { CONVERSATION_TEXT: 'we met about the budget' })).toBe(
+      'Summarize: we met about the budget'
     )
 
-    resetPrompt('ragChat')
-    expect(getPromptTemplate('ragChat')).toBe(
-      PROMPT_REGISTRY.find((prompt) => prompt.key === 'ragChat')?.defaultTemplate
+    resetPrompt('sessionSummary')
+    expect(getPromptTemplate('sessionSummary')).toBe(
+      PROMPT_REGISTRY.find((prompt) => prompt.key === 'sessionSummary')?.defaultTemplate
     )
   })
 })

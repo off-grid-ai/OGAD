@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { installedPerformancePackBin } from '../performance-pack'
-import { onnxCudaVerified } from './onnx-cuda-probe'
+import { onnxCudaVerified } from './onnx-cuda-verified'
 
 /** The pack's ONNX CUDA library folder, when the pack is installed and has one. */
 export function installedOnnxCudaDir(): string | null {

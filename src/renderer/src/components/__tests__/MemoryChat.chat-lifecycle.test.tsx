@@ -1915,9 +1915,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await send('Follow up', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(2))
     expect(vi.mocked(boundary.api.toolChat).mock.calls[1]![1]).toEqual(
+      // Earlier turns carry their day (a dated header and createdAt); the pair is what matters.
       expect.arrayContaining([
-        { role: 'user', content: 'Original question' },
-        { role: 'assistant', content: 'Original answer' }
+        expect.objectContaining({ role: 'user', content: expect.stringContaining('Original question') }),
+        expect.objectContaining({ role: 'assistant', content: 'Original answer' })
       ])
     )
     boundary.resolve(1, 'Follow up answer')
@@ -1964,8 +1965,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const history = vi.mocked(boundary.api.toolChat).mock.calls[2]![1]
     expect(history).toEqual(
       expect.arrayContaining([
-        { role: 'user', content: 'Edited question' },
-        { role: 'assistant', content: 'Edited first answer' }
+        expect.objectContaining({ role: 'user', content: expect.stringContaining('Edited question') }),
+        expect.objectContaining({ role: 'assistant', content: 'Edited first answer' })
       ])
     )
     expect(JSON.stringify(history)).not.toContain('Old branch answer')

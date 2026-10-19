@@ -54,6 +54,22 @@ export function cachedNvidiaDriverVersion(): string | null {
   return cached ?? null
 }
 
+/** Whether Windows has an NVIDIA driver installed (its CUDA driver library is present). */
+export function hasWindowsNvidiaDriver(
+  windowsDir = process.env.WINDIR ?? process.env.SystemRoot ?? 'C:\\Windows'
+): boolean {
+  return fs.existsSync(path.join(windowsDir, 'System32', 'nvcuda.dll'))
+}
+
+/** Whether Linux has an NVIDIA driver loaded (it exposes /dev/nvidiaN). */
+export function hasLinuxNvidiaDriver(): boolean {
+  try {
+    return fs.readdirSync('/dev').some((name) => /^nvidia\d+$/.test(name))
+  } catch {
+    return false
+  }
+}
+
 /** Read the driver again: at startup, on wake and when the GPU settings open. */
 export async function refreshNvidiaDriverVersion(): Promise<string | null> {
   cached = await readNvidiaDriverVersion().catch(() => null)

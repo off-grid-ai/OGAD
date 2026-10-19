@@ -1,7 +1,7 @@
 import path from 'path'
 import { nativeLibraryEnv } from '../native-library-env'
 import { nativeLadder, type NativeStep } from '../backend-facts'
-export { hasWindowsNvidiaDriver, hasLinuxNvidiaDriver } from '../backend-facts'
+export { hasWindowsNvidiaDriver, hasLinuxNvidiaDriver } from '../nvidia-driver'
 
 export async function findWhisperBinary(
   name: 'whisper-cli' | 'whisper-server'

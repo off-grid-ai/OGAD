@@ -1,9 +1,9 @@
-// Fresh-profile integration coverage for RELEASE_TEST_CHECKLIST #35.
+// Fresh-profile integration coverage for RELEASE_TEST_CHECKLIST #34 and #35.
 //
-// This invokes the REAL `rag:chat` handler registered by setupIPC, over the REAL
-// SQLite schema, retrieval queries, prompt assembly, modality queue, and LLM
-// transport. Only true process boundaries are faked: Electron registration,
-// MiniLM embeddings, LanceDB, and llama-server (a real loopback HTTP socket).
+// This invokes the REAL `rag:chat` handler registered by setupIPC and the REAL chat tools loop
+// (toolChat → search_memory → the retrieval engine), over the REAL SQLite schema, prompt assembly,
+// modality queue, and LLM transport. Only true process boundaries are faked: Electron
+// registration, the embedding model, and llama-server (a real loopback HTTP socket).
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
@@ -50,19 +50,11 @@ vi.mock('@huggingface/transformers', () => ({
   pipeline: async () => async () => ({ data: new Float32Array(384).fill(0.01) })
 }))
 
-vi.mock('@lancedb/lancedb', () => ({
-  connect: async () => ({
-    tableNames: async () => [],
-    openTable: async () => {
-      throw new Error('no vector table in a fresh profile')
-    }
-  })
-}))
-
 import { getDB, saveSetting } from '../database'
 import { setupIPC } from '../ipc'
 import { llm } from '../llm'
 import { listProjects } from '../rag/store'
+import { toolChat } from '../tools'
 
 let fake: FakeLlamaServer
 
@@ -80,11 +72,19 @@ beforeAll(async () => {
   // empty here so universalSearch runs its complete production query set against
   // a genuinely empty corpus instead of short-circuiting on missing optional DDL.
   getDB().exec(`
+    -- As Pro's crm/schema.ts creates it.
     CREATE TABLE IF NOT EXISTS observations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       summary TEXT NOT NULL,
       surface TEXT,
+      surface_app TEXT,
       url TEXT,
+      source_session_id TEXT,
+      source_key TEXT,
+      memory_id INTEGER,
+      category TEXT NOT NULL DEFAULT 'work',
+      engagement REAL NOT NULL DEFAULT 0,
+      salience REAL NOT NULL DEFAULT 0,
       ts DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS observation_fts USING fts5(
@@ -142,7 +142,7 @@ describe('rag:chat on an empty memory corpus', () => {
     expect(getActiveTranscription().isAvailable()).toBeTypeOf('boolean')
   })
 
-  it('answers without context and releases the chat seam for the next turn', async () => {
+  it('answers a plain turn on an empty profile and releases the chat seam for the next', async () => {
     const handler = handlers.get('rag:chat')
     expect(handler).toBeTypeOf('function')
     expect(
@@ -158,20 +158,13 @@ describe('rag:chat on an empty memory corpus', () => {
         .get()
     ).toEqual({ count: 0 })
 
-    const streamed: Array<{ channel: string; payload: unknown }> = []
-    const event: IpcEvent = {
-      sender: {
-        send: (channel, payload) => streamed.push({ channel, payload })
-      }
-    }
-
+    const event: IpcEvent = { sender: { send: () => undefined } }
     fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
       { content: 'I do not have any saved memory yet, but I can still help.' },
-      { content: '{"intent":"chat","urls":[]}' },
       { content: 'This second response is ready.' }
     )
 
+    // rag:chat is the direct model call (no retrieval); memory is the chat tools loop's.
     const first = (await handler!(
       event,
       'What do you remember about me?',
@@ -183,44 +176,19 @@ describe('rag:chat on an empty memory corpus', () => {
       'empty-memory-turn-1',
       false,
       []
-    )) as {
-      answer: string
-      context: Record<string, unknown[]>
-    }
-
+    )) as { answer: string; context?: unknown }
     expect(first.answer).toBe('I do not have any saved memory yet, but I can still help.')
     expect(first.answer).not.toMatch(/something went wrong/i)
-    expect(first.context).toMatchObject({
-      memories: [],
-      messages: [],
-      summaries: [],
-      entities: [],
-      entityFacts: [],
-      unified: []
-    })
-    const modelPrompt = JSON.stringify(fake.requests[1]?.messages ?? [])
-    expect(modelPrompt).toContain('RELEVANT MEMORIES:\\n(none)')
-    expect(modelPrompt).toContain('RELEVANT MESSAGES:\\n(none)')
-    expect(modelPrompt).toContain('RELEVANT SUMMARIES:\\n(none)')
-    expect(modelPrompt).toContain('RELEVANT ENTITIES:\\n(none)')
-    expect(modelPrompt).toContain('RELEVANT ENTITY FACTS:\\n(none)')
-    expect(streamed).toContainEqual({
-      channel: 'rag:stream',
-      payload: {
-        streamId: 'empty-memory-turn-1',
-        type: 'step',
-        step: {
-          kind: 'memory',
-          counts: { memories: 0, messages: 0, summaries: 0, entities: 0, facts: 0, unified: 0 }
-        }
-      }
-    })
+    expect(first.context).toBeUndefined()
 
     const second = (await handler!(
       event,
       'Can I ask another question?',
       'All',
-      [],
+      [
+        { role: 'user', content: 'What do you remember about me?' },
+        { role: 'assistant', content: first.answer }
+      ],
       null,
       'fresh-chat',
       false,
@@ -228,14 +196,13 @@ describe('rag:chat on an empty memory corpus', () => {
       false,
       []
     )) as { answer: string }
-
     expect(second.answer).toBe('This second response is ready.')
-    expect(fake.requests).toHaveLength(4)
+    expect(fake.requests).toHaveLength(2)
+    expect(JSON.stringify(fake.requests[1])).toContain('What do you remember about me?')
   })
 
   it('retrieves seeded local memory and returns its citation in All memory mode (#34)', async () => {
-    const handler = handlers.get('rag:chat')
-    expect(handler).toBeTypeOf('function')
+    fake.requests.length = 0
     const db = getDB()
     const inserted = db
       .prepare(
@@ -251,55 +218,28 @@ describe('rag:chat on an empty memory corpus', () => {
       inserted.lastInsertRowid,
       'Project Aurora uses the release code obsidian.'
     )
-
-    const streamed: Array<{ channel: string; payload: unknown }> = []
-    const event: IpcEvent = {
-      sender: {
-        send: (channel, payload) => streamed.push({ channel, payload })
-      }
-    }
     fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
+      { toolCalls: [{ name: 'search_memory', args: { query: 'Aurora release code' } }] },
       { content: 'The Aurora release code is obsidian [S1].' }
     )
 
-    const result = (await handler!(
-      event,
-      'Aurora release code obsidian',
-      'All',
-      [],
-      null,
-      'seeded-memory-chat',
-      false,
-      'seeded-memory-turn',
-      false,
-      []
-    )) as {
-      answer: string
-      context: { unified: Array<{ refId: number; snippet: string; surface: string }> }
-    }
+    const result = await toolChat('Aurora release code obsidian', [], {
+      conversationId: 'seeded-memory-chat',
+      allMemory: true
+    })
 
     expect(result.answer).toBe('The Aurora release code is obsidian [S1].')
-    expect(result.context.unified).toEqual([
+    expect(result.unified).toEqual([
       expect.objectContaining({
+        key: `obs:${Number(inserted.lastInsertRowid)}`,
         refId: Number(inserted.lastInsertRowid),
-        snippet: 'Project Aurora uses the release code obsidian.',
         surface: 'Synthetic release notes'
       })
     ])
+    expect(result.unified[0]!.snippet).toContain('Project Aurora uses the release code obsidian.')
+    // The answer's model call saw the cited source with its tag.
     const answerPrompt = JSON.stringify(fake.requests.at(-1)?.messages ?? [])
     expect(answerPrompt).toContain('[S1]')
     expect(answerPrompt).toContain('Project Aurora uses the release code obsidian.')
-    expect(streamed).toContainEqual({
-      channel: 'rag:stream',
-      payload: {
-        streamId: 'seeded-memory-turn',
-        type: 'step',
-        step: {
-          kind: 'memory',
-          counts: expect.objectContaining({ unified: 1 })
-        }
-      }
-    })
   })
 })

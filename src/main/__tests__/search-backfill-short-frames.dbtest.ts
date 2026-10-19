@@ -1,11 +1,11 @@
 /**
- * Search indexing drains capture frames too short to embed (backlog item 33), against the real
+ * Short capture frames never hold the search backlog open (backlog item 33), against the real
  * profile database.
  *
- * The pending scans no longer measure frame text in SQL. A short frame is selected, skipped
- * without an embedding, and recorded as handled, so the backlog empties instead of keeping it.
- * Electron, the embedding model and the native vector store are the only controlled boundaries:
- * the model throws if asked, so this proves a short frame never reaches it.
+ * A frame is not a search record: its words belong to the moment it is linked to, which is what
+ * gets embedded. So frames never enter the embedding queue, and a run of short frames ("ok",
+ * "see you at 3") leaves nothing pending. Electron and the embedding model are the only controlled
+ * boundaries: the model throws if asked, so this proves a frame never reaches it.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
@@ -29,9 +29,6 @@ vi.mock('@huggingface/transformers', () => ({
     throw new Error('a short frame must not be embedded')
   },
   env: {}
-}))
-vi.mock('@lancedb/lancedb', () => ({
-  connect: async () => ({ openTable: async () => ({}), tableNames: async () => [] })
 }))
 
 import { getDB } from '../database'
@@ -59,18 +56,16 @@ afterAll(() => {
 })
 
 describe('search indexing backlog', () => {
-  it('records frames too short to embed as handled, so the backlog empties', async () => {
+  it('never queues short capture frames, so the backlog stays empty', async () => {
+    expect((await searchStatus()).pending).toBe(0)
     const insert = getDB().prepare("INSERT INTO frames (surface, text) VALUES ('Slack', ?)")
     insert.run('ok')
     insert.run('see you at 3')
 
-    expect((await searchStatus()).pending).toBe(2)
+    expect((await searchStatus()).pending).toBe(0)
     await runBackfill()
 
     expect((await searchStatus()).pending).toBe(0)
-    const handled = getDB()
-      .prepare("SELECT key FROM vec_indexed WHERE key LIKE 'frame:%' ORDER BY key")
-      .all() as { key: string }[]
-    expect(handled.map((row) => row.key)).toEqual(['frame:1', 'frame:2'])
+    expect(getDB().prepare('SELECT COUNT(*) AS n FROM record_vectors').get()).toEqual({ n: 0 })
   })
 })

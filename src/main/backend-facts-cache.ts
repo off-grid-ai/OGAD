@@ -1,0 +1,24 @@
+// What backend-facts remembers between reads: cached device answers and the backends a fault
+// demoted. A leaf, so the backend choice store can clear it when a choice changes.
+
+import {
+  BACKEND_MODALITIES,
+  type BackendFacts,
+  type BackendModality,
+  type NativeBackend
+} from '@offgrid/models'
+
+export const demoted: BackendFacts['demoted'] = {}
+export const probes = new Map<string, Promise<boolean>>()
+
+export function demoteBackend(modality: BackendModality, backend: NativeBackend): void {
+  const backends = (demoted[modality] ??= [])
+  if (!backends.includes(backend)) backends.push(backend)
+}
+export function clearDemotions(modality?: BackendModality): void {
+  for (const value of modality ? [modality] : BACKEND_MODALITIES) delete demoted[value]
+}
+/** Forget cached device answers after a pack install, a driver change or wake. */
+export function invalidateBackendFacts(): void {
+  probes.clear()
+}

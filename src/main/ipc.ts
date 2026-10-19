@@ -61,6 +61,7 @@ import { requestApplicationRelaunch } from './shutdown'
 import {
   activateInstalledPerformancePack,
   onPerformancePackChanged,
+  onPerformancePackInstalled,
   pausePerformancePack,
   performancePackStatus,
   startPerformancePack
@@ -231,6 +232,29 @@ export function setupIPC(): void {
     BrowserWindow.getAllWindows().forEach((window) =>
       window.webContents.send('performance-pack:changed', status)
     )
+  })
+  onPerformancePackInstalled(() => {
+    // Voice and search helpers restart onto the pack (Windows tests its ONNX CUDA addon first),
+    // and auto-managed settings move onto the CUDA engine.
+    void (async () => {
+      const [{ invalidateBackendFacts }, { probeOnnxCuda }, { embeddings }, { ttsOnnxRuntime }] =
+        await Promise.all([
+          import('./backend-facts'),
+          import('./onnx-host/onnx-cuda-probe'),
+          import('./embeddings'),
+          import('./tts')
+        ])
+      invalidateBackendFacts()
+      await probeOnnxCuda()
+      invalidateBackendFacts()
+      await Promise.all([embeddings.restart(), ttsOnnxRuntime.restart()])
+    })().catch((error: unknown) => console.warn('[performance-pack] helper restart failed', error))
+    void import('./best-settings')
+      .then((m) => {
+        m.forgetDetectedMachine()
+        return m.ensureBestSettings()
+      })
+      .catch((error: unknown) => console.warn('[best-settings] CUDA refresh failed', error))
   })
   ipcMain.handle('performance-pack:status', performancePackStatus)
   ipcMain.handle('performance-pack:start', startPerformancePack)
