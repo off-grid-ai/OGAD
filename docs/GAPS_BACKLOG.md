@@ -1,129 +1,14 @@
 # Gaps backlog
 
 Honest log of gaps, regressions, and "not fully done" items. Each entry: what, evidence,
-how to reproduce, and the fix direction. Close with evidence; never hide.
+how to reproduce, and the fix direction. Close with evidence; never hide. This file only
+holds open work: remove an entry once it is resolved (the record lives in git history).
+
+Mobile-owned gaps live in the mobile repo's `docs/GAPS_BACKLOG.md`.
 
 ---
 
 ## OPEN
-
-### MODEL-REMOTE-20261013 (P1) - Serve grounding and decision specialists through the OGAD API
-
-**Status:** source patch prepared; keep open until the PR is merged and released.
-
-**Evidence (2026-10-13, nightly 0.0.55-beta.122 on Runpod):** UI-Mate-27B and Kev 4B are installed.
-The server task-role endpoint reports UI-Mate as the local grounding specialist, but `/v1/models`
-omits both specialists. The Mac remote-server dropdowns therefore show only the active Qwen chat
-model. `/v1/chat/completions` routes local requests to Chat rather than the requested specialist.
-Repeatedly selecting Kev with Use does not change the visible active lineup when the task strategy
-does not use a decision model; verify this selection behavior separately from runtime startup.
-
-**Required change:** advertise installed, runnable specialists with stable model IDs and route each
-request to the existing grounding or decision runtime. Keep the existing remote-client contract,
-Chat selection, streaming, errors, and cancellation behavior. Do not send Kev requests to Chat.
-
-**Acceptance:** the Mac discovers UI-Mate and Kev through the Runpod API; a small synthetic image
-request reaches UI-Mate; a small option-selection request reaches Kev and returns valid choice
-probabilities. Confirm CUDA for both. Preserve Chat and the persistent model files. Record the
-installed patch and verification here; a Runpod-only patch does not close the Git/release work.
-
-**Patch evidence:** installed on Runpod nightly 0.0.55-beta.122. A small synthetic Save-button image
-returned a UI-Mate result; Kev chose Save with 0.9916 probability through the private API. Runtime
-logs and GPU process memory confirm CUDA for both. Role dropdowns now filter grounding specialists
-and decision outputs separately, using the existing catalog and output-modalities contract.
-A renderer integration check covers UI-Mate, Kev, a provider decider, and a general vision model.
-The patched Mac client is installed. Its Grounding and Decision dropdowns were checked separately.
-The Kev Use action now enables a decision strategy while preserving each task's grounding choice.
-A real Electron check with a temporary profile passed all five starting strategies.
-
-### MODEL-SPLIT-20261013 (P1) - Download all GGUF shards with one file-picker action
-
-**Status:** source patch prepared; keep open until the PR is merged and released.
-
-**Evidence (2026-10-13, nightly 0.0.55-beta.122):** selecting a split Qwen3.8 Flash Next GGUF in the
-GUI downloads only the selected shard plus its projector. The user had to download part 1 separately
-after selecting part 2. The loader requires the complete matching shard set in the same directory.
-
-**Required change:** selecting any shard must resolve the complete matching set, download all parts
-and the required projector through the existing download queue, and record part 1 as the primary
-file. Validate the full set before download; preserve checksums, progress, cancellation, resume,
-existing completed files, and non-split downloads. Never combine different quantizations or folders.
-
-**Acceptance:** use a small complete split-file fixture to verify either selection fetches all parts
-once and records part 1; a missing shard fails clearly. Verify the installed Runpod patch without
-downloading the existing 75.8 GB model again. Record focused checks and remaining GUI/release checks.
-
-**Patch evidence:** shard resolution is installed on Runpod. Focused fixtures cover selection of
-either shard, order and metadata, incomplete sets, folders, quantizations, and ordinary files.
-A full GUI transfer was not repeated. Release and GUI download checks remain open.
-
-### MODEL-IMAGE-REMOTE-20261013 (P1) - Forward source images to remote editing endpoints
-
-**Status:** patched Mac client installed; a small real remote image edit returned HTTP 200.
-PR merge and release remain open.
-
-**Evidence:** a selected remote Qwen Image 2.1 model was rejected in the Mac client before the
-request reached the server. The client unconditionally rejected every remote init image.
-
-**Change:** send a source image as multipart data to the existing `/v1/images/edits` endpoint;
-retain JSON `/v1/images/generations` for requests without a source image. Preserve authentication,
-cancellation, and provider error handling. A small HTTP boundary fixture verifies source bytes,
-model, prompt, size, and the returned image for edit and generation requests.
-The separate chat claim that ten pages were generated after tool failures is not fixed here.
-
-### MODEL-TTS-REMOTE-20261013 (P1) - Load remote OGAD voices and languages
-
-**Status:** installed on Mac and Runpod. Remote synthesis returned WAV audio.
-After Keychain approval, the installed Mac comic reader shows English (US), Heart,
-and an enabled Read aloud control. The empty-selector check is complete.
-
-The remote OGAD server returns 20 voices, but Desktop returned an empty list for every
-remote provider except OpenRouter. Read the existing `/audio/voices` endpoint for OGAD,
-and use the shared Kokoro catalog for labels and languages. Two HTTP boundary checks
-verify the voice list, language mapping, and the selected voice sent for synthesis.
-No new API fields or stored preferences are required.
-
-### CHAT-ARTIFACT-SCROLL-20261013 (P2) - Keep chat usable beside an artifact
-
-**Status:** installed and restarted on Mac and Runpod. Renderer type check passed.
-A focused Mac UI check scrolled the chat while the artifact remained open.
-
-ArtifactCanvas used the modal SidePanel default. Its full-window backdrop caught the chat's
-wheel and click events. The existing panel now accepts an optional non-modal mode, used only
-by ArtifactCanvas. The chat can keep its own scroll and keyboard focus, while Close and Escape
-still dismiss the artifact. Other side panels retain their backdrop and focus trap.
-
-### MODEL-REMOTE-NAME-20261013 (P2) - Show a model label instead of its file path
-
-**Status:** installed and restarted on Mac and Runpod. Seventeen focused checks passed.
-The Mac composer displays Qwen3.8 Flash Next GSQ RCO IQ3_XXS without the server path.
-
-Remote providers can return a GGUF path as the model ID and as its name. The remote inventory
-now removes the directory, extension, and split suffix from filename labels. It preserves
-explicit display names and provider IDs, and keeps the full routing ID unchanged.
-Seventeen remote inventory tests passed, including six label and routing cases.
-
-### MODEL-IMAGE-CUDA-20261013 (P1) - Select CUDA with a nonzero Linux GPU index
-
-**Status:** installed on Runpod. A 256 × 256, one-step image edit returned HTTP 200.
-The live `sd-cuda/sd-cli` process used 10,600 MiB of GPU memory with no CPU-offload flag.
-The complete request took 39.2 seconds; this does not establish full-page generation latency.
-
-The CUDA pack is installed, but the image loader checked only `/dev/nvidia0`. Runpod
-exposes `/dev/nvidia1`, so it selected Vulkan. Reuse the existing NVIDIA driver check
-that accepts numbered GPU nodes. The earlier driver detection patch did not fix this
-separate image-runtime selector. An active real image request used the Vulkan sd-cli
-with CPU offload; successful CUDA use by Chat and specialists did not prove image CUDA.
-
-### MODEL-COMIC-PROMPT-20261013 (P2) - Include only selected comic options
-
-**Status:** source checks passed; installed in both Mac and Runpod renderers.
-Prompt selection checks passed in source. No new comic run was started for verification.
-
-The comic prompt included all six art treatments. Filter catalog option instructions against
-the approved choices and omit unanswered optional comic fields. Keep page count, format,
-reference image, and continuity rules when supplied. Tests cover all 24 style/format pairs
-and supplied optional inputs. Existing form submission checks also pass (27 tests total).
 
 ### REC-F6-001 (P1) - Desktop recovery backlog items need final review
 
@@ -177,48 +62,6 @@ Web Use journey and inspect its light/dark screenshots. Also run one safe Comput
 Mac. Prove that screenshots, mapped pointer, fresh evidence, milestone progress, and the active model
 are factual. For Computer Use, prove that Pause, Resume, Take Over, Stop, Chat Stop, and Esc stop or
 park the real native actuator as shown.
-
-### CU-013 (P1) - Computer Use and Web Use have different visual workflow owners
-
-**Evidence (2026-08-26):** Web Use runs `runVisionTaskGraph` through `browser-visual-task.ts`.
-Desktop Computer Use still runs the older `runVisionTask` loop through `vision-host.ts`. The old loop
-adds a model answer to `policyHistory` before it knows whether actuation succeeds. A rejected action,
-handoff, rethink, or terminal decision can therefore remain in the next model request as a prior
-validated decision. The graph commits that history only after successful actuation and discards it
-for rejected or non-action decisions.
-
-The standalone `vision-agent.test.ts` command does not finish and had to be stopped after 30 seconds.
-Scoped ESLint also reports a hard error in `vision-policy-runner.ts`, plus size and complexity
-warnings in both workflow owners. The superseded semantic `web-task-agent.ts` runtime and its tests
-have been removed; Web Use now has one production workflow owner.
-
-**Impact:** the same valid model response can produce different history and recovery behavior on the
-desktop and browser surfaces. Two owners can drift on Stop, evidence, milestone, and action-commit
-rules.
-
-**Fix direction:** route both surfaces through one workflow owner with injected capture and action
-boundaries. Commit model history only after successful action execution. Remove superseded runtime
-loops when the shared path is wired. Make the focused desktop test finish, then clear the scoped lint
-gate and rerun both surface journeys.
-
-### CU-015 (P0) - Selectable remote vision paths violate the local-only contract
-
-**Evidence (2026-08-26):** the standing product constraint says local models only and nothing leaves
-the device. The current model UI can select OpenRouter or a custom remote server.
-`vision-policy-runner.ts` then sends the base64 screenshot and full task context to that server.
-Only OpenRouter receives an explicit `reasoning_effort`; Ollama, LM Studio, OGAD, and custom
-OpenAI-compatible endpoints do not get a transport-level thinking control. The application does not
-prove that every selectable remote model is thinking-enabled.
-
-**Impact:** a cloud endpoint can receive private screen evidence and task context without a product
-exception to the local-only rule. Other remote paths can also run the required contract without a
-verified thinking mode.
-
-**Fix direction:** remove network model-server selection from Computer Use and Web Use, or make a
-documented product decision that changes the local-only constraint. Any approved exception needs an
-explicit per-server privacy boundary, clear local-network versus cloud disclosure, user opt-in, and
-a capability gate that rejects a model unless the required visual, structured-output, and thinking
-features are verified.
 
 ### SYN-004 (P1) - Late-pair full graph is not verified between the real Desktop and Mobile apps
 
@@ -402,31 +245,6 @@ boundary and must be switchable from malformed to valid output during the run. N
 should claim end-to-end coverage until that seam exists. Packaged macOS evidence still requires
 before/progress/after screenshots plus privacy-safe logs correlated by stable error code and frame
 identifier only.
-
-### DEF-004 (P1) - Oversized capture analysis stays pending and retries forever
-
-**Evidence (2026-08-09):** the live macOS database showed 115 frames as `pending` under the stable
-`capture-model-unavailable` code. Every row carried the same model-runtime response: the analysis
-request exceeded the model context window. The backlog was not a burst of current capture failures:
-114 rows dated to Aug 3, while the last 30 minutes contained 57 observed frames, 12 intentional
-skips, and one pending frame. Pending accessibility text ranged from 1,442 to 71,633 characters, and
-the same rows had accumulated between 3 and 202 transient retries.
-
-**Impact:** capture remains available and the images stay saved, but Replay never receives
-observations for these frames. The UI reports only a growing pending count while the processor spends
-time repeating requests that cannot fit the selected model. A model shown as `ready` therefore
-coexists with a six-day queue that has no visible reason or recovery path.
-
-**Owning seams:** capture input construction owns a model-aware text/image token budget;
-`capture-retry-policy.ts` owns the retry ceiling and backoff; frame persistence owns a durable blocked
-reason; Capture & processing owns the user-facing backlog explanation and recovery action.
-
-**Acceptance criteria:** fit capture input within the active model's context budget using a
-deterministic, privacy-preserving reduction strategy; bound and back off repeated context-overflow
-attempts; retain the captured frame when analysis cannot proceed; distinguish actively queued work
-from work blocked by model capacity; and show the exact next action without exposing captured text.
-Changing models or increasing context, then retrying, must drain the blocked backlog and update Replay
-and queue counts through the normal database and IPC owners.
 
 ### DEF-005 (P1) - Settings Pro previews are dead ends and omit Proactive delivery
 
@@ -672,8 +490,6 @@ usable. Assert no duplicate record and no recorder/transcription child survives.
 deliberately outside APP-142's requirement, narrow its documentation so it claims recorder lifecycle
 only and assign the finalization outcome to a separately identified case.
 
----
-
 ### SYN-001 (P2) - The offline-chat gateway journey cannot reach its own server
 
 `src/main/__tests__/image-runtime-reliability.integration.dbtest.ts > multimodal runtime reliability >
@@ -697,79 +513,7 @@ rest of this document: a port is either serving or it is not, and only the serve
 Found while landing the generated-image sync fixes; NOT caused by them (they cannot close a socket),
 though that was argued from the failure mechanism rather than proved against the base commit.
 
----
-
-### SYN-002 (P1) - Deliveries outlive the device, and inflate every count the user reads
-
-2,246 of the delivery rows on this Mac point at a `device_id` that is not in `sync_paired_devices`
-at all. They can never succeed, and they are counted:
-
-| device_id                          | in paired table | rows                                                                   |
-| ---------------------------------- | --------------- | ---------------------------------------------------------------------- |
-| `6e1c3b7150fb1f088b52a4c2e99eda78` | no              | 2,077 (1,559 skipped · 367 failed · 150 queued · 95 sent · 2 rejected) |
-| `8Lj2tUzzpBQ1zJEPHGfrSw`           | no              | 119 (78 sent · 18 dismissed · 16 rejected · 5 skipped · 2 queued)      |
-
-A device is forgotten and its deliveries stay. So "158 queued" and the failure total describe work
-aimed at machines this Mac no longer has any relationship with, and no retry can ever clear them.
-The delivery is parented by a device, so forgetting the device must settle its deliveries - the same
-lifecycle rule as everywhere else in this document.
-
-**Second, smaller finding.** Those two ids are not the same SHAPE. A device id here is 32 hex chars
-and a membership id is 11; `8Lj2tUzzpBQ1zJEPHGfrSw` is 22 base64url chars, which decodes to 16 bytes -
-the same width a device id encodes as hex, but not equal to any id this Mac holds. So the column has
-carried more than one id encoding over its life. Worth confirming before any migration keys on the
-column, because a comparison between the two forms silently fails.
-
-**This also corrects two entries in the previous session's handoff.**
-
-1. `service.listPaired()` does NOT return 1. It reads `sync_paired_devices`, which holds all three
-   devices. `pro:sync:share-file` resolves destinations from it, so destinations were never narrowed
-   to the offline Windows machine. The "all 1 paired device" count came from the RENDERER being
-   handed `saved` instead of the whole mesh, and that is already fixed on this branch.
-2. The failures are not one offline machine. They are spread: Windows 1,928 · iPhone 480 ·
-   a forgotten device 367. And the phones do receive - iPhone 103 sent, Nord 12 sent.
-
----
-
-### SYN-003 (P2) - A knowledge-document test outlives its own temp directory
-
-`pro/main/sync/__tests__/knowledge-document-sync-service.test.ts` fails in a full-directory run with
-`ENOENT: mkdir '/var/.../offgrid-knowledge-sync-XXXX/stage'`, and passes on its own. ENOENT on mkdir
-means the PARENT is gone, so the root the test made has already been removed while the service is still
-working in it - async work started by a test and not awaited by it, cleaned up underneath.
-
-Not a collision with its sibling: `knowledge-document-transfer.test.ts` shares the `offgrid-knowledge-`
-prefix but removes only its own root, by path.
-
-Two tests in the same directory therefore pass or fail depending on timing, which makes the suite a
-weak signal exactly where it should be strongest. The fix is for the test to await what it started, or
-for the service to expose a settled point to wait on.
-
-Found while landing the peer-link adoption. Not caused by it: nothing in that change touches
-knowledge-document sync, and the service under test builds no orchestrator.
-
----
-
-### DEF-009 (P2) - ModelPicker re-implements the Computer Use model-resolution rule in the renderer
-
-**Evidence (2026-08-27):** `src/renderer/src/components/ModelPicker.tsx` (~lines 175-179) re-derives
-which model Computer Use will run: it checks `computerUseStrategy === 'same_as_chat'` and matches
-models by `id` / `primaryFile` itself. The main process already owns that rule - the grounder loader's
-`modelStrategy`, `selectedGrounderModelId`, and `resolveActiveBrowserVisionSelection` are the source
-of truth. Two layers now answer "which model grounds Computer Use", kept in step by hand; any change
-to the main-process rule (a new strategy, a different identity key) silently strands the renderer copy
-and the picker labels the wrong model.
-
-**Fix direction:** collapse to one source. Add a main-process IPC (e.g.
-`getComputerUseModelSelection()`) that returns the resolved model identity, expose it through the
-preload, and have ModelPicker render that answer instead of re-deriving it.
-
-**Why deferred:** needs a new IPC channel plus a preload surface change, out of scope for a
-quality-only pass. Filed during the 2026-08-27 code-quality sweep.
-
----
-
-## Deferred from PR #60 review (CodeRabbit)
+### Deferred from PR #60 review (CodeRabbit)
 
 - **bench-capture.mjs — `downscale()` failure aborts the whole run.** A corrupt/unreadable frame
   throws out of the batch/single loops instead of being skipped. Dev-only benchmark tool (not
@@ -782,7 +526,7 @@ quality-only pass. Filed during the 2026-08-27 code-quality sweep.
   reflect the actually-run model when `effectiveEngine !== engineForActiveModel`. (PR #60,
   src/main/transcription/select.ts:153)
 
-## Deferred from desktop-pro PR #32 review (Gitar)
+### Deferred from desktop-pro PR #32 review (Gitar)
 
 - **Transcript provenance shows the selected model even after a cross-family engine fallback.**
   Same root as PR #60's select.ts:153 item. Fixing naively (label built-in when effectiveEngine
@@ -799,7 +543,7 @@ quality-only pass. Filed during the 2026-08-27 code-quality sweep.
   intentional (one local whisper); UX follow-up = disable the button / show "another run active"
   when busy for a different meeting. (MeetingsScreen.tsx:160)
 
-## e2e gate: graduate from advisory → blocking
+### e2e gate: graduate from advisory → blocking
 
 The Playwright e2e is wired into CI (own `e2e` job) and pre-push, but **advisory** (non-blocking)
 for now.
@@ -849,56 +593,6 @@ this spec should not be trusted as a hard gate until the hotkey is driven determ
 options: assert the global-shortcut registration before pressing, or expose a test-only IPC that
 triggers the same handler and keep the native-key path as a separate, quarantined check.
 
-### RESOLVED: a licensed installation this device never paired with became a repair row that could not repair
-
-Fixed in `@offgrid/sync`. Three parts: a row with no local pairing now reports `hasCredential: false`
-rather than leaving it absent, so the repair asks for the code instead of promising a reconnection with
-nothing to reconnect with; a device with an eviction in flight no longer also gets a saved row; and the
-saved pass no longer deletes devices from the discovered map, which is what hid `Pair again` after a
-failed eviction. Covered by two new tests in `shared/packages/sync/test/control-center.test.mjs`.
-
-Desktop needed no change of its own: its eviction store already tolerates an empty local side
-(`prepareEviction` uses `active?.membershipId ?? ''`) and `runEviction` already surfaces failures. The
-mobile host had neither and was fixed there.
-
-Original report follows.
-
-`projectSyncControlCenter` builds its `saved` list by walking the licence registry's installations and
-treating a local pairing as enrichment. That is correct for the roster - the licence IS the authority on
-which devices belong to the mesh - but it means an installation with NO matching local pairing still
-produces a row, and that row lands in `needs_repair` (`control-center.ts`: `!paired || repairIds.has(...)`).
-
-Two consequences, one of them user-visible and already seen on device:
-
-1. **A repair that cannot succeed.** The row offers `membershipRepair.kind === 'reconnect'` -
-   "Trying the saved pairing again may be enough" - when there is no saved pairing to try. This is the
-   ghost row seen after reinstalling a phone: the phone re-registers under a new sync device id, its old
-   installation stays on the licence, and the stale one renders as a device asking to be reconnected.
-   The wording is `reconnect` rather than `pair` only because `hasCredential` is absent and absent is
-   deliberately read as present (see the comment at the `credentialLost` line) so that a host which does
-   not report the field is not accused of having lost every pairing.
-
-2. **It can steal the discovered record from another row.** The `saved` pass calls
-   `discoveredById.delete(deviceId)`, so a stale installation consumes the discovery entry before the
-   membership-revocation pass looks for it. `revocationPeerDiscovered` is then false and
-   `actions.pairAgain` is hidden - meaning a failed eviction cannot be recovered from even while the
-   other device is sitting on the network. Demonstrated: with the licence listing the device and a
-   `stage: 'failed'` revocation present, `pairAgain` projects as `{visible: false, enabled: false}`.
-
-Note this does NOT arise from a normal eviction. `PersonalMeshDeviceEvictionCoordinator.evict()`
-deregisters the installation before it ever contacts the peer, so the seat is released immediately and
-the evicted device correctly appears once, in `available`. The trigger is a genuinely stale installation.
-
-Candidate fixes, both deliberately not taken yet:
-
-- Do not emit a `saved` row for an installation with no local pairing (narrow; may hide a real device
-  whose pairing this side genuinely lost).
-- Have the desktop and mobile hosts report `hasCredential` so the repair correctly says "Pair" and asks
-  for the code (touches both hosts, and is the more honest fix).
-
-The test asserts only the revocation row's own retry semantics and states in a comment that the
-`saved` count is deliberately unasserted, so this defect is recorded rather than blessed.
-
 ### Worth a look: the eviction confirmation promises the peer's licence is cleared
 
 `projectMembershipEvictionConfirmation` adds "Off Grid AI will also remove its saved licence" whenever
@@ -907,97 +601,6 @@ the device is connected. That sentence is only earned if the eviction actually r
 an authenticated session, which is the strongest reachability fact available - but the promise is made
 before delivery is confirmed, and a failed eviction leaves the user believing something that did not
 happen. Flagged for a copy decision, not changed.
-
-### Needs a decision: the Entity Graph screen is gone from the pro renderer, its IPC is not
-
-`entity-graph-renderer.integration.dbtest.ts` asks for `proView('graph', ...)` and gets nothing back:
-the route does not exist. The router now knows day, replay, reflect, devices, actions, meetings,
-entities, memories, search, notifications, clipboard, voice and vault - no graph. Nothing under
-`pro/renderer/` imports `react-force-graph-3d` or calls `getEntityGraph` any more.
-
-Core still carries the whole surface, though: `getEntityGraph` and `rebuildEntityGraph` are in
-`src/main/ipc.ts`, `src/main/database.ts` and the preload contract. A feature that was retired on
-purpose would normally have taken its IPC with it, which is why this is written down rather than
-resolved by deleting the test.
-
-Two readings, and they want opposite actions:
-
-- The graph was deliberately retired and folded into Entities. Then the test should go, and so should
-  the three IPC handlers and the preload entries, or they are dead surface area a renderer can still call.
-- The screen was lost in a refactor. Then the test is correctly failing and the screen needs restoring.
-
-The test is left red on purpose. Deleting it would remove the only thing still asserting that the graph
-services work end to end, and would make the second reading invisible.
-
-### RESOLVED (2 of 3): the pro-tier Devices e2e specs
-
-`e2e/devices-sync.spec.ts` is new on this branch and its `Devices surface — pro tier` describe was red in
-BOTH environments, hidden because the desktop CI `E2E (Playwright, xvfb)` step is `continue-on-error`.
-
-**Fixed - `renders the real Devices screen with live sync status`.** It asserted the text `LAN + nearby ready`
-and a heading `Personal mesh`. Neither string exists anywhere in `src/`, `pro/` or `shared/packages/`: the
-first was never shipped, and the second is now `Licensed devices`. The screen reports itself per ROUTE - one
-chip reading `LAN: ready`, or `LAN: <listen>/<advertise>/<browse>` when it is not (`syncRouteDisplay` +
-`DevicesScreen.tsx`) - so the spec now asserts that, plus the nearby counter. The screen underneath was fine
-the whole time; the spec was failing on its own stale copy.
-
-**Fixed - `sync settings ... expose a toggle per replicated category`.** Passes with the above; it was
-inheriting a broken screen state from the spec before it, not failing on its own account.
-
-**Still red - `pairs a real peer and converges projects and chats`.** Two problems, one down:
-
-- The harness constructed `ClipboardSyncCoordinator` without the `deliveryPersistence` its options require, so
-  the spec died inside its own setup (`Cannot read properties of undefined (reading 'load')` from
-  `loadPendingDeliveries`) before reaching the app. The synthetic peer now has an in-memory delivery store
-  beside its history store. FIXED.
-- What remains is not a harness defect: pairing now requires an **8-character code** shown on the other
-  device ("Enter the 8-character pairing code shown on the other device"), and the synthetic peer neither
-  mints one nor presents one the app will accept. `PairingCodeService` lives in
-  `shared/packages/sync/src/pairing-code.ts`; wiring it into the synthetic peer is the same job as the
-  standing "make pairing work in the test harness" item, so it is tracked there rather than bodged here.
-
-Verified headless: 5 of 6 in that file pass; the pairing one is the single remaining failure.
-
-### The desktop `ci` check hides three advisory steps
-
-`Lint`, `Heavy integration (build/native/port)` and `E2E (Playwright, xvfb)` are all
-`continue-on-error: true` in `.github/workflows/ci.yml`, so a green `ci` says nothing about them. On the
-last successful run: heavy integration reported **12 failed / 15 passed**, all in macOS packaging and
-real-engine files that cannot pass on a Linux runner (`packaged-helpers`, `release-packaging`,
-`whisper-cli-build`, `model-server-chat`, `HealthPanel`), and the e2e step failed the macOS-only pro
-surfaces (clipboard restore, Vault clipboard copy, dictation) plus `resilience-single-instance`.
-
-The Linux-impossible ones are a platform mismatch rather than rot - but they are being run and reported
-as failures on every push, which trains everyone to ignore the step. They should either be excluded by
-platform (like `vitest.db.ci.config.ts` does, with the reason recorded per file) or moved to a macOS
-runner, so that what remains inside an advisory step is only ever a real signal.
-
-### P1 - the desktop always reports its platform as `macos`, so a Windows node lies about itself
-
-`pro/main/sync/sync-store.ts:318` builds the LOCAL device identity with `platform: 'macos'` hardcoded,
-unconditionally, on every OS. Nothing misdetects Windows - the local device never reports its OS at all.
-The same literal is hardcoded in three more places: `pro/main/sync/model-transfer-service.ts:105` and
-`:414`, and `pro/main/sync/keygen-personal-mesh-registry.ts:163-164`.
-
-**Observed on the lab mesh (2026-08-06).** The Windows 11 ARM guest on .64, renamed
-`OGAD x.x.x.64 (Win)`, appears in the macOS node's own LICENSED DEVICES list as `macOS`, and the Android
-lists TWO macOS devices when the LAN has exactly one Mac. `DevicePlatform` in
-`shared/packages/sync/src/types/index.ts:2` already allows `"windows"`, so this is a missing
-`process.platform` map (`darwin`->macos, `win32`->windows, `linux`->linux), not a missing type.
-
-**Why P1 and not a labelling nit - `platform` gates two real decisions:**
-
-- `shared/packages/sync/src/multi-transport.ts:29` treats `platform === "ios" || "macos"` as
-  Apple-proximity-capable, so the mesh will attempt an APPLE-ONLY transport route to a Windows box.
-- `shared/packages/sync/src/transfer/model.ts:96-104` (`platformTransferBlocker`) refuses a model whose
-  `origin` platform differs from `receiverPlatform`, which exists precisely to stop an unrunnable
-  transfer. A Windows receiver claiming `macos` DEFEATS that guard: a macOS-only GGUF is allowed to
-  transfer to a machine that cannot load it. `model-transfer-service.ts:414` pins
-  `receiverPlatform: 'macos'` too, so both sides of that comparison are wrong together.
-
-Not fixed here: this is product code under `pro/`, and this sweep is not authorised to change `src/`.
-A fix needs a single platform helper used by all four sites, plus a test that a non-darwin
-`process.platform` yields a non-`macos` identity - otherwise the next hardcode reintroduces it.
 
 ### P2 - a long-running desktop instance can end up with NO sockets at all, mesh included
 
@@ -1024,178 +627,7 @@ peer reports should be derived from the listener actually being bound, so `servi
 outlive the socket. A liveness check that re-binds or reports unhealthy would have surfaced this in
 seconds instead of days.
 
-### P1 - the device cap REFUSES at 5 instead of reclaiming, and the seat it counts is the pairing target's own
-
-Observed 2026-08-06, driving the real lab mesh. After activating the Mac's Pro licence
-(`08634d13-641c-455d-957b-ad1834c5fb50`, policy `ec95153c`, `maxMachines: null`) on the Android, the
-Android's Devices screen reports:
-
-    5 of 5 devices saved
-    All slots are in use. Forget a saved device before pairing another.
-    0 connected
-
-and pairing with the macOS node on .64 is refused outright. Three separate defects are tangled here.
-
-**1. It refuses where it is documented to reclaim.** The stated behaviour is that a 6th device is
-admitted by reclaiming the least attributable seat, never by refusing. This is a flat refusal at 5, with
-the remedy pushed onto the user ("Forget a saved device"). Nothing was reclaimed.
-
-**2. The counter and the list disagree, so the remedy is impossible.** The screen says `5 of 5 devices
-saved` but renders only TWO saved rows (`fa4d14a6…`, `c375a25b…`). The other three seats are invisible,
-so a user told to "forget a saved device before pairing another" cannot forget them - there is no row to
-act on. The cap is counting LICENCE MACHINES (Keygen reports exactly 5 on that licence) while the list
-renders only locally-saved sync pairings. Two different populations behind one number.
-
-**3. Worst: the target's own seat blocks pairing with the target.** The device being paired with -
-the .64 Mac, fingerprint `d0e933934ac1be2b3ecf50ce0d7fbc85` - is ITSELF one of the 5 machines on that
-licence. So the Android is refused a pairing with a device that already holds a seat on the Android's own
-licence. A seat held by the pairing target cannot sensibly count against admitting that same target;
-the cap check needs to exclude the counterparty (and ideally any machine already in the mesh) before
-declaring the mesh full.
-
-**Related, same session:** the licence swap silently dropped the working iPhone<->Android pairing. The
-iPhone (`9d25c24e…`) is not among the machines on this licence - it is still on the previous one
-(`c88a9e27…`) - and its row on the Android reverted from `Connected - LAN` to an unpaired
-`sync-pair-9d25c24e…`. A licence change invalidating existing trust may be intended, but it happens with
-no warning and no explanation on either screen.
-
-Evidence: Keygen machine roster for the licence (5: one android `6e1c3b71…`, four macos incl.
-`fa4d14a6…` which is really the Windows guest per the platform P1 above), against the Android's two
-rendered rows.
-
----
-
-## Sync never re-connects a saved device after the session drops (only after a NEW discovery)
-
-**Status:** open. Found 2026-08-07 while building the four-device e2e flow suite.
-
-**Symptom, seen on two screens at once.** The iPhone `17 pro max` and the Mac `OGAD x.x.x.25 (MacOS)`
-are paired, both hold the credential, and each can see the other. The link drops (a phone restart is one
-way in). Neither side ever comes back on its own. The Mac sits on `Last connected just now` /
-`The device could not be reached.` with a `Reconnect` button, and the iPhone sits on `macos - Nearby`
-with its own `Reconnect`. Tapping Reconnect works instantly - so the credential, the address and the
-transport are all fine. The only thing missing is anything that decides to retry.
-
-**Cause.** Auto-reconnect is edge-triggered on discovery and nothing else. `Orchestrator.handleFound`
-(`shared/packages/sync/src/orchestrator.ts:223`) is the only automatic caller of `engine.reconnect()`,
-and it is wired to `discovery.onDeviceFound` (`orchestrator.ts:81`). Two consequences:
-
-1. A peer that is ALREADY in the discovery set produces no new `found` event, so `handleFound` never
-   runs again for it. The device is visible and saved and still never retried.
-2. A dropped session is a dead end. `onDisconnected` reaches production at
-   `desktop/pro/main/sync-ipc.ts:342`, where it only calls `chatStream?.onDisconnected(deviceId)`.
-   The orchestrator is never told, so nothing schedules a reconnect.
-
-The state machine heals on the RISING edge of discovery and never on the FALLING edge of a session.
-`orchestrator.ts:174` shows the intent was already understood - "until now the user was the retry
-mechanism" - but that was fixed for a STALE ADDRESS (`connectSaved`), not for a lost session.
-
-**Why it looks like one bad pair.** It is not. The other four links in the mesh simply have not dropped.
-Any link that drops stays dropped in exactly the same way.
-
-**Fix shape.** Make healing level-triggered: on `onDisconnected`, hand the device back to the
-orchestrator so a saved peer with a held credential is retried on a backoff for as long as discovery
-still sees it. `connectSaved` already does the hard part (re-resolve a stale address, then reconnect);
-what is missing is a caller on session loss. Guard with the existing `connecting` set so a flapping link
-cannot stack retries.
-
-**Consequence for the e2e suite.** Flow 2 ("reconnect a dropped saved device with the held credential,
-no code") passes only because the flow TAPS Reconnect. The unattended behaviour a user actually relies
-on - it comes back by itself - is untested and currently absent. Worth its own flow once fixed.
-
----
-
-## Disconnecting a device leaves BOTH sides saying "Needs repair", and it never clears
-
-**Status:** open. Found 2026-08-07 driving the four-device e2e suite.
-
-**Symptom.** Press the `x` (disconnect) on a connected peer - a deliberate, non-destructive action that
-is supposed to close the session and keep the credential. Both devices then show the other as
-`Needs repair`, with the description "The other device did not recognise this one." Nothing failed to
-recognise anything: the user pressed disconnect. Both sides still hold their credentials
-(`sync-paired-<id>`, offering repair rather than pair), so the accusation is not even true.
-
-Observed on OnePlus Nord 5 <-> 17 pro max. After the disconnect, BOTH rows read `Needs repair`.
-
-**It does not heal.** The peer was made discoverable again and a full rescan run; 90 seconds later
-both rows still read `Needs repair`. Only a manual repair tap clears it.
-
-**Cause.** `needs_repair` has exactly one source - `syncRuntimeCallbacks.ts:185`:
-
-    onPairingFailed: (remote, error) => {
-      if (remote && error === 'unknown_device') {
-        pairingSecretStore.markNeedsRepair(remote)
-
-So a single `unknown_device` answer is taken as fact. `pairingSecretStore.markNeedsRepair` documents
-the very false positive this hits - "a peer that is restarting, or whose pairing store has not
-finished loading, answers exactly the same way" - and keeps the secret for that reason, but the STATE
-is still set from one unanswered handshake, and nothing later re-tests it.
-
-`control-center.ts:298` then makes it stick to the top of the priority list: `needs_repair` beats
-`available`, so the row keeps the warning even once the peer is discovered again and reachable.
-
-**Why it matters.** This is the ordinary path - disconnect and reconnect later is what the control is
-FOR. A user who uses it once is left with two devices showing a red warning triangle and an
-instruction to repair a pairing that was never broken.
-
-**Fixed, in part (2026-08-07).** A disconnect the user asked for no longer enters this path.
-`onDisconnected` already consulted `manuallyDisconnected` to present the row as
-available-and-disconnected; a handshake refusal arriving afterwards overwrote that. `onPairingFailed`
-now consults the same set and leaves the pairing alone. That is the whole of the reported symptom.
-
-**Still open: one `unknown_device` is still taken as a verdict when the disconnect was NOT deliberate.**
-Requiring two consecutive refusals was tried and reverted, because nothing retries after a refusal: a
-pairing failure is not a disconnect, so no heal is scheduled, the second answer never arrives, and a
-peer that has genuinely forgotten this device would sit silent instead of asking for a repair. Trading
-a false accusation for silence is the worse bug, and `syncPersistence.integration.test.ts`
-("repairs one-sided trust") catches exactly that.
-
-So corroboration needs a RETRY before it can be safe: on the first refusal, re-attempt the reconnect
-with the held credential and decide on the second answer. The orchestrator already knows how to retry
-on a backoff (`connectSaved`, added the same day for dropped sessions); what is missing is entering it
-from a refused handshake rather than only from a lost session.
-
----
-
-## macOS: a CONNECTED device offers no actions at all
-
-**Status:** open. Found 2026-08-07 while driving the model-transfer flow by hand.
-
-**Symptom.** On the Mac's Devices screen, every connected peer card carries ZERO controls. Enumerated
-live from the DOM:
-
-    CARD: 17 pro max            ->  buttons: NONE
-    CARD: OnePlus Nord 5        ->  buttons: NONE
-    CARD: OGAD x.x.x.26 (Win)   ->  buttons: NONE
-    CARD: Off Grid AI Desktop   ->  buttons: Pair        (unpaired - this one has a control)
-    CARD: OGAD x.x.x.25 (MacOS) ->  buttons: NONE
-
-So on macOS a user cannot send a model, disconnect, forget or rename a device they are connected to.
-The only cards with controls are the ones NOT connected: unpaired shows `Pair`, saved-but-away shows
-`Reconnect` / `Evict`. Being connected removes every action.
-
-Both phones offer all four on every row - `sync-rename-<id>`, `sync-disconnect-<id>`,
-`sync-send-model-<id>`, `sync-forget-<id>` - so this is a desktop gap, not a product decision.
-
-**Consequence.** Flow 12 (send a model, with progress on both sides) cannot be driven from the Mac at
-all. Model transfer desktop -> phone is unreachable through the UI.
-
----
-
-## macOS: the "N/5 licensed devices" chip is a button that goes nowhere
-
-**Status:** open. Found 2026-08-07, same session.
-
-`4/5 licensed devices` on the Devices header is a real `<button>`, so it invites a click. Clicking it
-leaves the screen unchanged - no panel, no navigation, no roster. A user looking for which devices are
-on their licence (the thing they need before evicting one to free a seat) finds a control that does
-nothing.
-
-Either it lists the licensed installations, or it is not a button.
-
----
-
-## Harness: there is NO passive way to observe an iPhone through WDA
+### Harness: there is NO passive way to observe an iPhone through WDA
 
 **Status:** open, harness limitation. Learned the hard way 2026-08-07, twice in one session.
 
@@ -1226,69 +658,7 @@ its own state over a dev-only local endpoint, which the harness reads without go
 would make observation free on every platform and is probably the right long-term answer for a suite
 that has to watch journeys it is not driving.
 
----
-
-## Model transfer: the sender says "sent", the receiver says "could not receive"
-
-**Status:** partially fixed 2026-08-07. Found by looking at both screens during a real macOS -> iOS send.
-
-**F6 evidence, 2026-09-11:** Desktop and Mobile now advertise model-transfer support explicitly,
-and saved or discovered peer facts keep that capability. Focused Shared and app integration checks
-pass, and both development apps start with the new wiring. This does not close the gap. A real
-multi-GB transfer, interruption and resume, receiver load, sender/receiver completion agreement, and
-visual review still need two physical devices. This task did not control the UI.
-
-**Symptom.** The Mac reported the model sent successfully. The iPhone reported the same transfer as
-"could not receive / interrupted". Both screens were honest about their own side, and the user has no
-way to know which to believe.
-
-**Cause.** The sender decided completion from its own loop:
-
-    await this.sendPackage({ ... })
-    modelTransferJobs.update(job.id, { phase: 'completed' })   // unconditional
-
-`advanceJob` already receives the receiver's status and maps `failed` onto the job - but the loop runs
-afterwards and overwrote it. The reason completion lives in the loop is sound (a per-file `completed`
-would end a two-file vision package after its primary), but it made the sender's "I pushed the bytes"
-outrank the receiver's "they did not arrive".
-
-**Fixed:** the loop no longer marks a job completed if it is already `failed`.
-
-**Still open, and bigger:** "completed" on the sender still means _bytes pushed_, not _peer verified_.
-The picker promises otherwise - "the receiving device verifies the complete model before it appears in
-Models" - so the sender should wait for a receiver-side completion signal, and show something like
-"sent, awaiting verification" until it arrives. Guarding against an already-failed job closes the
-contradiction we saw; it does not make the sender's success mean what the copy says.
-
----
-
-## A model package that fails midway leaves a working-looking text model
-
-**Status:** open. Same session, same transfer.
-
-A vision package is two files sent in order: `Qwen3.5-0.8B-Q4_K_M.gguf` (508 MB) then
-`mmproj-Qwen3.5-0.8B-BF16.gguf` (198 MB). The transfer interrupted between them. The result on the
-receiver:
-
-- the primary is on disk, complete, and registered as a MODEL
-- the projector never arrived, so nothing links one
-- the model therefore presents as a plain text model, 508 MB, and loads happily
-- Activity, on another screen, says the transfer failed
-
-So a failed vision transfer silently produces a model that works and cannot see, and the only hint is
-a failure notice somewhere else. A user who does not cross-check believes they have the model.
-
-Package install needs to be atomic, or explicitly incomplete: either resume the missing file, or
-present the model as needing repair (the vision-repair path already exists for a missing projector and
-would fit exactly), or discard the partial package. What it must not do is register half a package as
-a whole model of a different kind.
-
-**Related and also open:** whether the interrupted projector left a partial file behind. That is flow
-15 ("a failed receive discards the partial file"), still unverified.
-
----
-
-## macOS Activity reports FILES, so a half-sent package reads as success
+### macOS Activity reports FILES, so a half-sent package reads as success
 
 **Status:** open. Verified on screen and against the engine log, 2026-08-07.
 
@@ -1332,9 +702,7 @@ show. Absence is indistinguishable from "there was never a second file".
 Independently: `0 failed` next to a logged `request.failed` is its own bug - the failed job is not
 reaching Activity even for the file that DID have a row.
 
----
-
-## MTP is a mobile feature, and it should be a `@offgrid/models` one
+### MTP is a mobile feature, and it should be a `@offgrid/models` one
 
 **Status:** open. Filed 2026-08-12. Deliberately NOT in the current PR - it is a package extraction,
 not a fix, and folding it in would bloat a release branch that is about sync feedback.
@@ -1362,55 +730,7 @@ deciding for itself. Desktop then gets it by consuming the package, and so does 
 phone runtime rather than about MTP. Those belong on the platform adapter, not in the shared rule - and
 the tell is any code in the extracted package that names a platform.
 
----
-
-## Every non-image attachment syncs to desktop as "text" and previews blank
-
-**Verdict:** fix-the-guard — the kinds exist, the write path never uses them.
-
-Reproduced on hardware 16 Aug 2026: a message sent from iPhone with three attachments (a camera
-photo, a library screenshot and `mobile.pdf`). On desktop the PDF arrives as a chip reading
-
-```
-mobile.pdf   text
-```
-
-and opening it shows an empty viewer with only Download and Close - nothing renders. Android shows
-the same message correctly, because it has its own renderer.
-
-The attachment type already names the kinds:
-
-```ts
-kind: 'text' | 'pdf' | 'docx' | 'image' | 'audio' | 'video'
-```
-
-but the write path in `src/renderer/src/components/MemoryChat.tsx` (~2940) only ever chooses between
-two of them:
-
-```ts
-if (isImage) { kind: 'image', code: a.path }
-else if (a.text) { kind: 'text', code: a.text }
-```
-
-A PDF has no image path, so it falls through to `text` and renders `a.text` - which for a binary
-document is empty. Hence a labelled-but-blank preview rather than an error.
-
-**This is not PDF-specific.** Any non-image attachment takes the same branch. It was predicted from
-the v0.0.103 diff for VOICE NOTES - "Mac classifies any non-image as kind: 'text', so a .wav arrives
-as a paperclip chip labelled text, and clicking it opens a blank viewer" - and never reproduced until
-now. A PDF and a voice note are the same bug.
-
-**Why it matters:** the attachment did sync. The bytes are there (Download works). What is broken is
-the classification and therefore the rendering, so the user sees a file they cannot open and
-concludes the transfer failed.
-
-**Fix:** classify by MIME/extension into the kinds the union already declares, carry `path` for
-binary kinds rather than `text`, and render a PDF/document viewer for them. `src/main/mime.ts`
-already exists and is the obvious source of truth.
-
----
-
-## Model transfer can use more of a fast local network
+### Model transfer can use more of a fast local network
 
 **Status:** open, non-blocking for the current release. Filed 2026-08-21.
 
@@ -1425,9 +745,7 @@ desktop-to-phone transfer at a time, separate checksum preparation from wire tim
 directions. Also persist verified file checksums so a repeat send does not hash the same multi-GB
 model again after an app restart. Keep the 4 MiB authenticated frame format and bounded memory.
 
----
-
-## Desktop voice modes need the final physical audio pass
+### Desktop voice modes need the final physical audio pass
 
 **Status:** automation-backed; manual device verification is open. Filed 2026-08-24.
 
@@ -1451,9 +769,7 @@ The remaining boundary is the installed macOS app with real hardware and models.
 Close this gap only with the exact packaged build, an audible reply, the real macOS microphone
 indicator, and a saved diagnostic excerpt that identifies the active speech-to-text model.
 
----
-
-## Personal Mesh visibility and Google OAuth need installed passes
+### Personal Mesh visibility and Google OAuth need installed passes
 
 **Status:** automation-backed; manual macOS and provider verification is open. Filed 2026-08-24.
 
@@ -1476,9 +792,7 @@ Close this gap only with the device names, OS versions, exact build commits, Goo
 status, redacted provider evidence, and completed checklist rows. Do not put client secrets, tokens,
 mail, calendar records, or other private data in release evidence.
 
----
-
-## Remote task approval and live-frame sync need lifecycle closure
+### Remote task approval and live-frame sync need lifecycle closure
 
 **Status:** code resolved 2026-08-28; physical cross-device verification pending.
 
@@ -1506,9 +820,7 @@ Electron build passes. Keep this entry open only for the final two-Desktop physi
 release build: default routing, exact named routing, permission off, live frame, all four controls,
 offline recovery, and terminal cleanup.
 
----
-
-## Release 107 exact-operation Sync needs final Desktop owner and restart proof
+### Release 107 exact-operation Sync needs final Desktop owner and restart proof
 
 **Status:** Code and Shared build evidence exist; Desktop Built and Live verified gates are open.
 Filed 2026-08-29.
@@ -1536,9 +848,7 @@ Keep this gap open until these gates pass on the final tree:
 Two earlier clean restarts are retained evidence. They do not close this gap because the related
 exact-operation code changed later.
 
----
-
-## Release 107 Computer Use PiP needs final installed visual proof
+### Release 107 Computer Use PiP needs final installed visual proof
 
 **Status:** Code and Wired gates pass; Built and Live verified gates are open. Filed 2026-08-29.
 
@@ -1550,9 +860,7 @@ Keep this gap open until the final Desktop build passes and one installed macOS 
 confirms that no Computer Use PiP appears before, during, or after the task. Also confirm that the
 task pane still shows the live frame, current step, controls, guidance, and terminal replay.
 
----
-
-## Release 107 QR panel and sidebar parity need final Desktop proof
+### Release 107 QR panel and sidebar parity need final Desktop proof
 
 **Status:** Shared QR Code and Built gates pass. Desktop code is still being finalized. Desktop Built
 and Live verified gates are open. Filed 2026-08-30.
@@ -1575,36 +883,6 @@ Keep this gap open until focused Desktop tests pass, the final production build 
 installed macOS check proves the QR panel and both sidebar widths. The QR check must use an iPhone to
 scan and pair the exact Desktop. Android is not required to close the Desktop visual proof.
 
----
-
-## PR #84 Dependency Cruiser reported a Playwright task cycle
-
-**Status:** resolved by the type-contract split below on 2026-08-30; final build and live verification
-are pending.
-
-Dependency Cruiser failed on this import path:
-
-```text
-browser-playwright-task-support.ts
-  -> browser-playwright-task.ts
-  -> browser-playwright-task-support.ts
-```
-
-The support module imported task input and result types from the task implementation. The task
-implementation imported the support functions. `browser-playwright-task-contract.ts` now owns the
-task input, result, and semantic observation contracts. The task implementation keeps type re-exports
-for existing consumers. The support and semantic evidence modules import the type-only contract
-directly. Runtime behavior did not change.
-
-Local evidence on commit `bcb86a09675cca8a60da68ff2afb571510454b9f` plus this directed fix:
-
-1. Focused Dependency Cruiser: 107 modules and 206 dependencies, 0 violations.
-2. Full Dependency Cruiser: 1,011 modules and 2,808 dependencies, 0 errors. The two existing orphan
-   warnings remain for `computer-use-frame-pointer.ts` and `MessageNudge.tsx`.
-3. Node and web TypeScript checks: pass.
-4. Web Use lifecycle and semantic evidence tests: 2 files, 7 tests, all pass.
-
-
 ### 2026-10-13: Runpod resident image engine and model discovery follow-up
 
 - Resident Qwen-Image generation and edits use the existing SD server, including the language encoder, vision projector, and VAE. API progress no longer forces a fresh CLI process.
@@ -1615,11 +893,3 @@ Local evidence on commit `bcb86a09675cca8a60da68ff2afb571510454b9f` plus this di
 - 38 focused Desktop checks passed on the main-based PR candidate. The workspace main type check passes. The isolated main-based type check has the existing Shared video-phase mismatch; no new diagnostics were reported in the changed code.
 - Shared search contract checks passed (4). Live Qwen search returned Turbo image repositories and excluded the AtomicChat encoder-only result after honoring its text-encoder tag. Repositories with incomplete metadata can still be misclassified; full artifact compatibility must be checked separately.
 - Remaining work: expose all downloaded image, speech, and transcription choices through their existing runtime routing; validate complete arbitrary Hugging Face image packs before offering them for image generation. The AtomicChat Uncensored download is an encoder and is kept under Vision, with the user's active image choice unchanged.
-
-
-### 2026-10-13: Preserve comic prose across image tool rounds
-
-- Keep visible prose from all tool-calling rounds in the returned answer. Save that answer with the final comic reader so the title, continuity notes, and tables remain after image generation.
-- Six transport checks pass, including native and text-form image calls. Both new regression cases fail against the previous tool loop. A separate public API integration check covers split downloads, specialist discovery, decision JSON/SSE/async replies, grounding sync/async replies, and selecting downloaded chat models through a synthetic native inference boundary.
-- Remove the runtime-manager/LLM import cycle by passing the existing chat backend reader at startup. Shared PR #49 retains per-shard checksum metadata and types image-search metadata.
-- Deployment of this follow-up is pending: Runpod is offline after its credits ran out. The Mac archive update stopped when the disk filled; the prior archive and a backup remain, but the app signature needs repair before use. Do not mark this follow-up as installed.
