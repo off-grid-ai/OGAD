@@ -10,6 +10,39 @@ Mobile-owned gaps live in the mobile repo's `docs/GAPS_BACKLOG.md`.
 
 ## OPEN
 
+### REL-DRAFTS-20261022 (P2) - Three abandoned draft releases are still on OGAD
+
+**Status:** open. Drafts `v0.0.55-beta.129`, `.130` and `.131` (2026-10-21) are still listed as Draft. The user
+said "can delete please" on 2026-10-21. The session asked for a direct confirmation, and none came.
+
+**Required change:** delete the three drafts. Keep `v0.0.55-beta.132` (published 2026-10-21 from `60fcd25d4`).
+
+### ENGINE-NIGHTLY-20261022 (P1) - The nightly engine update has never run
+
+**Evidence (2026-10-22):** `.github/workflows/update-engines.yml` is on `main` with `cron: '30 1 * * *'` and is
+enabled, but `gh workflow view update-engines.yml` reports 0 runs. The 01:30 UTC run after the #209 merge did
+not fire. The job also needs `vars.ENGINE_UPDATE_ENABLED != 'false'`.
+
+**Required change:** trigger one `workflow_dispatch` run and find out why the schedule did not fire.
+
+**Acceptance:** a scheduled run appears, builds, and opens its PR or reports that nothing changed.
+
+### CUDA-LIVE-20261022 (P1) - The 2026-10-21-v1 CUDA packs are not checked on a real NVIDIA GPU
+
+**Status:** open. The packs are on R2 and pinned in `resources/performance-packs.json`. The engine lists on
+runtime.getoffgridai.co carry llama.cpp b11791, sd.cpp master-982 and whisper.cpp v1.9.5. The Runpod session ran
+a model with CUDA, but not with the new packs.
+
+**Acceptance:** an installed Linux or Windows build with an NVIDIA GPU downloads the new pack, then runs chat,
+image and transcription on CUDA.
+
+### WAKE-LIVE-20261022 (P2) - Overnight wake is not checked on real machines
+
+**Status:** open. The code is on `main`. Nobody has checked the real wake prompt: the macOS `pmset` password
+prompt, the Windows scheduled task, and the Linux timer.
+
+**Acceptance:** one overnight capture wakes the machine on each platform.
+
 ### REC-F6-001 (P1) - Desktop recovery backlog items need final review
 
 **Check 2026-10-22:** item 4 has `bc6b8a97e` (router offers image tools for "draw a dog"); item 6 has model transfer code (`a9fe7150b`, `1ffe96553`). Item 5: `App.tsx` still shows a spinning loader while Pro loads. The other items are unclassified.
