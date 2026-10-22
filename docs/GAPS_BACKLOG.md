@@ -12,6 +12,8 @@ Mobile-owned gaps live in the mobile repo's `docs/GAPS_BACKLOG.md`.
 
 ### REC-F6-001 (P1) - Desktop recovery backlog items need final review
 
+**Check 2026-10-22:** item 4 has `bc6b8a97e` (router offers image tools for "draw a dog"); item 6 has model transfer code (`a9fe7150b`, `1ffe96553`). Item 5: `App.tsx` still shows a spinning loader while Pro loads. The other items are unclassified.
+
 **Status:** open; reported during the cumulative F6 manual pass on 2026-09-11. These items are
 observations and possible earlier product work. They are not approved implementation scope and have
 not yet been classified against the pre-migration baseline.
@@ -177,6 +179,8 @@ fresh/existing-profile grant/revoke/relaunch run or dark-mode visual evidence wa
 lint is now clean.
 
 ### DEF-003 (P1) - Capture exposes raw JSON parser failures and strands failed frames
+
+**Check 2026-10-22:** code largely fixed (`8b50d85`; `pro/renderer/CaptureFailureRecovery.tsx` shows the failed count and Retry; invalid output is terminal with a safe message). Still owed: the synthetic-frame E2E seam, packaged screenshots, and diagnostic history kept after recovery.
 
 **Evidence (2026-08-08):** Capture & processing displayed `Last frame failure: Expected ',' or ']'
 after array element in JSON at position 446 (line 11 column 2)`, with 14 failed frames. The model
@@ -357,6 +361,8 @@ real TCC grant/return/relaunch flow and show that no nested scroll ancestor reta
 DOM visibility alone is not closure evidence.
 
 ### DEF-008 (P1) - Catalog model downloads have a checksum gate but no trusted checksums
+
+**Check 2026-10-22:** still open. `download-verify.ts` skips the check when there is no hash. `catalog-speech.ts` has 0 digests; `catalog-chat.ts` has 17 for 47 sizes. Nothing fails the build on a missing digest.
 
 **Evidence (2026-08-09):** APP-025 passed its full rendered journey after the download boundary first
 served a corrupt payload with a bad GGUF header: production kept the `.part`, showed the integrity
@@ -545,6 +551,8 @@ though that was argued from the failure mechanism rather than proved against the
 
 ### e2e gate: graduate from advisory → blocking
 
+**Check 2026-10-22:** lint and heavy integration are now blocking (`06cefbf60`). Only the E2E step (`ci.yml`, `continue-on-error: true`, gated on `vars.OFFGRID_CI_E2E`) is still advisory.
+
 The Playwright e2e is wired into CI (own `e2e` job) and pre-push, but **advisory** (non-blocking)
 for now.
 
@@ -659,6 +667,8 @@ would make observation free on every platform and is probably the right long-ter
 that has to watch journeys it is not driving.
 
 ### macOS Activity reports FILES, so a half-sent package reads as success
+
+**Check 2026-10-22:** the package state is tracked (`model-package-transfer.ts`), but Activity is still built from per-file `transferActivity` in `DevicesScreen.tsx`.
 
 **Status:** open. Verified on screen and against the engine log, 2026-08-07.
 
@@ -883,13 +893,10 @@ Keep this gap open until focused Desktop tests pass, the final production build 
 installed macOS check proves the QR panel and both sidebar widths. The QR check must use an iPhone to
 scan and pair the exact Desktop. Android is not required to close the Desktop visual proof.
 
-### 2026-10-13: Runpod resident image engine and model discovery follow-up
+### MODEL-DISCOVERY-20261013 (P2) - The API does not list every downloaded speech and transcription model
 
-- Resident Qwen-Image generation and edits use the existing SD server, including the language encoder, vision projector, and VAE. API progress no longer forces a fresh CLI process.
-- On dedicated CUDA hosts, resident chat and image engines remain loaded across their queue transitions. Explicit Unload, model changes, shutdown, and on-demand behavior retain their existing paths. Mac unified-memory eviction is unchanged.
-- Remote image requests now carry saved size, steps, guidance, seed, and negative prompt settings.
-- The API advertises all complete downloaded chat models; Text + Vision excludes grounding and decision specialists. Image search retains matching local catalog entries and uses the Shared search correction.
-- Installed on Runpod and the signed per-user Mac app. Runpod synthetic 256 × 256, one-step generation → chat → generation returned success, retaining the same image PID 69919 and chat PID 69781. The image requests took 4.50 s and 2.56 s including transport. This is not a full comic-page benchmark.
-- 38 focused Desktop checks passed on the main-based PR candidate. The workspace main type check passes. The isolated main-based type check has the existing Shared video-phase mismatch; no new diagnostics were reported in the changed code.
-- Shared search contract checks passed (4). Live Qwen search returned Turbo image repositories and excluded the AtomicChat encoder-only result after honoring its text-encoder tag. Repositories with incomplete metadata can still be misclassified; full artifact compatibility must be checked separately.
-- Remaining work: expose all downloaded image, speech, and transcription choices through their existing runtime routing; validate complete arbitrary Hugging Face image packs before offering them for image generation. The AtomicChat Uncensored download is an encoder and is kept under Vision, with the user's active image choice unchanged.
+**Status (checked 2026-10-22):** resident image engines and image/text/vision discovery shipped in `1ec5d3acd`.
+`src/main/model-server.ts` still reports only the active speech and transcription pick.
+
+**Required change:** list every downloaded speech and transcription model through its existing runtime routing.
+Check that an arbitrary Hugging Face image pack is complete before offering it for image generation.
