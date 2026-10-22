@@ -73,6 +73,12 @@ did not get `generate_image`.
 **Required change:** route each sentence's request on its own score, so a second request does not depend on the
 first.
 
+### COVERAGE-GATE-20261022 (decision) - CI has no total-coverage gate
+
+**Status:** needs a decision. New-code coverage became report-only on 2026-10-21 (`ci.yml`), and
+`vitest.config.ts` turns thresholds off when `OFFGRID_AGGREGATE_COVERAGE=1`. A total-coverage gate is about an
+hour of work.
+
 ### REC-F6-001 (P1) - Desktop recovery backlog items need final review
 
 **Check 2026-10-22:** item 4 has `bc6b8a97e` (router offers image tools for "draw a dog"); item 6 has model transfer code (`a9fe7150b`, `1ffe96553`). Item 5: `App.tsx` still shows a spinning loader while Pro loads. The other items are unclassified.
