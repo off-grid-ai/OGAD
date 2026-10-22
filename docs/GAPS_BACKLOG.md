@@ -903,7 +903,7 @@ Keep this gap open until focused Desktop tests pass, the final production build 
 installed macOS check proves the QR panel and both sidebar widths. The QR check must use an iPhone to
 scan and pair the exact Desktop. Android is not required to close the Desktop visual proof.
 
-### MODEL-DISCOVERY-20261013 (P2) - The API does not list every downloaded speech and transcription model
+### 2026-10-13: Runpod resident image engine and model discovery follow-up
 
 **Status (checked 2026-10-22):** resident image engines and image/text/vision discovery shipped in `1ec5d3acd`.
 `src/main/model-server.ts` still reports only the active speech and transcription pick.
