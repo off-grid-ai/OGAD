@@ -43,6 +43,36 @@ prompt, the Windows scheduled task, and the Linux timer.
 
 **Acceptance:** one overnight capture wakes the machine on each platform.
 
+### SEARCH-RULES-TESTS-20261022 (P2) - The model search rules have no direct tests
+
+**Evidence:** no test calls `isHiddenUpload`, `baseModelKey`, `parseMoeParams` or `newerModelFor` from
+`shared/packages/models/src/search-rules.ts`. The picks are covered by `model-fit-phone.test.mjs` and
+`e2e/model-picks-download-to-chat.spec.ts`.
+
+**Required change:** add contract tests in `shared` for each rule.
+
+### MODEL-FLUX2-KLEIN-20261022 (P2) - No image model with a commercial licence in the catalog
+
+**Evidence:** Qwen-Image 2.1 has a research-only licence. FLUX.2 klein 4B is the planned commercially safe
+replacement, but `catalog-image.ts` has no FLUX.2 or klein entry.
+
+**Required change:** add FLUX.2 klein 4B with pinned files and checksums, then check that sd.cpp runs it.
+
+### MODEL-BADGES-20261022 (P3) - Model card badges repeat on many cards
+
+**Evidence (2026-10-21 review):** "FASTER REPLIES" appears on most cards, and the Image tab's Fast pick shows
+"FAST" twice. "VISION" is now an icon. Not re-checked since.
+
+**Required change:** show a badge only where it tells cards apart. Show each badge once per card.
+
+### TOOL-ROUTING-20261022 (P2) - A weak second request inside a page build does not get the image tool
+
+**Evidence (Runpod, 2026-10-21):** "Also generate a photo of a croissant" in a page-build turn scored 0.47 and
+did not get `generate_image`.
+
+**Required change:** route each sentence's request on its own score, so a second request does not depend on the
+first.
+
 ### REC-F6-001 (P1) - Desktop recovery backlog items need final review
 
 **Check 2026-10-22:** item 4 has `bc6b8a97e` (router offers image tools for "draw a dog"); item 6 has model transfer code (`a9fe7150b`, `1ffe96553`). Item 5: `App.tsx` still shows a spinning loader while Pro loads. The other items are unclassified.
