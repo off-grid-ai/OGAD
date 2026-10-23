@@ -145,7 +145,8 @@ describe('after the user opts in', () => {
     await service.shutdown()
     expect(fake!.events.map((event) => event.event)).toEqual(['$exception'])
     expect(fake!.bodies.join('')).not.toContain('alice')
-    expect(fake!.bodies.join('')).toContain('notes.txt')
+    expect(fake!.bodies.join('')).not.toContain('notes.txt')
+    expect(fake!.bodies.join('')).toContain('failed at <file>')
   })
 
   it('stops sending, drops the queue and resets the ID on opt-out', async () => {
