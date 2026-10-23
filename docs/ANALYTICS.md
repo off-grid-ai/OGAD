@@ -117,7 +117,7 @@ All multi-step journeys use three events with a `flow` property, so every funnel
 
 ## Report a problem
 
-- OGAM: opens the mail composer to the support address with the debug log attached. If no mail app is set up, use the share sheet.
+- OGAM: shows the debug log, then opens the share sheet addressed to support. iOS attaches the log file; Android puts the log's latest part in the message text.
 - OGAD: shows the debug log with Copy, then opens a mail draft to the support address; the user pastes the log into it (a `mailto:` link cannot attach a file).
 - The debug log never holds chat content: no log line may include prompts, replies, transcripts or tool output.
 - The user sees the log before it is sent.
