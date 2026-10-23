@@ -420,11 +420,11 @@ jobs:
           # Build every artifact with publication disabled. The artifact hook verifies
           # both the updater ZIP and DMG before this command can complete.
           npx electron-builder --mac --arm64 \
-            -c.dmg.artifactName='OffGrid-${version}-${arch}.${ext}' \
+            -c.dmg.artifactName='OffGrid-${version}.${ext}' \
             --publish never
           # electron-builder notarizes the app before it creates the DMG. Submit the
           # completed, signed DMG too, then staple its ticket for offline Gatekeeper.
-          DMG="dist/OffGrid-$VERSION-arm64.dmg"
+          DMG="dist/OffGrid-$VERSION.dmg"
           xcrun notarytool submit "$DMG" \
             --key "$APPLE_API_KEY" \
             --key-id "$APPLE_API_KEY_ID" \
@@ -528,7 +528,7 @@ jobs:
             cp dist/latest-mac.yml dist/pro-mac.yml
             gh release upload nightly dist/pro-mac.yml --clobber
           fi
-      # Stable "always latest" download link. The versioned DMG (OffGrid-<v>-arm64.dmg)
+      # Stable "always latest" download link. The versioned DMG (OffGrid-<v>.dmg)
       # changes name every release, so /releases/latest/download/<name> can't target
       # it. Upload a constant-named COPY so this URL is permanent across releases:
       #   https://github.com/off-grid-ai/OGAD/releases/latest/download/OffGrid-latest.dmg
@@ -540,7 +540,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          cp "dist/OffGrid-$VERSION-arm64.dmg" dist/OffGrid-latest.dmg
+          cp "dist/OffGrid-$VERSION.dmg" dist/OffGrid-latest.dmg
           gh release upload "v$VERSION" dist/OffGrid-latest.dmg --clobber
       # Constant nightly download link. /releases/latest EXCLUDES pre-releases, so it
       # can never point at a beta build (that is exactly what keeps the STABLE link
@@ -554,7 +554,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          cp "dist/OffGrid-$VERSION-arm64.dmg" dist/OffGrid-nightly.dmg
+          cp "dist/OffGrid-$VERSION.dmg" dist/OffGrid-nightly.dmg
           # Ensure the rolling 'nightly' pre-release exists (kept separate from the
           # versioned -beta.N releases electron-builder makes for the updater feed),
           # then clobber its dmg so the link always serves the freshest nightly.
