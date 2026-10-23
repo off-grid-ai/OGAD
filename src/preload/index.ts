@@ -1197,7 +1197,10 @@ const offGridApi = {
   approvalsApprove: (id: number) => ipcRenderer.invoke('approvals:approve', id),
   approvalsReject: (id: number, reason?: string) =>
     ipcRenderer.invoke('approvals:reject', id, reason),
-  reportSelfView: (view: string) => ipcRenderer.invoke('capture:self-view', view),
+  // A notice, not a request: Pro registers the handler only while Pro runs, so a free build has
+  // none and the rejection must not surface as an unhandled renderer error.
+  reportSelfView: (view: string) =>
+    ipcRenderer.invoke('capture:self-view', view).catch(() => undefined),
   secretaryPrefsGet: () => ipcRenderer.invoke('secretary:prefs:get'),
   secretaryPrefsSet: (doc: string) => ipcRenderer.invoke('secretary:prefs:set', doc),
   secretaryPrefsDistill: () => ipcRenderer.invoke('secretary:prefs:distill'),
