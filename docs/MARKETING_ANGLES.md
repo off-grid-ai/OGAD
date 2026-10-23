@@ -24,7 +24,7 @@ Voice rules (from `mobile/docs/brand_tone_voice.md`): proof-first, privacy state
 You don't remember what you did last Tuesday. Your laptop does. Off Grid AI is a quiet record of your work that you can actually ask.
 
 **2. Private by architecture, not by policy**
-Most "private" AI still uploads your screen to someone's cloud. Off Grid AI runs the model in your laptop's own memory. Nothing is sent anywhere because there is no server to send it to.
+Most "private" AI still uploads your screen to someone's cloud. Off Grid AI runs the model in your laptop's own memory. Your chats and files are sent nowhere because there is no server to send them to.
 
 **3. Background, not another tab**
 Every AI tool waits for you to open it and explain yourself. Off Grid AI already watched the meeting, read the thread, and saw the ticket. You don't brief it. It briefs you.
@@ -39,7 +39,7 @@ Scrub through your whole day like a recording. Every screen, in order, on device
 Littlebird stores your captured work on AWS. Off Grid AI stores it on your disk. Same idea, opposite trust model. Yours never leaves the building.
 
 **7. Read the code**
-The memory apps ask you to trust them. Off Grid AI is open source under AGPL. You can read exactly what leaves your device. The answer is nothing, and you can check.
+The memory apps ask you to trust them. Off Grid AI is open source under AGPL. You can read exactly what leaves your device: your chats and files never do, and anonymous usage data goes only if you turn it on. You can check.
 
 **8. The exocortex that fills itself**
 A second brain only works if you feed it. This one feeds itself. Capture, meetings, email, Notion, Linear, Jira, all flowing into one local memory without you copy-pasting anything.
@@ -136,4 +136,4 @@ This didn't start as a grand plan. Three problems, solved out of need, that turn
 - It already knows what you did today. So do you, now.
 - The AI memory that keeps your data at home.
 - You forget. Your laptop doesn't. And no one else gets to see.
-- Read the code. Watch what leaves your device. Nothing does.
+- Read the code. Your chats and files never leave your device.
