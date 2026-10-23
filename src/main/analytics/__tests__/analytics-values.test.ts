@@ -244,6 +244,7 @@ describe('crash scrubbing', () => {
       frames: []
     })
     expect(scrubText('a\n\tb')).toBe('a b')
+    expect(scrubText('bad "secret\nstill secret" here')).toBe('bad <redacted> here')
   })
 })
 

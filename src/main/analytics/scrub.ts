@@ -30,7 +30,8 @@ const MAX_FRAMES = 30
 const MAX_INPUT_CHARS = 2_000
 const MAX_FRAME_LINE_CHARS = 1_000
 
-const QUOTED = /"[^"\n]*"|'[^'\n]*'|`[^`\n]*`|“[^”\n]*”|‘[^’\n]*’/g
+// A quote can span lines: a multi-line value is still the person's text.
+const QUOTED = /"[^"]*"|'[^']*'|`[^`]*`|“[^”]*”|‘[^’]*’/g
 const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s)]+/gi
 const EMAIL = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g
 const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g
