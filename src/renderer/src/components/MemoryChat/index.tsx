@@ -1852,13 +1852,16 @@ export function MemoryChat({
     )
       return
     // Opt-in usage data: that a message went, and what kind. Never its text or attachments.
-    if (regen) track('reply_regenerated')
-    else
-      track('message_sent', {
-        has_image: imagePaths.length > 0,
-        has_document: turnDocuments.length > 0,
-        tools_enabled: assistantForTurn
-      })
+    // Counted once the message is accepted, so guidance a running task refuses is not a send.
+    const reportSent = (): void => {
+      if (regen) track('reply_regenerated')
+      else
+        track('message_sent', {
+          has_image: imagePaths.length > 0,
+          has_document: turnDocuments.length > 0,
+          tools_enabled: assistantForTurn
+        })
+    }
     // A live operator task owns this journey until it finishes. New Chat input is
     // guidance for that task, not a second memory/model turn running beside it.
     if (!regen && targetConv && !opts?.imageRequest) {
@@ -1891,6 +1894,7 @@ export function MemoryChat({
             setAttachments([])
           }
           setAttachWarn(null)
+          reportSent()
           return
         } catch (error) {
           console.error('Failed to guide the running task:', error)
@@ -1899,6 +1903,7 @@ export function MemoryChat({
         }
       }
     }
+    reportSent()
     if (isInput) setAttachments([])
 
     // An installed /skill-name anywhere in the prompt prepends that skill's instructions.
