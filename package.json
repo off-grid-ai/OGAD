@@ -98,6 +98,7 @@
     "ollama": "^0.6.3",
     "onnxruntime-node": "1.30.0",
     "pdfjs-dist": "4.8.69",
+    "posthog-node": "5.55.0",
     "sharp": "^0.35.2",
     "tldts": "^7.4.7",
     "tweetnacl": "^1.0.3",
