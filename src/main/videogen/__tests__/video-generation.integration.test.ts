@@ -8,15 +8,40 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { VideoGenerationJobContract } from '../../../shared/video-generation-contract'
 
-// Electron is the one framework boundary: no safe storage in a Node test process.
-vi.mock('electron', () => ({ safeStorage: { isEncryptionAvailable: () => false } }))
+// Electron is the one framework boundary: no safe storage in a Node test process, and the app
+// object analytics reads its version and paths from.
+const electron = vi.hoisted(() => ({ userData: '' }))
+vi.mock('electron', () => ({
+  safeStorage: { isEncryptionAvailable: () => false },
+  app: {
+    getPath: () => electron.userData,
+    getVersion: () => '0.0.55',
+    getLocale: () => 'en-GB',
+    isPackaged: false,
+    on: () => undefined
+  },
+  BrowserWindow: { getAllWindows: () => [], getFocusedWindow: () => null },
+  ipcMain: { handle: () => undefined, on: () => undefined }
+}))
 
 import { configureRuntime } from '../../runtime-env'
 import { getDB, saveSetting } from '../../database'
-import { cancelVideoGen, deleteGeneratedVideo, listGeneratedVideos, videoGenStatus } from '../../videogen'
+import {
+  cancelVideoGen,
+  deleteGeneratedVideo,
+  listGeneratedVideos,
+  videoGenStatus
+} from '../../videogen'
 import { VideoGenerationJobService } from '../job-service'
 import { readGeneratedVideoSidecar, writeGeneratedVideoSidecar } from '../gallery-sidecar'
 import { readGeneratedVideoMetadata } from '@offgrid/sync'
+import {
+  analytics,
+  createAnalyticsService,
+  installAnalytics,
+  resetAnalyticsForTests
+} from '../../analytics'
+import { startFakePostHog } from '../../__tests__/harness/fake-posthog'
 
 const WEIGHT = 'wan2.1_t2v_1.3B_fp16.safetensors'
 const PACK = [WEIGHT, 'wan_2.1_vae.safetensors', 'umt5-xxl-encoder-Q4_K_M.gguf']
@@ -93,6 +118,7 @@ beforeEach(() => {
   delete process.env.FAKE_SD_MODE
   delete process.env.FAKE_FFMPEG_MODE
   configureRuntime({ dataDir: root, modelsDir: path.join(root, 'models'), binRoots: [bin] })
+  electron.userData = root
   getDB()
 })
 
@@ -107,7 +133,10 @@ afterEach(() => {
 async function run(
   jobs: VideoGenerationJobService,
   request: Parameters<VideoGenerationJobService['start']>[0]
-): Promise<{ snapshots: VideoGenerationJobContract[]; result: Awaited<ReturnType<VideoGenerationJobService['start']>> }> {
+): Promise<{
+  snapshots: VideoGenerationJobContract[]
+  result: Awaited<ReturnType<VideoGenerationJobService['start']>>
+}> {
   const snapshots: VideoGenerationJobContract[] = []
   const off = jobs.onChange((job) => snapshots.push(job))
   try {
@@ -204,9 +233,9 @@ describe.skipIf(process.platform === 'win32')('local video generation journey', 
 
   it('removes a failed encoding and lets the next clip run', async () => {
     process.env.FAKE_FFMPEG_MODE = 'fail'
-    await expect(new VideoGenerationJobService().start({ prompt: 'lake', steps: 4 })).rejects.toThrow(
-      'code 1'
-    )
+    await expect(
+      new VideoGenerationJobService().start({ prompt: 'lake', steps: 4 })
+    ).rejects.toThrow('code 1')
     expect(fs.readdirSync(videosDir())).toEqual([])
     expect(cancelVideoGen()).toBe(false)
     delete process.env.FAKE_FFMPEG_MODE
@@ -218,14 +247,24 @@ describe.skipIf(process.platform === 'win32')('local video generation journey', 
     process.env.FAKE_SD_MODE = 'slow'
     const jobs = new VideoGenerationJobService()
     const chat = '11111111-1111-4111-8111-111111111111'
-    const first = jobs.start({ prompt: 'lake', steps: 4, conversationId: chat, projectId: 'project-a' })
+    const first = jobs.start({
+      prompt: 'lake',
+      steps: 4,
+      conversationId: chat,
+      projectId: 'project-a'
+    })
     await expect(jobs.start({ prompt: 'second', steps: 4 })).rejects.toThrow('already generating')
     await vi.waitFor(() => expect(engineRuns()).toHaveLength(1), { timeout: 5000 })
     jobs.cancel()
     await expect(first).rejects.toThrow(/stopped/i)
 
     delete process.env.FAKE_SD_MODE
-    const { result } = await run(jobs, { prompt: 'lake', steps: 4, conversationId: chat, projectId: 'project-a' })
+    const { result } = await run(jobs, {
+      prompt: 'lake',
+      steps: 4,
+      conversationId: chat,
+      projectId: 'project-a'
+    })
     expect(jobs.acknowledgeConversation('chat-b', 'message-b')).toBe(false)
     const updated: string[] = []
     jobs.onConversationUpdated((conversationId) => updated.push(conversationId))
@@ -240,7 +279,9 @@ describe.skipIf(process.platform === 'win32')('local video generation journey', 
   })
 
   it('records an engine failure without keeping a clip, and rejects invalid settings before it starts', async () => {
-    await expect(new VideoGenerationJobService().start({ prompt: 'lake', steps: 4.5 })).rejects.toThrow()
+    await expect(
+      new VideoGenerationJobService().start({ prompt: 'lake', steps: 4.5 })
+    ).rejects.toThrow()
     expect(engineRuns()).toEqual([])
     fs.rmSync(path.join(root, 'bin', 'sd', 'sd-cli'))
     install(path.join(root, 'bin', 'sd'), 'sd-cli', '#!/bin/sh\necho "out of memory" >&2\nexit 1\n')
@@ -261,5 +302,49 @@ describe.skipIf(process.platform === 'win32')('local video generation journey', 
     expect(fs.existsSync(outsider)).toBe(true)
     expect(deleteGeneratedVideo(result.path)).toBe(true)
     expect(listGeneratedVideos()).toEqual([])
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('video in opt-in analytics', () => {
+  it('reports a clip as a video generation with its engine and time, and never its prompt', async () => {
+    const posthog = await startFakePostHog()
+    try {
+      installAnalytics({ registerShutdown: () => undefined })
+      resetAnalyticsForTests(
+        createAnalyticsService({ apiKey: 'phc_test', host: posthog.host, buildAllowed: true })
+      )
+      analytics().start()
+      analytics().optIn('settings')
+
+      const prompt = 'A secret plan drawn on a whiteboard'
+      await run(new VideoGenerationJobService(), { prompt, steps: 4 })
+      await analytics().shutdown()
+
+      const generation = posthog.events.find((event) => event.event === 'generation_finished')
+      expect(generation?.properties).toMatchObject({
+        modality: 'video',
+        model: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged',
+        engine: 'sd.cpp',
+        outcome: 'done',
+        source: 'app',
+        duration_ms: expect.any(Number)
+      })
+      expect(
+        posthog.events.find((event) => event.event === 'feature_used')?.properties
+      ).toMatchObject({ feature: 'video_generation' })
+      expect(
+        posthog.events.find((event) => event.event === 'model_loaded')?.properties
+      ).toMatchObject({
+        model: 'Comfy-Org/Wan_2.1_ComfyUI_repackaged',
+        engine: 'sd.cpp',
+        quant: null
+      })
+      const everything = posthog.bodies.join('\n')
+      for (const leaked of [prompt, 'whiteboard', root, WEIGHT])
+        expect(everything).not.toContain(leaked)
+    } finally {
+      resetAnalyticsForTests(null)
+      await posthog.close()
+    }
   })
 })
