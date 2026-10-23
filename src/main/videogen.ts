@@ -1,4 +1,5 @@
 import { getBackendPreference } from './backend-preferences'
+import { recordAIRequest } from './ai-request-log'
 import { beginRuntimeBackend, runtimeBackendSnapshot } from './runtime-backends'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 import { generateRemoteVideo } from './remote-media-runtime'
@@ -240,233 +241,277 @@ export async function generateVideo(
     throw new Error('Select the requested video model before generating.')
   const pack = availablePacks().find((item) => item.name === selected)
   if (!pack && !remote) throw new Error('Select a complete video model pack.')
-  let request = resolvedRequest(input, selected ?? '')
-  cancelRequested = false
-  activeJob = true
-  jobAbort = new AbortController()
-  try {
-    if (input.enhancePrompt ?? getSetting('enhanceVideoPrompts', false)) {
-      onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
-      request = {
-        ...request,
-        prompt: await enhanceVideoPrompt(request.prompt, onUpdate, jobAbort.signal)
-      }
-    }
-    if (isCancelRequested()) throw new Error(CANCELLED)
-    onUpdate?.({ stage: 'preparing', enhancedPrompt: request.prompt })
-    fs.mkdirSync(generatedVideosDir(), { recursive: true })
-  } catch (error) {
-    activeJob = false
-    cancelRequested = false
-    jobAbort = null
-    throw error
-  }
-  const root = generatedVideosDir()
-  const id = randomUUID()
-  const raw = path.join(root, `${id}.webm`)
-  const output = path.join(root, `${id}.mp4`)
-  const previewPath = `${output}.preview.png`
-  const ffmpeg = ffmpegBin()!
-  try {
-    if (remote) {
-      const effective = await generateRemoteVideo(
-        remote,
-        request,
-        output,
-        jobAbort.signal,
-        (progress, stage, preview) =>
-          onUpdate?.({ stage: stage ?? 'generating', progress, ...(preview ? { preview } : {}) })
-      )
-      request = { ...request, ...effective }
-      // Read the downloaded container; providers can return a different frame rate.
-      let metadata = ''
-      await runProcess(
-        ffmpeg,
-        ['-hide_banner', '-i', output, '-map', '0:v:0', '-c', 'copy', '-t', '0', '-f', 'null', '-'],
-        (text) => {
-          metadata = `${metadata}${text}`.slice(-16_384)
-        }
-      )
-      const stream = metadata.match(/Video:[^\r\n]*?\b(\d{2,5})x(\d{2,5})\b[^\r\n]*?([\d.]+) fps/)
-      const duration = metadata.match(/Duration: (\d+):(\d+):([\d.]+)/)
-      if (stream && duration) {
-        const fps = Number(stream[3])
-        const seconds = Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3])
-        if (fps > 0 && seconds > 0)
+  // The request log is the seam usage statistics read: modality, model, backend and outcome only.
+  return recordAIRequest(
+    {
+      modality: 'video',
+      source: 'Video generation',
+      model: remote ? remote.selectedModel : pack!.name,
+      ...(remote ? { backend: 'remote' } : {}),
+      request: input,
+      isCancelled: (error) => error instanceof Error && error.message === CANCELLED
+    },
+    async (requestLog) => {
+      let request = resolvedRequest(input, selected ?? '')
+      cancelRequested = false
+      activeJob = true
+      jobAbort = new AbortController()
+      try {
+        if (input.enhancePrompt ?? getSetting('enhanceVideoPrompts', false)) {
+          onUpdate?.({ stage: 'enhancing', enhancedPrompt: '' })
           request = {
             ...request,
-            width: Number(stream[1]),
-            height: Number(stream[2]),
-            fps,
-            frames: Math.round(seconds * fps)
+            prompt: await enhanceVideoPrompt(request.prompt, onUpdate, jobAbort.signal)
           }
-      }
-    } else
-      await modalityQueue.run(
-        VIDEO_JOB,
-        async () => {
-          if (isCancelRequested()) throw new Error(CANCELLED)
-          // Linux's redistributable FFmpeg uses OpenH264; other bundles can use x264.
-          // Check before sampling so a missing encoder cannot waste a full generation.
-          let encoders = ''
-          await runProcess(ffmpeg, ['-hide_banner', '-encoders'], (text) => {
-            encoders += text
-          })
-          const encoder = ['libx264', 'libopenh264'].find((name) =>
-            new RegExp(`\\b${name}\\b`).test(encoders)
-          )
-          if (!encoder) throw new Error('The installed video encoder does not support H.264.')
-          const preference = getBackendPreference('video')
-          const preferred = findSdBinaries('sd-cli', preference)
-          // Metal and Vulkan distributions also contain CPU kernels. Explicit
-          // CPU must remain usable when no separate CPU binary is packaged.
-          const runtimes =
-            preference === 'cpu' && preferred.length === 0
-              ? findSdBinaries('sd-cli').filter(
-                  (runtime) => imageBackendForRuntime(process.platform, runtime) !== 'CUDA'
-                )
-              : preferred
-          if (!runtimes.length) throw new Error('Video engine was not found.')
-          const attempts = runtimes.map((runtime) => ({ runtime, cpu: preference === 'cpu' }))
-          // Linux's Vulkan distribution includes CPU kernels in the same binary.
-          if (
-            preference !== 'cpu' &&
-            !runtimes.some((runtime) => imageBackendForRuntime(process.platform, runtime) === 'CPU')
-          ) {
-            const runtime = runtimes.find(
-              (item) => imageBackendForRuntime(process.platform, item) !== 'CUDA'
-            )
-            if (runtime) attempts.push({ runtime, cpu: true })
-          }
-          for (const [index, { runtime, cpu }] of attempts.entries()) {
-            if (isCancelRequested()) throw new Error(CANCELLED)
-            const backend = beginRuntimeBackend('video', pack!.name)
-            let log = initialVideoEngineLog()
-            try {
-              // A failed engine can leave a partial file. Never accept it on retry.
-              fs.rmSync(raw, { force: true })
-              fs.rmSync(previewPath, { force: true })
-              console.info(`[videogen] Starting runtime ${runtime}`)
-              // CUDA binaries can start on a non-NVIDIA host and silently use CPU.
-              // Try the Vulkan engine first in that case.
-              if (!cpu && imageBackendForRuntime(process.platform, runtime) === 'CUDA') {
-                let devices = ''
-                await runProcess(runtime, ['--list-devices'], (chunk) => {
-                  devices = `${devices}${chunk}`.slice(-16384)
-                })
-                if (!/^CUDA\d*\s/im.test(devices))
-                  throw new Error('The CUDA engine found no usable CUDA device.')
-              }
-              let help = ''
-              await runProcess(runtime, ['--help'], (chunk) => {
-                help += chunk
-              })
-              const decodedPreviewArgs = help.includes('--decode-preview-path')
-                ? ['--decode-preview-path', previewPath]
-                : []
-              await runProcess(
-                runtime,
-                [
-                  ...videoCliArgs(pack!.pack, request, raw, process.platform),
-                  ...decodedPreviewArgs,
-                  ...(cpu ? ['--backend', 'cpu'] : [])
-                ],
-                (chunk) => {
-                  backend.observe(chunk)
-                  const read = readVideoEngineLog(log, chunk, request.steps)
-                  log = read.state
-                  for (const update of read.updates) {
-                    if (update.stage === 'generating') backend.ready()
-                    onUpdate?.(update)
-                  }
-                  if (read.frame && fs.existsSync(previewPath)) {
-                    log = videoFramePublished(log)
-                    onUpdate?.({ stage: 'decoding', preview: { path: previewPath, ...read.frame } })
-                  }
-                }
-              )
-              if (!fs.existsSync(raw) || fs.statSync(raw).size === 0)
-                throw new Error('Video engine produced no clip.')
-              console.info(
-                '[videogen] Completed runtime',
-                runtimeBackendSnapshot().find((item) => item.id === 'video')
-              )
-              backend.stop()
-              break
-            } catch (error) {
-              if (isCancelRequested()) {
-                backend.stop()
-                throw new Error(CANCELLED)
-              }
-              backend.fail(error)
-              const next = attempts[index + 1]
-              if (!next) throw error
-              console.warn(
-                `[videogen] Runtime failed; retrying with ${next.runtime}${next.cpu ? ' (CPU)' : ''}`,
-                error
-              )
-              onUpdate?.({ stage: 'preparing', progress: null, preview: null })
-            }
-          }
-          onUpdate?.({ stage: 'encoding', progress: null })
-          await runProcess(ffmpeg, [
-            '-hide_banner',
-            '-loglevel',
-            'error',
-            '-y',
-            '-i',
-            raw,
-            '-an',
-            '-c:v',
-            encoder,
-            ...(encoder === 'libopenh264' ? ['-b:v', '8M'] : []),
-            '-pix_fmt',
-            'yuv420p',
-            '-movflags',
-            '+faststart',
-            output
-          ])
-          if (!fs.existsSync(output) || fs.statSync(output).size === 0)
-            throw new Error('Video encoder produced no MP4 file.')
-        },
-        jobAbort.signal
-      )
-    if (isCancelRequested()) throw new Error(CANCELLED)
-    return {
-      path: output,
-      prompt: request.prompt,
-      negativePrompt: request.negativePrompt,
-      model: remote ? remote.selectedModel : pack!.name,
-      width: request.width,
-      height: request.height,
-      frames: request.frames,
-      fps: request.fps,
-      steps: request.steps,
-      guidance: request.guidance,
-      seed: request.seed,
-      durationSeconds: request.frames / request.fps
-    }
-  } catch (error) {
-    try {
-      fs.rmSync(output, { force: true })
-    } catch {
-      /* retain the generation error */
-    }
-    throw error
-  } finally {
-    jobAbort = null
-    cancelRequested = false
-    activeJob = false
-    // A preview can still be open in the player on Windows. Cleanup must not
-    // turn a completed clip into a failure or leave generation permanently busy.
-    for (const temporary of [raw, previewPath, `${previewPath}.tmp.png`]) {
-      try {
-        fs.rmSync(temporary, { force: true })
+        }
+        if (isCancelRequested()) throw new Error(CANCELLED)
+        onUpdate?.({ stage: 'preparing', enhancedPrompt: request.prompt })
+        fs.mkdirSync(generatedVideosDir(), { recursive: true })
       } catch (error) {
-        console.warn('[videogen] Temporary file cleanup failed', error)
+        activeJob = false
+        cancelRequested = false
+        jobAbort = null
+        throw error
+      }
+      const root = generatedVideosDir()
+      const id = randomUUID()
+      const raw = path.join(root, `${id}.webm`)
+      const output = path.join(root, `${id}.mp4`)
+      const previewPath = `${output}.preview.png`
+      const ffmpeg = ffmpegBin()!
+      try {
+        if (remote) {
+          const effective = await generateRemoteVideo(
+            remote,
+            request,
+            output,
+            jobAbort.signal,
+            (progress, stage, preview) =>
+              onUpdate?.({
+                stage: stage ?? 'generating',
+                progress,
+                ...(preview ? { preview } : {})
+              })
+          )
+          request = { ...request, ...effective }
+          // Read the downloaded container; providers can return a different frame rate.
+          let metadata = ''
+          await runProcess(
+            ffmpeg,
+            [
+              '-hide_banner',
+              '-i',
+              output,
+              '-map',
+              '0:v:0',
+              '-c',
+              'copy',
+              '-t',
+              '0',
+              '-f',
+              'null',
+              '-'
+            ],
+            (text) => {
+              metadata = `${metadata}${text}`.slice(-16_384)
+            }
+          )
+          const stream = metadata.match(
+            /Video:[^\r\n]*?\b(\d{2,5})x(\d{2,5})\b[^\r\n]*?([\d.]+) fps/
+          )
+          const duration = metadata.match(/Duration: (\d+):(\d+):([\d.]+)/)
+          if (stream && duration) {
+            const fps = Number(stream[3])
+            const seconds =
+              Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3])
+            if (fps > 0 && seconds > 0)
+              request = {
+                ...request,
+                width: Number(stream[1]),
+                height: Number(stream[2]),
+                fps,
+                frames: Math.round(seconds * fps)
+              }
+          }
+        } else
+          await modalityQueue.run(
+            VIDEO_JOB,
+            async () => {
+              if (isCancelRequested()) throw new Error(CANCELLED)
+              // Linux's redistributable FFmpeg uses OpenH264; other bundles can use x264.
+              // Check before sampling so a missing encoder cannot waste a full generation.
+              let encoders = ''
+              await runProcess(ffmpeg, ['-hide_banner', '-encoders'], (text) => {
+                encoders += text
+              })
+              const encoder = ['libx264', 'libopenh264'].find((name) =>
+                new RegExp(`\\b${name}\\b`).test(encoders)
+              )
+              if (!encoder) throw new Error('The installed video encoder does not support H.264.')
+              const preference = getBackendPreference('video')
+              const preferred = findSdBinaries('sd-cli', preference)
+              // Metal and Vulkan distributions also contain CPU kernels. Explicit
+              // CPU must remain usable when no separate CPU binary is packaged.
+              const runtimes =
+                preference === 'cpu' && preferred.length === 0
+                  ? findSdBinaries('sd-cli').filter(
+                      (runtime) => imageBackendForRuntime(process.platform, runtime) !== 'CUDA'
+                    )
+                  : preferred
+              if (!runtimes.length) throw new Error('Video engine was not found.')
+              const attempts = runtimes.map((runtime) => ({ runtime, cpu: preference === 'cpu' }))
+              // Linux's Vulkan distribution includes CPU kernels in the same binary.
+              if (
+                preference !== 'cpu' &&
+                !runtimes.some(
+                  (runtime) => imageBackendForRuntime(process.platform, runtime) === 'CPU'
+                )
+              ) {
+                const runtime = runtimes.find(
+                  (item) => imageBackendForRuntime(process.platform, item) !== 'CUDA'
+                )
+                if (runtime) attempts.push({ runtime, cpu: true })
+              }
+              for (const [index, { runtime, cpu }] of attempts.entries()) {
+                if (isCancelRequested()) throw new Error(CANCELLED)
+                const backend = beginRuntimeBackend('video', pack!.name)
+                let log = initialVideoEngineLog()
+                try {
+                  // A failed engine can leave a partial file. Never accept it on retry.
+                  fs.rmSync(raw, { force: true })
+                  fs.rmSync(previewPath, { force: true })
+                  console.info(`[videogen] Starting runtime ${runtime}`)
+                  // CUDA binaries can start on a non-NVIDIA host and silently use CPU.
+                  // Try the Vulkan engine first in that case.
+                  if (!cpu && imageBackendForRuntime(process.platform, runtime) === 'CUDA') {
+                    let devices = ''
+                    await runProcess(runtime, ['--list-devices'], (chunk) => {
+                      devices = `${devices}${chunk}`.slice(-16384)
+                    })
+                    if (!/^CUDA\d*\s/im.test(devices))
+                      throw new Error('The CUDA engine found no usable CUDA device.')
+                  }
+                  let help = ''
+                  await runProcess(runtime, ['--help'], (chunk) => {
+                    help += chunk
+                  })
+                  const decodedPreviewArgs = help.includes('--decode-preview-path')
+                    ? ['--decode-preview-path', previewPath]
+                    : []
+                  await runProcess(
+                    runtime,
+                    [
+                      ...videoCliArgs(pack!.pack, request, raw, process.platform),
+                      ...decodedPreviewArgs,
+                      ...(cpu ? ['--backend', 'cpu'] : [])
+                    ],
+                    (chunk) => {
+                      backend.observe(chunk)
+                      const read = readVideoEngineLog(log, chunk, request.steps)
+                      log = read.state
+                      for (const update of read.updates) {
+                        if (update.stage === 'generating') {
+                          backend.ready()
+                          const loaded = runtimeBackendSnapshot().find(
+                            (item) => item.id === 'video'
+                          )
+                          if (loaded) requestLog.useRuntime(loaded)
+                        }
+                        onUpdate?.(update)
+                      }
+                      if (read.frame && fs.existsSync(previewPath)) {
+                        log = videoFramePublished(log)
+                        onUpdate?.({
+                          stage: 'decoding',
+                          preview: { path: previewPath, ...read.frame }
+                        })
+                      }
+                    }
+                  )
+                  if (!fs.existsSync(raw) || fs.statSync(raw).size === 0)
+                    throw new Error('Video engine produced no clip.')
+                  console.info(
+                    '[videogen] Completed runtime',
+                    runtimeBackendSnapshot().find((item) => item.id === 'video')
+                  )
+                  backend.stop()
+                  break
+                } catch (error) {
+                  if (isCancelRequested()) {
+                    backend.stop()
+                    throw new Error(CANCELLED)
+                  }
+                  backend.fail(error)
+                  const next = attempts[index + 1]
+                  if (!next) throw error
+                  console.warn(
+                    `[videogen] Runtime failed; retrying with ${next.runtime}${next.cpu ? ' (CPU)' : ''}`,
+                    error
+                  )
+                  onUpdate?.({ stage: 'preparing', progress: null, preview: null })
+                }
+              }
+              onUpdate?.({ stage: 'encoding', progress: null })
+              await runProcess(ffmpeg, [
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                '-y',
+                '-i',
+                raw,
+                '-an',
+                '-c:v',
+                encoder,
+                ...(encoder === 'libopenh264' ? ['-b:v', '8M'] : []),
+                '-pix_fmt',
+                'yuv420p',
+                '-movflags',
+                '+faststart',
+                output
+              ])
+              if (!fs.existsSync(output) || fs.statSync(output).size === 0)
+                throw new Error('Video encoder produced no MP4 file.')
+            },
+            jobAbort.signal
+          )
+        if (isCancelRequested()) throw new Error(CANCELLED)
+        return {
+          path: output,
+          prompt: request.prompt,
+          negativePrompt: request.negativePrompt,
+          model: remote ? remote.selectedModel : pack!.name,
+          width: request.width,
+          height: request.height,
+          frames: request.frames,
+          fps: request.fps,
+          steps: request.steps,
+          guidance: request.guidance,
+          seed: request.seed,
+          durationSeconds: request.frames / request.fps
+        }
+      } catch (error) {
+        try {
+          fs.rmSync(output, { force: true })
+        } catch {
+          /* retain the generation error */
+        }
+        throw error
+      } finally {
+        jobAbort = null
+        cancelRequested = false
+        activeJob = false
+        // A preview can still be open in the player on Windows. Cleanup must not
+        // turn a completed clip into a failure or leave generation permanently busy.
+        for (const temporary of [raw, previewPath, `${previewPath}.tmp.png`]) {
+          try {
+            fs.rmSync(temporary, { force: true })
+          } catch (error) {
+            console.warn('[videogen] Temporary file cleanup failed', error)
+          }
+        }
       }
     }
-  }
+  )
 }
 
 export function listGeneratedVideos(scope?: {
