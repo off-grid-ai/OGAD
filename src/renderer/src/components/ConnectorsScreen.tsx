@@ -460,6 +460,7 @@ export function ConnectorsScreen(): ReactElement {
       if (id != null) pendingConnectorIds.current.set(entry.id, id)
       if (cancelledConnections.current.has(entry.id)) {
         await removePendingConnector(id)
+        flow.finish('connector_add', 'cancelled')
         return
       }
       await persistConnectorSecrets(id, secretVals)
@@ -483,11 +484,8 @@ export function ConnectorsScreen(): ReactElement {
       }
     } catch (e) {
       await removePendingConnector(id)
-      flow.finish(
-        'connector_add',
-        cancelledConnections.current.has(entry.id) ? 'cancelled' : 'failed',
-        'connect_failed'
-      )
+      if (cancelledConnections.current.has(entry.id)) flow.finish('connector_add', 'cancelled')
+      else flow.finish('connector_add', 'failed', 'connect_failed')
       if (!cancelledConnections.current.has(entry.id)) {
         setErrorFor((p) => ({
           ...p,
