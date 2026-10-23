@@ -242,7 +242,7 @@ const USE_CASES: UseCase[] = [
   {
     id: 'legal',
     label: 'Legal',
-    blurb: `Dense docs, careful reasoning — on-device, nothing leaves your ${deviceNoun()}.`,
+    blurb: `Dense docs, careful reasoning — on-device, your documents never leave your ${deviceNoun()}.`,
     match: (m) => (m.params ?? 0) >= 7
   },
   {

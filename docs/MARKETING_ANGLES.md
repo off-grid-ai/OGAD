@@ -1,6 +1,6 @@
 # Off Grid AI Desktop — positioning angles
 
-Background intelligence for knowledge workers. Completely offline, completely private.
+Background intelligence for knowledge workers. Runs offline. Your chats and files never leave your device; anonymous usage data only if you turn it on.
 
 **Source docs to pull from / stay consistent with:**
 
@@ -132,8 +132,8 @@ This didn't start as a grand plan. Three problems, solved out of need, that turn
 
 ## One-line hooks
 
-- Background intelligence for your work. Completely offline. Completely yours.
+- Background intelligence for your work. Runs offline. Completely yours.
 - It already knows what you did today. So do you, now.
-- The AI memory that never phones home.
+- The AI memory that keeps your data at home.
 - You forget. Your laptop doesn't. And no one else gets to see.
 - Read the code. Watch what leaves your device. Nothing does.

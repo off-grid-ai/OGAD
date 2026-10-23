@@ -292,7 +292,7 @@ export function UpgradeScreen({
                     Get Pro <ArrowSquareOut weight="bold" className="h-4 w-4" />
                   </Button>
                   <p className="text-[11px] leading-relaxed text-neutral-600">
-                    One-time purchase. Runs entirely on your device - no subscription, no cloud, no
+                    One-time purchase. Runs on your device, with no subscription, no cloud and no
                     account.
                   </p>
                 </>

@@ -3,7 +3,7 @@
   "productName": "Off Grid AI Desktop",
   "desktopName": "off-grid-ai.desktop",
   "version": "0.0.55",
-  "description": "Off Grid AI — a private, local-first AI that runs open models (text, vision, image, voice) entirely on your device. No cloud, no accounts.",
+  "description": "Off Grid AI — a private, local-first AI that runs open models (text, vision, image, voice) entirely on your device. No cloud, no accounts. Anonymous usage data and crash reports only if you turn them on.",
   "license": "AGPL-3.0-only",
   "main": "./out/main/index.js",
   "author": "Off Grid AI <hello@getoffgridai.co>",
