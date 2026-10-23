@@ -1133,8 +1133,7 @@ export class LLMService {
       this.kvCacheType = compatibleSettings.kvCacheType
     if (typeof compatibleSettings.flashAttn === 'boolean')
       this.flashAttn = compatibleSettings.flashAttn
-    if (compatibleSettings.gpuLayers === null || typeof compatibleSettings.gpuLayers === 'number')
-      this.gpuLayers = compatibleSettings.gpuLayers
+    if (typeof compatibleSettings.gpuLayers === 'number') this.gpuLayers = compatibleSettings.gpuLayers
     if (compatibleSettings.gpuPlacement === 'auto' || compatibleSettings.gpuPlacement === 'manual')
       this.gpuPlacement = compatibleSettings.gpuPlacement
     if (typeof compatibleSettings.threads === 'number') this.threads = compatibleSettings.threads
