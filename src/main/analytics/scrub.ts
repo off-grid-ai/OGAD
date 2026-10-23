@@ -26,6 +26,9 @@ export interface ScrubbedException {
 
 const MAX_MESSAGE_CHARS = 300
 const MAX_FRAMES = 30
+// The patterns below are not linear on hostile input, so no pattern ever sees more than this.
+const MAX_INPUT_CHARS = 2_000
+const MAX_FRAME_LINE_CHARS = 1_000
 
 const QUOTED = /"[^"\n]*"|'[^'\n]*'|`[^`\n]*`|“[^”\n]*”|‘[^’\n]*’/g
 const URL = /\b[a-z][a-z0-9+.-]*:\/\/[^\s)]+/gi
@@ -82,9 +85,32 @@ function baseName(path: string): string {
 }
 
 /** Scrub one free-text value (an error message or a function name). */
+/**
+ * Cut over-long text before any pattern runs. A quote the cut leaves open would escape the quote
+ * rule, so the text is also cut at that quote.
+ */
+function bounded(text: string): string {
+  if (text.length <= MAX_INPUT_CHARS) return text
+  let value = text.slice(0, MAX_INPUT_CHARS)
+  for (const mark of ['"', "'", '`']) {
+    if (value.split(mark).length % 2 === 0) value = value.slice(0, value.lastIndexOf(mark))
+  }
+  for (const [open, close] of [
+    ['“', '”'],
+    ['‘', '’']
+  ] as const) {
+    if (value.lastIndexOf(open) > value.lastIndexOf(close))
+      value = value.slice(0, value.lastIndexOf(open))
+  }
+  return value
+}
+
 export function scrubText(text: string): string {
   const { home, user } = accountPatterns()
-  let value = text.replace(QUOTED, '<redacted>').replace(URL, '<url>').replace(EMAIL, '<email>')
+  let value = bounded(text)
+    .replace(QUOTED, '<redacted>')
+    .replace(URL, '<url>')
+    .replace(EMAIL, '<email>')
   // Under the home folder a path is the person's own, and it can hold spaces: drop it to the
   // next separator.
   if (home) value = value.replace(home, '~').replace(/~[\\/][^,;()\n]*/g, '<file>')
@@ -105,6 +131,7 @@ export function scrubText(text: string): string {
 const FRAME = /^\s*at\s+(?:(.*?)\s+\()?(.+?):(\d+):(\d+)\)?\s*$/
 
 function frameOf(line: string): ScrubbedFrame | null {
+  if (line.length > MAX_FRAME_LINE_CHARS) return null
   const match = FRAME.exec(line)
   if (!match) return null
   const [, fn, location, lineno, colno] = match

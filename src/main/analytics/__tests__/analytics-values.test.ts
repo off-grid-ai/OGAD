@@ -222,6 +222,16 @@ describe('crash scrubbing', () => {
     expect(value).toContain('owner <user>,')
   })
 
+  it('bounds hostile input: a huge message scrubs fast and a quote cut open still goes', () => {
+    const started = Date.now()
+    const value = scrubText(`fail "${'secret '.repeat(1_000)}" ${'a.'.repeat(50_000)}`)
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(value).not.toContain('secret')
+    expect(
+      scrubException({ name: 'Error', message: 'x', stack: `at ${'/'.repeat(20_000)}:1:1` }).frames
+    ).toEqual([])
+  })
+
   it('scrubs anything thrown, not only errors', () => {
     expect(scrubException('plain /home/bob/x.txt').value).toBe('plain <file>')
     expect(scrubException('at /app/out/main/index.js').value).toBe('at index.js')
