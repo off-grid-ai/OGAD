@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   IconPhoto,
   IconUser,
-  IconHash,
   IconVideo,
-  IconBulb,
   IconSearch,
   IconCornerDownLeft,
   IconLayoutSidebar,
@@ -38,9 +36,7 @@ const api = (window as any).api
 const KIND_ICON = {
   screen: IconPhoto,
   meeting: IconVideo,
-  memory: IconBulb,
-  entity: IconUser,
-  fact: IconHash
+  entity: IconUser
 } as const
 
 interface CommandPaletteProps {

@@ -1,5 +1,5 @@
 // OCR a screenshot via the bundled macOS Vision binary (electron/accessibility/ocr).
-// The legacy text API remains stable. The boxed API owns structured OCR.
+// The boxed API owns structured OCR; runPdfOCR reads scanned PDF pages.
 
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -81,18 +81,6 @@ export async function runBoxedOCR(imagePath: string): Promise<BoxedOcrResult> {
   } catch (error) {
     console.error('[OCR] boxed OCR failed:', error)
     return { width: 0, height: 0, blocks: [], available: false, degradedReason: 'ocr_failed' }
-  }
-}
-
-export async function runOCR(imagePath: string): Promise<string> {
-  const bin = ocrBin()
-  if (!bin) return ''
-  try {
-    const { stdout } = await execFileAsync(bin, [imagePath], { maxBuffer: 32 * 1024 * 1024 })
-    return stdout.trim()
-  } catch (e) {
-    console.error('[OCR] failed:', e)
-    return ''
   }
 }
 

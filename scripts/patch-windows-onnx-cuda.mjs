@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // ONNX Runtime's published Windows Node addon has no CUDA provider. The optional
 // performance pack supplies a CUDA-enabled addon; keep the stock addon for other
-// Windows GPUs and for machines without the pack.
+// Windows GPUs and for machines without the pack. The CUDA addon loads only in a
+// voice or search helper whose environment says CUDA ran on this machine
+// (src/main/onnx-host/onnx-runtime-env.ts), so DirectML and WebGPU stay available.
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -42,12 +44,27 @@ if (ortInfo.version !== '1.30.0') {
   throw new Error(`Review the Windows CUDA binding for ONNX Runtime Node ${ortInfo.version}`)
 }
 const bindingFile = path.join(ortRoot, 'dist', 'binding.js')
+// Installs patched before the CUDA addon was gated on a verified run get the gate added in place.
+const bindingSource = fs.readFileSync(bindingFile, 'utf8')
+if (
+  bindingSource.includes('? process.env.OFFGRID_PERFORMANCE_PACK_BIN : undefined;') &&
+  !bindingSource.includes('OFFGRID_ONNX_CUDA_VERIFIED')
+) {
+  fs.writeFileSync(
+    bindingFile,
+    bindingSource.replace(
+      '        ? process.env.OFFGRID_PERFORMANCE_PACK_BIN : undefined;',
+      "        && process.env.OFFGRID_ONNX_CUDA_VERIFIED === '1'\n        ? process.env.OFFGRID_PERFORMANCE_PACK_BIN : undefined;"
+    )
+  )
+}
 replaceOnce(
   bindingFile,
   'require(`../bin/napi-v6/${process.platform}/${process.arch}/onnxruntime_binding.node`);',
   `(() => {
     const stock = \`../bin/napi-v6/\${process.platform}/\${process.arch}/onnxruntime_binding.node\`;
     const pack = process.platform === 'win32' && process.arch === 'x64'
+        && process.env.OFFGRID_ONNX_CUDA_VERIFIED === '1'
         ? process.env.OFFGRID_PERFORMANCE_PACK_BIN : undefined;
     const cuda = pack ? require('node:path').join(pack, 'onnx-cuda', 'onnxruntime_binding.node') : undefined;
     if (cuda && require('node:fs').existsSync(cuda)) {

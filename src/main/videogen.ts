@@ -1,4 +1,4 @@
-import { getBackendPreference } from './backend-preferences'
+import { nativeLadder } from './backend-facts'
 import { recordAIRequest } from './ai-request-log'
 import { beginRuntimeBackend, runtimeBackendSnapshot } from './runtime-backends'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
@@ -22,8 +22,7 @@ import { getActiveModal } from './active-models'
 import { getDB, getSetting, updateRagMessage } from './database'
 import { readGeneratedVideoReference } from '../shared/generated-video-reference'
 import {
-  findSdBinary,
-  findSdBinaries,
+  hasSdBinary,
   imageBackendForRuntime,
   sdRuntimeLibraryEnv
 } from './imagegen/sd-runtime'
@@ -94,7 +93,7 @@ export function videoGenStatus(options: { localOnly?: boolean } = {}): {
   const packs = availablePacks()
   const chosen = getActiveModal('video')
   const active = packs.find((p) => p.name === chosen)?.name ?? packs[0]?.name ?? null
-  if (!findSdBinary('sd-cli'))
+  if (!hasSdBinary('sd-cli'))
     return {
       available: false,
       models: packs.map((p) => p.name),
@@ -348,30 +347,11 @@ export async function generateVideo(
                 new RegExp(`\\b${name}\\b`).test(encoders)
               )
               if (!encoder) throw new Error('The installed video encoder does not support H.264.')
-              const preference = getBackendPreference('video')
-              const preferred = findSdBinaries('sd-cli', preference)
-              // Metal and Vulkan distributions also contain CPU kernels. Explicit
-              // CPU must remain usable when no separate CPU binary is packaged.
-              const runtimes =
-                preference === 'cpu' && preferred.length === 0
-                  ? findSdBinaries('sd-cli').filter(
-                      (runtime) => imageBackendForRuntime(process.platform, runtime) !== 'CUDA'
-                    )
-                  : preferred
-              if (!runtimes.length) throw new Error('Video engine was not found.')
-              const attempts = runtimes.map((runtime) => ({ runtime, cpu: preference === 'cpu' }))
-              // Linux's Vulkan distribution includes CPU kernels in the same binary.
-              if (
-                preference !== 'cpu' &&
-                !runtimes.some(
-                  (runtime) => imageBackendForRuntime(process.platform, runtime) === 'CPU'
-                )
-              ) {
-                const runtime = runtimes.find(
-                  (item) => imageBackendForRuntime(process.platform, item) !== 'CUDA'
-                )
-                if (runtime) attempts.push({ runtime, cpu: true })
-              }
+              // The shared backend policy orders the engines: the person's choice, then the GPUs
+              // that work here, then a CPU-only run (`--backend cpu`) as the last rung.
+              const ladder = await nativeLadder('video', 'sd-cli')
+              if (!ladder.length) throw new Error('Video engine was not found.')
+              const attempts = ladder.map((step) => ({ runtime: step.path, cpu: step.cpuOnly }))
               for (const [index, { runtime, cpu }] of attempts.entries()) {
                 if (isCancelRequested()) throw new Error(CANCELLED)
                 const backend = beginRuntimeBackend('video', pack!.name)

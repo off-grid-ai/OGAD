@@ -7,7 +7,7 @@ export interface AxRect {
   height: number
 }
 
-export interface AxCaptureGeometry {
+interface AxCaptureGeometry {
   sourceBounds: AxRect
   encodedWidth: number
   encodedHeight: number
@@ -16,7 +16,7 @@ export interface AxCaptureGeometry {
 }
 
 export type ObservationSource = 'ax' | 'ocr' | 'ax+ocr'
-export type ObservationModality = 'ax' | 'uia' | 'ocr' | 'capture'
+type ObservationModality = 'ax' | 'uia' | 'ocr' | 'capture'
 
 export interface WindowIdentity {
   platform: NodeJS.Platform
@@ -27,7 +27,7 @@ export interface WindowIdentity {
   bounds: AxRect
 }
 
-export interface SourceStatus {
+interface SourceStatus {
   available: boolean
   degradedReason?: string
 }
@@ -40,9 +40,9 @@ export interface WindowBoundObservation {
   sources: Record<ObservationModality, SourceStatus>
 }
 
-export type CandidateRisk = 'reversible' | 'private' | 'authentication' | 'payment' | 'destructive'
+type CandidateRisk = 'reversible' | 'private' | 'authentication' | 'payment' | 'destructive'
 
-export type CandidateAction =
+type CandidateAction =
   | { type: 'activate'; method: 'press' | 'click' | 'hover'; x: number; y: number }
   | { type: 'type'; text: string; submit: boolean }
   | { type: 'key'; keys: string }
@@ -111,7 +111,7 @@ export interface ComputerUseDecisionResult {
   latencyMs: number
 }
 
-export type VerificationStatus = 'satisfied' | 'unsatisfied' | 'unknown' | 'timeout'
+type VerificationStatus = 'satisfied' | 'unsatisfied' | 'unknown' | 'timeout'
 
 export interface ComputerUseVerificationResult {
   status: VerificationStatus

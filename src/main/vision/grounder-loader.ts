@@ -27,11 +27,6 @@ export interface GrounderTiming {
   swapOutMs: number
 }
 
-/** The wall-clock a swap adds on top of the task run. */
-export function grounderSwapOverheadMs(t: GrounderTiming): number {
-  return t.swapInMs + t.swapOutMs
-}
-
 interface GrounderRemoteSelection {
   id: string
   model: string

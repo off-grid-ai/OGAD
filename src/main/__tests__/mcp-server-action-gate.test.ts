@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 // it can't be exercised in-process. This is a source-level regression guard for
 // the SECURITY contract instead: the action tools must be exposed ONLY to an
 // authorized request. If someone un-gates them (registers unconditionally, or
-// stops threading isActionAuthorized into the build), this test fails.
+// stops threading authorizeActionRequest into the build), this test fails.
 const SRC = readFileSync(path.join(__dirname, '..', 'mcp-server.ts'), 'utf8')
 
 describe('mcp-server action-tool gate', () => {

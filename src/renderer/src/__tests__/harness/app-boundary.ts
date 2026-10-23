@@ -55,7 +55,6 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     universalSearch: async () => [],
     onNewAction: eventSubscription,
     onUpdateDownloaded: eventSubscription,
-    onReprocessProgress: eventSubscription,
     onNavigate: eventSubscription,
     onMeetingState: eventSubscription,
     onModelProgress: eventSubscription,

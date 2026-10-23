@@ -1,6 +1,6 @@
 import { BundleError } from '@offgrid/sync/portable'
 
-export interface DesktopBackupChunk {
+interface DesktopBackupChunk {
   content: string
   position: number
 }

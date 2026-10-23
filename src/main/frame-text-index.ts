@@ -3,8 +3,23 @@
 // is contentless (the text is not stored twice) with contentless_delete, so a frame that changes
 // or goes away is simply dropped from it. New and edited frames are indexed by triggers; frames
 // captured before the index existed are indexed in the background, newest first, in small batches.
+//
+// frame_fts keeps the tokenizer it was created with. It is the largest index by far (every word
+// ever on screen), and rebuilding it for the shared tokenizer (FTS_TOKENIZE, which keeps Devanagari
+// vowel signs inside words) would mean indexing everything twice on the main thread. Frame text is
+// mostly Latin, and a Hindi whole word still matches the old tokenizer through the phrase query
+// ftsQuery builds. A new index is created on the shared tokenizer; an existing one is rebuilt only
+// once a chunked, off-main-thread rebuild exists. Text is normalised (normaliseForIndex) on the way
+// in either way, so queries and indexed text agree.
 
-import { getDB } from './database'
+import {
+  enableFtsSecureDelete,
+  getDB,
+  markFtsIndexCurrent,
+  registerFtsFunctions,
+  tableExists
+} from './database'
+import { FTS_TOKENIZE, normaliseForIndex } from '@offgrid/rag/records'
 
 /** The backfill runs on the main thread in short slices: an average frame carries ~6KB of OCR, and
  *  200-frame batches held the thread over half a second each, which made the whole app lag. Each
@@ -14,38 +29,68 @@ const BACKFILL_PAUSE_MS = 80
 /** Frames read per slice; a slice usually stops on its time budget first. */
 const BACKFILL_BATCH = 50
 
-interface IndexDatabase {
-  exec(sql: string): void
-  prepare(sql: string): { get(...args: unknown[]): unknown }
+type IndexDatabase = ReturnType<typeof getDB>
+
+/** Below this frame id, frames still wait for the backfill; it works down from here. */
+function startCursor(db: IndexDatabase): number {
+  return (db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM frames').get() as { id: number })
+    .id
 }
+
+function writeState(db: IndexDatabase, cursor: number): void {
+  // The cursor lives beside the index, so the index needs nothing but this database.
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS frame_fts_state (id INTEGER PRIMARY KEY CHECK (id = 1), cursor INTEGER NOT NULL);
+     INSERT OR REPLACE INTO frame_fts_state (id, cursor) VALUES (1, ${Math.floor(cursor)});`
+  )
+}
+
+/** Synced mail and chat frames stay out, as search already left them out. */
+const TRIGGERS = `
+  CREATE TRIGGER IF NOT EXISTS frames_fts_ai AFTER INSERT ON frames
+  WHEN new.text IS NOT NULL AND COALESCE(new.source, '') != 'connector' BEGIN
+    INSERT INTO frame_fts(rowid, text) VALUES (new.id, offgrid_fts_text(new.text));
+  END;
+  CREATE TRIGGER IF NOT EXISTS frames_fts_ad AFTER DELETE ON frames BEGIN
+    DELETE FROM frame_fts WHERE rowid = old.id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS frames_fts_au AFTER UPDATE OF text, source ON frames BEGIN
+    DELETE FROM frame_fts WHERE rowid = old.id;
+    INSERT INTO frame_fts(rowid, text)
+      SELECT new.id, offgrid_fts_text(new.text)
+       WHERE new.text IS NOT NULL AND COALESCE(new.source, '') != 'connector';
+  END;
+`
 
 /** Create the index and its triggers on a database that has the frames table. Idempotent. */
 export function ensureFrameTextIndex(db: IndexDatabase): void {
-  const exists = db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'frame_fts'")
-    .get()
-  if (!exists) {
+  // The app's connection has the triggers' function already; another handle may not.
+  try {
+    db.prepare("SELECT offgrid_fts_text('')").get()
+  } catch {
+    registerFtsFunctions(db)
+  }
+  // An earlier build of this branch rebuilt the index beside itself; that copy goes.
+  db.exec(`
+    DROP TRIGGER IF EXISTS frames_fts_next_ai;
+    DROP TRIGGER IF EXISTS frames_fts_next_ad;
+    DROP TRIGGER IF EXISTS frames_fts_next_au;
+    DROP TABLE IF EXISTS frame_fts_next;
+    DROP TABLE IF EXISTS frame_fts_next_state;
+  `)
+  if (!tableExists(db, 'frame_fts')) {
     db.exec(
       `CREATE VIRTUAL TABLE frame_fts USING fts5(
-         text, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2'
+         text, content='', contentless_delete=1, tokenize = "${FTS_TOKENIZE}"
        )`
     )
-    // Everything below this id predates the index; the backfill works down from here. The
-    // cursor lives beside the index, so the index needs nothing but this database.
-    const top = db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM frames').get() as {
-      id: number
-    }
-    db.exec(
-      `CREATE TABLE IF NOT EXISTS frame_fts_state (id INTEGER PRIMARY KEY CHECK (id = 1), cursor INTEGER NOT NULL);
-       INSERT OR REPLACE INTO frame_fts_state (id, cursor) VALUES (1, ${Math.floor(Number(top.id))});`
-    )
+    enableFtsSecureDelete(db, 'frame_fts')
+    markFtsIndexCurrent(db, 'frame_fts')
+    writeState(db, startCursor(db))
   }
-  // An index made before the cursor moved here kept it in app settings; carry it over once, or
-  // start again from the top (re-indexing a frame is safe).
-  const hasState = db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'frame_fts_state'")
-    .get()
-  if (!hasState) {
+  // An index made before the cursor moved beside it kept it in app settings; carry it over once,
+  // or start again from the top (re-indexing a frame is safe).
+  if (!tableExists(db, 'frame_fts_state')) {
     let cursor: number | null = null
     try {
       const row = db
@@ -55,32 +100,20 @@ export function ensureFrameTextIndex(db: IndexDatabase): void {
     } catch {
       /* no settings table here */
     }
-    if (cursor === null || !Number.isFinite(cursor)) {
-      cursor = (db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM frames').get() as { id: number })
-        .id
-    }
-    db.exec(
-      `CREATE TABLE IF NOT EXISTS frame_fts_state (id INTEGER PRIMARY KEY CHECK (id = 1), cursor INTEGER NOT NULL);
-       INSERT OR REPLACE INTO frame_fts_state (id, cursor) VALUES (1, ${Math.floor(cursor)});`
-    )
+    writeState(db, cursor === null || !Number.isFinite(cursor) ? startCursor(db) : cursor)
   }
-
-  // Synced mail and chat frames stay out, as search already left them out.
-  db.exec(`
-    CREATE TRIGGER IF NOT EXISTS frames_fts_ai AFTER INSERT ON frames
-    WHEN new.text IS NOT NULL AND COALESCE(new.source, '') != 'connector' BEGIN
-      INSERT INTO frame_fts(rowid, text) VALUES (new.id, new.text);
-    END;
-    CREATE TRIGGER IF NOT EXISTS frames_fts_ad AFTER DELETE ON frames BEGIN
-      DELETE FROM frame_fts WHERE rowid = old.id;
-    END;
-    CREATE TRIGGER IF NOT EXISTS frames_fts_au AFTER UPDATE OF text, source ON frames BEGIN
-      DELETE FROM frame_fts WHERE rowid = old.id;
-      INSERT INTO frame_fts(rowid, text)
-        SELECT new.id, new.text
-         WHERE new.text IS NOT NULL AND COALESCE(new.source, '') != 'connector';
-    END;
-  `)
+  // Older triggers indexed the raw text; these normalise it. Deletes are by rowid (contentless),
+  // so replacing them is safe on an index of either kind.
+  const insertTrigger = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'frames_fts_ai'")
+    .get() as { sql: string } | undefined
+  if (insertTrigger && !insertTrigger.sql.includes('offgrid_fts_text')) {
+    db.exec(`
+      DROP TRIGGER IF EXISTS frames_fts_ai;
+      DROP TRIGGER IF EXISTS frames_fts_au;
+    `)
+  }
+  db.exec(TRIGGERS)
 }
 
 /** The lowest frame id the backfill has reached; 0 once every older frame is indexed. */
@@ -106,10 +139,7 @@ export function frameTextIndexBackfilling(): boolean {
 
 /** Index a slice of older frames, newest first: up to `batch` frames, stopping early once
  *  `budgetMs` is spent. Returns whether more remain. */
-export function indexFrameTextBatch(
-  batch = BACKFILL_BATCH,
-  budgetMs = SLICE_BUDGET_MS
-): boolean {
+export function indexFrameTextBatch(batch = BACKFILL_BATCH, budgetMs = SLICE_BUDGET_MS): boolean {
   const cursor = readCursor()
   if (cursor <= 1) return false
   const db = getDB()
@@ -128,7 +158,7 @@ export function indexFrameTextBatch(
     for (const row of rows) {
       // An edit since the index existed may already have indexed this frame.
       drop.run(row.id)
-      if (row.text && row.source !== 'connector') add.run(row.id, row.text)
+      if (row.text && row.source !== 'connector') add.run(row.id, normaliseForIndex(row.text))
       lowest = row.id
       if (Date.now() - started >= budgetMs) break
     }

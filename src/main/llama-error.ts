@@ -13,6 +13,7 @@ export interface LlamaFailure {
     | 'os_too_old'
     | 'out_of_memory'
     | 'gpu_unsupported'
+    | 'gpu_fault'
     | 'speculation_unsupported'
     | 'missing_library'
     | 'model_corrupt'
@@ -21,6 +22,9 @@ export interface LlamaFailure {
   /** One-line, user-facing explanation + what to do. */
   reason: string
 }
+
+export const GPU_FAULT_PATTERN =
+  /compute error|cuda error|ggml_cuda|device lost|ErrorDeviceLost|vk::DeviceLostError|failed to allocate|out of memory|cudaMalloc/i
 
 /** One source of truth for a live second-instance conflict, whether it is detected before spawn
  * from process ownership or reported by the native engine as EADDRINUSE. */
@@ -135,6 +139,10 @@ export function classifyLlamaError(
       code: 'missing_library',
       reason: 'A required engine library is missing or could not be loaded.'
     }
+  }
+
+  if (GPU_FAULT_PATTERN.test(stderr)) {
+    return { code: 'gpu_fault', reason: 'The GPU stopped responding.' }
   }
 
   // Corrupt / truncated weights.

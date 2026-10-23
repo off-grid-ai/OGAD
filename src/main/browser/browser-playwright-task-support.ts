@@ -109,6 +109,10 @@ export async function observeWithCurrentLease(
     let observation: PlaywrightToolResult
     try {
       observation = await input.session.snapshot(combinedSignal(input.signal, lease.signal))
+      if (!observation.isError && input.captureObservationImage) {
+        const screenshot = await input.captureObservationImage()
+        observation = { ...observation, screenshot }
+      }
     } catch (error) {
       if (!lease.signal.aborted) throw error
       continue

@@ -81,7 +81,7 @@ function phase(value: unknown): ComputerUsePhase | undefined {
 }
 
 /** Remove model-only reasoning while retaining the action and tool-call output users can audit. */
-export function visibleComputerUseModelOutput(value: unknown): string | undefined {
+function visibleComputerUseModelOutput(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const withoutClosedReasoning = value.replace(
     /<(?:think|analysis|reasoning)\b[^>]*>[\s\S]*?<\/(?:think|analysis|reasoning)>/gi,

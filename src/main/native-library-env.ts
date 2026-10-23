@@ -6,14 +6,26 @@ export function nativeLibraryEnv(
   binDir: string,
   inherited: Record<string, string | undefined> = {}
 ): Record<string, string> {
-  if (platform === 'darwin') return { DYLD_LIBRARY_PATH: binDir }
+  const pathApi = platform === 'win32' ? path.win32 : path.posix
+  const folder = pathApi.basename(binDir)
+  const cudaEnv: Record<string, string> =
+    (folder.endsWith('-cuda') || (platform === 'win32' && folder === 'whisper')) &&
+    inherited.CUDA_CACHE_MAXSIZE === undefined
+      ? { CUDA_CACHE_MAXSIZE: '4294967296' }
+      : {}
+  if (platform === 'darwin') return { ...cudaEnv, DYLD_LIBRARY_PATH: binDir }
   if (platform === 'linux') {
     return {
+      ...cudaEnv,
       LD_LIBRARY_PATH: inherited.LD_LIBRARY_PATH ? `${binDir}:${inherited.LD_LIBRARY_PATH}` : binDir
     }
   }
   if (platform === 'win32') {
-    return { PATH: `${binDir}${path.win32.delimiter}${inherited.PATH ?? ''}` }
+    return {
+      ...cudaEnv,
+      GGML_VK_DISABLE_BFLOAT16: '1',
+      PATH: `${binDir}${path.win32.delimiter}${inherited.PATH ?? ''}`
+    }
   }
-  return {}
+  return cudaEnv
 }

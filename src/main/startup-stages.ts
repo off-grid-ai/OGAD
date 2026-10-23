@@ -10,7 +10,7 @@ export type StartupStageResult<T> =
       readonly durationMs: number
     }
 
-export interface StartupStageContext {
+interface StartupStageContext {
   readonly signal: AbortSignal
   isOwner(): boolean
   commit<R>(label: string, apply: () => R): R | undefined

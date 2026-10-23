@@ -25,7 +25,7 @@ export interface GodChatState {
  * all memory, and takes what it knows right now with every question. Generation details and the
  * tools-sent list are not shown.
  */
-export interface GodChatOptions {
+interface GodChatOptions {
   /** The companion's name, shown as the chat's title. */
   readonly name: string
   /** What God knows right now and how it should answer, added to every turn. */
@@ -55,7 +55,8 @@ export interface GodChatOptions {
 }
 
 export interface MemoryChatProps {
-  readonly onNavigateToMemory?: (memoryId: number) => void
+  /** Open a to-do on the Actions screen (Pro). */
+  readonly onNavigateToAction?: (actionId: number) => void
   readonly onNavigateToChat?: (sessionId: string) => void
   readonly onNavigateToMeeting?: (meetingId: number) => void
   readonly onNavigateToEntity?: (entityId: number) => void

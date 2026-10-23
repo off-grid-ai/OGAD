@@ -349,7 +349,16 @@ const settingsStore = createSettingsStore({
     }
   },
   setText: async (patch: TextSettings) => {
-    await llm.setSettings(patch)
+    // A null layer count is Auto: llama.cpp places the layers itself.
+    const { gpuLayers, ...rest } = patch
+    await llm.setSettings({
+      ...rest,
+      ...(gpuLayers === null
+        ? { gpuPlacement: 'auto' as const }
+        : typeof gpuLayers === 'number'
+          ? { gpuLayers, gpuPlacement: 'manual' as const }
+          : {})
+    })
   },
   activeIds: readActiveModelIds,
   web: getWebUseSettings,

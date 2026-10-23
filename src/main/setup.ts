@@ -10,7 +10,7 @@ import { runtimeBackendSnapshot } from './runtime-backends'
 import os from 'os'
 import { videoPackError } from '@offgrid/models'
 import { totalBytes } from './model-sizing'
-import { findSdBinary } from './imagegen/sd-runtime'
+import { hasSdBinary } from './imagegen/sd-runtime'
 import { ffmpegBin } from './transcription/whisper-cli'
 import { getEmbeddingSetupModel, downloadEmbeddingModel } from './embedding-setup-download'
 import { modalityForKind } from './active-models-logic'
@@ -431,7 +431,7 @@ export async function getSetupPlan(mode?: RecMode): Promise<SetupPlan> {
   }
 
   const missingRuntime = [
-    !findSdBinary('sd-cli') ? 'video engine' : null,
+    !hasSdBinary('sd-cli') ? 'video engine' : null,
     !ffmpegBin() ? 'video encoder' : null
   ].filter(Boolean)
   const videoRuntimeIssue = missingRuntime.length

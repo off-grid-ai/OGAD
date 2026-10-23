@@ -60,6 +60,7 @@ win:
         - '!llama-cuda/**'
         - '!llama-prism-cuda/**'
         - '!cuda-runtime/**'
+        - '!onnx-cuda/**'
         - '!sd-cuda/**'
         - '!whisper/**'
         - '!kev-runtime/**'
@@ -114,6 +115,8 @@ mac:
         # Kev's Python runtime downloads with a Kev model (resources/kev-runtime-packs.json).
         # Bundled, it pushed the update zip past the 1 GiB Squirrel.Mac can install.
         - '!kev-runtime/**'
+        # CUDA ONNX Runtime arrives with the acceleration pack, never in an installer.
+        - '!onnx-cuda/**'
     - from: ../executorch-speech/native/bin/executorch-speech
       to: bin/executorch-speech
     - from: ../executorch-speech/generated/default-assets
@@ -127,7 +130,7 @@ dmg:
   # The zlib format every release has shipped; the release's DMG integrity check attaches it.
   format: UDZO
   sign: true
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
   # The app is currently ~3.3 GB before compression. macOS 26 adds an EFI/GPT
   # partition to large HFS images, so dmgbuild's computed size can leave less usable
   # space than the bundle needs. Allocate deterministic headroom, then shrink after
@@ -149,6 +152,7 @@ linux:
         - '!llama-cuda/**'
         - '!llama-prism-cuda/**'
         - '!cuda-runtime/**'
+        - '!onnx-cuda/**'
         - '!sd-cuda/**'
         - '!whisper-cuda/**'
         - '!kev-runtime/**'
@@ -175,6 +179,7 @@ deb:
     - libsecret-1-0
     - libasound2t64
     - libgbm1
+    - libvulkan1
     - xdotool
     - x11-utils
     - wtype
@@ -193,6 +198,8 @@ deb:
     - xdg-desktop-portal
     - grim
     - kde-spectacle
+  recommends:
+    - mesa-vulkan-drivers
 # Electron fuses (flipped at package time). ASAR integrity makes a tampered app.asar
 # refuse to load — the local-first anti-tamper lever (the license check works offline, so
 # this is the bar against cracking it). No telemetry unless the user opts in. Only the integrity fuses are

@@ -14,32 +14,21 @@ import { ProgressiveBlur } from './ui/progressive-blur'
 import { openChatLink } from '@renderer/lib/chat-link'
 import { primaryModifier } from '@renderer/lib/device'
 
-interface Memory {
-  id: number
-  content: string
-  raw_text: string | null
-  source_app: string | null
-  session_id: string
-  created_at: string
-}
-
 interface Entity {
   id: number
   name: string
   type: string
   summary: string | null
   updated_at: string
-  fact_count: number
 }
 
 interface ChatDetailProps {
   sessionId: string
   onBack: () => void
   onSelectEntity?: (entityId: number) => void
-  onSelectMemory?: (memoryId: number) => void
 }
 
-type ExpandedSection = 'summary' | 'memories' | 'entities' | null
+type ExpandedSection = 'summary' | 'entities' | null
 
 // Markdown components for summary display
 const markdownComponents: Components = {
@@ -93,55 +82,6 @@ const markdownComponents: Components = {
   )
 }
 
-// Memory card - full version for expanded view
-function MemoryCardFull({ memory, onClick }: { memory: Memory; onClick: () => void }): React.JSX.Element {
-  const formatTime = (dateStr: string): string => parseSqliteUtc(dateStr).toLocaleString()
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.01 }}
-      onClick={onClick}
-      className="group p-4 rounded-xl cursor-pointer transition-all bg-neutral-900/60 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60"
-    >
-      <p className="text-sm text-neutral-200 leading-relaxed">{memory.content}</p>
-      <div className="flex items-center justify-between mt-3 pt-3 border-t border-neutral-800">
-        <span className="text-[10px] text-neutral-500">{formatTime(memory.created_at)}</span>
-        <span className="text-[10px] text-neutral-400 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          View in Memories
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </span>
-      </div>
-    </motion.div>
-  )
-}
-
-// Compact memory card for bento view
-function MemoryCard({ memory, onClick }: { memory: Memory; onClick: () => void }): React.JSX.Element {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      whileHover={{ scale: 1.02 }}
-      onClick={onClick}
-      className="group p-3 rounded-xl cursor-pointer transition-all bg-neutral-900/60 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60"
-    >
-      <p className="text-xs text-neutral-300 line-clamp-2 leading-relaxed">{memory.content}</p>
-      <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="text-[10px] text-neutral-400 flex items-center gap-1">
-          View details
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </span>
-      </div>
-    </motion.div>
-  )
-}
-
 // Entity card - full version for expanded view
 function EntityCardFull({ entity, onClick }: { entity: Entity; onClick: () => void }): React.JSX.Element {
   const formatTime = (dateStr: string): string => parseSqliteUtc(dateStr).toLocaleString()
@@ -158,9 +98,6 @@ function EntityCardFull({ entity, onClick }: { entity: Entity; onClick: () => vo
         <span className="font-semibold text-white">{entity.name}</span>
         <span className="px-2 py-0.5 text-[10px] font-semibold uppercase rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
           {entity.type || 'Unknown'}
-        </span>
-        <span className="px-2 py-0.5 text-[10px] rounded bg-neutral-800 text-neutral-400">
-          {entity.fact_count} facts
         </span>
       </div>
       {entity.summary && (
@@ -200,7 +137,7 @@ function EntityCard({ entity, onClick }: { entity: Entity; onClick: () => void }
       )}
       <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <span className="text-[10px] text-neutral-400 flex items-center gap-1">
-          {entity.fact_count} facts · View details
+          View details
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
@@ -256,8 +193,7 @@ function SectionActions({
 }
 
 
-export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }: ChatDetailProps): React.JSX.Element {
-  const [memories, setMemories] = useState<Memory[]>([])
+export function ChatDetail({ sessionId, onBack, onSelectEntity }: ChatDetailProps): React.JSX.Element {
   const [entities, setEntities] = useState<Entity[]>([])
   const [summary, setSummary] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -293,12 +229,10 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }
     const fetchData = async (): Promise<void> => {
       setLoading(true)
       try {
-        const [memoriesData, entitiesData, sessionsData] = await Promise.all([
-          window.api.getMemoryRecordsForSession(sessionId),
+        const [entitiesData, sessionsData] = await Promise.all([
           window.api.getEntitiesForSession(sessionId),
           window.api.getChatSessions()
         ])
-        setMemories(memoriesData)
         setEntities(entitiesData)
 
         const thisSession = sessionsData.find((s) => s.session_id === sessionId)
@@ -402,66 +336,6 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }
                       </EmptyDescription>
                     </Empty>
                   )}
-                </Section>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Expanded Memories View */}
-          {expandedSection === 'memories' && (
-            <motion.div
-              key="expanded-memories"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex-1 px-6 pb-6 overflow-hidden"
-            >
-              <div className="relative h-full rounded-2xl p-5 bg-neutral-900/60 border border-neutral-800 overflow-hidden">
-                <BorderBeam
-                  size={200}
-                  duration={8}
-                  borderWidth={1.5}
-                  className="from-neutral-600/40 via-neutral-500/40 to-neutral-600/40"
-                />
-                <Section
-                  label="Memories"
-                  actions={
-                    <SectionActions
-                      count={memories.length}
-                      onExpand={() => handleExpand('memories')}
-                      isExpanded
-                    />
-                  }
-                  className="relative z-10 flex h-full flex-col"
-                >
-                  <div className="relative flex-1 min-h-0">
-                    <div className="absolute inset-0 overflow-y-auto pr-2 pb-16">
-                      {memories.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {memories.map((memory) => (
-                            <MemoryCardFull
-                              key={memory.id}
-                              memory={memory}
-                              onClick={() => onSelectMemory?.(memory.id)}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <Empty className="h-full flex-none gap-0 px-0 py-0 md:py-0">
-                          <EmptyDescription className="text-neutral-500 text-[length:inherit]">
-                            No memories yet
-                          </EmptyDescription>
-                        </Empty>
-                      )}
-                    </div>
-                    {memories.length > 4 && (
-                      <ProgressiveBlur
-                        height="60px"
-                        position="bottom"
-                        className="pointer-events-none"
-                      />
-                    )}
-                  </div>
                 </Section>
               </div>
             </motion.div>
@@ -580,62 +454,6 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity, onSelectMemory }
                           No summary available
                         </EmptyDescription>
                       </Empty>
-                    )}
-                  </div>
-                </div>
-              </Section>
-
-              <Section
-                label="Memories"
-                actions={
-                  <SectionActions
-                    count={memories.length}
-                    onExpand={() => handleExpand('memories')}
-                  />
-                }
-              >
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-label="Expand memories"
-                  className="relative rounded-2xl p-4 bg-neutral-900/60 border border-neutral-800 overflow-hidden cursor-pointer hover:border-neutral-700 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-500"
-                  onClick={() => handleExpand('memories')}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      handleExpand('memories')
-                    }
-                  }}
-                >
-                  <BorderBeam
-                    size={100}
-                    duration={8}
-                    borderWidth={1}
-                    className="from-neutral-600/30 via-neutral-500/30 to-neutral-600/30"
-                  />
-                  <div className="relative z-10 space-y-2">
-                    {memories.length > 0 ? (
-                      memories
-                        .slice(0, 3)
-                        .map((memory) => (
-                          <MemoryCard
-                            key={memory.id}
-                            memory={memory}
-                            onClick={() => onSelectMemory?.(memory.id)}
-                          />
-                        ))
-                    ) : (
-                      <Empty className="flex-none gap-0 px-0 py-4 md:py-4">
-                        <EmptyDescription className="text-neutral-500 text-xs">
-                          No memories yet
-                        </EmptyDescription>
-                      </Empty>
-                    )}
-                    {memories.length > 3 && (
-                      <p className="text-[10px] text-neutral-500 text-center">
-                        +{memories.length - 3} more
-                      </p>
                     )}
                   </div>
                 </div>

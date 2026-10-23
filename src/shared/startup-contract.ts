@@ -1,6 +1,6 @@
 export type StartupPhase = 'pending' | 'ready' | 'degraded' | 'failed'
 
-export type StartupStageStatus = 'running' | 'completed' | 'failed' | 'timeout' | 'late'
+type StartupStageStatus = 'running' | 'completed' | 'failed' | 'timeout' | 'late'
 
 export interface StartupStageSnapshot {
   readonly name: string

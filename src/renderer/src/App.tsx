@@ -44,11 +44,10 @@ import { currentPlatform, primaryModifier } from './lib/device'
 import { NotificationProvider } from './hooks/NotificationProvider'
 import { useNotifications } from './hooks/useNotifications'
 import { ToastProvider } from './hooks/ToastProvider'
-import { ReprocessingProvider, useReprocessing } from './hooks/useReprocessing'
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { Sidebar, SidebarBody } from './components/ui/sidebar'
 import { NavThemeToggle } from './components/ThemeToggle'
-import { motion, AnimatePresence } from 'motion/react'
+import { AnimatePresence } from 'motion/react'
 import {
   IconMessageCircle,
   IconSettings,
@@ -110,7 +109,6 @@ type ViewMode =
   | 'connectors'
   | 'meetings'
   | 'chats'
-  | 'memories'
   | 'entities'
   | 'memory-chat'
   | 'tasks'
@@ -139,52 +137,8 @@ interface NavigationState {
   subroute: string | null
   settingsSection: string | null
   selectedSessionId: string | null
-  selectedMemoryId: number | null
   selectedEntityId: number | null
   selectedProjectId: string | null
-}
-
-function ReprocessingBanner(): React.JSX.Element | null {
-  const { reprocessing, progress } = useReprocessing()
-  if (!reprocessing) return null
-
-  const pct =
-    progress && progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0
-
-  return (
-    <motion.div
-      initial={{ height: 0, opacity: 0 }}
-      animate={{ height: 'auto', opacity: 1 }}
-      exit={{ height: 0, opacity: 0 }}
-      transition={{ duration: 0.3 }}
-      className="bg-neutral-900/90 backdrop-blur-sm border-b border-neutral-800 px-4 py-2 flex items-center gap-3"
-    >
-      <motion.div
-        className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-transparent rounded-full shrink-0"
-        animate={{ rotate: 360 }}
-        transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-      />
-      <span className="text-sm text-neutral-400 flex-1 min-w-0 truncate">
-        {progress?.phase === 'cleared'
-          ? 'Data cleared. Rebuilding memories and entities...'
-          : progress
-            ? `Reprocessing session ${progress.processed} of ${progress.total}...`
-            : 'Reprocessing sessions...'}
-      </span>
-      {progress && progress.total > 0 && (
-        <div className="w-24 h-1.5 bg-neutral-800 rounded-full overflow-hidden shrink-0">
-          <motion.div
-            className="h-full bg-neutral-500 rounded-full"
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-      )}
-      {progress && progress.total > 0 && (
-        <span className="text-xs text-neutral-600 shrink-0">{pct}%</span>
-      )}
-    </motion.div>
-  )
 }
 
 // One rule for the look of EVERY sidebar row - nav items, the model-status row, the mobile-app
@@ -363,7 +317,6 @@ function AppContent(): React.JSX.Element {
   const [activeModelsOpen, setActiveModelsOpen] = useState(false)
   const [modelSettingsTab, setModelSettingsTab] = useState<ModelSettingsPanelTab>('model')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
-  const [selectedMemoryId, setSelectedMemoryId] = useState<number | null>(null)
   // Version of a downloaded-and-staged update (null = none). Surfaced as a banner
   // with a "Restart to update" button — Squirrel only applies on a clean quit, so
   // we drive the install explicitly instead of waiting for one.
@@ -546,7 +499,6 @@ function AppContent(): React.JSX.Element {
     setModelSettingsOpen(false)
     setModelSettingsTab('model')
     setSelectedSessionId(null)
-    setSelectedMemoryId(null)
     setSelectedEntityId(null)
     setSelectedProjectId(null)
     setSearchQuery('')
@@ -604,7 +556,6 @@ function AppContent(): React.JSX.Element {
       '/connectors': 'connectors',
       '/meetings': 'meetings',
       '/chat': CHAT_VIEW,
-      '/memories': 'memories',
       '/entities': 'entities',
       '/models': 'models',
       '/gateway': 'gateway',
@@ -720,7 +671,6 @@ function AppContent(): React.JSX.Element {
       'memory-chat': '/chat',
       chats: '/chats',
       tasks: '/tasks',
-      memories: '/memories',
       entities: '/entities',
       models: '/models',
       gateway: '/gateway',
@@ -763,7 +713,6 @@ function AppContent(): React.JSX.Element {
       subroute: isInternalTabView(viewMode) ? navigationSubroute : null,
       settingsSection: viewMode === 'settings' ? settingsSection : null,
       selectedSessionId,
-      selectedMemoryId,
       selectedEntityId,
       selectedProjectId
     }
@@ -775,7 +724,6 @@ function AppContent(): React.JSX.Element {
       lastState.subroute === currentState.subroute &&
       lastState.settingsSection === currentState.settingsSection &&
       lastState.selectedSessionId === currentState.selectedSessionId &&
-      lastState.selectedMemoryId === currentState.selectedMemoryId &&
       lastState.selectedEntityId === currentState.selectedEntityId &&
       lastState.selectedProjectId === currentState.selectedProjectId
 
@@ -794,7 +742,6 @@ function AppContent(): React.JSX.Element {
     navigationSubroute,
     settingsSection,
     selectedSessionId,
-    selectedMemoryId,
     selectedEntityId,
     selectedProjectId,
     syncNavFlags
@@ -839,7 +786,6 @@ function AppContent(): React.JSX.Element {
           setNavigationSubroute(previousState.subroute)
           setSettingsSection(previousState.settingsSection)
           setSelectedSessionId(previousState.selectedSessionId)
-          setSelectedMemoryId(previousState.selectedMemoryId)
           setSelectedEntityId(previousState.selectedEntityId)
           setSelectedProjectId(previousState.selectedProjectId)
           syncNavFlags()
@@ -860,7 +806,6 @@ function AppContent(): React.JSX.Element {
           setNavigationSubroute(nextState.subroute)
           setSettingsSection(nextState.settingsSection)
           setSelectedSessionId(nextState.selectedSessionId)
-          setSelectedMemoryId(nextState.selectedMemoryId)
           setSelectedEntityId(nextState.selectedEntityId)
           setSelectedProjectId(nextState.selectedProjectId)
           syncNavFlags()
@@ -873,17 +818,11 @@ function AppContent(): React.JSX.Element {
     navigateBack()
   }, [navigateBack])
 
-  // Navigation handlers for Dashboard and MemoryChat
-  const handleSelectChat = useCallback(
-    (sessionId: string) => {
-      navigateTo('chats', () => setSelectedSessionId(sessionId))
-    },
-    [navigateTo]
-  )
-
-  const handleSelectMemory = useCallback(
-    (memoryId: number) => {
-      navigateTo('memories', () => setSelectedMemoryId(memoryId))
+  // Navigation handlers for MemoryChat
+  // A chat cited in an answer is one of your own conversations: open it in Chat, as Search does.
+  const handleOpenConversation = useCallback(
+    (conversationId: string) => {
+      navigateTo('memory-chat', () => setChatTarget({ conversationId }))
     },
     [navigateTo]
   )
@@ -895,13 +834,15 @@ function AppContent(): React.JSX.Element {
     [navigateTo]
   )
 
+  // Pro navigation is defined below; search hits (a to-do) reach it through this ref.
+  const handleProNavigateRef = useRef<((intent: ProNavigationIntent) => void) | null>(null)
+
   // Universal-search result → jump to the exact thing: open its source URL, the
   // owning entity/memory/meeting, or seek Replay to that captured moment.
   const handleOpenHit = useCallback(
     (hit: SearchHit) => {
       navigateSearchHit(hit, {
         selectEntity: handleSelectEntity,
-        selectMemory: handleSelectMemory,
         openMeeting: (meetingId) => {
           navigateTo('meetings', () => setMeetingTarget(meetingId))
         },
@@ -911,12 +852,13 @@ function AppContent(): React.JSX.Element {
         openReplay: (timestamp) => {
           navigateTo('replay', () => setReplayTarget(timestamp))
         },
+        openAction: (actionId) => handleProNavigateRef.current?.({ view: 'actions', actionId }),
         openLink: (url) => {
           window.open(url, '_blank', 'noopener')
         }
       })
     },
-    [handleSelectEntity, handleSelectMemory, navigateTo]
+    [handleSelectEntity, navigateTo]
   )
 
   const openSearch = useCallback(
@@ -964,6 +906,9 @@ function AppContent(): React.JSX.Element {
     },
     [navigateTo]
   )
+  useEffect(() => {
+    handleProNavigateRef.current = handleProNavigate
+  }, [handleProNavigate])
 
   useEffect(() => {
     if (!proReady || !isPro) return
@@ -1145,7 +1090,6 @@ function AppContent(): React.JSX.Element {
       setNavigationSubroute(isInternalTabView(view) ? subroute : null)
       setSettingsSection(view === 'settings' ? subroute : null)
       setSelectedSessionId(null)
-      setSelectedMemoryId(null)
       setSelectedEntityId(null)
       setReplayTarget(null)
     })
@@ -1474,10 +1418,6 @@ function AppContent(): React.JSX.Element {
 
         <div className="min-w-0 flex-1" data-testid="main-workspace">
           <div className="flex h-full flex-col overflow-hidden">
-            {/* Global reprocessing banner */}
-            <AnimatePresence>
-              <ReprocessingBanner />
-            </AnimatePresence>
             {/* Content Area */}
             <div className="flex-1 overflow-hidden">
               <ScreenTransition
@@ -1502,12 +1442,6 @@ function AppContent(): React.JSX.Element {
                         setSelectedSessionId(null)
                       })
                     }}
-                    onSelectMemory={(memoryId) => {
-                      navigateTo('memories', () => {
-                        setSelectedMemoryId(memoryId)
-                        setSelectedSessionId(null)
-                      })
-                    }}
                   />
                 ) : (
                   <>
@@ -1520,8 +1454,9 @@ function AppContent(): React.JSX.Element {
                           <GodScreen
                             onRunPreset={handleRunPreset}
                             chat={{
-                              onNavigateToMemory: handleSelectMemory,
-                              onNavigateToChat: handleSelectChat,
+                              onNavigateToAction: (actionId) =>
+                                handleProNavigate({ view: 'actions', actionId }),
+                              onNavigateToChat: handleOpenConversation,
                               onNavigateToMeeting: (meetingId) =>
                                 handleProNavigate({ view: 'meetings', meetingId }),
                               onNavigateToEntity: handleSelectEntity,
@@ -1561,8 +1496,10 @@ function AppContent(): React.JSX.Element {
                                   onToggleBroadcast={controls ? toggleChatBroadcast : undefined}
                                   paneCount={controls ? chatPanes.length : undefined}
                                   onPaneCountChange={controls ? setChatPaneCount : undefined}
-                                  onNavigateToMemory={handleSelectMemory}
-                                  onNavigateToChat={handleSelectChat}
+                                  onNavigateToAction={(actionId) =>
+                                    handleProNavigate({ view: 'actions', actionId })
+                                  }
+                                  onNavigateToChat={handleOpenConversation}
                                   onNavigateToMeeting={(meetingId) =>
                                     handleProNavigate({ view: 'meetings', meetingId })
                                   }
@@ -1595,8 +1532,10 @@ function AppContent(): React.JSX.Element {
                     ) : viewMode === 'memory-chat' ? (
                       <MemoryChat
                         onToggleSplit={toggleChatSplit}
-                        onNavigateToMemory={handleSelectMemory}
-                        onNavigateToChat={handleSelectChat}
+                        onNavigateToAction={(actionId) =>
+                          handleProNavigate({ view: 'actions', actionId })
+                        }
+                        onNavigateToChat={handleOpenConversation}
                         onNavigateToMeeting={(meetingId) =>
                           handleProNavigate({ view: 'meetings', meetingId })
                         }
@@ -1673,12 +1612,9 @@ function AppContent(): React.JSX.Element {
                         onSearchSourcesChange: setSearchSources,
                         searchSort,
                         onSearchSortChange: setSearchSort,
-                        selectedMemoryId,
-                        setSelectedMemoryId,
                         selectedEntityId,
                         rec,
                         onSelectEntity: handleSelectEntity,
-                        onSelectMemory: handleSelectMemory,
                         onOpenHit: handleOpenHit,
                         openChatOwner: handleOpenChatOwner
                       } satisfies ProViewContext) ?? (
@@ -1765,9 +1701,7 @@ function App(): React.JSX.Element | null {
         <PermissionGate>
           <NotificationProvider>
             <ToastProvider>
-              <ReprocessingProvider>
-                <AppContent />
-              </ReprocessingProvider>
+              <AppContent />
             </ToastProvider>
           </NotificationProvider>
         </PermissionGate>

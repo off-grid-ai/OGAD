@@ -35,6 +35,7 @@ export interface SettingsSelectOption<T extends string> {
   value: T
   label: string
   disabled?: boolean
+  hint?: string
   /** Capability meta shown muted on the right of the row, so the list helps you choose. */
   meta?: React.ReactNode
 }
@@ -138,7 +139,12 @@ export function SettingsSelect<T extends string>({
       <SelectPopup portalProps={popupPortalProps}>
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-            {option.label}
+            <span>
+              <span className="block">{option.label}</span>
+              {option.hint && (
+                <span className="block text-xs text-muted-foreground">{option.hint}</span>
+              )}
+            </span>
           </SelectItem>
         ))}
       </SelectPopup>

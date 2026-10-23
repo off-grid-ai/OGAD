@@ -18,9 +18,6 @@ export const MIN_CAPTURE_CTX_SIZE = 8192
 // (n_predict = -1) at the wire. Single source of truth for the backend and the Settings UI.
 export const MAX_TOKENS_AUTO = 0
 
-// Fresh-install / reset default for max output: auto (context is the limit, not a fixed number).
-export const DEFAULT_MAX_TOKENS = MAX_TOKENS_AUTO
-
 // Keep existing Desktop imports stable while Shared owns the cross-platform tool-call policy.
 export {
   MIN_MAX_TOOL_CALLS,

@@ -33,6 +33,7 @@ import type { ManagedRuntime } from './runtime-manager'
 import { modalityQueue, SPEECH_JOB } from './modality-queue/queue'
 import { chooseVoice, DEFAULT_VOICE } from './tts-logic'
 import { OnnxSpeechRuntime } from './tts-onnx'
+import { executorchSpeechBinary, executorchSpeechInstalled } from './runtime-availability'
 import { MEDIA_WORKER_IDLE_MS, mayStartMediaWorker } from '@offgrid/models'
 import { measuredAvailableMB } from './runtime-manager'
 
@@ -46,7 +47,9 @@ const ONNX_VOICES = new Set(
     .filter(({ language }) => language === 'en-us' || language === 'en-gb')
     .map(({ id }) => id)
 )
-const onnxSpeech = new OnnxSpeechRuntime()
+/** The Kokoro voice helper process; index.ts restarts it on wake and after a CUDA check. */
+export const ttsOnnxRuntime = new OnnxSpeechRuntime()
+const onnxSpeech = ttsOnnxRuntime
 /** Extra Kokoro workers for team gateway mode, each its own ONNX session (330 MB each). */
 const teamOnnxSpeech: OnnxSpeechRuntime[] = []
 
@@ -99,11 +102,7 @@ function messageOf(error: unknown): string {
 }
 
 function executablePath(): string {
-  const candidates = [
-    ...resourceDirs().map((root) => path.join(root, 'bin', 'executorch-speech')),
-    path.resolve(process.cwd(), '../executorch-speech/native/bin/executorch-speech')
-  ]
-  const executable = candidates.find((candidate) => fs.existsSync(candidate))
+  const executable = executorchSpeechBinary()
   if (!executable) throw new Error('The local voice runtime is not installed in this build.')
   return executable
 }
@@ -194,12 +193,17 @@ export async function listVoiceCatalog(
   const remote = getActiveRemoteVisionServerForModality('voice')
   // Every remote provider owns its speakers; the remote model, not this machine, decides them.
   if (remote) return listRemoteVoices(remote)
-  const voices = speechCapabilities.voices.map(({ id, language }) => ({
-    id,
-    label: kokoroVoiceLabel(id),
-    language: LANGUAGE_TAGS[language] ?? language,
-    languageLabel: speechLanguageLabel(LANGUAGE_TAGS[language] ?? language)
-  }))
+  // Every voice but the English Kokoro ones speaks through the ExecuTorch runtime; without it,
+  // offering them only leads to a download that cannot play.
+  const executorch = executorchSpeechInstalled()
+  const voices = speechCapabilities.voices
+    .filter(({ id }) => executorch || ONNX_VOICES.has(id))
+    .map(({ id, language }) => ({
+      id,
+      label: kokoroVoiceLabel(id),
+      language: LANGUAGE_TAGS[language] ?? language,
+      languageLabel: speechLanguageLabel(LANGUAGE_TAGS[language] ?? language)
+    }))
   onProgress?.(100)
   return voices
 }
@@ -220,6 +224,9 @@ async function prepareVoiceAssetsInner(
   voice: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<void> {
+  if (!ONNX_VOICES.has(voice) && !executorchSpeechInstalled()) {
+    throw new Error('This voice needs the local voice runtime, which is not in this build.')
+  }
   if (ONNX_VOICES.has(voice)) {
     try {
       await onnxSpeech.prepare(voice, onProgress)
@@ -232,7 +239,7 @@ async function prepareVoiceAssetsInner(
 }
 
 /** One finished speech pass: the voice can start on pass 0 while the rest is still being made. */
-export interface SpeechPass {
+interface SpeechPass {
   readonly index: number
   readonly count: number
   readonly dataUrl: string

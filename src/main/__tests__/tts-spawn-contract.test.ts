@@ -2,16 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const src = readFileSync(join(__dirname, '..', 'tts.ts'), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/\/\/.*$/gm, '')
+const strip = (text: string): string =>
+  text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+const src = strip(readFileSync(join(__dirname, '..', 'tts.ts'), 'utf8'))
+// The helper's location is resolved once, for tts.ts and the voice catalogue alike.
+const availability = strip(readFileSync(join(__dirname, '..', 'runtime-availability.ts'), 'utf8'))
 
 describe('tts.ts ExecuTorch runtime contract', () => {
   it('resolves the packaged native helper before the sibling development checkout', () => {
-    expect(src).toMatch(
+    expect(src).toContain('executorchSpeechBinary()')
+    expect(availability).toMatch(
       /resourceDirs\(\)\.map\(\(root\) => path\.join\(root, 'bin', 'executorch-speech'\)\)/
     )
-    expect(src).toContain(
+    expect(availability).toContain(
       "path.resolve(process.cwd(), '../executorch-speech/native/bin/executorch-speech')"
     )
   })

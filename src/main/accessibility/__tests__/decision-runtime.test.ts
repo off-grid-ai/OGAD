@@ -29,7 +29,13 @@ vi.mock('../../llm', () => ({
 vi.mock('../../llm/http-post', () => ({ postCompletionOnce: mocks.post }))
 vi.mock('../../llm/settings-math', () => ({ buildLaunchArgs: vi.fn(() => ['--serve']) }))
 vi.mock('../../llm/spawn-env', () => ({ engineSpawnEnv: vi.fn(() => ({ TEST_ENGINE: '1' })) }))
-vi.mock('../../runtime-env', () => ({ binRoots: () => ['/bundle'], exe: (name: string) => name }))
+vi.mock('../../runtime-env', () => ({
+  binRoots: () => ['/bundle'],
+  exe: (name: string) => name,
+  // No CUDA pack manifest in this build.
+  resourceFile: () => null,
+  dataDir: () => '/data'
+}))
 vi.mock('../../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
 vi.mock('../../free-port', () => ({ isPortFree: vi.fn(), pickFreePort: mocks.pickPort }))
 vi.mock('../../kill-orphan-port', () => ({ reapOrphanProcessesOnPort: mocks.reap }))
@@ -66,7 +72,13 @@ beforeEach(() => {
     python: '/runtime/python',
     script: '/runtime/server.py'
   })
-  mocks.exists.mockImplementation((candidate: string) => !candidate.includes('llama-cuda'))
+  // A macOS bundle: one Metal engine folder (no CUDA, CPU-only or legacy root engine).
+  mocks.exists.mockImplementation(
+    (candidate: string) =>
+      !candidate.includes('llama-cuda') &&
+      !candidate.includes('llama-cpu') &&
+      candidate !== '/bundle/llama-server'
+  )
   mocks.pickPort.mockResolvedValue(8460)
   mocks.parse.mockReturnValue({ choice: 1, confidence: 0.8, probabilities: [0.2, 0.8] })
   mocks.post.mockResolvedValue('{"choice":"B"}')
@@ -213,7 +225,7 @@ describe('DecisionRuntime', () => {
     await runtime.shutdown()
 
     const failing = new DecisionRuntime()
-    mocks.spawn.mockImplementationOnce(() => {
+    const outOfMemory = (): FakeProcess => {
       const child = new FakeProcess()
       queueMicrotask(() => {
         child.stderr.emit('data', 'CUDA out of memory')
@@ -221,8 +233,12 @@ describe('DecisionRuntime', () => {
         child.emit('close', 1)
       })
       return child
-    })
+    }
+    // The GPU engine runs out of memory, then the same engine CPU-only does too.
+    mocks.spawn.mockClear()
+    mocks.spawn.mockImplementationOnce(outOfMemory).mockImplementationOnce(outOfMemory)
     vi.mocked(fetch).mockRejectedValue(new Error('not ready'))
     await expect(failing.start('offgrid/decider')).rejects.toMatchObject({ code: 'out_of_memory' })
+    expect(mocks.spawn).toHaveBeenCalledTimes(2)
   })
 })

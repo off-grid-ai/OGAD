@@ -21,7 +21,7 @@ function intersection(a: AxRect, b: AxRect): number {
   return width * height
 }
 
-export function overlapRatio(a: AxRect, b: AxRect): number {
+function overlapRatio(a: AxRect, b: AxRect): number {
   const overlap = intersection(a, b)
   const smaller = Math.min(a.width * a.height, b.width * b.height)
   return smaller > 0 ? overlap / smaller : 0

@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { addEntityFact, getDB, upsertEntitySession } from '../database'
+import { getDB, upsertEntitySession } from '../database'
 import {
   deleteEntityById,
   registerEntityDomain,
@@ -114,7 +114,9 @@ describe('EntityDomain SQLite lifecycle', () => {
       )
       const doomed = resolve('Delete With Dependants', 'Person')
       const survivor = resolve('Lifecycle Survivor', 'Person')
-      addEntityFact(doomed, 'Fact that must not become orphaned', 'entity-delete-session')
+      db.prepare(
+        'INSERT INTO entity_facts (entity_id, fact, source_session_id) VALUES (?, ?, ?)'
+      ).run(doomed, 'Fact that must not become orphaned', 'entity-delete-session')
       upsertEntitySession(doomed, 'entity-delete-session')
       db.prepare(
         `INSERT INTO entity_edges
@@ -149,7 +151,9 @@ describe('EntityDomain SQLite lifecycle', () => {
       'Notes'
     )
     const doomed = resolve('Rollback Entity', 'Person')
-    addEntityFact(doomed, 'This fact must survive rollback', 'entity-rollback-session')
+    db.prepare(
+      'INSERT INTO entity_facts (entity_id, fact, source_session_id) VALUES (?, ?, ?)'
+    ).run(doomed, 'This fact must survive rollback', 'entity-rollback-session')
     upsertEntitySession(doomed, 'entity-rollback-session')
     db.exec(`CREATE TRIGGER reject_entity_delete
       BEFORE DELETE ON entities WHEN old.id = ${doomed}

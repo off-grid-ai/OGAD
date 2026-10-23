@@ -120,7 +120,3 @@ export function setRemoteModelSelected(
 export function remoteVoiceSelected(): boolean {
   return remoteModelSelected('voice')
 }
-
-export function setRemoteVoiceSelected(selected: boolean): void {
-  setRemoteModelSelected('voice', selected)
-}

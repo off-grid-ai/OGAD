@@ -11,6 +11,8 @@ import { requestSentences, TOOL_INTENT_EXAMPLES, toolIntents } from './tool-inte
 export interface EmbedDeps {
   /** Returns a NORMALIZED embedding (so cosine similarity == dot product). */
   embed: (text: string) => Promise<number[]>
+  /** The same for several texts in one call: uncached tools are embedded together when given. */
+  embedMany?: (texts: string[]) => Promise<number[][]>
 }
 
 const MAX_RELEVANT_TOOLS = 6
@@ -81,6 +83,22 @@ async function embedTool(text: string, embed: EmbedDeps['embed']): Promise<numbe
   return v
 }
 
+/** Embed every tool not yet cached in one call. A failure leaves them to embedTool, one by one. */
+async function cacheToolVectors(tools: unknown[], deps: EmbedDeps): Promise<void> {
+  if (!deps.embedMany) return
+  const missing = [...new Set(tools.map(toolText))].filter((text) => !toolVecCache.has(hash(text)))
+  if (!missing.length) return
+  try {
+    const vectors = await deps.embedMany(missing)
+    missing.forEach((text, i) => {
+      const vector = vectors[i]
+      if (vector?.length) toolVecCache.set(hash(text), vector)
+    })
+  } catch {
+    /* embedTool retries each tool on its own */
+  }
+}
+
 /** Reorder tools so the built-ins (first `keepFirst`) stay put and the connector
  *  tools after them are sorted by DESCENDING cosine similarity to `query`. Returns
  *  the input unchanged when there's nothing to gain (≤1 connector tool, empty
@@ -99,6 +117,7 @@ export async function rankConnectorToolsSemantic(
   const qv = await deps.embed(query) // may throw → caller falls back to lexical
   const builtins = tools.slice(0, keepFirst)
   const connectors = tools.slice(keepFirst)
+  await cacheToolVectors(connectors, deps)
   const scored = await Promise.all(
     connectors.map(async (tool, i) => {
       try {
@@ -126,6 +145,7 @@ export async function selectRelevantToolsSemantic(
   if (!query.trim() || tools.length === 0) return []
 
   const qv = await deps.embed(query)
+  await cacheToolVectors(tools, deps)
   // Tools with example requests are judged against them and against chat answers (tool-intent);
   // the rest by their description.
   const toolName = (tool: unknown): string => {

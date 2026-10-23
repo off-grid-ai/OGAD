@@ -1,13 +1,22 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { dataDir } from './runtime-env'
+import { embedderSpec, type EmbedderSpec } from './embedding-models'
 
 export const EMBEDDING_MODELS = [
+  {
+    // The retrieval engine's default: a Hindi question finds an English passage.
+    id: 'Xenova/multilingual-e5-small',
+    name: 'Multilingual E5 Small',
+    detail: 'Many languages · 384 dimensions',
+    badge: 'Default',
+    files: [658, 17082730, 443, 470268533]
+  },
   {
     id: 'Xenova/all-MiniLM-L6-v2',
     name: 'MiniLM L6',
     detail: 'Fast · English · 384 dimensions',
-    badge: 'Default',
+    badge: 'Fastest',
     files: [650, 711661, 366, 90387606]
   },
   {
@@ -85,6 +94,34 @@ export function getEmbeddingModelId(): EmbeddingModelId {
 
 export function getEmbeddingDimensions(): number {
   return readChoice()?.dimensions ?? 384
+}
+
+const indexFile = (): string => path.join(dataDir(), 'embedding-index-model.json')
+let indexedCache: EmbeddingModelId | null = null
+
+/** The model the stored search vectors were made with: the chosen one once its index is complete. */
+export function getIndexedEmbeddingModelId(): EmbeddingModelId {
+  if (indexedCache) return indexedCache
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(indexFile(), 'utf8'))
+    indexedCache = isEmbeddingModelId(value) ? value : DEFAULT_EMBEDDING_MODEL
+  } catch {
+    indexedCache = DEFAULT_EMBEDDING_MODEL
+  }
+  return indexedCache
+}
+
+/**
+ * The model memory search embeds records and questions with: the indexed one. Each stored vector
+ * records its model, so search reads only vectors made by this one.
+ */
+export function recordEmbedder(): EmbedderSpec {
+  return embedderSpec(getIndexedEmbeddingModelId())
+}
+
+export function saveIndexedEmbeddingModelId(id: EmbeddingModelId): void {
+  fs.writeFileSync(indexFile(), JSON.stringify(id), { mode: 0o600 })
+  indexedCache = id
 }
 
 export function saveEmbeddingModelId(id: EmbeddingModelId, dimensions = 384): void {

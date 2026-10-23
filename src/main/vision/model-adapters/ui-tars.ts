@@ -41,7 +41,7 @@ function uiTarsInstruction(input: Parameters<VisionModelAdapter['buildRequest']>
 }
 
 /** UI-TARS remains on its native single action-text protocol. */
-export function parseUiTarsPolicyResponse(
+function parseUiTarsPolicyResponse(
   response: string,
   bounds: Parameters<VisionModelAdapter['parseResponse']>[1]
 ): VisionPolicyDecision {

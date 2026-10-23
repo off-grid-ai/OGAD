@@ -1,6 +1,6 @@
 import type { VisionContinuationCapsule } from './types'
 
-export const MAX_CONTINUATION_DONE_ITEMS = 10
+const MAX_CONTINUATION_DONE_ITEMS = 10
 const MAX_DONE_CHARS = 96
 const MAX_FIELD_CHARS = 160
 

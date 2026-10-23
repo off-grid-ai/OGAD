@@ -762,6 +762,20 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   })
   const servers = getRemoteVisionServerSettings().servers
   const remoteModels = remoteVisionInventoryModels(servers)
+  // A model whose runtime is not on this machine is not offered for download: Kev without its
+  // runtime, Parakeet without sherpa-onnx. One already downloaded stays listed, so it can be
+  // deleted.
+  const { kevRuntimeInstalled, parakeetRuntimeInstalled } = await import('./runtime-availability')
+  const kev = kevRuntimeInstalled()
+  const parakeet = parakeetRuntimeInstalled()
+  const offered = models.filter((entry) => {
+    const model = entry as { id?: string; engine?: string; files?: { name: string }[] }
+    const runtimeMissing =
+      (!kev && isKevModel(model.id)) || (!parakeet && model.engine === 'parakeet')
+    if (!runtimeMissing) return true
+    const files = model.files ?? []
+    return files.length > 0 && files.every((file) => present(file.name))
+  })
   // Every row is named by the one shared resolver, so no screen ever shows a file or repo id.
   const sources: ModelNameSources = {
     catalog: CATALOG,
@@ -774,7 +788,7 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   // list). One file at a time, so a first read holds one template window in memory, not one per
   // model; cached afterwards. Unknown (not installed, no template) stays undefined: no icon.
   const traitsById = new Map<string, { tools?: boolean; reasoning?: boolean }>()
-  for (const model of models as CatalogEntry[]) {
+  for (const model of offered as CatalogEntry[]) {
     if (model.kind !== 'text' && model.kind !== 'vision') continue
     const name = primaryFileName(model)
     if (!name || fileSizeOf(dir, name) <= 0) continue
@@ -784,7 +798,7 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   return {
     kinds: [...MODEL_KINDS, 'embedding'],
     models: [
-      ...models.map((model) => ({
+      ...offered.map((model) => ({
         ...model,
         ...traitsById.get((model as CatalogEntry).id),
         // What a download would still fetch: files another model already brought (a shared text
@@ -1597,6 +1611,8 @@ export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
 }
 
 async function deleteModelFiles(modelId: string): Promise<DeleteModelResult> {
+  if (modelId.startsWith('external:'))
+    return { success: false, error: 'External models are read only.' }
   const dir = llm.getModelsDir()
   if (modelId.startsWith('external:')) return trashExternalModel(modelId, dir)
   // Imported local model: remove its files + registry entry, clear if active.

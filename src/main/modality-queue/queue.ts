@@ -58,8 +58,8 @@ export interface QueueRequest {
 
 // The two standard heavy jobs, defined once instead of spelled out at every
 // call site (chat was inlined 4× in ipc.ts). A chat/tool turn evicts a resident
-// image server; image generation evicts the resident LLM — they can't co-reside
-// on unified memory. Frozen so a caller can't mutate the shared descriptor.
+// image server; image generation evicts the resident LLM and the task engines (grounding,
+// decision) — they can't co-reside on unified memory or on one GPU's VRAM. Frozen so a caller can't mutate the shared descriptor.
 export const CHAT_JOB: QueueRequest = Object.freeze({
   tier: 2,
   label: 'chat',
@@ -70,7 +70,7 @@ export const IMAGE_JOB: QueueRequest = Object.freeze({
   tier: 2,
   label: 'image',
   uses: { id: 'image' },
-  evicts: ['llm']
+  evicts: ['llm', 'grounding', 'decision']
 })
 export const VIDEO_JOB: QueueRequest = Object.freeze({
   tier: 2,
@@ -111,7 +111,7 @@ export function backgroundJob(label: string): QueueRequest {
 }
 
 /** Why a preempted job's model request was aborted. */
-export class PreemptedError extends Error {
+class PreemptedError extends Error {
   constructor(readonly by: string) {
     super(`Stopped to make room for ${by}; it runs again later.`)
     this.name = 'PreemptedError'

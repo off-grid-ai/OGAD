@@ -27,7 +27,7 @@ Pro (desktop):
 
 Also: the Off Grid AI mobile app (iOS, Android) and the browser extension (Chrome, Firefox), which pairs with Desktop over a sealed local link.`
 
-export type UpdateKind = 'release' | 'article' | 'community' | 'guide' | 'essay' | 'about'
+type UpdateKind = 'release' | 'article' | 'community' | 'guide' | 'essay' | 'about'
 
 /** One piece of Off Grid AI news: a release, an article or a community post. */
 export interface OffgridUpdate {
@@ -155,7 +155,7 @@ export function parseReddit(json: unknown): OffgridUpdate[] {
 
 /** The Off Grid AI site, and the pages the guide reads. Every page carries the site's catalogue
  *  of cards; each also has its own content (the quick start's steps). */
-export const OFFGRID_SITE = 'https://getoffgridai.co'
+const OFFGRID_SITE = 'https://getoffgridai.co'
 export const OFFGRID_SITE_PAGES = [
   { name: 'Quick start', url: `${OFFGRID_SITE}/quick-start/` },
   { name: 'Guides', url: `${OFFGRID_SITE}/guides/` },
@@ -272,9 +272,9 @@ export function newestUpdates(updates: readonly OffgridUpdate[], limit = 12): Of
 }
 
 /** How much of one page the guide reads in full. */
-export const PAGE_BODY_CHARS = 8_000
+const PAGE_BODY_CHARS = 8_000
 /** How many matching pages the guide reads in full for a question. */
-export const PAGES_READ_IN_FULL = 3
+const PAGES_READ_IN_FULL = 3
 
 /**
  * A page's own content, as the site's search indexes it (the article marked data-pagefind-body),

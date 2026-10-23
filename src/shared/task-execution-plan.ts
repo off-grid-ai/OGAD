@@ -106,7 +106,7 @@ export function normalizeTaskExecutionPlan(value: unknown): TaskExecutionPlan | 
       const operation = parsedPhaseOperation(phase)
       return [{ title, operation }]
     })
-    .slice(0, 7)
+    .slice(0, 16)
   if (normalizedPhases.length < 1) return null
   return {
     version: 1,
@@ -172,13 +172,13 @@ export function encodeTaskExecutionPlanProgress(
 export function decodeTaskPhase(step: string): string | null {
   if (!step.startsWith(TASK_PHASE_PREFIX)) return null
   const id = step.slice(TASK_PHASE_PREFIX.length).trim()
-  return /^phase-[1-7]$/.test(id) ? id : null
+  return /^phase-(?:[1-9]|1[0-6])$/.test(id) ? id : null
 }
 
 export function decodeTaskPhaseResume(step: string): string | null {
   if (!step.startsWith(TASK_PHASE_RESUME_PREFIX)) return null
   const id = step.slice(TASK_PHASE_RESUME_PREFIX.length).trim()
-  return /^phase-[1-7]$/.test(id) ? id : null
+  return /^phase-(?:[1-9]|1[0-6])$/.test(id) ? id : null
 }
 
 export function isTaskPlanControlStep(step: string): boolean {
@@ -242,7 +242,7 @@ export function taskPlanPrompt(
     `User goal: ${goal}`,
     targetLabel ? `${target}: ${targetLabel}` : '',
     currentState ? `Current visible app state:\n${currentState}` : '',
-    'Return 1 to 4 outcome-based phases in the order the user and agent should expect.',
+    'Return 1 to 16 outcome-based phases in the order the user and agent should expect.',
     'Each phase must contain exactly one atomic operation. Never combine clear and type, type and select, search and open, or any other two operations in one phase.',
     'When work requires multiple operations, return one phase for each operation in execution order.',
     'Each phase starts from the confirmed result of the previous phase. Do not repeat a completed prerequisite or reopen, reselect, or re-enter state that an earlier phase established.',
@@ -280,7 +280,7 @@ export const TASK_PLAN_RESPONSE_FORMAT = {
         phases: {
           type: 'array',
           minItems: 1,
-          maxItems: 4,
+          maxItems: 16,
           items: {
             type: 'object',
             properties: {

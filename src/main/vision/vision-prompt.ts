@@ -11,7 +11,7 @@
  * credential step is a handoff to the user, never typed by the agent.
  */
 
-export const VISION_ACTION_SPACE = [
+const VISION_ACTION_SPACE = [
   "click(point='<point>x y</point>'), left_double(...), right_single(...),",
   "drag(start_box='(x,y)', end_box='(x,y)'), type(content='...'), hotkey(key='...'),",
   "scroll(point='<point>x y</point>', direction='down'), navigate(url='https://...') (Web Use only), wait(), subtask_complete(), finished(content='...'), call_user(content='...')."

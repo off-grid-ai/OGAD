@@ -4,13 +4,12 @@
 
 import os from 'node:os'
 import { usableCpuCount } from './cpu-cores'
-import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { llm, type LlmSettings } from './llm'
 import { probedGpuMemoryMB } from './llm/gpu-device-probe'
 import { cudaVramMB } from './llm/vram-probe'
-import { selectLocalEngine } from './llm/select-local-engine'
+import { nativeLadder, type NativeStep } from './backend-facts'
 import { getBackendPreferences, setBackendPreference } from './backend-preferences'
 import { getResidency, setResidencyMode } from './runtime-residency'
 import { getSetting, saveSetting } from './database'
@@ -40,20 +39,22 @@ async function applePerformanceCores(): Promise<number | null> {
 }
 
 /** The GPU backend of the engine llama.cpp would load with, after its own device probe. */
-function nativeGpu(engine: string | undefined): NativeGpu | null {
+function nativeGpu(step: NativeStep | undefined): NativeGpu | null {
   if (process.platform === 'darwin') return 'Metal'
-  const directory = engine ? path.basename(path.dirname(engine)) : ''
-  if (directory === 'llama-cuda') return 'CUDA'
-  if (directory === 'llama') return 'Vulkan'
-  return null
+  return step?.backend === 'cuda' ? 'CUDA' : step?.backend === 'vulkan' ? 'Vulkan' : null
 }
 
 export async function detectMachine(): Promise<MachineProfile> {
   const cpus = os.cpus()
   const logical = usableCpuCount()
   const performance = process.platform === 'darwin' ? await applePerformanceCores() : null
-  const engine = process.platform === 'darwin' ? undefined : await selectLocalEngine('auto')
-  const gpu = nativeGpu(engine)
+  // The engine chat would load on Auto, from the shared backend policy.
+  const step =
+    process.platform === 'darwin'
+      ? undefined
+      : (await nativeLadder('llm', undefined, 'auto')).find((candidate) => !candidate.cpuOnly)
+  const engine = step?.path
+  const gpu = nativeGpu(step)
   return {
     platform: process.platform,
     cpuModel: (cpus[0]?.model ?? 'CPU').trim(),

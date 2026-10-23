@@ -114,13 +114,14 @@ export interface LaunchState {
  *  file sizes) and stays in LLMService; everything here is a pure function of these
  *  inputs so the terminal artifact (the args array handed to llama-server) is testable. */
 export interface LaunchArgsInput {
+  cpuOnly?: boolean
   modelPath: string
   mmProjPath: string // empty string = text-only (no --mmproj)
   port: number
   effectiveCtxSize: number // already RAM-clamped
   /** 'auto' passes no -ngl, so llama-server's `--fit` places layers and MoE experts itself.
    *  A number is a manual count (0 = CPU only). */
-  gpuLayers: number | 'auto'
+  gpuLayers?: number | 'auto'
   /** Batch and micro-batch for an MoE that spills its experts to the CPU under Auto (see
    *  spillBatchSize in @offgrid/models). The person's own batch size wins. */
   spillBatch?: number | null
@@ -184,7 +185,7 @@ export function slotInput(i: LaunchArgsInput): LlmSlotInput {
  * 16 GB machine 8 GB of cache next to the model invites swapping, so it is capped at a quarter of
  * RAM; machines with 32 GB or more keep the engine default.
  */
-export function promptCacheMiB(totalRamBytes: number | undefined): number | undefined {
+function promptCacheMiB(totalRamBytes: number | undefined): number | undefined {
   if (!totalRamBytes || !Number.isFinite(totalRamBytes)) return undefined
   const quarter = Math.floor(totalRamBytes / 1024 / 1024 / 4)
   return quarter >= 8192 ? undefined : Math.max(1024, quarter)
@@ -210,7 +211,9 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     // it is never smaller. Single mode: exactly the person's context.
     String(llmSlotPlan(slotInput(i)).poolCtx)
   )
-  if (i.gpuLayers !== 'auto') args.push('-ngl', String(i.gpuLayers))
+  // CPU means CPU only: no device, no layers (a GPU fault's fallback, or the person's choice).
+  if (i.cpuOnly) args.push('--device', 'none', '-ngl', '0')
+  else if (typeof i.gpuLayers === 'number') args.push('-ngl', String(i.gpuLayers))
   // Hybrid models (Qwen3.5, Bonsai 2) cannot roll recurrent state back past a saved
   // context checkpoint. At the 8192-token default spacing, any edit earlier in a shorter
   // conversation (a dropped screenshot, a compacted turn) re-processes the whole prompt;
@@ -236,7 +239,7 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
   if (kv.k !== 'f16' || kv.v !== 'f16') {
     args.push('--cache-type-k', kv.k, '--cache-type-v', kv.v)
   }
-  if (typeof i.threads === 'number') {
+  if (typeof i.threads === 'number' && i.threads > 0) {
     args.push('-t', String(i.threads))
   }
   if (typeof i.batchSize === 'number') {
@@ -257,8 +260,6 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     args.push('--spec-type', 'draft-mtp', '--spec-draft-n-max', draftMax)
     if (i.draftModelPath) {
       args.push('--spec-draft-model', i.draftModelPath)
-      // Auto leaves the draft head's placement to the engine too.
-      if (i.gpuLayers !== 'auto') args.push('--spec-draft-ngl', String(i.gpuLayers))
     }
   } else if (
     i.draftModelPath &&
@@ -271,6 +272,11 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
       i.draftModelPath
     )
     if (i.speculativeDraftMax) args.push('--spec-draft-n-max', String(i.speculativeDraftMax))
+  }
+  if (i.draftModelPath && ['mtp', 'draft', 'dflash'].includes(i.speculativeDecoding ?? '')) {
+    // Auto (no layer count) leaves the draft model's placement to the engine too.
+    if (i.cpuOnly) args.push('--spec-draft-ngl', '0')
+    else if (typeof i.gpuLayers === 'number') args.push('--spec-draft-ngl', String(i.gpuLayers))
   }
   // Grounding models (UI-TARS / Qwen-VL) need a minimum image-token budget or
   // clicks land in the wrong place; only set when a projector is present.

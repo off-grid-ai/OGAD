@@ -71,7 +71,14 @@ import {
 import { PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS } from '@offgrid/sync'
 import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
-import { purgeLegacyChatImports, getSetting, saveSetting, optimizeDB } from './database'
+import {
+  purgeLegacyChatImports,
+  getSetting,
+  saveSetting,
+  optimizeDB,
+  startIndexRebuilds,
+  stopIndexRebuilds
+} from './database'
 import { modalityQueue } from './modality-queue/queue'
 import { applyQueueConfig, readQueueConfig } from './modality-queue/config'
 import { liveMemory, registerRuntime } from './runtime-manager'
@@ -92,12 +99,10 @@ import {
   applicationShutdown,
   commitApplicationRelaunch,
   installApplicationShutdown,
-  requestApplicationRelaunch,
   registerCoreShutdownOwners
 } from './shutdown'
 import { shutdownRuntimes } from './runtime-manager'
 import { shutdownModelDownloads } from './models/download-queue'
-import { prepareInstalledOnnxCudaLibraries } from './performance-pack'
 import { analytics, installAnalytics, reportAppOpened } from './analytics'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
@@ -375,12 +380,13 @@ function startServerOnlyMode(): void {
 app.whenReady().then(async () => {
   // A Team-mode gateway keeps the machine awake while it serves clients.
   setGatewayPowerBlocker(powerSaveBlocker)
-  // glibc reads LD_LIBRARY_PATH when Electron starts, before an ONNX worker runs.
-  // Restart once with the verified optional libraries if this launch lacks them.
-  if (app.isPackaged && prepareInstalledOnnxCudaLibraries()) {
-    requestApplicationRelaunch(app)
-    return
-  }
+  // The NVIDIA driver version decides which CUDA engines may run; read it off the startup path.
+  void import('./nvidia-driver')
+    .then(async ({ refreshNvidiaDriverVersion }) => {
+      await refreshNvidiaDriverVersion()
+      ;(await import('./backend-facts')).invalidateBackendFacts()
+    })
+    .catch((error: unknown) => console.warn('[nvidia-driver] read failed', error))
   const { cleanupMovedModelStorage } = await import('./model-storage-move')
   const { modelsDir } = await import('./runtime-env')
   restoreCanonicalProductName()
@@ -688,6 +694,15 @@ app.whenReady().then(async () => {
           registerRuntime(ttsRuntime)
           registerRuntime(imageRuntime)
           registerRuntime(sttRuntime)
+          // An image job frees the task engines' memory; they start again on their next use.
+          modalityQueue.registerEvictable('grounding', {
+            evict: async () =>
+              (await import('./vision/grounder-runtime')).grounderRuntime.shutdown()
+          })
+          modalityQueue.registerEvictable('decision', {
+            evict: async () =>
+              (await import('./accessibility/decision-runtime')).decisionRuntime.shutdown()
+          })
         })
       }
     },
@@ -723,7 +738,56 @@ app.whenReady().then(async () => {
       lateEffect: 'keep',
       run: async () => {
         const { llm } = await import('./llm')
-        registerRuntime(llm.runtime, { readChatBackend: () => llm.runtimeBackend() })
+        registerRuntime(llm.runtime)
+        const { installEngineResumeHealth, registerResumeHealthTarget } =
+          await import('./engine-resume-health')
+        registerResumeHealthTarget({
+          id: 'chat',
+          shouldBeRunning: () => llm.shouldBeRunning(),
+          healthCheck: () => llm.healthCheck(),
+          restart: () => llm.restartSameModel()
+        })
+        const [{ embeddings }, { ttsOnnxRuntime }, { grounderRuntime }, { decisionRuntime }] =
+          await Promise.all([
+            import('./embeddings'),
+            import('./tts'),
+            import('./vision/grounder-runtime'),
+            import('./accessibility/decision-runtime')
+          ])
+        for (const [id, runtime] of [
+          ['grounding', grounderRuntime],
+          ['decision', decisionRuntime]
+        ] as const) {
+          registerResumeHealthTarget({
+            id,
+            shouldBeRunning: () => runtime.shouldBeRunning(),
+            healthCheck: () => runtime.health(),
+            restart: () => runtime.restart()
+          })
+        }
+        // A helper that died while asleep restarts on its next request; restart a running one
+        // so it does not hold a lost GPU context.
+        for (const [id, helper] of [
+          ['search', embeddings],
+          ['voice', ttsOnnxRuntime]
+        ] as const) {
+          registerResumeHealthTarget({
+            id,
+            shouldBeRunning: () => helper.isRunning,
+            healthCheck: async () => !helper.isRunning,
+            restart: () => helper.restart()
+          })
+        }
+        const disposeResumeHealth = installEngineResumeHealth()
+        // Windows: test the pack's ONNX CUDA addon once per pack and driver, in a helper.
+        void import('./onnx-host/onnx-cuda-probe')
+          .then(async ({ probeOnnxCuda }) => {
+            if (!(await probeOnnxCuda())) return
+            ;(await import('./backend-facts')).invalidateBackendFacts()
+            await Promise.all([embeddings.restart(), ttsOnnxRuntime.restart()])
+          })
+          .catch((error: unknown) => console.warn('[ONNX] CUDA check failed to run', error))
+        app.once('will-quit', disposeResumeHealth)
         applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
         // Models stay loaded while they fit live memory; the queue frees only what it must.
         modalityQueue.setMemoryProbe(liveMemory)
@@ -763,6 +827,43 @@ app.whenReady().then(async () => {
   setTimeout(() => {
     void import('./documents').then((documents) => documents.collectDocumentGarbage())
   }, 120_000).unref()
+
+  // Background index work, once start-up has settled, a short slice at a time: full-text indexes
+  // built by an older schema are rebuilt beside the old ones (which keep answering until each
+  // rebuild finishes), and rows that predate the memory-search triggers are queued for embedding.
+  const indexWork = setTimeout(() => {
+    void import('./records')
+      .then((records) => records.ensureRecordSchema())
+      .catch((error: unknown) => console.error('[search index] schema check failed', error))
+      .finally(startIndexRebuilds)
+  }, 15_000)
+  indexWork.unref()
+  // Embed the memory-search backlog (records queued by their tables' triggers): once shortly after
+  // launch, then every few minutes for what was added since. Core owns this, so builds without
+  // Pro index chats and people too.
+  const embedBacklog = (): void => {
+    void import('./records')
+      .then((records) =>
+        records.embedRecordBacklog((progress) => {
+          if (progress.remaining % 200 === 0)
+            console.log(`[search index] ${progress.done} embedded, ${progress.remaining} left`)
+        })
+      )
+      .catch((error: unknown) => console.error('[search index]', error))
+  }
+  const firstEmbed = setTimeout(embedBacklog, 20_000)
+  firstEmbed.unref()
+  const embedTimer = setInterval(embedBacklog, 5 * 60_000)
+  embedTimer.unref()
+  applicationShutdown.register({
+    name: 'core:background-indexing',
+    shutdown: () => {
+      clearTimeout(indexWork)
+      clearTimeout(firstEmbed)
+      clearInterval(embedTimer)
+      stopIndexRebuilds()
+    }
+  })
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow()
