@@ -502,13 +502,6 @@ export async function readFeatureSnapshot(): Promise<Record<string, boolean>> {
   } catch {
     /* unknown stays false */
   }
-  try {
-    // A local video model is active, or a remote server's video model is picked.
-    const { videoGenStatus } = await import('../videogen')
-    snapshot.video_generation = Boolean(videoGenStatus().active)
-  } catch {
-    /* unknown stays false */
-  }
   for (const source of featureSources) {
     try {
       for (const [feature, on] of Object.entries(await source())) {
