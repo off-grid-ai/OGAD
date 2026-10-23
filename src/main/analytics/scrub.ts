@@ -1,7 +1,13 @@
+import os from 'node:os'
+
 /**
  * Crash scrubbing (docs/ANALYTICS.md, Crashes): replace paths with the file name only, drop any
  * quoted text, keep type, file name, line and function. URLs, hosts, IP addresses and e-mail
  * addresses are on the never-send list too, so they go as well.
+ *
+ * File and document names are on the never-send list, so a path in a message keeps its name only
+ * when it is the app's own code (`index.js`); a person's file becomes `<file>`. The home folder
+ * and the account name go first, because they can hold spaces a path pattern cannot see.
  */
 
 export interface ScrubbedFrame {
@@ -27,11 +33,48 @@ const EMAIL = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/g
 const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g
 const IPV6 = /\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}\b/gi
 // A Windows path (C:\..., \\server\share\...) or a POSIX path with at least two segments.
-const WINDOWS_PATH = /(?:[a-z]:\\|\\\\)[^\s:*?"<>|]*/gi
+const WINDOWS_PATH = /(?:[a-z]:\\|\\\\|~\\)[^\s:*?"<>|]*/gi
 const POSIX_PATH = /(?:~|\.{1,2})?\/(?:[^\s/:]+\/)+[^\s/:]*/g
 // A domain name that is not a file name: something.tld with a letters-only TLD.
 const HOST =
   /\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|ai|co|dev|app|local|lan|internal|me|uk|de|fr|in|eu|us)\b/gi
+
+// The app's own code: its file name helps find the bug and names nothing of the person's.
+const CODE_FILE = /\.(?:[cm]?[jt]sx?|node|asar|dylib|so|dll|exe|wasm)$/i
+// A bare file name a person owns: a document, media, an archive or a model file.
+const USER_FILE =
+  /[^\s/\\:<>"'`]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|tsv|json|rtf|pages|key|numbers|html?|png|jpe?g|gif|heic|webp|svg|mp3|m4a|wav|ogg|mp4|mov|mkv|zip|gguf|safetensors|onnx|bin)\b/gi
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+let account: { home: RegExp | null; user: RegExp | null } | undefined
+
+/** The home folder and the account name of this computer, read once. */
+function accountPatterns(): { home: RegExp | null; user: RegExp | null } {
+  if (account) return account
+  let home = ''
+  let user = ''
+  try {
+    home = os.homedir()
+    user = os.userInfo().username
+  } catch {
+    /* no account information: the path patterns still apply */
+  }
+  account = {
+    home: home.length > 1 ? new RegExp(escapeRegExp(home), 'gi') : null,
+    // A very short account name would match inside ordinary words.
+    user: user.length >= 3 ? new RegExp(`\\b${escapeRegExp(user)}\\b`, 'gi') : null
+  }
+  return account
+}
+
+/** A path in free text: the app's own code file keeps its name; anything else is `<file>`. */
+function fileOnly(path: string): string {
+  const name = baseName(path)
+  return CODE_FILE.test(name) ? name : '<file>'
+}
 
 function baseName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '')
@@ -40,12 +83,16 @@ function baseName(path: string): string {
 
 /** Scrub one free-text value (an error message or a function name). */
 export function scrubText(text: string): string {
-  return text
-    .replace(QUOTED, '<redacted>')
-    .replace(URL, '<url>')
-    .replace(EMAIL, '<email>')
-    .replace(WINDOWS_PATH, (path) => baseName(path))
-    .replace(POSIX_PATH, (path) => baseName(path))
+  const { home, user } = accountPatterns()
+  let value = text.replace(QUOTED, '<redacted>').replace(URL, '<url>').replace(EMAIL, '<email>')
+  // Under the home folder a path is the person's own, and it can hold spaces: drop it to the
+  // next separator.
+  if (home) value = value.replace(home, '~').replace(/~[\\/][^,;()\n]*/g, '<file>')
+  if (user) value = value.replace(user, '<user>')
+  return value
+    .replace(WINDOWS_PATH, fileOnly)
+    .replace(POSIX_PATH, fileOnly)
+    .replace(USER_FILE, '<file>')
     .replace(IPV6, '<ip>')
     .replace(IPV4, '<ip>')
     .replace(HOST, '<host>')

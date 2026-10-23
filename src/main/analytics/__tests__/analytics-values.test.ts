@@ -1,3 +1,4 @@
+import os from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -186,11 +187,12 @@ describe('crash scrubbing', () => {
       'bob@',
       '192.168',
       'openai.com',
-      'Documents'
+      'Documents',
+      'plan.pdf'
     ])
       expect(text).not.toContain(leaked)
     expect(scrubbed.type).toBe('TypeError')
-    expect(scrubbed.value).toContain('plan.pdf')
+    expect(scrubbed.value).toContain('from <file>')
     expect(scrubbed.frames).toEqual([
       { filename: 'index.js', function: 'readPlan', lineno: 120, colno: 7, in_app: true },
       { filename: 'index.js', function: '<anonymous>', lineno: 9, colno: 3, in_app: true },
@@ -199,8 +201,21 @@ describe('crash scrubbing', () => {
     ])
   })
 
+  it('drops the home folder, the account name and bare file names a person owns', () => {
+    const home = os.homedir()
+    const user = os.userInfo().username
+    const value = scrubText(
+      `ENOENT ${home}/My Documents/Q3 plan.pdf, C:\\Users\\${user} Smith\\notes.txt, owner ${user}, open budget.xlsx and llama-3-8b.Q4_K_M.gguf`
+    )
+    for (const leaked of [home, 'Documents', 'plan', 'notes', 'budget', 'llama'])
+      expect(value).not.toContain(leaked)
+    expect(value).not.toContain(`${user} Smith`)
+    expect(value).toContain('owner <user>,')
+  })
+
   it('scrubs anything thrown, not only errors', () => {
-    expect(scrubException('plain /home/bob/x.txt').value).toBe('plain x.txt')
+    expect(scrubException('plain /home/bob/x.txt').value).toBe('plain <file>')
+    expect(scrubException('at /app/out/main/index.js').value).toBe('at index.js')
     expect(scrubException({ name: 'bad name!', message: 42 })).toEqual({
       type: 'Error',
       value: '',
