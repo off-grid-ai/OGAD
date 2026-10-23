@@ -118,6 +118,7 @@ import {
   internalTabSubroute
 } from '@renderer/lib/internal-tab-route'
 import offGridLogo from '@/assets/logo.png'
+import { flow } from '@renderer/lib/analytics'
 
 function Sel({
   value,
@@ -526,6 +527,20 @@ export function ModelsScreen({
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   useEffect(() => {
     setSelectedTags([])
+  }, [activeKind])
+  // A media kind's setup funnel opens with its tab; the download reports the later steps.
+  useEffect(() => {
+    const setup =
+      activeKind === 'image'
+        ? 'image_setup'
+        : activeKind === 'video'
+          ? 'video_setup'
+          : activeKind === 'voice' || activeKind === 'transcription'
+            ? 'voice_setup'
+            : null
+    if (!setup) return
+    flow.start(setup)
+    flow.step(setup, 'opened')
   }, [activeKind])
   useEffect(() => {
     if (activeKind === 'embedding') {

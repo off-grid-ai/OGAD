@@ -69,6 +69,7 @@ export const FEATURES = [
   'voice_input',
   'tts',
   'image_generation',
+  'video_generation',
   'vision',
   'web_search',
   'tools',
@@ -88,6 +89,7 @@ export const FLOW_STEPS = {
   remote_server: ['opened', 'address_entered', 'tested', 'connected'],
   voice_setup: ['opened', 'model_picked', 'downloaded'],
   image_setup: ['opened', 'model_picked', 'downloaded'],
+  video_setup: ['opened', 'model_picked', 'downloaded'],
   connector_add: ['opened', 'connector_picked', 'authorised'],
   pro_upgrade: ['gate_shown', 'paywall_viewed', 'trial_started', 'purchased']
 } as const

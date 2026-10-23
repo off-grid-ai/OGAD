@@ -161,11 +161,13 @@ export function reportDownloadStatus(
   freeStorageBytes?: () => number | undefined,
   kind?: string
 ): void {
-  // Voice and image models have their own setup funnels: the pick is the download starting.
+  // Voice, image and video models have their own setup funnels: the pick is the download starting.
   const setupFlow =
     kind === 'image'
       ? ('image_setup' as const)
-      : kind === 'voice' || kind === 'transcription'
+      : kind === 'video'
+        ? ('video_setup' as const)
+        : kind === 'voice' || kind === 'transcription'
         ? ('voice_setup' as const)
         : null
   try {
@@ -177,7 +179,8 @@ export function reportDownloadStatus(
       const free = freeStorageBytes?.()
       const props: AnalyticsProperties = {
         model: ref.model,
-        quant: ref.quant,
+        // A video pack is several files, so it has no single quantization.
+        quant: kind === 'video' ? null : ref.quant,
         size_bucket: progress.totalBytes ? sizeBucket(progress.totalBytes) : null,
         // Electron has no network type for a desktop; the spec's fallback is `unknown`.
         network: 'unknown',
@@ -251,8 +254,9 @@ function engineFor(runtime: RuntimeId, model: string, backend?: string): Engine 
   if (runtime === 'image') {
     if (/core ?ml/i.test(backend ?? '')) return 'coreml'
     if (/mflux|mlx/i.test(model)) return 'mlx'
-    return null
+    return 'sd.cpp'
   }
+  if (runtime === 'video') return 'sd.cpp'
   if (runtime === 'transcription' && /parakeet/i.test(model)) return 'onnx'
   return RUNTIME_ENGINE[runtime] ?? null
 }
@@ -286,7 +290,7 @@ export function reportModelLoadStart(load: {
     try {
       const base: AnalyticsProperties = {
         model: ref.model,
-        quant: ref.quant,
+        quant: load.runtime === 'video' ? null : ref.quant,
         engine: engineFor(load.runtime, load.model, outcome.ok ? outcome.backend : undefined),
         backend: outcome.ok ? backendOf(outcome.backend) : null,
         // Apple Silicon reports its chip family; others report the architecture only.
@@ -359,7 +363,9 @@ function generationEngine(
         ? 'coreml'
         : /mflux|mlx/i.test(outcome.model ?? '')
           ? 'mlx'
-          : null
+          : 'sd.cpp'
+    case 'video':
+      return 'sd.cpp'
   }
 }
 
@@ -371,6 +377,7 @@ const inflightGenerations = new Map<string, () => void>()
 
 const MODALITY_FEATURE: Partial<Record<AIRequestOutcome['modality'], AnalyticsFeature>> = {
   image: 'image_generation',
+  video: 'video_generation',
   stt: 'voice_input',
   tts: 'tts'
 }
@@ -426,7 +433,9 @@ const aiRequestObserver: AIRequestObserver = {
       tokens_per_sec: rate !== undefined ? roundRate(rate) : null,
       context_tokens_bucket: promptTokens !== undefined ? contextBucket(promptTokens) : null,
       error_code: outcome.status === 'failed' ? generationErrorCode(outcome.error) : null,
-      source: outcome.origin
+      source: outcome.origin,
+      // A clip has no tokens: its whole generation time is the speed figure.
+      ...(outcome.modality === 'video' ? { duration_ms: roundMs(outcome.durationMs) } : {})
     })
     if (outcome.origin !== 'app') return
     if (outcome.status === 'failed') owner.noteFailure()
@@ -490,6 +499,13 @@ export async function readFeatureSnapshot(): Promise<Record<string, boolean>> {
   try {
     const { getActiveRemoteVisionServer } = await import('../vision/remote-vision-server')
     snapshot.remote_server = Boolean(getActiveRemoteVisionServer())
+  } catch {
+    /* unknown stays false */
+  }
+  try {
+    // A local video model is active, or a remote server's video model is picked.
+    const { videoGenStatus } = await import('../videogen')
+    snapshot.video_generation = Boolean(videoGenStatus().active)
   } catch {
     /* unknown stays false */
   }

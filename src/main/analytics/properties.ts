@@ -11,7 +11,15 @@ export type AnalyticsProperties = Record<string, AnalyticsValue>
 export type SizeBucket = '<1GB' | '1-2GB' | '2-4GB' | '4-8GB' | '>8GB'
 export type ContextBucket = '<2k' | '2-8k' | '8-32k' | '>32k'
 export type Engine =
-  'llama.cpp' | 'mlx' | 'litert' | 'executorch' | 'coreml' | 'onnx' | 'whisper' | 'remote'
+  | 'llama.cpp'
+  | 'mlx'
+  | 'litert'
+  | 'executorch'
+  | 'coreml'
+  | 'onnx'
+  | 'whisper'
+  | 'sd.cpp'
+  | 'remote'
 export type Backend = 'cpu' | 'gpu' | 'npu' | 'remote'
 
 const GB = 1024 ** 3
