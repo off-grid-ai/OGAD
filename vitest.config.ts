@@ -97,7 +97,7 @@ export default defineConfig({
       all: true,
       include: ['src/**/*.ts', 'pro/**/*.ts'],
       // text-summary is the console line, json-summary powers the README badges.
-      reporter: ['text-summary', 'json-summary', 'json'],
+      reporter: ['text', 'text-summary', 'json-summary', 'json'],
       // Excludes: (a) vendored/built code (not ours) and (b) native/DB/spawn/IPC-wiring
       // shells the default vitest runner CANNOT cover in-process - each covered by a real
       // alternative suite (test:db / smoke / e2e), not left untested. See
