@@ -13,6 +13,9 @@ import { cn } from '@renderer/lib/utils'
 import logo from '@/assets/logo.png'
 import { QuickConnections } from './QuickConnections'
 import { Button } from './ui/button'
+import { Checkbox } from '@offgrid/operator-ui/operator/coss/checkbox'
+import { WhatWeShareDialog } from './analytics/WhatWeShareDialog'
+import { analyticsBridge } from '@renderer/lib/analytics'
 import {
   ArrowRight,
   Check,
@@ -164,6 +167,9 @@ const SYNC_GRID = [
 export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
   const [currentStep, setCurrentStep] = useState(restoredStep)
   const [connectionBusy, setConnectionBusy] = useState(false)
+  // Opt-in analytics: unticked unless the user ticks it.
+  const [shareAnalytics, setShareAnalytics] = useState(false)
+  const [sharingOpen, setSharingOpen] = useState(false)
   const reducedMotion = useReducedMotion()
 
   const handleNext = (): void => {
@@ -174,6 +180,9 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
     } else {
       localStorage.removeItem(ONBOARDING_STEP_KEY)
       localStorage.setItem('onboarding_completed', 'true')
+      // Either answer counts as asked, so no prompt asks again soon.
+      if (shareAnalytics) void analyticsBridge()?.optIn?.('setup')
+      else void analyticsBridge()?.dismissPrompt?.()
       onComplete()
     }
   }
@@ -495,6 +504,39 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                   <StatePill tone="off" label="Your choice" />
                 </SettingRow>
               </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1.2, duration: 0.5 }}
+                className="mx-auto mt-8 flex max-w-md items-start gap-3 text-left"
+              >
+                <Checkbox
+                  id="onboarding-share-analytics"
+                  checked={shareAnalytics}
+                  onCheckedChange={(checked) => setShareAnalytics(checked === true)}
+                  className="mt-0.5"
+                />
+                <div className="min-w-0">
+                  <label
+                    htmlFor="onboarding-share-analytics"
+                    className="cursor-pointer text-sm text-neutral-200"
+                  >
+                    Share anonymous usage and crash reports
+                  </label>
+                  <p className="mt-1 text-xs leading-5 text-neutral-500">
+                    Helps us fix what breaks on your computer. Your chats never leave it.{' '}
+                    <button
+                      type="button"
+                      onClick={() => setSharingOpen(true)}
+                      className="text-neutral-300 underline underline-offset-2 hover:text-white"
+                    >
+                      What we share
+                    </button>
+                  </p>
+                </div>
+              </motion.div>
+              <WhatWeShareDialog open={sharingOpen} onOpenChange={setSharingOpen} />
             </div>
           </motion.div>
         )}

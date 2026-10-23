@@ -86,6 +86,8 @@ import {
   type ModelSettingsPanelTab
 } from './lib/model-settings-panel'
 import { callHook } from './bootstrap/hookRegistry'
+import { track } from './lib/analytics'
+import { AnalyticsPrompt } from './components/analytics/AnalyticsPrompt'
 import { markTasksSeen } from './lib/task-side-panel'
 import { internalTabLocation, internalTabPath, isInternalTabView } from './lib/internal-tab-route'
 import {
@@ -492,6 +494,21 @@ function AppContent(): React.JSX.Element {
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(window.api as any)?.reportSelfView?.(viewMode)
+  }, [viewMode])
+
+  // Opt-in usage data: one view per screen change, with the screen left and the time spent on it.
+  // The screen is the view's fixed name; nothing about its content is sent.
+  const screenViewRef = useRef<{ screen: string; at: number } | null>(null)
+  useEffect(() => {
+    const at = performance.now()
+    const previous = screenViewRef.current
+    if (previous?.screen === viewMode) return
+    screenViewRef.current = { screen: viewMode, at }
+    track('screen_viewed', {
+      screen: viewMode,
+      prev_screen: previous?.screen ?? null,
+      prev_ms: previous ? Math.round(at - previous.at) : 0
+    })
   }, [viewMode])
 
   // Navigation history stacks (back and forward)
@@ -1741,6 +1758,7 @@ function App(): React.JSX.Element | null {
 
   return (
     <RendererEntitlementProvider>
+      <AnalyticsPrompt />
       <PerformancePackGate>
         <PermissionGate>
           <NotificationProvider>

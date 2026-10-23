@@ -38,6 +38,7 @@ const ComputerUseSupervisor: FC =
   (ProRenderer as { ComputerUseSupervisor?: FC }).ComputerUseSupervisor ?? (() => null)
 // DictationOverlay is a free-tier / open-core feature — lives in core, not pro.
 import { DictationOverlay } from './components/DictationOverlay'
+import { installRendererErrorReporting } from './lib/analytics'
 // The Pro computer-use supervisor has its own surface so it can float over the
 // app being driven. A free build resolves no component and renders nothing.
 
@@ -58,7 +59,10 @@ if (isDictation || isGodTwin) {
   document.body.style.backgroundImage = 'none'
 }
 
-// No analytics / telemetry. Off Grid AI is local-first — nothing leaves your device.
+// Analytics are opt-in and off by default. The renderer only reports to the main process
+// (src/main/analytics), which sends anonymous usage data and crash reports to PostHog after the
+// user turns them on in setup, a prompt or Settings > Analytics. Chats and files never leave.
+if (!isClipPopup && !isDictation && !isCuSupervisor && !isGodTwin) installRendererErrorReporting()
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}
