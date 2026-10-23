@@ -75,7 +75,8 @@ export const IMAGE_JOB: QueueRequest = Object.freeze({
 export const VIDEO_JOB: QueueRequest = Object.freeze({
   tier: 2,
   label: 'video',
-  evicts: ['llm', 'image']
+  // Like an image job, plus the image engine itself: a clip needs more memory than a picture.
+  evicts: ['llm', 'image', 'grounding', 'decision']
 })
 
 // Background model work (capture distill, replay-vision, secretary/agent passes).
