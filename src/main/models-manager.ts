@@ -1,3 +1,4 @@
+import { reportDownloadStatus } from './analytics'
 import { settingsChanged, settingsVersion } from './settings-version'
 import { withStorageDownload } from './model-storage-guard'
 // Central model management — the single source of truth for catalog, install
@@ -1155,6 +1156,7 @@ async function downloadModelInner(
     onProgress?.(p)
     if (p.status && p.status !== loggedStatus) {
       loggedStatus = p.status
+      reportDownloadStatus(modelId, p, () => freeBytes(dir) ?? undefined, entry.kind)
       writeDiagnosticLog(
         'models.download',
         `status.${p.status}`,

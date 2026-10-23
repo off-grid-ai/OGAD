@@ -1,3 +1,4 @@
+import { track } from '../analytics'
 import { isUncertainPageResult } from '../extension-bridge/bridge-socket-protocol'
 import type { PlaywrightToolResult } from './playwright-mcp-session'
 import { InvalidDecisionError, NoSupportedActionError } from './semantic-candidates'
@@ -101,6 +102,8 @@ interface SemanticLoopContext {
 export async function runBrowserPlaywrightTask(
   input: BrowserPlaywrightTaskInput
 ): Promise<BrowserPlaywrightTaskResult> {
+  // A count only: never the task, the page, its URL or its domain.
+  track('feature_used', { feature: 'browser_action' })
   try {
     return await runSemanticLoop(input)
   } catch (error) {

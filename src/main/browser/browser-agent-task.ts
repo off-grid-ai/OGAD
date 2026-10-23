@@ -1,3 +1,4 @@
+import { track } from '../analytics'
 import { setTimeout as delay } from 'node:timers/promises'
 import sharp from 'sharp'
 import type { WebContentsView } from 'electron'
@@ -60,6 +61,8 @@ const MAX_WAIT_MS = 30_000
 export async function runBrowserAgentTask(
   input: BrowserAgentTaskInput
 ): Promise<BrowserPlaywrightTaskResult> {
+  // A count only: never the task, the page, its URL or its domain.
+  track('feature_used', { feature: 'browser_action' })
   try {
     return await runAgentTask(input)
   } catch (error) {

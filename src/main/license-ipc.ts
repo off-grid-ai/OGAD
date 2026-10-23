@@ -29,6 +29,7 @@ import {
   type ProLicenseInfo
 } from './licensing/license-service'
 import { effectiveProLicenseInfo } from './licensing/effective-license'
+import { trackFlow } from './analytics'
 
 export function setupLicenseIpc(): void {
   let licenseChangeRevision = 0
@@ -82,6 +83,10 @@ export function setupLicenseIpc(): void {
   ipcMain.handle('license:activate', async (_e, key: string) => {
     const result = await activateProByKey(key)
     await licenseChangeTask
+    if (result.ok) {
+      trackFlow({ flow: 'pro_upgrade', action: 'step', step: 'purchased' })
+      trackFlow({ flow: 'pro_upgrade', action: 'finish', outcome: 'done' })
+    }
     return result
   })
   ipcMain.handle('license:list-devices', () => listProDevices())
