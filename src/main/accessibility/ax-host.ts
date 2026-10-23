@@ -489,7 +489,8 @@ class AxRailHost {
   ): Promise<ElementTaskResult> {
     const journeyId = options.journeyId ?? taskId
     const { checkpoint, recoverWithVision } = options
-    console.log(`[ax-rail] runTask app="${app}" goal="${goal}"`)
+    // The log holds metadata only: never the task the user typed.
+    console.log(`[ax-rail] runTask app="${app}" goal=${goal.length} chars`)
     const failBeforeStart = (summary: string): ElementTaskResult => {
       emitVisionState({
         taskId,
