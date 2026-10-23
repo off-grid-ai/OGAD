@@ -3,7 +3,6 @@ import { Copy, EnvelopeSimple, FolderOpen } from '@phosphor-icons/react'
 import { Skeleton } from '@offgrid/operator-ui/operator/coss/skeleton'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
-import { track } from '@renderer/lib/analytics'
 import { Button } from '../ui/button'
 import { IconTip } from '../IconTip'
 import {
@@ -59,7 +58,6 @@ export function ReportProblemDialog({
       navigator.clipboard.writeText(text)
     )
     setCopied(ok ? 'copied' : 'failed')
-    if (ok) track('problem_reported')
   }
 
   return (
