@@ -1,3 +1,4 @@
+import { flow } from '@renderer/lib/analytics'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 export const CONNECTIONS_CHANGED_EVENT = 'offgrid:connections-changed'
@@ -112,6 +113,7 @@ export function useQuickConnection(onBusyChange?: (busy: boolean) => void): Quic
     setBusy(entry.id)
     onBusy.current?.(true)
     setErrors((previous) => ({ ...previous, [entry.id]: '' }))
+    flow.step('connector_add', 'connector_picked', entry.id)
     try {
       // Read current state rather than a stale rendered list before creating a record.
       const current = (await window.api.mcpList()) as QuickConnectionRecord[]
@@ -141,7 +143,10 @@ export function useQuickConnection(onBusyChange?: (busy: boolean) => void): Quic
       }
       await window.api.mcpSetEnabled(attempt.id!, true)
       attempt.created = false
+      flow.step('connector_add', 'authorised')
+      flow.finish('connector_add', 'done')
     } catch (error) {
+      flow.finish('connector_add', attempt.cancelled ? 'cancelled' : 'failed', 'connect_failed')
       if (!attempt.cancelled && mounted.current) {
         setErrors((previous) => ({
           ...previous,

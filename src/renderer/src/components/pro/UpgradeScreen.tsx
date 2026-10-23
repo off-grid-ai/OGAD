@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { flow } from '@renderer/lib/analytics'
 import {
   ArrowSquareOut,
   Check,
@@ -131,6 +132,12 @@ export function UpgradeScreen({
     if (api?.openExternal) api.openExternal(url)
     else window.open(url, '_blank')
   }
+  // The upgrade funnel: this screen is the gate, and "Get Pro" opens the paywall.
+  const gateFeature = f?.route ?? 'pro'
+  useEffect(() => {
+    flow.start('pro_upgrade')
+    flow.step('pro_upgrade', 'gate_shown', gateFeature)
+  }, [gateFeature])
 
   return (
     <div className="h-full overflow-y-auto px-8 py-10 font-mono lg:px-12">
@@ -274,7 +281,14 @@ export function UpgradeScreen({
                   <div className="text-[10px] uppercase tracking-widest text-neutral-500">
                     Unlock Pro
                   </div>
-                  <Button size="lg" className="w-full" onClick={() => open(PRO_PAY_URL)}>
+                  <Button
+                    size="lg"
+                    className="w-full"
+                    onClick={() => {
+                      flow.step('pro_upgrade', 'paywall_viewed')
+                      open(PRO_PAY_URL)
+                    }}
+                  >
                     Get Pro <ArrowSquareOut weight="bold" className="h-4 w-4" />
                   </Button>
                   <p className="text-[11px] leading-relaxed text-neutral-600">

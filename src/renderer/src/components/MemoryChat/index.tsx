@@ -1,3 +1,4 @@
+import { track } from '@renderer/lib/analytics'
 import { restoredStreamMessage, withRestoredStream } from '@renderer/lib/chat-stream-restore'
 import { stopChatRun } from '@renderer/lib/chat-stop'
 import { observeOwnedRun, type RunEvent } from '@renderer/lib/chat-run-owner'
@@ -1850,6 +1851,14 @@ export function MemoryChat({
       ))
     )
       return
+    // Opt-in usage data: that a message went, and what kind. Never its text or attachments.
+    if (regen) track('reply_regenerated')
+    else
+      track('message_sent', {
+        has_image: imagePaths.length > 0,
+        has_document: turnDocuments.length > 0,
+        tools_enabled: assistantForTurn
+      })
     // A live operator task owns this journey until it finishes. New Chat input is
     // guidance for that task, not a second memory/model turn running beside it.
     if (!regen && targetConv && !opts?.imageRequest) {
