@@ -8,6 +8,7 @@ import {
   remoteVisionModelId,
   remoteVisionProviderForEndpoint,
   type RemoteVisionConnectionResult,
+  type RemoteVisionProvider,
   type RemoteVisionCatalogModel,
   type RemoteVisionSelections,
   type RemoteVisionRoleSelections,
@@ -38,6 +39,7 @@ const EMPTY_SETTINGS: RemoteVisionServerSettings = {
 }
 
 interface ServerForm {
+  provider?: RemoteVisionProvider
   id: string | null
   name: string
   endpoint: string
@@ -64,6 +66,7 @@ const EMPTY_FORM: ServerForm = {
 function formFromServer(server: RemoteVisionSavedServer): ServerForm {
   return {
     id: server.id,
+    provider: server.provider,
     name: server.name,
     endpoint: server.endpoint,
     model: server.model,
@@ -198,7 +201,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
   const payload = (): RemoteVisionServerUpdate => {
     const endpoint = remoteVisionApiBase(form.endpoint)
     return {
-      provider: remoteVisionProviderForEndpoint(endpoint),
+      provider: form.provider ?? remoteVisionProviderForEndpoint(endpoint),
       endpoint,
       model: form.model,
       mediaModels: form.mediaModels,
@@ -236,10 +239,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       setModels(discovered)
       setForm((current) => ({
         ...current,
+        provider: result.provider ?? current.provider,
         model: nextModel,
         modelCatalog: discovered,
         mediaModels: Object.fromEntries(
-          (['text', 'image', 'transcription', 'voice'] as const).flatMap((kind) => {
+          (['text', 'image', 'video', 'transcription', 'voice'] as const).flatMap((kind) => {
             const id = kind === 'text' ? nextModel : current.mediaModels[kind]
             return id && discovered.some((model) => model.id === id && model.kind === kind)
               ? [[kind, id]]
@@ -522,6 +526,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
                   setForm((current) => ({
                     ...current,
                     endpoint: event.target.value,
+                    provider: undefined,
                     model: '',
                     mediaModels: {},
                     roleModels: {},
@@ -689,11 +694,32 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
               />
             </Row>
           ))}
-          {(['image', 'transcription', 'voice'] as const).map((kind) => (
+          {(['image', 'video', 'transcription', 'voice'] as const)
+            .filter(
+              (kind) =>
+                kind !== 'video' ||
+                ['ogad', 'openrouter'].includes(
+                  form.provider ?? remoteVisionProviderForEndpoint(form.endpoint)
+                )
+            )
+            .map((kind) => (
             <Row
               inline
               key={kind}
-              label={kind === 'image' ? 'Image' : kind === 'voice' ? 'Voice' : 'Transcription'}
+              label={
+                kind === 'video'
+                  ? 'Video'
+                  : kind === 'image'
+                    ? 'Image'
+                    : kind === 'voice'
+                      ? 'Voice'
+                      : 'Transcription'
+              }
+              hint={
+                kind === 'video' && remoteVisionProviderForEndpoint(form.endpoint) === 'openrouter'
+                  ? 'Uses the nearest supported clip size and duration. Stop ends the download; the provider may still finish and charge for the video.'
+                  : undefined
+              }
               controlId={`remote-server-${kind}-model`}
             >
               <SettingsSelect

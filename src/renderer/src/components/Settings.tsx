@@ -202,7 +202,7 @@ export function Settings({
 
             <SettingsCard
               title="Engines"
-              summary="Keep chat, image and transcription engines current, and manage GPU components."
+              summary="Keep chat, image, video and transcription engines current, and manage GPU components."
               delay={0.135}
             >
               <PerformancePackPanel showUnavailable />

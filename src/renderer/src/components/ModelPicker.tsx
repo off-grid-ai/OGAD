@@ -58,10 +58,11 @@ interface ModelEntry {
 const MODALITIES: {
   label: string
   kinds: string[]
-  mode: 'text' | 'image' | 'speech' | 'transcription'
+  mode: 'text' | 'image' | 'video' | 'speech' | 'transcription'
 }[] = [
   { label: 'Text & Vision', kinds: ['text', 'vision'], mode: 'text' },
   { label: 'Image', kinds: ['image'], mode: 'image' },
+  { label: 'Video', kinds: ['video'], mode: 'video' },
   { label: 'Voice', kinds: ['voice', 'speech'], mode: 'speech' },
   { label: 'Transcription', kinds: ['transcription'], mode: 'transcription' }
 ]
@@ -72,6 +73,7 @@ type PickerMode = (typeof MODALITIES)[number]['mode']
 const MODE_TO_MODALITY: Record<PickerMode, string> = {
   text: 'llm',
   image: 'image',
+  video: 'video',
   speech: 'tts',
   transcription: 'stt'
 }
@@ -130,6 +132,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     setActive({
       text: remoteTextActive ? null : (text ?? modal.text ?? null),
       image: modal.image ?? null,
+      video: modal.video ?? null,
       speech: modal.speech ?? null,
       transcription: modal.transcription ?? null,
       computer_use: modal.computer_use ?? null
@@ -300,7 +303,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                       capabilities: modelCapabilities(current).length ? <ModelCapabilityIcons model={current} /> : null,
                       detail: current.remoteServerId
                         ? null
-                        : backendFor(mode === 'text' ? 'chat' : mode, [
+                        : mode === 'video'
+                          ? 'Local · loads for each clip'
+                          : backendFor(mode === 'text' ? 'chat' : mode, [
                             current.id,
                             primaryFile(current),
                             ...(mode === 'speech' ? ['Kokoro'] : [])
@@ -309,7 +314,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                   : null
               }
               unload={
-                current && !current.remoteServerId
+                current && !current.remoteServerId && mode !== 'video'
                   ? { status: unload[mode], onUnload: () => void unloadModel(mode) }
                   : undefined
               }

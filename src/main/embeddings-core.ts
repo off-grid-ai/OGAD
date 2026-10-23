@@ -12,6 +12,28 @@ import { requireModelStorage } from './runtime-env'
 import { configureTransformersEnv } from './embeddings-env'
 import { loadWithOnnxFallback, onnxDeviceCandidates } from './onnx-device'
 import type { BackendPreference } from '../shared/backend-preferences'
+import { DEFAULT_EMBEDDING_MODEL, type EmbeddingModelId } from './embedding-model-choice'
+
+export async function probeEmbeddingModel(
+  modelId: EmbeddingModelId,
+  modelsDir: string
+): Promise<number> {
+  configureTransformersEnv(modelsDir)
+  const candidate = await pipeline('feature-extraction', modelId, { device: 'cpu' })
+  try {
+    const output = await candidate('Off Grid AI embedding check', {
+      pooling: 'mean',
+      normalize: true
+    })
+    const vector = Array.from(output.data)
+    if (!vector.length || vector.length > 4096 || vector.some((value) => !Number.isFinite(value))) {
+      throw new Error('This model returned an invalid embedding.')
+    }
+    return vector.length
+  } finally {
+    await candidate.dispose()
+  }
+}
 
 /**
  * Text -> vector. The actual inference, owned in ONE place.
@@ -23,8 +45,9 @@ import type { BackendPreference } from '../shared/backend-preferences'
  *
  * The pipeline is cached per process, because loading it is the expensive part.
  */
-let pipe: FeatureExtractionPipeline | null = null
-let loading: Promise<FeatureExtractionPipeline> | null = null
+// One pipeline per model: search and memory use the chosen embedding model, attached documents
+// always use DOCUMENT_EMBEDDER. When the two are the same model, they share one pipeline.
+const pipes = new Map<string, Promise<FeatureExtractionPipeline>>()
 let activeDevice: DeviceType | null = null
 
 export function embeddingDevice(): DeviceType | null {
@@ -33,11 +56,10 @@ export function embeddingDevice(): DeviceType | null {
 
 /** Called after serialized inference when the model is configured on demand. */
 export async function disposeEmbeddingModel(): Promise<void> {
-  const previous = pipe
-  pipe = null
-  loading = null
+  const previous = [...pipes.values()]
+  pipes.clear()
   activeDevice = null
-  await previous?.dispose()
+  for (const loaded of previous) await (await loaded.catch(() => null))?.dispose()
   const reranker = rerankerLoading
   rerankerLoading = null
   await (await reranker?.catch(() => null))?.model.dispose()
@@ -75,18 +97,16 @@ export async function embedTexts(
   backendPreference: BackendPreference = 'auto',
   readDirectories = modelReadDirectories()
 ): Promise<number[][]> {
-  const out: number[][] = []
-  let rest = texts
-  // The first text loads the model.
-  if (!pipe && rest.length) {
-    out.push(await embedText(rest[0]!, modelsDir, undefined, backendPreference, readDirectories))
-    rest = rest.slice(1)
-  }
-  if (rest.length) {
-    const output = await pipe!(rest, { pooling: 'mean', normalize: true })
-    out.push(...(output.tolist() as number[][]))
-  }
-  return out
+  if (!texts.length) return []
+  const pipe = await loadPipeline(
+    DOCUMENT_EMBEDDER,
+    modelsDir,
+    undefined,
+    backendPreference,
+    readDirectories
+  )
+  const output = await pipe(texts, { pooling: 'mean', normalize: true })
+  return output.tolist() as number[][]
 }
 
 /** Relevance of each passage to the query (sigmoid of the cross-encoder logit), same order. */
@@ -151,35 +171,47 @@ export async function embedText(
   modelsDir: string,
   onReady?: (device: string, reason?: string) => void,
   backendPreference: BackendPreference = 'auto',
+  modelId: EmbeddingModelId = DEFAULT_EMBEDDING_MODEL,
   readDirectories = modelReadDirectories()
 ): Promise<number[]> {
-  if (!pipe) {
-    const id = 'Xenova/all-MiniLM-L6-v2'
-    const fp32 = resolveTransformersPackage(id, 'model.onnx', readDirectories)
-    const cached = fp32 ?? resolveTransformersPackage(id, 'model_quantized.onnx', readDirectories)
-    // Local-only reads must not require writable storage. Guard only an explicit
-    // folder choice when the pipeline can download; default storage is created lazily.
-    if (!cached && process.env.OFFGRID_EMBEDDINGS_OFFLINE !== '1') requireModelStorage()
-    configureTransformersEnv(modelsDir, !!cached)
-    loading ??= loadWithOnnxFallback(
-      (device) =>
-        pipeline('feature-extraction', cached ?? 'Xenova/all-MiniLM-L6-v2', {
-          device,
-          ...(cached ? { local_files_only: true, ...(fp32 ? {} : { dtype: 'q8' as const }) } : {})
-        }),
-      embeddingDevices(backendPreference)
-    )
-      .then(({ runtime, device, fallbackReason }) => {
-        onReady?.(device, fallbackReason)
-        activeDevice = device
-        return runtime
-      })
-      .catch((error) => {
-        loading = null
-        throw error
-      })
-    pipe = await loading
-  }
+  const pipe = await loadPipeline(modelId, modelsDir, onReady, backendPreference, readDirectories)
   const output = await pipe(text, { pooling: 'mean', normalize: true })
   return Array.from(output.data)
+}
+
+function loadPipeline(
+  modelId: EmbeddingModelId,
+  modelsDir: string,
+  onReady: ((device: string, reason?: string) => void) | undefined,
+  backendPreference: BackendPreference,
+  readDirectories: string[]
+): Promise<FeatureExtractionPipeline> {
+  const existing = pipes.get(modelId)
+  if (existing) return existing
+  const fp32 = resolveTransformersPackage(modelId, 'model.onnx', readDirectories)
+  const cached =
+    fp32 ?? resolveTransformersPackage(modelId, 'model_quantized.onnx', readDirectories)
+  // Local-only reads must not require writable storage. Guard only an explicit
+  // folder choice when the pipeline can download; default storage is created lazily.
+  if (!cached && process.env.OFFGRID_EMBEDDINGS_OFFLINE !== '1') requireModelStorage()
+  configureTransformersEnv(modelsDir, !!cached)
+  const loading = loadWithOnnxFallback(
+    (device) =>
+      pipeline('feature-extraction', cached ?? modelId, {
+        device,
+        ...(cached ? { local_files_only: true, ...(fp32 ? {} : { dtype: 'q8' as const }) } : {})
+      }),
+    embeddingDevices(backendPreference)
+  )
+    .then(({ runtime, device, fallbackReason }) => {
+      onReady?.(device, fallbackReason)
+      activeDevice = device
+      return runtime
+    })
+    .catch((error) => {
+      pipes.delete(modelId)
+      throw error
+    })
+  pipes.set(modelId, loading)
+  return loading
 }

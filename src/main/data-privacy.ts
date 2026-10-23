@@ -11,7 +11,7 @@ import { ATTACHED_DOCUMENT_TABLES } from './documents/sqlite-store'
 import { deleteByKinds, deleteByKindsOlderThan, resetVectors } from './vectors'
 
 export interface DataCategory {
-  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
+  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images' | 'videos'
   label: string
   detail: string
   count?: number
@@ -161,7 +161,7 @@ const CORE_PERSONAL: PersonalStore[] = [
   { tables: ['user_profile'], dirs: [] },
   { tables: [], dirs: ['captures'] },
   { tables: [], dirs: ['meetings'] },
-  { tables: [], dirs: ['generated-images', 'artifacts-library', 'style-thumbs'] },
+  { tables: [], dirs: ['generated-images', 'generated-videos', 'artifacts-library', 'style-thumbs'] },
   // Opt-in analytics: consent, the anonymous ID and the in-flight marker. Erasing everything
   // also opts out, so nothing more is sent from this device until the user opts in again.
   { files: [UNCLEAN_EXIT_MARKER_FILE], beforeDelete: forgetAnalytics }
@@ -288,6 +288,7 @@ function clearFiles(...files: string[]): void {
 export function getDataSummary(): DataCategory[] {
   const captures = dirSize(ud('captures'))
   const meetings = dirSize(ud('meetings'))
+  const videos = dirSize(ud('generated-videos'))
   const images = (() => {
     const a = dirSize(ud('generated-images')),
       b = dirSize(ud('artifacts-library')),
@@ -327,6 +328,13 @@ export function getDataSummary(): DataCategory[] {
       detail: 'Images, artifacts, and thumbnails',
       count: images.files,
       bytes: images.bytes
+    },
+    {
+      id: 'videos',
+      label: 'Generated videos',
+      detail: 'Video clips and generation details',
+      count: videos.files,
+      bytes: videos.bytes
     }
   ]
 }
@@ -381,6 +389,9 @@ export async function clearCategory(
           break
         case 'images':
           clearDirs(ud('generated-images'), ud('artifacts-library'), ud('style-thumbs'))
+          break
+        case 'videos':
+          clearDirs(ud('generated-videos'))
           break
       }
       for (const cleaner of categoryCleaners.get(id)?.values() ?? []) {

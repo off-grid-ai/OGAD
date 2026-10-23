@@ -11,7 +11,7 @@ export const REMOTE_VISION_PROVIDERS = [
 
 export type RemoteVisionProvider = (typeof REMOTE_VISION_PROVIDERS)[number]
 
-export type RemoteVisionModality = 'text' | 'image' | 'transcription' | 'voice'
+export type RemoteVisionModality = 'text' | 'image' | 'video' | 'transcription' | 'voice'
 export type RemoteVisionSelections = Partial<Record<RemoteVisionModality, string>>
 export type RemoteVisionTaskRole = 'grounding' | 'decision'
 export type RemoteVisionRoleSelections = Partial<Record<RemoteVisionTaskRole, string>>
@@ -73,7 +73,7 @@ export interface RemoteVisionModelReference {
 export interface RemoteVisionInventoryModel {
   id: string
   name: string
-  kind: 'vision' | 'image' | 'transcription' | 'speech' | 'computer_use'
+  kind: 'vision' | 'image' | 'video' | 'transcription' | 'speech' | 'computer_use'
   org: string
   description: string
   files: []
@@ -137,9 +137,10 @@ export function remoteVisionInventoryModels(
         remoteModelId: modelId
       }
     }
-    const media = (['text', 'image', 'transcription', 'voice'] as const).flatMap((modality) => {
+    const media = (['text', 'image', 'video', 'transcription', 'voice'] as const).flatMap((modality) => {
       const modelId = selections[modality]
-      if (!modelId) return []
+      if (!modelId || (modality === 'video' && !['ogad', 'openrouter'].includes(server.provider)))
+        return []
       const kind =
         modality === 'text'
           ? ('vision' as const)
@@ -200,6 +201,7 @@ export interface RemoteVisionServerUpdate {
 }
 
 export interface RemoteVisionConnectionResult {
+  provider?: RemoteVisionProvider
   ok: boolean
   latencyMs: number
   error?: string

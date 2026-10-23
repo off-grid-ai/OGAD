@@ -48,6 +48,6 @@ describe('command palette screen matching', () => {
     ])
     expect(
       internalTabPaletteScreens([{ view: 'models', locked: true }]).map(({ subroute }) => subroute)
-    ).toEqual(['image', 'computer-use', 'voice', 'transcription', 'storage'])
+    ).toEqual(['image', 'video', 'computer-use', 'voice', 'transcription', 'embedding', 'storage'])
   })
 })

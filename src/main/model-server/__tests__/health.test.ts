@@ -19,7 +19,8 @@ describe('buildGatewayModalities', () => {
       transcription: 'not_installed',
       speech: 'not_installed',
       image_generation: 'not_installed',
-      image_edit: 'not_installed'
+      image_edit: 'not_installed',
+      video_generation: 'not_installed'
     })
   })
 
@@ -31,7 +32,8 @@ describe('buildGatewayModalities', () => {
         embeddings: false,
         transcription: true,
         speech: true,
-        image: true
+        image: true,
+        video: true
       })
     ).toEqual({
       text: 'ready',
@@ -40,7 +42,8 @@ describe('buildGatewayModalities', () => {
       transcription: 'ready',
       speech: 'ready',
       image_generation: 'ready',
-      image_edit: 'ready'
+      image_edit: 'ready',
+      video_generation: 'ready'
     })
   })
 })

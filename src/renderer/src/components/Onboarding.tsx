@@ -22,6 +22,7 @@ import {
   ChatCircle,
   Eye,
   Image as ImageIcon,
+  VideoCamera,
   Microphone,
   SpeakerHigh,
   FolderOpen,
@@ -90,6 +91,7 @@ const ORBIT = [
   { icon: ChatCircle, label: 'Chat' },
   { icon: Eye, label: 'Vision' },
   { icon: ImageIcon, label: 'Image' },
+  { icon: VideoCamera, label: 'Video' },
   { icon: Microphone, label: 'Voice' },
   { icon: SpeakerHigh, label: 'Speech' },
   { icon: Browser, label: 'Web Use' },
@@ -160,7 +162,7 @@ const SYNC_GRID = [
   {
     icon: Package,
     label: 'Models',
-    line: 'See and switch the active Chat, Image, Transcription, Voice, and Computer Use model on a named Desktop.'
+    line: 'See and switch the active Chat, Image, Video, Transcription, Voice, and Computer Use model on a named Desktop.'
   }
 ]
 
@@ -241,7 +243,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 />
                 <div className="mt-4">
                   <TextGenerate
-                    words="Chat, read images, generate images, transcribe, speak, browse with Web Use, and run Computer Use with local models. Add a model server only when you want one."
+                    words="Chat, read images, generate images and videos, transcribe, speak, browse with Web Use, and run Computer Use with local models. Add a model server only when you want one."
                     as="p"
                     className="mx-auto max-w-2xl text-neutral-400"
                     delay={0.4}
@@ -298,7 +300,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                 transition={{ delay: 1 }}
                 className="mt-4 text-xs text-neutral-600"
               >
-                Chat / Vision / Image / Transcription / Voice / Web Use / Computer Use
+                Chat / Vision / Image / Video / Transcription / Voice / Web Use / Computer Use
               </motion.p>
             </div>
           </motion.div>

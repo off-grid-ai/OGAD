@@ -72,6 +72,11 @@ export const IMAGE_JOB: QueueRequest = Object.freeze({
   uses: { id: 'image' },
   evicts: ['llm']
 })
+export const VIDEO_JOB: QueueRequest = Object.freeze({
+  tier: 2,
+  label: 'video',
+  evicts: ['llm', 'image']
+})
 
 // Background model work (capture distill, replay-vision, secretary/agent passes).
 // Tier 3 = lowest priority: runs only when no chat/workspace/image job is running
@@ -295,7 +300,8 @@ export class ModalityQueue {
    * `fn`, release the slot, then admit the next waiter. Cooperative: a running
    * job is NEVER killed to make room — admission only gates jobs not yet started.
    */
-  async run<T>(request: QueueRequest, fn: () => Promise<T>): Promise<T> {
+  async run<T>(request: QueueRequest, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
     if (!this.enabled) return fn()
     // A job on a remote engine uses no memory here: nothing to admit or evict.
     if (request.uses && this.remoteEngines.get(request.uses.id)?.()) return fn()
@@ -309,7 +315,7 @@ export class ModalityQueue {
 
     // A preempted job waits its turn again and runs from the start.
     for (;;) {
-      const attempt = await this.attempt(request, fn)
+      const attempt = await this.attempt(request, fn, signal)
       if (attempt.done) return attempt.value
     }
   }
@@ -325,7 +331,8 @@ export class ModalityQueue {
   /** One admission and run of `fn`. `done: false` when foreground work preempted it. */
   private async attempt<T>(
     request: QueueRequest,
-    fn: () => Promise<T>
+    fn: () => Promise<T>,
+    signal?: AbortSignal
   ): Promise<{ done: true; value: T } | { done: false }> {
     const job: QueueJob = {
       id: `job-${String(++this.idCounter)}`,
@@ -336,7 +343,26 @@ export class ModalityQueue {
 
     // Wait for admission (resolves synchronously if the slot is free right now).
     await new Promise<void>((resolve, reject) => {
-      this.waiting.push({ job, request, admit: resolve, reject })
+      const abort = (): void => {
+        const index = this.waiting.findIndex((waiter) => waiter.job.id === job.id)
+        // An admitted job must finish eviction before it can release its slot.
+        if (index === -1) return
+        this.waiting.splice(index, 1)
+        signal?.removeEventListener('abort', abort)
+        reject(signal?.reason)
+        this.emitChange()
+        this.pump()
+      }
+      const admit = (): void => {
+        signal?.removeEventListener('abort', abort)
+        resolve()
+      }
+      const refuse = (reason: unknown): void => {
+        signal?.removeEventListener('abort', abort)
+        reject(reason)
+      }
+      this.waiting.push({ job, request, admit, reject: refuse })
+      signal?.addEventListener('abort', abort, { once: true })
       this.emitChange()
       this.pump()
     })
@@ -344,6 +370,7 @@ export class ModalityQueue {
     const entry = this.running.get(job.id)
     try {
       // Mark this async context as "inside a job" so any nested run() short-circuits.
+      signal?.throwIfAborted()
       return {
         done: true,
         value: await this.jobContext.run({ signal: entry?.controller?.signal }, fn)

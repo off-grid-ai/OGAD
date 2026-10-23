@@ -5,6 +5,9 @@
 /** The main marketing site. */
 export const OFF_GRID_WEBSITE_URL = 'https://getoffgridai.co'
 
+/** Official Desktop installers for repairing or updating the app package. */
+export const OFF_GRID_DESKTOP_RELEASES_URL = 'https://github.com/off-grid-ai/OGAD/releases'
+
 /** Off Grid AI Mobile landing page — carries both App Store and Google Play links.
  *  Mirrors mobile's link to getoffgridai.co/desktop. */
 export const OFF_GRID_MOBILE_URL = 'https://getoffgridai.co/mobile'

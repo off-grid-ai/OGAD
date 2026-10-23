@@ -3,7 +3,7 @@ import { beginRuntimeBackend, providerLabel } from './runtime-backends'
 import path from 'path'
 import { existsSync } from 'fs'
 import { Worker } from 'worker_threads'
-import { chosenModelsDir, modelsDir } from './runtime-env'
+import { chosenModelsDir, modelsDir, requireModelStorage } from './runtime-env'
 import { modelReadDirectories } from './model-paths'
 import {
   DOCUMENT_EMBEDDER,
@@ -12,6 +12,7 @@ import {
   embedText,
   embedTexts,
   embeddingDevice,
+  probeEmbeddingModel,
   rerankPassages
 } from './embeddings-core'
 import { getResidencyMode } from './runtime-residency'
@@ -19,6 +20,11 @@ import { recordAIRequest, type AIRequestHandle } from './ai-request-log'
 import type { EmbeddingRequest, EmbeddingResponse } from './embeddings-worker'
 import { writeDiagnosticLog } from './diagnostics-log'
 import { getBackendPreference } from './backend-preferences'
+import {
+  getEmbeddingModelId,
+  saveEmbeddingModelId,
+  type EmbeddingModelId
+} from './embedding-model-choice'
 
 /**
  * The built worker, when there is one.
@@ -87,13 +93,15 @@ class EmbeddingService {
     // run-from-source context have only the .ts next to this file. Resolve whichever EXISTS rather
     // than assuming the built layout: assuming it made every embedding fail outside a packaged
     // build, which silently demoted vector search to the FTS fallback instead of erroring.
-    const backendState = beginRuntimeBackend('embeddings', 'Xenova/all-MiniLM-L6-v2')
+    const modelId = getEmbeddingModelId()
+    const backendState = beginRuntimeBackend('embeddings', modelId)
     const worker = new Worker(entry, {
       workerData: {
         modelsDir: modelsDir(),
         chosenModelsDir: chosenModelsDir(),
         modelReadDirectories: modelReadDirectories(),
-        backendPreference: getBackendPreference('embeddings')
+        backendPreference: getBackendPreference('embeddings'),
+        modelId
       }
     })
     worker.on('message', (response: EmbeddingResponse) => {
@@ -143,6 +151,67 @@ class EmbeddingService {
     await this.generateEmbedding('')
   }
 
+  /** Wait for current inference, replace its worker, then publish the new choice. */
+  async switchModel(id: EmbeddingModelId, dimensions = 384): Promise<void> {
+    const switchAfterCurrent = async (): Promise<void> => {
+      const worker = this.worker
+      this.worker = null
+      if (worker) await worker.terminate()
+      else await disposeEmbeddingModel()
+      this.reportedDevice = null
+      saveEmbeddingModelId(id, dimensions)
+    }
+    const result = this.queue.then(switchAfterCurrent, switchAfterCurrent)
+    this.queue = result.catch(() => undefined)
+    await result
+  }
+
+  /** Load a candidate separately, so a failed choice leaves the active worker untouched. */
+  async probeModel(id: EmbeddingModelId): Promise<number> {
+    requireModelStorage()
+    const entry = builtWorkerEntry()
+    if (!entry) return probeEmbeddingModel(id, modelsDir())
+    const worker = new Worker(entry, {
+      workerData: {
+        modelsDir: modelsDir(),
+        backendPreference: 'cpu',
+        modelId: id
+      }
+    })
+    try {
+      const vector = await new Promise<number[]>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Model check timed out.')), 300_000)
+        const done = (callback: () => void): void => {
+          clearTimeout(timer)
+          callback()
+        }
+        worker.on('message', (response: EmbeddingResponse) => {
+          if (response.ready) return
+          if (response.error) done(() => reject(new Error(response.error)))
+          else done(() => resolve(response.vector ?? []))
+        })
+        worker.once('error', (error) => done(() => reject(error)))
+        worker.once('exit', (code) =>
+          done(() => reject(new Error(`Model check stopped (${code}).`)))
+        )
+        worker.postMessage({
+          id: 0,
+          text: 'Off Grid AI embedding check'
+        } satisfies EmbeddingRequest)
+      })
+      if (
+        !vector.length ||
+        vector.length > 4096 ||
+        vector.some((value) => !Number.isFinite(value))
+      ) {
+        throw new Error('This model returned an invalid embedding.')
+      }
+      return vector.length
+    } finally {
+      await worker.terminate()
+    }
+  }
+
   /** `interactive`: someone is waiting on this vector (a search), so it runs before background
    *  indexing that is already queued. */
   async generateEmbedding(text: string, opts: { interactive?: boolean } = {}): Promise<number[]> {
@@ -185,7 +254,7 @@ class EmbeddingService {
       {
         modality: 'embedding',
         source: text ? 'Embedding' : 'Embedding warm-up',
-        model: 'Xenova/all-MiniLM-L6-v2',
+        model: getEmbeddingModelId(),
         request: { text, pooling: 'mean', normalize: true }
       },
       async (log) => {
@@ -200,13 +269,14 @@ class EmbeddingService {
               text,
               modelsDir(),
               (device, reason) => {
-                beginRuntimeBackend('embeddings', 'Xenova/all-MiniLM-L6-v2').ready(
+                beginRuntimeBackend('embeddings', getEmbeddingModelId()).ready(
                   providerLabel(device),
                   undefined,
                   reason
                 )
               },
               getBackendPreference('embeddings'),
+              getEmbeddingModelId(),
               modelReadDirectories()
             )
           return this.post({ id: this.nextId++, text }, entry, log).then((r) => r.vector ?? [])

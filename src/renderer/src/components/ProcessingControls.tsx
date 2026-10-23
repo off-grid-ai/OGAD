@@ -232,6 +232,7 @@ const BACKEND_LABELS: Record<BackendPreference, string> = {
 const RUNTIME_IDS: Record<BackendModality, RuntimeId> = {
   llm: 'chat',
   image: 'image',
+  video: 'video',
   stt: 'transcription',
   tts: 'speech',
   grounding: 'grounding',
@@ -242,6 +243,7 @@ const RUNTIME_IDS: Record<BackendModality, RuntimeId> = {
 const BACKEND_ROW_LABELS: Record<BackendModality, string> = {
   llm: 'Chat and vision',
   image: 'Images',
+  video: 'Videos',
   stt: 'Transcription',
   tts: 'Speech',
   grounding: 'Grounding',
@@ -322,7 +324,7 @@ export function BackendPreferencesSection({
       {modalities.map((modality) => {
         const runtime = running.find((entry) => entry.id === RUNTIME_IDS[modality])
         const label = `${BACKEND_ROW_LABELS[modality]} backend`
-        const packOwnsCuda = ['llm', 'image', 'stt', 'grounding', 'decision'].includes(modality)
+        const packOwnsCuda = ['llm', 'image', 'video', 'stt', 'grounding', 'decision'].includes(modality)
         const cudaNeedsPack =
           packOwnsCuda &&
           packStatus !== null &&

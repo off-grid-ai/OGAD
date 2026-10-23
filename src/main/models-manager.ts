@@ -39,6 +39,7 @@ import {
   MTP_COMPANIONS,
   selectedGgufParts,
   mergeCatalog,
+  remainingDownloadBytes,
   installedIds,
   buildDiskEntry,
   primaryFileName,
@@ -706,6 +707,12 @@ function fileSizeOf(dir: string, name: string): number {
   }
 }
 
+/** Use the downloader's disk probe to count only files this job must fetch. */
+export function remainingModelDownloadBytes(entry: Pick<CatalogEntry, 'files'>): number {
+  const dir = llm.getModelsDir()
+  return remainingDownloadBytes(entry, (name) => fileSizeOf(dir, name))
+}
+
 function downloadedPrimary(model: DownloadedModel): string | undefined {
   return model.files.find((name) => !isProjectorFileName(name)) ?? model.files[0]
 }
@@ -775,7 +782,7 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
     if (traits) traitsById.set(model.id, traits)
   }
   return {
-    kinds: MODEL_KINDS,
+    kinds: [...MODEL_KINDS, 'embedding'],
     models: [
       ...models.map((model) => ({
         ...model,
@@ -953,6 +960,10 @@ export async function resolveComputerUseModelArtifact(
 
 export async function searchModels(query: string, kind?: string): Promise<unknown[]> {
   try {
+    if (kind === 'embedding') {
+      const { searchEmbeddingModels } = await import('./embedding-hub')
+      return await searchEmbeddingModels(query)
+    }
     const { searchHuggingFace } = await import('@offgrid/models')
     return await searchHuggingFace(query, { limit: 30, kind: kind as never })
   } catch (err) {
@@ -1047,7 +1058,18 @@ async function downloadModelInner(
   const CATALOG = await desktopCatalog()
   const inCatalog = CATALOG.find((m) => m.id === modelId)
   let entry = inCatalog ?? (await resolveHuggingFaceModel(modelId))
-  if (fileName && entry) {
+  if (fileName && entry?.kind === 'video') {
+    // The selected weights determine the encoder and VAE. Replacing only the
+    // primary file can pair a Wan 2.2 variant with a Wan 2.1 default's VAE.
+    const selectedPack = await resolveHuggingFaceModel(modelId, { kind: 'video', fileName })
+    if (!selectedPack)
+      return publishRefusal(
+        modelId,
+        'Selected video model file is no longer available.',
+        onProgress
+      )
+    entry = { ...entry, files: selectedPack.files, minRamGb: selectedPack.minRamGb }
+  } else if (fileName && entry) {
     const variants = await getModelFiles(modelId)
     const variant = variants.find((file) => file.fileName === fileName)
     if (!variant)
@@ -1058,7 +1080,7 @@ async function downloadModelInner(
     } catch (error) {
       return publishRefusal(modelId, (error as Error).message, onProgress)
     }
-    const catalogAuxFiles = (inCatalog?.files ?? []).filter(
+    const catalogAuxFiles = entry.files.filter(
       (file) =>
         file.role !== 'primary' &&
         file.role !== 'mmproj' &&
@@ -1379,7 +1401,7 @@ async function downloadModelInner(
             kind: entry.kind,
             source: 'downloaded',
             files: files as [(typeof files)[number], ...typeof files],
-            engine: 'llama'
+            engine: entry.kind === 'text' || entry.kind === 'vision' ? 'llama' : undefined
           })
           installedId = packageIdentity
           recordDownloaded(dir, {
@@ -1552,6 +1574,19 @@ async function trashExternalModel(modelId: string, dir: string): Promise<DeleteM
   return { success: true, freedFiles }
 }
 
+/** Files owned by complete runtime-discovered video packs, including copied variants. */
+async function installedVideoFileNames(excludeWeight?: string): Promise<Set<string>> {
+  const { videoGenStatus } = await import('./videogen')
+  const { videoPackFiles } = await import('@offgrid/models')
+  const names = new Set<string>()
+  for (const weight of videoGenStatus({ localOnly: true }).models) {
+    if (weight === excludeWeight) continue
+    const pack = videoPackFiles(weight)
+    if (pack) Object.values(pack).forEach((name) => names.add(name))
+  }
+  return names
+}
+
 /** Delete a model's files from disk. Clears it as active if it was selected. */
 export async function deleteModel(modelId: string): Promise<DeleteModelResult> {
   try {
@@ -1619,6 +1654,10 @@ async function deleteModelFiles(modelId: string): Promise<DeleteModelResult> {
     }
   }
   let freed = 0
+  const retainedVideoFiles =
+    entry.kind === 'video'
+      ? await installedVideoFileNames(primaryFileName(entry as unknown as CatalogEntry))
+      : new Set<string>()
 
   if (entry.runtime === 'mflux') {
     try {
@@ -1630,6 +1669,7 @@ async function deleteModelFiles(modelId: string): Promise<DeleteModelResult> {
     }
   } else {
     for (const f of entry.files) {
+      if (retainedVideoFiles.has(f.name)) continue
       try {
         fs.rmSync(path.join(dir, f.name), { force: true })
         freed++
@@ -1941,7 +1981,7 @@ export async function activateModel(
       (candidate) => candidate.id === remote.serverId
     )
     const selected = server?.mediaModels ?? (server?.model ? { text: server.model } : {})
-    const modality = (['text', 'image', 'transcription', 'voice'] as const).find(
+    const modality = (['text', 'image', 'video', 'transcription', 'voice'] as const).find(
       (kind) => selected[kind] === remote.modelId
     )
     // A server's Computer Use role model is activated as that role, as Tasks sets it.
@@ -2012,31 +2052,34 @@ export async function setActiveModalChoice(
     let stored = modelId
     // The image resolver loads by FILENAME, but the UI passes a catalog id — map it
     // to the entry's primary filename so an in-app pick (e.g. Juggernaut) takes effect.
-    if (modelId && modal === 'image') {
+    if (modelId && (modal === 'image' || modal === 'video')) {
       try {
         const CATALOG = await desktopCatalog()
         const e = CATALOG.find((m) => m.id === modelId)
-        // A free-form Hugging Face image download is keyed by its repo id, not a catalog id.
-        const downloaded = e
-          ? undefined
-          : downloadedVariant(
-              reconcileDownloadedModelRegistry(
-                llm.getModelsDir(),
-                CATALOG as unknown as CatalogEntry[]
-              ),
-              modelId
-            )
-        const fname = e
-          ? primaryFileName(e as unknown as CatalogEntry)
-          : downloaded
-            ? downloadedPrimary(downloaded)
-            : undefined
+        const downloaded = downloadedVariant(
+          reconcileDownloadedModelRegistry(
+            llm.getModelsDir(),
+            CATALOG as unknown as CatalogEntry[]
+          ),
+          modelId
+        )
+        const { isSupportedVideoWeight } = await import('@offgrid/models')
+        // A video pack's weight is the file the engine loads, not the pack's first file.
+        const fname =
+          modal === 'video' && downloaded
+            ? downloaded.files.find((file) => isSupportedVideoWeight(file))
+            : e
+              ? primaryFileName(e as unknown as CatalogEntry)
+              : downloaded
+                ? downloadedPrimary(downloaded)
+                : undefined
         if (fname) stored = fname
       } catch {
         /* keep modelId as-is */
       }
     }
     setModal(modal, stored)
+    if (modal === 'video') deactivateRemoteVisionMediaModel('video')
     // A Computer Use pick, from any screen, is the grounding specialist both tasks share.
     if (modal === 'computer_use' && modelId) setTaskRoleModel('computer_use', 'grounding', modelId)
     if (modal === 'image') deactivateRemoteVisionMediaModel('image')
@@ -2050,7 +2093,9 @@ export async function setActiveModalChoice(
 export function getActiveModalities(): { text: string | null } & Record<Modality, string | null> {
   const settings = getRemoteVisionServerSettings()
   // Each modality's model comes from the server that modality runs on, or is local.
-  const remoteId = (modality: 'text' | 'image' | 'transcription' | 'voice'): string | null => {
+  const remoteId = (
+    modality: 'text' | 'image' | 'video' | 'transcription' | 'voice'
+  ): string | null => {
     const remote = settings.servers.find((server) => server.id === remoteServerIdFor(modality))
     const model =
       remote?.mediaModels?.[modality] ?? (modality === 'text' ? remote?.model : undefined)
@@ -2059,6 +2104,7 @@ export function getActiveModalities(): { text: string | null } & Record<Modality
   return {
     text: remoteId('text') ?? getActiveModel(),
     ...getAllActiveModals(),
+    video: remoteId('video') ?? getAllActiveModals().video,
     image: remoteId('image') ?? getAllActiveModals().image,
     speech: remoteId('voice') ?? getAllActiveModals().speech,
     transcription: remoteId('transcription') ?? getAllActiveModals().transcription
@@ -2462,6 +2508,10 @@ export async function getStorageInfo(): Promise<StorageInfo> {
     activePrimary,
     activeMmproj
   })
+
+  // Runtime discovery also accepts complete local video packs that were copied
+  // into the model directory. Their files must not become orphan-cleanup targets.
+  for (const name of await installedVideoFileNames()) known.add(name)
 
   const active = getActiveModel()
   // Per-modality active picks (image/speech/transcription) are stored as the

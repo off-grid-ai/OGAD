@@ -14,17 +14,4 @@ export function hasMlmodelc(entries: string[]): boolean {
   return entries.some((f) => /\.mlmodelc$/i.test(f))
 }
 
-/** Z-Image family (the 3-model diffusion-transformer stack) by filename. */
-export function isZImageModel(base: string): boolean {
-  return /z[-_]?image/i.test(base)
-}
-
-/** Qwen-Image 2.1 family (diffusion transformer + Qwen3-VL + its own VAE). */
-export function isQwenImage21Model(base: string): boolean {
-  return /qwen[-_]?image[-_]?2[-._]?1/i.test(base)
-}
-
-/** A quantized checkpoint (q8_0 / Q4_K …) — LoRA can't be merged into these. */
-export function isQuantizedModel(base: string): boolean {
-  return /[._-]q\d/i.test(base)
-}
+export { isQuantizedModel, isQwenImage21Model, isZImageModel } from '@offgrid/models'

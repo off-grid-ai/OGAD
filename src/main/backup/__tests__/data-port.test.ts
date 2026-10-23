@@ -243,7 +243,8 @@ describe('taking a backup out of the database, and putting one back', () => {
         surface: 'offgrid-desktop',
         projects: [],
         conversations: [],
-        attachedDocuments: []
+        attachedDocuments: [],
+        videos: []
       })
     })
 

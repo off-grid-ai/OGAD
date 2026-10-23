@@ -78,6 +78,7 @@ import { getSlot, SLOTS } from './bootstrap/slotRegistry'
 import { NavHighlight, ScreenTransition } from '@offgrid/operator-ui/operator/experience'
 import { SidebarNavigationMenu } from './components/navigation/SidebarNavigationMenu'
 import { StartupNotice } from './components/StartupNotice'
+import { EmbeddingRebuildNotice } from './components/EmbeddingRebuildNotice'
 import { CHAT_VIEW, setCurrentView } from './lib/current-view'
 import { SHARED_COMPOSER_SLOT_ID } from './lib/chat-broadcast'
 import {
@@ -1211,6 +1212,7 @@ function AppContent(): React.JSX.Element {
   return (
     <div className="relative h-screen w-full overflow-hidden">
       <StartupNotice />
+      <EmbeddingRebuildNotice />
       <CommandPalette
         onOpenHit={handleOpenHit}
         onSeeAll={openSearch}
