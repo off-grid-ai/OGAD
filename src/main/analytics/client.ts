@@ -16,7 +16,10 @@ export interface ClientOptions {
   host: string
 }
 
-const SHUTDOWN_TIMEOUT_MS = 2_000
+// One request to EU Cloud takes about 2 s on a cold connection (measured: TLS ~1.1-1.3 s, total
+// 1.6-2.1 s), so a shorter bound drops the batch a quit is flushing. Quit waits only while a send
+// is in flight.
+const SHUTDOWN_TIMEOUT_MS = 5_000
 
 /**
  * The only place PostHog is constructed. Feature flags, remote config, surveys and exception
