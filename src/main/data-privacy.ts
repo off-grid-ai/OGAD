@@ -6,6 +6,7 @@ import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { getDB } from './database'
+import { forgetAnalytics, UNCLEAN_EXIT_MARKER_FILE } from './analytics'
 import { ATTACHED_DOCUMENT_TABLES } from './documents/sqlite-store'
 import { deleteByKinds, deleteByKindsOlderThan, resetVectors } from './vectors'
 
@@ -160,7 +161,10 @@ const CORE_PERSONAL: PersonalStore[] = [
   { tables: ['user_profile'], dirs: [] },
   { tables: [], dirs: ['captures'] },
   { tables: [], dirs: ['meetings'] },
-  { tables: [], dirs: ['generated-images', 'artifacts-library', 'style-thumbs'] }
+  { tables: [], dirs: ['generated-images', 'artifacts-library', 'style-thumbs'] },
+  // Opt-in analytics: consent, the anonymous ID and the in-flight marker. Erasing everything
+  // also opts out, so nothing more is sent from this device until the user opts in again.
+  { files: [UNCLEAN_EXIT_MARKER_FILE], beforeDelete: forgetAnalytics }
 ]
 const personalStores: PersonalStore[] = [...CORE_PERSONAL]
 
