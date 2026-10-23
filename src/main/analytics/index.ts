@@ -23,6 +23,7 @@ import {
   backendOf,
   channelOf,
   contextBucket,
+  documentFileType,
   documentSizeBucket,
   downloadErrorCode,
   gb,
@@ -439,9 +440,8 @@ const aiRequestObserver: AIRequestObserver = {
 /** A document was attached to a chat or added to a project: its extension and size only. */
 export function reportDocumentAdded(fileName: string, bytes: number): void {
   try {
-    const extension = /\.([a-z0-9]{1,8})$/i.exec(fileName)?.[1]?.toLowerCase() ?? 'none'
     maybeAnalytics()?.capture('document_added', {
-      file_type: extension,
+      file_type: documentFileType(fileName),
       size_bucket: documentSizeBucket(bytes)
     })
   } catch {

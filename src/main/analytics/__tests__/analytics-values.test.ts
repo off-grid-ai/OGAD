@@ -8,6 +8,7 @@ import {
   backendOf,
   channelOf,
   contextBucket,
+  documentFileType,
   documentSizeBucket,
   downloadErrorCode,
   gb,
@@ -162,6 +163,14 @@ describe('model names', () => {
     })
     expect(modelRef('../../etc', true).model).toBe('custom')
     expect(modelRef(undefined).model).toBe('custom')
+  })
+})
+
+describe('document type', () => {
+  it('sends an extension the app opens, and never a private suffix', () => {
+    expect(documentFileType('Q3 plan.PDF')).toBe('pdf')
+    expect(documentFileType('notes.clientsecret')).toBe('other')
+    expect(documentFileType('README')).toBe('none')
   })
 })
 

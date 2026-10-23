@@ -1,3 +1,5 @@
+import { uploadPickerExtensions } from '../files-classify'
+
 /**
  * Pure value rules from docs/ANALYTICS.md ("Shared value rules" and "Properties on every event").
  * Nothing here reads the machine; callers pass what they measured.
@@ -29,6 +31,18 @@ export function documentSizeBucket(bytes: number): string {
   if (bytes < 10 * MB) return '1-10MB'
   if (bytes < 100 * MB) return '10-100MB'
   return '>100MB'
+}
+
+const PUBLIC_FILE_TYPES = new Set(uploadPickerExtensions())
+
+/**
+ * A document's type for `document_added`: an extension the app can open, `other` for any other
+ * suffix (it can be part of a private name, e.g. `notes.clientsecret`), `none` without one.
+ */
+export function documentFileType(fileName: string): string {
+  const extension = /\.([^./\\]+)$/.exec(fileName)?.[1]?.toLowerCase()
+  if (!extension) return 'none'
+  return PUBLIC_FILE_TYPES.has(extension) ? extension : 'other'
 }
 
 export function contextBucket(tokens: number): ContextBucket {

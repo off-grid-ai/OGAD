@@ -81,7 +81,7 @@ Off Grid AI Mobile (OGAM) and Off Grid AI Desktop (OGAD) send anonymous usage da
 | `message_sent` | `has_image`, `has_document`, `tools_enabled` |
 | `reply_regenerated` | none |
 | `project_created` | none |
-| `document_added` | `file_type` (extension only), `size_bucket` |
+| `document_added` | `file_type` (an extension the app opens, else `other`; `none` without one), `size_bucket` |
 | `feature_used` | `feature`: `voice_input`, `tts`, `image_generation`, `vision`, `web_search`, `tools`, `mcp_tool`, `remote_server`, `browser_action`, `clipboard`, `meetings`, `sync` |
 | `features_snapshot` | once a day: one `true`/`false` property per feature that is switched on |
 | `problem_reported` | none |
