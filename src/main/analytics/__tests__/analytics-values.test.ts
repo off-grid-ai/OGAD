@@ -227,6 +227,9 @@ describe('crash scrubbing', () => {
     const value = scrubText(`fail "${'secret '.repeat(1_000)}" ${'a.'.repeat(50_000)}`)
     expect(Date.now() - started).toBeLessThan(500)
     expect(value).not.toContain('secret')
+    // Cutting one kind of quote can open another: every kind is closed before the patterns run.
+    const mixed = scrubText(`x "leak \`zzz" ${'y'.repeat(2_000)}`)
+    expect(mixed).not.toContain('leak')
     expect(
       scrubException({ name: 'Error', message: 'x', stack: `at ${'/'.repeat(20_000)}:1:1` }).frames
     ).toEqual([])

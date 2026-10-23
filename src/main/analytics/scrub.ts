@@ -92,17 +92,23 @@ function baseName(path: string): string {
 function bounded(text: string): string {
   if (text.length <= MAX_INPUT_CHARS) return text
   let value = text.slice(0, MAX_INPUT_CHARS)
+  // One cut can open a quote of another kind, so cut until every kind is closed.
+  for (let cut = openQuoteAt(value); cut >= 0; cut = openQuoteAt(value)) value = value.slice(0, cut)
+  return value
+}
+
+/** Where the last unclosed quote starts, or -1 when every quote is closed. */
+function openQuoteAt(value: string): number {
   for (const mark of ['"', "'", '`']) {
-    if (value.split(mark).length % 2 === 0) value = value.slice(0, value.lastIndexOf(mark))
+    if (value.split(mark).length % 2 === 0) return value.lastIndexOf(mark)
   }
   for (const [open, close] of [
     ['“', '”'],
     ['‘', '’']
   ] as const) {
-    if (value.lastIndexOf(open) > value.lastIndexOf(close))
-      value = value.slice(0, value.lastIndexOf(open))
+    if (value.lastIndexOf(open) > value.lastIndexOf(close)) return value.lastIndexOf(open)
   }
-  return value
+  return -1
 }
 
 export function scrubText(text: string): string {
