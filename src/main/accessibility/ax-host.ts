@@ -860,7 +860,8 @@ class AxRailHost {
               })
             )
             const raw = response.replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').trim()
-            console.log(`[ax-rail] model reply: ${JSON.stringify(raw.slice(0, 400))}`)
+            // Metadata only: the reply can quote what is on screen.
+            console.log(`[ax-rail] model reply: ${raw.length} chars`)
             return raw
           },
           ...(settings.modelStrategy === 'decision_plus_specialist' ||

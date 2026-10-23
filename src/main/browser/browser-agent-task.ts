@@ -135,7 +135,8 @@ async function runAgentTask(input: BrowserAgentTaskInput): Promise<BrowserPlaywr
       if (lease.signal.aborted && !input.signal?.aborted) throw new AgentInterrupted()
       throw error
     })
-    console.log('[web-use][agent] model reply', { role, reply: compact(reply) })
+    // The log holds metadata only: never the model's reply, which can quote the page.
+    console.log('[web-use][agent] model reply', { role, chars: String(reply).length })
     benchTrace.current?.timings[role].push(Date.now() - startedAt)
     return reply
   }
@@ -242,12 +243,12 @@ async function runAgentTask(input: BrowserAgentTaskInput): Promise<BrowserPlaywr
           if (benchTrace.current) benchTrace.current.plan = event.plan.map((s) => s.title)
           showPlan(event.plan, event.current)
         } else if (event.type === 'verdict') {
-          console.log('[web-use][agent] verdict', event.verdict)
+          console.log('[web-use][agent] verdict', { kind: event.verdict.kind })
           benchTrace.current?.steps.push({ verdict: event.verdict })
         } else if (event.type === 'user') {
           input.onStep(event.entry)
         } else if (event.type === 'guard') {
-          console.log('[web-use][agent] guard', event.text)
+          console.log('[web-use][agent] guard', { chars: event.text.length })
           benchTrace.current?.steps.push({ guard: event.text })
           input.onStep(event.text)
         }
