@@ -205,6 +205,20 @@ describe('after the user opts in', () => {
       expect(all).not.toContain(leaked)
   })
 
+  it('counts each feature at most once in ten minutes, whichever process reports it', async () => {
+    let now = 1_000_000
+    const service = build({ now: () => now })
+    service.optIn('settings')
+    service.capture('feature_used', { feature: 'tools' })
+    service.captureFromRenderer('feature_used', { feature: 'tools' })
+    service.capture('feature_used', { feature: 'web_search' })
+    now += 10 * 60 * 1000
+    service.capture('feature_used', { feature: 'tools' })
+    await service.shutdown()
+    const used = fake!.events.filter((event) => event.event === 'feature_used')
+    expect(used.map((event) => event.properties.feature)).toEqual(['tools', 'web_search', 'tools'])
+  })
+
   it('times flows and follows the setup funnel to the first message', async () => {
     let now = 1_000
     const service = build({ now: () => now })

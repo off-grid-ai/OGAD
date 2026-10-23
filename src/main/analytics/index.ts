@@ -368,18 +368,6 @@ function num(value: unknown): number | undefined {
 
 const inflightGenerations = new Map<string, () => void>()
 
-/** Speech plays sentence by sentence, so a feature counts at most once in this window. */
-const FEATURE_USE_WINDOW_MS = 10 * 60 * 1000
-const featureUsedAt = new Map<AnalyticsFeature, number>()
-
-function featureUsed(feature: AnalyticsFeature): void {
-  const now = Date.now()
-  const last = featureUsedAt.get(feature)
-  if (last !== undefined && now - last < FEATURE_USE_WINDOW_MS) return
-  featureUsedAt.set(feature, now)
-  track('feature_used', { feature })
-}
-
 const MODALITY_FEATURE: Partial<Record<AIRequestOutcome['modality'], AnalyticsFeature>> = {
   image: 'image_generation',
   stt: 'voice_input',
@@ -411,7 +399,7 @@ const aiRequestObserver: AIRequestObserver = {
         outcome.modality === 'text' && outcome.hasImage
           ? 'vision'
           : MODALITY_FEATURE[outcome.modality]
-      if (feature) featureUsed(feature)
+      if (feature) track('feature_used', { feature })
     }
     // Indexing embeddings are counted only when an API client asked for them.
     if (outcome.modality === 'embedding' && outcome.origin !== 'api') return

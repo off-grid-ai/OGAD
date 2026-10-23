@@ -41,6 +41,8 @@ export interface AnalyticsServiceDeps {
 }
 
 const DAY_MS = 86_400_000
+/** A feature counts at most once in this window: speech plays sentence by sentence, tools loop. */
+const FEATURE_USE_WINDOW_MS = 10 * 60 * 1000
 const SCREEN_NAME = /^[a-z0-9][a-z0-9:_-]{0,47}$/
 const ERROR_CODE = /^[a-z0-9_]{1,40}$/
 const CATALOG_OR_CUSTOM = /^(custom|[A-Za-z0-9][\w.-]{0,63}(?:\/[\w.-]{1,96})?)$/
@@ -59,6 +61,7 @@ export class AnalyticsService {
   private readonly flows = new Map<AnalyticsFlow, { startedAt: number; lastStep?: string }>()
   private onboardingSteps: readonly string[] | null = null
   private promptedThisSession = false
+  private readonly featureUsedAt = new Map<string, number>()
   private readonly now: () => number
   private readonly randomId: () => string
 
@@ -190,8 +193,17 @@ export class AnalyticsService {
   /** A usage event. Sent only while Usage data is on. */
   capture(event: string, properties: Record<string, AnalyticsValue | undefined> = {}): void {
     if (!this.client || !this.consent().usage) return
+    if (event === 'feature_used' && this.recentlyUsed(String(properties.feature))) return
     this.send(event, withoutUndefined(properties))
     this.observeForFlows(event)
+  }
+
+  private recentlyUsed(feature: string): boolean {
+    const now = this.now()
+    const last = this.featureUsedAt.get(feature)
+    if (last !== undefined && now - last < FEATURE_USE_WINDOW_MS) return true
+    this.featureUsedAt.set(feature, now)
+    return false
   }
 
   /** A crash event. Sent only while Crash reports is on. */
