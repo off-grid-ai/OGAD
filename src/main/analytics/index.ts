@@ -168,8 +168,8 @@ export function reportDownloadStatus(
         ? ('voice_setup' as const)
         : null
   try {
-    const service = maybeAnalytics()
-    if (!service) return
+    const owner = maybeAnalytics()
+    if (!owner) return
     const status = progress.status
     if (status === 'downloading' && !downloads.has(modelId)) {
       const ref = modelRef(modelId, true)
@@ -183,8 +183,8 @@ export function reportDownloadStatus(
         free_storage_gb: typeof free === 'number' ? gb(free) : null
       }
       downloads.set(modelId, { startedAt: Date.now(), props, totalBytes: progress.totalBytes })
-      service.capture('model_download_started', props)
-      if (setupFlow) service.flow({ flow: setupFlow, action: 'step', step: 'model_picked' })
+      owner.capture('model_download_started', props)
+      if (setupFlow) owner.flow({ flow: setupFlow, action: 'step', step: 'model_picked' })
       return
     }
     const state = downloads.get(modelId)
@@ -196,12 +196,12 @@ export function reportDownloadStatus(
       downloads.delete(modelId)
       if (!state) return
       if (status === 'cancelled') {
-        if (setupFlow) service.flow({ flow: setupFlow, action: 'finish', outcome: 'cancelled' })
+        if (setupFlow) owner.flow({ flow: setupFlow, action: 'finish', outcome: 'cancelled' })
         return
       }
       const duration = Date.now() - state.startedAt
       if (status === 'completed') {
-        service.capture('model_download_finished', {
+        owner.capture('model_download_finished', {
           ...state.props,
           duration_ms: roundMs(duration),
           mb_per_sec:
@@ -210,12 +210,12 @@ export function reportDownloadStatus(
               : null
         })
         if (setupFlow) {
-          service.flow({ flow: setupFlow, action: 'step', step: 'downloaded' })
-          service.flow({ flow: setupFlow, action: 'finish', outcome: 'done' })
+          owner.flow({ flow: setupFlow, action: 'step', step: 'downloaded' })
+          owner.flow({ flow: setupFlow, action: 'finish', outcome: 'done' })
         }
       } else {
         if (setupFlow) {
-          service.flow({
+          owner.flow({
             flow: setupFlow,
             action: 'finish',
             outcome: 'failed',
@@ -223,13 +223,13 @@ export function reportDownloadStatus(
           })
         }
         const errorCode = downloadErrorCode(progress.error)
-        service.capture('model_download_failed', {
+        owner.capture('model_download_failed', {
           ...state.props,
           duration_ms: roundMs(duration),
           error_code: errorCode
         })
         // A download the app interrupted (it is quitting) is not something to ask about.
-        if (errorCode !== 'interrupted') service.noteFailure()
+        if (errorCode !== 'interrupted') owner.noteFailure()
       }
     }
   } catch {
@@ -263,11 +263,11 @@ export function reportModelLoadStart(load: {
 }): (
   outcome: { ok: true; backend?: string } | { ok: false; errorCode: string } | { ok: null }
 ) => void {
-  const service = maybeAnalytics()
-  if (!service) return () => {}
+  const owner = maybeAnalytics()
+  if (!owner) return () => {}
   const ref = modelRef(load.model)
   const startedAt = Date.now()
-  const endWork = service.beginWork({
+  const endWork = owner.beginWork({
     stage: 'load',
     model: ref.model,
     engine: engineFor(load.runtime, load.model),
@@ -293,10 +293,10 @@ export function reportModelLoadStart(load: {
         free_ram_gb: freeRamGb(),
         load_ms: roundMs(Date.now() - startedAt)
       }
-      if (outcome.ok) service.capture('model_loaded', base)
+      if (outcome.ok) owner.capture('model_loaded', base)
       else {
-        service.capture('model_load_failed', { ...base, error_code: outcome.errorCode })
-        service.noteFailure()
+        owner.capture('model_load_failed', { ...base, error_code: outcome.errorCode })
+        owner.noteFailure()
       }
     } catch {
       /* Statistics must never break a load. */
@@ -324,16 +324,16 @@ export function reportLlamaServerCrash(crash: {
 }): void {
   try {
     const ref = modelRef(crash.model)
-    const service = maybeAnalytics()
-    if (!service) return
-    service.captureCrash('llama_server_crashed', {
+    const owner = maybeAnalytics()
+    if (!owner) return
+    owner.captureCrash('llama_server_crashed', {
       model: ref.model,
       engine: 'llama.cpp',
       backend: backendOf(crash.backend),
       exit_code: crash.exitCode,
       classified: crash.classified ?? 'unclassified'
     })
-    service.noteFailure()
+    owner.noteFailure()
   } catch {
     /* best effort */
   }
@@ -403,14 +403,14 @@ const aiRequestObserver: AIRequestObserver = {
     }
     // Indexing embeddings are counted only when an API client asked for them.
     if (outcome.modality === 'embedding' && outcome.origin !== 'api') return
-    const service = analytics()
+    const owner = analytics()
     const metrics = outcome.metrics ?? {}
     const ttftSeconds = num(metrics.timeToFirstTokenSeconds)
     const rate = num(metrics.decodeTokensPerSecond)
     const promptTokens = num(metrics.promptTokens) ?? num(metrics.estimatedPromptTokens)
     const ref = modelRef(outcome.model)
     const modality = outcome.modality === 'text' && outcome.hasImage ? 'vision' : outcome.modality
-    service.capture('generation_finished', {
+    owner.capture('generation_finished', {
       modality,
       model: ref.model,
       engine: generationEngine(outcome),
@@ -428,9 +428,9 @@ const aiRequestObserver: AIRequestObserver = {
       source: outcome.origin
     })
     if (outcome.origin !== 'app') return
-    if (outcome.status === 'failed') service.noteFailure()
+    if (outcome.status === 'failed') owner.noteFailure()
     else if (outcome.status === 'completed' && outcome.modality === 'text')
-      service.noteSuccessfulReply()
+      owner.noteSuccessfulReply()
   }
 }
 
