@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef, type ReactElement } from 'react'
 import { ConnectorPullQueryField } from './ConnectorPullQueryField'
+import { flow } from '@renderer/lib/analytics'
 import { ConnectorSecretsForm } from './ConnectorSecretsForm'
 import {
   IconLoader2,
@@ -382,6 +383,11 @@ export function ConnectorsScreen(): ReactElement {
       setLoading(false)
     }
   }, [])
+  // The connector funnel opens with this screen.
+  useEffect(() => {
+    flow.start('connector_add')
+    flow.step('connector_add', 'opened')
+  }, [])
   useEffect(() => {
     void load()
     const changed = (): void => {
@@ -440,6 +446,7 @@ export function ConnectorsScreen(): ReactElement {
     setConnecting(entry.id)
     cancelledConnections.current.delete(entry.id)
     setErrorFor((p) => ({ ...p, [entry.id]: '' }))
+    flow.step('connector_add', 'connector_picked', entry.id)
     let id: number | undefined
     try {
       id = await api.mcpAdd?.({
@@ -453,6 +460,7 @@ export function ConnectorsScreen(): ReactElement {
       if (id != null) pendingConnectorIds.current.set(entry.id, id)
       if (cancelledConnections.current.has(entry.id)) {
         await removePendingConnector(id)
+        flow.finish('connector_add', 'cancelled')
         return
       }
       await persistConnectorSecrets(id, secretVals)
@@ -463,14 +471,21 @@ export function ConnectorsScreen(): ReactElement {
         res
       )
       if (outcome.connected) {
+        flow.step('connector_add', 'authorised')
+        flow.finish('connector_add', 'done')
         // Truly connected → it moves into "Connected" and out of the gallery.
         // The secrets form closes with the card, and the typed secrets go with it.
         setTokenFor(null)
       } else if (outcome.error) {
+        flow.finish('connector_add', 'failed', 'connect_failed')
         setErrorFor((p) => ({ ...p, [entry.id]: outcome.error ?? '' }))
+      } else if (cancelledConnections.current.has(entry.id)) {
+        flow.finish('connector_add', 'cancelled')
       }
     } catch (e) {
       await removePendingConnector(id)
+      if (cancelledConnections.current.has(entry.id)) flow.finish('connector_add', 'cancelled')
+      else flow.finish('connector_add', 'failed', 'connect_failed')
       if (!cancelledConnections.current.has(entry.id)) {
         setErrorFor((p) => ({
           ...p,
@@ -507,6 +522,8 @@ export function ConnectorsScreen(): ReactElement {
 
   const addCustom = async (): Promise<void> => {
     if (!name.trim()) return
+    // A connector the user typed in is always `custom`: its name never leaves.
+    flow.step('connector_add', 'connector_picked', 'custom')
     await api.mcpAdd?.({
       name: name.trim(),
       transport,
@@ -514,6 +531,7 @@ export function ConnectorsScreen(): ReactElement {
       command: transport === 'stdio' ? command.trim() : undefined,
       args: transport === 'stdio' && args.trim() ? args.trim().split(/\s+/) : undefined
     })
+    flow.finish('connector_add', 'done')
     setName('')
     setUrl('')
     setCommand('')

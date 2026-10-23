@@ -1,3 +1,4 @@
+import { flow } from '@renderer/lib/analytics'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 export const CONNECTIONS_CHANGED_EVENT = 'offgrid:connections-changed'
@@ -112,6 +113,9 @@ export function useQuickConnection(onBusyChange?: (busy: boolean) => void): Quic
     setBusy(entry.id)
     onBusy.current?.(true)
     setErrors((previous) => ({ ...previous, [entry.id]: '' }))
+    flow.step('connector_add', 'connector_picked', entry.id)
+    // Every attempt ends the funnel once: done, failed, or cancelled (an early return included).
+    let finished = false
     try {
       // Read current state rather than a stale rendered list before creating a record.
       const current = (await window.api.mcpList()) as QuickConnectionRecord[]
@@ -141,7 +145,14 @@ export function useQuickConnection(onBusyChange?: (busy: boolean) => void): Quic
       }
       await window.api.mcpSetEnabled(attempt.id!, true)
       attempt.created = false
+      flow.step('connector_add', 'authorised')
+      flow.finish('connector_add', 'done')
+      finished = true
     } catch (error) {
+      if (!attempt.cancelled) {
+        flow.finish('connector_add', 'failed', 'connect_failed')
+        finished = true
+      }
       if (!attempt.cancelled && mounted.current) {
         setErrors((previous) => ({
           ...previous,
@@ -149,6 +160,7 @@ export function useQuickConnection(onBusyChange?: (busy: boolean) => void): Quic
         }))
       }
     } finally {
+      if (!finished) flow.finish('connector_add', 'cancelled')
       if (attempt.created && attempt.id != null)
         await window.api.mcpRemove(attempt.id).catch(() => {})
       active.current = null

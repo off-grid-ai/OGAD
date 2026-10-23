@@ -1,6 +1,7 @@
 // IPC surface for projects + RAG (knowledge bases) + project chat. Kept separate
 // from the large ipc.ts. Registered from main/index.ts via setupRagIPC().
 
+import { reportDocumentAdded, track } from './analytics'
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import fs from 'fs'
 import path from 'path'
@@ -31,6 +32,7 @@ export function setupRagIPC(): void {
     (_e, p: { name: string; description?: string; systemPrompt?: string; icon?: string }) => {
       const id = randomUUID()
       createProject({ id, ...p })
+      track('project_created')
       return id
     }
   )
@@ -119,6 +121,7 @@ export function setupRagIPC(): void {
       e.sender.send('projects:index-progress', { projectId, name, stage: 'adding' })
       try {
         await knowledgeBase.addFile({ projectId, path: filePath, fileName: name, size })
+        reportDocumentAdded(name, size)
         added++
         e.sender.send('projects:index-progress', { projectId, name, stage: 'done' })
         e.sender.send('projects:documents-changed', { projectId })

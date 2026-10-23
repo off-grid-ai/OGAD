@@ -1,3 +1,4 @@
+import { flow, track } from '@renderer/lib/analytics'
 import { useEffect, useMemo, useState } from 'react'
 import { modelDisplayName } from '@offgrid/models'
 import {
@@ -151,6 +152,12 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
     }
   }
 
+  // The remote server funnel opens with this tab. The address itself is never sent.
+  useEffect(() => {
+    flow.start('remote_server')
+    flow.step('remote_server', 'opened')
+  }, [])
+
   useEffect(() => {
     window.api
       .getRemoteVisionServer()
@@ -219,6 +226,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
         setStatus(result.error || 'Connection failed.')
         return
       }
+      flow.step('remote_server', 'tested')
       const discovered = result.models ?? []
       const nextModel = discovered.some(
         (model) => model.id === selectedModel && isRemoteChatModel(model)
@@ -266,6 +274,7 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       setStatus('Enter a server address first.')
       return
     }
+    flow.step('remote_server', 'address_entered')
     await discoverModels(payload(), form.model)
   }
 
@@ -309,6 +318,11 @@ export function RemoteVisionSettingsTab(): React.JSX.Element {
       )) as RemoteVisionServerSettings
       applySettings(saved)
       setApiKey('')
+      if (remoteEnabled && saved.activeServerId) {
+        flow.step('remote_server', 'connected')
+        flow.finish('remote_server', 'done')
+        track('feature_used', { feature: 'remote_server' })
+      }
       setStatus(
         !remoteEnabled
           ? 'Server saved and off.'

@@ -7,7 +7,7 @@ speech-to-text, text-to-speech, and image generation/editing — is exposed thro
 - **Base URL:** `http://127.0.0.1:7878/v1`
 - **Auth:** optional Bearer API keys, managed in Gateway > API keys.
 - **Compatibility:** OpenAI API surface. Point any OpenAI SDK at the base URL and supply an issued key when authentication is enabled.
-- **Privacy:** everything runs on the bundled local models. Nothing leaves the device.
+- **Privacy:** everything runs on the bundled local models. Requests and replies never leave the device.
 
 ## API keys
 

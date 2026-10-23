@@ -5,6 +5,7 @@
 // tool schemas; we parse its tool_calls, run them, feed results back, and loop
 // until it answers. Built-in tools and selected connector extensions share it.
 
+import { track } from './analytics'
 import { offgridGuideTool } from './tools/offgrid-guide-tool'
 import { llm } from './llm'
 import type { GenerationMetrics } from '../shared/generation-metrics'
@@ -549,6 +550,13 @@ export async function enabledToolSchemas(
   return [...builtins, ...extended.flat()]
 }
 
+/** The usage-statistics feature a built-in tool counts as. Never its arguments. */
+function toolFeature(name: string): 'web_search' | 'image_generation' | 'tools' {
+  if (name === 'web_search' || name === 'brave_search') return 'web_search'
+  if (name === 'generate_image') return 'image_generation'
+  return 'tools'
+}
+
 /** Normalize a tool's return (bare string or structured) to a ToolResult. */
 function asToolResult(r: string | ToolResult): ToolResult {
   return typeof r === 'string' ? { text: r } : r
@@ -577,9 +585,13 @@ export async function runTool(
         authoritative: true
       }
     }
-    if (ext) return asToolResult(await ext.execute(name, args, ctx))
+    if (ext) {
+      track('feature_used', { feature: ext.category === 'tool' ? 'tools' : 'mcp_tool' })
+      return asToolResult(await ext.execute(name, args, ctx))
+    }
     const tool = TOOLS.find((t) => t.name === name)
     if (!tool) return { text: unknownToolMessage(name, available), status: 'failed' }
+    track('feature_used', { feature: toolFeature(name) })
     return asToolResult(await tool.run(args, ctx))
   } catch (e) {
     return { text: toolFailureMessage(name, (e as Error).message), status: 'failed' }

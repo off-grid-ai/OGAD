@@ -763,7 +763,8 @@ class BrowserHost implements BrowserRailHost {
         : continuingJourney
           ? undefined
           : 'https://www.google.com')
-    console.log(`[web-use] runTask goal="${goal}" url="${start ?? record.chrome.url}"`)
+    // The log holds metadata only: never the task the user typed or the page it starts on.
+    console.log(`[web-use] runTask goal=${goal.length} chars`)
 
     // The browser rail's surface is the in-app watched pane (browser:*), which
     // shows the live page + step feed inline - so NO floating supervisor window

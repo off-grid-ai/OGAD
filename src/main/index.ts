@@ -97,6 +97,7 @@ import {
 import { shutdownRuntimes } from './runtime-manager'
 import { shutdownModelDownloads } from './models/download-queue'
 import { prepareInstalledOnnxCudaLibraries } from './performance-pack'
+import { analytics, installAnalytics, reportAppOpened } from './analytics'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -561,6 +562,17 @@ app.whenReady().then(async () => {
       })
   })
 
+  // Opt-in analytics. Registered before the window loads: the preload reads consent synchronously.
+  // Nothing is sent, and no client exists, until the user opts in.
+  try {
+    installAnalytics({
+      registerShutdown: (owner) => applicationShutdown.register(owner),
+      freeMemoryMB: () => liveMemory().availableMB
+    })
+  } catch (error) {
+    console.error('[analytics] install failed', error)
+  }
+
   // These registrations are independent. They load together, and each failure remains isolated.
   await runIndependentStartupStages([
     {
@@ -623,6 +635,7 @@ app.whenReady().then(async () => {
   await createWindowAndScheduleModelStorageCleanup(createWindow, () =>
     cleanupMovedModelStorage(app.getPath('userData'), modelsDir())
   )
+  reportAppOpened()
 
   // loadURL/loadFile resolves after the renderer finishes loading. Give Electron
   // one more event-loop turn to present that frame before optional main-process
@@ -804,6 +817,10 @@ app.on('before-quit', (event) => {
     // Buffered diagnostics are written now rather than lost with the process. Bounded, so a
     // stalled disk delays quit by at most the flush timeout.
     await flushDiagnosticLog()
+    // A clean quit: clear the in-flight marker and send queued analytics (bounded by the client).
+    await analytics()
+      .shutdown()
+      .catch(() => {})
     commitApplicationRelaunch(app)
     app.quit()
   })()

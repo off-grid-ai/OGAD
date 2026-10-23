@@ -4,6 +4,7 @@
 // sampled (~1 frame/sec) with each frame captioned, and that text is indexed the same way.
 // Everything runs locally. The text returned here is only a preview for the saved message.
 
+import { reportDocumentAdded } from './analytics'
 import path from 'path'
 import os from 'os'
 import fs from 'fs'
@@ -133,7 +134,9 @@ export async function processUploadPath(
   const resolved = path.resolve(filePath)
   const stat = await fs.promises.stat(resolved)
   if (!stat.isFile()) throw new Error('Only files can be attached.')
-  return processFileAt(resolved, name, options)
+  const processed = await processFileAt(resolved, name, options)
+  reportDocumentAdded(name, stat.size)
+  return processed
 }
 
 export async function processUpload(
@@ -145,7 +148,9 @@ export async function processUpload(
   const tmp = path.join(os.tmpdir(), `offgrid-upload-${Date.now()}-${safe}`)
   await fs.promises.writeFile(tmp, Buffer.from(bytes as ArrayBuffer))
   try {
-    return await processFileAt(tmp, name, options)
+    const processed = await processFileAt(tmp, name, options)
+    reportDocumentAdded(name, bytes.byteLength)
+    return processed
   } finally {
     fs.promises.unlink(tmp).catch(() => {})
   }

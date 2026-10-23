@@ -194,8 +194,8 @@ deb:
     - grim
     - kde-spectacle
 # Electron fuses (flipped at package time). ASAR integrity makes a tampered app.asar
-# refuse to load — the local-first anti-tamper lever (we don't phone home, so this is
-# the bar against cracking the offline license check). Only the integrity fuses are
+# refuse to load — the local-first anti-tamper lever (the license check works offline, so
+# this is the bar against cracking it). No telemetry unless the user opts in. Only the integrity fuses are
 # set: we deliberately leave runAsNode ENABLED because TTS spawns process.execPath as
 # a Node worker (disabling it would break on-device voice).
 electronFuses:

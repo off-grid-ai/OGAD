@@ -134,7 +134,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: Microphone,
     tagline: 'Record & transcribe meetings, locally.',
     description:
-      'Capture Zoom, Meet, and Teams calls with system audio + mic and get a private transcript and summary — no cloud meeting bot, nothing leaves your device.',
+      'Capture Zoom, Meet, and Teams calls with system audio + mic and get a private transcript and summary — no cloud meeting bot, and your recordings never leave your device.',
     highlights: [
       'Auto-detects calls',
       'On-device transcription',
@@ -199,7 +199,7 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Voice',
     icon: Waveform,
     tagline: 'Talk instead of type, fully local.',
-    description: `Hold ${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; nothing leaves the device.`,
+    description: `Hold ${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space and speak — Off Grid AI Desktop transcribes on-device with whisper.cpp and pastes the text into whatever app you are in. Tap to toggle, hold to push-to-talk. Every recording and transcript is kept in a searchable library, and you can drop in any audio or video file to transcribe it. Runs in your ${deviceNoun()}'s RAM; your audio and transcripts never leave the device.`,
     highlights: [
       `${primaryModifier() === 'Cmd' ? 'Option' : 'Alt'}+Space push-to-talk or toggle, anywhere`,
       'Paste-at-cursor + a searchable recordings library',
@@ -230,7 +230,7 @@ export const PRO_FEATURES: ProFeature[] = [
     label: 'Clipboard',
     icon: ClipboardText,
     tagline: 'Every copy, kept and searchable.',
-    description: `A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (${primaryModifier()}+Shift+C) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device, nothing leaves your machine.`,
+    description: `A local clipboard history that saves what you copy - text, images, and files - with a global hotkey (${primaryModifier()}+Shift+C) quick-paste popup to drop any past copy into whatever app you are in. Stored on-device; what you copy never leaves your machine.`,
     highlights: [
       'Searchable history of text, images & files',
       `${primaryModifier()}+Shift+C quick-paste popup anywhere`,

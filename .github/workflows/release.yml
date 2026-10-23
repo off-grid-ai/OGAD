@@ -40,7 +40,7 @@ concurrency:
 # source (cloned from off-grid-ai/desktop-pro) and is license-gated at runtime —
 # free = unlicensed (pro tabs locked), a valid Keygen key unlocks in place (no
 # re-download). The ASAR integrity fuse (electron-builder.yml) makes a tampered
-# app.asar refuse to load — our local-first anti-tamper lever (we don't phone home).
+# app.asar refuse to load — our local-first anti-tamper lever (no telemetry unless the user opts in).
 # Actions are pinned to commit SHAs. macOS, Windows, and Linux share the one
 # `version` job and publish to the same release. Each platform stages its own
 # native engine. Linux also bundles the pinned Pro source and gates it by license.

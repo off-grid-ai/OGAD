@@ -1,3 +1,5 @@
+import { ANALYTICS_SETTING_KEYS, isAnalyticsSettingKey } from '../shared/analytics'
+import { analytics, track } from './analytics'
 import { settingsChanged } from './settings-version'
 import { storageDownloadsActive } from './model-storage-guard'
 import { moveModelStorage } from './model-storage-move'
@@ -1220,7 +1222,9 @@ export function setupIPC(): void {
       projectId?: string | null,
       surface?: import('../shared/ipc-contracts').ConversationSurface
     ) => {
-      return createRagConversation(id, title, projectId, surface)
+      const created = createRagConversation(id, title, projectId, surface)
+      track('chat_created')
+      return created
     }
   )
 
@@ -1383,7 +1387,15 @@ export function setupIPC(): void {
   ipcMain.handle('settings:save', (_, key: string, value: unknown) => {
     if (key === COMPUTER_USE_SETTINGS_KEY) setComputerUseSettings(value)
     else if (key === WEB_USE_SETTINGS_KEY) setWebUseSettings(value)
-    else saveSetting(key, value)
+    // Consent goes through its owner, which starts or discards the client. The renderer may set
+    // the two toggles only; the anonymous ID and prompt history are main's.
+    else if (isAnalyticsSettingKey(key)) {
+      if (typeof value !== 'boolean') return false
+      if (key === ANALYTICS_SETTING_KEYS.usage) analytics().setConsent({ usage: value }, 'settings')
+      else if (key === ANALYTICS_SETTING_KEYS.crashes)
+        analytics().setConsent({ crashes: value }, 'settings')
+      else return false
+    } else saveSetting(key, value)
     return true
   })
 

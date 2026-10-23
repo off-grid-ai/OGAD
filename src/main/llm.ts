@@ -11,6 +11,7 @@ import { prepareModelMemory, registerModelEvictor } from './model-memory'
 import { callHook } from './bootstrap/hookRegistry'
 import path from 'path'
 import { recordAIRequest, currentAIRequest } from './ai-request-log'
+import { reportLlamaServerCrash, reportModelLoadStart } from './analytics'
 import * as fs from 'fs'
 import { modelMetadataFile, resolveModelReference } from './model-paths'
 import {
@@ -1501,9 +1502,29 @@ export class LLMService {
       return this.init()
     }
     this.initGeneration = this.launchGeneration
-    this.initPromise = this._doInit().finally(() => {
-      this.initPromise = null
-    })
+    const endLoad = reportModelLoadStart({ runtime: 'chat', model: this.modelPath })
+    this.initPromise = this._doInit()
+      .then(
+        () =>
+          endLoad(
+            this.initialized ? { ok: true, backend: this.backendPlacement?.backend } : { ok: null }
+          ),
+        (error: unknown) => {
+          // No model downloaded yet is the setup state, not a load failure.
+          endLoad(
+            this.modelsExist()
+              ? {
+                  ok: false,
+                  errorCode: classifyLlamaError(this.stderrTail.join('\n'))?.code ?? 'load_failed'
+                }
+              : { ok: null }
+          )
+          throw error
+        }
+      )
+      .finally(() => {
+        this.initPromise = null
+      })
     return this.initPromise
   }
 
@@ -1827,6 +1848,15 @@ export class LLMService {
           console.error(
             `[LLMService] llama-server load failure (${failure.code}): ${failure.reason}`
           )
+        }
+        // A healthy engine died. A failed launch is the load's failure, reported there.
+        if (!probing) {
+          reportLlamaServerCrash({
+            model: this.backendModelPath || this.modelPath,
+            backend: this.backendPlacement?.backend,
+            exitCode: code,
+            classified: failure?.code ?? null
+          })
         }
       }
       this.invalidateHealth()

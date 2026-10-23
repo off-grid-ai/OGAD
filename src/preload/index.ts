@@ -41,12 +41,31 @@ import {
   type ProjectDocumentTransfer
 } from '../shared/project-document-transfer'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
+import {
+  ANALYTICS_CHANNELS,
+  ANALYTICS_CONSENT_OFF,
+  type AnalyticsConsent,
+  type AnalyticsPromptKind,
+  type FlowReport,
+  type OptInSource,
+  type RendererAnalyticsEvent,
+  type RendererAnalyticsEvents,
+  type RendererErrorReport
+} from '../shared/analytics'
 
 console.log('PRELOAD SCRIPT LOADED')
 
 type IpcListener = Parameters<typeof ipcRenderer.removeListener>[1]
 
 let liveProEntitled = ipcRenderer.sendSync('pro:is-enabled') === true
+
+/** Consent before the first paint, so no screen view is reported for a user who did not opt in. */
+function initialAnalyticsConsent(): AnalyticsConsent {
+  const value: unknown = ipcRenderer.sendSync(ANALYTICS_CHANNELS.consentSync)
+  return value && typeof value === 'object'
+    ? { ...ANALYTICS_CONSENT_OFF, ...(value as Partial<AnalyticsConsent>) }
+    : ANALYTICS_CONSENT_OFF
+}
 
 function unsubscribe(channel: string, listener: IpcListener): () => void {
   return () => {
@@ -65,6 +84,37 @@ const offGridApi = {
     ipcRenderer.sendSync('pro:entitlement-bootstrap-enabled') === true,
   // Host OS, bridged once so renderer copy and availability rules use the same value.
   platform: process.platform,
+  // Opt-in analytics. Main validates every report and sends nothing without consent.
+  analytics: {
+    consent: initialAnalyticsConsent(),
+    setConsent: (patch: { usage?: boolean; crashes?: boolean }): Promise<AnalyticsConsent> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.setConsent, patch),
+    optIn: (source: OptInSource): Promise<AnalyticsConsent> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.optIn, source),
+    dismissPrompt: (): Promise<AnalyticsConsent> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.dismissPrompt),
+    capture: <E extends RendererAnalyticsEvent>(
+      event: E,
+      properties?: RendererAnalyticsEvents[E]
+    ): void => ipcRenderer.send(ANALYTICS_CHANNELS.capture, event, properties ?? {}),
+    flow: (report: FlowReport): void => ipcRenderer.send(ANALYTICS_CHANNELS.flow, report),
+    reportError: (report: RendererErrorReport): void =>
+      ipcRenderer.send(ANALYTICS_CHANNELS.rendererError, report),
+    readLog: (): Promise<{ path: string; text: string; truncated: boolean }> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.readLog),
+    emailLog: (): Promise<boolean> => ipcRenderer.invoke(ANALYTICS_CHANNELS.emailLog),
+    revealLog: (): Promise<boolean> => ipcRenderer.invoke(ANALYTICS_CHANNELS.revealLog),
+    onConsentChanged: (cb: (consent: AnalyticsConsent) => void) => {
+      const sub = (_e: unknown, consent: AnalyticsConsent): void => cb(consent)
+      ipcRenderer.on(ANALYTICS_CHANNELS.consentChanged, sub)
+      return unsubscribe(ANALYTICS_CHANNELS.consentChanged, sub)
+    },
+    onPrompt: (cb: (kind: AnalyticsPromptKind) => void) => {
+      const sub = (_e: unknown, kind: AnalyticsPromptKind): void => cb(kind)
+      ipcRenderer.on(ANALYTICS_CHANNELS.prompt, sub)
+      return unsubscribe(ANALYTICS_CHANNELS.prompt, sub)
+    }
+  },
   // License (Keygen) activation + status for the upgrade/settings UI.
   license: {
     status: () => ipcRenderer.invoke('license:status'),
@@ -1147,7 +1197,10 @@ const offGridApi = {
   approvalsApprove: (id: number) => ipcRenderer.invoke('approvals:approve', id),
   approvalsReject: (id: number, reason?: string) =>
     ipcRenderer.invoke('approvals:reject', id, reason),
-  reportSelfView: (view: string) => ipcRenderer.invoke('capture:self-view', view),
+  // A notice, not a request: Pro registers the handler only while Pro runs, so a free build has
+  // none and the rejection must not surface as an unhandled renderer error.
+  reportSelfView: (view: string) =>
+    ipcRenderer.invoke('capture:self-view', view).catch(() => undefined),
   secretaryPrefsGet: () => ipcRenderer.invoke('secretary:prefs:get'),
   secretaryPrefsSet: (doc: string) => ipcRenderer.invoke('secretary:prefs:set', doc),
   secretaryPrefsDistill: () => ipcRenderer.invoke('secretary:prefs:distill'),
