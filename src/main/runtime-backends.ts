@@ -3,6 +3,26 @@ import { currentAIRequest } from './ai-request-log'
 
 const live = new Map<RuntimeId, RuntimeBackend>()
 
+/** Observes model loads for opt-in usage statistics: when one starts, and how it ended. */
+export interface RuntimeLoadObserver {
+  started(load: {
+    id: RuntimeId
+    model: string
+  }): (
+    outcome:
+      | { state: 'loaded'; backend?: string }
+      | { state: 'error'; error: unknown }
+      | { state: 'stopped' }
+  ) => void
+}
+let loadObserver: RuntimeLoadObserver | undefined
+/** A load superseded by a newer one for the same runtime ends as stopped. */
+const unsettledLoads = new Map<RuntimeId, () => void>()
+
+export function setRuntimeLoadObserver(next: RuntimeLoadObserver | undefined): void {
+  loadObserver = next
+}
+
 export function runtimeBackendSnapshot(): RuntimeBackend[] {
   return [...live.values()].map((value) => ({ ...value }))
 }
@@ -12,10 +32,47 @@ export function beginRuntimeBackend(id: RuntimeId, model: string): { recordReque
   const record: RuntimeBackend = { id, model, state: 'loading' }
   const startingRequest = currentAIRequest()
   live.set(id, record)
+  unsettledLoads.get(id)?.()
+  let settle: ReturnType<RuntimeLoadObserver['started']> | undefined
+  try {
+    settle = loadObserver?.started({ id, model })
+  } catch {
+    /* Statistics must never break a load. */
+  }
+  const supersede = (): void => {
+    const done = settle
+    settle = undefined
+    if (unsettledLoads.get(id) === supersede) unsettledLoads.delete(id)
+    try {
+      done?.({ state: 'stopped' })
+    } catch {
+      /* Statistics must never break a load. */
+    }
+  }
+  if (settle) unsettledLoads.set(id, supersede)
   const update = (value: Partial<RuntimeBackend>): void => {
     if (live.get(id) === record && record.state !== 'stopped' && record.state !== 'error') {
+      const wasLoading = record.state === 'loading'
       Object.assign(record, value)
       startingRequest?.useRuntime(record)
+      // Re-read after the assignment: the guard above narrowed the type of the old value.
+      const state = (record as RuntimeBackend).state as RuntimeBackend['state']
+      if (wasLoading && state !== 'loading' && settle) {
+        const done = settle
+        settle = undefined
+        if (unsettledLoads.get(id) === supersede) unsettledLoads.delete(id)
+        try {
+          done(
+            state === 'loaded'
+              ? { state: 'loaded', ...(record.backend ? { backend: record.backend } : {}) }
+              : state === 'error'
+                ? { state: 'error', error: record.detail }
+                : { state: 'stopped' }
+          )
+        } catch {
+          /* Statistics must never break a load. */
+        }
+      }
     }
   }
   let output = ''
