@@ -3,7 +3,7 @@ import type { ResponseVersion } from '../../../shared/chat-versions'
 import { attachmentsOf } from '../components/MemoryChat/helper'
 import { priorAnswerVersions } from './chat-versions'
 
-export interface ReplacementSend {
+interface ReplacementSend {
   regen: true
   atts: Attachment[]
   conversationId: string

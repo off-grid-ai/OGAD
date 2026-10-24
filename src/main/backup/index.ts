@@ -29,4 +29,4 @@ export function createDesktopBackupEngine(): DesktopBackupEngine {
   )
 }
 
-export type { DesktopBackupData, DesktopRestoreSummary, DesktopBackupDelivery }
+export type { DesktopBackupDelivery }

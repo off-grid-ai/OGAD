@@ -193,42 +193,4 @@ class VisionService {
   }
 }
 
-/**
- * The focused window's rectangle expressed as a FRACTION of its display — used to
- * crop a full-display screenshot down to exactly that window. Window bounds are
- * global (screen) coords; we subtract the window's display origin and divide by
- * the display size. desktopCapturer thumbnails preserve the display's aspect
- * ratio, so these fractions map cleanly onto the screenshot pixels. Returns null
- * if bounds are missing/degenerate (caller then OCRs the whole screen).
- */
-export function windowRegionOnDisplay(bounds?: {
-  x: number
-  y: number
-  width: number
-  height: number
-}): { x: number; y: number; w: number; h: number } | null {
-  if (!bounds || !Number.isFinite(bounds.x) || bounds.width < 50 || bounds.height < 50) return null
-  try {
-    const center = {
-      x: Math.round(bounds.x + bounds.width / 2),
-      y: Math.round(bounds.y + bounds.height / 2)
-    }
-    const db = screen.getDisplayNearestPoint(center).bounds
-    if (!db.width || !db.height) return null
-    const clamp = (n: number): number => Math.min(1, Math.max(0, n))
-    const r = {
-      x: clamp((bounds.x - db.x) / db.width),
-      y: clamp((bounds.y - db.y) / db.height),
-      w: clamp(bounds.width / db.width),
-      h: clamp(bounds.height / db.height)
-    }
-    // Ignore if it's basically the whole display (no useful crop) or degenerate.
-    if (r.w < 0.15 || r.h < 0.15) return null
-    if (r.x <= 0.01 && r.y <= 0.01 && r.w >= 0.99 && r.h >= 0.99) return null
-    return r
-  } catch {
-    return null
-  }
-}
-
 export const vision = new VisionService()

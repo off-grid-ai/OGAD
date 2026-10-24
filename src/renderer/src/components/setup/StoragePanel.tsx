@@ -25,7 +25,7 @@ import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { Empty, EmptyDescription, EmptyMedia } from '@offgrid/operator-ui/operator/coss/empty'
 import { cn } from '@renderer/lib/utils'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
-import { companionDownloadLabel } from '@renderer/lib/download-label'
+import { companionDownloadLabel, modelSetupErrorMessage } from '@renderer/lib/download-label'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -75,7 +75,7 @@ interface DownloadEntry {
 
 // Group order for the by-type storage layout. Display labels come from the shared
 // model-kind-labels source (single source of truth with the Models screen).
-const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'voice', 'transcription', 'other']
+const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'video', 'voice', 'transcription', 'embedding', 'other']
 
 /** Disk usage for downloaded models, orphan cleanup, and a download manager
  *  (active / failed / interrupted downloads with retry + cancel). */
@@ -374,7 +374,7 @@ export function StoragePanel(): React.ReactElement {
                 Other model folders
               </div>
               <div className="mt-1 text-[10px] text-neutral-500">
-                Add a folder to reuse compatible chat, image, voice, and transcription models. Files
+                Add a folder to reuse compatible chat, image, video, voice, and transcription models. Files
                 stay in their current folder.
               </div>
             </div>
@@ -536,8 +536,8 @@ export function StoragePanel(): React.ReactElement {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[11px] text-neutral-300">{d.modelName}</div>
-                    <div className="truncate text-[10px] text-neutral-500">
-                      {d.error ?? d.status}
+                    <div className="text-[10px] text-neutral-500">
+                      {d.error ? modelSetupErrorMessage(d.error) : d.status}
                     </div>
                   </div>
                   <IconTip label="Retry">

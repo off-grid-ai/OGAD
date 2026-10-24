@@ -75,7 +75,7 @@ it('offers the fastest settings in one slim row, applies them, then slides the r
   expect(await screen.findByText('Fastest settings on for Apple M5, Metal GPU')).toBeTruthy()
   await waitFor(() =>
     expect(screen.getByRole('combobox', { name: 'Chat and vision backend' }).textContent).toContain(
-      'Metal'
+      'Auto'
     )
   )
   await waitFor(

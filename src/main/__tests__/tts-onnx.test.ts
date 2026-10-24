@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EventEmitter } from 'node:events'
+// The process boundary: Electron's utilityProcess. The host, its request map, crash handling and
+// the helper's init message are production code.
 interface TestWorker extends EventEmitter {
   postMessage: ReturnType<typeof vi.fn>
-  terminate: ReturnType<typeof vi.fn>
+  kill: ReturnType<typeof vi.fn>
 }
 const host = vi.hoisted(() => ({ workers: [] as TestWorker[] }))
 vi.mock('node:fs', async (original) => ({
@@ -10,16 +12,21 @@ vi.mock('node:fs', async (original) => ({
   existsSync: () => true
 }))
 vi.mock('../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
-vi.mock('node:worker_threads', async () => {
+vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
+  class FakeUtilityProcess extends EventEmitter {
+    postMessage = vi.fn()
+    kill = vi.fn(() => {
+      this.emit('exit', 0)
+      return true
+    })
+  }
   return {
-    Worker: class extends EventEmitter {
-      postMessage = vi.fn()
-      terminate = vi.fn().mockResolvedValue(0)
-      unref = vi.fn()
-      constructor() {
-        super()
-        host.workers.push(this)
+    utilityProcess: {
+      fork: () => {
+        const child = new FakeUtilityProcess()
+        host.workers.push(child as unknown as TestWorker)
+        return child
       }
     }
   }
@@ -28,7 +35,7 @@ import { OnnxSpeechRuntime } from '../tts-onnx'
 beforeEach(() => {
   host.workers.length = 0
 })
-describe('speech worker lifecycle', () => {
+describe('voice helper process lifecycle', () => {
   it('uses the actual completion device and forwards progress for each request', async () => {
     const runtime = new OnnxSpeechRuntime()
     const progress = vi.fn()
@@ -61,8 +68,10 @@ describe('speech worker lifecycle', () => {
     )
     worker.emit('message', { id: 2, type: 'complete', device: 'cuda' })
     await expect(second).resolves.toBe('cuda')
+    // The helper's first message is its init data; requests follow.
+    expect(worker.postMessage.mock.calls[0]?.[0]).toMatchObject({ type: 'init' })
     await runtime.close()
-    expect(worker.terminate).toHaveBeenCalledOnce()
+    expect(worker.kill).toHaveBeenCalledOnce()
   })
   it('rejects worker errors and starts a new worker after a crash', async () => {
     const runtime = new OnnxSpeechRuntime()
@@ -71,7 +80,7 @@ describe('speech worker lifecycle', () => {
     host.workers[0]!.emit('message', { id: 1, type: 'error', error: 'provider failed' })
     await failed
     const second = runtime.prepare('af_heart')
-    const crashed = expect(second).rejects.toThrow('exited with code 9')
+    const crashed = expect(second).rejects.toThrow('exit code 9')
     host.workers[0]!.emit('exit', 9)
     await crashed
     const third = runtime.prepare('af_heart')

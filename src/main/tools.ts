@@ -5,15 +5,21 @@
 // tool schemas; we parse its tool_calls, run them, feed results back, and loop
 // until it answers. Built-in tools and selected connector extensions share it.
 
+import { track } from './analytics'
 import { offgridGuideTool } from './tools/offgrid-guide-tool'
 import { llm } from './llm'
 import type { GenerationMetrics } from '../shared/generation-metrics'
 import type { ResponseCutoffContract } from '../shared/ipc-contracts'
-import { SEARCH_KB_TOOL, sanitizePromptExcerpt } from '@offgrid/rag'
+import { SEARCH_KB_TOOL } from '@offgrid/rag'
 import { stripChatControlTokens } from '@offgrid/sync'
 import { isMemoryToolAllowed } from './tools/memory-scope'
 import { parseToolCallsFromText, stripQwenToolCallMarkup } from './tools/tool-call-parse'
-import { getSetting, saveSetting, searchProjectConversations } from './database'
+import {
+  getSetting,
+  saveSetting,
+  searchProjectConversations,
+  type ProjectConversationMessage
+} from './database'
 import { projectDocumentsMode, type ProjectDocumentsMode } from './documents/project-knowledge-mode'
 import { buildContentParts } from './llm/chat-payload'
 import { readImages } from './llm/read-images'
@@ -44,6 +50,13 @@ import {
 } from '@offgrid/models'
 import { toolPromptChars, toolPromptTokens } from './tools/prompt-budget'
 import { checkCitations } from '@offgrid/rag/documents'
+import {
+  describeRecordStatus,
+  recordBlock,
+  timeAnchor,
+  type RecordHit,
+  type RecordSearchStatus
+} from '@offgrid/rag/records'
 import { noteDocumentPrefill } from './documents'
 import { buildPageBlock, buildPageFence, pageBudgetChars } from './tools/page-fence'
 import {
@@ -104,7 +117,8 @@ export interface ToolContext {
   /** The active project (if the chat is in one), so search_knowledge_base can query
    *  that project's documents, chats and (when the project includes it) captured memory. */
   projectId?: string
-  /** The `[S#]` number of a document passage in this turn's sources, adding it when new. */
+  /** The `[S#]` number of a document passage or memory record in this turn's sources, adding it
+   *  when new. */
   citeDocumentPassage?: (source: UnifiedSource) => number
   /** Per-turn location result. Nearby task tools use this to fail closed when
    *  the device location request did not return usable coordinates. */
@@ -116,7 +130,7 @@ export interface ToolContext {
   completedPrerequisites?: string[]
 }
 
-export interface ToolConversationTurn {
+interface ToolConversationTurn {
   role: 'user' | 'assistant'
   content: string
 }
@@ -147,6 +161,7 @@ export interface ToolResult {
   sources?: UnifiedSource[]
   imageRequest?: { prompt: string; enhancePrompt?: boolean }
   imageRequests?: { prompt: string; enhancePrompt?: boolean }[]
+  videoRequest?: { prompt: string; enhancePrompt?: boolean }
   /** For a task tool (web_use, computer_use): the accepted task's id. Its run, its progress and
    *  Stop all use it, from the moment it is accepted, queued or waiting for approval. */
   taskId?: string
@@ -162,46 +177,78 @@ type ToolDef = {
   ) => Promise<string | ToolResult> | string | ToolResult
 }
 
-/** The one retrieval path used by memory and Replay chat tools. A caller may
- *  narrow the source kind, but search, ranking, thumbnails, and citation shape
- *  stay owned by universalSearch. */
+/** The one retrieval path used by memory, Replay and meeting chat tools: the records engine
+ *  (src/main/records over @offgrid/rag/records). A caller may narrow the kinds; ranking, dates and
+ *  the <source> shape stay owned by the engine. With the turn's `ctx`, every hit takes its `[S#]`
+ *  from the turn's citation registry, so it is in the Sources panel under the number the model
+ *  sees; `sources` still lists the cited hits (the loop skips ones already registered). */
 export async function searchMemoryToolResult(
   query: string,
   options: {
     limit?: number
     kinds?: SearchKind[]
+    /** Repeated screen moments always collapse now; kept so existing callers need no change. */
     collapseScreenMoments?: boolean
     excludeChatId?: string
     emptyText?: string
     errorSubject?: string
-  } = {}
+  } = {},
+  ctx?: ToolContext
 ): Promise<ToolResult> {
   try {
-    const { universalSearch } = await import('./search')
+    const { recordSearch, recordToSearchResult, screenMomentKey } = await import('./records')
     const limit = Math.min(20, Math.max(1, Number(options.limit) || 8))
-    const hits = await universalSearch(query, {
+    const excluded = options.excludeChatId ? `chat:${options.excludeChatId}` : null
+    const onActivity = ctx?.onActivity
+    const { hits } = await recordSearch(query, {
       limit,
       semantic: true,
-      kinds: options.kinds,
-      collapseScreenMoments: options.collapseScreenMoments,
-      excludeChatId: options.excludeChatId
+      rerank: true,
+      ...(options.kinds?.length ? { kinds: options.kinds } : {}),
+      // The model writes the query: a time phrase in it is a window, not words to match.
+      timeMode: 'filter',
+      // The same screen seen again and again is one moment, in every chat tool.
+      collapseKey: screenMomentKey,
+      // The chat being asked in cannot cite itself.
+      ...(excluded ? { exclude: (hit: RecordHit) => hit.key === excluded } : {}),
+      ...(onActivity
+        ? {
+            onStatus: (status: RecordSearchStatus) =>
+              onActivity({ kind: 'documents', label: describeRecordStatus(status) })
+          }
+        : {})
     })
-    const sources: UnifiedSource[] = hits.map((hit) => ({ ...hit }))
-    const text = hits.length
-      ? hits
-          .map((hit) => {
-            const when = hit.ts
-              ? ` · ${new Date(hit.ts).toISOString().slice(0, 16).replace('T', ' ')}`
-              : ''
-            return `(${hit.surface || hit.kind}${when}) ${hit.title ? `${hit.title} — ` : ''}${hit.snippet}`
-          })
-          .join('\n')
-      : (options.emptyText ?? 'Nothing found in memory for that.')
-    return { text, sources }
+    if (!hits.length) return { text: options.emptyText ?? 'Nothing found in memory for that.' }
+    const sources: UnifiedSource[] = []
+    const block = recordBlock(query, hits, (hit) => {
+      const source = recordToSearchResult(hit)
+      sources.push(source)
+      return ctx?.citeDocumentPassage?.(source) ?? sources.length
+    })
+    return { text: block.text, sources }
   } catch (error) {
     return {
       text: `Error searching ${options.errorSubject ?? 'memory'}: ${(error as Error).message}`
     }
+  }
+}
+
+/** A sibling project chat's matching message, as a record the turn can cite. The key is the
+ *  message itself, so the same passage keeps one number however many searches find it. */
+function projectChatHit(message: ProjectConversationMessage): RecordHit {
+  const title = message.title || 'Project conversation'
+  // SQLite's CURRENT_TIMESTAMP text is UTC without a zone.
+  const ts = Date.parse(`${message.created_at.replace(' ', 'T')}Z`)
+  return {
+    key: `project-chat:${message.conversation_id}:${message.role}:${message.content.slice(0, 120)}`,
+    kind: 'chat',
+    refId: 0,
+    title,
+    text: `${message.role}: ${message.content}`,
+    ts: Number.isFinite(ts) ? ts : 0,
+    surface: 'Project chat',
+    // The conversation to open.
+    url: message.conversation_id
   }
 }
 
@@ -418,10 +465,11 @@ const TOOLS: ToolDef[] = [
     // interactive citations. Excludes the current conversation (ctx) so it can't
     // cite itself. The loop dedups the returned sources across rounds.
     run: (args, context) =>
-      searchMemoryToolResult(String(args.query ?? ''), {
-        limit: Number(args.limit) || 8,
-        excludeChatId: context.conversationId
-      })
+      searchMemoryToolResult(
+        String(args.query ?? ''),
+        { limit: Number(args.limit) || 8, excludeChatId: context.conversationId },
+        context
+      )
   },
   {
     // Only OFFERED in a project chat (gated in schemas() by projectId). The project's documents
@@ -441,30 +489,43 @@ const TOOLS: ToolDef[] = [
         if (!query) return { text: 'Give a query to search for.' }
         const { searchDocumentsForTool } = await import('./documents/tool-extension')
         const { projectIncludesMemory } = await import('./rag')
+        const { recordToSearchResult } = await import('./records')
         const conversations = searchProjectConversations(ctx.projectId, query, ctx.conversationId)
         const documents = await searchDocumentsForTool(ctx, query)
-        const memory = projectIncludesMemory(ctx.projectId)
-          ? await searchMemoryToolResult(query, {
-              limit: 5,
-              // Captured memory only: other projects' files and chats stay out of this project.
-              kinds: ['screen', 'message', 'meeting', 'memory', 'entity', 'fact'],
-              excludeChatId: ctx.conversationId,
-              emptyText: 'No matching captured memory.'
-            })
-          : null
+        // Sibling chats are sources like the rest: each passage takes the turn's next [S#].
+        const chatSources: UnifiedSource[] = []
         const chats = conversations.length
-          ? conversations
-              .map(
-                (message, index) =>
-                  `[C${index + 1}] ${sanitizePromptExcerpt(message.title || 'Project conversation')} · ${message.role}: ${sanitizePromptExcerpt(message.content.slice(0, 1500))}`
-              )
-              .join('\n\n')
+          ? recordBlock(
+              query,
+              conversations.map(projectChatHit),
+              (hit) => {
+                const source = recordToSearchResult(hit)
+                chatSources.push(source)
+                return ctx.citeDocumentPassage?.(source) ?? chatSources.length
+              },
+              { labels: { chat: 'Project conversations' }, maxChars: 1500, budgetTokens: 2400 }
+            ).text
           : 'No matching project conversations found.'
+        const memory = projectIncludesMemory(ctx.projectId)
+          ? await searchMemoryToolResult(
+              query,
+              {
+                limit: 5,
+                // Captured memory only: other projects' files and chats stay out of this project.
+                kinds: ['screen', 'message', 'meeting', 'entity'],
+                excludeChatId: ctx.conversationId,
+                emptyText: 'No matching captured memory.'
+              },
+              ctx
+            )
+          : null
         return {
           text: `Project documents:\n${documents}\n\nProject conversations:\n${chats}${
             memory ? `\n\nCaptured memory:\n${memory.text}` : ''
           }`,
-          ...(memory?.sources?.length ? { sources: memory.sources } : {})
+          ...(chatSources.length || memory?.sources?.length
+            ? { sources: [...chatSources, ...(memory?.sources ?? [])] }
+            : {})
         }
       } catch (e) {
         return { text: 'Error searching the knowledge base: ' + (e as Error).message }
@@ -507,6 +568,25 @@ const TOOLS: ToolDef[] = [
           }
         : { text: 'Error: no image prompt provided.' }
     }
+  },
+  {
+    name: 'generate_video',
+    description: 'Generate a short silent video on this device from a text prompt. Use when the user asks for a video or moving clip.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'The subject, action and motion to show in the clip.' },
+        enhance_prompt: { type: 'boolean', description: 'Rewrite a short prompt before generation.' }
+      },
+      required: ['prompt']
+    },
+    run: (args): ToolResult => {
+      const prompt = String(args.prompt ?? '').trim()
+      const enhancePrompt = typeof args.enhance_prompt === 'boolean' ? args.enhance_prompt : undefined
+      return prompt
+        ? { text: 'Video generation started. The clip will appear in this chat.', videoRequest: { prompt, ...(enhancePrompt === undefined ? {} : { enhancePrompt }) } }
+        : { text: 'Error: no video prompt provided.' }
+    }
   }
 ]
 
@@ -514,6 +594,7 @@ const TOOLS: ToolDef[] = [
 // otherwise; every other built-in obeys only the disabled-set.
 function schemas(
   imageAvailable: boolean,
+  videoAvailable: boolean,
   scope: { projectActive: boolean; allMemory: boolean },
   allTools = false
 ): unknown[] {
@@ -521,6 +602,7 @@ function schemas(
   return (
     TOOLS.filter((t) => !off.has(t.name))
       .filter((t) => t.name !== 'generate_image' || imageAvailable)
+      .filter((t) => t.name !== 'generate_video' || videoAvailable)
       // Memory tools (search_knowledge_base / search_memory) follow the chat's memory scope.
       .filter((t) => isMemoryToolAllowed(t.name, scope))
       .map((t) => ({
@@ -536,7 +618,7 @@ export async function enabledToolSchemas(
   exts: ToolExtension[]
 ): Promise<{ schema: unknown; extension?: ToolExtension }[]> {
   const off = disabledSet()
-  const builtins = schemas(false, { projectActive: false, allMemory: true }).map((schema) => ({
+  const builtins = schemas(false, false, { projectActive: false, allMemory: true }).map((schema) => ({
     schema
   }))
   const extended = await Promise.all(
@@ -547,6 +629,13 @@ export async function enabledToolSchemas(
     )
   )
   return [...builtins, ...extended.flat()]
+}
+
+/** The usage-statistics feature a built-in tool counts as. Never its arguments. */
+function toolFeature(name: string): 'web_search' | 'image_generation' | 'tools' {
+  if (name === 'web_search' || name === 'brave_search') return 'web_search'
+  if (name === 'generate_image') return 'image_generation'
+  return 'tools'
 }
 
 /** Normalize a tool's return (bare string or structured) to a ToolResult. */
@@ -577,9 +666,13 @@ export async function runTool(
         authoritative: true
       }
     }
-    if (ext) return asToolResult(await ext.execute(name, args, ctx))
+    if (ext) {
+      track('feature_used', { feature: ext.category === 'tool' ? 'tools' : 'mcp_tool' })
+      return asToolResult(await ext.execute(name, args, ctx))
+    }
     const tool = TOOLS.find((t) => t.name === name)
     if (!tool) return { text: unknownToolMessage(name, available), status: 'failed' }
+    track('feature_used', { feature: toolFeature(name) })
     return asToolResult(await tool.run(args, ctx))
   } catch (e) {
     return { text: toolFailureMessage(name, (e as Error).message), status: 'failed' }
@@ -653,6 +746,7 @@ export async function selectChatTools(
     projectId?: string
     allMemory?: boolean
     imageAvailable?: boolean
+    videoAvailable?: boolean
     conversationId?: string
   } = {},
   history: { role: string; content: string }[] = []
@@ -664,6 +758,7 @@ export async function selectChatTools(
 }> {
   const toolsEnabled = opts.allTools || getSetting<boolean>('toolsEnabled', true) !== false
   const imageAvailable = opts.imageAvailable ?? false
+  const videoAvailable = opts.videoAvailable ?? false
   // Opt-in: pull in tools from registered pro extensions (e.g. MCP connectors)
   // alongside the built-ins. Schemas are built once per turn; each extension
   // caches whatever per-turn state it needs for execute(). Free build registers
@@ -719,6 +814,7 @@ export async function selectChatTools(
   const builtins = toolsEnabled
     ? schemas(
         imageAvailable,
+        videoAvailable,
         { projectActive: !!opts.projectId, allMemory: !!opts.allMemory },
         opts.allTools
       ).filter((schema) =>
@@ -834,6 +930,7 @@ export async function toolChat(
     allMemory?: boolean
     images?: string[]
     imageAvailable?: boolean
+    videoAvailable?: boolean
     thinking?: boolean
     signal?: AbortSignal
     onDelta?: (text: string, kind: 'content' | 'reasoning') => void
@@ -859,6 +956,7 @@ export async function toolChat(
   toolCalls: ToolCall[]
   unified: UnifiedSource[]
   imageRequests: { prompt: string; enhancePrompt?: boolean }[]
+  videoRequests?: { prompt: string; enhancePrompt?: boolean }[]
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string; enhancePrompt?: boolean }
   toolsOffered?: string[]
@@ -901,6 +999,7 @@ export async function toolChat(
   // correctly (single source of truth for "can we make an image right now").
   const toolsEnabled = opts.allTools || getSetting<boolean>('toolsEnabled', true) !== false
   let imageAvailable = opts.imageAvailable ?? false
+  let videoAvailable = opts.videoAvailable ?? false
   if ((!opts.assistantOnly || toolsEnabled) && opts.imageAvailable === undefined) {
     try {
       // The same answer the renderer reads: a runtime and a model, here or on a remote server.
@@ -910,10 +1009,18 @@ export async function toolChat(
       /* no image runtime -> stay false */
     }
   }
+  if ((!opts.assistantOnly || toolsEnabled) && opts.videoAvailable === undefined) {
+    try {
+      const { videoGenStatus } = await import('./videogen')
+      videoAvailable = videoGenStatus().available
+    } catch {
+      /* no video runtime */
+    }
+  }
 
   const { tools, protectedToolCount, hints, exts } = await selectChatTools(
     query,
-    { ...opts, imageAvailable },
+    { ...opts, imageAvailable, videoAvailable },
     history
   )
   const ctx = await llm.contextWindow()
@@ -988,6 +1095,10 @@ export async function toolChat(
   // turn to turn, so the model server reuses its cached prefix; this turn's passages sit beside
   // the question.
   const historyTokens = toolPromptTokens(messages.slice(1, -1))
+  // The system prompt ends with today's date and time, after everything that stays the same from
+  // turn to turn (instructions, whole documents), so "today" in history or retrieved items is never
+  // read as now. God's own context dates itself as well.
+  const anchor = `\n\n${timeAnchor(Date.now())}`
   const turnReplyReserve = Math.min(1024, Math.max(256, Math.floor(ctx * 0.1)))
   let documentSources: UnifiedSource[] = []
   const { prepareTurnDocuments } = await import('./documents/chat-turn')
@@ -1000,7 +1111,7 @@ export async function toolChat(
     budget: {
       ctx,
       replyReserve: turnReplyReserve,
-      systemTokens: toolPromptTokens([messages[0]]),
+      systemTokens: toolPromptTokens([{ ...messages[0], content: messages[0].content + anchor }]),
       requiredToolTokens: opts.assistantOnly ? Math.max(0, toolPromptTokens([], tools)) : 0,
       historyTokens,
       questionTokens: toolPromptTokens([{ role: 'user', content: query }]),
@@ -1035,6 +1146,7 @@ export async function toolChat(
     }
     documentSources = attachedDocuments.sources
   }
+  messages[0].content = `${messages[0].content}${anchor}`
   // One model call folds every earlier turn into a structured summary that stands in for them
   // from now on. If it fails, the oldest turns fall back to short excerpts as before.
   const summary =
@@ -1080,9 +1192,12 @@ export async function toolChat(
   // Document passages lead the sources, so `[S1]…[Sn]` in the prompt are the first n sources.
   const unified: UnifiedSource[] = [...documentSources]
   const unifiedKeys = new Set<string>(documentSources.map((source) => source.key))
-  // A document search tool cites passages by their place in these sources: a passage the turn
+  // Whether the model was shown any `[S#]` tag this turn (documents, memory, meetings, chats).
+  let citedSources = documentSources.length > 0
+  // A search tool cites passages and records by their place in these sources: one the turn
   // already gave keeps its number, a new one is added now so its number is fixed.
   toolContext.citeDocumentPassage = (source) => {
+    citedSources = true
     const known = unified.findIndex((existing) => existing.key === source.key)
     if (known >= 0) return known + 1
     unifiedKeys.add(source.key)
@@ -1094,6 +1209,7 @@ export async function toolChat(
   // not silently replace the first request with the last.
   const imageRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   const earlyImagePrompts = new Set<string>()
+  const videoRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   let finishAfterDeferredImages = false
   const toolRoundAnswers: string[] = []
   const resultWithImages = (result: {
@@ -1109,6 +1225,7 @@ export async function toolChat(
     metrics?: GenerationMetrics
     cutoff?: ResponseCutoffContract
     imageRequests: { prompt: string; enhancePrompt?: boolean }[]
+    videoRequests: { prompt: string; enhancePrompt?: boolean }[]
     imageRequest?: { prompt: string; enhancePrompt?: boolean }
     toolsOffered?: string[]
   } => {
@@ -1119,7 +1236,7 @@ export async function toolChat(
       ...result,
       // A citation that points at no source would lead nowhere in the Sources panel.
       answer:
-        documentSources.length || result.unified.some((source) => source.kind === 'attachment')
+        citedSources || result.unified.some((source) => source.kind === 'attachment')
           ? checkCitations(answer, result.unified.length)
           : answer,
       metrics: {
@@ -1128,6 +1245,7 @@ export async function toolChat(
         ...(result.metrics?.promptTokens ? {} : { estimatedPromptTokens: retainedPromptTokens })
       },
       imageRequests,
+      videoRequests,
       ...(offeredTools.size ? { toolsOffered: [...offeredTools] } : {}),
       ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
     }
@@ -1312,8 +1430,10 @@ export async function toolChat(
       // One model round can request several tools in parallel. Count the actual calls, as Mobile
       // does, and execute only the remaining allowance so the configured ceiling stays truthful.
       let remainingImageRequests = requestedImageCount - imageRequests.length
+      let remainingVideoRequests = videoRequests.length === 0 ? 1 : 0
       const callsToRun = callsWithinToolBudget(permitted, toolCalls.length, maxToolCalls).filter(
-        (call) => call.name !== 'generate_image' || remainingImageRequests-- > 0
+        (call) => (call.name !== 'generate_image' || remainingImageRequests-- > 0) &&
+          (call.name !== 'generate_video' || remainingVideoRequests-- > 0)
       )
       // Re-add the assistant turn (with its tool_calls) so the model sees what it invoked.
       messages.push({
@@ -1396,6 +1516,10 @@ export async function toolChat(
         } else if (res.imageRequest) {
           imageRequests.push(res.imageRequest)
           finishAfterDeferredImages = imageRequests.length >= requestedImageCount
+        }
+        if (res.videoRequest && videoRequests.length === 0) {
+          videoRequests.push(res.videoRequest)
+          finishAfterDeferredImages = true
         }
         const status = res.status ?? 'completed'
         callRecords.push({ key, outcome: status })

@@ -7,7 +7,7 @@
 import { COMPUTER_USE_ACTION_TYPE, WEB_USE_ACTION_TYPE } from '@offgrid/use'
 import type { ActionRisk } from '../actions/approval'
 
-export const WEB_USE_TOOL_NAME = WEB_USE_ACTION_TYPE
+const WEB_USE_TOOL_NAME = WEB_USE_ACTION_TYPE
 
 export interface NativeToolSpec {
   /** Model-facing tool name. */
@@ -357,7 +357,7 @@ export const WINDOWS_TOOL_NAMES: ReadonlySet<string> = new Set([
 // Location and the link opener are also available without task tools.
 export const LINUX_TOOL_NAMES: ReadonlySet<string> = new Set(['open_url', 'get_current_location'])
 
-export const TASK_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_use'])
+const TASK_USE_TOOL_NAMES: ReadonlySet<string> = new Set([WEB_USE_TOOL_NAME, 'computer_use'])
 
 export function specsForPlatform(
   platform: NodeJS.Platform,

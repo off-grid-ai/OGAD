@@ -7,6 +7,10 @@ import { ChatBoundary, installBoundary, renderChat, send } from './harness/chat-
 
 afterEach(cleanup)
 
+/** A turn's text as written: the first turn of each day carries that day's marker line. */
+const said = (turn: { content: string }): string =>
+  turn.content.replace(/^\[(?:Earlier conversation|Today) — [^\]]+\]\n/, '')
+
 it('keeps the active turn and a short earlier excerpt after a saved compaction notice', async () => {
   ;(Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {}
   const boundary = new ChatBoundary()
@@ -21,8 +25,8 @@ it('keeps the active turn and a short earlier excerpt after a saved compaction n
     getLlmSettings: async () => ({ ctxSize: 4096 }),
     toolChat: async (_query: string, history: Array<{ role: string; content: string }>) => ({
       answer:
-        history.some((turn) => turn.content === 'hi') &&
-        history.some((turn) => turn.content.startsWith('Earlier chat excerpts')) &&
+        history.some((turn) => said(turn) === 'hi') &&
+        history.some((turn) => said(turn).startsWith('Earlier chat excerpts')) &&
         history.every((turn) => !turn.content.includes('END-OF-OLD-ANSWER'))
           ? 'The compacted history carried forward.'
           : 'The full old history returned.',
@@ -63,11 +67,11 @@ it('sends the saved summary in place of the compacted turns after reopening the 
     toolChat: async (_query: string, history: Array<{ role: string; content: string }>) => ({
       answer:
         history[0]?.content.includes('## Goal\nA three-day Lisbon trip in May.') &&
-        history.some((turn) => turn.content === 'Make it three days') &&
+        history.some((turn) => said(turn) === 'Make it three days') &&
         history.every(
           (turn) =>
             !turn.content.includes('END-OF-OLD-ANSWER') &&
-            !turn.content.startsWith('Earlier chat excerpts')
+            !said(turn).startsWith('Earlier chat excerpts')
         )
           ? 'The summary carried forward.'
           : 'The summary was lost.',

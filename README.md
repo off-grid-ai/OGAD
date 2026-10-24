@@ -5,7 +5,7 @@
 <h1 align="center">Off Grid AI</h1>
 
 <p align="center">
-  <strong>Private, on-device AI. Your models, your data — no cloud, no accounts, no API keys.</strong>
+  <strong>Private, on-device AI. Your models, your data — no cloud, no accounts, no API keys. Anonymous usage data and crash reports only if you turn them on.</strong>
 </p>
 
 <p align="center">
@@ -55,7 +55,8 @@ Off Grid AI is a **local-first AI runtime** for your desktop. Download open mode
 built-in catalog (or any GGUF from Hugging Face) and use them across every modality — all
 inference runs on your hardware via bundled `llama.cpp`, `stable-diffusion.cpp`,
 `whisper.cpp`, and Kokoro. Nothing routes through a server we own; your conversations,
-files, and models never leave your device.
+files, and models never leave your device. Anonymous usage data and crash reports are sent
+only if you turn them on.
 
 Three things in one app:
 
@@ -84,7 +85,7 @@ Three things in one app:
 </tr>
 <tr>
 <td width="50%"><strong>Off Grid AI Pro</strong> — the sees/remembers/reflects/acts layer<br><img src="docs/screenshots/07-pro-upgrade.png" width="100%" alt="Pro" /></td>
-<td width="50%"><strong>Private by default</strong> — runs on your machine, no account<br><img src="docs/screenshots/08-onboarding.png" width="100%" alt="Private by default" /></td>
+<td width="50%"><strong>Private by default</strong> — runs on your machine, no account, analytics off unless you opt in<br><img src="docs/screenshots/08-onboarding.png" width="100%" alt="Private by default" /></td>
 </tr>
 </table>
 
@@ -180,7 +181,7 @@ curl -X POST http://127.0.0.1:7878/v1/models/activate \
 
 The free app **runs** models. **Pro** adds the always-on layer that turns your own work
 into private, on-device memory — and an assistant that helps you act on it. Everything is
-explicit opt-in, with a visible recording indicator, and nothing leaves the device.
+explicit opt-in, with a visible recording indicator, and what it records never leaves the device.
 
 - **Sees** — screen capture → OCR → on-device LLM distill into observations + entities.
   Multi-monitor aware, consumption-vs-work classification, blank/locked frames skipped.
@@ -193,8 +194,8 @@ explicit opt-in, with a visible recording indicator, and nothing leaves the devi
 - **Dictation** — hold **⌥ Space** and talk; whisper transcribes **completely on-device**
   and the text is pasted at your cursor in any app (over full-screen too). Tap-to-toggle or
   push-to-talk, a searchable recordings library, drag-in audio/video file transcription, and
-  the people, projects, and to-dos from what you said folded into your memory. Nothing leaves
-  the device.
+  the people, projects, and to-dos from what you said folded into your memory. Your audio and
+  transcripts never leave the device.
 - **Clipboard** — a private clipboard manager: searchable history of everything you copy,
   with image, PDF, and file previews, a quick-paste popup, all stored on-device.
 - **Acts (with approval)** — action items detected from your communication, an
@@ -311,6 +312,11 @@ simply absent in this build, so the open app compiles and runs entirely on its o
 
 All model inference is local. Your conversations, documents, and models stay on your device
 — there's no cloud inference, no account, and no API key. You can run it fully offline.
+
+Analytics are opt-in and off by default. If you turn them on (in setup, a prompt, or
+**Settings > Analytics**), the app sends anonymous usage data and crash reports to PostHog
+Cloud EU. It never sends prompts, replies, file names, paths, URLs or search terms. The full
+list is in [docs/ANALYTICS.md](docs/ANALYTICS.md).
 
 ## Community
 

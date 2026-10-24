@@ -17,6 +17,11 @@ import type {
   ImageGenerationRequestContract,
   ImageGenerationResultContract
 } from '../shared/image-generation-contract'
+import type {
+  VideoGenerationRequestContract,
+  VideoGenerationResultContract,
+  VideoGenerationJobContract
+} from '../shared/video-generation-contract'
 import {
   BACKUP_EXPORT_ALL_CHANNEL,
   BACKUP_IMPORT_CHANNEL,
@@ -41,12 +46,31 @@ import {
   type ProjectDocumentTransfer
 } from '../shared/project-document-transfer'
 import type { TaskRunSnapshot } from '../main/tasks/task-history-store'
+import {
+  ANALYTICS_CHANNELS,
+  ANALYTICS_CONSENT_OFF,
+  type AnalyticsConsent,
+  type AnalyticsPromptKind,
+  type FlowReport,
+  type OptInSource,
+  type RendererAnalyticsEvent,
+  type RendererAnalyticsEvents,
+  type RendererErrorReport
+} from '../shared/analytics'
 
 console.log('PRELOAD SCRIPT LOADED')
 
 type IpcListener = Parameters<typeof ipcRenderer.removeListener>[1]
 
 let liveProEntitled = ipcRenderer.sendSync('pro:is-enabled') === true
+
+/** Consent before the first paint, so no screen view is reported for a user who did not opt in. */
+function initialAnalyticsConsent(): AnalyticsConsent {
+  const value: unknown = ipcRenderer.sendSync(ANALYTICS_CHANNELS.consentSync)
+  return value && typeof value === 'object'
+    ? { ...ANALYTICS_CONSENT_OFF, ...(value as Partial<AnalyticsConsent>) }
+    : ANALYTICS_CONSENT_OFF
+}
 
 function unsubscribe(channel: string, listener: IpcListener): () => void {
   return () => {
@@ -65,6 +89,37 @@ const offGridApi = {
     ipcRenderer.sendSync('pro:entitlement-bootstrap-enabled') === true,
   // Host OS, bridged once so renderer copy and availability rules use the same value.
   platform: process.platform,
+  // Opt-in analytics. Main validates every report and sends nothing without consent.
+  analytics: {
+    consent: initialAnalyticsConsent(),
+    setConsent: (patch: { usage?: boolean; crashes?: boolean }): Promise<AnalyticsConsent> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.setConsent, patch),
+    optIn: (source: OptInSource): Promise<AnalyticsConsent> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.optIn, source),
+    dismissPrompt: (): Promise<AnalyticsConsent> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.dismissPrompt),
+    capture: <E extends RendererAnalyticsEvent>(
+      event: E,
+      properties?: RendererAnalyticsEvents[E]
+    ): void => ipcRenderer.send(ANALYTICS_CHANNELS.capture, event, properties ?? {}),
+    flow: (report: FlowReport): void => ipcRenderer.send(ANALYTICS_CHANNELS.flow, report),
+    reportError: (report: RendererErrorReport): void =>
+      ipcRenderer.send(ANALYTICS_CHANNELS.rendererError, report),
+    readLog: (): Promise<{ path: string; text: string; truncated: boolean }> =>
+      ipcRenderer.invoke(ANALYTICS_CHANNELS.readLog),
+    emailLog: (): Promise<boolean> => ipcRenderer.invoke(ANALYTICS_CHANNELS.emailLog),
+    revealLog: (): Promise<boolean> => ipcRenderer.invoke(ANALYTICS_CHANNELS.revealLog),
+    onConsentChanged: (cb: (consent: AnalyticsConsent) => void) => {
+      const sub = (_e: unknown, consent: AnalyticsConsent): void => cb(consent)
+      ipcRenderer.on(ANALYTICS_CHANNELS.consentChanged, sub)
+      return unsubscribe(ANALYTICS_CHANNELS.consentChanged, sub)
+    },
+    onPrompt: (cb: (kind: AnalyticsPromptKind) => void) => {
+      const sub = (_e: unknown, kind: AnalyticsPromptKind): void => cb(kind)
+      ipcRenderer.on(ANALYTICS_CHANNELS.prompt, sub)
+      return unsubscribe(ANALYTICS_CHANNELS.prompt, sub)
+    }
+  },
   // License (Keygen) activation + status for the upgrade/settings UI.
   license: {
     status: () => ipcRenderer.invoke('license:status'),
@@ -219,13 +274,6 @@ const offGridApi = {
   getMediaUrl: (absPath: string) => ipcRenderer.invoke('media:url', absPath),
   // Clipboard manager is a Pro feature: its renderer reaches IPC through the
   // generic proInvoke / proOn passthrough above (no dedicated namespace here).
-  getMemories: (limit: number, appName?: string) =>
-    ipcRenderer.invoke('db:get-memories', limit, appName),
-  addMemory: (content: string, source?: string) =>
-    ipcRenderer.invoke('db:add-memory', content, source),
-  searchMemories: (query: string) => ipcRenderer.invoke('db:search-memories', query),
-  getStats: () => ipcRenderer.invoke('db:get-stats'),
-  getDashboardStats: () => ipcRenderer.invoke('db:get-dashboard-stats'),
   extractMemory: (text: string) => ipcRenderer.invoke('llm:extract', text),
 
   // Chat Summaries
@@ -234,14 +282,8 @@ const offGridApi = {
     ipcRenderer.invoke('db:get-memories-for-session', sessionId),
   getEntitiesForSession: (sessionId: string) =>
     ipcRenderer.invoke('db:get-entities-for-session', sessionId),
-  getMemoryRecordsForSession: (sessionId: string) =>
-    ipcRenderer.invoke('db:get-memory-records-for-session', sessionId),
   summarizeSession: (sessionId: string) => ipcRenderer.invoke('llm:summarize-session', sessionId),
   deleteSession: (sessionId: string) => ipcRenderer.invoke('db:delete-session', sessionId),
-
-  // Master Memory
-  getMasterMemory: () => ipcRenderer.invoke('db:get-master-memory'),
-  regenerateMasterMemory: () => ipcRenderer.invoke('db:regenerate-master-memory'),
 
   // RAG Chat - updated to support conversation history + live streaming
   ragChat: (
@@ -368,11 +410,7 @@ const offGridApi = {
   deleteRagConversation: (id: string) => ipcRenderer.invoke('rag:delete-conversation', id),
 
   // Entities
-  getEntities: (appName?: string) => ipcRenderer.invoke('db:get-entities', appName),
-  getEntityDetails: (entityId: number, appName?: string) =>
-    ipcRenderer.invoke('db:get-entity-details', entityId, appName),
   deleteEntity: (entityId: number) => ipcRenderer.invoke('db:delete-entity', entityId),
-  deleteMemory: (memoryId: number) => ipcRenderer.invoke('db:delete-memory', memoryId),
 
   // User Profile
   getUserProfile: () => ipcRenderer.invoke('db:get-user-profile'),
@@ -425,31 +463,11 @@ const offGridApi = {
   consoleStatus: () => ipcRenderer.invoke('console:status'),
   consoleSyncNow: () => ipcRenderer.invoke('console:sync-now'),
   consoleDisconnect: () => ipcRenderer.invoke('console:disconnect'),
-  reprocessAllSessions: (clean?: boolean) =>
-    ipcRenderer.invoke('db:reprocess-all-sessions', clean ?? false),
-
-  // Master Memory Progress
-  onMasterMemoryProgress: (callback: (data: { current: number; total: number }) => void) => {
-    const subscription = (_event: unknown, data: { current: number; total: number }): void =>
-      callback(data)
-    ipcRenderer.on('master-memory:progress', subscription)
-    return unsubscribe('master-memory:progress', subscription)
-  },
 
   // Prompts
   getPrompts: () => ipcRenderer.invoke('prompts:get-all'),
   savePrompt: (key: string, value: string) => ipcRenderer.invoke('prompts:save', key, value),
   resetPrompt: (key: string) => ipcRenderer.invoke('prompts:reset', key),
-  onReprocessProgress: (
-    callback: (data: { phase: string; processed: number; total: number }) => void
-  ) => {
-    const subscription = (
-      _event: unknown,
-      data: { phase: string; processed: number; total: number }
-    ): void => callback(data)
-    ipcRenderer.on('reprocess:progress', subscription)
-    return unsubscribe('reprocess:progress', subscription)
-  },
 
   // Auto-update — fired when a new version finished downloading and is staged.
   // installUpdate() forces the quit+swap (Squirrel only applies on a graceful
@@ -466,6 +484,11 @@ const offGridApi = {
   residencyGet: () => ipcRenderer.invoke('runtime:residency:get'),
   residencySet: (modality: string, mode: string) =>
     ipcRenderer.invoke('runtime:residency:set', modality, mode),
+  backendChoices: (): Promise<
+    Record<import('@offgrid/models').BackendModality, import('@offgrid/models').BackendChoice[]>
+  > => ipcRenderer.invoke('runtime:backend:choices'),
+  backendRetry: (modality: string): Promise<void> =>
+    ipcRenderer.invoke('runtime:backend:retry', modality),
   backendPreferencesGet: () => ipcRenderer.invoke('runtime:backend:get'),
   backendPreferenceSet: (modality: string, preference: string) =>
     ipcRenderer.invoke('runtime:backend:set', modality, preference),
@@ -660,7 +683,6 @@ const offGridApi = {
     status: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:status'),
     start: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:start'),
     pause: (): Promise<PerformancePackStatus> => ipcRenderer.invoke('performance-pack:pause'),
-    restart: (): Promise<void> => ipcRenderer.invoke('performance-pack:restart'),
     onChanged: (callback: (status: PerformancePackStatus) => void): (() => void) => {
       const subscription = (_event: unknown, status: PerformancePackStatus): void =>
         callback(status)
@@ -685,7 +707,9 @@ const offGridApi = {
   chatVisionAvailable: () => ipcRenderer.invoke('model:chat-vision'),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
   readClipboardText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
-  autoConfigure: () => ipcRenderer.invoke('setup:auto-configure'),
+  cancelSetupDownload: (modelId: string) => ipcRenderer.invoke('setup:cancel-download', modelId),
+  autoConfigure: (selectedModelIds?: string[], mode?: 'conservative' | 'balanced' | 'extreme') =>
+    ipcRenderer.invoke('setup:auto-configure', selectedModelIds, mode),
   restartComponent: (id: string) => ipcRenderer.invoke('system:restart', id),
   estimateModelFit: (modelId: string) => ipcRenderer.invoke('system:estimate-fit', modelId),
 
@@ -701,6 +725,19 @@ const offGridApi = {
     const listener = (): void => callback()
     ipcRenderer.on('models:inventory-changed', listener)
     return () => ipcRenderer.removeListener('models:inventory-changed', listener)
+  },
+  getEmbeddingModelChoices: () => ipcRenderer.invoke('models:embedding-choices'),
+  chooseEmbeddingModel: (id: string) => ipcRenderer.invoke('models:choose-embedding', id),
+  cancelEmbeddingRebuild: () =>
+    ipcRenderer.invoke('models:cancel-embedding-rebuild') as Promise<{
+      canceled?: boolean
+      error?: string
+    }>,
+  getEmbeddingRebuildStatus: () => ipcRenderer.invoke('models:embedding-rebuild-status'),
+  onEmbeddingRebuildStatusChanged: (callback: (status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus): void => callback(status)
+    ipcRenderer.on('models:embedding-rebuild-status-changed', listener)
+    return () => ipcRenderer.removeListener('models:embedding-rebuild-status-changed', listener)
   },
   deleteOrphans: () => ipcRenderer.invoke('models:delete-orphans'),
   listDownloads: () => ipcRenderer.invoke('models:downloads'),
@@ -742,6 +779,7 @@ const offGridApi = {
       allMemory?: boolean
       images?: string[]
       imageAvailable?: boolean
+      videoAvailable?: boolean
       streamId?: string
       thinking?: boolean
       context?: string
@@ -773,7 +811,7 @@ const offGridApi = {
     systemPrompt?: string
     kvCacheType?: 'f16' | 'q8_0' | 'q4_0'
     flashAttn?: boolean
-    gpuLayers?: number
+    gpuLayers?: number | null
     gpuPlacement?: 'auto' | 'manual'
     threads?: number
     batchSize?: number
@@ -893,6 +931,7 @@ const offGridApi = {
 
   // --- Voice output (text-to-speech via Kokoro) ---
   ttsVoices: () => ipcRenderer.invoke('tts:voices'),
+  parakeetAvailable: (): Promise<boolean> => ipcRenderer.invoke('transcription:parakeet-available'),
   prepareTtsVoice: (voice: string) => ipcRenderer.invoke('tts:prepare-voice', voice),
   onTtsVoiceProgress: (
     callback: (data: {
@@ -998,6 +1037,35 @@ const offGridApi = {
     }
   ) => ipcRenderer.invoke('imagegen:generate', params) as Promise<ImageGenerationResultContract>,
 
+  videoGenStatus: () => ipcRenderer.invoke('videogen:status') as Promise<{
+    available: boolean; models: string[]; active: string | null; reason?: string
+  }>,
+  videoGenJobStatus: () => ipcRenderer.invoke('videogen:job-status') as Promise<VideoGenerationJobContract>,
+  generateVideo: (request: VideoGenerationRequestContract & {
+    conversationId?: string; projectId?: string | null
+  }) => ipcRenderer.invoke('videogen:generate', request) as Promise<VideoGenerationResultContract>,
+  cancelVideoGen: () => ipcRenderer.invoke('videogen:cancel') as Promise<boolean>,
+  videoGenConversationPersisted: (conversationId: string, messageId?: string) =>
+    ipcRenderer.invoke('videogen:conversation-persisted', conversationId, messageId) as Promise<boolean>,
+  listGeneratedVideos: (scope?: { conversationId?: string; projectId?: string | null }) =>
+    ipcRenderer.invoke('videogen:list', scope) as Promise<Array<{
+      path: string; name: string; mtime: number; syncId?: string;
+      conversationId?: string; projectId?: string | null; durationSeconds?: number
+    }>>,
+  deleteGeneratedVideo: (videoPath: string) => ipcRenderer.invoke('videogen:delete', videoPath) as Promise<boolean>,
+  exportGeneratedVideo: (videoPath: string, name?: string) =>
+    ipcRenderer.invoke('videogen:export', videoPath, name) as Promise<boolean>,
+  onVideoGenJobState: (callback: (state: VideoGenerationJobContract) => void) => {
+    const listener = (_event: unknown, state: VideoGenerationJobContract): void => callback(state)
+    ipcRenderer.on('videogen:job-state', listener)
+    return unsubscribe('videogen:job-state', listener)
+  },
+  onVideoGenConversationUpdated: (callback: (conversationId: string) => void) => {
+    const listener = (_event: unknown, conversationId: string): void => callback(conversationId)
+    ipcRenderer.on('videogen:conversation-updated', listener)
+    return unsubscribe('videogen:conversation-updated', listener)
+  },
+
   // --- Projects + RAG (knowledge bases) + project chat ---
   listProjects: () => ipcRenderer.invoke('projects:list'),
   createProject: (p: {
@@ -1047,8 +1115,6 @@ const offGridApi = {
     ipcRenderer.invoke('crm:entity-record', entityId, opts),
   crmObservationFrames: (observationId: number) =>
     ipcRenderer.invoke('crm:observation-frames', observationId),
-  crmSearch: (query: string, entityId?: number) =>
-    ipcRenderer.invoke('crm:search', query, entityId),
   searchFacets: (query: string) => ipcRenderer.invoke('search:facets', query),
   universalSearch: (
     query: string,
@@ -1147,7 +1213,10 @@ const offGridApi = {
   approvalsApprove: (id: number) => ipcRenderer.invoke('approvals:approve', id),
   approvalsReject: (id: number, reason?: string) =>
     ipcRenderer.invoke('approvals:reject', id, reason),
-  reportSelfView: (view: string) => ipcRenderer.invoke('capture:self-view', view),
+  // A notice, not a request: Pro registers the handler only while Pro runs, so a free build has
+  // none and the rejection must not surface as an unhandled renderer error.
+  reportSelfView: (view: string) =>
+    ipcRenderer.invoke('capture:self-view', view).catch(() => undefined),
   secretaryPrefsGet: () => ipcRenderer.invoke('secretary:prefs:get'),
   secretaryPrefsSet: (doc: string) => ipcRenderer.invoke('secretary:prefs:set', doc),
   secretaryPrefsDistill: () => ipcRenderer.invoke('secretary:prefs:distill'),

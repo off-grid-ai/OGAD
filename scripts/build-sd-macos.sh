@@ -10,10 +10,10 @@ TARGET="${MACOS_DEPLOYMENT_TARGET:-13.0}"
 WORK="${2:-${TMPDIR:-/tmp}/offgrid-sd-build}"
 OUT="${OFFGRID_SD_OUT:-$ROOT/resources/bin/sd}"
 
-rm -rf "$WORK/src" "$WORK/build"
+rm -rf "$WORK/build"
 mkdir -p "$WORK"
-git clone --quiet --depth 1 --branch "$TAG" --recurse-submodules --shallow-submodules \
-  https://github.com/leejet/stable-diffusion.cpp "$WORK/src"
+# The pinned source plus the video decode-preview patches (scripts/patches).
+node "$ROOT/scripts/prepare-image-runtime.mjs" "$WORK/src" "$TAG"
 
 # ggml-blas asks Accelerate for its new LAPACK interface, which exists only on macOS 13.3+; below that
 # it is weak-linked and the first CPU matrix multiply calls null. Use the classic interface there.

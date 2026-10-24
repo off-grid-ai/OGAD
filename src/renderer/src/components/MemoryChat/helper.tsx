@@ -13,6 +13,7 @@ import {
   readResponseVariants
 } from '../../lib/message-persistence'
 import { readGeneratedImageReference } from '../../../../shared/generated-image-reference'
+import { readGeneratedVideoReference } from '../../../../shared/generated-video-reference'
 import { captureUrlForPath } from '../../../../shared/ogcapture-url'
 import type {
   Attachment,
@@ -68,7 +69,7 @@ export function attachmentsOf(message: { attachments?: StoredAttachment[] }): At
   }))
 }
 
-export function parseRagContext(context: unknown): RagContext | undefined {
+function parseRagContext(context: unknown): RagContext | undefined {
   if (typeof context === 'string') {
     try {
       return JSON.parse(context) as RagContext
@@ -79,7 +80,7 @@ export function parseRagContext(context: unknown): RagContext | undefined {
   return context && typeof context === 'object' ? (context as RagContext) : undefined
 }
 
-export function readRagProvenance(message: RawRagMessage): ChatMessage['provenance'] {
+function readRagProvenance(message: RawRagMessage): ChatMessage['provenance'] {
   if (
     typeof message.origin_device_id !== 'string' ||
     typeof message.origin_device_name !== 'string'
@@ -137,6 +138,7 @@ function projectedTurnTools(turn: ProjectedTurn): Partial<ChatMessage> {
 
 function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMessage {
   const imageReference = readGeneratedImageReference(context)
+  const videoReference = readGeneratedVideoReference(context)
   const variants = readResponseVariants(context)
   return {
     id: turn.id,
@@ -164,6 +166,8 @@ function projectChatMessage(turn: ProjectedTurn, context?: RagContext): ChatMess
     provenance: turn.provenance,
     image: imageReference ? captureUrlForPath(imageReference.path) : undefined,
     imagePath: imageReference?.path,
+    videoPath: videoReference?.path,
+    videoMetadata: context?.videoMetadata,
     imageMetadata: context?.imageMetadata,
     attachments: Array.isArray(context?.attachments) ? context.attachments : undefined
   }

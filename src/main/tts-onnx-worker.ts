@@ -1,29 +1,28 @@
-import { parentPort, workerData } from 'node:worker_threads'
 import { writeFile } from 'node:fs/promises'
 import type { DeviceType, ProgressInfo } from '@huggingface/transformers'
 import { KokoroTTS } from 'kokoro-js'
 import { configureTransformersEnv } from './embeddings-env'
 import { requireModelStorage } from './runtime-env'
 import { resolveTransformersPackage } from './model-paths'
-import { loadWithOnnxFallback, onnxDeviceCandidates } from './onnx-device'
-import type { BackendPreference } from '../shared/backend-preferences'
+import { loadWithOnnxFallback } from './onnx-device'
+import type { OnnxDevice } from '@offgrid/models'
+import { connectHelper, type HelperPort } from './onnx-host/helper-port'
 
 const MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX'
 
-if (!parentPort) throw new Error('tts-onnx-worker must be started as a worker thread')
-const port = parentPort
-const {
-  modelsDir,
-  modelReadDirectories = [modelsDir],
-  backendPreference = 'auto'
-} = workerData as {
+/** Sent by the host (tts-onnx.ts) as the helper's first message. */
+export interface TtsWorkerInit {
   modelsDir: string
   modelReadDirectories?: string[]
-  backendPreference?: BackendPreference
+  devices: OnnxDevice[]
 }
-configureTransformersEnv(modelsDir)
 
-interface TtsWorkerRequest {
+let port: HelperPort<TtsWorkerRequest>
+let modelsDir = ''
+let modelReadDirectories: string[] = []
+let devices: OnnxDevice[] = ['cpu']
+
+export interface TtsWorkerRequest {
   id: number
   type: 'prepare' | 'synthesize'
   text?: string
@@ -73,11 +72,7 @@ const unusableDevices = new Set<DeviceType>()
 const lastProgress = new Map<number, number>()
 
 function speechDeviceCandidates(): DeviceType[] {
-  const candidates = onnxDeviceCandidates(process.platform, backendPreference)
-  // On Linux, CPU Kokoro is substantially faster than WebGPU when CUDA cannot
-  // produce audio. Keep an explicit WebGPU choice ahead of CPU.
-  if (process.platform !== 'linux' || backendPreference === 'webgpu') return candidates
-  return [...candidates.filter((device) => device !== 'webgpu'), ...candidates.filter((device) => device === 'webgpu')]
+  return devices
 }
 
 function hasAudibleSamples(samples: Float32Array): boolean {
@@ -93,7 +88,7 @@ function reportProgress(id: number, info: ProgressInfo): void {
     const percentage = Math.max(0, Math.min(100, Math.floor(info.progress)))
     if (lastProgress.get(id) === percentage) return
     lastProgress.set(id, percentage)
-    port.postMessage({
+    port.post({
       id,
       type: 'progress',
       downloadedBytes: info.loaded,
@@ -149,7 +144,12 @@ async function runtime(id: number): Promise<{ runtime: KokoroRuntime; device: De
     speechDeviceCandidates().filter((device) => !unusableDevices.has(device))
   )
     .then((value) => {
-      port.postMessage({ id, type: 'ready', device: value.device, fallbackReason: value.fallbackReason } satisfies TtsWorkerResponse)
+      port.post({
+        id,
+        type: 'ready',
+        device: value.device,
+        fallbackReason: value.fallbackReason
+      } satisfies TtsWorkerResponse)
       loaded = value
       return value
     })
@@ -188,23 +188,33 @@ async function synthesizeWithFallback(request: TtsWorkerRequest): Promise<Device
   throw new Error(`No speech backend produced audio. ${failures.join(' | ')}`)
 }
 
-port.on('message', (request: TtsWorkerRequest) => {
+function handle(request: TtsWorkerRequest): void {
   void (async () => {
     try {
-      const device = request.type === 'synthesize'
-        ? await synthesizeWithFallback(request)
-        : (await runtime(request.id)).device
-      port.postMessage({
+      const device =
+        request.type === 'synthesize'
+          ? await synthesizeWithFallback(request)
+          : (await runtime(request.id)).device
+      port.post({
         id: request.id,
         type: 'complete',
         device
       } satisfies TtsWorkerResponse)
     } catch (error) {
-      port.postMessage({
+      port.post({
         id: request.id,
         type: 'error',
         error: error instanceof Error ? error.message : String(error)
       } satisfies TtsWorkerResponse)
     }
   })()
+}
+
+void connectHelper<TtsWorkerInit, TtsWorkerRequest>().then(({ init, port: connected }) => {
+  port = connected
+  modelsDir = init.modelsDir
+  modelReadDirectories = init.modelReadDirectories ?? [init.modelsDir]
+  devices = init.devices
+  configureTransformersEnv(modelsDir)
+  port.onRequest(handle)
 })

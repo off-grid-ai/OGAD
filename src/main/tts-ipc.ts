@@ -27,6 +27,10 @@ export function setupTtsIpc(): void {
     }
   }
 
+  // Parakeet is offered only where its sherpa-onnx runtime ships.
+  ipcMain.handle('transcription:parakeet-available', async () =>
+    (await import('./runtime-availability')).parakeetRuntimeInstalled()
+  )
   ipcMain.handle('tts:voices', async () => {
     const { listVoiceCatalog } = await import('./tts')
     try {

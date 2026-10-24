@@ -8,6 +8,7 @@ import { PerformancePackPanel } from './setup/PerformancePackPanel'
 import { EngineUpdatesSection } from './setup/EngineUpdatesSection'
 import { StoragePanel } from './setup/StoragePanel'
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel'
+import { AnalyticsPanel } from './analytics/AnalyticsPanel'
 import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
 import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
 import { getSlot, SLOTS } from '../bootstrap/slotRegistry'
@@ -40,6 +41,7 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   secretary: 'What Off Grid AI has learned',
   'pro-plan': 'Your Pro plan',
   privacy: 'Data & privacy',
+  analytics: 'Analytics',
   backup: 'Backup & restore',
   shortcuts: 'Keyboard shortcuts',
   update: 'Software update'
@@ -200,7 +202,7 @@ export function Settings({
 
             <SettingsCard
               title="Engines"
-              summary="Keep chat, image and transcription engines current, and manage GPU components."
+              summary="Keep chat, image, video and transcription engines current, and manage GPU components."
               delay={0.135}
             >
               <PerformancePackPanel showUnavailable />
@@ -297,6 +299,13 @@ export function Settings({
               delay={0.42}
             >
               <DataPrivacyPanel />
+            </SettingsCard>
+            <SettingsCard
+              title="Analytics"
+              summary="Share anonymous usage and crash reports, see what is shared, or report a problem."
+              delay={0.43}
+            >
+              <AnalyticsPanel />
             </SettingsCard>
 
             <SettingsCard

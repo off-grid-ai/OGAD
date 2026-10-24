@@ -16,7 +16,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-export type DiagnosticWriterStats = Readonly<{
+type DiagnosticWriterStats = Readonly<{
   /** Lines accepted but not yet written. */
   bufferedRecords: number
   bufferedBytes: number

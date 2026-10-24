@@ -4,8 +4,7 @@
  * This drives the same IPC handlers as the renderer through real file reading, the
  * document engine, SQLite persistence, the project search tool, prompt assembly,
  * deletion, and profile reopen. Only process boundaries are controlled: Electron
- * registration, the MiniLM/LanceDB runtimes, and llama-server tokens over a real
- * loopback socket.
+ * registration, the embedding model, and llama-server tokens over a real loopback socket.
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -66,15 +65,6 @@ vi.mock('@huggingface/transformers', () => ({
   }
 }))
 
-vi.mock('@lancedb/lancedb', () => ({
-  connect: async () => ({
-    tableNames: async () => [],
-    openTable: async () => {
-      throw new Error('no external vector table in this profile')
-    }
-  })
-}))
-
 const event: IpcEvent = { sender: { send: () => undefined } }
 let fake: FakeLlamaServer
 
@@ -109,8 +99,10 @@ async function createCaptureTablesNow(): Promise<void> {
   const { getDB } = await import('../database')
   getDB().exec(`
     CREATE TABLE IF NOT EXISTS observations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, summary TEXT NOT NULL, surface TEXT, url TEXT,
-      category TEXT NOT NULL DEFAULT 'work', ts DATETIME DEFAULT CURRENT_TIMESTAMP, source_key TEXT
+      id INTEGER PRIMARY KEY AUTOINCREMENT, summary TEXT NOT NULL, surface TEXT, surface_app TEXT,
+      url TEXT, source_session_id TEXT, source_key TEXT, memory_id INTEGER,
+      category TEXT NOT NULL DEFAULT 'work', engagement REAL NOT NULL DEFAULT 0,
+      salience REAL NOT NULL DEFAULT 0, ts DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS observation_fts USING fts5(summary, content='observations', content_rowid='id');
     CREATE TABLE IF NOT EXISTS frames (id INTEGER PRIMARY KEY AUTOINCREMENT, image_path TEXT, text TEXT, surface TEXT, url TEXT, ts DATETIME, source TEXT);
@@ -124,6 +116,26 @@ async function createCaptureTablesNow(): Promise<void> {
   }
 }
 const createCaptureTables = createCaptureTablesNow
+
+/** A captured screen moment, as Pro's capture pipeline stores it. */
+async function captureMoment(summary: string): Promise<number> {
+  const { getDB } = await import('../database')
+  const id = Number(
+    getDB().prepare("INSERT INTO observations (summary, surface) VALUES (?, 'Notes')").run(summary)
+      .lastInsertRowid
+  )
+  getDB().prepare('INSERT INTO observation_fts(rowid, summary) VALUES (?, ?)').run(id, summary)
+  return id
+}
+
+/** The user deletes a captured moment (Pro's capture deletion removes the row and its text). */
+async function deleteMoment(id: number, summary: string): Promise<void> {
+  const { getDB } = await import('../database')
+  getDB()
+    .prepare("INSERT INTO observation_fts(observation_fts, rowid, summary) VALUES ('delete', ?, ?)")
+    .run(id, summary)
+  getDB().prepare('DELETE FROM observations WHERE id = ?').run(id)
+}
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   return (await handler(channel)(event, ...args)) as T
@@ -157,13 +169,18 @@ async function askProject(
 }
 
 const projectFiles = (answer: ProjectAnswer): string[] => [
-  ...new Set(answer.unified.filter(({ kind }) => kind === 'attachment').map(({ surface }) => surface))
+  ...new Set(
+    answer.unified.filter(({ kind }) => kind === 'attachment').map(({ surface }) => surface)
+  )
 ]
+/** Whether the answer drew on captured memory (a screen moment). */
 const usedMemory = (answer: ProjectAnswer): boolean =>
-  answer.unified.some(({ kind }) => kind === 'memory')
+  answer.unified.some(({ kind }) => kind === 'screen')
 
 /** The knowledge-base list once every file has been read and indexed. */
-async function settled(projectId: string): Promise<Array<{ id: number; name: string; enabled: boolean }>> {
+async function settled(
+  projectId: string
+): Promise<Array<{ id: number; name: string; enabled: boolean }>> {
   let rows: Array<{ id: number; name: string; enabled: boolean; state?: string }> = []
   await vi.waitFor(
     async () => {
@@ -215,8 +232,8 @@ describe('memory -> RAG -> scoped chat lifecycle', () => {
     boundary.selectedPaths = [otherDocument]
     expect(await invoke('projects:add-documents', otherProjectId)).toEqual({ added: 1 })
 
-    const memory = await invoke<{ id: number }>('db:add-memory', capturedMemory, 'integration-test')
-    expect(Number(memory.id)).toBeGreaterThan(0)
+    const memoryId = await captureMoment(capturedMemory)
+    expect(memoryId).toBeGreaterThan(0)
 
     const currentConversation = 'cedar-current'
     const siblingConversation = 'cedar-sibling'
@@ -261,7 +278,7 @@ describe('memory -> RAG -> scoped chat lifecycle', () => {
     expect(lastModelPrompt()).not.toContain(capturedMemory)
     expect(lastModelPrompt()).toContain(siblingContext)
 
-    expect(await invoke('db:delete-memory', Number(memory.id))).toBe(true)
+    await deleteMoment(memoryId, capturedMemory)
     const [oldDocument] = await invoke<Array<{ id: number; name: string }>>(
       'projects:list-documents',
       selectedProjectId
@@ -302,7 +319,7 @@ describe('memory -> RAG -> scoped chat lifecycle', () => {
 
     const reopenedDb = (await import('../database')).getDB()
     expect(
-      reopenedDb.prepare('SELECT COUNT(*) AS count FROM memories WHERE id = ?').get(memory.id)
+      reopenedDb.prepare('SELECT COUNT(*) AS count FROM observations WHERE id = ?').get(memoryId)
     ).toEqual({ count: 0 })
     // The replaced file's text left the document index: nothing holds it any more.
     expect(
@@ -328,22 +345,24 @@ describe('memory -> RAG -> scoped chat lifecycle', () => {
     expect(lastModelPrompt()).not.toContain(otherChatContext)
   })
 
-  it('includes saved memory in an All-memory answer through the public chat handler', async () => {
+  it('includes captured memory in an All-memory answer through the public chat handler', async () => {
     const fact = 'The Aurora release owner is Priya and the release code is obsidian.'
-    const saved = await invoke<{ id: number }>('db:add-memory', fact, 'integration-test')
-    expect(saved.id).toBeGreaterThan(0)
+    const id = await captureMoment(fact)
     fake.enqueue(
-      { content: '{"intent":"chat","urls":[]}' },
+      { toolCalls: [{ name: 'search_memory', args: { query: 'Aurora release owner' } }] },
       { content: 'Priya owns the Aurora release, code obsidian.' }
     )
-    const reply = await invoke<{
-      answer: string
-      context: { memories: Array<{ content: string }> }
-    }>('rag:chat', 'Who owns the Aurora release?', 'All', [], null, 'aurora-memory-chat', false, 'aurora-memory-turn', false, [])
+    const reply = await invoke<ProjectAnswer>('tools:chat', 'Who owns the Aurora release?', [], {
+      conversationId: 'aurora-memory-chat',
+      allMemory: true
+    })
     expect(reply.answer).toBe('Priya owns the Aurora release, code obsidian.')
-    expect(reply.context.memories).toEqual(expect.arrayContaining([expect.objectContaining({ content: fact })]))
+    expect(reply.unified).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'screen', snippet: expect.stringContaining(fact) })
+      ])
+    )
     expect(lastModelPrompt()).toContain(fact)
-    await invoke('db:delete-memory', saved.id)
+    await deleteMoment(id, fact)
   })
-
 })

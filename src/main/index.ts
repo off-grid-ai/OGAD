@@ -37,6 +37,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupIPC } from './ipc' // IMPORT FROM IPC ONLY
 import { initializeAIRequestLogs } from './ai-request-log-store'
+import { activateInstalledPerformancePack } from './performance-pack'
 import { setupRagIPC } from './rag-ipc'
 import { setupMcpIpc } from './mcp-ipc'
 import { registerToolExtension } from './tools'
@@ -70,7 +71,14 @@ import {
 import { PERSONAL_MESH_ENTITLEMENT_REVALIDATION_INTERVAL_MS } from '@offgrid/sync'
 import { setupLicenseIpc } from './license-ipc'
 import { nativeImage } from 'electron'
-import { purgeLegacyChatImports, getSetting, saveSetting, optimizeDB } from './database'
+import {
+  purgeLegacyChatImports,
+  getSetting,
+  saveSetting,
+  optimizeDB,
+  startIndexRebuilds,
+  stopIndexRebuilds
+} from './database'
 import { modalityQueue } from './modality-queue/queue'
 import { applyQueueConfig, readQueueConfig } from './modality-queue/config'
 import { liveMemory, registerRuntime } from './runtime-manager'
@@ -91,12 +99,16 @@ import {
   applicationShutdown,
   commitApplicationRelaunch,
   installApplicationShutdown,
-  requestApplicationRelaunch,
   registerCoreShutdownOwners
 } from './shutdown'
 import { shutdownRuntimes } from './runtime-manager'
 import { shutdownModelDownloads } from './models/download-queue'
-import { prepareInstalledOnnxCudaLibraries } from './performance-pack'
+import {
+  analytics,
+  installAnalytics,
+  registerFeatureSnapshotSource,
+  reportAppOpened
+} from './analytics'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -344,6 +356,8 @@ function startServerOnlyMode(): void {
   const override = parseGatewayLaunchOverride(process.argv, process.env)
   for (const value of override.invalid)
     writeDiagnosticLog('gateway', 'server-only.flag_ignored', { value }, 'warn')
+  // Headless startup skips setupIPC, which activates the pack for the desktop UI.
+  activateInstalledPerformancePack()
   if (process.platform === 'darwin' && app.dock) {
     try {
       app.dock.hide()
@@ -371,16 +385,23 @@ function startServerOnlyMode(): void {
 app.whenReady().then(async () => {
   // A Team-mode gateway keeps the machine awake while it serves clients.
   setGatewayPowerBlocker(powerSaveBlocker)
-  // glibc reads LD_LIBRARY_PATH when Electron starts, before an ONNX worker runs.
-  // Restart once with the verified optional libraries if this launch lacks them.
-  if (app.isPackaged && prepareInstalledOnnxCudaLibraries()) {
-    requestApplicationRelaunch(app)
-    return
-  }
+  // The NVIDIA driver version decides which CUDA engines may run; read it off the startup path.
+  void import('./nvidia-driver')
+    .then(async ({ refreshNvidiaDriverVersion }) => {
+      await refreshNvidiaDriverVersion()
+      ;(await import('./backend-facts')).invalidateBackendFacts()
+    })
+    .catch((error: unknown) => console.warn('[nvidia-driver] read failed', error))
   const { cleanupMovedModelStorage } = await import('./model-storage-move')
   const { modelsDir } = await import('./runtime-env')
   restoreCanonicalProductName()
   initializeAIRequestLogs()
+  try {
+    const { startEmbeddingIndexRebuild } = await import('./embedding-index-rebuild')
+    void startEmbeddingIndexRebuild().catch((error) => console.error('[embeddings] index rebuild failed', error))
+  } catch (error) {
+    console.error('[embeddings] index preparation failed', error)
+  }
 
   // Server-only (headless) mode: boot just the multimodal gateway + LLM runtime,
   // no window / tray / capture / CRM loops. Lets the gateway be deployed on its
@@ -561,6 +582,21 @@ app.whenReady().then(async () => {
       })
   })
 
+  // Opt-in analytics. Registered before the window loads: the preload reads consent synchronously.
+  // Nothing is sent, and no client exists, until the user opts in.
+  try {
+    installAnalytics({
+      registerShutdown: (owner) => applicationShutdown.register(owner),
+      freeMemoryMB: () => liveMemory().availableMB
+    })
+    // Video is on when a local video model is active or a remote server's video model is picked.
+    registerFeatureSnapshotSource(async () => ({
+      video_generation: Boolean((await import('./videogen')).videoGenStatus().active)
+    }))
+  } catch (error) {
+    console.error('[analytics] install failed', error)
+  }
+
   // These registrations are independent. They load together, and each failure remains isolated.
   await runIndependentStartupStages([
     {
@@ -623,6 +659,7 @@ app.whenReady().then(async () => {
   await createWindowAndScheduleModelStorageCleanup(createWindow, () =>
     cleanupMovedModelStorage(app.getPath('userData'), modelsDir())
   )
+  reportAppOpened()
 
   // loadURL/loadFile resolves after the renderer finishes loading. Give Electron
   // one more event-loop turn to present that frame before optional main-process
@@ -666,6 +703,15 @@ app.whenReady().then(async () => {
           registerRuntime(ttsRuntime)
           registerRuntime(imageRuntime)
           registerRuntime(sttRuntime)
+          // An image job frees the task engines' memory; they start again on their next use.
+          modalityQueue.registerEvictable('grounding', {
+            evict: async () =>
+              (await import('./vision/grounder-runtime')).grounderRuntime.shutdown()
+          })
+          modalityQueue.registerEvictable('decision', {
+            evict: async () =>
+              (await import('./accessibility/decision-runtime')).decisionRuntime.shutdown()
+          })
         })
       }
     },
@@ -701,7 +747,56 @@ app.whenReady().then(async () => {
       lateEffect: 'keep',
       run: async () => {
         const { llm } = await import('./llm')
-        registerRuntime(llm.runtime, { readChatBackend: () => llm.runtimeBackend() })
+        registerRuntime(llm.runtime)
+        const { installEngineResumeHealth, registerResumeHealthTarget } =
+          await import('./engine-resume-health')
+        registerResumeHealthTarget({
+          id: 'chat',
+          shouldBeRunning: () => llm.shouldBeRunning(),
+          healthCheck: () => llm.healthCheck(),
+          restart: () => llm.restartSameModel()
+        })
+        const [{ embeddings }, { ttsOnnxRuntime }, { grounderRuntime }, { decisionRuntime }] =
+          await Promise.all([
+            import('./embeddings'),
+            import('./tts'),
+            import('./vision/grounder-runtime'),
+            import('./accessibility/decision-runtime')
+          ])
+        for (const [id, runtime] of [
+          ['grounding', grounderRuntime],
+          ['decision', decisionRuntime]
+        ] as const) {
+          registerResumeHealthTarget({
+            id,
+            shouldBeRunning: () => runtime.shouldBeRunning(),
+            healthCheck: () => runtime.health(),
+            restart: () => runtime.restart()
+          })
+        }
+        // A helper that died while asleep restarts on its next request; restart a running one
+        // so it does not hold a lost GPU context.
+        for (const [id, helper] of [
+          ['search', embeddings],
+          ['voice', ttsOnnxRuntime]
+        ] as const) {
+          registerResumeHealthTarget({
+            id,
+            shouldBeRunning: () => helper.isRunning,
+            healthCheck: async () => !helper.isRunning,
+            restart: () => helper.restart()
+          })
+        }
+        const disposeResumeHealth = installEngineResumeHealth()
+        // Windows: test the pack's ONNX CUDA addon once per pack and driver, in a helper.
+        void import('./onnx-host/onnx-cuda-probe')
+          .then(async ({ probeOnnxCuda }) => {
+            if (!(await probeOnnxCuda())) return
+            ;(await import('./backend-facts')).invalidateBackendFacts()
+            await Promise.all([embeddings.restart(), ttsOnnxRuntime.restart()])
+          })
+          .catch((error: unknown) => console.warn('[ONNX] CUDA check failed to run', error))
+        app.once('will-quit', disposeResumeHealth)
         applyQueueConfig(modalityQueue, readQueueConfig(getSetting))
         // Models stay loaded while they fit live memory; the queue frees only what it must.
         modalityQueue.setMemoryProbe(liveMemory)
@@ -741,6 +836,43 @@ app.whenReady().then(async () => {
   setTimeout(() => {
     void import('./documents').then((documents) => documents.collectDocumentGarbage())
   }, 120_000).unref()
+
+  // Background index work, once start-up has settled, a short slice at a time: full-text indexes
+  // built by an older schema are rebuilt beside the old ones (which keep answering until each
+  // rebuild finishes), and rows that predate the memory-search triggers are queued for embedding.
+  const indexWork = setTimeout(() => {
+    void import('./records')
+      .then((records) => records.ensureRecordSchema())
+      .catch((error: unknown) => console.error('[search index] schema check failed', error))
+      .finally(startIndexRebuilds)
+  }, 15_000)
+  indexWork.unref()
+  // Embed the memory-search backlog (records queued by their tables' triggers): once shortly after
+  // launch, then every few minutes for what was added since. Core owns this, so builds without
+  // Pro index chats and people too.
+  const embedBacklog = (): void => {
+    void import('./records')
+      .then((records) =>
+        records.embedRecordBacklog((progress) => {
+          if (progress.remaining % 200 === 0)
+            console.log(`[search index] ${progress.done} embedded, ${progress.remaining} left`)
+        })
+      )
+      .catch((error: unknown) => console.error('[search index]', error))
+  }
+  const firstEmbed = setTimeout(embedBacklog, 20_000)
+  firstEmbed.unref()
+  const embedTimer = setInterval(embedBacklog, 5 * 60_000)
+  embedTimer.unref()
+  applicationShutdown.register({
+    name: 'core:background-indexing',
+    shutdown: () => {
+      clearTimeout(indexWork)
+      clearTimeout(firstEmbed)
+      clearInterval(embedTimer)
+      stopIndexRebuilds()
+    }
+  })
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow()
@@ -804,6 +936,10 @@ app.on('before-quit', (event) => {
     // Buffered diagnostics are written now rather than lost with the process. Bounded, so a
     // stalled disk delays quit by at most the flush timeout.
     await flushDiagnosticLog()
+    // A clean quit: clear the in-flight marker and send queued analytics (bounded by the client).
+    await analytics()
+      .shutdown()
+      .catch(() => {})
     commitApplicationRelaunch(app)
     app.quit()
   })()

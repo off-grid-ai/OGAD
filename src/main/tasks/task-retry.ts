@@ -66,7 +66,7 @@ interface TaskRetryServiceOptions {
 }
 
 export const TASK_RETRY_TRACE = 'RETRY · Resumed from the failed checkpoint.'
-export const TASK_CONTINUE_TRACE = 'CONTINUE · Resumed from the saved checkpoint.'
+const TASK_CONTINUE_TRACE = 'CONTINUE · Resumed from the saved checkpoint.'
 
 function taskGuidanceId(context: string | null): string | undefined {
   if (!context) return undefined
@@ -78,7 +78,7 @@ function taskGuidanceId(context: string | null): string | undefined {
   }
 }
 
-export function retryGuidanceFromMessages(
+function retryGuidanceFromMessages(
   taskId: string,
   messages: readonly Pick<RagMessage, 'content' | 'context'>[]
 ): string[] {

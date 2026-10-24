@@ -1,0 +1,132 @@
+/**
+ * The opt-in analytics contract shared by main, preload and the renderer.
+ *
+ * docs/ANALYTICS.md is the specification. This file holds only the values both sides of the IPC
+ * bridge must agree on: the consent shape, the settings keys, the channels and the events and
+ * flows the renderer is allowed to report. Main validates every renderer report against these
+ * lists, so the renderer can never widen what is sent.
+ */
+
+export const ANALYTICS_SETTING_KEYS = {
+  usage: 'analyticsUsage',
+  crashes: 'analyticsCrashes',
+  asked: 'analyticsAsked',
+  lastPromptAt: 'analyticsLastPromptAt',
+  installId: 'analyticsInstallId',
+  /** The day the last daily `features_snapshot` went, so a relaunch does not send another. */
+  snapshotDay: 'analyticsSnapshotDay'
+} as const
+
+export type AnalyticsSettingKey =
+  (typeof ANALYTICS_SETTING_KEYS)[keyof typeof ANALYTICS_SETTING_KEYS]
+
+export const ANALYTICS_SETTING_KEY_LIST: readonly AnalyticsSettingKey[] =
+  Object.values(ANALYTICS_SETTING_KEYS)
+
+export function isAnalyticsSettingKey(key: string): key is AnalyticsSettingKey {
+  return (ANALYTICS_SETTING_KEY_LIST as readonly string[]).includes(key)
+}
+
+/** What the user chose on this device. Off until they turn it on. */
+export interface AnalyticsConsent {
+  usage: boolean
+  crashes: boolean
+  /** The user saw a consent choice (the setup checkbox or a prompt). */
+  asked: boolean
+  /** When a prompt last asked, in epoch ms. */
+  lastPromptAt: number | null
+}
+
+export const ANALYTICS_CONSENT_OFF: AnalyticsConsent = {
+  usage: false,
+  crashes: false,
+  asked: false,
+  lastPromptAt: null
+}
+
+export const OPT_IN_SOURCES = ['setup', 'settings', 'failure_prompt', 'first_chat_prompt'] as const
+export type OptInSource = (typeof OPT_IN_SOURCES)[number]
+
+/** Which consent prompt main asks the renderer to show. */
+export type AnalyticsPromptKind = 'failure' | 'first_chat'
+
+export const ANALYTICS_CHANNELS = {
+  consentSync: 'analytics:consent-sync',
+  consentChanged: 'analytics:consent-changed',
+  setConsent: 'analytics:set-consent',
+  optIn: 'analytics:opt-in',
+  dismissPrompt: 'analytics:dismiss-prompt',
+  prompt: 'analytics:prompt',
+  capture: 'analytics:capture',
+  flow: 'analytics:flow',
+  rendererError: 'analytics:renderer-error',
+  readLog: 'analytics:read-log',
+  emailLog: 'analytics:email-log',
+  revealLog: 'analytics:reveal-log'
+} as const
+
+export const FEATURES = [
+  'voice_input',
+  'tts',
+  'image_generation',
+  'video_generation',
+  'vision',
+  'web_search',
+  'tools',
+  'mcp_tool',
+  'remote_server',
+  'browser_action',
+  'clipboard',
+  'meetings',
+  'sync'
+] as const
+export type AnalyticsFeature = (typeof FEATURES)[number]
+
+export const FLOW_STEPS = {
+  onboarding: ['setup_shown', 'download_started', 'download_done', 'model_loaded', 'first_message'],
+  model_transfer: ['opened', 'device_picked', 'model_picked', 'started'],
+  sync_pairing: ['opened', 'code_shown', 'code_entered', 'paired'],
+  remote_server: ['opened', 'address_entered', 'tested', 'connected'],
+  voice_setup: ['opened', 'model_picked', 'downloaded'],
+  image_setup: ['opened', 'model_picked', 'downloaded'],
+  video_setup: ['opened', 'model_picked', 'downloaded'],
+  connector_add: ['opened', 'connector_picked', 'authorised'],
+  pro_upgrade: ['gate_shown', 'paywall_viewed', 'trial_started', 'purchased']
+} as const
+export type AnalyticsFlow = keyof typeof FLOW_STEPS
+export type FlowStep<F extends AnalyticsFlow = AnalyticsFlow> = (typeof FLOW_STEPS)[F][number]
+export type FlowOutcome = 'done' | 'failed' | 'cancelled'
+
+/** One flow report from the renderer. Main owns the timing. */
+export type FlowReport =
+  | { flow: AnalyticsFlow; action: 'start' }
+  | {
+      flow: AnalyticsFlow
+      action: 'step'
+      step: string
+      /** `pro_upgrade` gate_shown: which Pro feature. `connector_add` connector_picked: catalog id or `custom`. */
+      detail?: string
+    }
+  | { flow: AnalyticsFlow; action: 'finish'; outcome: FlowOutcome; errorCode?: string }
+
+/** Events the renderer may report, with the only properties main will forward. */
+export interface RendererAnalyticsEvents {
+  screen_viewed: { screen: string; prev_screen: string | null; prev_ms: number }
+  message_sent: { has_image: boolean; has_document: boolean; tools_enabled: boolean }
+  reply_regenerated: Record<string, never>
+  feature_used: { feature: AnalyticsFeature }
+  problem_reported: Record<string, never>
+}
+export type RendererAnalyticsEvent = keyof RendererAnalyticsEvents
+
+/** A renderer error, before main scrubs it. */
+export interface RendererErrorReport {
+  name?: string
+  message?: string
+  stack?: string
+}
+
+export const SUPPORT_EMAIL = 'support@getoffgridai.co'
+
+/** Days between two consent prompts after a failure. */
+export const FAILURE_PROMPT_INTERVAL_DAYS = 30

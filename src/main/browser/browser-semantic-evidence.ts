@@ -35,7 +35,7 @@ export function createBrowserSemanticEvidenceRecorder(
   })
   const executionDevice = getTaskExecutionDevice()
   return async (observation) => {
-    const screenshot = await screen.capture()
+    const screenshot = observation.screenshot ?? (await screen.capture())
     appendTaskStepDetail(
       input.taskId,
       'web_use',

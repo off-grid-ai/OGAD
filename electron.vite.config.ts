@@ -126,12 +126,6 @@ export default defineConfig({
       // embeddings.ts can spawn it by path. It must not be folded into the main chunk: the point
       // is that native ONNX inference runs off the thread that owns the window.
       rollupOptions: {
-        // Rollup hoists external require() calls above source imports. The CUDA
-        // pack must be selected before its first ONNX Runtime import, including
-        // in the embedding and speech workers.
-        output: {
-          banner: readFileSync(resolve('scripts/windows-onnx-cuda-preload.cjs'), 'utf8')
-        },
         input: {
           index: resolve('src/main/index.ts'),
           'embeddings-worker': resolve('src/main/embeddings-worker.ts'),

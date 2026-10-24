@@ -30,14 +30,11 @@ export interface ProViewContext {
   onSearchSourcesChange: (s: string[]) => void
   searchSort: 'relevance' | 'recency' | 'match'
   onSearchSortChange: (s: 'relevance' | 'recency' | 'match') => void
-  selectedMemoryId: number | null
-  setSelectedMemoryId: (id: number | null) => void
   selectedEntityId: number | null
   // The meeting-recorder handle (typed loosely so core needn't know its shape).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rec: any
   onSelectEntity: (id: number) => void
-  onSelectMemory: (id: number) => void
   onOpenHit: (hit: SearchHit) => void
   openChatOwner: (target: { conversationId?: string; openGallery?: boolean }) => void
 }

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { IconChevronDown } from '@tabler/icons-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible'
 
-export interface SidebarNavigationGroup<Item extends { view: string; label: string }> {
+interface SidebarNavigationGroup<Item extends { view: string; label: string }> {
   label: string
   icon: ReactNode
   items: readonly Item[]

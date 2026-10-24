@@ -16,6 +16,7 @@ import { documentEmbedder, documentReranker } from './models'
 import { conversationDocuments, referencedDocumentIds } from './conversation-documents'
 import { knowledgeBaseDocumentIds, projectDocuments } from './project-documents'
 import { pageOcr, shutdownOcr } from './ocr'
+import { getDB, tableExists } from '../database'
 
 /** Foreground work (a chat reply, an image, speech) is running or waiting to run. */
 async function foregroundBusy(): Promise<boolean> {
@@ -85,7 +86,61 @@ const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 async function documentsInUse(): Promise<Set<string>> {
   const used = await referencedDocumentIds()
   for (const id of await knowledgeBaseDocumentIds()) used.add(id)
+  for (const { document_id } of keptDocumentsTable().prepare('SELECT document_id FROM kept_documents').all() as {
+    document_id: string
+  }[])
+    used.add(document_id)
   return used
+}
+
+let keptReady: object | undefined
+
+/** Documents kept by an owner outside chats (a meeting transcript, a long dictation). */
+function keptDocumentsTable(): ReturnType<typeof getDB> {
+  const db = getDB()
+  if (keptReady !== db) {
+    db.exec(`CREATE TABLE IF NOT EXISTS kept_documents (
+      owner TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_kept_documents_document ON kept_documents(document_id);`)
+    keptReady = db
+  }
+  return db
+}
+
+/** `owner` (e.g. "meeting:12") keeps `documentId`: cache cleanup never drops it while kept. */
+export function keepDocument(owner: string, documentId: string): void {
+  keptDocumentsTable()
+    .prepare('INSERT INTO kept_documents (owner, document_id) VALUES (?, ?) ON CONFLICT(owner) DO UPDATE SET document_id = excluded.document_id')
+    .run(owner, documentId)
+}
+
+/** `owner` no longer keeps its document; cleanup may drop it when nothing else uses it. */
+export function releaseDocument(owner: string): void {
+  keptDocumentsTable().prepare('DELETE FROM kept_documents WHERE owner = ?').run(owner)
+}
+
+/**
+ * Release every document kept by an owner `${prefix}:<id>` whose row in `table` is gone (a
+ * privacy clear or retention deleted the rows directly, not through their owner's delete). All of
+ * them when the table does not exist. Returns how many were released.
+ */
+export function releaseDocumentsOfDeletedOwners(prefix: string, table: string): number {
+  const db = keptDocumentsTable()
+  const owner = `${prefix}:`
+  const ownedHere = 'substr(owner, 1, ?) = ?'
+  if (!tableExists(db, table)) {
+    return db
+      .prepare(`DELETE FROM kept_documents WHERE ${ownedHere}`)
+      .run(owner.length, owner).changes
+  }
+  return db
+    .prepare(
+      `DELETE FROM kept_documents WHERE ${ownedHere}
+         AND CAST(substr(owner, ?) AS INTEGER) NOT IN (SELECT id FROM ${table})`
+    )
+    .run(owner.length, owner, owner.length + 1).changes
 }
 
 /** Drop document caches nothing references and that went unused for 30 days. */
@@ -97,10 +152,16 @@ export async function collectDocumentGarbage(): Promise<void> {
   }
 }
 
+/** Drop documents nothing uses (no chat, knowledge base or owner keeps them), now. Throws on
+ *  failure: a privacy delete must not report success while the text remains. */
+export async function removeUnreferencedDocuments(): Promise<void> {
+  await documentIngest.collectGarbage(await documentsInUse(), 0)
+}
+
 /** A conversation or knowledge-base file was deleted: drop documents nothing else uses, now. */
 export async function forgetUnreferencedDocuments(): Promise<void> {
   try {
-    await documentIngest.collectGarbage(await documentsInUse(), 0)
+    await removeUnreferencedDocuments()
   } catch (error) {
     warn('Removing documents of a deleted chat failed', error)
   }

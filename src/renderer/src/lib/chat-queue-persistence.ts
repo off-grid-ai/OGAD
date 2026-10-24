@@ -9,7 +9,7 @@ export type QueuedAttachmentReference = Pick<
 > & { text?: string }
 export type PersistedQueuedTurn = Omit<QueuedTurn, 'atts'> & { atts: QueuedAttachmentReference[] }
 
-export function persistedQueuedTurn(item: QueuedTurn): PersistedQueuedTurn {
+function persistedQueuedTurn(item: QueuedTurn): PersistedQueuedTurn {
   return {
     ...(item.id ? { id: item.id } : {}),
     text: item.text,

@@ -1,3 +1,5 @@
+import { videoArchitecture } from '@offgrid/models'
+
 // Pure image-model filename classifier used by the model picker. No fs — the
 // caller lists the models dir and runs each entry through isImageModelFile.
 
@@ -14,6 +16,7 @@ const DIFFUSION_FAMILY =
 
 /** Whether a filename in the models dir is a pickable image model. */
 export function isImageModelFile(f: string): boolean {
+  if (videoArchitecture(f)) return false
   if (EXCLUDE.test(f)) return false
   // Custom checkpoints (Civitai etc.) ship as a single .safetensors.
   if (/\.safetensors$/i.test(f)) return true

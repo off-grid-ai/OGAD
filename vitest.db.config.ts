@@ -99,7 +99,7 @@ export default defineConfig({
         'pro/renderer/**/*.ts',
         'pro/renderer/**/*.tsx'
       ],
-      reporter: ['text-summary', 'json-summary', 'json'],
+      reporter: ['text', 'text-summary', 'json-summary', 'json'],
       reportsDirectory: 'coverage-db'
     }
   }

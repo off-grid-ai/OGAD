@@ -12,6 +12,7 @@ device** — no cloud inference, no account, no API key. Each feature has its ow
 | [The Gateway](features/gateway.md)               | One local OpenAI-compatible API for every model — chat, vision, image, audio, embeddings. |
 | [Chat](features/chat.md)                         | Text + vision + reasoning, streaming, tabs, tools, voice mode, project scoping.           |
 | [Image generation](features/image-generation.md) | Text→image and image→image (SDXL GGUFs), styles, LoRA, live previews.                     |
+| [Video generation](features/video-generation.md) | Silent Wan clips, chat tools, playback, and an asynchronous video API. |
 | [Voice & speech](features/voice.md)              | Speech→text (whisper) and text→speech (Kokoro), hands-free voice mode.                    |
 | [Projects (RAG)](features/projects.md)           | Group chats, upload docs, chat grounded in them with cited retrieval.                     |
 | [Artifacts](features/artifacts.md)               | HTML / React / SVG / Mermaid / Markdown rendered in a sandboxed canvas.                   |
@@ -22,7 +23,7 @@ device** — no cloud inference, no account, no API key. Each feature has its ow
 
 | Topic                                                | What it covers                                                  |
 | ---------------------------------------------------- | --------------------------------------------------------------- |
-| [Privacy & data](features/privacy.md)                | 100% local inference, encryption at rest, fully offline.        |
+| [Privacy & data](features/privacy.md)                | Local inference, encryption at rest, offline, opt-in analytics. |
 | [Architecture (open core)](features/architecture.md) | The AGPL core, the `pro/` submodule, and the `activate()` seam. |
 | [Off Grid AI Pro](features/pro.md)                   | The sees / remembers / acts layer — **coming July 2026**.       |
 

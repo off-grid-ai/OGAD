@@ -910,3 +910,11 @@ scan and pair the exact Desktop. Android is not required to close the Desktop vi
 
 **Required change:** list every downloaded speech and transcription model through its existing runtime routing.
 Check that an arbitrary Hugging Face image pack is complete before offering it for image generation.
+
+### 2026-10-23: Analytics flow details checked against a shared allowlist in main
+
+**Source:** review of https://github.com/off-grid-ai/OGAD/pull/213 (CodeRabbit thread on `src/main/analytics/service.ts`).
+
+Main accepts a `connector_add` connector id and a `pro_upgrade` feature when the value has the catalog-id shape. The renderer sends only catalog ids or `custom`, but main does not check the value against the catalog itself.
+
+**Required change:** move the connector ids and Pro routes into one data-only module in `src/shared`. The renderer catalogs and the analytics service both read it. Main keeps known connector ids and maps any other value to `custom`. Main keeps known Pro routes and drops any other `feature`.

@@ -17,9 +17,9 @@ import {
 } from '@phosphor-icons/react'
 
 export type PresetCapability = 'browser' | 'computer-use' | 'memory' | 'phone' | 'creation'
-export type DemoReadiness = 'robust' | 'needs-setup' | 'needs-data'
+type DemoReadiness = 'robust' | 'needs-setup' | 'needs-data'
 export type PresetRequirement = 'pro' | 'phone-paired' | 'capture-history' | 'image-model'
-export type PresetFieldKind =
+type PresetFieldKind =
   | 'text'
   | 'textarea'
   | 'select'
@@ -29,7 +29,7 @@ export type PresetFieldKind =
   | 'style'
   | 'image'
 
-export interface PresetFieldOption {
+interface PresetFieldOption {
   value: string
   label: string
 }
@@ -48,7 +48,7 @@ export interface PresetIntakeField {
   promptSuffix?: string
 }
 
-export interface PresetIntake {
+interface PresetIntake {
   title: string
   description: string
   recommendedConnector?: string

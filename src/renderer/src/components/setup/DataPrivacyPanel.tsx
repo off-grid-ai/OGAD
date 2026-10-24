@@ -7,7 +7,7 @@ import { GlyphSwap, IconTip } from '../IconTip'
 import { Section } from '@offgrid/operator-ui/operator/experience'
 
 interface DataCategory {
-  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images'
+  id: 'chats' | 'memories' | 'captures' | 'meetings' | 'images' | 'videos'
   label: string
   detail: string
   count?: number

@@ -19,7 +19,7 @@
 import { createPublicKey, verify } from 'node:crypto'
 import { parsePerformancePackAsset, type PerformancePackAsset } from './performance-pack'
 
-export const ENGINE_STORE_ORIGIN = 'https://runtime.getoffgridai.co'
+const ENGINE_STORE_ORIGIN = 'https://runtime.getoffgridai.co'
 
 /** The Ed25519 key that signs every published engine index (SPKI, base64 DER). */
 export const ENGINE_SIGNING_PUBLIC_KEY =
@@ -39,7 +39,7 @@ export interface EngineFile {
   mode?: number
 }
 
-export interface EngineLink {
+interface EngineLink {
   path: string
   /** Symlink target, relative to the link's own folder (Linux shared-library versions). */
   target: string
@@ -68,7 +68,7 @@ export interface EngineIndex {
   performancePack?: PerformancePackAsset
 }
 
-export type EngineUpdatePhase =
+type EngineUpdatePhase =
   | 'unsupported'
   | 'disabled'
   | 'idle'
@@ -95,7 +95,7 @@ const SAFE_VERSION = /^[A-Za-z0-9._-]{1,64}$/
 const MAX_FILE_BYTES = 4 * 1024 ** 3
 
 /** A relative path that stays inside the engine folder on every platform. */
-export function safeEnginePath(value: unknown): value is string {
+function safeEnginePath(value: unknown): value is string {
   if (typeof value !== 'string' || !value || value.length > 300) return false
   const segments = value.split('/')
   return segments.every(
@@ -218,7 +218,7 @@ function versionParts(version: string): number[] {
 }
 
 /** Whether `appVersion` is at least `minimum` (numeric dotted versions; pre-release tags ignored). */
-export function appVersionAtLeast(appVersion: string, minimum: string): boolean {
+function appVersionAtLeast(appVersion: string, minimum: string): boolean {
   const app = versionParts(appVersion.split('-')[0] ?? appVersion)
   const min = versionParts(minimum.split('-')[0] ?? minimum)
   for (let i = 0; i < Math.max(app.length, min.length); i++) {

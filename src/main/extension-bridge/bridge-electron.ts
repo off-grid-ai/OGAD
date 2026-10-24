@@ -349,7 +349,16 @@ const settingsStore = createSettingsStore({
     }
   },
   setText: async (patch: TextSettings) => {
-    await llm.setSettings(patch)
+    // A null layer count is Auto: llama.cpp places the layers itself.
+    const { gpuLayers, ...rest } = patch
+    await llm.setSettings({
+      ...rest,
+      ...(gpuLayers === null
+        ? { gpuPlacement: 'auto' as const }
+        : typeof gpuLayers === 'number'
+          ? { gpuLayers, gpuPlacement: 'manual' as const }
+          : {})
+    })
   },
   activeIds: readActiveModelIds,
   web: getWebUseSettings,
@@ -525,10 +534,11 @@ const data: BridgeData = {
     const { setTaskRoleFromRequest } = await import('../task-role-requests')
     return setTaskRoleFromRequest(request)
   },
-  vault: async (request, browser) =>
+  vault: async (request, browser, kinds) =>
     callHookAsync(HOOKS.extensionVaultRequest, request, {
       deviceName: browser.name,
-      deviceId: browser.id
+      deviceId: browser.id,
+      ...(kinds ? { kinds } : {})
     }),
   readSettings: (section) => settingsStore.read(section),
   writeSettings: (section, patch) => settingsStore.write(section, patch)

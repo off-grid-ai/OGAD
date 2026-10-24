@@ -65,7 +65,7 @@ describe('rendered multimodal onboarding journey', () => {
     await waitFor(() => expect(renderedText()).toContain('Your devices work as one'))
     expect(renderedText()).toContain('choose a paired Desktop by name')
     expect(renderedText()).toContain(
-      'See and switch the active Chat, Image, Transcription, Voice, and Computer Use model'
+      'See and switch the active Chat, Image, Video, Transcription, Voice, and Computer Use model'
     )
 
     await user.click(screen.getByRole('button', { name: 'Continue' }))
