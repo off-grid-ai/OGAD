@@ -2075,6 +2075,40 @@ export async function activateModel(
   return result
 }
 
+/** The file an image or video engine loads for a catalog or package id, or undefined. */
+async function mediaModelFileName(
+  modal: 'image' | 'video',
+  modelId: string
+): Promise<string | undefined> {
+  try {
+    const CATALOG = await desktopCatalog()
+    const e = CATALOG.find((m) => m.id === modelId)
+    const downloaded = downloadedVariant(
+      reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG as unknown as CatalogEntry[]),
+      modelId
+    )
+    const { isSupportedVideoWeight } = await import('@offgrid/models')
+    // A video pack's weight is the file the engine loads, not the pack's first file.
+    return modal === 'video' && downloaded
+      ? downloaded.files.find((file) => isSupportedVideoWeight(file))
+      : e
+        ? primaryFileName(e as unknown as CatalogEntry)
+        : downloaded
+          ? downloadedPrimary(downloaded)
+          : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The video pack file for an id a client picked from /v1/models/catalog. A video request names
+ * the model the same way activation does, so both resolve it here.
+ */
+export function videoModelFileName(modelId: string): Promise<string | undefined> {
+  return mediaModelFileName('video', modelId)
+}
+
 export async function setActiveModalChoice(
   kind: string,
   modelId: string | null
@@ -2089,30 +2123,7 @@ export async function setActiveModalChoice(
     // The image resolver loads by FILENAME, but the UI passes a catalog id — map it
     // to the entry's primary filename so an in-app pick (e.g. Juggernaut) takes effect.
     if (modelId && (modal === 'image' || modal === 'video')) {
-      try {
-        const CATALOG = await desktopCatalog()
-        const e = CATALOG.find((m) => m.id === modelId)
-        const downloaded = downloadedVariant(
-          reconcileDownloadedModelRegistry(
-            llm.getModelsDir(),
-            CATALOG as unknown as CatalogEntry[]
-          ),
-          modelId
-        )
-        const { isSupportedVideoWeight } = await import('@offgrid/models')
-        // A video pack's weight is the file the engine loads, not the pack's first file.
-        const fname =
-          modal === 'video' && downloaded
-            ? downloaded.files.find((file) => isSupportedVideoWeight(file))
-            : e
-              ? primaryFileName(e as unknown as CatalogEntry)
-              : downloaded
-                ? downloadedPrimary(downloaded)
-                : undefined
-        if (fname) stored = fname
-      } catch {
-        /* keep modelId as-is */
-      }
+      stored = (await mediaModelFileName(modal, modelId)) ?? modelId
     }
     setModal(modal, stored)
     if (modal === 'video') deactivateRemoteVisionMediaModel('video')
