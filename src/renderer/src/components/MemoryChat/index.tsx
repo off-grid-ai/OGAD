@@ -2202,7 +2202,9 @@ export function MemoryChat({
         setVideoGenConv(convId)
         try {
           // An attached photo is the start image (or, if Pro asks, a person to keep).
-          const startImage = atts.find((attachment) => attachment.kind === 'image' && attachment.path)
+          const startImage = atts.find(
+            (attachment) => attachment.kind === 'image' && attachment.path
+          )
           const request = {
             prompt: trimmed,
             conversationId: convId,
@@ -2220,7 +2222,7 @@ export function MemoryChat({
             ])
             return
           }
-          const video = await controller.generate(request)
+          const video = await controller.generate({ ...request, storeReply: true })
           const videoMetadata = {
             width: video.width,
             height: video.height,
@@ -2234,11 +2236,14 @@ export function MemoryChat({
             { videoMetadata, durationMs: video.durationMs },
             { id: video.syncId, path: video.path }
           )
-          const stored = await window.api.addRagMessage(convId, 'assistant', content, context)
+          // The job stores the reply itself (it survives this window reloading mid-render).
+          const storedId =
+            video.messageId ??
+            (await window.api.addRagMessage(convId, 'assistant', content, context)).uuid
           setConvMessages(convId, (previous) => [
-            ...previous,
+            ...previous.filter((message) => message.id !== storedId),
             {
-              id: stored.uuid,
+              id: storedId,
               role: 'assistant',
               content,
               context,
@@ -2247,7 +2252,7 @@ export function MemoryChat({
               generationTimeMs: video.durationMs
             }
           ])
-          await chatVideo()?.acknowledge(convId, stored.uuid)
+          if (!video.messageId) await chatVideo()?.acknowledge(convId, storedId)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           if (!/stopped|cancel/i.test(message)) {

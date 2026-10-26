@@ -10,6 +10,8 @@ import type {
 export type ChatVideoRequest = VideoGenerationRequestContract & {
   conversationId: string
   projectId?: string | null
+  /** The job stores the chat's "Generated for" reply itself (the composer's Video mode). */
+  storeReply?: boolean
 }
 
 export interface ChatVideoState {
@@ -25,7 +27,10 @@ export interface ChatVideoController {
   getState(): ChatVideoState
   subscribe(listener: () => void): () => void
   refresh(): void
-  generate(request: ChatVideoRequest): Promise<VideoGenerationResultContract>
+  /** `messageId`: the chat reply the job already stored for this clip. */
+  generate(
+    request: ChatVideoRequest
+  ): Promise<VideoGenerationResultContract & { messageId?: string }>
   cancel(): Promise<boolean>
   acknowledge(conversationId: string, messageId: string): Promise<boolean>
   /**
