@@ -2083,10 +2083,22 @@ async function mediaModelFileName(
   try {
     const CATALOG = await desktopCatalog()
     const e = CATALOG.find((m) => m.id === modelId)
-    const downloaded = downloadedVariant(
-      reconcileDownloadedModelRegistry(llm.getModelsDir(), CATALOG as unknown as CatalogEntry[]),
-      modelId
-    )
+    // The catalog's own pack wins when all its files are here; a variant of the same family
+    // (another quantization) stands in only when it is not.
+    const catalogPackHere =
+      e &&
+      (e.files as { name: string }[]).every(
+        (file) => fileSizeOf(llm.getModelsDir(), file.name) > 0
+      )
+    const downloaded = catalogPackHere
+      ? undefined
+      : downloadedVariant(
+          reconcileDownloadedModelRegistry(
+            llm.getModelsDir(),
+            CATALOG as unknown as CatalogEntry[]
+          ),
+          modelId
+        )
     const { isSupportedVideoWeight } = await import('@offgrid/models')
     // A video pack's weight is the file the engine loads, not the pack's first file.
     return modal === 'video' && downloaded
