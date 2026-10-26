@@ -35,7 +35,7 @@ import {
 } from '../utlis'
 import { ChatImagePreview } from './ChatImagePreview'
 import { ChatVideoPreview } from './ChatVideoPreview'
-import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
+import { getSlot, SLOTS, useSlotRevision } from '@/bootstrap/slotRegistry'
 import { NoticeMessageRow } from './NoticeMessageRow'
 import { PromptEnhancementMessageRow } from './PromptEnhancementMessageRow'
 import { ToolMessageTimelineRow } from './ToolMessageTimelineRow'
@@ -485,6 +485,8 @@ function MessageBubble({
   navigation: ContextNavigation
 }>): React.JSX.Element {
   const editing = state.editingId === message.id
+  // Pro fills the clip and film slots after the first screen; a new revision remounts them.
+  const slotRevision = useSlotRevision()
   const artifact = message.role === 'assistant' ? parseArtifact(message.content) : null
   const ask = message.role === 'assistant' ? parseAsk(message.content) : null
   const selected = state.askSelections[message.id] ?? []
@@ -510,10 +512,10 @@ function MessageBubble({
         />
       ) : null}
       {message.videoPath ? (
-        <VideoCardSlot messageId={message.id} videoPath={message.videoPath} />
+        <VideoCardSlot key={slotRevision} messageId={message.id} videoPath={message.videoPath} />
       ) : null}
       {message.context?.videoStoryId ? (
-        <FilmCardSlot storyId={message.context.videoStoryId} />
+        <FilmCardSlot key={slotRevision} storyId={message.context.videoStoryId} />
       ) : null}
       {message.image ? (
         <ChatImagePreview

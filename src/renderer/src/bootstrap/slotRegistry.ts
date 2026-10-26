@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import { useSyncExternalStore, type ComponentType } from 'react'
 
 // Component-slot seam. Pro registers UI components into named slots inside core
 // screens during activation; core renders whatever is registered and renders its
@@ -7,10 +7,17 @@ import type { ComponentType } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const slots: Record<string, ComponentType<any>> = {}
+const listeners = new Set<() => void>()
+let revision = 0
+const notify = (): void => {
+  revision += 1
+  listeners.forEach((listener) => listener())
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerSlot(name: string, component: ComponentType<any>): void {
   slots[name] = component
+  notify()
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,6 +27,22 @@ export function getSlot(name: string): ComponentType<any> | undefined {
 
 export function clearRegisteredSlots(): void {
   for (const name of Object.keys(slots)) delete slots[name]
+  notify()
+}
+
+/**
+ * Changes whenever a slot is filled or cleared. Pro's renderer loads after the first screen, so a
+ * component that read `getSlot` once (a memoised chat row) kept the empty slot until it remounted;
+ * keyed by this, it remounts and reads the slot Pro filled.
+ */
+export function useSlotRevision(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => revision
+  )
 }
 
 /** Known slot names, centralised so core and pro stay in sync. */
