@@ -15,6 +15,8 @@ export type ChatVideoRequest = VideoGenerationRequestContract & {
 export interface ChatVideoState {
   /** A video model and engine are ready here or on a remote server. */
   available: boolean
+  /** An installed video model can start from an image (a photo, or a clip's last frame). */
+  startImage: boolean
   job: VideoGenerationJobContract | null
 }
 
@@ -37,7 +39,7 @@ export interface ChatVideoController {
 
 export const CHAT_VIDEO_HOOK = 'chat.video'
 
-const NONE: ChatVideoState = { available: false, job: null }
+const NONE: ChatVideoState = { available: false, startImage: false, job: null }
 const noSubscription = (): (() => void) => () => {}
 
 export function chatVideo(): ChatVideoController | undefined {

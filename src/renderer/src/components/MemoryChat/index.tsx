@@ -662,7 +662,11 @@ export function MemoryChat({
   const [showImageOptions, setShowImageOptions] = useState(false)
   const [imageAvailable, setImageAvailable] = useState(false)
   const videoController = chatVideo()
-  const { available: videoAvailable, job: videoJob } = useChatVideoState()
+  const {
+    available: videoAvailable,
+    startImage: videoStartImage,
+    job: videoJob
+  } = useChatVideoState()
   const [videoGenConv, setVideoGenConv] = useState<string | null>(null)
   const videoCancelPendingRef = useRef(new Set<string>())
   const generatingVideo = videoGenConv !== null && videoGenConv === activeConversationId
@@ -5745,9 +5749,12 @@ export function MemoryChat({
                                 <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
                                   <Paperclip /> Attach files
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
-                                  <ImageIcon /> Add image
-                                </DropdownMenuItem>
+                                {/* In video mode an image is the start image: only a model that takes one gets it. */}
+                                {(mode !== 'video' || videoStartImage) && (
+                                  <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
+                                    <ImageIcon /> Add image
+                                  </DropdownMenuItem>
+                                )}
                                 {!god && (
 <><DropdownMenuItem
                                   disabled={!imageAvailable}
