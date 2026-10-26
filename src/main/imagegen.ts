@@ -623,7 +623,10 @@ export function expectedImageResidentMB(preferred?: string): number | undefined 
 export async function generateImage(
   params: ImageGenParams,
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** `countAsGeneration: false` runs the job but leaves it out of usage statistics, for an image
+   *  that is part of another feature (a Studio key still). */
+  options: { countAsGeneration?: boolean } = {}
 ): Promise<ImageGenOutput> {
   return recordAIRequest(
     {
@@ -631,6 +634,7 @@ export async function generateImage(
       source: 'Image generation',
       model: params.model,
       request: params,
+      ...(options.countAsGeneration === false ? { countAsGeneration: false } : {}),
       isCancelled: (error) => error instanceof Error && error.message === IMAGE_CANCELLED_MESSAGE
     },
     async (log) => {

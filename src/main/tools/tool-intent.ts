@@ -91,6 +91,26 @@ export const TOOL_INTENT_EXAMPLES: Readonly<Record<string, readonly string[]>> =
     'turn this into a picture: a castle on a cliff at night',
     'make a meme image of a surprised cat'
   ],
+  generate_video: [
+    'make a video of a dog running on the beach',
+    'generate a short clip of waves crashing on rocks',
+    'animate this picture',
+    'turn the last image into a video',
+    'make the image move',
+    'a slow motion video of rain on a window',
+    'create a moving clip of a city at night',
+    'make a short video of a rocket taking off',
+    'bring this photo to life with motion'
+  ],
+  make_film: [
+    'make a film about a robot who learns to paint',
+    'make a short movie about two friends on a road trip',
+    'create a story video about a lost kitten finding home',
+    'make a film with several shots of a day at the farm',
+    'turn this idea into a short film',
+    'make a movie trailer about a heist in space',
+    'tell a story as a video with a few scenes'
+  ],
   web_use: [
     'book a table on opentable for tonight',
     'order this on amazon',

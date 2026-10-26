@@ -13,6 +13,9 @@ type Metadata = {
   request?: unknown
   signal?: AbortSignal
   isCancelled?: (error: unknown) => boolean
+  /** False keeps this request out of usage statistics; the request log still keeps it.
+   *  For work that is part of another feature (a Studio key still is not an image generation). */
+  countAsGeneration?: boolean
 }
 type Update = Partial<
   Pick<AIRequestRecord, 'model' | 'effectiveRequest' | 'metrics' | 'response' | 'source'>
@@ -41,6 +44,8 @@ export interface AIRequestOutcome {
   durationMs: number
   /** True when the request carried an image for the model to read. */
   hasImage: boolean
+  /** Video only: true when the clip started from an image (a start image or a continued shot). */
+  hasInitImage?: boolean
   error?: unknown
   metrics?: Record<string, unknown>
 }
@@ -83,6 +88,11 @@ function carriesImage(request: unknown): boolean {
       )
   )
 }
+function carriesInitImage(request: unknown): boolean {
+  const initImage = (request as { initImage?: unknown } | undefined)?.initImage
+  return typeof initImage === 'string' && initImage.length > 0
+}
+
 /** The gateway request a record belongs to: which API key sent it, once the key is checked. */
 const gatewayCaller = new AsyncLocalStorage<{ keyName?: string }>()
 
@@ -182,13 +192,17 @@ export class AIRequestHandle {
   private reasoning = ''
   private runtime?: RuntimeBackend
   private readonly parent = context.getStore()
-  private readonly observed = !!observer && !context.getStore() && unrecorded.getStore() !== true
+  private readonly observed: boolean
   private readonly origin: AIRequestOrigin = currentOrigin()
   private readonly hasImage: boolean
+  private readonly hasInitImage: boolean
   private record: AIRequestRecord
   constructor(meta: Metadata) {
     const parent = context.getStore()
+    this.observed =
+      !!observer && !parent && unrecorded.getStore() !== true && meta.countAsGeneration !== false
     this.hasImage = this.observed && meta.modality === 'text' && carriesImage(meta.request)
+    this.hasInitImage = this.observed && meta.modality === 'video' && carriesInitImage(meta.request)
     this.record = {
       id: this.id,
       parentId: parent?.id,
@@ -358,6 +372,7 @@ export class AIRequestHandle {
         status: this.record.status,
         durationMs: this.record.durationMs ?? 0,
         hasImage: this.hasImage,
+        ...(this.record.modality === 'video' ? { hasInitImage: this.hasInitImage } : {}),
         ...(error !== undefined ? { error } : {}),
         ...(metrics ? { metrics } : {})
       })

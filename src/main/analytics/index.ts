@@ -14,7 +14,11 @@ import {
   type AIRequestObserver,
   type AIRequestOutcome
 } from '../ai-request-log'
-import { setRuntimeLoadObserver, type RuntimeLoadObserver } from '../runtime-backends'
+import {
+  runtimeBackendSnapshot,
+  setRuntimeLoadObserver,
+  type RuntimeLoadObserver
+} from '../runtime-backends'
 import type { RuntimeId } from '../../shared/runtime-backends'
 import { createPostHogClient } from './client'
 import { POSTHOG_API_KEY, POSTHOG_HOST } from './config'
@@ -373,6 +377,17 @@ function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+/** The backend the video runtime is on, or last ran on, for this model. */
+function lastVideoBackend(model: string | undefined): string | undefined {
+  try {
+    const video = runtimeBackendSnapshot().find((item) => item.id === 'video')
+    if (!video || (model && video.model && video.model !== model)) return undefined
+    return video.backend ?? video.lastRun?.backend
+  } catch {
+    return undefined
+  }
+}
+
 const inflightGenerations = new Map<string, () => void>()
 
 const MODALITY_FEATURE: Partial<Record<AIRequestOutcome['modality'], AnalyticsFeature>> = {
@@ -418,11 +433,16 @@ const aiRequestObserver: AIRequestObserver = {
     const promptTokens = num(metrics.promptTokens) ?? num(metrics.estimatedPromptTokens)
     const ref = modelRef(outcome.model)
     const modality = outcome.modality === 'text' && outcome.hasImage ? 'vision' : outcome.modality
+    // A clip stopped before its engine was ready has no backend of its own yet: report the one
+    // this video model last ran on, so a stop is still placed.
+    const reported =
+      outcome.backend ??
+      (outcome.modality === 'video' ? lastVideoBackend(outcome.model) : undefined)
     owner.capture('generation_finished', {
       modality,
       model: ref.model,
-      engine: generationEngine(outcome),
-      backend: backendOf(outcome.backend),
+      engine: generationEngine({ ...outcome, backend: reported }),
+      backend: backendOf(reported),
       outcome:
         outcome.status === 'completed'
           ? 'done'
@@ -435,7 +455,12 @@ const aiRequestObserver: AIRequestObserver = {
       error_code: outcome.status === 'failed' ? generationErrorCode(outcome.error) : null,
       source: outcome.origin,
       // A clip has no tokens: its whole generation time is the speed figure.
-      ...(outcome.modality === 'video' ? { duration_ms: roundMs(outcome.durationMs) } : {})
+      ...(outcome.modality === 'video'
+        ? {
+            duration_ms: roundMs(outcome.durationMs),
+            has_init_image: outcome.hasInitImage === true
+          }
+        : {})
     })
     if (outcome.origin !== 'app') return
     if (outcome.status === 'failed') owner.noteFailure()

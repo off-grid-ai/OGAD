@@ -163,6 +163,7 @@ const client = new OpenAI({ baseURL: "${b(port)}/v1", apiKey: "YOUR_API_KEY" });
 Off Grid AI is **also an MCP server** (Streamable HTTP, stateless) at \`POST ${b(port)}/mcp\`. Any MCP client can run the on-device models as tools — the inference layer for the whole device.
 
 **Tools:** \`generate_text\`, \`describe_image\`, \`generate_image\`, \`edit_image\`, \`transcribe_audio\`, \`text_to_speech\`, \`embed\`.
+With Pro and a video model, MCP also lists \`generate_video\` and \`video_generation_status\`. In the app's chat, Pro adds \`generate_video\` (\`prompt\`, optional \`start_image: "last_image"\` to animate the chat's last image) and \`make_film\` (\`sentence\`: starts a draft film in Video Studio).
 
 List the tools:
 

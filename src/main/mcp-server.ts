@@ -204,43 +204,46 @@ export function buildMcpServer(
     }
   )
 
-  server.registerTool(
-    'generate_video',
-    {
-      title: 'Generate a video',
-      description:
-        'Start a local text-to-video job. Returns a job ID. Use video_generation_status to check progress and get the MP4 content URL.',
-      inputSchema: {
-        prompt: z.string(),
-        negative_prompt: z.string().optional(),
-        width: z.number().int().optional(),
-        height: z.number().int().optional(),
-        frames: z.number().int().optional(),
-        fps: z.number().int().optional(),
-        steps: z.number().int().optional(),
-        seed: z.number().int().optional(),
-        guidance: z.number().optional(),
-        model: z.string().optional()
+  // Video is Pro-only: its tools are listed only while Pro has handed in the video jobs.
+  if (videoJobs) {
+    server.registerTool(
+      'generate_video',
+      {
+        title: 'Generate a video',
+        description:
+          'Start a local text-to-video job. Returns a job ID. Use video_generation_status to check progress and get the MP4 content URL.',
+        inputSchema: {
+          prompt: z.string(),
+          negative_prompt: z.string().optional(),
+          width: z.number().int().optional(),
+          height: z.number().int().optional(),
+          frames: z.number().int().optional(),
+          fps: z.number().int().optional(),
+          steps: z.number().int().optional(),
+          seed: z.number().int().optional(),
+          guidance: z.number().optional(),
+          model: z.string().optional()
+        }
+      },
+      async ({ negative_prompt, ...input }) => {
+        const jobs = requireVideoJobs()
+        const job = jobs.start({ ...input, negativePrompt: negative_prompt })
+        return TEXT(JSON.stringify(jobs.status(job.id)))
       }
-    },
-    async ({ negative_prompt, ...input }) => {
-      const jobs = requireVideoJobs()
-      const job = jobs.start({ ...input, negativePrompt: negative_prompt })
-      return TEXT(JSON.stringify(jobs.status(job.id)))
-    }
-  )
-  server.registerTool(
-    'video_generation_status',
-    {
-      title: 'Video job status',
-      description:
-        'Check a video job. Set cancel to stop this job. Completed results include an MP4 URL relative to this OGAD server.',
-      inputSchema: { job_id: z.string(), cancel: z.boolean().optional() }
-    },
-    async ({ job_id, cancel }) => {
-      return TEXT(JSON.stringify(requireVideoJobs().status(job_id, cancel)))
-    }
-  )
+    )
+    server.registerTool(
+      'video_generation_status',
+      {
+        title: 'Video job status',
+        description:
+          'Check a video job. Set cancel to stop this job. Completed results include an MP4 URL relative to this OGAD server.',
+        inputSchema: { job_id: z.string(), cancel: z.boolean().optional() }
+      },
+      async ({ job_id, cancel }) => {
+        return TEXT(JSON.stringify(requireVideoJobs().status(job_id, cancel)))
+      }
+    )
+  }
 
   server.registerTool(
     'edit_image',

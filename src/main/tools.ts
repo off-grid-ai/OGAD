@@ -147,6 +147,9 @@ export type ToolActivity =
   /** Reading the conversation's attached documents, then what was read. */
   | import('./documents/chat-turn').DocumentsActivity
 
+/** A deferred chat video request. `initImage` is the start image's path on this device. */
+export type VideoToolRequest = { prompt: string; enhancePrompt?: boolean; initImage?: string }
+
 // A tool's structured result. Most tools just return text (a bare string, which the
 // loop normalizes to { text }); a tool may ALSO emit side channels — `sources`
 // (interactive citations, from search_memory) and `imageRequest` (the deferred
@@ -161,7 +164,10 @@ export interface ToolResult {
   sources?: UnifiedSource[]
   imageRequest?: { prompt: string; enhancePrompt?: boolean }
   imageRequests?: { prompt: string; enhancePrompt?: boolean }[]
-  videoRequest?: { prompt: string; enhancePrompt?: boolean }
+  videoRequest?: VideoToolRequest
+  /** A Studio film this tool started (make_film). The chat's film card reads it as the
+   *  message context `videoStoryId`. */
+  videoStoryId?: string
   /** For a task tool (web_use, computer_use): the accepted task's id. Its run, its progress and
    *  Stop all use it, from the moment it is accepted, queued or waiting for approval. */
   taskId?: string
@@ -571,21 +577,53 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'generate_video',
-    description: 'Generate a short silent video on this device from a text prompt. Use when the user asks for a video or moving clip.',
+    description:
+      'Generate a short silent video on this device from a text prompt. Use when the user asks for a video or moving clip. Set start_image to "last_image" to animate the last image in this chat.',
     parameters: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', description: 'The subject, action and motion to show in the clip.' },
-        enhance_prompt: { type: 'boolean', description: 'Rewrite a short prompt before generation.' }
+        prompt: {
+          type: 'string',
+          description: 'The subject, action and motion to show in the clip.'
+        },
+        start_image: {
+          type: 'string',
+          enum: ['last_image'],
+          description: 'Start the clip from the last image in this chat.'
+        },
+        enhance_prompt: {
+          type: 'boolean',
+          description: 'Rewrite a short prompt before generation.'
+        }
       },
       required: ['prompt']
     },
-    run: (args): ToolResult => {
+    run: async (args, ctx): Promise<ToolResult> => {
       const prompt = String(args.prompt ?? '').trim()
-      const enhancePrompt = typeof args.enhance_prompt === 'boolean' ? args.enhance_prompt : undefined
-      return prompt
-        ? { text: 'Video generation started. The clip will appear in this chat.', videoRequest: { prompt, ...(enhancePrompt === undefined ? {} : { enhancePrompt }) } }
-        : { text: 'Error: no video prompt provided.' }
+      if (!prompt) return { text: 'Error: no video prompt provided.' }
+      const enhancePrompt =
+        typeof args.enhance_prompt === 'boolean' ? args.enhance_prompt : undefined
+      let initImage: string | undefined
+      if (args.start_image === 'last_image') {
+        if (ctx.conversationId) {
+          const { getRagMessages } = await import('./database')
+          const { lastChatImagePath } = await import('./tools/last-chat-image')
+          initImage = lastChatImagePath(getRagMessages(ctx.conversationId))
+        }
+        if (!initImage)
+          return {
+            text: 'Error: there is no image in this chat to start the video from.',
+            status: 'failed'
+          }
+      }
+      return {
+        text: 'Video generation started. The clip will appear in this chat.',
+        videoRequest: {
+          prompt,
+          ...(enhancePrompt === undefined ? {} : { enhancePrompt }),
+          ...(initImage ? { initImage } : {})
+        }
+      }
     }
   }
 ]
@@ -956,7 +994,9 @@ export async function toolChat(
   toolCalls: ToolCall[]
   unified: UnifiedSource[]
   imageRequests: { prompt: string; enhancePrompt?: boolean }[]
-  videoRequests?: { prompt: string; enhancePrompt?: boolean }[]
+  videoRequests?: VideoToolRequest[]
+  /** The film make_film started this turn, for the message context `videoStoryId`. */
+  videoStoryId?: string
   /** Compatibility alias for older renderer bundles that can generate only one image. */
   imageRequest?: { prompt: string; enhancePrompt?: boolean }
   toolsOffered?: string[]
@@ -1209,7 +1249,8 @@ export async function toolChat(
   // not silently replace the first request with the last.
   const imageRequests: { prompt: string; enhancePrompt?: boolean }[] = []
   const earlyImagePrompts = new Set<string>()
-  const videoRequests: { prompt: string; enhancePrompt?: boolean }[] = []
+  const videoRequests: VideoToolRequest[] = []
+  let videoStoryId: string | undefined
   let finishAfterDeferredImages = false
   const toolRoundAnswers: string[] = []
   const resultWithImages = (result: {
@@ -1225,7 +1266,8 @@ export async function toolChat(
     metrics?: GenerationMetrics
     cutoff?: ResponseCutoffContract
     imageRequests: { prompt: string; enhancePrompt?: boolean }[]
-    videoRequests: { prompt: string; enhancePrompt?: boolean }[]
+    videoRequests: VideoToolRequest[]
+    videoStoryId?: string
     imageRequest?: { prompt: string; enhancePrompt?: boolean }
     toolsOffered?: string[]
   } => {
@@ -1246,6 +1288,7 @@ export async function toolChat(
       },
       imageRequests,
       videoRequests,
+      ...(videoStoryId ? { videoStoryId } : {}),
       ...(offeredTools.size ? { toolsOffered: [...offeredTools] } : {}),
       ...(finalImageRequest ? { imageRequest: finalImageRequest } : {})
     }
@@ -1517,6 +1560,7 @@ export async function toolChat(
           imageRequests.push(res.imageRequest)
           finishAfterDeferredImages = imageRequests.length >= requestedImageCount
         }
+        if (res.videoStoryId) videoStoryId = res.videoStoryId
         if (res.videoRequest && videoRequests.length === 0) {
           videoRequests.push(res.videoRequest)
           finishAfterDeferredImages = true
