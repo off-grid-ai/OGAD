@@ -349,6 +349,15 @@ describe('macOS artifact integrity', () => {
       fs.mkdirSync(path.dirname(destination), { recursive: true })
       fs.writeFileSync(destination, 'fixture')
     }
+    // c2patool signs the AI label into exported videos: a release without it fails (0c089357e).
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/c2patool'
+    )
+    fs.writeFileSync(path.join(resources, 'bin', 'c2patool'), 'fixture')
+    await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
+      'installer input is missing required runtime: bin/licenses/c2patool.txt'
+    )
+    fs.writeFileSync(path.join(resources, 'bin', 'licenses', 'c2patool.txt'), 'fixture')
     await expect(verifyElectronBuilderArtifact(event)).rejects.toThrow(
       'installer input is missing required runtime: bin/sd/sd-cli'
     )
