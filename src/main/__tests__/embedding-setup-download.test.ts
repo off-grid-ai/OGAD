@@ -19,15 +19,16 @@ afterAll(() => {
 })
 
 it('reports real catalog bytes and cached install state without changing the active model', () => {
+  // Multilingual E5 Small is the retrieval engine's default (26e8e9dc2).
   const model = getEmbeddingSetupModel()
-  expect(model?.id).toBe('Xenova/all-MiniLM-L6-v2')
+  expect(model?.id).toBe('Xenova/multilingual-e5-small')
   expect(model?.files.map((file) => file.name)).toEqual([
     'config.json',
     'tokenizer.json',
     'tokenizer_config.json',
     'onnx/model.onnx'
   ])
-  expect(model?.totalBytes).toBe(91_100_283)
+  expect(model?.totalBytes).toBe(487_352_364)
   expect(model?.remainingBytes).toBe(model?.totalBytes)
   expect(model?.installed).toBe(false)
 
