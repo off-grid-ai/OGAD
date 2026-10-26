@@ -160,6 +160,8 @@ function previousPack(): { bin: string; version: string } | null {
 }
 
 function activeBin(asset: PerformancePackAsset | null): string | null {
+  // A pack folder left on a machine the pack has no engines for (arm64, macOS) is never used.
+  if (!packPlatform()) return null
   return (asset && installedBin(asset)) ?? previousPack()?.bin ?? null
 }
 
