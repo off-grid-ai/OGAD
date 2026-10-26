@@ -78,10 +78,24 @@ export function readDownloaded(dir: string): DownloadedModel[] {
         'utf-8'
       )
     )
-    return Array.isArray(arr) ? (arr as DownloadedModel[]) : []
+    return Array.isArray(arr) ? arr.flatMap(usableDownloadedModel) : []
   } catch {
     return []
   }
+}
+
+/** A registry copied or edited by hand can hold rows without an id, or without a file list. A row
+ *  without an id names no model, so readers skip it. Older rows name their files only as primary
+ *  and mmproj; readers get those as the file list, so no row makes every model read fail. */
+function usableDownloadedModel(value: unknown): DownloadedModel[] {
+  if (typeof value !== 'object' || value === null) return []
+  const entry = value as Partial<DownloadedModel> & { primary?: unknown; mmproj?: unknown }
+  if (typeof entry.id !== 'string') return []
+  if (Array.isArray(entry.files)) return [entry as DownloadedModel]
+  const files = [entry.primary, entry.mmproj].filter(
+    (file): file is string => typeof file === 'string'
+  )
+  return [{ ...entry, files } as DownloadedModel]
 }
 
 function writeDownloaded(dir: string, list: DownloadedModel[]): void {
