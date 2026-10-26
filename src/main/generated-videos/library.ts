@@ -2,6 +2,7 @@
 // deleted without Pro. Generation lives in the private Pro package.
 import fs from 'node:fs'
 import path from 'node:path'
+import { callHook } from '../bootstrap/hookRegistry'
 import { getDB, updateRagMessage } from '../database'
 import { readGeneratedVideoReference } from '../../shared/generated-video-reference'
 import { resolveExistingOwnedEntry, resolveExistingOwnedPath } from '../imagegen/owned-path'
@@ -11,6 +12,16 @@ import { generatedVideoSidecarPath, readGeneratedVideoSidecar } from './gallery-
 import { describeOwnGeneratedVideo } from './generated-video-share'
 
 export const generatedVideosDir = (): string => path.join(dataDir(), 'generated-videos')
+
+/**
+ * ({ syncId?: string; storyId?: string }) => void - a film was deleted from the library. Pro's
+ * Video Studio registers it so the story forgets its film; free builds have no stories.
+ */
+export const VIDEO_FILM_DELETED_HOOK = 'video:filmDeleted'
+
+/** A film's captions sit beside it with the same name. */
+export const generatedVideoCaptionsPath = (videoPath: string): string =>
+  videoPath.replace(/\.mp4$/i, '.vtt')
 
 export function listGeneratedVideos(scope?: {
   conversationId?: string
@@ -79,9 +90,21 @@ export function deleteGeneratedVideo(candidate: string): boolean {
       delete context.videoRef
       updateRagMessage(message.conversation_id, message.uuid, message.content, context)
     }
+    const facts = readGeneratedVideoSidecar(owned)
     fs.rmSync(owned)
     fs.rmSync(generatedVideoSidecarPath(owned), { force: true })
+    fs.rmSync(generatedVideoCaptionsPath(owned), { force: true })
     if (shared) emitSharedFileMutation({ kind: 'delete', file: shared })
+    if (facts.storyId) {
+      try {
+        callHook(VIDEO_FILM_DELETED_HOOK, {
+          syncId: facts.syncId ?? shared?.syncId,
+          storyId: facts.storyId
+        })
+      } catch (error) {
+        console.error('[video-library] Cannot clear the deleted film from its story.', error)
+      }
+    }
     return true
   } catch {
     return false

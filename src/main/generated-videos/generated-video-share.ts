@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
+  canonicalSharedFileMetadataJson,
   describeGeneratedVideo,
   readGeneratedVideoMetadata,
   type ChatHome,
@@ -9,6 +10,37 @@ import {
 } from '@offgrid/sync'
 import { emitSharedFileMutation } from '../sync-shared-file'
 import { readGeneratedVideoSidecar, writeGeneratedVideoSidecar } from './gallery-sidecar'
+
+/** Captions travel in the metadata only while they fit well inside its 16 KB limit. */
+const MAX_CARRIED_CAPTIONS_BYTES = 12 * 1024
+
+/**
+ * A Studio film's story and captions, added to the film's metadata. Other hosts read only the
+ * metadata keys they know, so the extra keys are safe on the wire.
+ */
+function withStudioFilmFacts(
+  file: SharedFileDescriptor | null,
+  videoPath: string,
+  storyId: string | undefined
+): SharedFileDescriptor | null {
+  if (!file?.metadataJson || !storyId) return file
+  let captionsVtt: string | undefined
+  try {
+    const captions = fs.readFileSync(videoPath.replace(/\.mp4$/i, '.vtt'), 'utf8')
+    if (Buffer.byteLength(captions) <= MAX_CARRIED_CAPTIONS_BYTES) captionsVtt = captions
+  } catch {
+    /* A film without captions. */
+  }
+  const metadata = JSON.parse(file.metadataJson) as Record<string, unknown>
+  return {
+    ...file,
+    metadataJson: canonicalSharedFileMetadataJson({
+      ...metadata,
+      storyId,
+      ...(captionsVtt ? { captionsVtt } : {})
+    })
+  }
+}
 
 export function describeOwnGeneratedVideo(videoPath: string, shownIn?: ChatHome): SharedFileDescriptor | null {
   const facts = readGeneratedVideoSidecar(videoPath)
@@ -18,7 +50,7 @@ export function describeOwnGeneratedVideo(videoPath: string, shownIn?: ChatHome)
   const home = shownIn ?? (facts.conversationId && facts.messageId
     ? { conversationId: facts.conversationId, messageId: facts.messageId }
     : undefined)
-  return describeGeneratedVideo({
+  return withStudioFilmFacts(describeGeneratedVideo({
     syncId: facts.syncId,
     name: path.basename(videoPath),
     fileSize: stat.size,
@@ -28,7 +60,7 @@ export function describeOwnGeneratedVideo(videoPath: string, shownIn?: ChatHome)
     height: facts.height,
     durationSeconds: facts.durationSeconds,
     metadata
-  }, home)
+  }, home), videoPath, facts.storyId)
 }
 
 export function describeGeneratedVideoEnsuringIdentity(videoPath: string): SharedFileDescriptor | null {
