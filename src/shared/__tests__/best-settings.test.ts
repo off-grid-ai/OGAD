@@ -31,7 +31,7 @@ describe('planBestSettings', () => {
       speculativeDraftMax: 2,
       draftModel: ''
     })
-    expect(Object.values(plan.backends)).toEqual(Array(7).fill('auto'))
+    expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
     expect(plan.residency).toEqual({
       image: 'resident',
       stt: 'resident',
@@ -60,8 +60,9 @@ describe('planBestSettings', () => {
       qwen9b
     )
 
-    expect(Object.values(plan.backends)).toEqual(Array(7).fill('auto'))
-    expect(plan.chat.gpuLayers).toBeNull()
+    expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
+    expect(plan.chat.gpuPlacement).toBe('auto')
+    expect(plan.chat.gpuLayers).toBe(99)
   })
 
   it('leaves a Linux Vulkan GPU on Auto, which tries Vulkan before the CPU', () => {
@@ -103,7 +104,7 @@ describe('planBestSettings', () => {
       speculativeDecoding: 'ngram',
       speculativeDraftMax: 0
     })
-    expect(Object.values(plan.backends)).toEqual(Array(7).fill('auto'))
+    expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
     expect(plan.residency).toEqual({})
     expect(plan.summary[0]).toContain('4 CPU threads')
   })
@@ -131,7 +132,8 @@ describe('planBestSettings', () => {
       chat: { ...plan.chat, draftModel: undefined, temperature: 0.7 },
       backends: plan.backends,
       residency: { ...plan.residency, llm: 'resident' },
-      screenshotSize: 'balanced'
+      screenshotSize: 'balanced',
+      videoMemory: plan.videoMemory
     }
 
     expect(matchesBestSettings(plan, current)).toBe(true)
@@ -143,6 +145,7 @@ describe('planBestSettings', () => {
     ).toBe(false)
     expect(matchesBestSettings(plan, { ...current, residency: {} })).toBe(false)
     expect(matchesBestSettings(plan, { ...current, screenshotSize: 'large' })).toBe(false)
+    expect(matchesBestSettings(plan, { ...current, videoMemory: undefined })).toBe(false)
   })
 })
 
