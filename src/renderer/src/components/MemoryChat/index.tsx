@@ -2179,12 +2179,13 @@ export function MemoryChat({
             ...(startImage?.path ? { initImage: startImage.path } : {})
           }
           const controller = requireChatVideo()
-          const filmLine = await controller.startFilm?.(request)
-          if (filmLine) {
-            const stored = await window.api.addRagMessage(convId, 'assistant', filmLine)
+          const film = await controller.startFilm?.(request)
+          if (film) {
+            const context = { filmRef: { storyId: film.storyId } }
+            const stored = await window.api.addRagMessage(convId, 'assistant', film.line, context)
             setConvMessages(convId, (previous) => [
               ...previous,
-              { id: stored.uuid, role: 'assistant', content: filmLine }
+              { id: stored.uuid, role: 'assistant', content: film.line, context }
             ])
             return
           }

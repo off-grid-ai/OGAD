@@ -30,7 +30,7 @@ export interface ChatVideoController {
    * Before a clip: Pro may take the request as a film (a longer ask, or a person to keep in every
    * shot). Returns the line chat shows when it did, or null to render one clip.
    */
-  startFilm?(request: ChatVideoRequest): Promise<string | null>
+  startFilm?(request: ChatVideoRequest): Promise<{ line: string; storyId: string } | null>
   /** Conversations whose messages changed outside the renderer (a clip finished). */
   onConversationUpdated(listener: (conversationId: string) => void): () => void
 }

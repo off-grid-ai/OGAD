@@ -22,6 +22,8 @@ export type RagSummary = { session_id: string; summary?: string; title?: string;
 export type RagEntity = { id: number; name?: string }
 
 export type RagContext = {
+  /** A film started from this chat. Pro renders its card; free builds show the line only. */
+  filmRef?: { storyId: string }
   branches?: { question: string; answers: ResponseVersion[] }[]
   variants?: ResponseVersion[]
   variantIndex?: number

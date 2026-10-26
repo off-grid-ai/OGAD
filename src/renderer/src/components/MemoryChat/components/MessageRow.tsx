@@ -497,6 +497,7 @@ function MessageBubble({
         />
       ) : null}
       {message.videoPath ? <ChatVideoPreview path={message.videoPath} className="mb-2" /> : null}
+      {message.context?.filmRef ? <FilmCardSlot storyId={message.context.filmRef.storyId} /> : null}
       {message.image ? (
         <ChatImagePreview
           src={message.image}
@@ -877,6 +878,13 @@ function sameMessageState(
     left.showToolsSent === right.showToolsSent &&
     left.regenerationDisabled === right.regenerationDisabled
   )
+}
+
+
+/** A film started from this chat. Pro draws it; without Pro the message line stands alone. */
+function FilmCardSlot({ storyId }: { storyId: string }): React.JSX.Element | null {
+  const [FilmCard] = useState(() => getSlot(SLOTS.chatFilmCard))
+  return FilmCard ? <FilmCard storyId={storyId} /> : null
 }
 
 export const MessageRow = memo(
