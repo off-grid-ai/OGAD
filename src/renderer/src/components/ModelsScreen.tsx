@@ -118,6 +118,8 @@ import {
   internalTabSubroute
 } from '@renderer/lib/internal-tab-route'
 import offGridLogo from '@/assets/logo.png'
+import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
+import { VideoProUpsell } from './VideoProUpsell'
 import { flow } from '@renderer/lib/analytics'
 
 function Sel({
@@ -436,6 +438,18 @@ export function ModelsScreen({
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const reducedMotion = useReducedMotion()
   const [installed, setInstalled] = useState<string[]>([])
+  // Video is Pro: free users see the upsell on the Video tab instead of video models.
+  const { isPro } = useRendererEntitlement()
+  // Search (embedding) models on disk, from the Storage numbers main already computes.
+  const [embeddingInstalled, setEmbeddingInstalled] = useState<Set<string>>(new Set())
+  const loadEmbeddingInstalled = (): void => {
+    void Promise.resolve(api.getStorageInfo?.()).then(
+      (info?: { models?: { id: string; kind?: string }[] }) =>
+        setEmbeddingInstalled(
+          new Set((info?.models ?? []).filter((m) => m.kind === 'embedding').map((m) => m.id))
+        )
+    )
+  }
   // Per-model optional companion readiness from the backend (derived from files + disk).
   // Drives repair actions for projectors and DFlash draft models.
   const [visionSt, setVisionSt] = useState<
@@ -545,6 +559,7 @@ export function ModelsScreen({
   useEffect(() => {
     if (activeKind === 'embedding') {
       void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
+      loadEmbeddingInstalled()
       const unsubscribe = api.onEmbeddingRebuildStatusChanged?.((status: { phase: string; error?: string }) => {
         if (status.phase === 'done' || status.phase === 'error' || status.phase === 'restored') {
           void api.getEmbeddingModelChoices().then(setEmbeddingChoices)
@@ -754,7 +769,18 @@ export function ModelsScreen({
       }
     }
     if (d.status === 'failed') switchWhenReady.current.delete(d.modelId)
+    if (d.status === 'completed' && activeKind === 'embedding') loadEmbeddingInstalled()
   })
+  // A search model downloads through the shared queue; choosing it stays a separate step.
+  const downloadEmbedding = (id: string): void => {
+    setProgress((p) => ({ ...p, [id]: { percent: 0, status: 'queued' } }))
+    void Promise.resolve(api.downloadModel?.(id)).then(
+      (r?: { success: boolean; error?: string }) => {
+        if (!r || r.success || r.error === 'cancelled') return
+        setProgress((p) => ({ ...p, [id]: { ...p[id], percent: 0, status: 'failed', error: r.error } }))
+      }
+    )
+  }
 
   const cancelDownload = (id: string): void => {
     switchWhenReady.current.delete(id)
@@ -806,6 +832,7 @@ export function ModelsScreen({
       if (result && result.success === false && result.error) window.alert(result.error)
       setInstalled(await api.getInstalledModels?.())
       refreshActive()
+      if (activeKind === 'embedding') loadEmbeddingInstalled()
     } finally {
       setDeleting(null)
     }
@@ -1787,10 +1814,44 @@ export function ModelsScreen({
                   {embeddingChoices.active === model.id ? (
                     <span className="text-[10px] text-green-500">Active</span>
                   ) : (
-                    <button type="button" onClick={() => void chooseEmbedding(model.id)} disabled={switching !== null}
-                      className="shrink-0 rounded-md border border-neutral-700 px-2.5 py-1 text-[11px] text-neutral-300 transition-colors hover:border-green-500 hover:text-white focus-visible:outline focus-visible:outline-green-500">
-                      {switching === model.id ? 'Changing...' : 'Use'}
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {(() => {
+                        const job = progress[model.id]
+                        if (job && (job.status === 'queued' || job.status === 'downloading'))
+                          return (
+                            <>
+                              <span className="text-[10px] tabular-nums text-neutral-500">
+                                {job.status === 'queued' ? 'Queued' : `${Math.round(job.percent)}%`}
+                              </span>
+                              <IconTip label="Cancel">
+                                <Button size="icon-xs" variant="ghost" aria-label="Cancel" onClick={() => cancelDownload(model.id)}>
+                                  <IconX className="h-3 w-3" />
+                                </Button>
+                              </IconTip>
+                            </>
+                          )
+                        return embeddingInstalled.has(model.id) ? (
+                          <IconTip label="Delete">
+                            <Button size="icon-xs" variant="ghost" aria-label={`Delete ${model.name}`}
+                              disabled={deleting === model.id} onClick={() => void removeModel(model.id, model.name)}
+                              className="text-neutral-500 hover:text-red-400">
+                              <IconTrash className="h-3 w-3" />
+                            </Button>
+                          </IconTip>
+                        ) : (
+                          <IconTip label={job?.status === 'failed' ? 'Retry download' : 'Download'}>
+                            <Button size="icon-xs" variant="ghost" aria-label={`Download ${model.name}`}
+                              onClick={() => downloadEmbedding(model.id)} className="text-neutral-500 hover:text-white">
+                              {job?.status === 'failed' ? <IconRefresh className="h-3 w-3" /> : <IconDownload className="h-3 w-3" />}
+                            </Button>
+                          </IconTip>
+                        )
+                      })()}
+                      <button type="button" onClick={() => void chooseEmbedding(model.id)} disabled={switching !== null}
+                        className="shrink-0 rounded-md border border-neutral-700 px-2.5 py-1 text-[11px] text-neutral-300 transition-colors hover:border-green-500 hover:text-white focus-visible:outline focus-visible:outline-green-500">
+                        {switching === model.id ? 'Changing...' : 'Use'}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1820,8 +1881,16 @@ export function ModelsScreen({
         </div>
       )}
 
+      {activeKind === 'video' && !isPro && (
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="max-w-xl rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
+            <VideoProUpsell />
+          </div>
+        </div>
+      )}
+
       {/* Catalog tab */}
-      {activeKind !== 'storage' && activeKind !== 'embedding' && (
+      {activeKind !== 'storage' && activeKind !== 'embedding' && (activeKind !== 'video' || isPro) && (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Filter bar */}
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-neutral-800/60 px-6 py-2">

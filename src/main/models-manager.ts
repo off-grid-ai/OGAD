@@ -996,6 +996,13 @@ export async function getModelFiles(
   )
 }
 
+/** Record a download that runs outside this module (a search model) in the shared registry. */
+export function recordDownloadProgress(p: DownloadProgress): void {
+  ensureRegistryLoaded()
+  lastProgress.set(p.modelId, p)
+  if (p.status && p.status !== 'queued' && p.status !== 'downloading') persistRegistry()
+}
+
 export function downloadStatus(modelId: string): DownloadProgress | null {
   return lastProgress.get(modelId) ?? null
 }
@@ -1067,6 +1074,16 @@ async function downloadModelInner(
       reason: 'application_shutdown'
     })
     return publishRefusal(modelId, DOWNLOAD_INTERRUPTED_ERROR, onProgress)
+  }
+  // A search (embedding) model: its own files and cache folder, the same queue and registry.
+  const embedding = await import('./embedding-setup-download')
+  if (embedding.isEmbeddingDownloadId(modelId)) {
+    const storageError = modelStorageError()
+    if (storageError) return publishRefusal(modelId, storageError, onProgress)
+    return embedding.queueEmbeddingDownload(modelId, (p) => {
+      recordDownloadProgress(p)
+      onProgress?.(p)
+    })
   }
   const { resolveHuggingFaceModel } = await import('@offgrid/models')
   const CATALOG = await desktopCatalog()
@@ -1615,6 +1632,9 @@ async function deleteModelFiles(modelId: string): Promise<DeleteModelResult> {
     return { success: false, error: 'External models are read only.' }
   const dir = llm.getModelsDir()
   if (modelId.startsWith('external:')) return trashExternalModel(modelId, dir)
+  const embedding = await import('./embedding-setup-download')
+  if (embedding.isEmbeddingDownloadId(modelId) || embedding.isInstalledEmbeddingModel(modelId))
+    return embedding.deleteEmbeddingModel(modelId)
   // Imported local model: remove its files + registry entry, clear if active.
   if (modelId.startsWith('local:')) {
     const list = getLocalModels()
@@ -2495,6 +2515,8 @@ export interface StorageInfo {
   freeBytes: number // free space on the volume
   models: ModelDiskEntry[]
   orphans: { name: string; bytes: number }[]
+  /** Other large local data (videos and films, the document/search index), shown read-only. */
+  dataUsage?: { id: string; label: string; count: number; bytes: number }[]
 }
 
 /** Disk usage for models: per installed model, total, free space, and orphan files
@@ -2590,7 +2612,11 @@ export async function getStorageInfo(): Promise<StorageInfo> {
       return sum
     }
   }, 0)
-  const totalBytes = scanned.totalBytes + nestedModelBytes
+  // Search (embedding) models live in the Transformers.js cache folder, not the scanned root.
+  const embeddingModels = (await import('./embedding-setup-download')).installedEmbeddingModels()
+  models.push(...embeddingModels)
+  const embeddingBytes = embeddingModels.reduce((sum, model) => sum + model.bytes, 0)
+  const totalBytes = scanned.totalBytes + nestedModelBytes + embeddingBytes
   const { orphans } = scanned
 
   let freeBytes = 0
@@ -2600,7 +2626,13 @@ export async function getStorageInfo(): Promise<StorageInfo> {
   } catch {
     /* unknown */
   }
-  return { dir, totalBytes, freeBytes, models, orphans }
+  let dataUsage: StorageInfo['dataUsage']
+  try {
+    dataUsage = (await import('./data-privacy')).getStoredDataUsage()
+  } catch {
+    /* no database yet */
+  }
+  return { dir, totalBytes, freeBytes, models, orphans, dataUsage }
 }
 
 /** Delete every orphan file (unreferenced gguf/.part). Recomputes the orphan set so

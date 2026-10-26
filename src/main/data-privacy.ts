@@ -20,6 +20,10 @@ export interface DataCategory {
 
 const ud = (...p: string[]): string => path.join(app.getPath('userData'), ...p)
 
+/** Generated clips and the films (projects, renders) made from them. Counted for Storage only:
+ *  films also keep rows in Pro's tables, so Pro owns their deletion. */
+const VIDEO_DIRS = ['generated-videos', 'video-studio']
+
 function dirSize(p: string): { bytes: number; files: number } {
   let bytes = 0,
     files = 0
@@ -317,6 +321,46 @@ function clearFiles(...files: string[]): void {
       /* missing or already removed */
     }
   }
+}
+
+function videoUsage(): { bytes: number; files: number } {
+  return VIDEO_DIRS.map((dir) => dirSize(ud(dir))).reduce(
+    (sum, size) => ({ bytes: sum.bytes + size.bytes, files: sum.files + size.files }),
+    { bytes: 0, files: 0 }
+  )
+}
+
+function sqlNumber(sql: string): number {
+  try {
+    const row = getDB().prepare(sql).get() as { n: number | null } | undefined
+    return Number(row?.n ?? 0)
+  } catch {
+    return 0
+  }
+}
+
+export interface StoredDataUsage {
+  id: 'videos' | 'documents'
+  label: string
+  count: number
+  bytes: number
+}
+
+/** Large non-model data for the Storage panel: videos and films, and the document/search index. */
+export function getStoredDataUsage(): StoredDataUsage[] {
+  const videos = videoUsage()
+  const indexBytes =
+    sqlNumber('SELECT SUM(LENGTH(text)) + SUM(COALESCE(LENGTH(vector), 0)) AS n FROM attached_document_chunks') +
+    sqlNumber('SELECT SUM(LENGTH(vector)) AS n FROM record_vectors')
+  return [
+    { id: 'videos', label: 'Videos & films', count: videos.files, bytes: videos.bytes },
+    {
+      id: 'documents',
+      label: 'Documents & search index',
+      count: tableCount('attached_documents'),
+      bytes: indexBytes
+    }
+  ]
 }
 
 /** Summary of what's stored, per category, for the Delete-my-data screen. */
