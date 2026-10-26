@@ -6,7 +6,7 @@
 // isn't ready. Tool embeddings are cached by content hash (name+description
 // rarely change), so across turns only the query is embedded fresh.
 
-import { requestSentences, TOOL_INTENT_EXAMPLES, toolIntents } from './tool-intent'
+import { requestSentences, toolIntentExamples, toolIntents } from './tool-intent'
 
 export interface EmbedDeps {
   /** Returns a NORMALIZED embedding (so cosine similarity == dot product). */
@@ -157,7 +157,7 @@ export async function selectRelevantToolsSemantic(
   const byExample = tools
     .filter((tool) => intents.has(toolName(tool)))
     .sort((a, b) => (intents.get(toolName(b)) ?? 0) - (intents.get(toolName(a)) ?? 0))
-  const described = tools.filter((tool) => !(toolName(tool) in TOOL_INTENT_EXAMPLES))
+  const described = tools.filter((tool) => !toolIntentExamples(toolName(tool)))
   const scored = await Promise.all(
     described.map(async (tool, index) => {
       try {

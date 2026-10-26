@@ -91,26 +91,6 @@ export const TOOL_INTENT_EXAMPLES: Readonly<Record<string, readonly string[]>> =
     'turn this into a picture: a castle on a cliff at night',
     'make a meme image of a surprised cat'
   ],
-  generate_video: [
-    'make a video of a dog running on the beach',
-    'generate a short clip of waves crashing on rocks',
-    'animate this picture',
-    'turn the last image into a video',
-    'make the image move',
-    'a slow motion video of rain on a window',
-    'create a moving clip of a city at night',
-    'make a short video of a rocket taking off',
-    'bring this photo to life with motion'
-  ],
-  make_film: [
-    'make a film about a robot who learns to paint',
-    'make a short movie about two friends on a road trip',
-    'create a story video about a lost kitten finding home',
-    'make a film with several shots of a day at the farm',
-    'turn this idea into a short film',
-    'make a movie trailer about a heist in space',
-    'tell a story as a video with a few scenes'
-  ],
   web_use: [
     'book a table on opentable for tonight',
     'order this on amazon',
@@ -202,13 +182,27 @@ async function closest(
   return Math.max(-1, ...vecs.map((v) => dot(query, v)))
 }
 
+/** Example requests for tools a Pro feature adds while it is active. Core never names them. */
+const extensionExamples = new Map<string, readonly string[]>()
+export function registerToolIntentExamples(name: string, examples: readonly string[]): () => void {
+  extensionExamples.set(name, examples)
+  return () => {
+    if (extensionExamples.get(name) === examples) extensionExamples.delete(name)
+  }
+}
+
+/** A routed tool's example requests: core's own, or ones a Pro feature registered. */
+export function toolIntentExamples(name: string): readonly string[] | undefined {
+  return TOOL_INTENT_EXAMPLES[name] ?? extensionExamples.get(name)
+}
+
 /** The routed tools (by name) this request is for, with their scores. `query` is the request's
  *  embedding; `sentences` are the embeddings of its sentences: each is matched against the code
  *  examples, and each can ask for a tool on its own. Tools without examples are not judged here. */
 export async function toolIntents(
   query: number[],
   embed: Embed,
-  names: readonly string[] = Object.keys(TOOL_INTENT_EXAMPLES),
+  names: readonly string[] = [...Object.keys(TOOL_INTENT_EXAMPLES), ...extensionExamples.keys()],
   sentences: readonly number[][] = []
 ): Promise<Map<string, number>> {
   let chat = await closest(query, ANSWER_IN_CHAT, embed)
@@ -216,7 +210,7 @@ export async function toolIntents(
     chat = Math.max(chat, await closest(sentence, BUILD_IN_CHAT, embed))
   const picked = new Map<string, number>()
   for (const name of names) {
-    const examples = TOOL_INTENT_EXAMPLES[name]
+    const examples = toolIntentExamples(name)
     if (!examples) continue
     const score = await closest(query, examples, embed)
     if (score >= TOOL_INTENT_FLOOR && score > chat + TOOL_INTENT_MARGIN) picked.set(name, score)
