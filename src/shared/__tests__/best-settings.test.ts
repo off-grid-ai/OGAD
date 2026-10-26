@@ -199,7 +199,7 @@ describe('planBestSettings speculation and placement', () => {
     expect(plan.summary[0]).toContain('n-gram speculation')
   })
 
-  it('keeps the person\'s DFlash or draft-model choice', () => {
+  it("keeps the person's DFlash or draft-model choice", () => {
     const plan = planBestSettings(appleM5, {
       ...qwen9b,
       ownSpeculation: { mode: 'dflash', draftModel: 'Qwen3.5-9B-DFlash.gguf', draftMax: 6 }
