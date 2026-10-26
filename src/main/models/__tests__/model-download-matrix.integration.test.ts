@@ -254,6 +254,48 @@ describe('model download release matrix', () => {
     }
   })
 
+  it('a GGUF picked from Hugging Face fetches its published MTP head in the same download', async () => {
+    const repoId = 'someone/gemma-4-E4B-it-GGUF'
+    const selected = 'gemma-4-E4B-it-Q4_K_M.gguf'
+    const { mtpHeadForPrimaryFile } = await import('@offgrid/models')
+    const head = mtpHeadForPrimaryFile(selected)!
+    const requested: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        requested.push(url)
+        if (url.includes('/api/models/')) {
+          return new Response(JSON.stringify({ siblings: [{ rfilename: selected, size: 2048 }] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' }
+          })
+        }
+        if (url.endsWith(selected)) {
+          return new Response(
+            new Uint8Array(Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(2044)])),
+            { status: 200, headers: { 'content-length': '2048' } }
+          )
+        }
+        // The head's bytes are the published file's; this fixture cannot reproduce its checksum.
+        if (url === head.url) return new Response('unavailable', { status: 503 })
+        throw new Error(`Unexpected download: ${url}`)
+      })
+    )
+
+    try {
+      const result = await manager.downloadModel(repoId, undefined, selected)
+      expect(requested.filter((url) => url.endsWith(selected))).toHaveLength(1)
+      expect(requested).toContain(head.url)
+      // The head is part of the model's job: the model is not ready while its head is missing.
+      expect(result.success).toBe(false)
+      expect(await manager.listInstalled()).not.toContain(repoId)
+    } finally {
+      fs.rmSync(path.join(dataDir, 'models', selected), { force: true })
+      await manager.clearDownload(repoId)
+    }
+  })
+
   it('downloads the chat (vision) model with observable progress and makes it activatable (#17)', async () => {
     const { progress } = await downloadEveryRequiredFile(chatModel)
 

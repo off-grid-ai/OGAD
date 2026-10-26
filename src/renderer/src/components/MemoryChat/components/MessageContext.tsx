@@ -31,11 +31,17 @@ export function hasInlineMemorySources(
   )
 }
 
-export function openUnifiedContext(item: UnifiedContextItem, navigation: ContextNavigation): void {
+/** Open a source an answer cites. `answer` is that answer, so a document's host can find the very
+ *  part it cites (a meeting: the moment it quotes). */
+export function openUnifiedContext(
+  item: UnifiedContextItem,
+  navigation: ContextNavigation,
+  answer?: string
+): void {
   if (item.kind === 'attachment' && typeof item.key === 'string') {
     // key: attachment:<documentId>:<page>:<position>
     const [, documentId, page] = item.key.split(':')
-    if (documentId) navigation.onOpenDocument?.(documentId, Number(page) || 1)
+    if (documentId) navigation.onOpenDocument?.(documentId, Number(page) || 1, item.snippet, answer)
     return
   }
   navigateSearchHit(
@@ -64,10 +70,13 @@ export function openUnifiedContext(item: UnifiedContextItem, navigation: Context
 
 function UnifiedContextSectionComponent({
   items,
-  navigation
+  navigation,
+  answer
 }: Readonly<{
   items?: readonly UnifiedContextItem[]
   navigation: ContextNavigation
+  /** The answer citing these sources. */
+  answer?: string
 }>): React.JSX.Element | null {
   if (!items?.length) return null
   // Document passages: thin rows grouped by document. Other sources keep their cards. The tag stays
@@ -96,7 +105,7 @@ function UnifiedContextSectionComponent({
               <li key={item.key ?? index}>
                 <button
                   type="button"
-                  onClick={() => openUnifiedContext(item, navigation)}
+                  onClick={() => openUnifiedContext(item, navigation, answer)}
                   className="flex w-full items-baseline gap-2 px-2 py-1 text-left text-[11px] text-neutral-400 transition-colors hover:bg-green-500/5 hover:text-neutral-200"
                 >
                   <span className="shrink-0 font-semibold text-green-500">[S{index + 1}]</span>
@@ -119,7 +128,7 @@ function UnifiedContextSectionComponent({
               <button
                 key={`${item.kind}-${item.refId ?? item.ts}-${index}`}
                 type="button"
-                onClick={() => openUnifiedContext(item, navigation)}
+                onClick={() => openUnifiedContext(item, navigation, answer)}
                 title={`${item.kind} · ${item.surface}${item.title ? ` · ${item.title}` : ''}${replaySuffix}`}
                 className="flex flex-col gap-1 overflow-hidden rounded-md border border-neutral-800 p-2 text-left text-[11px] text-neutral-400 transition-colors hover:border-green-500"
               >
@@ -244,10 +253,13 @@ function EntitiesContextSectionComponent({
 
 function ContextDisclosureComponent({
   context,
-  navigation
+  navigation,
+  answer
 }: Readonly<{
   context?: RagContext
   navigation: ContextNavigation
+  /** The answer citing these sources. */
+  answer?: string
 }>): React.JSX.Element | null {
   if (!context) return null
   const resultCount = contextResultCount(context)
@@ -279,7 +291,7 @@ function ContextDisclosureComponent({
         </svg>
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-1.5 max-h-[400px] max-w-full overflow-y-auto rounded-md border border-neutral-800 bg-neutral-900/40 p-4 text-sm">
-        <UnifiedContextSection items={context.unified} navigation={navigation} />
+        <UnifiedContextSection items={context.unified} navigation={navigation} answer={answer} />
         <SourceScoresSection sources={context.sources} />
         <SummariesContextSection
           summaries={context.summaries}

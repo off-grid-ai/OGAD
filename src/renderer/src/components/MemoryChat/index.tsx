@@ -18,7 +18,7 @@ import {
   settleUnownedStream,
   type RunStopTarget
 } from '@renderer/lib/chat-run-lifecycle'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { queuedCount } from '@renderer/lib/chat-queue'
 import {
   submitQueuedTurn,
@@ -335,6 +335,8 @@ export function MemoryChat({
   onTargetConsumed,
   onActiveConversationChange,
   onTaskDetailModeChange,
+  contextDocuments,
+  conversationIds,
   god,
   paneKey,
   split,
@@ -1636,6 +1638,11 @@ export function MemoryChat({
           setActiveConversationId(null)
           setConvMessages(null, [])
           setActiveProjectId(openTarget.projectId)
+        } else if (openTarget.fresh) {
+          setActiveConversationId(null)
+          setConvMessages(null, [])
+          setActiveProjectId(null)
+          if (openTarget.draftPrompt) draftStore.set(openTarget.draftPrompt)
         } else if (openTarget.presetId) {
           setActiveConversationId(null)
           setConvMessages(null, [])
@@ -2567,7 +2574,20 @@ export function MemoryChat({
           // God is set up to do everything: every tool, and the selected model reasoning.
           ...(god ? { context: god.context(), rules: god.rules?.(), allTools: true } : {}),
           images: imagePaths,
-          ...(turnDocuments.length ? { documents: turnDocuments } : {}),
+          ...(turnDocuments.length || contextDocuments
+            ? {
+                documents: [
+                  // Only what main reads: a document's click handler stays in this window.
+                  ...(contextDocuments?.() ?? []).map(({ id, name, kind, text }) => ({
+                    documentId: id,
+                    name,
+                    kind,
+                    text
+                  })),
+                  ...turnDocuments
+                ]
+              }
+            : {}),
           imageAvailable,
           streamId: toolStreamId,
           thinking: god ? true : thinkingEnabled,
@@ -4314,6 +4334,12 @@ export function MemoryChat({
   else if (isPro) examples = ASK_EXAMPLES_PRO
 
   const installedSkillNames = useMemo(() => skills.map((skill) => skill.name), [skills])
+  // Read when a source is clicked, so a host re-rendering (a meeting's playhead) does not rebuild
+  // every message's navigation.
+  const contextDocumentsRef = useRef(contextDocuments)
+  useLayoutEffect(() => {
+    contextDocumentsRef.current = contextDocuments
+  }, [contextDocuments])
   const messageNavigation = useMemo<ContextNavigation>(
     () => ({
       onNavigateToAction,
@@ -4330,12 +4356,20 @@ export function MemoryChat({
         setSkillsOpen(true)
       },
       // A document citation opens the document at the page it cites.
-      onOpenDocument: (documentId, page) => {
+      onOpenDocument: (documentId, page, passage, answer) => {
         const conversation =
           messagesByConvRef.current[activeConversationId ?? NEW_CHAT] ?? EMPTY_MSGS
         const attachment = conversation
           .flatMap((message) => message.attachments ?? [])
           .find((candidate) => candidate.documentId === documentId)
+        // A document the chat is given (a meeting) shows its own source: the meeting moves there.
+        // An answer from before it had an id still names it by a fingerprint of its old text, so a
+        // chat given one document takes any other unattached citation to be that one.
+        const given = contextDocumentsRef.current?.() ?? []
+        const own =
+          given.find((document) => document.id === documentId) ??
+          (!attachment && given.length === 1 ? given[0] : undefined)
+        if (own?.onOpen) return own.onOpen(passage ?? '', answer ?? '')
         if (!attachment) return
         closePanels()
         const isPdf = attachment.kind === 'pdf' && !!attachment.path
@@ -4554,13 +4588,17 @@ export function MemoryChat({
 
   const conversationListRows = useMemo(() => {
     const query = convSearch.trim().toLowerCase()
+    const allowed = conversationIds ? new Set(conversationIds) : null
+    const listed = allowed
+      ? conversations.filter((conversation) => allowed.has(conversation.id))
+      : conversations
     const filtered = query
-      ? conversations.filter(
+      ? listed.filter(
           (conversation) =>
             (conversation.title || '').toLowerCase().includes(query) ||
             contentMatchIds.has(conversation.id)
         )
-      : conversations
+      : listed
     if (!filtered.length) return []
 
     const today = startOfLocalDay(new Date())
@@ -4595,7 +4633,7 @@ export function MemoryChat({
           ]
         : []
     )
-  }, [contentMatchIds, convSearch, conversations])
+  }, [contentMatchIds, convSearch, conversations, conversationIds])
 
   return (
     <ActiveConversationProvider conversationId={activeConversationId}>

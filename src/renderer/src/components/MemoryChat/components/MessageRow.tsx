@@ -193,7 +193,13 @@ function VoiceMessageRow({
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
-        content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
+        content: (
+          <UnifiedContextSection
+            items={message.context.unified}
+            navigation={navigation}
+            answer={message.content}
+          />
+        )
       }
     : undefined
   const transcribeAgain = useCallback(async (): Promise<void> => {
@@ -599,7 +605,13 @@ function StandardMessageRow({
   const memorySources = hasInlineMemorySources(message)
     ? {
         count: message.context.unified.length,
-        content: <UnifiedContextSection items={message.context.unified} navigation={navigation} />
+        content: (
+          <UnifiedContextSection
+            items={message.context.unified}
+            navigation={navigation}
+            answer={message.content}
+          />
+        )
       }
     : undefined
   return (
@@ -723,6 +735,7 @@ function StandardMessageRow({
         <ContextDisclosure
           context={memorySources ? { ...message.context, unified: [] } : message.context}
           navigation={navigation}
+          answer={message.content}
         />
       ) : null}
     </div>

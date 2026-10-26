@@ -19,14 +19,31 @@ describe('renderer media permission admission', () => {
 
     if (!handler) throw new Error('Permission handler was not registered')
 
-    const decision = (permission: Parameters<PermissionHandler>[1]): boolean => {
+    const decision = (
+      permission: Parameters<PermissionHandler>[1],
+      isMainFrame = true
+    ): boolean => {
       let granted = false
-      handler!({} as never, permission, (value) => (granted = value), {} as never)
+      handler!({} as never, permission, (value) => (granted = value), { isMainFrame } as never)
       return granted
     }
     expect(decision('media')).toBe(true)
     expect(decision('notifications')).toBe(false)
     expect(decision('geolocation')).toBe(false)
     expect(decision('openExternal')).toBe(false)
+  })
+
+  it("lets the app's own page go full screen (a recording's video), but not an embedded frame", () => {
+    let handler: PermissionHandler | null = null
+    installMediaPermissionHandler({
+      setPermissionRequestHandler: (next: PermissionHandler | null) => (handler = next)
+    } as Pick<Session, 'setPermissionRequestHandler'>)
+    const decision = (isMainFrame: boolean): boolean => {
+      let granted = false
+      handler!({} as never, 'fullscreen', (value) => (granted = value), { isMainFrame } as never)
+      return granted
+    }
+    expect(decision(true)).toBe(true)
+    expect(decision(false)).toBe(false)
   })
 })

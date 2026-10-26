@@ -65,6 +65,7 @@ import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 import {
   describeModel,
   modelDisplayName,
+  mtpHeadForPrimaryFile,
   type ModelEntry,
   type ModelNameSources
 } from '@offgrid/models'
@@ -1154,6 +1155,14 @@ async function downloadModelInner(
           : file
       )
     }
+  }
+  // One tap brings everything the model needs. A catalog entry lists its MTP head already; a file
+  // picked from Hugging Face gets its separately published head in the same job.
+  if (entry && !inCatalog) {
+    const primary = primaryFileName(entry)
+    const head = primary ? mtpHeadForPrimaryFile(primary) : undefined
+    if (head && !entry.files.some((file) => file.name === head.name))
+      entry = { ...entry, files: [...entry.files, { ...head, role: 'aux' as const }] }
   }
   if (!entry) {
     writeDiagnosticLog('models.download', 'request.rejected', { modelId, reason: 'unknown_model' })

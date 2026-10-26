@@ -1,7 +1,203 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-21",
+  "updatedAt": "2026-10-23",
   "sections": {
-    "models": []
+    "models": [
+      {
+        "id": "nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-GGUF",
+        "sourceModelId": "nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB",
+        "quality": 21,
+        "activeParams": 9,
+        "name": "Nemotron 3.5 Bolt 74B",
+        "kind": "vision",
+        "org": "NVIDIA",
+        "description": "74B quality in 24GB; reads images",
+        "params": 74,
+        "minRamGb": 32,
+        "quant": "IQ2_XXS",
+        "isNew": true,
+        "tags": [
+          "Challenger"
+        ],
+        "releaseDate": "2026-10-07",
+        "files": [
+          {
+            "name": "NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf",
+            "url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-GGUF/resolve/e0fecb69cb3e5e4c5e8a056fa2aec98c78e91246/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf",
+            "sizeBytes": 22018326528,
+            "sha256": "91d63363e782c8a3d5f4be42816eba8e0d42dd2530bd07a7d0d2dc440599af75",
+            "role": "primary"
+          },
+          {
+            "name": "mmproj-NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf",
+            "url": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-GGUF/resolve/e0fecb69cb3e5e4c5e8a056fa2aec98c78e91246/mmproj-NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB.gguf",
+            "sizeBytes": 1733692736,
+            "sha256": "0ee891eadc7bf0cae6289b249c74eb1ef420534351f6ef8b64d49f0ca6a926b0",
+            "role": "mmproj"
+          }
+        ]
+      },
+      {
+        "id": "InternScience/Sage-A1.5-Q4_K_M-GGUF",
+        "sourceModelId": "InternScience/Sage-A1.5",
+        "quality": 22,
+        "activeParams": 3,
+        "name": "Sage A1.5 35B",
+        "kind": "vision",
+        "org": "InternScience",
+        "description": "Research and agent work at the speed of a 3B; reads images",
+        "params": 35,
+        "minRamGb": 32,
+        "quant": "Q4_K_M",
+        "isNew": true,
+        "releaseDate": "2026-10-15",
+        "files": [
+          {
+            "name": "Sage-A1.5-Q4_K_M.gguf",
+            "url": "https://huggingface.co/InternScience/Sage-A1.5-Q4_K_M-GGUF/resolve/10b179b52f2c841030db327627e707d076b4c8cf/Sage-A1.5-Q4_K_M.gguf",
+            "sizeBytes": 21713463520,
+            "sha256": "a64fe0bbf936db3eb54f66f142c2b2eee569ade83673649f549a21daef8ca395",
+            "role": "primary"
+          },
+          {
+            "name": "Sage-A1.5-mmproj.gguf",
+            "url": "https://huggingface.co/InternScience/Sage-A1.5-Q4_K_M-GGUF/resolve/10b179b52f2c841030db327627e707d076b4c8cf/Sage-A1.5-mmproj.gguf",
+            "sizeBytes": 899282880,
+            "sha256": "51cd4410057e8dc4152ca771a726fbfb34856f047e7049018c757d42ddd481f2",
+            "role": "mmproj"
+          }
+        ]
+      },
+      {
+        "id": "LiquidAI/LFM2.5-24B-A2B-GGUF",
+        "quality": 15,
+        "activeParams": 2.45,
+        "name": "LFM2.5 24B A2B",
+        "kind": "text",
+        "org": "LiquidAI",
+        "description": "Agent and tool use at the speed of a 2B; text only",
+        "params": 24,
+        "minRamGb": 20,
+        "quant": "Q4_K_M",
+        "isNew": true,
+        "releaseDate": "2026-10-12",
+        "files": [
+          {
+            "name": "LFM2.5-24B-A2B-Q4_K_M.gguf",
+            "url": "https://huggingface.co/LiquidAI/LFM2.5-24B-A2B-GGUF/resolve/0912d33141f77e10705345a6732bfd83f0252fdc/LFM2.5-24B-A2B-Q4_K_M.gguf",
+            "sizeBytes": 14526258464,
+            "sha256": "d3334405b96228eb9908cdebb5c6194908f2da64282bda852afc3a3910c64e7d",
+            "role": "primary"
+          }
+        ]
+      },
+      {
+        "id": "RecursiveSI/flint-int4-gguf",
+        "sourceModelId": "RecursiveSI/flint",
+        "quality": 20,
+        "activeParams": 2.5,
+        "name": "Flint 40B",
+        "kind": "text",
+        "org": "RecursiveSI",
+        "description": "Coding agent at the speed of a 2.5B; text only",
+        "params": 39.8,
+        "minRamGb": 36,
+        "quant": "Q4_1",
+        "minLlamaBuild": 11803,
+        "isNew": true,
+        "releaseDate": "2026-10-21",
+        "files": [
+          {
+            "name": "flint-int4-q4_1.gguf",
+            "url": "https://huggingface.co/RecursiveSI/flint-int4-gguf/resolve/9c47151036bc2c34331142dda04488bceab2bc9f/flint-int4-q4_1.gguf",
+            "sizeBytes": 25992966976,
+            "sha256": "43c07baccdba42eb7528a9630ee15699b1942c297291dc1b39a061f508ee1a4b",
+            "role": "primary"
+          }
+        ]
+      },
+      {
+        "id": "XHToken/Spark-X2.6-4B-GGUF",
+        "sourceModelId": "XHToken/Spark-X2.6-4B",
+        "quality": 18,
+        "name": "Spark X2.6 4B",
+        "kind": "text",
+        "org": "XHToken",
+        "description": "Best agent and coding model at 4B; text only",
+        "params": 4.1,
+        "minRamGb": 6,
+        "quant": "Q4_K_M",
+        "minLlamaBuild": 10828,
+        "isNew": true,
+        "releaseDate": "2026-10-19",
+        "files": [
+          {
+            "name": "Spark-X2.6-4B-Q4_K_M.gguf",
+            "url": "https://huggingface.co/XHToken/Spark-X2.6-4B-GGUF/resolve/fe31f8d64890302cc3a1d365d700357b4b75ba77/Spark-X2.6-4B-Q4_K_M.gguf",
+            "sizeBytes": 3543441312,
+            "sha256": "91cb2811aebb47ac916aa619d27d4cdd7f4143106b7917accb8ead4cd7f5cbd9",
+            "role": "primary"
+          }
+        ]
+      },
+      {
+        "id": "ggml-org/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF",
+        "quality": 16,
+        "activeParams": 3,
+        "supersededBy": "Nemotron 3.5 Bolt 74B",
+        "name": "Nemotron 3.5 Lightning 30B",
+        "kind": "text",
+        "org": "NVIDIA",
+        "description": "30B quality at the speed of a 3B; text only",
+        "params": 30,
+        "minRamGb": 32,
+        "quant": "Q4_0",
+        "isNew": true,
+        "tags": [
+          "Challenger"
+        ],
+        "releaseDate": "2026-08-11",
+        "files": [
+          {
+            "name": "NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_0.gguf",
+            "url": "https://huggingface.co/ggml-org/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/resolve/main/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_0.gguf",
+            "sizeBytes": 18898091584,
+            "role": "primary"
+          }
+        ]
+      },
+      {
+        "id": "unsloth/Qwen3.6-35B-A3B-GGUF",
+        "sourceModelId": "Qwen/Qwen3.6-35B-A3B",
+        "quality": 18,
+        "supersededBy": "Sage A1.5 35B",
+        "activeParams": 3,
+        "name": "Qwen 3.6 35B A3B",
+        "kind": "vision",
+        "org": "Qwen",
+        "description": "35B quality at the speed of a 3B; reads images",
+        "params": 35,
+        "minRamGb": 32,
+        "quant": "UD-Q4_K_M",
+        "isNew": true,
+        "releaseDate": "2026-04-16",
+        "files": [
+          {
+            "name": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+            "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+            "sizeBytes": 22134528992,
+            "sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61",
+            "role": "primary"
+          },
+          {
+            "name": "mmproj-Qwen3.6-35B-A3B-F16.gguf",
+            "url": "https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF/resolve/a483e9e6cbd595906af30beda3187c2663a1118c/mmproj-F16.gguf",
+            "sizeBytes": 899283680,
+            "sha256": "8971ee4f331ff0a4c609374f32984b3d4e6dc086c0aa35f1d637fad1829e887f",
+            "role": "mmproj"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -74,7 +74,8 @@ const keepCitations = (url: string): string =>
 
 function makeCiteComponents(
   unified: RagContext['unified'],
-  navigation: ContextNavigation
+  navigation: ContextNavigation,
+  answer: string
 ): Components {
   return {
     ...markdownComponents,
@@ -99,7 +100,7 @@ function makeCiteComponents(
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => openUnifiedContext(source, navigation)}
+                  onClick={() => openUnifiedContext(source, navigation, answer)}
                   aria-label={`Open ${source.surface}, ${page}`}
                   className="mx-0.5 inline-flex items-center rounded-sm border border-green-500/40 bg-green-500/10 px-1 align-baseline text-[0.72em] font-semibold text-green-500 transition-colors hover:bg-green-500/20"
                 >
@@ -118,7 +119,7 @@ function makeCiteComponents(
         <button
           type="button"
           onClick={() => {
-            if (source) openUnifiedContext(source, navigation)
+            if (source) openUnifiedContext(source, navigation, answer)
           }}
           title={
             source
@@ -207,7 +208,7 @@ function MessageMarkdownComponent({
 }>): React.JSX.Element {
   const components =
     message.role === 'assistant'
-      ? makeCiteComponents(message.context?.unified, navigation)
+      ? makeCiteComponents(message.context?.unified, navigation, message.content)
       : makeUserMessageComponents(navigation)
   const content =
     message.role === 'user'

@@ -54,6 +54,19 @@ interface GodChatOptions {
   ) => Array<T & { reactions?: readonly string[] }>
 }
 
+/** A document a chat reads on every turn without the user attaching it. */
+export interface ChatContextDocument {
+  /** Names it in the answer's sources (letters, digits and dashes); change it when the text does. */
+  readonly id: string
+  readonly name: string
+  /** As an attachment's kind: 'pasted' for text. */
+  readonly kind: string
+  readonly text: string
+  /** A cited passage of it was clicked: show where it comes from (a meeting moves there).
+   *  `answer` is the answer that cited it, to find the very part it means. */
+  readonly onOpen?: (passage: string, answer: string) => void
+}
+
 export interface MemoryChatProps {
   /** Open a to-do on the Actions screen (Pro). */
   readonly onNavigateToAction?: (actionId: number) => void
@@ -80,12 +93,22 @@ export interface MemoryChatProps {
     presetId?: string
     /** Open the composer with this text. The user still confirms the send. */
     draftPrompt?: string
+    /** Start on a new, empty chat rather than the last one open (a meeting with no chat yet). */
+    fresh?: boolean
   }> | null
   readonly onTargetConsumed?: () => void
   /** Keep the surrounding task workspace scoped to the conversation shown here. */
   readonly onActiveConversationChange?: (conversationId: string | null) => void
   /** Let the app hide global navigation while a task uses its immersive detail view. */
   readonly onTaskDetailModeChange?: (detailOpen: boolean) => void
+  /**
+   * Documents every turn of this chat reads, as if attached to it: the meeting a meeting's chat is
+   * about, say. Read fresh each turn, so they follow what they describe; whole when they fit,
+   * otherwise the passages that answer the question.
+   */
+  readonly contextDocuments?: () => readonly ChatContextDocument[]
+  /** List only these conversations (a meeting's chats beside the meeting). Absent: all of them. */
+  readonly conversationIds?: readonly string[]
   /** Chat as God (see GodChatOptions). Absent: the Chat screen. */
   readonly god?: GodChatOptions
   /** One pane of the split view: keeps its own tabs, apart from the main Chat screen's. */
