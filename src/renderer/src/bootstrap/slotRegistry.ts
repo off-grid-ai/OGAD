@@ -51,6 +51,9 @@ export const SLOTS = {
   /** Under a finished clip in chat: Continue, New shot, Make it a story. Receives
    *  `{ conversationId, messageId, videoPath }`. Pro. */
   chatVideoActions: 'chat.videoActions',
+  /** A generated clip in chat, drawn by Pro in place of the plain player (poster, open, actions).
+   *  Receives `{ messageId, videoPath }`. Pro. */
+  chatVideoCard: 'chat.videoCard',
   /** A film started from chat: its progress, shot strip and player. Receives `{ storyId }`. Pro. */
   chatFilmCard: 'chat.filmCard',
   /** Video settings inside the shared Settings drawer. Pro. */

@@ -729,8 +729,15 @@ const offGridApi = {
       error?: string
     }>,
   getEmbeddingRebuildStatus: () => ipcRenderer.invoke('models:embedding-rebuild-status'),
-  onEmbeddingRebuildStatusChanged: (callback: (status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus): void => callback(status)
+  onEmbeddingRebuildStatusChanged: (
+    callback: (
+      status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus
+    ) => void
+  ) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      status: import('../shared/embedding-rebuild-contract').EmbeddingRebuildStatus
+    ): void => callback(status)
     ipcRenderer.on('models:embedding-rebuild-status-changed', listener)
     return () => ipcRenderer.removeListener('models:embedding-rebuild-status-changed', listener)
   },
@@ -1032,15 +1039,27 @@ const offGridApi = {
     }
   ) => ipcRenderer.invoke('imagegen:generate', params) as Promise<ImageGenerationResultContract>,
 
-  videoGenStatus: () => ipcRenderer.invoke('videogen:status') as Promise<{
-    available: boolean; models: string[]; active: string | null; reason?: string
-  }>,
+  videoGenStatus: () =>
+    ipcRenderer.invoke('videogen:status') as Promise<{
+      available: boolean
+      models: string[]
+      active: string | null
+      reason?: string
+    }>,
   listGeneratedVideos: (scope?: { conversationId?: string; projectId?: string | null }) =>
-    ipcRenderer.invoke('videogen:list', scope) as Promise<Array<{
-      path: string; name: string; mtime: number; syncId?: string;
-      conversationId?: string; projectId?: string | null; durationSeconds?: number
-    }>>,
-  deleteGeneratedVideo: (videoPath: string) => ipcRenderer.invoke('videogen:delete', videoPath) as Promise<boolean>,
+    ipcRenderer.invoke('videogen:list', scope) as Promise<
+      Array<{
+        path: string
+        name: string
+        mtime: number
+        syncId?: string
+        conversationId?: string
+        projectId?: string | null
+        durationSeconds?: number
+      }>
+    >,
+  deleteGeneratedVideo: (videoPath: string) =>
+    ipcRenderer.invoke('videogen:delete', videoPath) as Promise<boolean>,
   exportGeneratedVideo: (videoPath: string, name?: string) =>
     ipcRenderer.invoke('videogen:export', videoPath, name) as Promise<boolean>,
 
@@ -1253,6 +1272,12 @@ const offGridApi = {
     return unsubscribe('meeting:state', sub)
   },
   // Main-driven view navigation (used by the tray to jump to a screen).
+  /** Back or Forward from the app menu (Cmd+[ / Cmd+], Ctrl on Windows and Linux). */
+  onHistoryNavigate: (cb: (direction: 'back' | 'forward') => void) => {
+    const sub = (_event: unknown, direction: 'back' | 'forward'): void => cb(direction)
+    ipcRenderer.on('navigate:history', sub)
+    return unsubscribe('navigate:history', sub)
+  },
   onNavigate: (cb: (view: string) => void) => {
     const sub = (_e: unknown, view: string): void => cb(view)
     ipcRenderer.on('navigate', sub)

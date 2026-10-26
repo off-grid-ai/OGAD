@@ -279,11 +279,18 @@ function VoiceMessageRow({
       />
     )
   } else if (message.videoPath) {
+    const VideoCard = getSlot(SLOTS.chatVideoCard)
     const VideoActions = getSlot(SLOTS.chatVideoActions)
-    body = (
+    body = VideoCard ? (
+      <div className={standardMessageBubbleClass(message, false)}>
+        <VideoCard messageId={message.id} videoPath={message.videoPath} />
+      </div>
+    ) : (
       <div className={standardMessageBubbleClass(message, false)}>
         <ChatVideoPreview path={message.videoPath} />
-        {VideoActions ? <VideoActions messageId={message.id} videoPath={message.videoPath} /> : null}
+        {VideoActions ? (
+          <VideoActions messageId={message.id} videoPath={message.videoPath} />
+        ) : null}
         <p className="mt-2 text-xs text-neutral-400">{message.content}</p>
       </div>
     )
@@ -497,7 +504,9 @@ function MessageBubble({
         />
       ) : null}
       {message.videoPath ? <ChatVideoPreview path={message.videoPath} className="mb-2" /> : null}
-      {message.context?.videoStoryId ? <FilmCardSlot storyId={message.context.videoStoryId} /> : null}
+      {message.context?.videoStoryId ? (
+        <FilmCardSlot storyId={message.context.videoStoryId} />
+      ) : null}
       {message.image ? (
         <ChatImagePreview
           src={message.image}
@@ -879,7 +888,6 @@ function sameMessageState(
     left.regenerationDisabled === right.regenerationDisabled
   )
 }
-
 
 /** A film started from this chat. Pro draws it; without Pro the message line stands alone. */
 function FilmCardSlot({ storyId }: { storyId: string }): React.JSX.Element | null {

@@ -294,6 +294,24 @@ async function createWindow(): Promise<void> {
           { role: 'forceReload' },
           { role: 'toggleDevTools' },
           { type: 'separator' },
+          // The app's own Back and Forward: every screen is a history entry.
+          {
+            label: 'Back',
+            accelerator: 'CmdOrCtrl+[',
+            click: (_item: unknown, window: unknown): void => {
+              if (window instanceof BrowserWindow && !window.isDestroyed())
+                window.webContents.send('navigate:history', 'back')
+            }
+          },
+          {
+            label: 'Forward',
+            accelerator: 'CmdOrCtrl+]',
+            click: (_item: unknown, window: unknown): void => {
+              if (window instanceof BrowserWindow && !window.isDestroyed())
+                window.webContents.send('navigate:history', 'forward')
+            }
+          },
+          { type: 'separator' },
           { label: 'Zoom In', accelerator: 'CmdOrCtrl+=', click: stepWindowZoom(0.5) },
           { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', click: stepWindowZoom(-0.5) },
           { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', click: stepWindowZoom(0) },
@@ -398,7 +416,9 @@ app.whenReady().then(async () => {
   initializeAIRequestLogs()
   try {
     const { startEmbeddingIndexRebuild } = await import('./embedding-index-rebuild')
-    void startEmbeddingIndexRebuild().catch((error) => console.error('[embeddings] index rebuild failed', error))
+    void startEmbeddingIndexRebuild().catch((error) =>
+      console.error('[embeddings] index rebuild failed', error)
+    )
   } catch (error) {
     console.error('[embeddings] index preparation failed', error)
   }

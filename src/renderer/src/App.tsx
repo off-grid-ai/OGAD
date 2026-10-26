@@ -91,6 +91,12 @@ import { AnalyticsPrompt } from './components/analytics/AnalyticsPrompt'
 import { markTasksSeen } from './lib/task-side-panel'
 import { internalTabLocation, internalTabPath, isInternalTabView } from './lib/internal-tab-route'
 import {
+  hasPathSubroute,
+  restoreRouteScroll,
+  routeScroller,
+  routeScrollTop
+} from './lib/route-history'
+import {
   NOTIFICATION_OPEN_TARGET_CHANNEL,
   NOTIFICATION_RESOLVE_TARGET_HOOK,
   NOTIFICATION_SUBSCRIBE_EXTERNAL_ITEMS_HOOK,
@@ -130,6 +136,53 @@ interface NavigationIntent {
   subroute?: string
   conversationId?: string
   draftPrompt?: string
+}
+
+/** The hash route of a screen: /video/watch/<id>, /settings/<section>, /models/image, ... */
+function routePath(
+  viewMode: ViewMode,
+  navigationSubroute: string | null,
+  settingsSection: string | null
+): string {
+  const urlMap: Record<ViewMode, string> = {
+    explore: '/explore',
+    day: '/day',
+    replay: '/replay',
+    reflect: '/reflect',
+    actions: '/actions',
+    connectors: '/connectors',
+    meetings: '/meetings',
+    dashboard: '/dashboard',
+    'memory-chat': '/chat',
+    chats: '/chats',
+    tasks: '/tasks',
+    entities: '/entities',
+    models: '/models',
+    gateway: '/gateway',
+    projects: '/projects',
+    notifications: '/notifications',
+    search: '/search',
+    settings: '/settings',
+    clipboard: '/clipboard',
+    voice: '/voice',
+    vault: '/vault',
+    devices: '/devices',
+    video: '/video'
+  }
+
+  if (viewMode === 'settings' && settingsSection)
+    return `/settings/${encodeURIComponent(settingsSection)}`
+  if (isInternalTabView(viewMode)) return internalTabPath(viewMode, navigationSubroute)
+  if (hasPathSubroute(viewMode) && navigationSubroute)
+    return `${urlMap[viewMode]}/${navigationSubroute}`
+  return urlMap[viewMode]
+}
+
+/** One browser history entry: the screen, and where its page was scrolled. */
+interface RouteEntry {
+  nav: NavigationState
+  idx: number
+  scroll: number
 }
 
 // Navigation state type for history tracking
@@ -466,17 +519,16 @@ function AppContent(): React.JSX.Element {
     })
   }, [viewMode])
 
-  // Navigation history stacks (back and forward)
-  const navigationHistory = useRef<NavigationState[]>([])
-  const forwardHistory = useRef<NavigationState[]>([])
+  // Browser history is the one navigation stack. `routeIndex` is where this screen sits in it and
+  // `routeMax` how far Forward can go, so the toolbar arrows know when they apply.
+  const routeIndex = useRef(-1)
+  const routeMax = useRef(-1)
   const isNavigatingHistory = useRef(false)
-  // Reactive mirrors of the stacks so the in-app back/forward buttons can
-  // enable/disable (refs alone don't trigger a re-render).
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
   const syncNavFlags = useCallback(() => {
-    setCanGoBack(navigationHistory.current.length > 1)
-    setCanGoForward(forwardHistory.current.length > 0)
+    setCanGoBack(routeIndex.current > 0)
+    setCanGoForward(routeIndex.current < routeMax.current)
   }, [])
 
   const removePaidRendererAccess = useCallback((): void => {
@@ -489,8 +541,9 @@ function AppContent(): React.JSX.Element {
     setProReady(false)
     void activateRendererFeatures()
 
-    navigationHistory.current = []
-    forwardHistory.current = []
+    // Paid screens may sit in history: start a fresh history at the current screen.
+    routeIndex.current = -1
+    routeMax.current = -1
     isNavigatingHistory.current = false
     setCanGoBack(false)
     setCanGoForward(false)
@@ -575,6 +628,10 @@ function AppContent(): React.JSX.Element {
       setNavigationSubroute(internalTab.subroute)
       setSettingsSection(null)
       commitViewMode(internalTab.view)
+    } else if (path.startsWith('/video/')) {
+      setNavigationSubroute(path.slice('/video/'.length) || null)
+      setSettingsSection(null)
+      commitViewMode('video')
     } else if (path.startsWith('/settings/')) {
       let section: string | null = null
       try {
@@ -610,7 +667,9 @@ function AppContent(): React.JSX.Element {
         setSettingsSection(navigation.view === 'settings' ? (navigation.section ?? null) : null)
         if (navigation.view === 'settings') setSettingsNavigationKey((value) => value + 1)
         setNavigationSubroute(
-          isInternalTabView(navigation.view) ? (navigation.subroute ?? null) : null
+          isInternalTabView(navigation.view) || hasPathSubroute(navigation.view)
+            ? (navigation.subroute ?? null)
+            : null
         )
         if (
           navigation.view === 'memory-chat' &&
@@ -661,38 +720,7 @@ function AppContent(): React.JSX.Element {
 
   // Update browser URL when view mode changes
   useEffect(() => {
-    const urlMap: Record<ViewMode, string> = {
-      explore: '/explore',
-      day: '/day',
-      replay: '/replay',
-      reflect: '/reflect',
-      actions: '/actions',
-      connectors: '/connectors',
-      meetings: '/meetings',
-      dashboard: '/dashboard',
-      'memory-chat': '/chat',
-      chats: '/chats',
-      tasks: '/tasks',
-      entities: '/entities',
-      models: '/models',
-      gateway: '/gateway',
-      projects: '/projects',
-      notifications: '/notifications',
-      search: '/search',
-      settings: '/settings',
-      clipboard: '/clipboard',
-      voice: '/voice',
-      vault: '/vault',
-      devices: '/devices',
-      video: '/video'
-    }
-
-    let newPath = urlMap[viewMode]
-    if (viewMode === 'settings' && settingsSection) {
-      newPath = `/settings/${encodeURIComponent(settingsSection)}`
-    } else if (isInternalTabView(viewMode)) {
-      newPath = internalTabPath(viewMode, navigationSubroute)
-    }
+    const newPath = routePath(viewMode, navigationSubroute, settingsSection)
     if (appLocationPath() !== newPath) {
       replaceAppLocation(newPath)
     }
@@ -707,37 +735,38 @@ function AppContent(): React.JSX.Element {
   useLayoutEffect(() => {
     if (isNavigatingHistory.current) {
       isNavigatingHistory.current = false
+      syncNavFlags()
       return
     }
-
-    // Avoid duplicating the same state
     const currentState: NavigationState = {
       viewMode,
-      subroute: isInternalTabView(viewMode) ? navigationSubroute : null,
+      subroute:
+        isInternalTabView(viewMode) || hasPathSubroute(viewMode) ? navigationSubroute : null,
       settingsSection: viewMode === 'settings' ? settingsSection : null,
       selectedSessionId,
       selectedEntityId,
       selectedProjectId
     }
-
-    const lastState = navigationHistory.current[navigationHistory.current.length - 1]
-    const isSameState =
-      lastState &&
-      lastState.viewMode === currentState.viewMode &&
-      lastState.subroute === currentState.subroute &&
-      lastState.settingsSection === currentState.settingsSection &&
-      lastState.selectedSessionId === currentState.selectedSessionId &&
-      lastState.selectedEntityId === currentState.selectedEntityId &&
-      lastState.selectedProjectId === currentState.selectedProjectId
-
-    if (!isSameState) {
-      navigationHistory.current.push(currentState)
-      // Clear forward history when navigating to a new state
-      forwardHistory.current = []
-      // Limit history size to prevent memory issues
-      if (navigationHistory.current.length > 50) {
-        navigationHistory.current = navigationHistory.current.slice(-50)
-      }
+    const path = routePath(viewMode, currentState.subroute, currentState.settingsSection)
+    const url = window.location.protocol === 'file:' ? `#${path}` : path
+    const held = window.history.state as RouteEntry | null
+    if (routeIndex.current < 0 || !held?.nav) {
+      // The first screen of this history.
+      routeIndex.current = 0
+      routeMax.current = 0
+      window.history.replaceState(
+        { nav: currentState, idx: 0, scroll: 0 } satisfies RouteEntry,
+        '',
+        url
+      )
+    } else if (JSON.stringify(held.nav) !== JSON.stringify(currentState)) {
+      routeIndex.current = held.idx + 1
+      routeMax.current = routeIndex.current
+      window.history.pushState(
+        { nav: currentState, idx: routeIndex.current, scroll: 0 } satisfies RouteEntry,
+        '',
+        url
+      )
     }
     syncNavFlags()
   }, [
@@ -749,6 +778,47 @@ function AppContent(): React.JSX.Element {
     selectedProjectId,
     syncNavFlags
   ])
+
+  // Keep each history entry's scroll position current, so Back returns to the same place.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const onScroll = (event: Event): void => {
+      if (event.target !== routeScroller()) return
+      if (timer) return
+      timer = setTimeout(() => {
+        timer = null
+        const held = window.history.state as RouteEntry | null
+        if (held?.nav) window.history.replaceState({ ...held, scroll: routeScrollTop() }, '')
+      }, 200)
+    }
+    document.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('scroll', onScroll, true)
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
+  // Back and Forward land here: restore that entry's screen, then its scroll position.
+  useEffect(() => {
+    const onPop = (event: PopStateEvent): void => {
+      const entry = event.state as RouteEntry | null
+      if (!entry?.nav) return
+      routeIndex.current = entry.idx
+      const target = entry.nav
+      navigateTo(target.viewMode, () => {
+        isNavigatingHistory.current = true
+        setNavigationSubroute(target.subroute)
+        setSettingsSection(target.settingsSection)
+        setSelectedSessionId(target.selectedSessionId)
+        setSelectedEntityId(target.selectedEntityId)
+        setSelectedProjectId(target.selectedProjectId)
+      })
+      restoreRouteScroll(entry.scroll)
+      syncNavFlags()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [navigateTo, syncNavFlags])
 
   // Subscribe to informational notification events from the main process. Action
   // approvals live only in Actions and never create a notification copy.
@@ -777,45 +847,13 @@ function AppContent(): React.JSX.Element {
     }
   }, [isPro, proReady])
 
-  // Navigate back using history stack
+  // Back and Forward walk the browser history; popstate restores the screen.
   const navigateBack = useCallback(() => {
-    if (navigationHistory.current.length > 1) {
-      const previousState = navigationHistory.current[navigationHistory.current.length - 2]
-      if (previousState) {
-        navigateTo(previousState.viewMode, () => {
-          isNavigatingHistory.current = true
-          const currentState = navigationHistory.current.pop()
-          if (currentState) forwardHistory.current.push(currentState)
-          setNavigationSubroute(previousState.subroute)
-          setSettingsSection(previousState.settingsSection)
-          setSelectedSessionId(previousState.selectedSessionId)
-          setSelectedEntityId(previousState.selectedEntityId)
-          setSelectedProjectId(previousState.selectedProjectId)
-          syncNavFlags()
-        })
-      }
-    }
-  }, [navigateTo, syncNavFlags])
-
-  // Navigate forward using forward history stack
+    if (routeIndex.current > 0) window.history.back()
+  }, [])
   const navigateForward = useCallback(() => {
-    if (forwardHistory.current.length > 0) {
-      const nextState = forwardHistory.current[forwardHistory.current.length - 1]
-      if (nextState) {
-        navigateTo(nextState.viewMode, () => {
-          isNavigatingHistory.current = true
-          forwardHistory.current.pop()
-          navigationHistory.current.push(nextState)
-          setNavigationSubroute(nextState.subroute)
-          setSettingsSection(nextState.settingsSection)
-          setSelectedSessionId(nextState.selectedSessionId)
-          setSelectedEntityId(nextState.selectedEntityId)
-          setSelectedProjectId(nextState.selectedProjectId)
-          syncNavFlags()
-        })
-      }
-    }
-  }, [navigateTo, syncNavFlags])
+    if (routeIndex.current < routeMax.current) window.history.forward()
+  }, [])
 
   const handleBack = useCallback(() => {
     navigateBack()
@@ -976,22 +1014,19 @@ function AppContent(): React.JSX.Element {
     [navigateTo]
   )
 
-  // Global keyboard shortcuts for back/forward navigation (Cmd+[ and Cmd+])
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if ((e.metaKey || e.ctrlKey) && e.key === '[') {
-        e.preventDefault()
-        if (activeModelsOpen) setActiveModelsOpen(false)
-        else if (modelSettingsOpen) setModelSettingsOpen(false)
-        else navigateBack()
-      } else if ((e.metaKey || e.ctrlKey) && e.key === ']') {
-        e.preventDefault()
-        navigateForward()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeModelsOpen, modelSettingsOpen, navigateBack, navigateForward])
+  // Back and Forward (Cmd+[ / Cmd+], Ctrl on Windows and Linux) come from the app menu, so they
+  // work wherever focus is, even in a text field or a web view.
+  useEffect(
+    () =>
+      window.api.onHistoryNavigate((direction) => {
+        if (direction === 'back') {
+          if (activeModelsOpen) setActiveModelsOpen(false)
+          else if (modelSettingsOpen) setModelSettingsOpen(false)
+          else navigateBack()
+        } else navigateForward()
+      }),
+    [activeModelsOpen, modelSettingsOpen, navigateBack, navigateForward]
+  )
 
   // Original sidebar order preserved. Pro tabs pull their icon/label from the
   // static catalogue and are marked locked in the free build (open the
@@ -1423,7 +1458,7 @@ function AppContent(): React.JSX.Element {
         <div className="min-w-0 flex-1" data-testid="main-workspace">
           <div className="flex h-full flex-col overflow-hidden">
             {/* Content Area */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden" data-route-host>
               <ScreenTransition
                 screenKey={
                   viewMode === 'chats' && selectedSessionId
@@ -1595,7 +1630,7 @@ function AppContent(): React.JSX.Element {
                       // Pro tabs: render through the pro view-router when active,
                       // otherwise show the upgrade writeup for that feature.
                       // Context carries event callbacks; the router does not read their refs.
-                      // eslint-disable-next-line react-hooks/refs
+
                       (renderProView(viewMode, {
                         setView: (v) => navigateTo(v as ViewMode),
                         onNavigate: handleProNavigate,
