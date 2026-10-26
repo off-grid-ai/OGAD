@@ -6308,7 +6308,9 @@ export function MemoryChat({
               ref={taskWorkspaceRef}
               id="task-workspace"
               order={2}
-              defaultSize={48}
+              // Hidden at mount, it starts collapsed: the collapse the pane controller schedules
+              // can run before the group has a layout, which left the chat at half width.
+              defaultSize={taskWorkspaceVisible ? 48 : 0}
               minSize={32}
               collapsible
               collapsedSize={0}
