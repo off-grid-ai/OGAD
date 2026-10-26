@@ -5749,8 +5749,18 @@ export function MemoryChat({
                                 <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
                                   <Paperclip /> Attach files
                                 </DropdownMenuItem>
-                                {/* In video mode an image is the start image: only a model that takes one gets it. */}
-                                {(mode !== 'video' || videoStartImage) && (
+                                {/* In video mode an image is the start image: without a model that takes
+                                    one, the item stays, dimmed, and offers that model. */}
+                                {mode === 'video' && !videoStartImage ? (
+                                  <DropdownMenuItem
+                                    aria-disabled
+                                    title="Needs a video model that starts from an image. Click to get it."
+                                    className="opacity-50"
+                                    onSelect={() => videoController?.offerStartImage?.()}
+                                  >
+                                    <ImageIcon /> Add image
+                                  </DropdownMenuItem>
+                                ) : (
                                   <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
                                     <ImageIcon /> Add image
                                   </DropdownMenuItem>

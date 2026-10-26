@@ -33,6 +33,8 @@ export interface ChatVideoController {
    * shot). Returns the line chat shows when it did, or null to render one clip.
    */
   startFilm?(request: ChatVideoRequest): Promise<{ line: string; storyId: string } | null>
+  /** Without a model that takes a start image: say what it needs and offer to get it. */
+  offerStartImage?(): void
   /** Conversations whose messages changed outside the renderer (a clip finished). */
   onConversationUpdated(listener: (conversationId: string) => void): () => void
 }
