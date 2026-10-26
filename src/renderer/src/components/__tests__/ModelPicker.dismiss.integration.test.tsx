@@ -92,7 +92,7 @@ describe('<ModelPicker/> dismissal', () => {
     renderPicker()
     expect(
       await screen.findByText(
-        'Your selected Text & Vision model handles chat and supported vision work. Image, Voice, and Transcription use their selected models.'
+        'Your selected Text & Vision model handles chat and supported vision work. Image, Video, Voice, Transcription, and Search use their selected models.'
       )
     ).toBeTruthy()
     expect(screen.queryByText(/swaps the chat model/i)).toBeNull()
