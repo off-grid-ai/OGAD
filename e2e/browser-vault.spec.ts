@@ -20,6 +20,7 @@ import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import { enginePortsUnavailableReason } from './helpers/ports'
 import { pairedBrowser, type FakeExtension } from './helpers/fake-extension'
 import { closeAndWait, gotoScreen, mainWindow } from './helpers/windows'
+import { createVaultThroughGate } from './helpers/vault'
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 const MASTER_PASSWORD = 'Browser-vault-demo-2026!'
@@ -83,10 +84,7 @@ test.describe('Paired-browser vault', () => {
     test.setTimeout(120_000)
     // The person sets up the vault and a login on Desktop.
     await gotoScreen(page, 'Vault')
-    await page.getByLabel('Master password', { exact: true }).fill(MASTER_PASSWORD)
-    await page.getByLabel('Confirm password', { exact: true }).fill(MASTER_PASSWORD)
-    await page.getByRole('button', { name: 'Create Vault', exact: true }).click()
-    await expect(page.getByRole('button', { name: 'Lock vault', exact: true })).toBeVisible()
+    await createVaultThroughGate(page, MASTER_PASSWORD)
     await page.getByTitle('New entry', { exact: true }).click()
     await page
       .getByRole('radiogroup', { name: 'Kind', exact: true })
