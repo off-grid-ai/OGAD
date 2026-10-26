@@ -1810,10 +1810,11 @@ export async function reconcileActiveModelProjector(): Promise<boolean> {
   } catch {
     return false // no active selection yet
   }
+  if (typeof cfg !== 'object' || cfg === null) return false
   const CATALOG = await desktopCatalog()
   const dir = llm.getModelsDir()
   const downloaded = reconcileDownloadedModelRegistry(dir, CATALOG as unknown as CatalogEntry[])
-  const active = cfg!
+  const active = cfg
   const transferred = active.id ? downloadedVariant(downloaded, active.id) : undefined
   if (transferred) {
     const primary = downloadedPrimary(transferred)
@@ -2122,7 +2123,13 @@ export function getLocalModels(dir = llm.getModelsDir()): LocalModel[] {
         'utf-8'
       )
     )
-    managed = Array.isArray(arr) ? (arr as LocalModel[]) : []
+    // A row without an id or a primary file names no usable model (a hand-edited copy).
+    managed = Array.isArray(arr)
+      ? arr.filter(
+          (entry): entry is LocalModel =>
+            typeof entry?.id === 'string' && typeof entry.primary === 'string'
+        )
+      : []
   } catch {
     /* no imported models */
   }
