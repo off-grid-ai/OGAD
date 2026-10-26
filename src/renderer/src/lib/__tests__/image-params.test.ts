@@ -38,6 +38,8 @@ describe('resolveImageParams — model default vs user override', () => {
     expect(resolveImageParams(FULL, null)).toEqual({
       steps: d.defaultSteps,
       size: d.defaultSize,
+      width: d.defaultSize,
+      height: d.defaultSize,
       cfgScale: d.defaultCfg
     })
   })
@@ -69,6 +71,8 @@ describe('resolveImageParams — model default vs user override', () => {
     expect(resolveImageParams(FEW_STEP, store)).toEqual({
       steps: d.defaultSteps,
       size: 768,
+      width: 768,
+      height: 768,
       cfgScale: d.defaultCfg
     })
   })

@@ -86,7 +86,14 @@ import { TextEffect } from '@offgrid/operator-ui/operator/text-effect'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { SidePanel } from '../SidePanel'
 import { ImageLightbox } from '../media/ImageLightbox'
-import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
+import {
+  resolveImageParams,
+  setDimensions,
+  setOverride,
+  type ImageParamStore
+} from '@renderer/lib/image-params'
+import { IMAGE_SIZE_PRESETS } from '../../../../shared/image-dimensions'
+import { ImageDimensionFields } from '../ImageDimensionFields'
 import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
 import {
   DISPLAY_SETTINGS_INVALIDATED_EVENT,
@@ -307,10 +314,10 @@ const QUEUE_LABELS: MessageQueueLabels = {
 }
 
 /** The image sizes the composer offers, as segmented options. */
-const IMAGE_SIZE_OPTIONS = [256, 512, 640, 768, 1024].map((size) => ({
-  id: String(size),
-  label: String(size)
-}))
+const IMAGE_SIZE_OPTIONS = [
+  ...IMAGE_SIZE_PRESETS.map((size) => ({ id: String(size), label: String(size) })),
+  { id: 'custom', label: 'Custom' }
+]
 
 /** A new turn rises into the thread; it animates on mount only, never as tokens stream. */
 const MESSAGE_ROW_ENTER = {
@@ -659,7 +666,12 @@ export function MemoryChat({
   const [videoGenConv, setVideoGenConv] = useState<string | null>(null)
   const videoCancelPendingRef = useRef(new Set<string>())
   const generatingVideo = videoGenConv !== null && videoGenConv === activeConversationId
-  const [imgSize, setImgSize] = useState(512)
+  const [imgDims, setImgDims] = useState({ width: 512, height: 512 })
+  const [customImgSize, setCustomImgSize] = useState(false)
+  const showCustomImgSize =
+    customImgSize ||
+    imgDims.width !== imgDims.height ||
+    !(IMAGE_SIZE_PRESETS as readonly number[]).includes(imgDims.width)
   const [imgSteps, setImgSteps] = useState(10)
   const [imgCfgScale, setImgCfgScale] = useState(2)
   const [imgSeed, setImgSeed] = useState('')
@@ -1241,8 +1253,8 @@ export function MemoryChat({
   useEffect(() => {
     console.log('MemoryChat effect: resolve image parameters')
     if (!imgModel) return
-    const { steps, size, cfgScale } = resolveImageParams(imgModel, imgParamStore)
-    setImgSize(size)
+    const { steps, width, height, cfgScale } = resolveImageParams(imgModel, imgParamStore)
+    setImgDims({ width, height })
     setImgSteps(steps)
     setImgCfgScale(cfgScale)
   }, [imgModel, imgParamStore])
@@ -1272,9 +1284,17 @@ export function MemoryChat({
   )
   const setSizeOverride = useCallback(
     (value: number) => {
-      setImgSize(value)
+      setImgDims({ width: value, height: value })
       if (!imgModel) return
       setImgParamStore((prev) => setOverride(prev, imgModel, 'size', value))
+    },
+    [imgModel]
+  )
+  const setDimensionsOverride = useCallback(
+    (width: number, height: number) => {
+      setImgDims({ width, height })
+      if (!imgModel) return
+      setImgParamStore((prev) => setDimensions(prev, imgModel, width, height))
     },
     [imgModel]
   )
@@ -2260,8 +2280,8 @@ export function MemoryChat({
         const imageRequest: ImageGenerationRequestContract = opts?.imageRequest ?? {
           prompt: fullPrompt,
           negativePrompt: imgNegative.trim() || undefined,
-          width: imgSize,
-          height: imgSize,
+          width: imgDims.width,
+          height: imgDims.height,
           steps: imgSteps,
           cfgScale: imgCfgScale,
           seed: Number.isNaN(seedNum) ? -1 : seedNum,
@@ -2278,8 +2298,8 @@ export function MemoryChat({
             projectId: projectId
           })
           const imageMetadata: ImageGenerationMetadata = {
-            width: img.width ?? imageRequest.width ?? imgSize,
-            height: img.height ?? imageRequest.height ?? imgSize,
+            width: img.width ?? imageRequest.width ?? imgDims.width,
+            height: img.height ?? imageRequest.height ?? imgDims.height,
             steps: img.steps ?? imageRequest.steps ?? imgSteps,
             cfgScale: img.cfgScale ?? imageRequest.cfgScale ?? imgCfgScale,
             seed:
@@ -5298,10 +5318,20 @@ export function MemoryChat({
                             <Segmented
                               label="Size"
                               size="sm"
-                              value={String(imgSize)}
+                              value={showCustomImgSize ? 'custom' : String(imgDims.width)}
                               options={IMAGE_SIZE_OPTIONS}
-                              onValueChange={(value) => setSizeOverride(Number(value))}
+                              onValueChange={(value) => {
+                                setCustomImgSize(value === 'custom')
+                                if (value !== 'custom') setSizeOverride(Number(value))
+                              }}
                             />
+                            {showCustomImgSize && (
+                              <ImageDimensionFields
+                                width={imgDims.width}
+                                height={imgDims.height}
+                                onChange={setDimensionsOverride}
+                              />
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5">
                             Steps

@@ -8,28 +8,31 @@
 // typed. The rule below makes the resolution explicit: a user override always
 // wins; only when there is no override do we fall back to the model default.
 
+import { effectiveImageParameter, hasImageParameterOverride } from '@offgrid/models'
 import {
-  effectiveImageParameter,
-  hasImageParameterOverride,
-  resolveImageParameters,
-  setImageParameterOverride,
-  type EffectiveImageParameters,
-  type ImageParameterOverride,
-  type ImageParameterStore
-} from '@offgrid/models'
+  resolveImageDimensions,
+  setImageDimensions,
+  setImageParameter,
+  type EffectiveImageDimensions,
+  type ImageDimensionOverride,
+  type ImageDimensionStore
+} from '../../../shared/image-dimensions'
 
 /** Per-model image params the user can override. Stored per model so switching
  *  models restores that model's last value, not a global one. `null`/`undefined`
  *  means "no override — use the model default". */
-export type ImageParamOverride = ImageParameterOverride
+export type ImageParamOverride = ImageDimensionOverride
+
+/** The single-number params set one at a time; width × height go through setDimensions. */
+export type ImageParamKey = 'steps' | 'size' | 'cfgScale'
 
 /** All persisted image-composer params, keyed by model filename. Shape mirrors
  *  what we round-trip through `saveSetting('imageParams', …)` / `getSettings()`. */
-export type ImageParamStore = ImageParameterStore
+export type ImageParamStore = ImageDimensionStore
 
 /** The concrete params the composer should run with for a given model, after
  *  resolving overrides against the model's defaults. */
-export type EffectiveImageParams = EffectiveImageParameters
+export type EffectiveImageParams = EffectiveImageDimensions
 
 /** override ?? default. A user override (any finite number) wins; absent (null /
  *  undefined / NaN) falls back to the supplied default. Exported so both the
@@ -46,7 +49,7 @@ export function resolveImageParams(
   model: string,
   store: ImageParamStore | null | undefined
 ): EffectiveImageParams {
-  return resolveImageParameters({ id: model }, store)
+  return resolveImageDimensions({ id: model }, store)
 }
 
 /** Record a user override for one param of one model, returning a NEW store
@@ -55,10 +58,21 @@ export function resolveImageParams(
 export function setOverride(
   store: ImageParamStore | null | undefined,
   model: string,
-  key: keyof ImageParamOverride,
+  key: ImageParamKey,
   value: number
 ): ImageParamStore {
-  return setImageParameterOverride(store, model, key, value)
+  return setImageParameter(store, model, key, value)
+}
+
+/** Record a custom width × height for one model, snapped to 64 and clamped to 256-2048. A square
+ *  result is the same as choosing that size. */
+export function setDimensions(
+  store: ImageParamStore | null | undefined,
+  model: string,
+  width: number,
+  height: number
+): ImageParamStore {
+  return setImageDimensions(store, model, width, height)
 }
 
 /** True when the user has an explicit override for this model+key (i.e. we must
@@ -66,7 +80,7 @@ export function setOverride(
 export function hasOverride(
   store: ImageParamStore | null | undefined,
   model: string,
-  key: keyof ImageParamOverride
+  key: ImageParamKey
 ): boolean {
   return hasImageParameterOverride(store, model, key)
 }

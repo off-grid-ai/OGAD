@@ -1267,6 +1267,38 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       seed: 4242
     })
   })
+
+  it('generates at a custom width × height and keeps it for the next visit', async () => {
+    const boundary = installApi({ active: FULL, models: [FULL] })
+    const user = userEvent.setup()
+    const first = renderChat()
+    await openImageComposer(user)
+
+    const sizes = screen.getByRole('radiogroup', { name: 'Size' })
+    await user.click(within(sizes).getByRole('radio', { name: 'Custom' }))
+    const width = screen.getByLabelText('Image width')
+    await user.clear(width)
+    await user.type(width, '1200{Enter}')
+    const height = screen.getByLabelText('Image height')
+    await user.clear(height)
+    await user.type(height, '832{Enter}')
+    expect((width as HTMLInputElement).value).toBe('1216')
+    await sendPrompt(user, 'a wide desert road at dusk')
+
+    await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
+    expect(boundary.generateImage.mock.calls[0]![0]).toMatchObject({ width: 1216, height: 832 })
+
+    first.unmount()
+    const nextUser = userEvent.setup()
+    renderChat()
+    await openImageComposer(nextUser)
+    expect(
+      within(screen.getByRole('radiogroup', { name: 'Size' }))
+        .getByRole('radio', { name: 'Custom' })
+        .getAttribute('aria-checked')
+    ).toBe('true')
+    expect((screen.getByLabelText('Image height') as HTMLInputElement).value).toBe('832')
+  })
 })
 
 // Send a message in the DEFAULT chat composer (not image mode).

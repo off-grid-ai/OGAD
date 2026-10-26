@@ -4,6 +4,7 @@
  * field without a blur, so the typed value has to be saved before the field goes away.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ImageSettingsTab } from '../ImageSettingsTab'
 
@@ -54,5 +55,41 @@ describe('<ImageSettingsTab/> fine tuning', () => {
     await openFineTuning()
     fireEvent.change(screen.getByLabelText('Image steps'), { target: { value: '1' } })
     expect(settings.imageParams).toBeUndefined()
+  })
+})
+
+async function chooseCustomSize(): Promise<void> {
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('combobox', { name: 'Image size' }))
+  await user.click(await screen.findByRole('option', { name: 'Custom' }))
+}
+
+describe('<ImageSettingsTab/> custom size', () => {
+  it('saves a typed width × height, snapped to 64, and shows it after Settings reopens', async () => {
+    const first = render(<ImageSettingsTab />)
+    await chooseCustomSize()
+    const width = screen.getByLabelText('Image width')
+    fireEvent.change(width, { target: { value: '1216' } })
+    const height = screen.getByLabelText('Image height')
+    fireEvent.change(height, { target: { value: '830' } })
+    fireEvent.blur(height)
+    expect((height as HTMLInputElement).value).toBe('832')
+    first.unmount()
+
+    expect(settings.imageParams).toEqual({ [MODEL]: { width: 1216, height: 832 } })
+    render(<ImageSettingsTab />)
+    expect(await screen.findByText(/· 1216 × 832$/)).toBeTruthy()
+    expect((screen.getByLabelText('Image width') as HTMLInputElement).value).toBe('1216')
+    expect(screen.getByRole('combobox', { name: 'Image size' }).textContent).toContain('Custom')
+  })
+
+  it('clamps an out-of-range size on blur', async () => {
+    render(<ImageSettingsTab />)
+    await chooseCustomSize()
+    const width = screen.getByLabelText('Image width')
+    fireEvent.change(width, { target: { value: '4000' } })
+    fireEvent.blur(width)
+    expect((width as HTMLInputElement).value).toBe('2048')
+    expect(settings.imageParams).toMatchObject({ [MODEL]: { width: 2048 } })
   })
 })

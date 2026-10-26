@@ -18,11 +18,8 @@ import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
 import { getSetting } from './database'
-import {
-  QWEN_IMAGE_21_COMPANIONS,
-  resolveImageParameters,
-  type ImageParameterStore
-} from '@offgrid/models'
+import { QWEN_IMAGE_21_COMPANIONS } from '@offgrid/models'
+import { resolveImageDimensions, type ImageDimensionStore } from '../shared/image-dimensions'
 import {
   generatedImageSidecarPath,
   readGeneratedImageSidecar,
@@ -657,15 +654,15 @@ export async function generateImage(
       ) {
         if (remoteAbort)
           throw new Error('An image is already generating — please wait for it to finish.')
-        const stored = getSetting<ImageParameterStore>('imageParams', {})
-        const remoteParameters = resolveImageParameters(
+        const stored = getSetting<ImageDimensionStore>('imageParams', {})
+        const remoteParameters = resolveImageDimensions(
           { id: remoteId!, name: remote.selectedModel },
           stored
         )
         const effectiveRemote = {
           ...params,
-          width: params.width ?? remoteParameters.size,
-          height: params.height ?? remoteParameters.size,
+          width: params.width ?? remoteParameters.width,
+          height: params.height ?? remoteParameters.height,
           steps: params.steps ?? remoteParameters.steps,
           cfgScale: params.cfgScale ?? remoteParameters.cfgScale
         }
@@ -714,9 +711,9 @@ export async function generateImage(
       }
       const selectedModel = params.model ?? activeImageModel()
       const modelParameters = selectedModel
-        ? resolveImageParameters(
+        ? resolveImageDimensions(
             { id: selectedModel },
-            getSetting<ImageParameterStore>('imageParams', {})
+            getSetting<ImageDimensionStore>('imageParams', {})
           )
         : null
       const effective = {
@@ -726,8 +723,8 @@ export async function generateImage(
         cfgScale: params.cfgScale ?? modelParameters?.cfgScale,
         // The selected model size is authoritative for both txt2img and img2img.
         // Only fall back to source dimensions when no model size can be resolved.
-        width: params.width ?? modelParameters?.size,
-        height: params.height ?? modelParameters?.size
+        width: params.width ?? modelParameters?.width,
+        height: params.height ?? modelParameters?.height
       }
       log.update({ effectiveRequest: effective, model: selectedModel ?? undefined })
       onUpdate?.({ stage: 'preparing', enhancedPrompt: enhanced })

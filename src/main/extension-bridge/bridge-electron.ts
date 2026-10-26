@@ -55,7 +55,8 @@ import { listTools as listDesktopTools, setToolEnabled } from '../tools'
 import { addConnector, listConnectors, removeConnector, setConnectorEnabled } from '../mcp'
 import { imageGenStatus } from '../imagegen'
 import { readTranscriptionInfo } from '../transcription/select'
-import { resolveImageParameters, setImageParameterOverride } from '@offgrid/models'
+import { resolveImageParameters } from '@offgrid/models'
+import { setImageParameter } from '../../shared/image-dimensions'
 import { createSettingsStore } from './bridge-settings-store'
 import {
   activateRemoteVisionModel,
@@ -410,8 +411,8 @@ const settingsStore = createSettingsStore({
   imageParams: (model, settings) =>
     resolveImageParameters({ id: model }, settings as Parameters<typeof resolveImageParameters>[1]),
   setImageParam: (settings, model, key, value) =>
-    setImageParameterOverride(
-      settings as Parameters<typeof setImageParameterOverride>[0],
+    setImageParameter(
+      settings as Parameters<typeof setImageParameter>[0],
       model,
       key,
       value
