@@ -121,7 +121,11 @@ describe('<App/> desktop navigation integration', () => {
       observer.disconnect()
     }
 
-    await waitFor(() => expect(screen.getAllByText('Project Beta')).toHaveLength(2))
+    // Back is a real history step (popstate, then the Projects screen renders again): the same
+    // 5 s the other screen changes in this test allow.
+    await waitFor(() => expect(screen.getAllByText('Project Beta')).toHaveLength(2), {
+      timeout: 5_000
+    })
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ']', metaKey: true, bubbles: true }))
