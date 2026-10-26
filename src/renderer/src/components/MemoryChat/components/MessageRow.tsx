@@ -509,7 +509,9 @@ function MessageBubble({
           onOpenImage={actions.openImage}
         />
       ) : null}
-      {message.videoPath ? <ChatVideoPreview path={message.videoPath} className="mb-2" /> : null}
+      {message.videoPath ? (
+        <VideoCardSlot messageId={message.id} videoPath={message.videoPath} />
+      ) : null}
       {message.context?.videoStoryId ? (
         <FilmCardSlot storyId={message.context.videoStoryId} />
       ) : null}
@@ -903,6 +905,23 @@ function sameMessageState(
 }
 
 /** A film started from this chat. Pro draws it; without Pro the message line stands alone. */
+/** A clip in text chat: the player, then Pro's actions (Continue, New shot, Make it a story). */
+function VideoCardSlot({
+  messageId,
+  videoPath
+}: {
+  messageId: string
+  videoPath: string
+}): React.JSX.Element {
+  const [VideoActions] = useState(() => getSlot(SLOTS.chatVideoActions))
+  return (
+    <div className="mb-2 flex flex-col gap-2.5">
+      <ChatVideoPreview path={videoPath} />
+      {VideoActions ? <VideoActions messageId={messageId} videoPath={videoPath} /> : null}
+    </div>
+  )
+}
+
 function FilmCardSlot({ storyId }: { storyId: string }): React.JSX.Element | null {
   const [FilmCard] = useState(() => getSlot(SLOTS.chatFilmCard))
   return FilmCard ? <FilmCard storyId={storyId} /> : null
