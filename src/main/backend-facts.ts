@@ -18,7 +18,7 @@ import { binRoots, exe } from './runtime-env'
 import { gpuDeviceAvailable } from './llm/gpu-device-probe'
 import { performancePackStatus, installedPerformancePackBin } from './performance-pack'
 import { getBackendPreference } from './backend-preferences'
-import { demoted, probes } from './backend-facts-cache'
+import { cachedProbe, demoted } from './backend-facts-cache'
 import {
   cachedNvidiaDriverVersion,
   hasLinuxNvidiaDriver,
@@ -139,16 +139,14 @@ async function probeCandidates(
   return Promise.all(
     candidates.map(async (candidate) => {
       if (!candidate.usable || candidate.backend === 'cpu') return candidate
-      let probe = probes.get(candidate.id)
-      if (!probe) {
-        probe = gpuDeviceAvailable(
+      const available = await cachedProbe(candidate.id, () =>
+        gpuDeviceAvailable(
           candidate.id,
           candidate.backend === 'cuda' ? 'CUDA' : 'Vulkan',
           process.platform
         )
-        probes.set(candidate.id, probe)
-      }
-      return (await probe)
+      )
+      return available
         ? candidate
         : { ...candidate, usable: false, reason: { code: 'no-device' as const } }
     })
