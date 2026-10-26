@@ -1011,8 +1011,8 @@ export async function toolChat(
   }
   if ((!opts.assistantOnly || toolsEnabled) && opts.videoAvailable === undefined) {
     try {
-      const { videoGenStatus } = await import('./videogen')
-      videoAvailable = videoGenStatus().available
+      const { videoGenerationStatus } = await import('./generated-videos/status')
+      videoAvailable = videoGenerationStatus().available
     } catch {
       /* no video runtime */
     }

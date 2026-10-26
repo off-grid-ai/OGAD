@@ -142,8 +142,8 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     /* imagegen unavailable */
   }
 
-  const { videoGenStatus } = await import('./videogen')
-  const video = videoGenStatus({ localOnly: true })
+  const { videoGenerationStatus } = await import('./generated-videos/status')
+  const video = videoGenerationStatus({ localOnly: true })
 
   const gw = (gatewayHealth ?? {}) as { modalities?: Record<string, string> }
   const modality = (k: string): ComponentStatus => {

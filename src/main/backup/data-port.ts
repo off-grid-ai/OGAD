@@ -1,7 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { generatedVideosDir, listGeneratedVideos } from '../videogen'
-import { readGeneratedVideoSidecar, writeGeneratedVideoSidecar } from '../videogen/gallery-sidecar'
+import { generatedVideosDir, listGeneratedVideos } from '../generated-videos/library'
+import {
+  readGeneratedVideoSidecar,
+  writeGeneratedVideoSidecar
+} from '../generated-videos/gallery-sidecar'
 import {
   readGeneratedVideoReference,
   withGeneratedVideoReference

@@ -46,6 +46,13 @@ export const SLOTS = {
    *  app root, OUTSIDE the route switch: the whole point is to survive navigation, so anything
    *  route-scoped unmounts it exactly when it is needed. */
   taskFloatingView: 'tasks.floatingView',
+  /** A video rendering in chat. Receives `{ job }` (VideoGenerationJobContract). Pro. */
+  chatVideoProgress: 'chat.videoProgress',
+  /** Under a finished clip in chat: Continue, New shot, Make it a story. Receives
+   *  `{ conversationId, messageId, videoPath }`. Pro. */
+  chatVideoActions: 'chat.videoActions',
+  /** Video settings inside the shared Settings drawer. Pro. */
+  videoSettings: 'video.settings',
   /** The God screen. Receives `{ onRunPreset, chat }`. */
   godScreen: 'god.screen',
   /** Always mounted at the app root while Pro runs. Receives `{ isOpen, open }`. */

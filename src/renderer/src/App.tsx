@@ -122,6 +122,7 @@ type ViewMode =
   | 'voice'
   | 'vault'
   | 'devices'
+  | 'video'
 
 interface NavigationIntent {
   view: ViewMode
@@ -681,7 +682,8 @@ function AppContent(): React.JSX.Element {
       clipboard: '/clipboard',
       voice: '/voice',
       vault: '/vault',
-      devices: '/devices'
+      devices: '/devices',
+      video: '/video'
     }
 
     let newPath = urlMap[viewMode]
@@ -1044,7 +1046,8 @@ function AppContent(): React.JSX.Element {
         },
         proItem('explore'),
         proItem('tasks'),
-        proItem('voice')
+        proItem('voice'),
+        proItem('video')
       )
     },
     {

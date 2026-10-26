@@ -11,7 +11,8 @@ import {
   ListChecks,
   Waveform,
   ShieldCheck,
-  Devices as DevicesIcon
+  Devices as DevicesIcon,
+  FilmStrip
 } from '@phosphor-icons/react'
 import type { ComponentType } from 'react'
 import { GodIcon } from '../GodIcon'
@@ -64,6 +65,21 @@ export const PRO_FEATURES: ProFeature[] = [
       'Chat or voice, wake word "Ares"',
       'Approvals and what needs you',
       'Acts with Web Use and Computer Use'
+    ],
+    platforms: ['darwin', 'win32', 'linux']
+  },
+  {
+    route: 'video',
+    label: 'Video',
+    icon: FilmStrip,
+    tagline: 'Turn one sentence into a narrated short film.',
+    description:
+      'Describe a story and Off Grid AI writes the shots, keeps the same people in every shot, adds a voice and captions, and renders it on your computer. Your photos never leave your devices.',
+    highlights: [
+      'One sentence to a storyboard',
+      'The same face in every shot',
+      'Narration and captions',
+      'Renders overnight while you sleep'
     ],
     platforms: ['darwin', 'win32', 'linux']
   },

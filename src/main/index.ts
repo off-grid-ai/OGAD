@@ -591,7 +591,9 @@ app.whenReady().then(async () => {
     })
     // Video is on when a local video model is active or a remote server's video model is picked.
     registerFeatureSnapshotSource(async () => ({
-      video_generation: Boolean((await import('./videogen')).videoGenStatus().active)
+      video_generation: Boolean(
+        (await import('./generated-videos/status')).videoGenerationStatus().active
+      )
     }))
   } catch (error) {
     console.error('[analytics] install failed', error)

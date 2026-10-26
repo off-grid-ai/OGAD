@@ -7,18 +7,9 @@ import {
   type RuntimeSpeechVoice
 } from '@offgrid/speech'
 import { IMAGE_MEMORY_GUARD_ERROR_CODE, imageMemoryGuardErrorMessage } from '../shared/image-generation-contract'
-import {
-  openRouterVideoRequest,
-  pollRemoteVideoJob,
-  remoteVideoSubmitBody,
-  type OpenRouterVideoModel,
-  type ResolvedVideoRequest,
-  type VideoGenerationProgressContract,
-  type VideoGenerationStage
-} from '@offgrid/models'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 
-type RemoteServer = NonNullable<ReturnType<typeof getActiveRemoteVisionServerForModality>>
+export type RemoteServer = NonNullable<ReturnType<typeof getActiveRemoteVisionServerForModality>>
 
 let cachedRemoteVoices: { key: string; expiresAt: number; voices: RuntimeSpeechVoice[] } | undefined
 
@@ -100,7 +91,7 @@ function remoteSpeechVoice(model: string, id: string): RuntimeSpeechVoice {
   }
 }
 
-function headers(server: RemoteServer, contentType?: string): Record<string, string> {
+export function headers(server: RemoteServer, contentType?: string): Record<string, string> {
   return {
     ...(server.apiKey ? { Authorization: `Bearer ${server.apiKey}` } : {}),
     ...(contentType ? { 'Content-Type': contentType } : {})
@@ -137,7 +128,7 @@ async function providerFailure(response: Response): Promise<never> {
   throw new Error(message)
 }
 
-async function checked(response: Response): Promise<Response> {
+export async function checked(response: Response): Promise<Response> {
   if (!response.ok) await providerFailure(response)
   return response
 }
@@ -263,155 +254,4 @@ export async function transcribeRemoteAudio(
   if (typeof result.text !== 'string' || !result.text.trim())
     throw new Error('The remote server returned no transcript.')
   return { text: result.text.trim(), language: result.language }
-}
-
-/** The remote provider owns the asynchronous job. Always fetch bytes from its authenticated
- * content endpoint; never forward credentials to a URL from a response. */
-export async function generateRemoteVideo(
-  server: RemoteServer,
-  request: ResolvedVideoRequest,
-  output: string,
-  signal: AbortSignal,
-  onProgress?: (
-    progress: VideoGenerationProgressContract | null,
-    stage?: VideoGenerationStage,
-    preview?: { path: string; width: number; height: number }
-  ) => void
-): Promise<Partial<ResolvedVideoRequest>> {
-  if (!['ogad', 'openrouter'].includes(server.provider))
-    throw new Error('Remote video generation requires an OGAD or OpenRouter server.')
-  const openRouter = server.provider === 'openrouter'
-  let effective: Partial<ResolvedVideoRequest> = {}
-  let providerRequest: Record<string, unknown> | undefined
-  if (openRouter) {
-    const response = await checked(
-      await fetch(`${server.endpoint}/videos/models`, { headers: headers(server), signal })
-    )
-    const catalog = (await response.json()) as { data?: OpenRouterVideoModel[] }
-    const model = catalog.data?.find((entry) => entry.id === server.selectedModel)
-    if (!model) throw new Error('The selected OpenRouter model does not support video generation.')
-    const mapped = openRouterVideoRequest(model, request)
-    effective = mapped.effective
-    providerRequest = mapped.body
-  }
-  const { randomUUID } = await import('node:crypto')
-  const { Readable, Transform } = await import('node:stream')
-  const { pipeline } = await import('node:stream/promises')
-  const { setTimeout: delay } = await import('node:timers/promises')
-  const id = randomUUID()
-  let endpoint = `${server.endpoint}/videos/${id}`
-  let previewDownloaded = false
-  const cancel = (): void => {
-    // OpenRouter has no documented cancellation API; abort stops local polling/download.
-    if (openRouter) return
-    void fetch(`${endpoint}/cancel`, {
-      method: 'POST',
-      headers: headers(server),
-      signal: AbortSignal.timeout(10_000)
-    }).catch(() => {})
-  }
-  signal.addEventListener('abort', cancel, { once: true })
-  try {
-    signal.throwIfAborted()
-    const submitted = await checked(
-      await fetch(`${server.endpoint}/videos`, {
-        method: 'POST',
-        headers: headers(server, 'application/json'),
-        signal,
-        body: JSON.stringify(
-          providerRequest ?? remoteVideoSubmitBody(request, server.selectedModel, id)
-        )
-      })
-    )
-    const job = (await submitted.json()) as { id?: unknown; request_id?: unknown }
-    const jobId = openRouter ? job.id : (job.request_id ?? id)
-    if (typeof jobId !== 'string' || !jobId) throw new Error('The server returned no video job ID.')
-    endpoint = `${server.endpoint}/videos/${encodeURIComponent(jobId)}`
-    const savePreview = async (
-      preview: { width: number; height: number },
-      progress: VideoGenerationProgressContract | null,
-      stage: VideoGenerationStage | undefined
-    ): Promise<void> => {
-      try {
-        const response = await fetch(`${endpoint}/preview`, {
-          headers: headers(server),
-          signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)])
-        })
-        if (
-          !response.ok ||
-          !response.body ||
-          !response.headers.get('content-type')?.startsWith('image/png')
-        )
-          return
-        const reader = response.body.getReader()
-        const chunks: Uint8Array[] = []
-        let size = 0
-        try {
-          for (;;) {
-            const { value, done } = await reader.read()
-            if (done) break
-            size += value.length
-            if (size > 16 * 1024 * 1024) {
-              await reader.cancel()
-              return
-            }
-            chunks.push(value)
-          }
-        } finally {
-          reader.releaseLock()
-        }
-        if (!size) return
-        const path = `${output}.preview.png`
-        await fs.promises.writeFile(path, Buffer.concat(chunks))
-        previewDownloaded = true
-        onProgress?.(progress, stage, { path, ...preview })
-      } catch {
-        // A preview is optional; keep the authoritative remote job running.
-        signal.throwIfAborted()
-      }
-    }
-    await pollRemoteVideoJob({
-      poll: async () =>
-        (await checked(await fetch(endpoint, { headers: headers(server), signal }))).json(),
-      onStatus: async (status) => {
-        const stage = status.stage ?? (status.status === 'pending' ? 'preparing' : 'generating')
-        if (status.progress || status.stage || openRouter) onProgress?.(status.progress, stage)
-        if (!previewDownloaded && status.preview)
-          await savePreview(status.preview, status.progress, status.stage ?? undefined)
-      },
-      sleep: (ms) => delay(ms, undefined, { signal }),
-      now: Date.now,
-      isCancelled: () => signal.aborted,
-      intervalMs: openRouter ? 10_000 : 1000
-    })
-    onProgress?.(null, 'encoding')
-    const response = await checked(
-      await fetch(`${endpoint}/content`, { headers: headers(server), signal })
-    )
-    if (!response.body) throw new Error('The remote server returned no video.')
-    let bytes = 0
-    const limit = new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        bytes += chunk.length
-        callback(
-          bytes > 512 * 1024 * 1024 ? new Error('The video exceeds the download limit.') : null,
-          chunk
-        )
-      }
-    })
-    await pipeline(
-      Readable.fromWeb(response.body as import('node:stream/web').ReadableStream),
-      limit,
-      fs.createWriteStream(output, { flags: 'wx' }),
-      { signal }
-    )
-    if (!bytes) throw new Error('The remote server returned an empty video.')
-    return effective
-  } catch (error) {
-    cancel()
-    await fs.promises.rm(output, { force: true })
-    throw error
-  } finally {
-    signal.removeEventListener('abort', cancel)
-  }
 }

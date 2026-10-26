@@ -26,7 +26,6 @@ import {
   type ModelSettingsPanelTab as Tab
 } from '@renderer/lib/model-settings-panel'
 import { ImageSettingsTab } from './ImageSettingsTab'
-import { VideoSettingsTab } from './VideoSettingsTab'
 import { SidePanel } from './SidePanel'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
 import { BestSettingsCard } from './BestSettingsCard'
@@ -383,6 +382,7 @@ export function SettingsPanel({
   initialTab?: Tab
 }): React.JSX.Element {
   const TaskSettings = getSlot(SLOTS.taskSettings)
+  const VideoSettings = getSlot(SLOTS.videoSettings)
   const [replySound, setReplySound] = useReplySound()
   const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
@@ -684,7 +684,7 @@ export function SettingsPanel({
             [
               'model',
               'image',
-              'video',
+              ...(VideoSettings ? (['video'] as const) : []),
               'voice',
               'transcription',
               'remote',
@@ -1221,7 +1221,7 @@ export function SettingsPanel({
         )}
 
         {tab === 'image' && <ImageSettingsTab />}
-        {tab === 'video' && <VideoSettingsTab />}
+        {tab === 'video' && VideoSettings ? <VideoSettings /> : null}
 
         {tab === 'remote' && <RemoteVisionSettingsTab />}
 

@@ -35,6 +35,7 @@ import {
 } from '../utlis'
 import { ChatImagePreview } from './ChatImagePreview'
 import { ChatVideoPreview } from './ChatVideoPreview'
+import { getSlot, SLOTS } from '@/bootstrap/slotRegistry'
 import { NoticeMessageRow } from './NoticeMessageRow'
 import { PromptEnhancementMessageRow } from './PromptEnhancementMessageRow'
 import { ToolMessageTimelineRow } from './ToolMessageTimelineRow'
@@ -278,7 +279,14 @@ function VoiceMessageRow({
       />
     )
   } else if (message.videoPath) {
-    body = <div className={standardMessageBubbleClass(message, false)}><ChatVideoPreview path={message.videoPath} /><p className="mt-2 text-xs text-neutral-400">{message.content}</p></div>
+    const VideoActions = getSlot(SLOTS.chatVideoActions)
+    body = (
+      <div className={standardMessageBubbleClass(message, false)}>
+        <ChatVideoPreview path={message.videoPath} />
+        {VideoActions ? <VideoActions messageId={message.id} videoPath={message.videoPath} /> : null}
+        <p className="mt-2 text-xs text-neutral-400">{message.content}</p>
+      </div>
+    )
   } else if (message.image) {
     body = (
       <>

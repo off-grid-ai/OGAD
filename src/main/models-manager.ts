@@ -1590,10 +1590,10 @@ async function trashExternalModel(modelId: string, dir: string): Promise<DeleteM
 
 /** Files owned by complete runtime-discovered video packs, including copied variants. */
 async function installedVideoFileNames(excludeWeight?: string): Promise<Set<string>> {
-  const { videoGenStatus } = await import('./videogen')
+  const { installedVideoPacks } = await import('./generated-videos/status')
   const { videoPackFiles } = await import('@offgrid/models')
   const names = new Set<string>()
-  for (const weight of videoGenStatus({ localOnly: true }).models) {
+  for (const { name: weight } of installedVideoPacks()) {
     if (weight === excludeWeight) continue
     const pack = videoPackFiles(weight)
     if (pack) Object.values(pack).forEach((name) => names.add(name))

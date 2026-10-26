@@ -105,10 +105,7 @@ import { buildAssistantContext, type AssistantTimelineEntry } from '../../lib/me
 import type { GenerationMetrics } from '../../../../shared/generation-metrics'
 import { withGeneratedImageReference } from '../../../../shared/generated-image-reference'
 import { withGeneratedVideoReference } from '../../../../shared/generated-video-reference'
-import type {
-  VideoGenerationJobContract,
-  VideoGenerationRequestContract
-} from '../../../../shared/video-generation-contract'
+import { chatVideo, requireChatVideo, useChatVideoState } from '../../lib/chat-video'
 import { ChatVideoPreview } from './components/ChatVideoPreview'
 import type { RagConversationContract } from '../../../../shared/ipc-contracts'
 import {
@@ -655,10 +652,10 @@ export function MemoryChat({
   const [mode, setMode] = useState<ChatMode>('ask')
   const [showImageOptions, setShowImageOptions] = useState(false)
   const [imageAvailable, setImageAvailable] = useState(false)
-  const [videoAvailable, setVideoAvailable] = useState(false)
+  const videoController = chatVideo()
+  const { available: videoAvailable, job: videoJob } = useChatVideoState()
   const [videoGenConv, setVideoGenConv] = useState<string | null>(null)
   const videoCancelPendingRef = useRef(new Set<string>())
-  const [videoJob, setVideoJob] = useState<VideoGenerationJobContract | null>(null)
   const generatingVideo = videoGenConv !== null && videoGenConv === activeConversationId
   const [imgSize, setImgSize] = useState(512)
   const [imgSteps, setImgSteps] = useState(10)
@@ -958,6 +955,7 @@ export function MemoryChat({
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
   const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
+  const ChatVideoProgress = getSlot(SLOTS.chatVideoProgress)
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     console.log('MemoryChat effect: overlay escape handler')
@@ -1427,43 +1425,26 @@ export function MemoryChat({
   }, [refreshConversationMessages, markGenerating])
 
   useEffect(() => {
-    let live = true
-    const observe = (job: VideoGenerationJobContract): void => {
-      if (!live || !job.conversationId) return
-      setVideoJob(job)
-      if (job.phase === 'running') {
-        setVideoGenConv(job.conversationId)
-        markGenerating(job.conversationId, true)
-      } else {
-        setVideoGenConv((owner) => (owner === job.conversationId ? null : owner))
-        markGenerating(job.conversationId, false)
-      }
+    if (!videoJob?.conversationId) return
+    const conversationId = videoJob.conversationId
+    if (videoJob.phase === 'running') {
+      setVideoGenConv(conversationId)
+      markGenerating(conversationId, true)
+    } else {
+      setVideoGenConv((owner) => (owner === conversationId ? null : owner))
+      markGenerating(conversationId, false)
     }
-    const offJob = window.api.onVideoGenJobState(observe)
-    const offConversation = window.api.onVideoGenConversationUpdated((conversationId) => {
-      void refreshConversationMessages(conversationId)
-    })
-    void window.api
-      .videoGenJobStatus()
-      .then(observe)
-      .catch(() => {})
-    return () => {
-      live = false
-      offJob()
-      offConversation()
-    }
-  }, [refreshConversationMessages, markGenerating])
+  }, [videoJob, markGenerating])
+  useEffect(
+    () =>
+      videoController?.onConversationUpdated((conversationId) => {
+        void refreshConversationMessages(conversationId)
+      }),
+    [videoController, refreshConversationMessages]
+  )
   useEffect(() => {
-    const refresh = (): void => {
-      void window.api
-        .videoGenStatus()
-        .then((status) => setVideoAvailable(status.available))
-        .catch(() => setVideoAvailable(false))
-    }
-    refresh()
-    window.addEventListener('og:video-settings-changed', refresh)
-    return () => window.removeEventListener('og:video-settings-changed', refresh)
-  }, [modelPickerOpen, settingsOpen])
+    videoController?.refresh()
+  }, [videoController, modelPickerOpen, settingsOpen])
 
   const conversationListRequestRef = useRef<Promise<void> | null>(null)
   const conversationListRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2189,9 +2170,8 @@ export function MemoryChat({
       if (mode === 'video') {
         setVideoGenConv(convId)
         try {
-          const request: VideoGenerationRequestContract = { prompt: trimmed }
-          const video = await window.api.generateVideo({
-            ...request,
+          const video = await requireChatVideo().generate({
+            prompt: trimmed,
             conversationId: convId,
             projectId
           })
@@ -2221,7 +2201,7 @@ export function MemoryChat({
               generationTimeMs: video.durationMs
             }
           ])
-          await window.api.videoGenConversationPersisted(convId, stored.uuid)
+          await chatVideo()?.acknowledge(convId, stored.uuid)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           if (!/stopped|cancel/i.test(message)) {
@@ -2710,7 +2690,7 @@ export function MemoryChat({
         try {
           for (const request of videoRequests) {
             if (cancelledRef.current.has(convId)) break
-            const video = await window.api.generateVideo({
+            const video = await requireChatVideo().generate({
               ...request,
               conversationId: convId,
               projectId
@@ -2742,7 +2722,7 @@ export function MemoryChat({
               toolsOffered: tr?.toolsOffered,
               generationTimeMs: video.durationMs
             })
-            await window.api.videoGenConversationPersisted(convId, stored.uuid)
+            await chatVideo()?.acknowledge(convId, stored.uuid)
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -3487,7 +3467,7 @@ export function MemoryChat({
         setLoading,
         videoGenConv,
         videoCancelPendingRef,
-        cancelVideoGen: () => window.api.cancelVideoGen()
+        cancelVideoGen: () => chatVideo()?.cancel() ?? Promise.resolve(false)
       },
       cid,
       task,
@@ -4295,6 +4275,12 @@ export function MemoryChat({
     },
     [addFiles]
   )
+
+  // Video is Pro. Without it the button opens the upgrade screen instead of a dead mode.
+  const chooseVideoMode = (): void => {
+    if (videoController) setMode('video')
+    else window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'video' }))
+  }
 
   let examples = ASK_EXAMPLES
   if (mode === 'image') examples = IMAGE_EXAMPLES
@@ -5179,38 +5165,8 @@ export function MemoryChat({
                                 Off Grid AI
                               </div>
                               {generatingVideo ? (
-                                <div
-                                  className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start gap-2 text-xs text-neutral-400`}
-                                  role="status"
-                                >
-                                  <span>
-                                    {videoJob?.stage === 'enhancing'
-                                      ? 'Enhancing prompt…'
-                                      : videoJob?.stage === 'encoding'
-                                        ? 'Encoding MP4…'
-                                        : videoJob?.stage === 'decoding'
-                                          ? 'Decoding video…'
-                                          : videoJob?.stage === 'conditioning'
-                                            ? 'Processing prompt…'
-                                            : videoJob?.stage === 'generating'
-                                              ? 'Generating video…'
-                                              : 'Preparing video…'}
-                                  </span>
-                                  {videoJob?.progress ? (
-                                    <span>
-                                      {videoJob.progress.step} / {videoJob.progress.total}{' '}
-                                      {videoJob.stage === 'decoding' ? 'sections decoded' : 'steps'}
-                                    </span>
-                                  ) : null}
-                                  {videoJob?.preview ? (
-                                    <img
-                                      src={captureUrlForPath(videoJob.preview.path)}
-                                      width={videoJob.preview.width}
-                                      height={videoJob.preview.height}
-                                      alt="First decoded video frame"
-                                      className="max-w-full rounded-md object-contain"
-                                    />
-                                  ) : null}
+                                <div className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start`}>
+                                  {ChatVideoProgress ? <ChatVideoProgress job={videoJob} /> : null}
                                 </div>
                               ) : mode === 'image' || generatingImage ? (
                                 <div
@@ -5710,8 +5666,8 @@ export function MemoryChat({
                                   <Sparkles /> Generate image
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
-                                  disabled={!videoAvailable}
-                                  onSelect={() => setMode('video')}
+                                  disabled={Boolean(videoController) && !videoAvailable}
+                                  onSelect={chooseVideoMode}
                                 >
                                   <VideoCamera /> Generate video
                                 </DropdownMenuItem>
@@ -6021,7 +5977,7 @@ export function MemoryChat({
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => setMode(mode === 'video' ? 'ask' : 'video')}
+                                  onClick={() => (mode === 'video' ? setMode('ask') : chooseVideoMode())}
                                   className={`h-8 gap-1.5 rounded-full ${mode === 'video' ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
                                 >
                                   <VideoCamera className="h-3.5 w-3.5" /> Video
@@ -6029,9 +5985,11 @@ export function MemoryChat({
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                {videoAvailable
-                                  ? 'Generate a local video'
-                                  : 'Download a complete video model pack in Models'}
+                                {!videoController
+                                  ? 'Video needs Off Grid AI Pro'
+                                  : videoAvailable
+                                    ? 'Generate a local video'
+                                    : 'Download a complete video model pack in Models'}
                               </TooltipContent>
                             </Tooltip>
                             {mode === 'video' && (
