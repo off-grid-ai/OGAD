@@ -130,6 +130,60 @@ type ViewMode =
   | 'devices'
   | 'video'
 
+interface LaunchRoute {
+  view: ViewMode
+  subroute: string | null
+  section: string | null
+}
+
+/** Screens a launch URL may name. */
+const LAUNCH_VIEWS: Record<string, ViewMode> = {
+  '/explore': 'explore',
+  '/god': 'explore',
+  '/day': 'day',
+  '/replay': 'replay',
+  '/reflect': 'reflect',
+  '/actions': 'actions',
+  '/connectors': 'connectors',
+  '/meetings': 'meetings',
+  '/chat': CHAT_VIEW,
+  '/entities': 'entities',
+  '/models': 'models',
+  '/gateway': 'gateway',
+  '/projects': 'projects',
+  '/notifications': 'notifications',
+  '/search': 'search',
+  '/settings': 'settings',
+  '/voice': 'voice',
+  '/vault': 'vault',
+  '/devices': 'devices',
+  '/video': 'video'
+}
+
+/**
+ * The screen the launch URL names (a deep link, a refresh), or null for a bare launch ('/', or an
+ * empty hash in the built app), which keeps landingView: a free install must open on Models, never
+ * on a locked Day screen. Read before the first render, so recording the first history entry can
+ * never overwrite the URL it came from.
+ */
+function launchRoute(path: string): LaunchRoute | null {
+  const internalTab = internalTabLocation(path)
+  if (internalTab) return { view: internalTab.view, subroute: internalTab.subroute, section: null }
+  if (path.startsWith('/video/'))
+    return { view: 'video', subroute: path.slice('/video/'.length) || null, section: null }
+  if (path.startsWith('/settings/')) {
+    let section: string | null = null
+    try {
+      section = decodeURIComponent(path.slice('/settings/'.length)) || null
+    } catch {
+      section = null
+    }
+    return { view: 'settings', subroute: null, section }
+  }
+  const view = LAUNCH_VIEWS[path]
+  return view ? { view, subroute: null, section: null } : null
+}
+
 interface NavigationIntent {
   view: ViewMode
   section?: string
@@ -357,16 +411,21 @@ function AppContent(): React.JSX.Element {
   }, [addNotification, isPro, proReady])
 
   // Open on Day only where the catalog supports it.
-  const [viewMode, commitViewMode] = useState<ViewMode>(landingView(currentPlatform(), isPro))
+  const [launch] = useState(() => launchRoute(appLocationPath()))
+  const [viewMode, commitViewMode] = useState<ViewMode>(
+    () => launch?.view ?? landingView(currentPlatform(), isPro)
+  )
   // Visiting the Tasks screen counts as seeing them, on the way in and on the way out.
   useEffect(() => {
     if (viewMode !== 'tasks') return
     markTasksSeen()
     return () => markTasksSeen()
   }, [viewMode])
-  const [settingsSection, setSettingsSection] = useState<string | null>(null)
+  const [settingsSection, setSettingsSection] = useState<string | null>(launch?.section ?? null)
   const [settingsNavigationKey, setSettingsNavigationKey] = useState(0)
-  const [navigationSubroute, setNavigationSubroute] = useState<string | null>(null)
+  const [navigationSubroute, setNavigationSubroute] = useState<string | null>(
+    launch?.subroute ?? null
+  )
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false)
   const [activeModelsOpen, setActiveModelsOpen] = useState(false)
   const [modelSettingsTab, setModelSettingsTab] = useState<ModelSettingsPanelTab>('model')
@@ -594,60 +653,6 @@ function AppContent(): React.JSX.Element {
       off()
     }
   }, [activateRendererFeatures, removePaidRendererAccess, setIsPro])
-
-  // Handle browser URL changes
-  useEffect(() => {
-    const path = appLocationPath()
-    // A bare launch ('/', or an empty hash in the built app) keeps landingView: a free install
-    // must open on Models, never on a locked Day screen.
-    const viewMap: Record<string, ViewMode> = {
-      '/explore': 'explore',
-      '/god': 'explore',
-      '/day': 'day',
-      '/replay': 'replay',
-      '/reflect': 'reflect',
-      '/actions': 'actions',
-      '/connectors': 'connectors',
-      '/meetings': 'meetings',
-      '/chat': CHAT_VIEW,
-      '/entities': 'entities',
-      '/models': 'models',
-      '/gateway': 'gateway',
-      '/projects': 'projects',
-      '/notifications': 'notifications',
-      '/search': 'search',
-      '/settings': 'settings',
-      '/voice': 'voice',
-      '/vault': 'vault',
-      '/devices': 'devices',
-      '/video': 'video'
-    }
-
-    const internalTab = internalTabLocation(path)
-    if (internalTab) {
-      setNavigationSubroute(internalTab.subroute)
-      setSettingsSection(null)
-      commitViewMode(internalTab.view)
-    } else if (path.startsWith('/video/')) {
-      setNavigationSubroute(path.slice('/video/'.length) || null)
-      setSettingsSection(null)
-      commitViewMode('video')
-    } else if (path.startsWith('/settings/')) {
-      let section: string | null = null
-      try {
-        section = decodeURIComponent(path.slice('/settings/'.length)) || null
-      } catch {
-        section = null
-      }
-      setSettingsSection(section)
-      setNavigationSubroute(null)
-      commitViewMode('settings')
-    } else if (viewMap[path]) {
-      setNavigationSubroute(null)
-      setSettingsSection(null)
-      commitViewMode(viewMap[path])
-    }
-  }, [])
 
   // Programmatic navigation from outside the shell (e.g. the first-run gate's
   // "pick a model yourself" CTA) — switch the active view without a remount.
