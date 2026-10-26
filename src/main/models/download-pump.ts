@@ -40,7 +40,10 @@ export async function pumpToFile(
       // Wait for the disk when it falls behind the network. Without this a fast connection
       // queued gigabytes in memory, and macOS refused the batched write (EINVAL: writev takes
       // at most 1024 buffers).
-      if (!out.write(Buffer.from(value))) {
+      // A stream that already errored (the part file could not be opened, the disk failed)
+      // refuses every write and never drains: its one 'error' has fired, so stop here.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!out.write(Buffer.from(value)) && !writeErr && !out.errored && !out.destroyed) {
         await new Promise<void>((resolve) => {
           const settle = (): void => {
             out.off('drain', settle)
