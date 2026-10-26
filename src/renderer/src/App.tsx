@@ -566,7 +566,8 @@ function AppContent(): React.JSX.Element {
       '/settings': 'settings',
       '/voice': 'voice',
       '/vault': 'vault',
-      '/devices': 'devices'
+      '/devices': 'devices',
+      '/video': 'video'
     }
 
     const internalTab = internalTabLocation(path)
