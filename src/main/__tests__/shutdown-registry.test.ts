@@ -387,8 +387,26 @@ describe('relaunching', () => {
     })
   })
 
+  it('relaunches the AppImage file, not its temporary mount', () => {
+    delete process.env.NODE_ENV_ELECTRON_VITE
+    process.env.APPIMAGE = '/home/user/Applications/off_grid_ai_desktop.appimage'
+    let options: ApplicationRelaunchOptions | undefined
+    const source = {
+      quit: vi.fn(),
+      relaunch: (o?: ApplicationRelaunchOptions) => void (options = o)
+    }
+
+    requestApplicationRelaunch(source)
+    commitApplicationRelaunch(source)
+
+    // The AppImage runtime unmounts /tmp/.mount_* when this process exits, so a child started from
+    // process.execPath dies in early Electron startup. No args: Electron keeps the current ones (--no-sandbox).
+    expect(options).toEqual({ execPath: '/home/user/Applications/off_grid_ai_desktop.appimage' })
+  })
+
   it('relaunches Electron alone in a packaged build', () => {
     delete process.env.NODE_ENV_ELECTRON_VITE
+    delete process.env.APPIMAGE
     let options: ApplicationRelaunchOptions | undefined | 'unset' = 'unset'
     const source = {
       quit: vi.fn(),
