@@ -25,6 +25,7 @@ import { isPackaged } from '../runtime-env'
 import { findWhisperBinary, findWhisperBinaries, whisperRuntimeLibraryEnv } from './whisper-runtime'
 import type { Transcript } from './types'
 import { killOrphansOnPort as reapOrphansOnPort } from '../kill-orphan-port'
+import { isPortFree, pickFreePort } from '../free-port'
 import { Mutex } from 'async-mutex'
 import { filesMB } from '../model-footprint'
 
@@ -130,7 +131,7 @@ export class WhisperServerService {
   private idleMs = 5 * 60_000 // keep the model hot for 5 min of inactivity, then evict
   private stderrTail: string[] = []
 
-  constructor(private readonly port = WHISPER_SERVER_PORT) {}
+  constructor(private port = WHISPER_SERVER_PORT) {}
 
   /** Tune the idle window (mainly for tests). */
   setIdleMs(ms: number): void {
@@ -216,6 +217,12 @@ export class WhisperServerService {
     // port, but never a foreign process that merely happened to bind it.
     await this.killOrphanOnPort()
     if (epoch !== this.startEpoch) throw new Error('Transcription server startup canceled.')
+    // A port another app holds (another Off Grid AI, say) is not ours to free: take the next one.
+    if (!(await isPortFree(this.port))) {
+      const free = await pickFreePort(this.port + 1, (port) => isPortFree(port))
+      if (free === null) throw new Error(`No free port for speech-to-text near ${this.port}.`)
+      this.port = free
+    }
 
     const args = buildWhisperServerArgs({ ...ctx, port: this.port })
     if (step.cpuOnly && step.backend !== 'cpu') args.push('-ng')

@@ -2729,7 +2729,7 @@ export class LLMService {
     )
   }
 
-  async unload(keepPaused = false): Promise<{ outcome: TeardownOutcome; portFree: boolean }> {
+  async unload(keepPaused = false): Promise<{ outcome: TeardownOutcome; stopped: boolean }> {
     this.launchGeneration++
     this.paused = true // stop the on-demand respawn path from warming a new server mid-teardown
     let outcome: TeardownOutcome = 'already-dead'
@@ -2755,13 +2755,14 @@ export class LLMService {
     }
     this.initialized = false
     // Safety net: reap any llama-server WE own still holding the port (a forked/stuck child).
-    // liveOwners are OTHER apps' engines — we never touch those, so the port isn't "ours to free".
-    const reap = this.reapOrphansOnPort(this.port)
+    // Other apps' engines on that port are not ours: we never touch them, and they never block
+    // eviction. What a competing model needs is OUR engine gone, which `outcome` reports.
+    this.reapOrphansOnPort(this.port)
     // Leave the engine down but allow a future explicit start; releasePause clears the block
     // without warming a server (on-demand — the next chat/tool turn respawns).
     if (!keepPaused) this.paused = false
     this.invalidateHealth()
-    return { outcome, portFree: outcome !== 'stuck' && reap.liveOwners.length === 0 }
+    return { outcome, stopped: outcome !== 'stuck' }
   }
 
   /** Set by the image runtime (imagegen.ts): how to evict a resident image server
@@ -2781,11 +2782,9 @@ export class LLMService {
   /** Eviction must finish before a competing model starts. pause() only signals the
    *  child, while unload() waits for exit and handles an in-flight init. */
   private async pauseAndWait(): Promise<void> {
-    const { portFree } = await this.unload(true)
-    if (!portFree) {
-      throw new Error(
-        'The chat model port is still occupied; image generation cannot start safely.'
-      )
+    const { stopped } = await this.unload(true)
+    if (!stopped) {
+      throw new Error('The chat model did not stop; image generation cannot start safely.')
     }
   }
 
@@ -2934,5 +2933,5 @@ export const llm = new LLMService()
 modalityQueue.setRemoteEngine('llm', () => llm.usesRemoteTextModel())
 registerModelEvictor('chat', async () => {
   const result = await llm.unload()
-  if (!result.portFree) throw new Error('Chat model did not stop; cannot free memory for Decision.')
+  if (!result.stopped) throw new Error('Chat model did not stop; cannot free memory for Decision.')
 })

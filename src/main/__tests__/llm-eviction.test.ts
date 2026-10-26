@@ -15,8 +15,8 @@ import { LLMService } from '../llm'
 describe('LLM eviction for image generation', () => {
   it('refuses image admission while the chat port has a live owner', async () => {
     const svc = new LLMService()
-    vi.spyOn(svc, 'unload').mockResolvedValue({ outcome: 'already-dead', portFree: false })
-    await expect(Promise.resolve(svc.runtime.evict())).rejects.toThrow('port is still occupied')
+    vi.spyOn(svc, 'unload').mockResolvedValue({ outcome: 'stuck', stopped: false })
+    await expect(Promise.resolve(svc.runtime.evict())).rejects.toThrow('chat model did not stop')
   })
 
   it('waits for the server to close and keeps respawn blocked until release', async () => {

@@ -24,6 +24,7 @@ import fs from 'fs'
 import { usableCpuCount } from './cpu-cores'
 import { isPackaged } from './runtime-env'
 import { killOrphansOnPort as reapOrphansOnPort } from './kill-orphan-port'
+import { isPortFree, pickFreePort } from './free-port'
 import { findSdBinaries, sdRuntimeLibraryEnv } from './imagegen/sd-runtime'
 import { getResidencyMode } from './runtime-residency'
 import { filesMB } from './model-footprint'
@@ -358,6 +359,12 @@ class SdServerService {
     // Kill an orphaned sd-server from a prior app process still holding the port,
     // but never a foreign process that merely happened to bind it.
     await this.killOrphanOnPort()
+    // A port another app holds (another Off Grid AI, say) is not ours to free: take the next one.
+    if (!(await isPortFree(this.port))) {
+      const free = await pickFreePort(this.port + 1, (port) => isPortFree(port))
+      if (free === null) throw new Error(`No free port for the image engine near ${this.port}.`)
+      this.port = free
+    }
 
     const args = buildSdServerContextArgs({ ...ctx, port: this.port })
     if (cpuOnly) args.push('--backend', 'cpu')

@@ -1594,7 +1594,9 @@ export function setupIPC(): void {
   // another tool without force-quitting the app). Returns whether the port was actually freed.
   ipcMain.handle('llm:unload', async () => {
     const { llm } = await import('./llm')
-    return llm.unload()
+    // The panel's contract: portFree = our engine is down (another app's engine never counts).
+    const result = await llm.unload()
+    return { outcome: result.outcome, portFree: result.stopped }
   })
 
   // --- Canvas / artifacts sandbox runtime ---------------------------------
