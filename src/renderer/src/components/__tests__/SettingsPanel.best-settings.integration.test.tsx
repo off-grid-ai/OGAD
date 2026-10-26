@@ -31,6 +31,8 @@ function installBridge(start: { llm: Record<string, unknown>; backends: object }
   let llmSettings = start.llm
   let residency: Record<string, string> = {}
   let screenshotSize = 'large'
+  // Main's default video memory mode (video-memory.ts); the plan sets 'fit' (09f52cf41).
+  let videoMemory = 'save'
   ;(window as unknown as { api: Record<string, unknown> }).api = {
     platform: 'darwin',
     bestSettingsStatus: async () => ({
@@ -38,7 +40,8 @@ function installBridge(start: { llm: Record<string, unknown>; backends: object }
         chat: llmSettings,
         backends: preferences,
         residency,
-        screenshotSize
+        screenshotSize,
+        videoMemory
       })
     }),
     applyBestSettings: async () => {
@@ -46,6 +49,7 @@ function installBridge(start: { llm: Record<string, unknown>; backends: object }
       llmSettings = { ...llmSettings, ...plan.chat }
       residency = { ...residency, ...plan.residency }
       screenshotSize = plan.screenshotSize
+      videoMemory = plan.videoMemory
       return { machine, plan }
     },
     backendPreferencesGet: async () => preferences,
