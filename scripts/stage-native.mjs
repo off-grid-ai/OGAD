@@ -78,3 +78,12 @@ run(path.join(root, 'scripts', 'build-computer-use-capture.sh'), root)
 run(path.join(root, 'scripts', 'build-ocr.sh'), root)
 run(path.join(root, 'scripts', 'build-actions-helper.sh'), root)
 run(path.join(root, 'pro', 'scripts', 'build-proximity-helper.sh'), path.join(root, 'pro'))
+
+// c2patool signs the AI label into exported videos, on every platform that has a build.
+{
+  const result = spawnSync(process.execPath, [path.join(root, 'scripts', 'fetch-c2patool.mjs')], {
+    cwd: root,
+    stdio: 'inherit'
+  })
+  if (result.status !== 0) console.warn('[c2patool] not staged; exports keep the metadata label only')
+}

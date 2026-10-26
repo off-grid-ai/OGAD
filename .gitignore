@@ -108,3 +108,9 @@ coverage-native-desktop/
 # Local scratch: generated PDFs and their helper scripts
 /output/
 /tmp/
+
+# Fetched by scripts/fetch-c2patool.mjs during the build (pinned, checksum-verified).
+resources/bin/c2patool
+resources/bin/c2patool.exe
+resources/bin/c2patool.version
+resources/bin/licenses/c2patool.txt
