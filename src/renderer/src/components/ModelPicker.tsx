@@ -2,6 +2,7 @@ import { useRuntimeBackends } from '../hooks/useRuntimeBackends'
 import {
   canonicalModelId,
   modelCapabilities,
+  modelDisplayName,
   modelSizeLabel,
   type ModelFile as CatalogModelFile
 } from '@offgrid/models'
@@ -142,7 +143,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     ids.add(choices.active)
     setEmbedding({
       active: choices.active,
-      models: [...ids].map((id) => ({ id, name: names.get(id) ?? id.split('/').pop() ?? id }))
+      models: [...ids].map((id) => ({ id, name: names.get(id) ?? modelDisplayName(id) ?? id }))
     })
   }, [])
   useEffect(() => {

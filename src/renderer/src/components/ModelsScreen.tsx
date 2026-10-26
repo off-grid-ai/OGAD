@@ -104,6 +104,7 @@ import {
   desktopImagePicks,
   baseModelKey,
   mtpHeadForModel,
+  modelDisplayName,
   type FilterState,
   type Credibility,
   type ModelKind
@@ -596,7 +597,7 @@ export function ModelsScreen({
         if (!current) return current
         const found = hfResults.find((item) => item.id === id)
         return { active: id, models: current.models.some((model) => model.id === id)
-          ? current.models : [...current.models, { id, name: found?.name ?? id.split('/').pop() ?? id, detail: id, badge: 'Your model' }] }
+          ? current.models : [...current.models, { id, name: found?.name ?? modelDisplayName(id) ?? id, detail: id, badge: 'Your model' }] }
       })
       else if (result.error) reportError(result.error)
     } catch (error) {
