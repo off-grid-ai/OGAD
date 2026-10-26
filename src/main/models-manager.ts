@@ -731,15 +731,20 @@ function downloadedVariant(models: DownloadedModel[], id: string): DownloadedMod
   return family.length === 1 ? family[0] : undefined
 }
 
-/** Bytes a download of `model` still needs, when some of its files are already on disk. */
-function missingBytes(model: CatalogEntry, dir: string): { missingBytes?: number } {
+/** Bytes a download of `model` still needs, and which of its files are already on disk (a shared
+ *  encoder or VAE another model brought), when some are. */
+function missingBytes(
+  model: CatalogEntry,
+  dir: string
+): { missingBytes?: number; onDiskFiles?: string[] } {
   const files = model.files as { name: string; sizeBytes?: number }[]
   const onDisk = files.filter((file) => fileSizeOf(dir, file.name) > 0)
   if (onDisk.length === 0 || onDisk.length === files.length) return {}
   return {
     missingBytes: files
       .filter((file) => !onDisk.includes(file))
-      .reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
+      .reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0),
+    onDiskFiles: onDisk.map((file) => file.name)
   }
 }
 
