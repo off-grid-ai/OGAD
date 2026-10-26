@@ -382,7 +382,7 @@ export function SettingsPanel({
   initialTab?: Tab
 }): React.JSX.Element {
   const TaskSettings = getSlot(SLOTS.taskSettings)
-  const VideoSettings = getSlot(SLOTS.videoSettings)
+  const [VideoSettings] = useState(() => getSlot(SLOTS.videoSettings))
   const [replySound, setReplySound] = useReplySound()
   const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
