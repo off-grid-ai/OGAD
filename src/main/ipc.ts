@@ -1015,7 +1015,10 @@ export function setupIPC(): void {
         type: 'question',
         title: 'Change embedding model',
         message: 'Use this embedding model?',
-        detail: `${itemCount === null ? 'Saved search and project knowledge indexes' : `About ${itemCount.toLocaleString()} search and knowledge entries`} will be indexed now. This can take a long time on large profiles. You can cancel during indexing and restore your previous model and indexes. The model may download on first use.`,
+        detail:
+          itemCount === 0
+            ? 'Nothing is indexed yet, so the switch is quick. The model may download on first use.'
+            : `${itemCount === null ? 'Saved search and project knowledge indexes' : `About ${itemCount.toLocaleString()} search and knowledge entries`} will be indexed now. This can take a long time on large profiles. You can cancel during indexing and restore your previous model and indexes. The model may download on first use.`,
         buttons: ['Use and rebuild', 'Cancel'],
         defaultId: 0,
         cancelId: 1
