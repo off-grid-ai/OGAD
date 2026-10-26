@@ -158,9 +158,11 @@ beforeAll(async () => {
     },
     restartComponent: async () => ({ success: true }),
     // Wire the UI button to the REAL engine teardown so the test exercises the actual unload path.
+    // The llm:unload handler reports portFree as "our engine stopped" (08e588e32).
     unloadLlmEngine: async () => {
       const { llm } = await import('../../../../../main/llm')
-      return llm.unload()
+      const result = await llm.unload()
+      return { outcome: result.outcome, portFree: result.stopped }
     }
   }
 
