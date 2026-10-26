@@ -1181,6 +1181,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     await waitFor(async () => expect((await api.getSettings()).imgSeed).toBe('777'))
   })
 
+  // A long journey (two mounts, every setting typed in): about 4.5 s alone, so it gets the 30 s
+  // CI allows under the coverage gate rather than 15 s, which a loaded parallel run can exceed.
   it('applies every existing image setting at the native boundary and reloads persisted values (#64)', async () => {
     const boundary = installApi({ active: FULL, models: [FULL, FEW_STEP] })
     const firstUser = userEvent.setup()
@@ -1266,7 +1268,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       cfgScale: 5.5,
       seed: 4242
     })
-  })
+  }, 30_000)
 
   it('generates at a custom width × height and keeps it for the next visit', async () => {
     const boundary = installApi({ active: FULL, models: [FULL] })
