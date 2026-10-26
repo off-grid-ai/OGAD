@@ -13,7 +13,7 @@ import {
   type PendingModelCleanup
 } from './model-storage-choice'
 import { resolveModelReference } from './model-paths'
-import { configureRuntime } from './runtime-env'
+import { configureRuntime, dataDir } from './runtime-env'
 import {
   beginStorageMove,
   storageDownloadsActive,
@@ -213,22 +213,11 @@ export async function moveModelStorage(
     })
     const names = new Set(files.map((file) => file.name))
     const unknownEntriesLeft = unknownCount(from, names)
-    for (const file of files) {
-      const target = path.join(to, file.name)
-      if (fs.existsSync(target))
-        throw new Error(`The new folder already contains ${file.name}. Choose another folder.`)
-      // Existing destination parents must not redirect writes through links.
-      let parent = path.dirname(target)
-      while (parent !== to) {
-        if (
-          fs.existsSync(parent) &&
-          (fs.lstatSync(parent).isSymbolicLink() || !fs.statSync(parent).isDirectory())
-        )
-          throw new Error('The new folder contains an unsafe model path.')
-        parent = path.dirname(parent)
-      }
-    }
-    const total = files.reduce((sum, file) => sum + file.size, 0)
+    const former = formerModelFolder(profile, to)
+    const reused = await checkDestination(from, to, files, former)
+    const total = files
+      .filter((file) => !reused.has(file.name))
+      .reduce((sum, file) => sum + file.size, 0)
     const margin = Math.max(MOVE_SAFETY_BYTES, Math.ceil(total * 0.05))
     const free = await (
       deps.freeBytes ??
@@ -243,21 +232,29 @@ export async function moveModelStorage(
       )
     assertIdle() // Re-check after the asynchronous volume probe, immediately before copying.
     const promoted: string[] = []
+    const replaced: ReplacedFile[] = []
     const pending: PendingModelCleanup[] = []
     try {
       for (const file of files.filter((entry) => !metadata.includes(entry.name))) {
         const target = path.join(to, file.name)
-        fs.mkdirSync(path.dirname(target), { recursive: true })
-        if (file.linkTarget) {
-          fs.symlinkSync(file.linkTarget, target)
-        } else {
-          await fs.promises.copyFile(path.join(from, file.name), target, fs.constants.COPYFILE_EXCL)
+        let hash = reused.get(file.name)
+        if (!hash) {
+          fs.mkdirSync(path.dirname(target), { recursive: true })
+          if (file.linkTarget) {
+            fs.symlinkSync(file.linkTarget, target)
+          } else {
+            await fs.promises.copyFile(
+              path.join(from, file.name),
+              target,
+              fs.constants.COPYFILE_EXCL
+            )
+          }
+          promoted.push(target)
+          hash = await verifyCopy(from, target, {
+            ...file,
+            size: file.linkTarget ? fs.statSync(file.linkTarget).size : file.size
+          })
         }
-        promoted.push(target)
-        const hash = await verifyCopy(from, target, {
-          ...file,
-          size: file.linkTarget ? fs.statSync(file.linkTarget).size : file.size
-        })
         assertUnchanged(from, file.name, file.sourceStat, true)
         if (
           (file.sourceStat.nlink > 1 && !file.linkTarget) ||
@@ -273,8 +270,10 @@ export async function moveModelStorage(
           sha256: hash
         })
       }
-      copyMetadata(from, to, promoted, pending)
-      saveModelStorageChoice(profile, to, [...readPendingModelCleanup(profile), ...pending])
+      copyMetadata(from, to, promoted, pending, { replaced: former ? replaced : null })
+      // Records that would clean up the folder now in use are void.
+      const kept = readPendingModelCleanup(profile).filter((record) => record.source !== to)
+      saveModelStorageChoice(profile, to, [...kept, ...pending])
       configureRuntime({ modelsDir: to })
     } catch (error) {
       for (const target of promoted) {
@@ -284,12 +283,44 @@ export async function moveModelStorage(
           console.warn('[model-storage] Could not remove failed copy:', target, cleanupError)
         }
       }
+      restoreReplaced(replaced)
       throw error
     }
     return { moved: promoted.length, unknownEntriesLeft }
   } finally {
     release()
   }
+}
+
+/** Throws on a destination conflict. Returns the models the destination already holds. */
+async function checkDestination(
+  from: string,
+  to: string,
+  files: Array<OwnedModelFile & { linkTarget?: string }>,
+  former: boolean
+): Promise<Map<string, string>> {
+  // A model the destination already holds byte for byte (an old copy not yet cleaned up) is reused.
+  const reused = new Map<string, string>()
+  for (const file of files) {
+    const target = path.join(to, file.name)
+    if (fs.existsSync(target) && !(former && metadata.includes(file.name))) {
+      const hash = file.linkTarget ? undefined : await sameContent(from, to, file.name)
+      if (!hash)
+        throw new Error(`The new folder already contains ${file.name}. Choose another folder.`)
+      reused.set(file.name, hash)
+    }
+    // Existing destination parents must not redirect writes through links.
+    let parent = path.dirname(target)
+    while (parent !== to) {
+      if (
+        fs.existsSync(parent) &&
+        (fs.lstatSync(parent).isSymbolicLink() || !fs.statSync(parent).isDirectory())
+      )
+        throw new Error('The new folder contains an unsafe model path.')
+      parent = path.dirname(parent)
+    }
+  }
+  return reused
 }
 
 async function verifyCopy(
@@ -307,13 +338,55 @@ async function verifyCopy(
   return hash
 }
 
-/** Complete this snapshot and the config switch without yielding to renderer writes. */
+/** Returns the shared hash when both folders hold the same regular file. */
+async function sameContent(from: string, to: string, name: string): Promise<string | undefined> {
+  const target = regularFileOrMissing(to, name)
+  if (!target || target.size !== fs.statSync(path.join(from, name)).size) return undefined
+  const hash = await sha256File(path.join(to, name))
+  return (await sha256File(path.join(from, name))) === hash ? hash : undefined
+}
+
+/** The default model folder, or one moved away from since the last start: its settings files are ours. */
+function formerModelFolder(profile: string, folder: string): boolean {
+  try {
+    if (fs.realpathSync(path.join(dataDir(), 'models')) === folder) return true
+  } catch {
+    /* No default folder yet. */
+  }
+  return readPendingModelCleanup(profile).some(
+    (record) => record.source === folder && metadata.includes(record.name)
+  )
+}
+
+interface ReplacedFile {
+  target: string
+  bytes: Buffer
+}
+
+function restoreReplaced(replaced: ReplacedFile[]): void {
+  for (const { target, bytes } of replaced) {
+    try {
+      fs.writeFileSync(target, bytes)
+    } catch (restoreError) {
+      console.warn('[model-storage] Could not restore settings file:', target, restoreError)
+    }
+  }
+}
+
+/** Complete this snapshot and the config switch without yielding to renderer writes.
+ * With `replaced`, settings files the destination already holds are ours and replaced. */
 function copyMetadata(
   from: string,
   to: string,
   promoted: string[],
   pending: PendingModelCleanup[],
-  transform: (name: string, bytes: Buffer) => Buffer = (_name, bytes) => bytes
+  {
+    replaced = null,
+    transform = (_name, bytes) => bytes
+  }: {
+    replaced?: ReplacedFile[] | null
+    transform?: (name: string, bytes: Buffer) => Buffer
+  } = {}
 ): void {
   // Settings may change during the asynchronous model copy. Refresh small metadata
   // synchronously so no renderer write can occur between this snapshot and the switch.
@@ -338,12 +411,16 @@ function copyMetadata(
       parent = path.dirname(parent)
     }
     fs.mkdirSync(path.dirname(target), { recursive: true })
-    if (!promoted.includes(target)) {
-      if (fs.existsSync(target))
-        throw new Error(`The new folder already contains ${name}. Choose another folder.`)
-      const fd = fs.openSync(target, 'wx')
-      fs.closeSync(fd)
-      promoted.push(target)
+    if (!promoted.includes(target) && !replaced?.some((file) => file.target === target)) {
+      if (fs.existsSync(target)) {
+        if (!replaced || !regularFileOrMissing(to, name))
+          throw new Error(`The new folder already contains ${name}. Choose another folder.`)
+        replaced.push({ target, bytes: fs.readFileSync(target) })
+      } else {
+        const fd = fs.openSync(target, 'wx')
+        fs.closeSync(fd)
+        promoted.push(target)
+      }
     }
     fs.writeFileSync(target, bytes)
     if (fs.statSync(target).size !== bytes.length || !fs.readFileSync(target).equals(bytes))
@@ -519,48 +596,53 @@ function validRegistryEntry(entry: unknown): boolean {
 export function leaveModelStorage(profile: string, source: string, destination: string): void {
   const release = beginStorageMove()
   const promoted: string[] = []
+  const replaced: ReplacedFile[] = []
   let addedScanFolder: string | null = null
   try {
     if (storageDownloadsActive()) throw new Error(STORAGE_DOWNLOAD_ERROR)
     const from = fs.realpathSync(source)
     const to = fs.realpathSync(destination)
     if (from === to) return
-    copyMetadata(from, to, promoted, [], (name, bytes) => {
-      const registry = name === 'downloaded-models.json' || name === 'local-models.json'
-      const keys =
-        name === 'active-model.json'
-          ? ['primary', 'mmproj']
-          : name === 'llm-settings.json'
-            ? ['draftModel']
-            : []
-      if (!registry && !keys.length) return bytes
-      try {
-        const value: unknown = JSON.parse(bytes.toString('utf8'))
-        const roots = [from, ...readModelScanFolders(profile)]
-        const reference = (file: string): string => resolveModelReference(file, roots)
-        if (registry) {
-          if (!Array.isArray(value) || !value.every(validRegistryEntry)) {
-            throw new Error('Invalid registry structure')
-          }
-          return Buffer.from(
-            JSON.stringify(
-              value.map((entry) => rewriteRegistryEntryReferences(entry, reference)),
-              null,
-              2
+    const former = formerModelFolder(profile, to)
+    copyMetadata(from, to, promoted, [], {
+      replaced: former ? replaced : null,
+      transform: (name, bytes) => {
+        const registry = name === 'downloaded-models.json' || name === 'local-models.json'
+        const keys =
+          name === 'active-model.json'
+            ? ['primary', 'mmproj']
+            : name === 'llm-settings.json'
+              ? ['draftModel']
+              : []
+        if (!registry && !keys.length) return bytes
+        try {
+          const value: unknown = JSON.parse(bytes.toString('utf8'))
+          const roots = [from, ...readModelScanFolders(profile)]
+          const reference = (file: string): string => resolveModelReference(file, roots)
+          if (registry) {
+            if (!Array.isArray(value) || !value.every(validRegistryEntry)) {
+              throw new Error('Invalid registry structure')
+            }
+            return Buffer.from(
+              JSON.stringify(
+                value.map((entry) => rewriteRegistryEntryReferences(entry, reference)),
+                null,
+                2
+              )
             )
-          )
+          }
+          if (!isRegistryObject(value)) {
+            throw new Error('Invalid settings structure')
+          }
+          for (const key of keys) {
+            if (typeof value[key] === 'string' && value[key]) value[key] = reference(value[key])
+          }
+          return Buffer.from(JSON.stringify(value, null, 2))
+        } catch {
+          // Do not log parser errors: their messages can include private metadata.
+          console.warn('[model-storage] Could not rewrite metadata; copying unchanged:', name)
+          return bytes
         }
-        if (!isRegistryObject(value)) {
-          throw new Error('Invalid settings structure')
-        }
-        for (const key of keys) {
-          if (typeof value[key] === 'string' && value[key]) value[key] = reference(value[key])
-        }
-        return Buffer.from(JSON.stringify(value, null, 2))
-      } catch {
-        // Do not log parser errors: their messages can include private metadata.
-        console.warn('[model-storage] Could not rewrite metadata; copying unchanged:', name)
-        return bytes
       }
     })
     const alreadyScanned = readModelScanFolders(profile).includes(from)
@@ -569,6 +651,7 @@ export function leaveModelStorage(profile: string, source: string, destination: 
     saveModelStorageChoice(profile, to)
   } catch (error) {
     for (const target of promoted) fs.rmSync(target, { force: true })
+    restoreReplaced(replaced)
     if (addedScanFolder) removeModelScanFolder(profile, addedScanFolder)
     throw error
   } finally {
