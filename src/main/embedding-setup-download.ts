@@ -211,20 +211,21 @@ export function queueEmbeddingDownload(
     .finally(() => signal?.removeEventListener('abort', onAbort))
 }
 
-/** Prefetch curated ONNX files. Runs in the shared download queue so the download UI shows it. */
+/** Prefetch curated ONNX files. Runs in the shared download queue so the download UI shows it;
+ *  `record` hands each queue update to the download registry, which the caller owns. */
 export async function downloadEmbeddingModel(
   id: string,
   onProgress?: (progress: EmbeddingDownloadProgress) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  record?: (progress: EmbeddingQueueProgress) => void
 ): Promise<void> {
   requireModelStorage()
   if (!filesFor(id)) throw new Error('This embedding model is not in the setup catalog.')
   if (signal?.aborted) throw Object.assign(new Error('Download canceled.'), { name: 'AbortError' })
-  const { recordDownloadProgress } = await import('./models-manager')
   const result = await queueEmbeddingDownload(
     id,
     (p) => {
-      recordDownloadProgress(p)
+      record?.(p)
       if (p.downloadedBytes !== undefined && p.totalBytes !== undefined)
         onProgress?.({
           downloadedBytes: p.downloadedBytes,

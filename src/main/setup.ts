@@ -28,6 +28,7 @@ import {
   BONSAI_2,
   desktopCatalog,
   displayModelName,
+  recordDownloadProgress,
   remainingModelDownloadBytes
 } from './models-manager'
 import { getAllActiveModals } from './active-models'
@@ -481,7 +482,8 @@ async function downloadSetupEmbedding(item: SetupItem, emit: SetupProgressCb): P
           downloadedBytes: p.downloadedBytes,
           totalBytes: p.totalBytes
         }),
-      controller.signal
+      controller.signal,
+      recordDownloadProgress
     )
     if (controller.signal.aborted) throw new Error('Download canceled.')
   } finally {
