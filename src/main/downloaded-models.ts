@@ -145,9 +145,23 @@ export function reconcileDownloadedModelRegistry(
     viewOf.set(model, view)
     return model
   }
+  // A catalog video entry whose exact pack these files are: its own row already lists them.
+  const catalogVideoPack = (names: readonly string[]): boolean =>
+    catalog.some(
+      (entry) =>
+        entry.kind === 'video' &&
+        entry.files.length === names.length &&
+        names.every((name) => entry.files.some((file) => file.name === name))
+    )
   let changed = false
   const migrated: DownloadedModel[] = []
   for (const model of current) {
+    // An adopted video copy that is some catalog entry's exact pack showed the same files twice.
+    // Only the registry row goes; the files stay.
+    if (model.kind === 'video' && model.packageIdentity && catalogVideoPack(model.files)) {
+      changed = true
+      continue
+    }
     if (model.familyId || model.packageIdentity) {
       const family = model.familyId
         ? catalog.find((entry) => entry.id === model.familyId)
@@ -214,12 +228,12 @@ export function reconcileDownloadedModelRegistry(
   for (const weight of entries) {
     const architecture = videoArchitecture(weight)
     if (!architecture || migrated.some((model) => model.kind === 'video' && model.files.includes(weight))) continue
+    const names = Object.values(videoPackFiles(weight)!)
+    // The catalog already provides controls when this is any entry's exact default pack.
+    if (catalogVideoPack(names)) continue
     const family = catalog.find((entry) => entry.kind === 'video' &&
       entry.files.some((file) => videoArchitecture(file.name) === architecture))
     if (!family) continue
-    const names = Object.values(videoPackFiles(weight)!)
-    // The catalog already provides controls when this is its exact default pack.
-    if (names.length === family.files.length && names.every((name) => family.files.some((file) => file.name === name))) continue
     const files: Array<{ name: string; sizeBytes: number; role: 'primary' }> = []
     for (const name of names) {
       try {
