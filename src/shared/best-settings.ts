@@ -60,6 +60,9 @@ export interface BestSettingsPlan {
   backends: Record<BackendModality, BackendPreference>
   residency: Partial<Record<Modality, 'resident'>>
   screenshotSize: 'balanced'
+  /** Video skips CPU offload and VAE tiling when the GPU has enough free memory. Video is never
+   *  kept in memory: it loads for each clip and frees the GPU after. */
+  videoMemory: 'fit'
   /** One plain line per area, shown to the person after the settings apply. */
   summary: string[]
 }
@@ -67,6 +70,7 @@ export interface BestSettingsPlan {
 const BACKEND_ORDER: BackendModality[] = [
   'llm',
   'image',
+  'video',
   'stt',
   'tts',
   'grounding',
@@ -200,7 +204,8 @@ export function planBestSettings(
     chat: bestChatSettings(machine, model),
     backends,
     residency: bestResidency(machine.totalRamGb),
-    screenshotSize: 'balanced' as const
+    screenshotSize: 'balanced' as const,
+    videoMemory: 'fit' as const
   }
   return { ...plan, summary: summarize(machine, plan) }
 }
@@ -210,6 +215,7 @@ export interface CurrentSpeedSettings {
   backends: Partial<Record<BackendModality, BackendPreference>>
   residency: Partial<Record<Modality, string>>
   screenshotSize: string
+  videoMemory?: string
 }
 
 /** True when every setting the plan chooses is already in place. */
@@ -232,7 +238,8 @@ export function matchesBestSettings(
     Object.entries(plan.residency).every(
       ([modality, mode]) => current.residency[modality as Modality] === mode
     ) &&
-    current.screenshotSize === plan.screenshotSize
+    current.screenshotSize === plan.screenshotSize &&
+    current.videoMemory === plan.videoMemory
   )
 }
 
