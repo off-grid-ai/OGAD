@@ -175,11 +175,21 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     const modal = (await api().getActiveModalities?.()) ?? {}
     const nextActiveIds = new Set<string>((await api().getActiveModelIds?.()) ?? [])
     const remoteTextActive = resolveActiveTextModel(catalogModels, text, nextActiveIds).remote
+    // With no saved pick, the image and video engines still use one (the first installed): show
+    // that one, as Settings does, rather than "None selected" while it makes every picture.
+    const [imageStatus, videoStatus] = await Promise.all([
+      api()
+        .imageGenStatus?.()
+        .catch(() => null),
+      api()
+        .videoGenStatus?.()
+        .catch(() => null)
+    ])
     setActiveIds(nextActiveIds)
     setActive({
       text: remoteTextActive ? null : (text ?? modal.text ?? null),
-      image: modal.image ?? null,
-      video: modal.video ?? null,
+      image: modal.image ?? imageStatus?.active ?? null,
+      video: modal.video ?? videoStatus?.active ?? null,
       speech: modal.speech ?? null,
       transcription: modal.transcription ?? null,
       computer_use: modal.computer_use ?? null
