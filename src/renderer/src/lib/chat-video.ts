@@ -26,6 +26,11 @@ export interface ChatVideoController {
   generate(request: ChatVideoRequest): Promise<VideoGenerationResultContract>
   cancel(): Promise<boolean>
   acknowledge(conversationId: string, messageId: string): Promise<boolean>
+  /**
+   * Before a clip: Pro may take the request as a film (a longer ask, or a person to keep in every
+   * shot). Returns the line chat shows when it did, or null to render one clip.
+   */
+  startFilm?(request: ChatVideoRequest): Promise<string | null>
   /** Conversations whose messages changed outside the renderer (a clip finished). */
   onConversationUpdated(listener: (conversationId: string) => void): () => void
 }

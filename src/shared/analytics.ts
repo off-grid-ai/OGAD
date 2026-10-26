@@ -90,6 +90,14 @@ export const FLOW_STEPS = {
   voice_setup: ['opened', 'model_picked', 'downloaded'],
   image_setup: ['opened', 'model_picked', 'downloaded'],
   video_setup: ['opened', 'model_picked', 'downloaded'],
+  video_story: [
+    'storyboard_shown',
+    'draft_started',
+    'draft_finished',
+    'final_started',
+    'final_finished',
+    'exported'
+  ],
   connector_add: ['opened', 'connector_picked', 'authorised'],
   pro_upgrade: ['gate_shown', 'paywall_viewed', 'trial_started', 'purchased']
 } as const

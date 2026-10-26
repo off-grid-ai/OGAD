@@ -2170,11 +2170,25 @@ export function MemoryChat({
       if (mode === 'video') {
         setVideoGenConv(convId)
         try {
-          const video = await requireChatVideo().generate({
+          // An attached photo is the start image (or, if Pro asks, a person to keep).
+          const startImage = atts.find((attachment) => attachment.kind === 'image' && attachment.path)
+          const request = {
             prompt: trimmed,
             conversationId: convId,
-            projectId
-          })
+            projectId,
+            ...(startImage?.path ? { initImage: startImage.path } : {})
+          }
+          const controller = requireChatVideo()
+          const filmLine = await controller.startFilm?.(request)
+          if (filmLine) {
+            const stored = await window.api.addRagMessage(convId, 'assistant', filmLine)
+            setConvMessages(convId, (previous) => [
+              ...previous,
+              { id: stored.uuid, role: 'assistant', content: filmLine }
+            ])
+            return
+          }
+          const video = await controller.generate(request)
           const videoMetadata = {
             width: video.width,
             height: video.height,

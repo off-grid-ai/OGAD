@@ -10,6 +10,8 @@ export interface GeneratedVideoSidecar {
   height?: number
   durationSeconds?: number
   metadataJson?: string
+  /** A film joined from a Studio story. Clips have none. */
+  storyId?: string
 }
 
 export const generatedVideoSidecarPath = (videoPath: string): string => `${videoPath}.json`
@@ -33,7 +35,8 @@ export function readGeneratedVideoSidecar(videoPath: string): GeneratedVideoSide
       ...(typeof value.durationSeconds === 'number'
         ? { durationSeconds: value.durationSeconds }
         : {}),
-      ...(typeof value.metadataJson === 'string' ? { metadataJson: value.metadataJson } : {})
+      ...(typeof value.metadataJson === 'string' ? { metadataJson: value.metadataJson } : {}),
+      ...(typeof value.storyId === 'string' ? { storyId: value.storyId } : {})
     }
   } catch {
     return {}
