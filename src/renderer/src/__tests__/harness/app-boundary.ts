@@ -56,6 +56,17 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     onNewAction: eventSubscription,
     onUpdateDownloaded: eventSubscription,
     onNavigate: eventSubscription,
+    // The app menu's View > Back / Forward (main/index.ts): its CmdOrCtrl+[ and CmdOrCtrl+]
+    // accelerators send 'navigate:history'. jsdom has no menu, so the keys stand in for it.
+    onHistoryNavigate: (cb: (direction: 'back' | 'forward') => void): (() => void) => {
+      const onKey = (event: KeyboardEvent): void => {
+        if (!(event.metaKey || event.ctrlKey)) return
+        if (event.key === '[') cb('back')
+        else if (event.key === ']') cb('forward')
+      }
+      window.addEventListener('keydown', onKey)
+      return () => window.removeEventListener('keydown', onKey)
+    },
     onMeetingState: eventSubscription,
     onModelProgress: eventSubscription,
     proOn: eventSubscription,
