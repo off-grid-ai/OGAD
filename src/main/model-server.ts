@@ -2665,7 +2665,11 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
           'POST /v1/videos',
           'GET /v1/videos/:id',
           'GET /v1/videos/:id/content',
-          'POST /v1/videos/:id/cancel'
+          'POST /v1/videos/:id/cancel',
+          'POST /v1/stories',
+          'GET /v1/stories/:id',
+          'GET /v1/stories/:id/content',
+          'POST /v1/stories/:id/cancel'
         ],
         docs: `http://${GATEWAY_HOST}:${boundGatewayPort}/docs`
       })

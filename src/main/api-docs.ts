@@ -21,10 +21,15 @@ EMBEDDINGS            POST ${b}/v1/embeddings          {input}  (local all-MiniL
 SPEECH -> TEXT (STT)  POST ${b}/v1/audio/transcriptions  multipart: file
 TEXT -> SPEECH (TTS)  POST ${b}/v1/audio/speech        {input, voice?}  -> audio/wav
   voices              GET  ${b}/v1/audio/voices
-TEXT -> VIDEO         POST ${b}/v1/videos             {prompt, model?, width?, height?, frames?, fps?, steps?, seed?, client_job_id?, use_remote?} -> 202 job
+TEXT -> VIDEO (Pro)   POST ${b}/v1/videos             {prompt, model?, width?, height?, frames?, fps?, steps?, seed?, init_image?, ref_images?, format?, client_job_id?, use_remote?} -> 202 job
   status              GET ${b}/v1/videos/:id
   download            GET ${b}/v1/videos/:id/content -> video/mp4
   stop                POST ${b}/v1/videos/:id/cancel
+STORY -> FILM (Pro)   POST ${b}/v1/stories            {story, characters?, photos?, init_images?, quality?, schedule?} -> 202 job
+  status              GET ${b}/v1/stories/:id
+  download            GET ${b}/v1/stories/:id/content -> video/mp4 (captions: /captions -> text/vtt)
+  stop                POST ${b}/v1/stories/:id/cancel
+  Without Pro both answer 402 pro_required; an unsafe request answers 422 safety_refused.
 TEXT -> IMAGE         POST ${b}/v1/images              {prompt, aspect_ratio?, resolution?, seed?}
 IMAGE -> IMAGE        POST ${b}/v1/images              {prompt, input_references:[{image_url:{url}}]}
   (OpenAI aliases)    POST ${b}/v1/images/generations  |  POST ${b}/v1/images/edits (multipart)
@@ -550,7 +555,22 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
                     steps: { type: 'integer', minimum: 4, maximum: 50 },
                     guidance: { type: 'number', minimum: 0, maximum: 20 },
                     seed: { type: 'integer', minimum: -1, maximum: 2147483647 },
-                    enhancePrompt: { type: 'boolean' }
+                    enhancePrompt: { type: 'boolean' },
+                    init_image: {
+                      type: 'string',
+                      description: 'Start image as a PNG or JPEG data URL (≤ 8 MB). Needs the Wan 2.2 model.'
+                    },
+                    ref_images: {
+                      type: 'array',
+                      maxItems: 4,
+                      items: { type: 'string' },
+                      description: 'Photos of a person to keep, as data URLs. Send consent: true.'
+                    },
+                    consent: {
+                      type: 'boolean',
+                      description: 'The photos show the sender or people who agreed.'
+                    },
+                    format: { type: 'string', enum: ['portrait', 'landscape', 'square'] }
                   }
                 }
               }
@@ -558,8 +578,70 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
           },
           responses: {
             '202': { description: 'Accepted job with request_id and poll_url' },
+            '402': { description: 'Video needs Off Grid AI Pro (error type pro_required)' },
+            '422': { description: 'The request was refused by the safety check (safety_refused)' },
             default: errorResponse
           }
+        }
+      },
+      '/v1/stories': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Render a narrated short film from a story (Pro)',
+          description:
+            'The story holds 1–8 shots. Character photos and start images travel as data URLs keyed by id. The film renders in the queue of this computer: draft first, or final now or tonight.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['story'],
+                  properties: {
+                    story: { type: 'object' },
+                    characters: { type: 'array', items: { type: 'object' } },
+                    photos: { type: 'object', additionalProperties: { type: 'string' } },
+                    init_images: { type: 'object', additionalProperties: { type: 'string' } },
+                    quality: { type: 'string', enum: ['draft', 'final'] },
+                    schedule: { type: 'string', enum: ['now', 'tonight'] }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '202': { description: 'Accepted: request_id, poll_url, estimate_seconds, ready_at' },
+            '402': { description: 'Video needs Off Grid AI Pro (pro_required)' },
+            '422': { description: 'Refused by the safety check (safety_refused)' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/stories/{id}': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Story status, per-shot progress and estimate',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Story with status and progress' }, default: errorResponse }
+        }
+      },
+      '/v1/stories/{id}/content': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Download the finished film (MP4 with narration and captions)',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': { description: 'Film', content: { 'video/mp4': { schema: { type: 'string', format: 'binary' } } } },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/stories/{id}/cancel': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Stop this film',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Stop requested' }, default: errorResponse }
         }
       },
       '/v1/videos/{id}': {
