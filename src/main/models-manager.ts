@@ -1,4 +1,5 @@
 import { reportDownloadStatus } from './analytics'
+import { totalmem } from 'os'
 import { settingsChanged, settingsVersion } from './settings-version'
 import { withStorageDownload } from './model-storage-guard'
 // Central model management — the single source of truth for catalog, install
@@ -742,7 +743,11 @@ function missingBytes(model: CatalogEntry, dir: string): { missingBytes?: number
   }
 }
 
-export async function getCatalog(): Promise<{ kinds: readonly string[]; models: unknown[] }> {
+export async function getCatalog(): Promise<{
+  kinds: readonly string[]
+  memoryGb: number
+  models: unknown[]
+}> {
   const { MODEL_KINDS } = await import('@offgrid/models')
   const CATALOG = await desktopCatalog()
   const dir = llm.getModelsDir()
@@ -798,6 +803,9 @@ export async function getCatalog(): Promise<{ kinds: readonly string[]; models: 
   }
   return {
     kinds: [...MODEL_KINDS, 'embedding'],
+    // This machine's memory, as the Models screen judges "too big for this Mac" (a model's
+    // minRamGb), so a paired phone can judge which models this computer can take.
+    memoryGb: Math.round(totalmem() / 1e9),
     models: [
       ...offered.map((model) => ({
         ...model,
