@@ -2181,7 +2181,7 @@ export function MemoryChat({
           const controller = requireChatVideo()
           const film = await controller.startFilm?.(request)
           if (film) {
-            const context = { filmRef: { storyId: film.storyId } }
+            const context = { videoStoryId: film.storyId }
             const stored = await window.api.addRagMessage(convId, 'assistant', film.line, context)
             setConvMessages(convId, (previous) => [
               ...previous,
@@ -2589,9 +2589,16 @@ export function MemoryChat({
       )
       const context = tr?.unified?.length ? { unified: tr.unified } : undefined
       // Persist the citation sources + tool calls so they survive a reload.
+      // A film a tool started (make_film) keeps its card on this message.
+      const filmStoryId = (tr as { videoStoryId?: string } | undefined)?.videoStoryId
       const toolCtx =
-        tr?.unified?.length || toolCalls.length || tr?.toolsOffered?.length
-          ? { unified: tr?.unified ?? [], toolCalls, toolsOffered: tr?.toolsOffered }
+        tr?.unified?.length || toolCalls.length || tr?.toolsOffered?.length || filmStoryId
+          ? {
+              unified: tr?.unified ?? [],
+              toolCalls,
+              toolsOffered: tr?.toolsOffered,
+              ...(filmStoryId ? { videoStoryId: filmStoryId } : {})
+            }
           : undefined
       if (cancelledRef.current.has(convId)) {
         // Stop also ends a comic page that started while the model was writing.

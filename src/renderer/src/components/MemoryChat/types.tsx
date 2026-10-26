@@ -23,7 +23,7 @@ export type RagEntity = { id: number; name?: string }
 
 export type RagContext = {
   /** A film started from this chat. Pro renders its card; free builds show the line only. */
-  filmRef?: { storyId: string }
+  videoStoryId?: string
   branches?: { question: string; answers: ResponseVersion[] }[]
   variants?: ResponseVersion[]
   variantIndex?: number

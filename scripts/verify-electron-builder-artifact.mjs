@@ -45,6 +45,8 @@ export default async function verifyElectronBuilderArtifact(event) {
         path.join('bin', 'sd', 'sd-cli.exe'),
         path.join('bin', 'sd-cpu', 'sd-cli.exe'),
         path.join('bin', 'ffmpeg.exe'),
+        // Signs the AI label into exported videos: a release without it must fail.
+        path.join('bin', 'c2patool.exe'),
         path.join('bin', 'kev-local-server.py')
       )
     }
@@ -58,6 +60,8 @@ export default async function verifyElectronBuilderArtifact(event) {
         ),
         path.join('bin', 'ffmpeg'),
         path.join('bin', 'licenses', 'ffmpeg.txt'),
+        path.join('bin', 'c2patool'),
+        path.join('bin', 'licenses', 'c2patool.txt'),
         path.join('bin', 'sd', 'sd-cli'),
         path.join('bin', 'sd', 'sd-server'),
         path.join('bin', 'sd', 'libggml-vulkan.so'),

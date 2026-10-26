@@ -497,7 +497,7 @@ function MessageBubble({
         />
       ) : null}
       {message.videoPath ? <ChatVideoPreview path={message.videoPath} className="mb-2" /> : null}
-      {message.context?.filmRef ? <FilmCardSlot storyId={message.context.filmRef.storyId} /> : null}
+      {message.context?.videoStoryId ? <FilmCardSlot storyId={message.context.videoStoryId} /> : null}
       {message.image ? (
         <ChatImagePreview
           src={message.image}

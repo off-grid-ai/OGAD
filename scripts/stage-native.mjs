@@ -85,5 +85,9 @@ run(path.join(root, 'pro', 'scripts', 'build-proximity-helper.sh'), path.join(ro
     cwd: root,
     stdio: 'inherit'
   })
-  if (result.status !== 0) console.warn('[c2patool] not staged; exports keep the metadata label only')
+  if (result.status !== 0) {
+    // A release build must carry it; a local build can go on with the metadata label only.
+    if (process.env.CI) process.exit(result.status ?? 1)
+    console.warn('[c2patool] not staged; exports keep the metadata label only')
+  }
 }
