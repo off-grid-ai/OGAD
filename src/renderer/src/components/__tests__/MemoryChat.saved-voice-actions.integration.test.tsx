@@ -99,9 +99,10 @@ function installSavedVoiceBoundary(): void {
       conversationId: string,
       role: 'user' | 'assistant',
       content: string,
-      context?: StoredMessage['context']
+      context?: StoredMessage['context'],
+      placement?: { keepShownVersion?: boolean }
     ) => {
-      const placed = thread.place(messages, conversationId, role, context)
+      const placed = thread.place(messages, conversationId, role, context, placement)
       const id = nextId++
       const uuid = `saved-voice-${id}`
       messages.push({

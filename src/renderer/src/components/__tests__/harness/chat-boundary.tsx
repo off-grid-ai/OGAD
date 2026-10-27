@@ -162,7 +162,8 @@ export class ChatBoundary {
       conversationId: string,
       role: 'user' | 'assistant',
       content: string,
-      context?: unknown
+      context?: unknown,
+      placement?: { keepShownVersion?: boolean }
     ) => {
       if (role === 'user' && this.pendingUserWrite) {
         const gate = this.pendingUserWrite
@@ -171,7 +172,13 @@ export class ChatBoundary {
         this.heldUserWrites.delete(gate)
       }
       this.messages[conversationId] ??= []
-      const placed = this.thread.place(this.messages[conversationId]!, conversationId, role, context)
+      const placed = this.thread.place(
+        this.messages[conversationId]!,
+        conversationId,
+        role,
+        context,
+        placement
+      )
       const id = this.nextMessageId++
       const uuid = `message-${id}`
       this.messages[conversationId]!.push({

@@ -244,12 +244,18 @@ test.describe('Desktop queue and saved response versions', () => {
     ).toBeVisible()
     await closeApp()
     await launchApp()
-    const previous = page.getByRole('button', { name: 'Previous response' })
-    if ((await previous.count()) && (await previous.isEnabled())) await previous.click()
+    // Closing the app ends the resend. What it left is kept one version newer; the saved answer
+    // is still the one shown.
+    await expect(page.getByText('1/2', { exact: true })).toBeVisible()
     await expect(
       page.getByText('The saved answer remains available.', { exact: true }).last()
     ).toBeVisible()
     await expect(page.getByRole('button', { name: 'Stop generating', exact: true })).toBeHidden()
+    await page.getByRole('button', { name: 'Next response' }).click()
+    await expect(page.getByText('2/2', { exact: true })).toBeVisible()
+    await expect(
+      page.getByText('The saved answer remains available.', { exact: true })
+    ).toHaveCount(0)
   })
 
   test('Stop during resend keeps both the partial and earlier answer after restart', async () => {
