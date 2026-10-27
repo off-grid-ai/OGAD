@@ -1381,6 +1381,26 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     ])
   })
 
+  it('keeps what already streamed when the engine fails mid-answer, with the error under it', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('write the long answer', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    boundary.emit(0, 'The first half of the answer arrived.')
+    expect(await screen.findByText(/The first half of the answer arrived\./)).toBeTruthy()
+    // The engine goes away (the app closing, a crash) before the answer ends.
+    boundary.reject(0, new Error('connect ECONNREFUSED 127.0.0.1:8439'))
+
+    expect(await screen.findByText(/connect ECONNREFUSED/)).toBeTruthy()
+    expect(screen.getByText(/The first half of the answer arrived\./)).toBeTruthy()
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
+    )
+  })
+
   it('shows the remote provider failure instead of hiding it behind a generic error', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)

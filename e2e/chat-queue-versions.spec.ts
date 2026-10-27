@@ -256,6 +256,8 @@ test.describe('Desktop queue and saved response versions', () => {
     await expect(
       page.getByText('The saved answer remains available.', { exact: true })
     ).toHaveCount(0)
+    // What the resend had streamed before the app closed is kept in that version.
+    await expect(page.getByText(/The replacement reply is still running\./).last()).toBeVisible()
   })
 
   test('Stop during resend keeps both the partial and earlier answer after restart', async () => {

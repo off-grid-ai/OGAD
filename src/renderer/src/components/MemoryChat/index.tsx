@@ -3157,7 +3157,14 @@ export function MemoryChat({
       const failedReasoning = sid ? reasoningByStream.current[sid] : undefined
       const failedTimeline = sid ? timelineByStream.current[sid] : undefined
       const failedToolCalls = sid ? toolCallsByStream.current[sid] : undefined
-      const failed = failedAnswerVersion(opts?.priorAnswer, errorContent, opts?.priorVariants)
+      // What already streamed stays, with the error under it: a reply never disappears because the
+      // engine went away mid-answer (the app closing, a crash), just as Stop keeps a partial answer.
+      const streamed = sid ? (answerByStream.current[sid] ?? '').trim() : ''
+      const failed = failedAnswerVersion(
+        opts?.priorAnswer,
+        streamed ? `${streamed}\n\n${errorContent}` : errorContent,
+        opts?.priorVariants
+      )
       setConvMessages(convId, (previous) => {
         if (sid && previous.some((message) => message.id === sid))
           return previous.map((message) =>
