@@ -30,6 +30,7 @@ STORY -> FILM (Pro)   POST ${b}/v1/stories            {story, characters?, photo
   download            GET ${b}/v1/stories/:id/content -> video/mp4 (captions: /captions -> text/vtt)
   stop                POST ${b}/v1/stories/:id/cancel
   Without Pro both answer 402 pro_required; an unsafe request answers 422 safety_refused.
+SEARCH (Pro)          POST ${b}/v1/search             {query, limit?, sources?} -> {data:[{id, title, snippet, kind, source, timestamp, deepLinkId}]}
 TEXT -> IMAGE         POST ${b}/v1/images              {prompt, aspect_ratio?, resolution?, seed?}
 IMAGE -> IMAGE        POST ${b}/v1/images              {prompt, input_references:[{image_url:{url}}]}
   (OpenAI aliases)    POST ${b}/v1/images/generations  |  POST ${b}/v1/images/edits (multipart)
@@ -581,6 +582,35 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
             '202': { description: 'Accepted job with request_id and poll_url' },
             '402': { description: 'Video needs Off Grid AI Pro (error type pro_required)' },
             '422': { description: 'The request was refused by the safety check (safety_refused)' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/search': {
+        post: {
+          tags: ['Search'],
+          summary: 'Search everything this computer has seen (Pro)',
+          description:
+            'The Search screen engine: keywords and meaning, best first. Paired apps only; a website origin is refused.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['query'],
+                  properties: {
+                    query: { type: 'string' },
+                    limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+                    sources: { type: 'array', items: { type: 'string' } }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Ranked results: id, title, snippet, kind, source, timestamp, deepLinkId' },
+            '402': { description: 'Search needs Off Grid AI Pro (pro_required)' },
             default: errorResponse
           }
         }
