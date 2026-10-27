@@ -741,61 +741,6 @@
         ]
       },
       {
-        "id": "offgrid-ai/pony-diffusion-v6-xl-GGUF",
-        "quantLabel": "Full quality",
-        "name": "Pony Diffusion V6 XL (stylized)",
-        "kind": "image",
-        "tags": [
-          "High quality",
-          "Stylized"
-        ],
-        "org": "PurpleSmartAI",
-        "description": "Dominant SDXL for stylized characters & illustration; highly promptable. Off Grid GGUF build of Pony Diffusion V6 XL.",
-        "minRamGb": 8,
-        "quant": "Q8_0",
-        "releaseDate": "2024-05-25",
-        "imageModes": [
-          "txt2img",
-          "img2img"
-        ],
-        "files": [
-          {
-            "name": "pony-diffusion-v6-xl-Q8_0.gguf",
-            "url": "https://huggingface.co/off-grid-ai/pony-diffusion-v6-xl-GGUF/resolve/main/pony-diffusion-v6-xl-Q8_0.gguf",
-            "role": "primary",
-            "sizeBytes": 4180186816
-          }
-        ]
-      },
-      {
-        "id": "offgrid-ai/pony-diffusion-v6-xl-GGUF-Q4",
-        "quantOf": "offgrid-ai/pony-diffusion-v6-xl-GGUF",
-        "quantLabel": "Light",
-        "name": "Pony Diffusion V6 XL (Light)",
-        "kind": "image",
-        "tags": [
-          "Stylized",
-          "Light"
-        ],
-        "org": "PurpleSmartAI",
-        "description": "Dominant SDXL for stylized characters & illustration. Q4 quant: ~35% less memory, small quality trade-off. Runs on a 16GB Mac. Off Grid GGUF build of Pony Diffusion V6 XL.",
-        "minRamGb": 8,
-        "quant": "Q4_K",
-        "releaseDate": "2024-05-25",
-        "imageModes": [
-          "txt2img",
-          "img2img"
-        ],
-        "files": [
-          {
-            "name": "pony-diffusion-v6-xl-Q4_K.gguf",
-            "url": "https://huggingface.co/off-grid-ai/pony-diffusion-v6-xl-GGUF/resolve/main/pony-diffusion-v6-xl-Q4_K.gguf",
-            "role": "primary",
-            "sizeBytes": 2797752960
-          }
-        ]
-      },
-      {
         "id": "off-grid-ai/Wan2.1-T2V-1.3B-GGUF",
         "quantLabel": "Full quality",
         "sourceModelId": "Wan-AI/Wan2.1-T2V-1.3B",
