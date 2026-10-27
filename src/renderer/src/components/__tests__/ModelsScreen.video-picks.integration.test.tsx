@@ -21,9 +21,11 @@ import { CATALOG } from '@offgrid/models'
 }
 
 let ModelsScreen: typeof import('../ModelsScreen').ModelsScreen
+// Imported after the boundary is in place; the screen's module graph is large, so a loaded run
+// needs longer than the 10 s hook default to load it.
 beforeAll(async () => {
   ModelsScreen = (await import('../ModelsScreen')).ModelsScreen
-})
+}, 60_000)
 afterEach(cleanup)
 
 /** The card a badge sits on: the nearest block that holds the model's name and its maker. */
