@@ -151,6 +151,8 @@ export interface GatewayApiKeyContract {
   expiresAt: number | null
   lastUsedAt: number | null
   revokedAt: number | null
+  /** Set on a key Sync issued to a paired device; revoked when that device is forgotten. */
+  deviceId?: string
 }
 
 export interface GatewayApiKeySettingsContract {

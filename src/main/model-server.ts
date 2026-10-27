@@ -38,6 +38,7 @@ import { randomUUID, randomBytes, createHash } from 'crypto'
 import { getSecret, setSecret, listSecretKeys } from './secrets'
 import { getSetting, saveSetting } from './database'
 import { authorizeBearer } from './mcp-auth-logic'
+import { GATEWAY_HEALTH_COMPUTER_ID } from '@offgrid/sync'
 import type { GatewayApiKeyContract, GatewayApiKeySettingsContract } from '../shared/ipc-contracts'
 import { getActiveTranscription } from './transcription/select'
 import { transcriptionRequestOptions } from './model-server/transcription-request'
@@ -210,7 +211,8 @@ function readGatewayKeys(): StoredGatewayKeys {
         typeof key.digest !== 'string' ||
         !/^[a-f0-9]{64}$/.test(key.digest) ||
         (key.expiresAt !== null && !Number.isFinite(key.expiresAt)) ||
-        (key.revokedAt !== null && !Number.isFinite(key.revokedAt))
+        (key.revokedAt !== null && !Number.isFinite(key.revokedAt)) ||
+        (key.deviceId !== undefined && typeof key.deviceId !== 'string')
     )
   )
     throw new Error('API key storage could not be read.')
@@ -237,6 +239,8 @@ function writeGatewayKeys(value: StoredGatewayKeys): void {
   }
   recordGatewayKeysRequired(value.enabled)
 }
+
+const digestOf = (key: string): string => createHash('sha256').update(key).digest('hex')
 
 export function gatewayApiKeySettings(): GatewayApiKeySettingsContract {
   const state = readGatewayKeys()
@@ -275,7 +279,7 @@ export function createGatewayApiKey(
     id: randomUUID(),
     name: name.trim(),
     prefix: key.slice(0, 13),
-    digest: createHash('sha256').update(key).digest('hex'),
+    digest: digestOf(key),
     createdAt: now,
     expiresAt,
     revokedAt: null,
@@ -293,6 +297,73 @@ export function revokeGatewayApiKey(id: string): GatewayApiKeySettingsContract {
   key.revokedAt ??= Date.now()
   writeGatewayKeys(state)
   return gatewayApiKeySettings()
+}
+
+/**
+ * Stores the gateway key Sync derived for a paired device. Idempotent: the same key on every
+ * reconnect is one stored key. A new key for the device (it paired again) replaces its old one.
+ * Whether keys are required is the owner's choice and stays as it is.
+ * Returns 'revoked' when the owner revoked this exact key: it is not brought back.
+ */
+export function issueDeviceGatewayApiKey(
+  deviceId: string,
+  name: string,
+  key: string
+): 'active' | 'revoked' {
+  if (!deviceId || !/^ogad_[a-f0-9]{64}$/.test(key)) throw new Error('Invalid device key.')
+  const state = readGatewayKeys()
+  const digest = digestOf(key)
+  const existing = state.keys.find((stored) => stored.digest === digest)
+  if (existing) return existing.revokedAt === null ? 'active' : 'revoked'
+  const now = Date.now()
+  for (const stored of state.keys) {
+    if (stored.deviceId === deviceId) stored.revokedAt ??= now
+  }
+  state.keys.push({
+    id: randomUUID(),
+    name: name.trim().slice(0, 80) || 'Paired device',
+    prefix: key.slice(0, 13),
+    digest,
+    createdAt: now,
+    expiresAt: null,
+    revokedAt: null,
+    lastUsedAt: null,
+    deviceId
+  })
+  writeGatewayKeys(state)
+  return 'active'
+}
+
+function revokeDeviceKeysWhere(revoke: (deviceId: string) => boolean): void {
+  const state = readGatewayKeys()
+  const now = Date.now()
+  let changed = false
+  for (const stored of state.keys) {
+    if (stored.deviceId !== undefined && stored.revokedAt === null && revoke(stored.deviceId)) {
+      stored.revokedAt = now
+      changed = true
+    }
+  }
+  if (changed) writeGatewayKeys(state)
+}
+
+/** Revokes every gateway key issued to a device. Sync calls this when the device is forgotten. */
+export function revokeDeviceGatewayApiKeys(deviceId: string): void {
+  revokeDeviceKeysWhere((id) => id === deviceId)
+}
+
+/** Revokes the keys of devices no longer paired: a forget that could not reach the key store. */
+export function revokeUnpairedDeviceGatewayApiKeys(pairedDeviceIds: readonly string[]): void {
+  const paired = new Set(pairedDeviceIds)
+  revokeDeviceKeysWhere((id) => !paired.has(id))
+}
+
+// The computer's Sync device id, named by /health so a phone knows which computer answered,
+// whatever address it reached it at. Sync sets it when it starts; absent without Sync.
+let gatewayComputerId: string | undefined
+
+export function setGatewayComputerId(id: string | undefined): void {
+  gatewayComputerId = id
 }
 
 function authorizeGateway(req: http.IncomingMessage): boolean {
@@ -2622,7 +2693,8 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         video_api: 'offgrid-video-v1',
         video_models: videoGenerationStatus({ localOnly: true }).models,
         image_models: img.models,
-        image_reason: img.available ? undefined : img.reason
+        image_reason: img.available ? undefined : img.reason,
+        [GATEWAY_HEALTH_COMPUTER_ID]: gatewayComputerId
       })
       return
     }
