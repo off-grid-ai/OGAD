@@ -2,40 +2,49 @@ import { describe, it, expect } from 'vitest'
 import {
   buildParakeetArgs,
   parseParakeetOutput,
-  matchParakeetFiles,
+  parseParakeetResults,
+  matchSherpaFiles,
   activeMatchesEntry,
   type ParakeetModel
 } from '../parakeet-cli'
 
 const model: ParakeetModel = {
-  dir: '/m',
-  encoder: '/m/encoder.onnx',
-  decoder: '/m/decoder.onnx',
-  joiner: '/m/joiner.onnx',
-  tokens: '/m/tokens.txt'
+  family: 'nemo-transducer',
+  files: {
+    encoder: '/m/encoder.onnx',
+    decoder: '/m/decoder.onnx',
+    joiner: '/m/joiner.onnx',
+    tokens: '/m/tokens.txt'
+  }
 }
 
 describe('buildParakeetArgs', () => {
-  it('passes the four model files, thread count, and the wav last', () => {
-    const args = buildParakeetArgs(model, '/tmp/a.wav', 6)
-    expect(args).toContain('--encoder=/m/encoder.onnx')
-    expect(args).toContain('--decoder=/m/decoder.onnx')
-    expect(args).toContain('--joiner=/m/joiner.onnx')
-    expect(args).toContain('--tokens=/m/tokens.txt')
-    expect(args).toContain('--num-threads=6')
-    expect(args).toContain('--decoding-method=greedy_search')
-    expect(args[args.length - 1]).toBe('/tmp/a.wav') // positional wav is last
+  it('loads a Parakeet TDT as a NeMo transducer, then the thread count, then the wavs last', () => {
+    expect(buildParakeetArgs(model, ['/tmp/a.wav', '/tmp/b.wav'], 6)).toEqual([
+      '--tokens=/m/tokens.txt',
+      '--encoder=/m/encoder.onnx',
+      '--decoder=/m/decoder.onnx',
+      '--joiner=/m/joiner.onnx',
+      '--model-type=nemo_transducer',
+      '--num-threads=6',
+      '--decoding-method=greedy_search',
+      '/tmp/a.wav',
+      '/tmp/b.wav'
+    ])
   })
 
   it('defaults the thread count', () => {
     expect(buildParakeetArgs(model, '/tmp/a.wav')).toContain('--num-threads=4')
   })
+})
 
-  it('does not pass a --model-type flag (sherpa infers transducer)', () => {
-    // v1.13.3 has no --model-type; passing one errors. Regression guard.
-    expect(buildParakeetArgs(model, '/tmp/a.wav').some((a) => a.startsWith('--model-type'))).toBe(
-      false
-    )
+describe('parseParakeetResults', () => {
+  it('reads one transcript per wav from the JSON lines sherpa-onnx v2 prints on stdout', () => {
+    const stdout =
+      '{"lang": "", "emotion": "", "event": "", "text": "first piece", "timestamps": []}\n' +
+      '{"lang": "", "emotion": "", "event": "", "text": "", "timestamps": []}\n' +
+      '{"lang": "", "emotion": "", "event": "", "text": "third piece", "timestamps": []}\n'
+    expect(parseParakeetResults(stdout)).toEqual(['first piece', '', 'third piece'])
   })
 })
 
@@ -80,9 +89,9 @@ describe('parseParakeetOutput', () => {
   })
 })
 
-describe('matchParakeetFiles', () => {
+describe('matchSherpaFiles', () => {
   it('picks the four roles from slug-prefixed catalog names', () => {
-    const m = matchParakeetFiles([
+    const m = matchSherpaFiles('nemo-transducer', [
       'parakeet-v2.encoder.int8.onnx',
       'parakeet-v2.decoder.int8.onnx',
       'parakeet-v2.joiner.int8.onnx',
@@ -99,12 +108,19 @@ describe('matchParakeetFiles', () => {
   it('requires .onnx for the model parts and .txt for tokens', () => {
     // a stray "encoder" text file must not satisfy the encoder role
     expect(
-      matchParakeetFiles(['encoder.txt', 'decoder.onnx', 'joiner.onnx', 'tokens.txt'])
+      matchSherpaFiles('nemo-transducer', [
+        'encoder.txt',
+        'decoder.onnx',
+        'joiner.onnx',
+        'tokens.txt'
+      ])
     ).toBeNull()
   })
 
   it('returns null when a role is missing', () => {
-    expect(matchParakeetFiles(['encoder.onnx', 'decoder.onnx', 'tokens.txt'])).toBeNull()
+    expect(
+      matchSherpaFiles('nemo-transducer', ['encoder.onnx', 'decoder.onnx', 'tokens.txt'])
+    ).toBeNull()
   })
 })
 
