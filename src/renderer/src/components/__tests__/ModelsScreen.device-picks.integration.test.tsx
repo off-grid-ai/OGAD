@@ -29,6 +29,7 @@ const IMAGE_MODELS = [
   image('offgrid-ai/juggernaut-xl-v9-GGUF', 'Juggernaut XL v9', 4.3),
   image('offgrid-ai/Qwen-Image-2.1-Turbo-GGUF', 'Qwen-Image 2.1 Turbo', 14.5),
   image('offgrid-ai/Qwen-Image-2.1-GGUF', 'Qwen-Image 2.1', 14.5),
+  image('leejet/flux-3-image-klein-GGUF', 'FLUX 3 Image Klein', 9),
   image('someone/other-image', 'Other Image', 3)
 ]
 const MODELS = [
@@ -101,7 +102,7 @@ describe('<ModelsScreen/> picks for this device', () => {
     expect(screen.queryByRole('list', { name: /^Picks for this / })).toBeNull()
   })
 
-  it('leads the Image tab with DreamShaper, then Qwen-Image 2.1 Turbo and base where they run', async () => {
+  it('leads the Image tab with DreamShaper, then Qwen-Image 2.1 Turbo and FLUX 3 Image Klein where they run', async () => {
     ramGb = 24
     const user = userEvent.setup()
     const { ModelsScreen } = await import('../ModelsScreen')
@@ -113,7 +114,7 @@ describe('<ModelsScreen/> picks for this device', () => {
     const [fast, balanced, best] = pickNames()
     expect(fast).toContain('DreamShaper XL v2 Turbo')
     expect(balanced).toContain('Qwen-Image 2.1 Turbo')
-    expect(best).toContain('Qwen-Image 2.1')
+    expect(best).toContain('FLUX 3 Image Klein')
     expect(pickNames().join(' ')).not.toContain('Other Image')
   })
 
