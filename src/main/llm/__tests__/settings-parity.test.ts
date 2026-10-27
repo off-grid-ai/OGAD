@@ -150,7 +150,7 @@ describe('where team mode may differ, and why', () => {
     expect(flag(chosen, '--cache-type-k')).toBe('q8_0')
   })
 
-  it('on CUDA, sizes slots from VRAM by the shared policy and batches wider unless the person set a batch', () => {
+  it('on CUDA, sizes slots from VRAM by the shared policy and batches at 2048 / 2048 unless the person set a batch', () => {
     const cuda: Partial<LaunchArgsInput> = {
       gatewayMode: 'team',
       slotPlatform: 'cuda',
@@ -171,10 +171,21 @@ describe('where team mode may differ, and why', () => {
       String(llmSlotPlan(slotInput({ ...person, ...cuda })).slots)
     )
     expect(flag(args, '--parallel')).toBe('16')
-    expect(flag(args, '-b')).toBe('4096')
-    expect(flag(args, '-ub')).toBe('1024')
+    expect(flag(args, '-b')).toBe('2048')
+    expect(flag(args, '-ub')).toBe('2048')
     const own = buildLaunchArgs({ ...person, batchSize: 512, ...cuda })
     expect(flag(own, '-b')).toBe('512')
     expect(own).not.toContain('-ub')
+  })
+
+  it('on a Mac, batches team prefill at 2048 / 2048 unless the person set a batch', () => {
+    const person = { ...PERSON, batchSize: undefined }
+    const args = buildLaunchArgs({ ...person, ...TEAM })
+    expect(flag(args, '-b')).toBe('2048')
+    expect(flag(args, '-ub')).toBe('2048')
+    // Single mode keeps the engine defaults.
+    const single = buildLaunchArgs({ ...person, gatewayMode: 'single' })
+    expect(single).not.toContain('-b')
+    expect(single).not.toContain('-ub')
   })
 })

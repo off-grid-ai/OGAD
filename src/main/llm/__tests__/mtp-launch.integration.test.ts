@@ -96,7 +96,7 @@ describe('MTP installation and persisted launch contract', () => {
     expect(args).toEqual(
       expect.arrayContaining(['--spec-type', 'draft-mtp', '--spec-draft-model', sidecar])
     )
-    expect(args[args.indexOf('--spec-draft-n-max') + 1]).toBe('2')
+    expect(args[args.indexOf('--spec-draft-n-max') + 1]).toBe('3')
     // A stored 99 (the old "all layers") is Auto now: llama.cpp fits the model and its draft to the
     // GPU itself, which an explicit layer count would switch off.
     expect(args).not.toContain('-ngl')

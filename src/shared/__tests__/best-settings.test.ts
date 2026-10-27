@@ -28,7 +28,7 @@ describe('planBestSettings', () => {
       ctxSize: 16_384,
       threads: 0,
       speculativeDecoding: 'mtp',
-      speculativeDraftMax: 2,
+      speculativeDraftMax: 3,
       draftModel: ''
     })
     expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
@@ -40,7 +40,7 @@ describe('planBestSettings', () => {
     })
     expect(plan.screenshotSize).toBe('balanced')
     expect(plan.summary[0]).toBe(
-      'Chat and vision run on the Apple M5 GPU (Metal) with automatic GPU placement, MTP with 2 draft tokens, a full-precision (f16) cache and a 16K context.'
+      'Chat and vision run on the Apple M5 GPU (Metal) with automatic GPU placement, MTP with 3 draft tokens, a full-precision (f16) cache and a 16K context.'
     )
     expect(plan.summary[1]).toBe('Auto picks the fastest processor that works on this computer.')
     expect(plan.summary[2]).toBe(
@@ -100,8 +100,8 @@ describe('planBestSettings', () => {
       gpuLayers: 0,
       threads: 4,
       kvCacheType: 'q4_0',
-      // No MTP head: the n-gram cache needs no extra model.
-      speculativeDecoding: 'ngram',
+      // No MTP head: no speculation, the engine default.
+      speculativeDecoding: 'off',
       speculativeDraftMax: 0
     })
     expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
@@ -117,7 +117,7 @@ describe('planBestSettings', () => {
 
     expect(plan.chat.kvCacheType).toBe('q8_0')
     expect(plan.chat.ctxSize).toBe(16_384)
-    expect(plan.chat.speculativeDecoding).toBe('ngram')
+    expect(plan.chat.speculativeDecoding).toBe('off')
   })
 
   it('never asks for more context than the model was trained on', () => {
@@ -164,17 +164,17 @@ describe('planBestSettings speculation and placement', () => {
     expect(planBestSettings(cudaPc(32), moe).chat).toMatchObject({
       gpuPlacement: 'auto',
       speculativeDecoding: 'mtp',
-      speculativeDraftMax: 2
+      speculativeDraftMax: 3
     })
     // On a 12 GB card the experts spill to the CPU: the MTP head would cost VRAM and slow decoding,
-    // so the n-gram cache, which costs no VRAM, takes its place.
+    // so speculation is off.
     expect(planBestSettings(cudaPc(12), moe).chat).toMatchObject({
       gpuPlacement: 'auto',
-      speculativeDecoding: 'ngram',
+      speculativeDecoding: 'off',
       speculativeDraftMax: 0
     })
     // VRAM the engine did not report never counts as fitting.
-    expect(planBestSettings(cudaPc(null), moe).chat.speculativeDecoding).toBe('ngram')
+    expect(planBestSettings(cudaPc(null), moe).chat.speculativeDecoding).toBe('off')
   })
 
   it('keeps MTP on a CPU-only machine, where no VRAM is shared with the head', () => {
@@ -189,14 +189,14 @@ describe('planBestSettings speculation and placement', () => {
       gpuLayers: 0,
       threads: 6,
       speculativeDecoding: 'mtp',
-      speculativeDraftMax: 2
+      speculativeDraftMax: 3
     })
   })
 
-  it('uses the n-gram cache for a model without an MTP head', () => {
+  it('turns speculation off for a model without an MTP head', () => {
     const plan = planBestSettings(cudaPc(32), { ...moe, supportsMtp: false })
-    expect(plan.chat.speculativeDecoding).toBe('ngram')
-    expect(plan.summary[0]).toContain('n-gram speculation')
+    expect(plan.chat.speculativeDecoding).toBe('off')
+    expect(plan.summary[0]).toContain('no speculative decoding')
   })
 
   it("keeps the person's DFlash or draft-model choice", () => {

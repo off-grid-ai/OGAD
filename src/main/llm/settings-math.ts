@@ -7,6 +7,7 @@ import type { KvCacheType, PerformanceMode } from '../model-sizing'
 import {
   llmParallelFlags,
   llmSlotPlan,
+  MTP_DRAFT_TOKENS,
   teamBatchFlags,
   type GatewayMode,
   type GpuPlacement,
@@ -248,15 +249,16 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     // Experts on the CPU: a wide batch keeps prompt reading on the GPU busy.
     args.push('-b', String(i.spillBatch), '-ub', String(i.spillBatch))
   } else if (team) {
-    // Team mode on CUDA batches wider prefill; the person's own batch size always wins.
-    args.push(...(teamBatchFlags(i.slotPlatform) ?? []))
+    // Team mode batches prefill wider (one shared rule for every backend); the person's own
+    // batch size always wins.
+    args.push(...teamBatchFlags(i.slotPlatform))
   }
   if (i.speculativeDecoding === 'ngram') {
     args.push('--spec-type', 'ngram-cache')
   } else if (i.speculativeDecoding === 'mtp') {
-    // A short draft limits rejected work on normal chat prompts. Larger
-    // user-selected limits remain available for more predictable output.
-    const draftMax = i.speculativeDraftMax ? String(i.speculativeDraftMax) : '2'
+    // Auto drafts MTP_DRAFT_TOKENS (3): llama.cpp's own --spec-draft-n-max default (see
+    // docs/fastest-settings-sources.md). Larger user-selected limits remain available.
+    const draftMax = String(i.speculativeDraftMax || MTP_DRAFT_TOKENS)
     args.push('--spec-type', 'draft-mtp', '--spec-draft-n-max', draftMax)
     if (i.draftModelPath) {
       args.push('--spec-draft-model', i.draftModelPath)
