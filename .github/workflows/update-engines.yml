@@ -1,7 +1,7 @@
 name: Update engines
 
 # Nightly: moves resources/engine-pins.json to the newest upstream engines (llama.cpp, Prism,
-# stable-diffusion.cpp, whisper.cpp, NVIDIA CUDA libraries), rebuilds and smoke-tests the macOS and
+# stable-diffusion.cpp, whisper.cpp, sherpa-onnx, NVIDIA CUDA libraries), rebuilds and smoke-tests the macOS and
 # Linux engine archives, and publishes new CUDA packs for Windows and Linux to R2. Then, by
 # ENGINE_UPDATE_CHANNEL:
 #   on-merge (default)  opens a PR with every pin; merging it publishes the engines to every app
@@ -12,7 +12,7 @@ name: Update engines
 #
 # Settings (repository variables; Settings > Secrets and variables > Actions > Variables):
 #   ENGINE_UPDATE_ENABLED           'false' turns the nightly run off (manual runs still work)
-#   ENGINE_UPDATE_ENGINES           engines to track, default 'llama,prism,sd,whisper,nvidia'
+#   ENGINE_UPDATE_ENGINES           engines to track, default 'llama,prism,sd,whisper,sherpa,nvidia'
 #   ENGINE_UPDATE_LLAMA_MIN_BUILDS  move llama.cpp only when upstream is this many builds ahead,
 #                                   default 1 (any newer build)
 #   ENGINE_UPDATE_BASE              branch to update and open the PR against, default main
@@ -68,7 +68,7 @@ jobs:
         name: Move the pins to the newest upstream engines
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          ENGINES: ${{ inputs.engines || vars.ENGINE_UPDATE_ENGINES || 'llama,prism,sd,whisper,nvidia' }}
+          ENGINES: ${{ inputs.engines || vars.ENGINE_UPDATE_ENGINES || 'llama,prism,sd,whisper,sherpa,nvidia' }}
           LLAMA_MIN_BUILDS: ${{ inputs.llama_min_builds || vars.ENGINE_UPDATE_LLAMA_MIN_BUILDS || '1' }}
         run: |
           result=$(node scripts/update-engine-pins.mjs --summary "$RUNNER_TEMP/summary.md" \
@@ -220,6 +220,7 @@ jobs:
             echo '- Linux archive: llama.cpp and Prism (Vulkan, CPU), stable-diffusion.cpp (Vulkan); chat and transcription smoke tests'
             echo "- CUDA packs \`${{ needs.check.outputs.version }}\` on R2 for Windows and Linux, pinned in \`resources/performance-packs.json\`"
             echo '- Windows installers fetch the pinned upstream zips (hash-checked) at release time'
+            echo '- Every release job fetches the pinned sherpa-onnx build (hash-checked) and starts it once'
             echo
             echo '**Merging publishes these engines to every app** through the engine update channel.'
             echo 'Before merging, run a CUDA chat and an image on an NVIDIA machine (CI has no GPU).'

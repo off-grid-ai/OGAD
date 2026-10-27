@@ -47,6 +47,15 @@
       "win-cpu": "6ba69e3482d7826214f90a6a9c84ca07782aec1e1d0c6a7c30c994fd5d816ccb"
     }
   },
+  "sherpa": {
+    "repo": "k2-fsa/sherpa-onnx",
+    "ref": "v2.0.1",
+    "sha256": {
+      "mac-universal": "bf6718f708e15390f1da133dd888661a68df270791b178aaf765d4e3f0baa9fe",
+      "linux-x64": "2e823376987c3b6960d50726b6560155e2ad92da0b8b3886325773225ec6bdec",
+      "win-x64": "dc703575a68594435f53dec93df775ff4913af851a196c0537163f21d8d2364e"
+    }
+  },
   "nvidia": {
     "linux": {
       "nvidia-cuda-runtime": "13.4.92",
