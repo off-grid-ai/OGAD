@@ -44,6 +44,7 @@ import { currentPlatform, primaryModifier } from './lib/device'
 import { NotificationProvider } from './hooks/NotificationProvider'
 import { useNotifications } from './hooks/useNotifications'
 import { ToastProvider } from './hooks/ToastProvider'
+import { TranscriptionFallbackNotice } from './components/TranscriptionFallbackNotice'
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { Sidebar, SidebarBody } from './components/ui/sidebar'
 import { NavThemeToggle } from './components/ThemeToggle'
@@ -1745,6 +1746,7 @@ function App(): React.JSX.Element | null {
         <PermissionGate>
           <NotificationProvider>
             <ToastProvider>
+              <TranscriptionFallbackNotice />
               <AppContent />
             </ToastProvider>
           </NotificationProvider>

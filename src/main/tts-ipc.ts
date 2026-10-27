@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { getSetting } from './database'
 import { sampleProgressRate, type ProgressRateSample } from '@offgrid/ui'
 
@@ -30,6 +30,14 @@ export function setupTtsIpc(): void {
   // Parakeet is offered only where its sherpa-onnx runtime ships.
   ipcMain.handle('transcription:parakeet-available', async () =>
     (await import('./runtime-availability')).parakeetRuntimeInstalled()
+  )
+  // A recording Whisper transcribed because Parakeet or Qwen3-ASR failed on it: every window
+  // tells the person.
+  void import('./transcription/fallback-notice').then(({ onTranscriptionFallback }) =>
+    onTranscriptionFallback((notice) => {
+      for (const window of BrowserWindow.getAllWindows())
+        if (!window.isDestroyed()) window.webContents.send('transcription:fallback', notice)
+    })
   )
   ipcMain.handle('tts:voices', async () => {
     const { listVoiceCatalog } = await import('./tts')

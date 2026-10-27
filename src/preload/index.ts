@@ -923,7 +923,7 @@ const offGridApi = {
   // Provenance + picker options: which STT engine + model would run right now, and the installed
   // transcription models a picker can switch to (switch via setActiveModalModel('transcription')).
   getTranscriptionInfo: (): Promise<{
-    engine: 'whisper' | 'parakeet' | 'whisper-resident' | 'remote'
+    engine: 'whisper' | 'parakeet' | 'qwen3-asr' | 'whisper-resident' | 'remote'
     modelId: string | null
     label: string
     language: string
@@ -935,6 +935,17 @@ const offGridApi = {
   // --- Voice output (text-to-speech via Kokoro) ---
   ttsVoices: () => ipcRenderer.invoke('tts:voices'),
   parakeetAvailable: (): Promise<boolean> => ipcRenderer.invoke('transcription:parakeet-available'),
+  /** Parakeet or Qwen3-ASR failed on a recording and Whisper transcribed it instead. */
+  onTranscriptionFallback: (
+    callback: (notice: { engine: 'parakeet' | 'qwen3-asr'; reason: string }) => void
+  ) => {
+    const subscription = (
+      _event: unknown,
+      notice: { engine: 'parakeet' | 'qwen3-asr'; reason: string }
+    ): void => callback(notice)
+    ipcRenderer.on('transcription:fallback', subscription)
+    return unsubscribe('transcription:fallback', subscription)
+  },
   prepareTtsVoice: (voice: string) => ipcRenderer.invoke('tts:prepare-voice', voice),
   onTtsVoiceProgress: (
     callback: (data: {

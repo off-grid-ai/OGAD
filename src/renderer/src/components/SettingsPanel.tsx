@@ -178,7 +178,7 @@ function groupTools(tools: ToolSetting[]): { label: string; tools: ToolSetting[]
 }
 
 type TranscriptionInfo = {
-  engine: 'whisper' | 'parakeet' | 'whisper-resident' | 'remote'
+  engine: 'whisper' | 'parakeet' | 'qwen3-asr' | 'whisper-resident' | 'remote'
   modelId: string | null
   label: string
   language: string
