@@ -6,9 +6,11 @@
 export {
   DEFAULT_IMAGE_NEGATIVE as DEFAULT_NEGATIVE,
   buildQwenImage21Args,
+  buildFluxKleinArgs,
   buildStandardArgs,
   buildZImageArgs,
   qwenImageArgsForBackend,
+  type FluxKleinArgsInput,
   type QwenImage21ArgsInput,
   type StandardArgsInput,
   type ZImageArgsInput

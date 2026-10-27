@@ -18,7 +18,7 @@ import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
 import { getSetting } from './database'
-import { QWEN_IMAGE_21_COMPANIONS } from '@offgrid/models'
+import { QWEN_IMAGE_21_COMPANIONS, sdImagePackFor, type SDImagePack } from '@offgrid/models'
 import { resolveImageDimensions, type ImageDimensionStore } from '../shared/image-dimensions'
 import {
   generatedImageSidecarPath,
@@ -70,6 +70,7 @@ import {
   buildQwenImage21Args,
   qwenImageArgsForBackend,
   buildZImageArgs,
+  buildFluxKleinArgs,
   buildStandardArgs,
   DEFAULT_NEGATIVE
 } from './imagegen/args'
@@ -318,6 +319,12 @@ function findInModels(re: RegExp): string | null {
   }
 }
 
+/** The FLUX klein pack (FLUX.2 klein, FLUX 3 Image Klein) a weight belongs to, if any. */
+function fluxKleinPack(base: string): SDImagePack | undefined {
+  const pack = sdImagePackFor(base)
+  return pack?.family === 'flux2-klein' || pack?.family === 'flux3-klein' ? pack : undefined
+}
+
 // A GGUF checkpoint is loadable via `-m` only if it's a FULL pipeline (UNET + VAE
 // + text encoder). Many SDXL quants on HF (e.g. animagine-xl, illustrious) ship
 // the UNET ONLY — sd.cpp then can't detect the version ("get sd version from file
@@ -402,14 +409,17 @@ function resolveModel(preferred?: string): string | null {
   // generic heuristic below when no DreamShaper quant is installed.
   const dreamshaper = defaultImageModelFilename(sd, os.totalmem() / 1e9)
   if (dreamshaper) return resolveModelAsset(dreamshaper)
-  // Preference: Juggernaut XL v9 (default photoreal) > Z-Image-Turbo >
-  // SDXL-Lightning > SDXL > SD 2.1 > anything else.
+  // Preference: FLUX 3 Image Klein > FLUX.2 klein > Juggernaut XL v9 (default photoreal) >
+  // Z-Image-Turbo > SDXL-Lightning > SDXL > SD 2.1 > anything else.
+  const flux =
+    sd.find((f) => sdImagePackFor(f)?.family === 'flux3-klein') ??
+    sd.find((f) => !!fluxKleinPack(f))
   const juggernaut = sd.find((f) => /juggernaut/i.test(f))
   const zimage = sd.find((f) => /z[-_]?image/i.test(f))
   const lightning = sd.find((f) => /lightning/i.test(f))
   const xl = sd.find((f) => /sdxl|xl/i.test(f))
   const v21 = sd.find((f) => /v2-1|v2\.1/i.test(f))
-  const pick = juggernaut ?? zimage ?? lightning ?? xl ?? v21 ?? sd[0]!
+  const pick = flux ?? juggernaut ?? zimage ?? lightning ?? xl ?? v21 ?? sd[0]!
   return resolveModelAsset(pick) ?? (pick.startsWith('mlx/') ? path.join(dir, pick) : null) // sd.length checked above
 }
 
@@ -579,7 +589,9 @@ function imageMemoryGuard(model: string, coreml: boolean, totalGb: number): Memo
   // combo that then overflows unified memory and freezes the box.
   const zImageStack = isZImageModel(path.basename(model))
   const qwenImageStack = isQwenImage21Model(path.basename(model))
+  const flux = fluxKleinPack(path.basename(model))
   return evaluateMemoryGuard({
+    companionGb: flux ? safeSizeGb(findInModels(flux.llm)) + safeSizeGb(findInModels(flux.vae)) : 0,
     totalGb,
     modelSizeGb: safeSizeGb(model),
     coreml,
@@ -913,7 +925,7 @@ async function runImageGen(
     throw new Error(
       imageMemoryGuardErrorMessage(
         `Not enough memory to run ${path.basename(model)} (~${guard.modelGb.toFixed(1)}GB resident) on this ${totalGb.toFixed(0)}GB machine. ` +
-          `Pick a lighter image model (e.g. SDXL-Lightning or SD 1.5) in the image options.`
+          `Pick a lighter image model (a Light build) in the image options.`
       )
     )
   }
@@ -946,6 +958,7 @@ async function runImageGen(
   const base = path.basename(model)
   const isZImage = isZImageModel(base)
   const isQwenImage21 = isQwenImage21Model(base)
+  const fluxPack = fluxKleinPack(base)
   const previewPath = path.join(outDir, `preview-${stamp}.png`)
 
   // Reuse the existing server for resident checkpoints and Qwen's companion stack.
@@ -954,6 +967,7 @@ async function runImageGen(
     getResidencyMode('image') === 'resident' &&
     !coreml &&
     !isZImage &&
+    !fluxPack &&
     !loras.length &&
     (isQwenImage21 || (!params.initImage && ggufIsFullCheckpoint(model)))
   if (eligibleForServer) {
@@ -1058,6 +1072,29 @@ async function runImageGen(
       seed,
       threads,
       previewArgs
+    })
+  } else if (fluxPack) {
+    // FLUX.2 klein / FLUX 3 Image Klein: diffusion transformer + Qwen text encoder + FLUX.2 VAE.
+    const llm = findInModels(fluxPack.llm)
+    const vae = findInModels(fluxPack.vae)
+    if (!llm || !vae)
+      throw new Error(
+        `The ${fluxPack.family === 'flux3-klein' ? 'FLUX 3 Image Klein' : 'FLUX.2 klein'} ${llm ? 'VAE' : 'text encoder'} is missing. Download the complete model from Models.`
+      )
+    args = buildFluxKleinArgs({
+      model,
+      llm,
+      vae,
+      prompt: params.prompt,
+      outPath,
+      width: params.width,
+      height: params.height,
+      steps: params.steps,
+      cfgScale: params.cfgScale,
+      seed,
+      threads,
+      previewArgs,
+      initImage: params.initImage
     })
   } else if (isQwenImage21) {
     const llm = findInModels(QWEN_IMAGE_21_COMPANIONS.llm)

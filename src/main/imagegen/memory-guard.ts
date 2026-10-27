@@ -22,6 +22,8 @@ export interface MemoryGuardInput {
   qwenEncoderGb?: number
   qwenVisionGb?: number
   qwenVaeGb?: number
+  /** Text encoder + VAE of another diffusion-transformer pack (FLUX klein), resident beside it. */
+  companionGb?: number
 }
 
 export interface MemoryGuardResult {
@@ -55,7 +57,14 @@ export function evaluateMemoryGuard(input: MemoryGuardInput): MemoryGuardResult 
   const qwenVaeGb = qwenImageStack ? (input.qwenVaeGb ?? 0) : 0
   const modelGb = coreml
     ? 0
-    : (modelSizeGb + zEncoderGb + zVaeGb + qwenEncoderGb + qwenVisionGb + qwenVaeGb) * 1.4
+    : (modelSizeGb +
+        zEncoderGb +
+        zVaeGb +
+        qwenEncoderGb +
+        qwenVisionGb +
+        qwenVaeGb +
+        (input.companionGb ?? 0)) *
+      1.4
   const budgetGb = totalGb - reserveGb
   return { modelGb, budgetGb, reserveGb, overBudget: modelGb > budgetGb }
 }
