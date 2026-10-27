@@ -2,6 +2,23 @@ Take over the Off Grid AI release `release/analytics-video` and finish it. Load 
 
 Repos: /Users/user/wednesday/off-grid-ai/{desktop,shared,mobile}; `desktop/pro` and `mobile/pro` are submodules (desktop-pro, mobile-pro). Same branch name everywhere. Work in these main checkouts; no new worktrees or branches.
 
+## Repositories and branches (all on GitHub; branch `release/analytics-video` everywhere)
+
+| Repo (GitHub) | Local path | PR into `main` | Notes |
+|---|---|---|---|
+| off-grid-ai/shared | shared | #68 | Shared packages (models catalog, sync, rag, speech). Push first. |
+| off-grid-ai/OGAD | desktop | #215 | Desktop app. `pro` submodule → desktop-pro. |
+| off-grid-ai/desktop-pro | desktop/pro | #125 | Desktop Pro (private). No CI of its own runs; tested via OGAD. |
+| off-grid-ai/OGAM | mobile | #739 | Mobile app. `pro` submodule → mobile-pro. Carries the `./pro` 75% coverage floor. |
+| off-grid-ai/mobile-pro | mobile/pro | #94 | Mobile Pro (private). Tested via OGAM CI. |
+| off-grid-ai/browser-extension | browser-extension | #25 | Vault kinds, authenticator, analytics wording. |
+| off-grid-ai/website | website (on `main`); release branch is in worktree `website-analytics` | #93 | Video Studio pages, privacy/terms. `main` merged in (conflicts resolved, built pages regenerated). |
+| off-grid-ai/brand | brand | #3 | Voice guide for AI video and opt-in analytics. |
+| off-grid-ai/ui-library | ui-library | — | No release branch; not part of this release. |
+| off-grid-ai/executorch-speech | executorch-speech | — | No release branch; CI checks it out read-only. |
+
+Push/merge order: shared → desktop-pro → OGAD → mobile-pro → OGAM; browser-extension, website and brand are independent. Bring `main` INTO the release branch (merge, never rebase, never push to `main`). Submodule commits must be pushed before the parent's pointer bump.
+
 ## State at 19:20 IST, 2026-10-27
 - Everything is on GitHub (pushed at ~19:25 with --no-verify on Ali's word, so CI is the first check on the last pushes: confirm it). Includes the mobile push (85 commits) and the WIP in item 2.
 - PRs: OGAD #215, OGAM #739, shared #68, desktop-pro #125, mobile-pro #94, browser-extension #25 (has 10 commits; all checks pass except SonarCloud — ignore). Auto-fix is on for the first five.
