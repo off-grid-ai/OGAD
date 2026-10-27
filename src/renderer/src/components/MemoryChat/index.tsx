@@ -3185,10 +3185,15 @@ export function MemoryChat({
               failed.content,
               context
             )
-          : await window.api.addRagMessage(convId, 'assistant', failed.content, context)
-        // A retry that failed is kept as a version, and the answer it was retrying stays shown.
-        if (stored && stored !== true && opts?.versionOf)
-          await window.api.selectRagMessageVersion(convId, stored.uuid, -1)
+          : // A retry that failed is kept as a version, and the answer it was retrying stays
+            // shown: one write, so an app closing mid-retry cannot leave the error shown instead.
+            await window.api.addRagMessage(
+              convId,
+              'assistant',
+              failed.content,
+              context,
+              opts?.versionOf ? { keepShownVersion: true } : undefined
+            )
         if (stored && sid)
           setConvMessages(convId, (previous) =>
             previous.map((message) =>

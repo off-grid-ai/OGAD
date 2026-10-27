@@ -20,7 +20,14 @@ import fs from 'fs'
 import crypto from 'crypto'
 import { createSettingsStore, initializeSettingsStore } from './settings-store'
 import { CORE_SYNC_ENTITIES, emitSyncMutation } from './sync-mutation'
-import { appendPlace, chatThread, neighbourVersion, parentOfVersion } from '@offgrid/sync'
+import {
+  THREAD_ROOT,
+  appendPlace,
+  chatThread,
+  neighbourVersion,
+  parentOfVersion,
+  threadParents
+} from '@offgrid/sync'
 import { migrateLegacyChatVersions } from './chat-thread-migration'
 import type {
   ConversationSurface,
@@ -1720,18 +1727,29 @@ export function addRagMessage(
    * the same id as the record that follows. Minting a fresh one here instead is what left the peer
    * unable to match the two, so it drew the answer twice until its preview timed out.
    */
-  knownUuid?: string
+  knownUuid?: string,
+  /**
+   * A retry that failed is kept as a version, and the answer it was retrying stays shown. Saved and
+   * chosen in one write: as two calls, an app closing between them left the error as the answer
+   * shown in place of a good saved one.
+   */
+  placement?: { keepShownVersion?: boolean }
 ): AddedRagMessage {
   const db = getDB()
   // A retried answer is a version of the answer it retries (prepareAnswerVersion); a new question
   // starts a new turn, so no retry from before it can claim the next answer.
   const versionParent = role === 'assistant' ? pendingAnswerParents.get(conversationId) : undefined
   pendingAnswerParents.delete(conversationId)
+  const keepShown =
+    versionParent && placement?.keepShownVersion
+      ? shownVersionAfter(conversationId, versionParent)
+      : undefined
   const placed = withThreadPlace(
     conversationId,
     context,
     versionParent,
-    role === 'assistant' ? turnTails.get(conversationId) : undefined
+    role === 'assistant' ? turnTails.get(conversationId) : undefined,
+    !keepShown
   )
   const contextJson = placed ? JSON.stringify(placed) : context ? JSON.stringify(context) : null
   const uuid = knownUuid ?? crypto.randomUUID()
@@ -1739,14 +1757,18 @@ export function addRagMessage(
   if (role === 'user' || turnTails.has(conversationId)) turnTails.set(conversationId, uuid)
 
   // uuid is the cross-device identity for sync (the autoincrement id is device-local).
-  const info = db
-    .prepare(
-      `
+  const info = db.transaction(() => {
+    const inserted = db
+      .prepare(
+        `
         INSERT INTO rag_messages (uuid, conversation_id, role, content, context, created_at)
         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     `
-    )
-    .run(uuid, conversationId, role, content, contextJson)
+      )
+      .run(uuid, conversationId, role, content, contextJson)
+    if (keepShown) chooseVersion(conversationId, keepShown)
+    return inserted
+  })()
 
   // Update conversation updated_at timestamp
   db.prepare(
@@ -1850,7 +1872,11 @@ export function selectRagMessageVersion(
   direction: number
 ): boolean {
   const target = neighbourVersion(threadRows(storedRagMessages(conversationId)), uuid, direction)
-  if (!target) return false
+  return target ? chooseVersion(conversationId, target) : false
+}
+
+/** Choose version `target`: it is the one shown from now. */
+function chooseVersion(conversationId: string, target: string): boolean {
   const db = getDB()
   const row = db
     .prepare('SELECT id, context FROM rag_messages WHERE conversation_id = ? AND uuid = ?')
@@ -1908,6 +1934,15 @@ function withoutInMessageVersions(context: unknown): Record<string, unknown> {
   return rest
 }
 
+/** The version shown now among the messages that follow `parent` (THREAD_ROOT for the first). */
+function shownVersionAfter(conversationId: string, parent: string): string | undefined {
+  const rows = threadRows(storedRagMessages(conversationId))
+  const parents = threadParents(rows)
+  return chatThread(rows).messages.find(
+    (message) => (parents.get(message.uuid) ?? THREAD_ROOT) === parent
+  )?.uuid
+}
+
 function threadRows(rows: RagMessage[]): Array<{ row: RagMessage; uuid: string } & ThreadPlace> {
   return rows.map((row) => ({ row, uuid: row.uuid ?? `id:${row.id}`, ...threadPlace(row.context) }))
 }
@@ -1954,7 +1989,7 @@ export function addRagMessageVersion(
 
 /**
  * Where a new message goes. A version (its context names its parent, or it is the answer a retry
- * prepared) is chosen from now. Any other message is appended: in a chat without versions it
+ * prepared) is chosen from now, unless `chosen` is false. Any other message is appended: in a chat without versions it
  * stores nothing (appendPlace), so turns from several devices keep their order by time. Null when
  * nothing about the thread needs storing.
  */
@@ -1962,12 +1997,14 @@ function withThreadPlace(
   conversationId: string,
   context: unknown,
   versionParent?: string,
-  turnTail?: string
+  turnTail?: string,
+  chosen = true
 ): Record<string, unknown> | null {
   const base = withoutInMessageVersions(context)
   if (typeof base.parent === 'string' || versionParent) {
     if (typeof base.parent !== 'string') base.parent = versionParent
-    if (typeof base.selectedAt !== 'number') base.selectedAt = Date.now()
+    if (!chosen) delete base.selectedAt
+    else if (typeof base.selectedAt !== 'number') base.selectedAt = Date.now()
     return base
   }
   const rows = storedRagMessages(conversationId)

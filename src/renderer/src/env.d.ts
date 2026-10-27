@@ -285,7 +285,9 @@ interface RendererAPIOverrides {
     conversationId: string,
     role: 'user' | 'assistant',
     content: string,
-    context?: unknown
+    context?: unknown,
+    /** keepShownVersion: a failed retry is kept as a version; the answer it retried stays shown. */
+    placement?: { keepShownVersion?: boolean }
   ) => Promise<{ id: number; uuid: string }>
   updateRagMessage: (
     conversationId: string,
