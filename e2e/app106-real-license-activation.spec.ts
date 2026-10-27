@@ -310,7 +310,7 @@ test.describe('APP-106 real licence activation', () => {
     expect(await page.evaluate(() => window.api.isPro)).toBe(false)
     expect((await page.evaluate(() => window.api.license?.status())).isPro).toBe(false)
 
-    const keyInput = page.getByPlaceholder('XXXX-XXXX-XXXX-XXXX')
+    const keyInput = page.getByPlaceholder('key/...')
     let licenceKey = fs.readFileSync(secureFixturePath('key.txt'), 'utf8').trim()
     expect(licenceKey.length).toBeGreaterThan(0)
     await keyInput.fill(licenceKey)

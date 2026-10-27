@@ -73,9 +73,9 @@ function LicenseActivation(): React.ReactElement {
           value={key}
           onChange={(e) => setKey(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !busy && activate()}
-          placeholder="XXXX-XXXX-XXXX-XXXX"
+          placeholder="key/..."
           spellCheck={false}
-          autoCapitalize="characters"
+          autoCapitalize="off"
           className="flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-white placeholder:text-neutral-600 focus:border-green-500/60 focus:outline-none"
         />
         <button
