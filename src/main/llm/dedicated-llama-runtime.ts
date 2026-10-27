@@ -12,12 +12,15 @@ import { engineSpawnEnv } from './spawn-env'
 type Step = Awaited<ReturnType<typeof selectLocalEngines>>[number]
 type LaunchArgs = Parameters<typeof buildLaunchArgs>[0]
 interface Options {
-  id: 'grounding' | 'decision'
+  id: 'grounding' | 'decision' | 'transcription'
   label: string
-  modality: 'grounding' | 'decision'
+  /** The backend policy it follows. Speech-to-text runs the chat engine, so it follows chat's. */
+  modality: 'grounding' | 'decision' | 'llm'
   port: number
   modelPaths(): Promise<{ model: string; modelPath: string; mmProjPath: string }>
   extraArgs(step: Step): Omit<LaunchArgs, 'modelPath' | 'mmProjPath' | 'port' | 'cpuOnly'>
+  /** Flags appended after the shared launch args. */
+  argv?: readonly string[]
   readyTimeoutMs?: number
 }
 
@@ -166,7 +169,7 @@ export class DedicatedLlamaRuntime {
             mmProjPath: paths.mmProjPath,
             port,
             cpuOnly: step.cpuOnly
-          }),
+          }).concat(this.options.argv ?? []),
           {
             env: {
               ...process.env,
