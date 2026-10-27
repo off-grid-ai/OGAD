@@ -246,7 +246,7 @@ export function buildLaunchArgs(i: LaunchArgsInput): string[] {
     // Experts on the CPU: a wide batch keeps prompt reading on the GPU busy.
     args.push('-b', String(i.spillBatch), '-ub', String(i.spillBatch))
   } else if (team) {
-    // Team mode on CUDA batches wider prefill; the person's own batch size always wins.
+    // Team mode on CUDA and Apple batches wider prefill; the person's own batch size always wins.
     args.push(...(teamBatchFlags(i.slotPlatform) ?? []))
   }
   if (i.speculativeDecoding === 'ngram') {

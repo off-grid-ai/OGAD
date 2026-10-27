@@ -177,4 +177,15 @@ describe('where team mode may differ, and why', () => {
     expect(flag(own, '-b')).toBe('512')
     expect(own).not.toContain('-ub')
   })
+
+  it('on a Mac, batches team prefill at 2048 / 2048 unless the person set a batch', () => {
+    const person = { ...PERSON, batchSize: undefined }
+    const args = buildLaunchArgs({ ...person, ...TEAM })
+    expect(flag(args, '-b')).toBe('2048')
+    expect(flag(args, '-ub')).toBe('2048')
+    // Single mode keeps the engine defaults.
+    const single = buildLaunchArgs({ ...person, gatewayMode: 'single' })
+    expect(single).not.toContain('-b')
+    expect(single).not.toContain('-ub')
+  })
 })
