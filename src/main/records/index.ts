@@ -3,6 +3,7 @@
 // database, the people a question names, the ms-marco cross-encoder and the record embedder.
 // Universal search (search.ts) and the chat tools both search through recordSearch.
 
+import fs from 'node:fs'
 import {
   ftsTypeahead,
   parseTimeWindow,
@@ -154,7 +155,9 @@ export function recordToSearchResult(hit: RecordHit & { score?: number }): Searc
     surface: hit.surface ?? '',
     url: hit.url ?? null,
     ts: hit.ts || 0,
-    imagePath: hit.imagePath ?? null,
+    // Capture retention deletes old screenshots while their moments stay searchable: a result
+    // names its picture only while the file is there, so no card shows a broken image.
+    imagePath: hit.imagePath && fs.existsSync(hit.imagePath) ? hit.imagePath : null,
     score: desktop.score ?? 0
   }
 }
