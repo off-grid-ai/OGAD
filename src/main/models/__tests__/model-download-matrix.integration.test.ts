@@ -58,7 +58,11 @@ const chatModel = byKind('vision', 2)
 const visionModel = byKind('vision', 2)
 const holoGrounder = CATALOG.find((candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF')
 if (!holoGrounder) throw new Error('Model catalog needs the dual-capability Holo3.1-4B fixture')
+// A multi-file image pack (diffusion model + text encoder + VAE). Its files carry checksums, which
+// synthetic bytes cannot match, so the fixture serves this pack without them: this case is about the
+// whole stack landing, not verification.
 const imageModel = byKind('image', 3)
+for (const file of imageModel.files) delete file.sha256
 const speechModel = CATALOG.find(
   (candidate) => candidate.kind === 'transcription' && candidate.engine === 'parakeet'
 )
