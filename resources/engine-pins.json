@@ -82,12 +82,12 @@
   "archives": {
     "release": "native-deps-2026-09",
     "mac-native": {
-      "name": "ogad-mac-native-20261026-r6.tar.gz",
-      "sha256": "455ecd0e71263596a140c3278465557eeecb6b2fbc3f08e8b528388f4bf34003"
+      "name": "ogad-mac-native-20261027-r2.tar.gz",
+      "sha256": "205ccdf86e85e05b0f62b1d5f8ab210447bc6d2578d21439138db9f287313811"
     },
     "linux-native": {
-      "name": "ogad-linux-native-x64-20261026-r6.tar.gz",
-      "sha256": "270bdbf9b171a6d5d2fe464df36f31a5068bd9237091238210fdfce0a874b7ba"
+      "name": "ogad-linux-native-x64-20261027-r2.tar.gz",
+      "sha256": "fe6209c8db64a4308c750c5db5d974692cab50a67b745992e329938cab12f107"
     },
     "linux-sd-cuda": {
       "name": "ogad-sd-master-1015-e41fbcf-linux-x64-cuda12.8-multiarch-20261026-r6.tar.gz",
