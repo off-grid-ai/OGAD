@@ -146,7 +146,7 @@ jobs:
           echo "$sha  $RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
       - name: Build macOS image engine for macOS 13
-        run: bash scripts/build-sd-mac.sh
+        run: bash scripts/build-sd-macos.sh
       - name: Verify cached macOS engines
         run: |
           for variant in llama llama-prism; do
