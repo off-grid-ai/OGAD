@@ -1,5 +1,5 @@
 import { videoGenerationStatus } from './generated-videos/status'
-import { dispatchGatewayRoute, isProGatewayPath } from './gateway-routes'
+import { dispatchGatewayRoute, proGatewayFeature } from './gateway-routes'
 // Off Grid AI local inference gateway — ONE OpenAI-compatible endpoint for every
 // modality, on :7878. Any local tool (IDE, app, script) points here and gets the
 // on-device models, and so does a phone on the same LAN - Off Grid AI Mobile scans the
@@ -2437,7 +2437,7 @@ function isLocalCaller(req: http.IncomingMessage): boolean {
   return remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
 }
 
-/** Routes a website must never reach: tool and file access over /mcp, settings writes, and model
+/** Routes a website must never reach: tool and file access over /mcp, search, settings writes, and model
  *  management writes (download, cancel, activate, delete, task roles). The OpenAI-compatible
  *  inference routes stay open to any origin, as in 0.0.54, so tools that call the gateway from a
  *  browser or an Electron app keep working. A preflight is judged by the method it asks for. */
@@ -2453,6 +2453,8 @@ export function protectedGatewayRoute(
   ).toUpperCase()
   const pathname = new URL(url ?? '/', 'http://localhost').pathname
   if (pathname === '/mcp' || pathname.startsWith('/mcp/')) return true
+  // Search reads everything this computer has seen; only the paired apps may ask.
+  if (pathname === '/v1/search') return true
   if (pathname === '/v1/settings') return effective !== 'GET'
   if (pathname === '/v1/models' || pathname.startsWith('/v1/models/')) return effective !== 'GET'
   return false
@@ -2589,8 +2591,9 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       })
     )
       return
-    if (isProGatewayPath(url)) {
-      json(res, 402, errBody('Video needs Off Grid AI Pro.', 'pro_required'))
+    const proFeature = proGatewayFeature(url)
+    if (proFeature) {
+      json(res, 402, errBody(`${proFeature} needs Off Grid AI Pro.`, 'pro_required'))
       return
     }
 

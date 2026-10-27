@@ -28,9 +28,17 @@ export async function dispatchGatewayRoute(context: GatewayRouteContext): Promis
   return false
 }
 
-/** Paths that exist only with Pro. Without it the gateway refuses them with 402, not 404. */
-export const PRO_GATEWAY_PATHS = ['/v1/videos', '/v1/stories'] as const
+/** Paths that exist only with Pro, and the feature each one is. Without Pro the gateway refuses
+ *  them with 402, not 404. */
+const PRO_GATEWAY_FEATURES: Record<string, string> = {
+  '/v1/videos': 'Video',
+  '/v1/stories': 'Video',
+  '/v1/search': 'Search'
+}
 
-export function isProGatewayPath(url: string): boolean {
-  return PRO_GATEWAY_PATHS.some((prefix) => url === prefix || url.startsWith(`${prefix}/`))
+/** The Pro feature a path belongs to, or null when the path is not Pro-only. */
+export function proGatewayFeature(url: string): string | null {
+  for (const [prefix, feature] of Object.entries(PRO_GATEWAY_FEATURES))
+    if (url === prefix || url.startsWith(`${prefix}/`)) return feature
+  return null
 }
