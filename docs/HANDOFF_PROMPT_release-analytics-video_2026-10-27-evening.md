@@ -8,8 +8,8 @@ Repos: /Users/user/wednesday/off-grid-ai/{desktop,shared,mobile}; `desktop/pro` 
 
 | Repo (GitHub) | Local path | PR into `main` | Notes |
 |---|---|---|---|
-| off-grid-ai/shared | shared | #68 | Shared packages (models catalog, sync, rag, speech). Push first. |
-| off-grid-ai/OGAD | desktop | #215 | Desktop app. `pro` submodule → desktop-pro. |
+| off-grid-ai/shared | shared | #68 | Shared packages (models catalog, sync, rag, speech). Fastest-settings (#69) merged in. Push first. |
+| off-grid-ai/OGAD | desktop | #215 | Desktop app. `pro` submodule → desktop-pro. Fastest-settings (#220) merged in. |
 | off-grid-ai/desktop-pro | desktop/pro | #125 | Desktop Pro (private). No CI of its own runs; tested via OGAD. |
 | off-grid-ai/OGAM | mobile | #739 | Mobile app. `pro` submodule → mobile-pro. Carries the `./pro` 75% coverage floor. |
 | off-grid-ai/mobile-pro | mobile/pro | #94 | Mobile Pro (private). Tested via OGAM CI. |
@@ -34,7 +34,16 @@ Push/merge order: shared → desktop-pro → OGAD → mobile-pro → OGAM; brows
 4. **Speech on phones:** Qwen3-ASR 30-language list (shared `speech-wip` stash in /Users/user/wednesday/off-grid-ai/shared, `git stash list`) wired into the mobile language picker; mobile memory guard must honour the 0.6B model's `minRamGb: 3`.
 5. **Device acceptance: Ali does this manually; not your job.** For his reference only: image, video and search through the paired desktop on iPhone and OnePlus, the phone-search checklist, and the Local Dream ↔ sd.cpp switch test.
 6. **Other release repos (same branch name):** browser-extension PR #25 (all checks pass except SonarCloud, ignore); brand PR #3 (2 commits, up to date with main); website PR #93 (14 commits) is 46 behind `main`: merging main conflicts in `preview-ui/pages/desktop.jsx` and `mobile.jsx` plus 36 generated pages. Resolve the two .jsx files keeping both sides, then regenerate (`npm run build:preview`) instead of hand-merging generated files. The website release branch is checked out in the worktree `/Users/user/wednesday/off-grid-ai/website-analytics`.
-7. **Next work order, after release:** engine parity — one shared engine-pins file both apps build from (today desktop `resources/engine-pins.json`, mobile `scripts/video/revision` sd.cpp 3f8527a, llama.rn/whisper.rn npm versions); bump phones' sd.cpp (unlocks FLUX 3 Klein); Parakeet on phones; fix Android sd.cpp Vulkan crash (SIGSEGV ggml_vk_build_graph) so sd.cpp leaves the CPU (~26 min/image today); remove dead mobile OuteTTS/Qwen3-TTS. Also merge fastest-settings PRs OGAD #220 + shared #69 together (cited sources, `docs/fastest-settings-sources.md`).
+7. **Next work order, after release:** engine parity — one shared engine-pins file both apps build from (today desktop `resources/engine-pins.json`, mobile `scripts/video/revision` sd.cpp 3f8527a, llama.rn/whisper.rn npm versions); bump phones' sd.cpp (unlocks FLUX 3 Klein); Parakeet on phones; fix Android sd.cpp Vulkan crash (SIGSEGV ggml_vk_build_graph) so sd.cpp leaves the CPU (~26 min/image today); remove dead mobile OuteTTS/Qwen3-TTS.
+
+## Fastest settings are now release rules (merged from OGAD#220 + shared#69; those PRs are closed)
+- Every speed default comes from a cited published source, listed in `desktop/docs/fastest-settings-sources.md`. Never measure locally to choose a default; never hardcode a value the shared rule owns.
+- MTP draft tokens = `MTP_DRAFT_TOKENS` (3, llama.cpp's default) in `@offgrid/models`; phones read `MOBILE_MTP_DRAFT_TOKENS` (same value). A model with no MTP head runs without speculation (no n-gram fallback). Team mode batches `-b 2048 -ub 2048` on every backend via `teamBatchFlags`. Single-request batch stays at engine defaults.
+- One rule per setting across Metal, CUDA, Vulkan, CPU and phones, owned in shared; a platform differs only where a cited source says so.
+- Open, unsourced (fix only with a citation): phones default MTP off and use a q8_0 KV cache; the image engine passes the deprecated `--diffusion-fa` flag.
+
+## Waiting on Ali
+- website#90 "Consumer site: Pro with Boost" (marked do-not-merge-yet) and license-worker#11 "Pro + Boost yearly plans": whether they join this release on `release/analytics-video`. Don't touch them until he says.
 
 ## Decided today (don't relitigate)
 - Image catalog: FLUX 3 Image Klein (desktop 16 GB+), FLUX.2 klein 4B, Z-Image Turbo (+Light); Pony removed; SDXL-Lightning/Turbo superseded (installs keep working); Qwen-Image kept as non-commercial. On Snapdragon/Adreno Android, sd.cpp models are listed with "About N min per image" but never picks — Local Dream is the pick. One measured memory rule (1.3× pack) decides both recommendation and guard.
