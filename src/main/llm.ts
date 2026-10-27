@@ -1670,17 +1670,6 @@ export class LLMService {
           console.warn(`[LLMService] out of memory — retrying load at ${at.reason}`)
         }
         const args = this.launchArgsFor(at.ctxSize, at.gpuLayers, serverPath)
-        // The six-token Qwen3.5 9B gain was measured with stock llama.cpp on
-        // Metal. Preserve the existing limit for other engines and backends.
-        const draftMaxIndex = args.indexOf('--spec-draft-n-max')
-        if (
-          draftMaxIndex >= 0 &&
-          this.speculativeDecoding === 'mtp' &&
-          this.speculativeDraftMax === 0 &&
-          (engineDir !== 'llama' || cpuOnly || process.platform !== 'darwin')
-        ) {
-          args[draftMaxIndex + 1] = '2'
-        }
         // Captured in the same step as the arguments: a save can land during init's earlier awaits,
         // so only this matches what actually ran. A successful spawn makes it the working launch.
         const launchedWith = { settings: this.getSettings(), explicit: new Set(this.userExplicit) }
