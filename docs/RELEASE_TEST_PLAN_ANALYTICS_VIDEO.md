@@ -5,14 +5,37 @@ Pick up a device. Go to its section. Tick each box.
 Every line is: **do this** → **you should see this**.
 If you don't see it, it's a bug.
 
-Start with **Everywhere**. Then do your device's own section.
+Order matters:
+1. **Old install** first — install the new version over the previous one, keep all its data.
+2. **Everywhere**, then your device's own section, on that upgraded install.
+3. **Fresh install** last — wipe the app, install clean, check first run.
+
+A fresh install first would wipe the old data the upgrade checks need.
 
 ---
 
-## Everywhere — every computer and every phone
+## 1. Old install — do this first
+
+Use a computer and a phone that already have the **previous version** with chats, documents and models on them. Install the new version over the top.
+
+**Computer**
+- [ ] Open it → search works straight away
+- [ ] Quit while it's busy re-indexing, reopen → it picks up where it left off
+- [ ] Your documents still come up in search (they may take a while to come back)
+- [ ] If you had **Pony Diffusion** or the **Lessac** voice selected → something sensible is picked, not a blank
+
+**Phone**
+- [ ] Open it → no crash on launch, Gallery or Storage
+- [ ] Your chats, images and custom image settings are still there
+- [ ] Your documents still come up in search
+- [ ] Old voice-to-text and image models still load
+
+---
+
+## 2. Everywhere — every computer and every phone
 
 ### Basics
-- [ ] Install fresh and finish setup → app opens, no errors
+- [ ] Open the app → no errors
 - [ ] Send a chat message → reply streams in
 - [ ] Open Models → the list loads
 - [ ] Open every Settings tab → none is blank
@@ -20,8 +43,6 @@ Start with **Everywhere**. Then do your device's own section.
 - [ ] Quit and reopen → your chat and settings are still there
 
 ### Analytics is OFF until you say yes
-- [ ] During setup → the "share anonymous usage" box is **unticked**
-- [ ] Skip it → you are not asked again straight away
 - [ ] Settings → Analytics → two switches (Usage data, Crash reports), both **off**
 - [ ] Turn one on, then off → it stays the way you left it after a restart
 - [ ] Settings → Analytics → What we share → two short lists, readable
@@ -121,21 +142,15 @@ Test in **Brave** and in **Firefox**.
 
 ---
 
-## Old install — the bugs fresh installs hide
+## 3. Fresh install — do this last
 
-Use a computer and a phone that already have the **previous version** with chats, documents and models on them. Install the new version over the top.
+Delete the app and its data, then install the new version clean. Do this on every computer and phone.
 
-**Computer**
-- [ ] Open it → search works straight away
-- [ ] Quit while it's busy re-indexing, reopen → it picks up where it left off
-- [ ] Your documents still come up in search (they may take a while to come back)
-- [ ] If you had **Pony Diffusion** or the **Lessac** voice selected → something sensible is picked, not a blank
-
-**Phone**
-- [ ] Open it → no crash on launch, Gallery or Storage
-- [ ] Your chats, images and custom image settings are still there
-- [ ] Your documents still come up in search
-- [ ] Old voice-to-text and image models still load
+- [ ] Install and open → setup starts, no errors
+- [ ] During setup → the "share anonymous usage" box is **unticked**
+- [ ] Skip it → you are not asked again straight away
+- [ ] Finish setup → the recommended models download and chat works
+- [ ] Watch the network before you touch anything → nothing is sent to analytics
 
 ---
 
