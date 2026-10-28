@@ -230,3 +230,4 @@ Everything that isn't platform code is already proven on the Mac and the phones.
 - [ ] PostHog project settings → turn on **Discard client IP data**. The privacy policy promises IPs are not stored; the apps only turn off location lookup
 - [x] PostHog plan → **free**, keeps events 1 year, matches the policy's 12 months. Before ever moving to a paid plan (7 years, cannot be shortened), change the policy first
 - [ ] Reconnect the **iPhone** to the Mac when lane A asks
+- [ ] On your own phone, with the **App Store** app and your real data: install this release from **TestFlight** over it → your chats, documents and models are all still there. This is the one real upgrade a dev build can't fake
