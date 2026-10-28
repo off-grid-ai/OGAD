@@ -13,6 +13,7 @@ import { BorderBeam } from './ui/border-beam'
 import { ProgressiveBlur } from './ui/progressive-blur'
 import { openChatLink } from '@renderer/lib/chat-link'
 import { primaryModifier } from '@renderer/lib/device'
+import { useUiAnimations } from '@renderer/ui-animations'
 
 interface Entity {
   id: number
@@ -85,12 +86,13 @@ const markdownComponents: Components = {
 // Entity card - full version for expanded view
 function EntityCardFull({ entity, onClick }: { entity: Entity; onClick: () => void }): React.JSX.Element {
   const formatTime = (dateStr: string): string => parseSqliteUtc(dateStr).toLocaleString()
+  const hoverMotion = useUiAnimations()
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.01 }}
+      whileHover={hoverMotion ? { scale: 1.01 } : undefined}
       onClick={onClick}
       className="group p-4 rounded-xl cursor-pointer transition-all bg-neutral-900/60 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60"
     >
@@ -118,11 +120,12 @@ function EntityCardFull({ entity, onClick }: { entity: Entity; onClick: () => vo
 
 // Compact entity card for bento view
 function EntityCard({ entity, onClick }: { entity: Entity; onClick: () => void }): React.JSX.Element {
+  const hoverMotion = useUiAnimations()
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      whileHover={{ scale: 1.02 }}
+      whileHover={hoverMotion ? { scale: 1.02 } : undefined}
       onClick={onClick}
       className="group p-3 rounded-xl cursor-pointer transition-all bg-neutral-900/60 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-800/60"
     >

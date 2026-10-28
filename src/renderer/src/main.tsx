@@ -1,12 +1,14 @@
 import './assets/main.css'
 import './assets/onboarding.css'
 import { applyTheme } from './theme'
+import { applyUiAnimations } from './ui-animations'
 import { initFocusModality } from './lib/focus-modality'
 import { initScrollActivity } from './lib/scroll-activity'
 import { cspNonce, initShadowStyleNonce } from './lib/shadow-style-nonce'
 
 // Apply the saved/system theme (dark default) before first paint.
 applyTheme()
+applyUiAnimations()
 
 // Media players style their shadow DOM with <style> tags; give them the CSP nonce.
 initShadowStyleNonce()

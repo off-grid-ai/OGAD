@@ -294,6 +294,45 @@ button:disabled,
   box-shadow: none;
 }
 
+/* Settings > UI > Hover and click animations, switched off (data-ui-animations on <html>, set by
+   ui-animations.ts). Nothing lifts, presses in, tilts or glows under the pointer, and a click sends
+   no ring. Colours, borders and focus rings still change, so a control still shows it is live.
+   Scoped to the controls and hover/press utilities that move, so a hovered dialog or popover that
+   is centred with a translate keeps its place. */
+:root[data-ui-animations='off'] * {
+  --og-lp: 0 !important;
+  --og-wave-a: 0 !important;
+}
+:root[data-ui-animations='off']
+  :is(
+    [data-slot='button'],
+    [data-variant][data-slot$='-trigger'],
+    [data-slot='toolbar-button'],
+    [data-slot='toggle'],
+    [data-slot='tabs-tab'],
+    [data-slot='checkbox'],
+    [data-slot='radio'],
+    [data-slot='switch'],
+    [data-slot='slider-thumb']
+  ):is(:hover, :active),
+:root[data-ui-animations='off']
+  :is([data-slot='button'], [data-slot='toolbar-button'], [data-slot='toggle']):hover
+  > svg,
+:root[data-ui-animations='off']
+  :is([class*='hover:scale'], [class*='hover:translate'], [class*='hover:-translate']):hover,
+:root[data-ui-animations='off']
+  .group:hover
+  :is(
+    [class*='group-hover:scale'],
+    [class*='group-hover:translate'],
+    [class*='group-hover:-translate']
+  ),
+:root[data-ui-animations='off'] [class*='active:scale']:active {
+  translate: none !important;
+  scale: none !important;
+  rotate: none !important;
+}
+
 /* Settings lays its cards out in three columns, or four when the cards this build draws fill
    four-wide rows better (Settings.tsx counts them; an open card is the only one drawn). */
 @media (min-width: 1536px) {

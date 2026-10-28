@@ -17,6 +17,7 @@ import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 // importing this whole god-file (which pulls SetupPanel/etc. + their window.api types).
 import { SettingsCard, ProPlaceholder, SettingsCardsGroup } from './SettingsCard'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
+import { UiSettingsSection } from './UiSettingsSection'
 import { currentPlatform } from '@renderer/lib/device'
 import { getProFeature, proComingSoonHere, featureSupportsPlatform } from './pro/proCatalog'
 import { SoftwareUpdateSection } from './SoftwareUpdateSection'
@@ -43,6 +44,7 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   privacy: 'Data & privacy',
   analytics: 'Analytics',
   backup: 'Backup & restore',
+  ui: 'UI',
   shortcuts: 'Keyboard shortcuts',
   update: 'Software update'
 }
@@ -314,6 +316,14 @@ export function Settings({
               delay={0.44}
             >
               <BackupRestoreSection />
+            </SettingsCard>
+
+            <SettingsCard
+              title="UI"
+              summary="Choose whether buttons and cards animate when you hover and click."
+              delay={0.448}
+            >
+              <UiSettingsSection />
             </SettingsCard>
 
             {/* Keyboard shortcuts — one reference for every hotkey (core + pro rows). */}

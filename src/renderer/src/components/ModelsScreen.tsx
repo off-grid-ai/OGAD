@@ -122,6 +122,7 @@ import offGridLogo from '@/assets/logo.png'
 import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
 import { VideoProUpsell } from './VideoProUpsell'
 import { flow } from '@renderer/lib/analytics'
+import { useUiAnimations } from '@renderer/ui-animations'
 
 function Sel({
   value,
@@ -445,6 +446,7 @@ export function ModelsScreen({
   const [catalogLoaded, setCatalogLoaded] = useState(false)
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const reducedMotion = useReducedMotion()
+  const hoverMotion = useUiAnimations() && !reducedMotion
   const [installed, setInstalled] = useState<string[]>([])
   // Video is Pro: free users see the upsell on the Video tab instead of video models.
   const { isPro } = useRendererEntitlement()
@@ -1667,7 +1669,7 @@ export function ModelsScreen({
         animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
         exit={{ opacity: 0, scale: 0.96, filter: 'blur(4px)' }}
         transition={COLLECTION_SPRING}
-        whileHover={reducedMotion ? undefined : { y: -2 }}
+        whileHover={hoverMotion ? { y: -2 } : undefined}
         className="group relative"
       >
         <Card
@@ -2047,7 +2049,7 @@ export function ModelsScreen({
             <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-neutral-800/40 px-6 py-1.5">
               {/* One hover light glides from chip to chip (the collections chapter's rows). */}
               <AnimatedBackground
-                enableHover
+                enableHover={hoverMotion}
                 className="rounded-full bg-[rgb(var(--og-rgb-text)/0.06)]"
                 transition={{ type: 'spring', bounce: 0.1, duration: 0.35 }}
               >
