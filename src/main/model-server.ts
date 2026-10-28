@@ -2663,7 +2663,10 @@ export async function startModelServer(
         url,
         method,
         rid,
+        query: new URLSearchParams((req.url || '').split('?')[1] ?? ''),
         readJson: () => readJson(req),
+        readForm: async () =>
+          parseMultipart(await readBody(req, MAX_UPLOAD), req.headers['content-type'] || ''),
         json: (status, body) => json(res, status, body)
       })
     )
@@ -2744,9 +2747,10 @@ export async function startModelServer(
           'POST /v1/images/generations',
           'POST /v1/images/edits',
           'POST /v1/videos',
+          'GET /v1/videos/models',
           'GET /v1/videos/:id',
           'GET /v1/videos/:id/content',
-          'POST /v1/videos/:id/cancel',
+          'DELETE /v1/videos/:id',
           'POST /v1/stories',
           'GET /v1/stories/:id',
           'GET /v1/stories/:id/content',

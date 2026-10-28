@@ -45,7 +45,7 @@ const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
-async function materialize(ref: string, fallbackExt: string): Promise<string> {
+export async function materialize(ref: string, fallbackExt: string): Promise<string> {
   const url = ref.trim()
   if (url.startsWith('data:')) {
     const { data, ext } = parseDataUrl(url, fallbackExt)

@@ -7,7 +7,14 @@ export interface GatewayRouteContext {
   url: string
   method: string
   rid: string
+  /** The request's query string; `url` has none. */
+  query: URLSearchParams
   readJson(): Promise<Record<string, unknown>>
+  /** A multipart/form-data body: its text fields and uploaded files. */
+  readForm(): Promise<{
+    fields: Record<string, string>
+    files: Record<string, { filename: string; data: Buffer }>
+  }>
   json(status: number, body: unknown): void
 }
 
