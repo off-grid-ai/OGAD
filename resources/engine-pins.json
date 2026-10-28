@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "llama": {
     "repo": "ggml-org/llama.cpp",
-    "ref": "b11913",
+    "ref": "b11946",
     "sha256": {
-      "linux-cuda": "2d169de5f6665d20779ee6888269cc69703cad01cbadf2c673c86ade332ded78",
-      "linux-cudart": "be951a4cb7885562b4df07e7652a897ebfac3b95f4e0434c68ac99302e4f613e",
-      "linux-vulkan": "2e491e97a7da04134e7006fdcb314f82f5934ed71345b26df874b61c1b5ad432",
-      "linux-cpu": "c670ad826f59478db859c9d4a0d931ab9eb653f22b7e0adebd70816c4092aab5",
-      "win-cuda": "a63d06a2afc8a73f580e6088b90f965f2bd0419a6f986d3ef48fc0755dce69d6",
+      "linux-cuda": "c8a2c0344b3e2d9a0c959c0f5fa7403d453ba1824b41520db8b5550dc4f0d514",
+      "linux-cudart": "2b7e10a79a668e66a03a723162e8f19da2d0881bdfec500c7c38db18bed144ab",
+      "linux-vulkan": "0398261224d54b766a442dcb0b0bf5fe7ba8482bc67d9585e169c4981f728602",
+      "linux-cpu": "9e44e1a59e971f0de3fbf74fa46355ab48fed7bb51c1c16b56a96c355947f8dd",
+      "win-cuda": "97f3b1a9ae814569d92487561c7e1a4b79e0cdedadab36adddc38efd68eec296",
       "win-cudart": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
-      "win-vulkan": "d9b27dfe8addb0782c59c194604dbab69ccef8493c8964a435d762c4be45e176",
-      "win-cpu": "55b31ccaf398e90457cfe28087297f5f3fdf1e3bfa7a28e1108f13d0af8e4621"
+      "win-vulkan": "b65b2837c584ca2d37033b8a947513fc02649199077a17455f416921aa6eb8f5",
+      "win-cpu": "8a702bb07c873b133c56eb3acd92a48d7c5c9ad339c6435eddc5185e46e1a043"
     }
   },
   "prism": {
@@ -91,12 +91,12 @@
   "archives": {
     "release": "native-deps-2026-09",
     "mac-native": {
-      "name": "ogad-mac-native-20261027-r7.tar.gz",
-      "sha256": "d06a2f4d56e9203758b5eaad8cd9bdd49f67652decabce6692510f112ef2e244"
+      "name": "ogad-mac-native-20261028-r8.tar.gz",
+      "sha256": "fb90e918b6580dfff7c8c428ae29269d57cd05070ad97a1af64e7d26d2d12f48"
     },
     "linux-native": {
-      "name": "ogad-linux-native-x64-20261027-r7.tar.gz",
-      "sha256": "a0e2a8eb03e1a919627186bf2ebeac846dfe61977df2a35e6e9584fb01deedf7"
+      "name": "ogad-linux-native-x64-20261028-r8.tar.gz",
+      "sha256": "3f489d6b45c3a3ce7d12893c03017ac840b6210cec6936591d36c1dcf06a96ae"
     },
     "linux-sd-cuda": {
       "name": "ogad-sd-master-1017-be48649-linux-x64-cuda12.8-multiarch-20261027-r7.tar.gz",
