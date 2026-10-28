@@ -228,6 +228,7 @@ import type {
   ImageGenerationMetadata,
   ImageProgress,
   MessageRowActions,
+  MessageRowState,
   ProjectLite,
   RagContext,
   StoredMessageAttachment
@@ -924,6 +925,7 @@ export function MemoryChat({
   const [speakingId, setSpeakingId] = useState<string | null>(null)
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null)
   const [speakError, setSpeakError] = useState<{ id: string; message: string } | null>(null)
+  const [speakDownload, setSpeakDownload] = useState<MessageRowState['speakDownload']>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<'model' | 'voice' | 'video'>('model')
@@ -3639,6 +3641,11 @@ export function MemoryChat({
           console.error('[tts] audio element error')
           failed()
         }
+        // A voice that is not on this computer yet downloads before the first word: say so, with
+        // its size, under this reply rather than leaving the button spinning.
+        const stopDownload = window.api.onTtsVoiceProgress(({ progress, totalBytes }) =>
+          setSpeakDownload({ id, totalBytes: totalBytes ?? null, percent: progress })
+        )
         const made = window.api
           .speak(messageToSpeakable(text), undefined, (pass) =>
             audio.addPass(pass.index, pass.dataUrl)
@@ -3646,6 +3653,10 @@ export function MemoryChat({
           .then(({ dataUrl }) => {
             if (!dataUrl) throw new Error('empty dataUrl')
             audio.setFull(dataUrl)
+          })
+          .finally(() => {
+            stopDownload()
+            setSpeakDownload((cur) => (cur?.id === id ? null : cur))
           })
         const playing = audio.play()
         // The first audio, or the synthesis failing before any audio exists.
@@ -5226,6 +5237,7 @@ export function MemoryChat({
                                       speakingId,
                                       speakLoadingId,
                                       speakError,
+                                      speakDownload,
                                       ttsEnabled,
                                       ttsSpeed,
                                       latestVoiceAssistantId,

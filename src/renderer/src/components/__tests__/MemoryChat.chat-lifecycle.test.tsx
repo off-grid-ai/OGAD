@@ -732,6 +732,27 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(audios[0]!.pause).toHaveBeenCalledOnce()
   })
 
+  it('says a voice is downloading, with its size, before speaking a reply', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-b' })
+
+    await screen.findByText('Conversation B baseline')
+    await openActionsFor('Conversation B baseline')
+    await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
+    await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
+    // The voice is not on this computer yet: the main process fetches it before the first word.
+    act(() => boundary.voiceProgress({ progress: 40, totalBytes: 92_361_116 }))
+
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Getting a voice ready · 92 MB · 40%'
+    )
+
+    boundary.speechTurns[0]!.resolve({ dataUrl: 'data:audio/wav;base64,UklGRg==' })
+    await waitFor(() => expect(screen.queryByText(/Getting a voice ready/)).toBeNull())
+  })
+
   it('shows an actionable error when assistant speech cannot be generated (#105)', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)

@@ -53,13 +53,19 @@ beforeEach(() => {
   host.device = 'coreml'
   for (const mock of [host.on, host.post, host.load, host.generate]) mock.mockReset()
   host.load.mockImplementation(async (_id, options) => {
-    options.progress_callback({
-      status: 'progress',
-      progress: 50,
-      loaded: 5,
-      total: 10,
-      file: 'model.onnx'
-    })
+    // What Transformers.js sends while a voice downloads: each file as it streams, a few-KB config
+    // first, then the model in chunks.
+    const file = (name: string, loaded: number, total: number): void =>
+      options.progress_callback({
+        status: 'progress',
+        file: name,
+        loaded,
+        total,
+        progress: (loaded / total) * 100
+      })
+    file('config.json', 44, 44)
+    file('model.onnx', 30_000_000, 326_000_000)
+    file('model.onnx', 163_000_000, 326_000_000)
     return { generate: host.generate }
   })
   host.generate.mockResolvedValue({ data: new Float32Array([-1, 0, 1]), sampling_rate: 24000 })
@@ -123,9 +129,22 @@ describe('voice helper response evidence', () => {
     await vi.waitFor(() =>
       expect(host.post).toHaveBeenCalledWith({ id: 1, type: 'complete', device: 'coreml' })
     )
-    expect(host.post).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'progress', percentage: 50 })
-    )
+    // The whole voice, never one file of it, and nothing for the config file alone.
+    const progress = host.post.mock.calls
+      .map(([message]) => message)
+      .filter((message: { type: string }) => message.type === 'progress')
+    expect(progress).toEqual([
+      expect.objectContaining({
+        percentage: 9,
+        downloadedBytes: 30_000_044,
+        totalBytes: 326_000_044
+      }),
+      expect.objectContaining({
+        percentage: 50,
+        downloadedBytes: 163_000_044,
+        totalBytes: 326_000_044
+      })
+    ])
     receive({
       id: 2,
       type: 'synthesize',

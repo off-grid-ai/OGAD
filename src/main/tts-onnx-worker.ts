@@ -83,20 +83,36 @@ function hasAudibleSamples(samples: Float32Array): boolean {
   return false
 }
 
+/** Smaller than this, a download is the voice's config and tokenizer, not the voice itself. */
+const VOICE_DOWNLOAD_MIN_BYTES = 1_000_000
+const filesLoading = new Map<number, Map<string, { loaded: number; total: number }>>()
+
 function reportProgress(id: number, info: ProgressInfo): void {
-  if (info.status === 'progress_total' || info.status === 'progress') {
-    const percentage = Math.max(0, Math.min(100, Math.floor(info.progress)))
-    if (lastProgress.get(id) === percentage) return
-    lastProgress.set(id, percentage)
-    port.post({
-      id,
-      type: 'progress',
-      downloadedBytes: info.loaded,
-      totalBytes: info.total,
-      percentage,
-      currentAsset: info.status === 'progress' ? info.file : 'kokoro-onnx'
-    } satisfies TtsWorkerResponse)
+  // Transformers.js reports each file as it streams; the whole voice is their sum, which is what a
+  // person is told (the model streams through the file cache without a combined total of its own).
+  // On Core ML that is the full-precision model, larger than the catalog's quantized one.
+  if (info.status !== 'progress') return
+  const files = filesLoading.get(id) ?? new Map<string, { loaded: number; total: number }>()
+  filesLoading.set(id, files)
+  files.set(info.file, { loaded: info.loaded, total: info.total })
+  let loaded = 0
+  let total = 0
+  for (const file of files.values()) {
+    loaded += file.loaded
+    total += file.total
   }
+  if (total < VOICE_DOWNLOAD_MIN_BYTES) return
+  const percentage = Math.max(0, Math.min(100, Math.floor((loaded / total) * 100)))
+  if (lastProgress.get(id) === percentage) return
+  lastProgress.set(id, percentage)
+  port.post({
+    id,
+    type: 'progress',
+    downloadedBytes: loaded,
+    totalBytes: total,
+    percentage,
+    currentAsset: 'kokoro-onnx'
+  } satisfies TtsWorkerResponse)
 }
 
 async function runtime(id: number): Promise<{ runtime: KokoroRuntime; device: DeviceType }> {

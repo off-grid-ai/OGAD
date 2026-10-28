@@ -585,6 +585,7 @@ function StandardMessageRow({
   const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const speechState = speechControlState(message.id, state.speakingId, state.speakLoadingId)
   const speechError = state.speakError?.id === message.id ? state.speakError.message : undefined
+  const speechDownload = state.speakDownload?.id === message.id ? state.speakDownload : undefined
   const preparingToolCalls =
     (message.activity as { kind?: unknown } | undefined)?.kind === 'preparing_tool_calls'
   const liveActivity = activityLabel(message.activity)
@@ -716,6 +717,7 @@ function StandardMessageRow({
             copied={copied}
             speechState={speechState}
             speechError={speechError}
+            speechDownload={speechDownload}
             speechEnabled={state.ttsEnabled}
             onCopy={() => actions.copy(message.content, message.id)}
             onOpenArtifact={(opened) => actions.openArtifact(opened, message.id)}
@@ -895,6 +897,8 @@ function sameMessageState(
     (left.speakLoadingId === messageId) === (right.speakLoadingId === messageId) &&
     (left.speakError?.id === messageId ? left.speakError.message : undefined) ===
       (right.speakError?.id === messageId ? right.speakError.message : undefined) &&
+    (left.speakDownload?.id === messageId ? left.speakDownload : undefined) ===
+      (right.speakDownload?.id === messageId ? right.speakDownload : undefined) &&
     left.ttsEnabled === right.ttsEnabled &&
     left.ttsSpeed === right.ttsSpeed &&
     (left.latestVoiceAssistantId === messageId) === (right.latestVoiceAssistantId === messageId) &&

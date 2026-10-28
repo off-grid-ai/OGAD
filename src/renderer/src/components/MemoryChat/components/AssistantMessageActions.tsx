@@ -7,6 +7,7 @@ import { DropdownMenuItem } from '@renderer/components/ui/dropdown-menu'
 import type { Artifact } from '../../ArtifactCanvas'
 import type { ChatMessage } from '../types'
 import { isSupportingMessage } from '../utlis'
+import { formatStorageBytes } from '../../setup/storage-format'
 import { CopyAction, MessageActionsMenu, RegenerateAction } from './MessageActions'
 
 export type SpeechControlState = 'idle' | 'loading' | 'playing'
@@ -129,6 +130,7 @@ function AssistantMessageActionsComponent({
   copied,
   speechState,
   speechError,
+  speechDownload,
   speechEnabled,
   onCopy,
   onOpenArtifact,
@@ -141,6 +143,7 @@ function AssistantMessageActionsComponent({
   copied: boolean
   speechState: SpeechControlState
   speechError?: string
+  speechDownload?: { totalBytes: number | null; percent: number | null }
   speechEnabled: boolean
   onCopy: () => void
   onOpenArtifact: (artifact: Artifact) => void
@@ -167,6 +170,17 @@ function AssistantMessageActionsComponent({
         ) : null}
       </MessageActionsMenu>
       <VariantNavigation message={message} onSelect={onSelectVariant} />
+      {speechDownload && !speechError ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="basis-full text-[11px] leading-4 text-muted-foreground"
+        >
+          Getting a voice ready
+          {speechDownload.totalBytes ? ` · ${formatStorageBytes(speechDownload.totalBytes)}` : ''}
+          {speechDownload.percent !== null ? ` · ${Math.round(speechDownload.percent)}%` : ''}
+        </p>
+      ) : null}
       {speechError ? (
         <p role="alert" className="basis-full text-[11px] leading-4 text-red-400">
           {speechError}

@@ -241,6 +241,8 @@ export type MessageRowState = Readonly<{
   speakingId: string | null
   speakLoadingId: string | null
   speakError: { id: string; message: string } | null
+  /** A voice read-aloud is fetching before it can speak: one line under that reply, never silent. */
+  speakDownload: { id: string; totalBytes: number | null; percent: number | null } | null
   ttsEnabled: boolean
   ttsSpeed: number
   latestVoiceAssistantId: string | null

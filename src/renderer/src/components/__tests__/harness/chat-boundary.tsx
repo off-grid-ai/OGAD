@@ -98,6 +98,12 @@ function deferred<T>(): {
   return { promise, resolve, reject }
 }
 
+type VoiceProgress = {
+  progress: number | null
+  totalBytes?: number | null
+  downloadedBytes?: number
+}
+
 export class ChatBoundary {
   constructor(private readonly createSplitter?: ThinkSplitterFactory) {}
 
@@ -130,6 +136,12 @@ export class ChatBoundary {
   readonly toolQueries: { query: string; options: Record<string, unknown> }[] = []
 
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
+  private readonly voiceProgressListeners = new Set<(data: VoiceProgress) => void>()
+
+  /** The main process reporting a voice download (tts:voice-progress) while speech waits on it. */
+  voiceProgress(data: VoiceProgress): void {
+    for (const listener of this.voiceProgressListeners) listener(data)
+  }
   readonly settings: Record<string, unknown> = {}
   readonly activeRagStreams: ActiveChatStreamContract[] = []
 
@@ -355,7 +367,10 @@ export class ChatBoundary {
       { id: 'bf_emma', label: 'Emma', language: 'en-GB' }
     ]),
     prepareTtsVoice: vi.fn(async () => ({ ready: true })),
-    onTtsVoiceProgress: vi.fn(() => () => {}),
+    onTtsVoiceProgress: (listener: (data: VoiceProgress) => void) => {
+      this.voiceProgressListeners.add(listener)
+      return () => void this.voiceProgressListeners.delete(listener)
+    },
     getSettings: vi.fn(async () => structuredClone(this.settings)),
     getLlmSettings: vi.fn(async () => ({})),
     saveSetting: vi.fn(async (key: string, value: unknown) => {
