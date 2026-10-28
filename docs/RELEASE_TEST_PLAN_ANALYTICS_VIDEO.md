@@ -26,22 +26,22 @@ Ticks: ✅ pass · ❌ fail (file it) · ⬜ not run.
 
 ## Pass 0 — Resolve before shipping
 
-These came out of the diff read, not from testing. Each needs a decision, not a tester.
+These came out of the diff read, not from testing. Ali ruled on each on 2026-10-28; the decision column is his call, not a proposal.
 
-| # | Thing | Where |
-|---|---|---|
-| 1 | Renderer still says **"Your photos never leave your devices"** while remote video rendering uploads character photos and start images as base64 — to a paired desktop or to **OpenRouter**, a paid third party. Copy contradicts behaviour. | desktop video |
-| 2 | Save-password offer now sends the **plaintext password into the page's process** (closed shadow root). The test that asserted it never left the worker was rewritten in this diff. Wants a security read. | extension |
-| 3 | iOS `NSPhotoLibraryUsageDescription` says "attach images to conversations"; **Animate a photo** now reads the library for video. App Store risk. | mobile iOS |
-| 4 | New iOS `UIBackgroundModes: [audio]` — Apple rejects this without audible playback. Have the narration justification ready. | mobile iOS |
-| 5 | Firefox AMO declares `data_collection_permissions: none`; the new README says requests follow Desktop's analytics setting. Store-facing mismatch. | extension |
-| 6 | **PostHog Cloud EU (Frankfurt)** is a new named sub-processor in `privacy.md`. DPA signed? Listed wherever sub-processors are disclosed? | legal |
-| 7 | Privacy §4 claims GDPR access/erasure cannot be honoured; §5 cites **EU AI Act Art. 50**. Needs legal sign-off. | legal |
-| 8 | `writing/architecture-of-trust.md` adds "with four rules:" followed by an **empty list**. | website |
-| 9 | Site moves from "no telemetry" to "opt-in". **Ship the site with the apps**, not before, or the policy describes behaviour nobody has. | release order |
-| 10 | Delete character has **no confirmation** and removes its photos. | desktop video |
-| 11 | Gateway request timeout was removed — a hung desktop now hangs the phone's call. | mobile sync |
-| 12 | Android Wan 2.1/2.2 are marked experimental; no completed Android clip has been verified. Ship or hide? | mobile Android |
+| # | Thing | Decision | Where |
+|---|---|---|---|
+| 1 | Renderer still says **"Your photos never leave your devices"** while remote video rendering uploads character photos and start images as base64 — to a paired desktop or to **OpenRouter**, a paid third party. | Update the copy so both paths are truthful | desktop video |
+| 2 | Save-password offer now sends the **plaintext password into the page's process** (closed shadow root). The test that asserted it never left the worker was rewritten in this diff. | Assess it properly; fix it if it is real, and pin the actual guarantee with a test either way | extension |
+| 3 | iOS `NSPhotoLibraryUsageDescription` says "attach images to conversations"; **Animate a photo** now reads the library for video. | Make it accurate; audit the other usage strings too | mobile iOS |
+| 4 | New iOS `UIBackgroundModes: [audio]` — Apple rejects this without audible playback. | Justify it or remove it | mobile iOS |
+| 5 | Firefox AMO declares `data_collection_permissions: none`; the new README says requests follow Desktop's analytics setting. | Make the declaration match what we actually send | extension |
+| 6 | **PostHog Cloud EU (Frankfurt)** is a new named sub-processor in `privacy.md`. | Disclose it publicly. **DPA signature is Ali's to do** | legal |
+| 7 | Privacy §4 claims GDPR access/erasure cannot be honoured; §5 cites **EU AI Act Art. 50**. | The policy exists to safeguard us — keep it that way. State anonymity as the reason, don't assert legal conclusions, never promise what the product cannot keep | legal |
+| 8 | `writing/architecture-of-trust.md` adds "with four rules:" followed by an **empty list**. | Fix it | website |
+| 9 | Site moves from "no telemetry" to "opt-in". | **Ship the site with the apps**, never before | release order |
+| 10 | Delete character has **no confirmation** and removes its photos. | Add one | desktop video |
+| 11 | Gateway request timeout was removed — a hung desktop now hangs the phone's call. | **The timeout stays gone** — it was cutting off genuinely long responses. Instead the phone must be able to stop a call and come back to a correct state | mobile sync |
+| 12 | Android Wan 2.1/2.2 are marked experimental. | Not experimental. Everything works — drop the marking | mobile Android |
 
 ---
 
