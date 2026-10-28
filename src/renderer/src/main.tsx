@@ -25,6 +25,7 @@ import { AliveProvider, LivingField } from '@offgrid/operator-ui/operator/alive'
 import App from './App'
 import { TooltipProvider } from './components/ui/tooltip'
 import { AIRequestLogs } from './components/AIRequestLogs'
+import { ConfirmDialogHost } from './components/ConfirmDialogHost'
 
 // The quick-paste popup is a Pro feature; its component lives in the pro package.
 // The Vite alias resolves `@offgrid/pro/renderer` to a stub in free builds (which
@@ -86,6 +87,7 @@ createRoot(document.getElementById('root')!).render(
               <LivingField />
               <TooltipProvider delayDuration={300}>
                 <App />
+                <ConfirmDialogHost />
               </TooltipProvider>
             </>
           )}

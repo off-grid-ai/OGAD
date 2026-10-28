@@ -88,6 +88,14 @@ import {
   supportsModelSettings
 } from '@renderer/lib/model-settings-panel'
 import { fitTier, type FitTier, fitLabel } from '../../../shared/model-fit'
+import { confirmDialog, noticeDialog } from '@renderer/lib/confirm-dialog'
+import {
+  deleteModelDialog,
+  loadModelAnywayDialog,
+  modelImportFailedNotice,
+  modelRemoveFailedNotice,
+  trashExternalModelDialog
+} from '@renderer/lib/confirm-dialog-copy'
 import {
   filterAndSort,
   parseParamCount,
@@ -628,7 +636,7 @@ export function ModelsScreen({
         setInstalled(await api.getInstalledModels?.())
         selectKind('text')
       } else if (res && !res.canceled && res.error) {
-        window.alert(`Import failed: ${res.error}`)
+        await noticeDialog(modelImportFailedNotice(res.error))
       }
     } finally {
       setImporting(false)
@@ -727,19 +735,14 @@ export function ModelsScreen({
   }
   const removeModel = async (id: string, label: string): Promise<void> => {
     const external = id.startsWith('external:')
-    if (
-      !window.confirm(
-        external
-          ? `Move "${label}" to the Trash? Its files are in another app's folder; you can restore them from the Trash.`
-          : `Delete "${label}"? This removes its files from disk.`
-      )
-    )
-      return
+    const dialog = external ? trashExternalModelDialog(label) : deleteModelDialog(label)
+    if (!(await confirmDialog(dialog))) return
     setDeleting(id)
     try {
       const result = (await api.deleteModel?.(id)) as
         { success?: boolean; error?: string } | undefined
-      if (result && result.success === false && result.error) window.alert(result.error)
+      if (result && result.success === false && result.error)
+        await noticeDialog(modelRemoveFailedNotice(label, result.error))
       setInstalled(await api.getInstalledModels?.())
       refreshActive()
     } finally {
@@ -751,7 +754,7 @@ export function ModelsScreen({
     try {
       const fit = await api.estimateModelFit?.(id)
       if (fit && fit.level !== 'ok') {
-        if (!window.confirm(`${fit.message}\n\nLoad it anyway?`)) return
+        if (!(await confirmDialog(loadModelAnywayDialog(fit.message)))) return
       }
     } catch {
       /* best-effort */

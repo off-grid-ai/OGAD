@@ -4,6 +4,12 @@ import { Skeleton } from '@offgrid/operator-ui/operator/coss/skeleton'
 import { CircleNotch, Trash, Warning } from '@phosphor-icons/react'
 import { Button } from '../ui/button'
 import { GlyphSwap, IconTip } from '../IconTip'
+import { confirmDialog } from '@renderer/lib/confirm-dialog'
+import {
+  clearDataCategoryDialog,
+  DELETE_ALL_DATA_DIALOG,
+  DELETE_ALL_DATA_RECONFIRM_DIALOG
+} from '@renderer/lib/confirm-dialog-copy'
 import { Section } from '@offgrid/operator-ui/operator/experience'
 
 interface DataCategory {
@@ -56,15 +62,8 @@ export function DataPrivacyPanel(): React.ReactElement {
   }
 
   const clearOne = async (c: DataCategory, olderThanDays?: number): Promise<void> => {
-    const what = olderThanDays
-      ? `${c.label.toLowerCase()} older than ${olderThanDays} days`
-      : `all ${c.label.toLowerCase()}`
-    if (
-      !window.confirm(
-        `Delete ${what}? This permanently removes it from this device and can't be undone.`
-      )
-    )
-      return
+    const dialog = clearDataCategoryDialog({ categoryLabel: c.label, olderThanDays })
+    if (!(await confirmDialog(dialog))) return
     setBusy(c.id)
     try {
       await api.clearDataCategory(c.id, olderThanDays)
@@ -75,18 +74,8 @@ export function DataPrivacyPanel(): React.ReactElement {
   }
 
   const deleteEverything = async (): Promise<void> => {
-    if (
-      !window.confirm(
-        'Delete ALL your data — chats, memory, captures, meetings, and generated images? This cannot be undone. (Installed models are kept.)'
-      )
-    )
-      return
-    if (
-      !window.confirm(
-        'Are you absolutely sure? This permanently erases your personal data on this device.'
-      )
-    )
-      return
+    if (!(await confirmDialog(DELETE_ALL_DATA_DIALOG))) return
+    if (!(await confirmDialog(DELETE_ALL_DATA_RECONFIRM_DIALOG))) return
     setBusy('all')
     try {
       await api.deleteAllData()
