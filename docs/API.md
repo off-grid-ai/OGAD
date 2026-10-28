@@ -466,22 +466,30 @@ directory; install them from the in-app Models screen.
 
 ## Video generation
 
-Video uses the OGAD `offgrid-video-v1` job API. It returns an asynchronous job;
-it is not a drop-in implementation of a hosted video provider's API.
+Video speaks OpenAI's video API (`POST /v1/videos` answers with a Video object),
+so the OpenAI SDKs work with `base_url` set to this gateway. Off Grid fields
+(`negative_prompt`, `steps`, `guidance`, `seed`, `fps`, `frames`, `consent`,
+`client_job_id`) are optional extras.
 
 ```bash
 curl http://127.0.0.1:7878/v1/videos \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"A red ball rolls across a wooden table","model":"Wan2.2-TI2V-5B-Q5_K_M.gguf","width":832,"height":480,"frames":17,"fps":8,"steps":20,"seed":42}'
+  -d '{"model":"Wan2.2-TI2V-5B-Q5_K_M.gguf","prompt":"A red ball rolls across a wooden table","seconds":"4","size":"832x480"}'
 ```
 
-Use the same authorization header as other gateway requests when authentication
-is enabled. The response contains `request_id` and `poll_url`.
+`seconds` becomes the nearest valid frame count at the model's own frame rate,
+up to its longest clip. A start image goes in `input_reference`
+(`{"image_url": "data:image/png;base64,..."}`, or a multipart upload).
 
-- `GET /v1/videos/:id`: read status, step count, result, or error.
-- `GET /v1/videos/:id/preview`: read a decoded frame when the job reports a preview URL.
+- `GET /v1/videos/models`: installed models with OpenRouter's limit fields
+  (`supported_durations`, `supported_sizes`, `supported_aspect_ratios`,
+  `supported_frame_images`) plus `limits`, the exact grid each model renders on.
+- `GET /v1/videos/:id`: the Video object: `status`, `progress` (0-100), `error`;
+  while running also `stage`, `step_progress` and `preview`; when done, `result`.
 - `GET /v1/videos/:id/content`: download the completed MP4.
-- `POST /v1/videos/:id/cancel`: stop the job.
+  `?variant=thumbnail` returns the decoded frame as a PNG.
+- `DELETE /v1/videos/:id`: stop a running job (it then fails with
+  `error.code: "cancelled"`), or forget a finished one. The clip stays in the library.
 
 To recover a lost submission response, include a stable `client_job_id` and reuse
 it with the same request. The gateway returns the existing job.
