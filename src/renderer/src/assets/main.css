@@ -305,13 +305,15 @@ button:disabled,
 }
 
 /* Settings > UI > Hover and click animations, switched off (data-ui-animations on <html>, set by
-   ui-animations.ts). Nothing lifts, presses in, tilts or glows under the pointer, and a click sends
-   no ring. Colours, borders and focus rings still change, so a control still shows it is live.
+   ui-animations.ts). Nothing lifts, presses in, tilts, glows or fades under the pointer, and a
+   click flashes no card or button (the LivingField canvas ring is drawn in JS, outside CSS).
+   Colours, borders and focus rings still change, so a control still shows it is live.
    Scoped to the controls and hover/press utilities that move, so a hovered dialog or popover that
    is centred with a translate keeps its place. */
 :root[data-ui-animations='off'] * {
   --og-lp: 0 !important;
   --og-wave-a: 0 !important;
+  --og-edge-a: 0 !important;
 }
 :root[data-ui-animations='off']
   :is(
@@ -337,10 +339,47 @@ button:disabled,
     [class*='group-hover:translate'],
     [class*='group-hover:-translate']
   ),
-:root[data-ui-animations='off'] [class*='active:scale']:active {
+:root[data-ui-animations='off'] [class*='active:scale']:active,
+:root[data-ui-animations='off'] :is(button, [role='button'], summary):not([data-slot]):active,
+:root[data-ui-animations='off'] input[type='range']:not([data-slot]):active::-webkit-slider-thumb {
   translate: none !important;
   scale: none !important;
   rotate: none !important;
+}
+/* The sheen that sweeps a hovered button. */
+:root[data-ui-animations='off'] [data-slot='button']:hover::after {
+  animation: none !important;
+}
+/* A hovered primary button keeps its resting halo instead of flaring: alive.css's for a default
+   button, then the OGAD skin's for an emerald fill (later, so it wins where both apply). */
+:root[data-ui-animations='off'] [data-slot='button'][data-variant='default']:not(:disabled):hover {
+  box-shadow:
+    0 0 0 1px rgb(var(--og-glow) / 0.35),
+    0 6px 26px -10px rgb(var(--og-glow) / 0.75),
+    0 0 46px -18px rgb(var(--og-glow) / 0.9) !important;
+}
+:root[data-ui-animations='off']
+  :is(
+    [class~='bg-green-500'],
+    [class~='bg-emerald-500'],
+    [class~='bg-emerald-600'],
+    [class~='bg-primary']
+  ):is(button, a, [role='button']):not(:disabled):hover {
+  box-shadow:
+    0 0 0 1px rgb(var(--og-skin-glow) / 0.4),
+    0 6px 22px -10px rgb(var(--og-skin-glow) / 0.8),
+    0 0 40px -16px rgb(var(--og-skin-glow) / 0.85) !important;
+}
+/* Cards next to a hovered card stay as they are instead of fading back. */
+:root[data-ui-animations='off']
+  :has(> :is([data-og-living], [data-slot='card'], [data-og-surface='glow']):hover)
+  > :is([data-og-living], [data-slot='card'], [data-og-surface='glow']):not(
+    :hover,
+    :focus-within,
+    [data-og-pending]
+  ) {
+  opacity: 1 !important;
+  filter: none !important;
 }
 
 /* A pinned header (data-sticky-header) casts a soft shadow only while content scrolls under it,
