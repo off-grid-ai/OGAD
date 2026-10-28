@@ -343,6 +343,20 @@ button:disabled,
   rotate: none !important;
 }
 
+/* A pinned header (data-sticky-header) casts a soft shadow only while content scrolls under it,
+   so at rest it reads as part of the page. */
+[data-sticky-header] {
+  container-type: scroll-state;
+}
+[data-sticky-header-face] {
+  transition: box-shadow var(--og-dur, 320ms) ease-out;
+}
+@container scroll-state(stuck: top) {
+  [data-sticky-header-face] {
+    box-shadow: 0 8px 16px -12px rgb(var(--og-rgb-text) / 0.35);
+  }
+}
+
 /* Settings lays its cards out in three columns, or four when the cards this build draws fill
    four-wide rows better (Settings.tsx counts them; an open card is the only one drawn). */
 @media (min-width: 1536px) {
