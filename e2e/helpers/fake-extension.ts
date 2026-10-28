@@ -37,7 +37,6 @@ import {
 import { GATEWAY_PORT } from '../../src/shared/ports'
 
 export const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop'
-const BASE = `http://127.0.0.1:${GATEWAY_PORT}`
 
 export interface RpcReply {
   status: number
@@ -91,9 +90,11 @@ export const pairingDialogs = (app: ElectronApplication): Promise<string[]> =>
 /** A browser paired the way a person pairs one (matching words confirmed), with its socket open. */
 export const pairedBrowser = async (
   app: ElectronApplication,
-  name = 'E2E Browser'
+  name = 'E2E Browser',
+  /** The app's gateway port, when the spec gave it its own through OFFGRID_GATEWAY_PORT. */
+  port = GATEWAY_PORT
 ): Promise<FakeExtension> => {
-  const browser = new FakeExtension(name)
+  const browser = new FakeExtension(name, port)
   await answerPairingDialog(app, await browser.pairingCode())
   const paired = await browser.pair()
   if (paired.status !== 200) throw new Error(`pairing failed: ${JSON.stringify(paired)}`)
@@ -115,15 +116,20 @@ export class FakeExtension {
   private channel: SealedChannel | null = null
   private ping: NodeJS.Timeout | null = null
 
-  constructor(name = 'E2E Browser') {
+  private readonly base: string
+  private readonly port: number
+
+  constructor(name = 'E2E Browser', port = GATEWAY_PORT) {
     this.name = name
+    this.port = port
+    this.base = `http://127.0.0.1:${port}`
   }
 
   /** The words this browser shows while pairing; Desktop's dialog must show the same. */
   async pairingCode(): Promise<string> {
     this.keys ??= await generateKeyPair(true)
     const info = (await (
-      await fetch(`${BASE}/v1/extension/info`, { headers: { origin: EXTENSION_ORIGIN } })
+      await fetch(`${this.base}/v1/extension/info`, { headers: { origin: EXTENSION_ORIGIN } })
     ).json()) as { publicKey: string }
     return pairingCode(await exportPublicKey(this.keys.publicKey), info.publicKey)
   }
@@ -131,7 +137,7 @@ export class FakeExtension {
   /** Ask Desktop to pair. Resolves once the person answered Desktop's dialog. */
   async pair(): Promise<{ status: number; error?: string }> {
     this.keys ??= await generateKeyPair(true)
-    const response = await fetch(`${BASE}/v1/extension/pair`, {
+    const response = await fetch(`${this.base}/v1/extension/pair`, {
       method: 'POST',
       headers: { origin: EXTENSION_ORIGIN, 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -144,7 +150,7 @@ export class FakeExtension {
     if (response.status !== 200 || !body.deviceId) return { status: response.status, ...body }
     this.deviceId = body.deviceId
     const info = (await (
-      await fetch(`${BASE}/v1/extension/info`, { headers: { origin: EXTENSION_ORIGIN } })
+      await fetch(`${this.base}/v1/extension/info`, { headers: { origin: EXTENSION_ORIGIN } })
     ).json()) as { publicKey: string }
     this.key = await deriveSessionKey(
       this.keys.privateKey,
@@ -164,7 +170,7 @@ export class FakeExtension {
       method,
       params
     })
-    const response = await fetch(`${BASE}/v1/extension/rpc`, {
+    const response = await fetch(`${this.base}/v1/extension/rpc`, {
       method: 'POST',
       headers: { origin: EXTENSION_ORIGIN, 'content-type': 'application/json' },
       body: JSON.stringify({ v: BRIDGE_VERSION, d: this.deviceId, ...sealed })
@@ -182,10 +188,9 @@ export class FakeExtension {
   /** Open the live socket. Resolves true once Desktop answered the hello, false if it refused. */
   async connect(): Promise<boolean> {
     if (!this.key) throw new Error('not paired')
-    const socket = new WebSocket(
-      `ws://127.0.0.1:${GATEWAY_PORT}${SOCKET_PATH}?d=${this.deviceId}`,
-      { origin: EXTENSION_ORIGIN }
-    )
+    const socket = new WebSocket(`ws://127.0.0.1:${this.port}${SOCKET_PATH}?d=${this.deviceId}`, {
+      origin: EXTENSION_ORIGIN
+    })
     const opened = await Promise.race([
       once(socket, 'open').then(() => true),
       once(socket, 'close').then(() => false),

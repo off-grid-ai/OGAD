@@ -60,7 +60,8 @@ import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
-import { isPortFreeOnAll, pickFreePort } from './free-port'
+import { isPortFreeOnAll, pickFreePort, preferredPort } from './free-port'
+import { isPackagedHost } from './runtime-env'
 import { retryWithDeadline } from './lib/retry'
 import { resolveDims } from './model-server/dimensions'
 import { guardProxyStreams } from './stream-guards'
@@ -2533,7 +2534,10 @@ export function protectedGatewayRoute(
 
 /** Start the unified local model gateway. Bound to loopback (local-only). Async because it scans
  *  for a free port when the preferred one is taken. */
-export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
+export async function startModelServer(
+  // OFFGRID_GATEWAY_PORT gives a dev or e2e instance its own gateway port; an installed app keeps 7878.
+  port = preferredPort(GATEWAY_PORT, process.env.OFFGRID_GATEWAY_PORT, isPackagedHost())
+): Promise<void> {
   if (server || startingGateway) return
   startingGateway = true
   try {

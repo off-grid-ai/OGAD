@@ -13,11 +13,11 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
-import { enginePortsUnavailableReason } from './helpers/ports'
 import { pairedBrowser, type FakeExtension } from './helpers/fake-extension'
 import { closeAndWait, mainWindow } from './helpers/windows'
 
@@ -60,6 +60,16 @@ function seedOlderTasks(): void {
   ])
 }
 
+/** A port free right now, for this app's gateway: the spec then shares no port with the dev app or
+ *  another lane's tests, which otherwise all want 7878. */
+const freePort = async (): Promise<number> => {
+  const probe = net.createServer()
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve))
+  const { port } = probe.address() as net.AddressInfo
+  await new Promise<void>((resolve) => probe.close(() => resolve()))
+  return port
+}
+
 const launch = async (): Promise<void> => {
   profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-sticky-header-'))
   modelLog = path.join(profileDir, 'model-requests.jsonl')
@@ -78,6 +88,7 @@ const launch = async (): Promise<void> => {
   fs.copyFileSync(path.resolve('e2e/fixtures/paired-web-task-llama-server.mjs'), executable)
   fs.chmodSync(executable, 0o755)
   seedOlderTasks()
+  const gatewayPort = await freePort()
   app = await launchOffGrid({
     env: {
       ...process.env,
@@ -87,13 +98,14 @@ const launch = async (): Promise<void> => {
       // The model holds the task while it reads the page, so it stays running.
       OFFGRID_WEB_TASK_HOLD: '1',
       OFFGRID_PRO: '1',
+      OFFGRID_GATEWAY_PORT: String(gatewayPort),
       NODE_ENV: 'production',
       NO_PROXY: '127.0.0.1,localhost'
     }
   })
   page = await mainWindow(app)
   await completeOnboarding(page)
-  browser = await pairedBrowser(app)
+  browser = await pairedBrowser(app, 'E2E Browser', gatewayPort)
   browser.answers.set('page.call', (command) => ({
     text:
       command.args.tool === 'browser_snapshot'
@@ -108,8 +120,6 @@ test.describe('The running task header', () => {
 
   test.beforeEach(async () => {
     test.skip(!PRO_PRESENT, 'pro package not present: Web Use is a Pro surface')
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
   })
 
   // Playwright requires the first callback argument to use object destructuring.

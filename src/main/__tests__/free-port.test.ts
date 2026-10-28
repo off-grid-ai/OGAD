@@ -1,7 +1,13 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import net from 'node:net'
-import { portCandidates, isPortFree, isPortFreeOnAll, pickFreePort } from '../free-port'
+import {
+  portCandidates,
+  isPortFree,
+  isPortFreeOnAll,
+  pickFreePort,
+  preferredPort
+} from '../free-port'
 
 describe('portCandidates — gradual +1 increments', () => {
   it('starts at the preferred port and steps up by 1', () => {
@@ -81,6 +87,20 @@ describe('isPortFreeOnAll — a gateway on every interface never takes a port he
       expect(picked).not.toBeNull()
     } finally {
       await new Promise<void>((r) => loopbackOnly.close(() => r()))
+    }
+  })
+})
+
+describe('preferredPort — an env override moves a dev or test build, never an installed app', () => {
+  it('uses the override in an unpackaged build', () => {
+    expect(preferredPort(7878, '17878', false)).toBe(17878)
+  })
+  it('keeps the fixed port in a packaged build, whatever the override says', () => {
+    expect(preferredPort(7878, '17878', true)).toBe(7878)
+  })
+  it('keeps the fixed port when the override is missing or not a port', () => {
+    for (const value of [undefined, '', 'abc', '0', '70000', '78.5']) {
+      expect(preferredPort(7878, value, false)).toBe(7878)
     }
   })
 })
