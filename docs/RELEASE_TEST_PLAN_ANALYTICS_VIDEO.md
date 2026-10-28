@@ -13,7 +13,7 @@ Every check is: **do this** → **you should see this**. If you don't see it, it
 
 | Lane | Thread | Devices | Can start when |
 |---|---|---|---|
-| **A · Phones** | mobile-blockers | OnePlus (Android) and iPhone, one agent each, **side by side** | iPhone is reconnected |
+| **A · Phones** | mobile-blockers | iPhone runs everything shared; OnePlus runs only Android code, **side by side** | now |
 | **B · Mac** | border-cleanup | this Mac | sticky header is committed |
 | **C · Browser** | ext-security | Brave and Firefox, **side by side** | its fixes land, and the Mac app is running |
 | **D · Phone + Mac** | main thread coordinates | one phone + this Mac | A and B both reach step 2 |
@@ -26,7 +26,8 @@ Every check is: **do this** → **you should see this**. If you don't see it, it
 
 ```
             step 1         step 2                 step 3
-A Phones    old install ─► core + Android/iPhone ─► fresh install
+A iPhone    old install ─► core + iPhone ─────────► fresh install
+A Android   Android-only checks
 B Mac       old install ─► core + Mac ─────────────────────────────────► fresh install  (last of all)
 C Browser                  fixes land ─► Brave + Firefox
 D Together                 (A and B at step 2) ─► phone + Mac checks
@@ -44,7 +45,7 @@ F/G                                                                        remot
 
 ## Core checks
 
-Lanes A and B run these on every device, in step 2.
+Run once per app: on the **iPhone** for mobile, on the **Mac** for desktop. The code is shared, so a second phone or computer adds nothing.
 
 **Basics**
 - [ ] Open the app → no errors
@@ -72,7 +73,7 @@ Lanes A and B run these on every device, in step 2.
 
 ## Fresh install checks
 
-Lanes A and B run these in step 3. Delete the app and its data first.
+Run once per app, on the iPhone and the Mac, in step 3. Delete the app and its data first.
 
 - [ ] Install and open → setup starts, no errors
 - [ ] During setup → the "share anonymous usage" box is **unticked**
@@ -84,17 +85,19 @@ Lanes A and B run these in step 3. Delete the app and its data first.
 
 ## Lane A · Phones — mobile-blockers
 
-Android and iPhone run **side by side**, one agent per phone.
+The two phones run **side by side**, one agent each, but they don't repeat each other:
+- **iPhone** — steps 1 to 3: old install, core checks, iPhone checks, fresh install. This is where everything shared is proven.
+- **OnePlus** — only the Android checks below. That's the code Android alone runs: notifications, foreground service, Downloads, the Snapdragon video path.
 
-**Step 1 · Old install** — install the new build over the one already there and keep its data
+**Step 1 · Old install (iPhone)** — install the previous release, add a document, a voice-to-text model, an image chat and a custom image setting, then install the new build over it
 - [ ] Open it → no crash on launch, Gallery or Storage
 - [ ] Your chats, images and custom image settings are still there
 - [ ] Your documents still come up in search
 - [ ] Old voice-to-text and image models still load
 
-**Step 2 · Core checks**, then:
+**Step 2 (iPhone) · Core checks**, then the iPhone list below.
 
-*Android*
+*Android — OnePlus, Android code only*
 - [x] Stop a model load on a Desktop that never answers → request closes, row recovers, next pick works (new)
 - [ ] Make a video → a "Generating video" notification shows, with **Stop**
 - [ ] Press Stop in the notification → it stops
@@ -105,6 +108,7 @@ Android and iPhone run **side by side**, one agent per phone.
 - [ ] Android **14** and **15** (if you have both) → video works on each
 - [ ] Wan 2.1 and Wan 2.2 → offered like any other model, no "experimental" label (new)
 - [ ] Phone under 11 GB RAM → video says "made on your computer" + **Find my computer**
+- [ ] Settings → Analytics → Report a problem → Send → the log is pasted into the message (iPhone attaches a file instead)
 
 *iPhone*
 - [ ] Stop a call on a Desktop that never answers → the app recovers, the next request works (new)
@@ -118,7 +122,7 @@ Android and iPhone run **side by side**, one agent per phone.
 - [ ] Only **Wan 2.1** is offered for video (Wan 2.2 is Android only)
 - [ ] Install from **TestFlight** → it installs (new background permission)
 
-**Step 3 · Fresh install checks**
+**Step 3 (iPhone) · Fresh install checks**
 
 ---
 
