@@ -74,7 +74,7 @@ export const PRO_FEATURES: ProFeature[] = [
     icon: FilmStrip,
     tagline: 'Turn one sentence into a narrated short film.',
     description:
-      'Describe a story and Off Grid AI writes the shots, keeps the same people in every shot, adds a voice and captions, and renders it on your computer. Your photos never leave your devices.',
+      'Describe a story and Off Grid AI writes the shots, keeps the same people in every shot, adds a voice and captions, and renders it on your computer. Your photos go only to the computer that renders, and the Video screen names it.',
     highlights: [
       'One sentence to a storyboard',
       'The same face in every shot',
