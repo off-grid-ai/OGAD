@@ -155,4 +155,4 @@ The site ships **with** the apps, never before.
 
 - [ ] Sign the **PostHog** data processing agreement
 - [ ] PostHog project settings → turn on **Discard client IP data**. The privacy policy promises IPs are not stored; the apps only turn off location lookup
-- [ ] PostHog project settings → set data retention to **12 months**. The privacy policy promises it
+- [ ] Check which **PostHog plan** we are on. The policy promises 12 months. Free keeps events 1 year, which matches. Paid keeps them **7 years and cannot be shortened**, which breaks the promise
