@@ -269,6 +269,16 @@ button:disabled,
   border-color: var(--color-input);
 }
 
+/* The skin glows any element whose class contains "border" round a focused input three levels
+   down. A row with only a divider (border-b, border-t) holding a search field matched it, so the
+   whole Models filter bar lit up as a boxed panel whenever its search had focus. A divider row is
+   not a field: the beam already marks the field. Only all-round bordered boxes keep the glow. */
+:where([class*='border']):not([class~='border']):has(
+    :is(input, textarea):not([type='checkbox'], [type='radio'], [type='range']):focus
+  ) {
+  box-shadow: none;
+}
+
 /* The beam takes its corners from the outermost field slot (borderRadius: inherit). A combobox or
    autocomplete wraps its rounded control (input-control, rounded-lg) in a group slot with no
    radius, so the beam traced a square box round a rounded field. Give the group the control's
