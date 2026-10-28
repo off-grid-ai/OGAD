@@ -18,8 +18,8 @@ Every check is: **do this** → **you should see this**. If you don't see it, it
 | **C · Browser** | ext-security | Brave and Firefox, **side by side** | its fixes land, and the Mac app is running |
 | **D · Phone + Mac** | main thread coordinates | one phone + this Mac | A and B both reach step 2 |
 | **E · Website** | website-pricing | the site on localhost:4100 | now |
-| **F · Windows** | not assigned | needs a Windows PC (one AMD/Intel, one NVIDIA) | a machine |
-| **G · Linux** | not assigned | the RunPod Linux server | a Linux build |
+| **F · Windows** | at the end | a remote Windows instance (one AMD/Intel, one NVIDIA) | everything else is verified |
+| **G · Linux** | at the end | a remote Linux instance | everything else is verified |
 | **You** | Ali | — | now |
 
 ## Order
@@ -31,7 +31,7 @@ B Mac       old install ─► core + Mac ────────────�
 C Browser                  fixes land ─► Brave + Firefox
 D Together                 (A and B at step 2) ─► phone + Mac checks
 E Website   read any time
-F/G         blocked until there is a machine
+F/G                                                                        remote instances, last
 ```
 
 **Three rules**
@@ -44,7 +44,7 @@ F/G         blocked until there is a machine
 
 ## Core checks
 
-Lanes A, B, F and G run these on every device, in step 2.
+Lanes A and B run these on every device, in step 2.
 
 **Basics**
 - [ ] Open the app → no errors
@@ -72,7 +72,7 @@ Lanes A, B, F and G run these on every device, in step 2.
 
 ## Fresh install checks
 
-Lanes A, B, F and G run these in step 3. Delete the app and its data first.
+Lanes A and B run these in step 3. Delete the app and its data first.
 
 - [ ] Install and open → setup starts, no errors
 - [ ] During setup → the "share anonymous usage" box is **unticked**
@@ -196,9 +196,11 @@ The site ships **with** the apps, never before.
 
 ---
 
-## Lane F · Windows — not assigned
+## Lanes F and G · Windows and Linux — last, on remote instances
 
-Needs a Windows PC. Run step 1 (the Mac's old install list), the core checks, then:
+Everything that isn't platform code is already proven on the Mac and the phones. These lanes run only the checks for code that differs on Windows or Linux.
+
+**Windows**
 
 - [ ] **AMD or Intel graphics** → chat, image and voice-to-text all work
 - [ ] **NVIDIA** → chat, image and video all work in the same session
@@ -208,19 +210,13 @@ Needs a Windows PC. Run step 1 (the Mac's old install list), the core checks, th
 - [ ] Settings → engine picker → options make sense; greyed ones say why
 - [ ] Old NVIDIA driver → says "driver too old", doesn't just fail
 
-Then step 3, the fresh install checks.
-
-## Lane G · Linux — not assigned
-
-Needs a Linux build on the RunPod server. Run step 1, the core checks, then:
+**Linux**
 
 - [ ] Install the **.deb** on a fresh Ubuntu 24.04 → installs and runs
 - [ ] Run the **AppImage** on the same box → runs
 - [ ] **NVIDIA** → install the performance pack → app does **not** restart itself, and search/voice speed up
 - [ ] Change a setting that restarts the app (AppImage) → it comes back
 - [ ] Ubuntu 22.04 → app opens, chat works
-
-Then step 3, the fresh install checks.
 
 ---
 
