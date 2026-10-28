@@ -16,7 +16,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import {
   answerPairingDialog,
   FakeExtension,
@@ -44,8 +44,7 @@ test.describe('Browser pairing', () => {
 
   test.beforeEach(async () => {
     test.skip(!PRO_PRESENT, 'pro package not present: browser pairing is a Pro surface')
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-browser-pairing-'))
     app = await launchOffGrid({
       env: {

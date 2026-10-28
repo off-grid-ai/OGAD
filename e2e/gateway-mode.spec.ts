@@ -11,7 +11,7 @@ import path from 'node:path'
 import { GATEWAY_PORT } from '../src/shared/ports'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid } from './helpers/launch'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import { closeAndWait, gotoScreen, mainWindow } from './helpers/windows'
 
 let app: ElectronApplication | null = null
@@ -50,8 +50,7 @@ const launch = async (): Promise<void> => {
 
 test.describe('Gateway mode', () => {
   test.beforeEach(async () => {
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-mode-'))
     await launch()
   })

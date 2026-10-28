@@ -13,7 +13,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import { closeAndWait } from './helpers/windows'
 
 const REAL_MODELS = path.join(
@@ -55,8 +55,7 @@ test.describe('Real llama.cpp', () => {
   )
 
   test.beforeEach(async () => {
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-real-llama-'))
     const models = path.join(profileDir, 'models')
     fs.mkdirSync(models, { recursive: true })

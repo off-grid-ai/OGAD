@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import { pairedBrowser, type FakeExtension } from './helpers/fake-extension'
 import { closeAndWait, gotoScreen, mainWindow } from './helpers/windows'
 import { createVaultThroughGate } from './helpers/vault'
@@ -55,8 +55,7 @@ test.describe('Paired-browser vault', () => {
 
   test.beforeEach(async () => {
     test.skip(!PRO_PRESENT, 'pro package not present: the vault is a Pro surface')
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-browser-vault-'))
     app = await launchOffGrid({
       env: {
