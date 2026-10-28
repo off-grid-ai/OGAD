@@ -60,7 +60,7 @@ import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
-import { isPortFree, pickFreePort } from './free-port'
+import { isPortFreeOnAll, pickFreePort } from './free-port'
 import { retryWithDeadline } from './lib/retry'
 import { resolveDims } from './model-server/dimensions'
 import { guardProxyStreams } from './stream-guards'
@@ -2537,8 +2537,10 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
   if (server || startingGateway) return
   startingGateway = true
   try {
+    // Free on every interface and on loopback: a port another app holds on 127.0.0.1 only would
+    // let local clients reach that app instead of this gateway.
     const availablePort = await pickFreePort(port, (candidate) =>
-      isPortFree(candidate, GATEWAY_BIND_HOST)
+      isPortFreeOnAll(candidate, [GATEWAY_BIND_HOST, GATEWAY_HOST])
     )
     if (availablePort === null) throw new Error(`No free gateway port on ${GATEWAY_BIND_HOST}.`)
     boundGatewayPort = availablePort

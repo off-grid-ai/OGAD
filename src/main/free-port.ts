@@ -32,6 +32,14 @@ export function isPortFree(port: number, host = '127.0.0.1'): Promise<boolean> {
   })
 }
 
+/** True if `port` is free on every one of `hosts`. A server listening on every interface (0.0.0.0)
+ *  can still bind a port that another process holds on 127.0.0.1 alone, and then loopback clients
+ *  reach that other process instead: so a port counts as free only when loopback is free too. */
+export async function isPortFreeOnAll(port: number, hosts: readonly string[]): Promise<boolean> {
+  for (const host of hosts) if (!(await isPortFree(port, host))) return false
+  return true
+}
+
 /**
  * The first free port at or after `preferred`, scanning upward in single steps. Returns null if none
  * in the window is free (caller decides whether to surface a conflict). `isFree` is injected so the
