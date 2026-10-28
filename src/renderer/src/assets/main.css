@@ -286,6 +286,14 @@ button:disabled,
   outline: none;
 }
 
+/* A segmented group is a row of choices in the page, not a boxed-off panel. operator-ui draws a
+   1px track ring round every group, which on the Models filter bar framed the tabs, the size
+   chips and the layout toggle as separate panels. The chosen option keeps its own pill, so the
+   state still reads without the frame. Dropped once here for every screen that uses Segmented. */
+[data-slot='segmented'] {
+  box-shadow: none;
+}
+
 /* Settings lays its cards out in three columns, or four when the cards this build draws fill
    four-wide rows better (Settings.tsx counts them; an open card is the only one drawn). */
 @media (min-width: 1536px) {
