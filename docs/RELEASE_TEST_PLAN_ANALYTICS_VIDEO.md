@@ -154,3 +154,5 @@ The site ships **with** the apps, never before.
 ## Still open — not a test, needs you
 
 - [ ] Sign the **PostHog** data processing agreement
+- [ ] PostHog project settings → turn on **Discard client IP data**. The privacy policy promises IPs are not stored; the apps only turn off location lookup
+- [ ] PostHog project settings → set data retention to **12 months**. The privacy policy promises it
