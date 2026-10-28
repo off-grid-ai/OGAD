@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -10,6 +11,8 @@ const root = path.resolve(import.meta.dirname, '../../..')
 const electronVite = path.join(root, 'node_modules', '.bin', 'electron-vite')
 const tempRoots: string[] = []
 const execFileAsync = promisify(execFile)
+const require = createRequire(import.meta.url)
+const { getConfig: getEffectiveBuilderConfig } = require('app-builder-lib/out/util/config/config')
 const BUILD_TIMEOUT_MS = 90_000
 
 function tempDir(prefix: string): string {
@@ -260,6 +263,42 @@ describe.sequential('release packaging integration', () => {
     )
     expect(pro).toContain('[pro] main activated')
     expect(pro).toContain('vault:status')
+  })
+
+  it('packages the native helpers into bin on every platform, from the real electron-builder config', async () => {
+    // What electron-builder will actually use: electron-builder.yml merged with the shared runtime
+    // file it extends. The fixture build below proves the staged helper runs; this proves the
+    // installer copies it. A config edit that drops either path ships an app with no engine.
+    const builder = fs.readFileSync(path.join(root, 'electron-builder.yml'), 'utf8')
+    expect(builder).toContain("- '!pro/**'")
+    expect(builder).toContain('extends: scripts/config/electron-builder-runtime.yml')
+    type Resource = { from?: string; to?: string; filter?: string[] }
+    const config = (await getEffectiveBuilderConfig(
+      root,
+      path.join(root, 'electron-builder.yml'),
+      null
+    )) as {
+      extraResources?: Resource[]
+      mac?: { extraResources?: Resource[] }
+      win?: { extraResources?: Resource[] }
+      linux?: { extraResources?: Resource[] }
+    }
+    // Shared resources go everywhere; the native binaries never come from them.
+    const shared = config.extraResources?.find((entry) => entry.from === 'resources')
+    expect(shared?.filter).toEqual(expect.arrayContaining(['**/*', '!models/**', '!bin/**']))
+
+    const into = (from: string, to: string): unknown => expect.objectContaining({ from, to })
+    expect(config.mac?.extraResources).toContainEqual(into('resources/bin', 'bin'))
+    expect(config.win?.extraResources).toContainEqual(into('resources/bin', 'bin'))
+    expect(config.linux?.extraResources).toContainEqual(into('build/linux-bin', 'bin'))
+    for (const platform of [config.mac, config.linux]) {
+      expect(platform?.extraResources).toContainEqual(
+        into('../executorch-speech/native/bin/executorch-speech', 'bin/executorch-speech')
+      )
+      expect(platform?.extraResources).toContainEqual(
+        into('../executorch-speech/generated/default-assets', 'speech-assets')
+      )
+    }
   })
 
   it('stages an executable helper payload before packaging', () => {
