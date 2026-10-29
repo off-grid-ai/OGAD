@@ -53,15 +53,10 @@ export function EmbeddingRebuildNotice(): React.JSX.Element | null {
       <div
         role="status"
         aria-live="polite"
-        className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 bg-emerald-950/90 px-4 py-1.5 font-mono text-[11px] text-emerald-200"
+        className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 border-b border-primary/30 bg-card/90 px-4 py-1.5 font-mono text-meta text-primary"
       >
         <span>Previous embedding model and search index restored.</span>
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={() => setStatus(null)}
-          className="h-5 text-emerald-100 hover:bg-emerald-800/60"
-        >
+        <Button variant="ghost" size="xs" onClick={() => setStatus(null)} className="h-5">
           Dismiss
         </Button>
       </div>
@@ -71,7 +66,7 @@ export function EmbeddingRebuildNotice(): React.JSX.Element | null {
       <div
         role="status"
         aria-live="assertive"
-        className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 bg-red-950/90 px-4 py-1.5 font-mono text-[11px] text-red-200"
+        className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 border-b border-destructive/30 bg-card/90 px-4 py-1.5 font-mono text-meta text-destructive"
       >
         <WarningCircle size={13} aria-hidden />
         <span className="min-w-0">
@@ -79,12 +74,7 @@ export function EmbeddingRebuildNotice(): React.JSX.Element | null {
             ? 'Search index could not be restored. Restart the app to retry recovery. Details are in the app log.'
             : 'Search index rebuild failed. Previous model and index restored. Try again. Details are in the app log.'}
         </span>
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={() => setStatus(null)}
-          className="h-5 text-red-100 hover:bg-red-800/60"
-        >
+        <Button variant="ghost" size="xs" onClick={() => setStatus(null)} className="h-5">
           Dismiss
         </Button>
       </div>
@@ -94,7 +84,7 @@ export function EmbeddingRebuildNotice(): React.JSX.Element | null {
     <div
       role="status"
       aria-live="polite"
-      className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 bg-neutral-900/90 px-4 py-1.5 font-mono text-[11px] text-neutral-300"
+      className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 border-b border-border bg-card/90 px-4 py-1.5 font-mono text-meta text-foreground/80"
     >
       <span>
         {status.phase === 'preparing'
@@ -107,11 +97,11 @@ export function EmbeddingRebuildNotice(): React.JSX.Element | null {
         size="xs"
         disabled={cancelling}
         onClick={() => void cancel()}
-        className="h-5 border-neutral-600 bg-neutral-800 text-neutral-100 hover:bg-neutral-700"
+        className="h-5 bg-secondary"
       >
         {cancelling ? 'Restoring...' : 'Cancel and restore'}
       </Button>
-      {cancelError && <span className="text-red-300">{cancelError}</span>}
+      {cancelError && <span className="text-destructive">{cancelError}</span>}
     </div>
   )
 }
