@@ -85,6 +85,24 @@ describe('noticeDialog', () => {
     settleConfirmDialog(request, true)
     await expect(dismissed).resolves.toBeUndefined()
   })
+
+  it('shows a repeated notice once, and both callers wait until it is dismissed', async () => {
+    const settledOrder: string[] = []
+    const first = noticeDialog({ title: 'Import failed', description: 'Bad file' }).then(() =>
+      settledOrder.push('first')
+    )
+    const repeat = noticeDialog({ title: 'Import failed', description: 'Bad file' }).then(() =>
+      settledOrder.push('repeat')
+    )
+
+    expect(renderHook(() => useConfirmDialogState()).result.current.queue).toHaveLength(1)
+    await new Promise((tick) => setTimeout(tick, 0))
+    expect(settledOrder).toEqual([])
+
+    settleConfirmDialog(onScreen(), true)
+    await Promise.all([first, repeat])
+    expect(settledOrder).toEqual(['first', 'repeat'])
+  })
 })
 
 describe('clearDataCategoryDialog', () => {

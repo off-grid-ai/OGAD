@@ -41,6 +41,8 @@ const NOTICE_LABEL = 'OK'
 
 let state: ConfirmDialogState = { queue: [] }
 const listeners = new Set<() => void>()
+/** Callers of a duplicate notice, resolved when the notice they share is dismissed. */
+const noticeFollowers = new Map<ConfirmDialogRequest, Array<() => void>>()
 
 function setState(next: ConfirmDialogState): void {
   state = next
@@ -54,10 +56,18 @@ function isSameRequest(
   return a.title === b.title && a.description === b.description && a.confirmLabel === b.confirmLabel
 }
 
+function followNotice(notice: ConfirmDialogRequest): Promise<boolean> {
+  return new Promise((resolve) => {
+    noticeFollowers.set(notice, [...(noticeFollowers.get(notice) ?? []), () => resolve(true)])
+  })
+}
+
 // A native confirm blocked the page, so a double click could never ask twice. Here it could, and
-// confirming both would run the action twice, so a request already waiting is answered no.
+// confirming both would run the action twice, so a question already waiting is answered no. A
+// repeated notice has no action to guard; it shares the one on screen and resolves when that does.
 function enqueue(options: Omit<ConfirmDialogRequest, 'resolve'>): Promise<boolean> {
-  if (state.queue.some((queued) => isSameRequest(queued, options))) return Promise.resolve(false)
+  const waiting = state.queue.find((queued) => isSameRequest(queued, options))
+  if (waiting) return options.cancelLabel === null ? followNotice(waiting) : Promise.resolve(false)
   return new Promise((resolve) => {
     const queued = { ...options, resolve }
     const queue = [...state.queue, queued]
@@ -93,6 +103,8 @@ export function settleConfirmDialog(settled: ConfirmDialogRequest, confirmed: bo
   const queue = state.queue.slice(1)
   setState({ queue, shown: queue[0] ?? settled })
   settled.resolve(confirmed)
+  for (const follow of noticeFollowers.get(settled) ?? []) follow()
+  noticeFollowers.delete(settled)
 }
 
 function getState(): ConfirmDialogState {
