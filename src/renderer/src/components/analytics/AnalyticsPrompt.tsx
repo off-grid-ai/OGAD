@@ -40,7 +40,7 @@ export function AnalyticsPrompt(): React.ReactElement | null {
 
   return (
     <Dialog open onOpenChange={(open) => !open && answer(false)}>
-      <DialogContent className="rounded-none border-neutral-700 bg-neutral-950 sm:max-w-md">
+      <DialogContent className="rounded-none sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{TITLES[kind]}</DialogTitle>
           <DialogDescription className="leading-relaxed">{BODY}</DialogDescription>

@@ -27,7 +27,7 @@ export function WhatWeShareDialog({
 }): React.ReactElement {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-none border-neutral-700 bg-neutral-950 sm:max-w-2xl">
+      <DialogContent className="rounded-none sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>What we share</DialogTitle>
           <DialogDescription className="leading-relaxed">
@@ -39,14 +39,14 @@ export function WhatWeShareDialog({
           <section aria-labelledby="analytics-we-share">
             <h3
               id="analytics-we-share"
-              className="mb-2 text-label uppercase tracking-wide text-neutral-400"
+              className="mb-2 text-label uppercase tracking-wide text-muted-foreground"
             >
               We share
             </h3>
             <ul className="space-y-1.5">
               {WE_SHARE.map((item) => (
-                <li key={item} className="flex gap-2 text-neutral-200">
-                  <Check aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                <li key={item} className="flex gap-2">
+                  <Check aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
                   {item}
                 </li>
               ))}
@@ -55,14 +55,14 @@ export function WhatWeShareDialog({
           <section aria-labelledby="analytics-never-share">
             <h3
               id="analytics-never-share"
-              className="mb-2 text-label uppercase tracking-wide text-neutral-400"
+              className="mb-2 text-label uppercase tracking-wide text-muted-foreground"
             >
               We never share
             </h3>
             <ul className="space-y-1.5">
               {WE_NEVER_SHARE.map((item) => (
-                <li key={item} className="flex gap-2 text-neutral-200">
-                  <X aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
+                <li key={item} className="flex gap-2">
+                  <X aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
                   {item}
                 </li>
               ))}

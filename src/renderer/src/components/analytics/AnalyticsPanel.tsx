@@ -69,7 +69,7 @@ export function AnalyticsPanel(): React.ReactElement {
           <Bug className="h-3.5 w-3.5" />
           Report a problem
         </Button>
-        <span className="text-meta text-neutral-500">
+        <span className="text-meta text-muted-foreground">
           Your chats and files never leave your computer.
         </span>
       </div>

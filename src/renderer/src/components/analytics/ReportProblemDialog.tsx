@@ -63,7 +63,7 @@ export function ReportProblemDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-none border-neutral-700 bg-neutral-950 sm:max-w-3xl">
+      <DialogContent className="rounded-none sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Report a problem</DialogTitle>
           <DialogDescription className="leading-relaxed">
@@ -77,13 +77,13 @@ export function ReportProblemDialog({
           <pre
             aria-label="Diagnostic log"
             tabIndex={0}
-            className="h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-neutral-800 bg-neutral-900/60 p-3 font-mono text-meta leading-relaxed text-neutral-300"
+            className="h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-muted/40 p-3 font-mono text-meta leading-relaxed text-foreground/70"
           >
             {log.text || 'The log is empty.'}
           </pre>
         )}
         {log?.truncated ? (
-          <p className="text-meta text-neutral-500">Showing the newest part of the log.</p>
+          <p className="text-meta text-muted-foreground">Showing the newest part of the log.</p>
         ) : null}
         <DialogFooter className="items-center gap-2 sm:justify-between">
           <IconTip label="Show log file">
