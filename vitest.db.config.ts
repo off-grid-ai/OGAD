@@ -24,7 +24,8 @@ export default defineConfig({
       'integration-tests/*.dbtest.ts',
       'integration-tests/*.dbtest.tsx',
       'src/main/__tests__/*.dbtest.ts',
-      'pro/main/__tests__/*.dbtest.ts'
+      'pro/**/__tests__/*.dbtest.ts',
+      'pro/**/__tests__/*.dbtest.tsx'
     ],
     exclude: ['node_modules/**', 'out/**', 'e2e/**'],
     // Every file leaves the model port free for the next one - see the harness for why that has to be
