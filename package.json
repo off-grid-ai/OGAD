@@ -43,6 +43,7 @@
     "build:linux:release": "bash scripts/build-llama-linux.sh && LLAMA_ACCELERATOR=cpu bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism bash scripts/build-llama-linux.sh && LLAMA_VARIANT=prism LLAMA_ACCELERATOR=cpu bash scripts/build-llama-linux.sh && bash scripts/build-voice-linux.sh && bash scripts/fetch-image-linux.sh && bash scripts/build-tts-linux.sh && node scripts/fetch-sherpa.mjs --bin build/linux-bin --check && bash scripts/stage-linux-desktop.sh && npm run prepare:speech-defaults && node scripts/stage-native.mjs && electron-vite build && electron-builder --linux --x64 --publish never",
     "build:linux:pinned": "node scripts/fetch-sherpa.mjs --bin build/linux-bin --check && bash scripts/stage-linux-desktop.sh && npm run prepare:speech-defaults && node scripts/stage-native.mjs && electron-vite build && electron-builder --linux --x64 --publish never",
     "test:e2e": "electron-vite build && OFFGRID_E2E_HEADLESS=1 playwright test",
+    "shots": "node scripts/pr-shots.mjs",
     "test:sync:physical": "node scripts/physical-sync/iosMacKnowledgeSync.mjs",
     "smoke": "bash scripts/smoke-api.sh",
     "smoke:packaged": "bash scripts/smoke-packaged.sh",
