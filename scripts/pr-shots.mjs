@@ -26,7 +26,7 @@ const SETS = {
     config: 'pro/e2e/playwright.config.ts',
     grep: 'video-screens',
     covers:
-      'Video home, making, watch (with the player), your videos, the shot editor, character, and the clip and film cards in chat'
+      'Video home, making, watch (with the player), your videos, the shot editor, character, and the clip (text and voice mode) and film cards in chat'
   }
 }
 
