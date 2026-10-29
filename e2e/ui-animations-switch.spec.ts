@@ -68,7 +68,7 @@ async function measure(): Promise<Motion> {
 
   // A plain button (a Video idea card) held down, released off it so nothing is clicked.
   await navButton(page, 'Video').click()
-  const plain = page.locator('button:not([data-slot])').filter({ hasText: /red fox/i })
+  const plain = page.locator('button:not([data-slot])').filter({ hasText: /talking head/i })
   await expect(plain).toBeVisible()
   const middle = (await plain.boundingBox())!
   await page.mouse.move(middle.x + middle.width / 2, middle.y + middle.height / 2)
