@@ -126,6 +126,17 @@
   --color-ring: var(--og-primary);
 
   /*
+   * Over a photo or a video, the same in light and dark: the picture sets the ground, not the
+   * theme (mobile's MEDIA). A player is black with white controls; a badge on a picture is a
+   * dark scrim (bg-media/60) with white text.
+   */
+  --color-media: #000000;
+  --color-media-foreground: #ffffff;
+  /* A card lifted off the page: a soft shadow that reads on the light field and sinks into dark. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+  --shadow-card-lg: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 32px rgb(0 0 0 / 0.07);
+
+  /*
    * Brutalist/terminal radius scale — Off Grid AI is flat, sharp, dense. Remapping
    * the radius tokens globally makes EVERY approved-library component (shadcn,
    * Aceternity, Magic UI) sharp and on-brand with no per-component overrides.
