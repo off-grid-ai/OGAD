@@ -86,7 +86,7 @@ const result = run('npx', ['playwright', 'test', '-c', set.config, set.grep], {
 })
 
 const taken = (fs.existsSync(shotDir) ? fs.readdirSync(shotDir) : [])
-  .filter((file) => file.endsWith(`-${phase}.png`))
+  .filter((file) => file.endsWith(`-${phase}.png`) || file.endsWith(`-${phase}-dark.png`))
   .filter((file) => fs.statSync(path.join(shotDir, file)).mtimeMs >= startedAt)
   .sort()
 console.log(`\n${taken.length} screen${taken.length === 1 ? '' : 's'} taken into ${shotDir}`)
