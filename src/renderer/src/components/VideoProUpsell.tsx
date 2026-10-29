@@ -4,8 +4,8 @@ import { Button } from './ui/button'
 /** Video is Pro. Free builds show this short line and open the upgrade screen. */
 export function VideoProUpsell(props: { readonly onOpen?: () => void }): React.JSX.Element {
   return (
-    <span className="flex items-center gap-3 text-xs text-neutral-500">
-      <FilmStrip className="h-4 w-4 shrink-0 text-neutral-400" aria-hidden />
+    <span className="flex items-center gap-3 text-xs text-muted-foreground">
+      <FilmStrip className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
       <span className="min-w-0 flex-1">Video needs Off Grid AI Pro.</span>
       <Button
         type="button"

@@ -136,7 +136,7 @@ export function ChatVideoPreview({
   return url && !failed ? (
     <MediaController
       key={url}
-      className={`chat-video-player w-full overflow-hidden rounded-md border border-neutral-800 ${className}`}
+      className={`chat-video-player w-full overflow-hidden rounded-md border border-border ${className}`}
     >
       <video
         ref={videoRef}
@@ -172,7 +172,7 @@ export function ChatVideoPreview({
     </MediaController>
   ) : (
     <div
-      className={`flex aspect-video items-center justify-center rounded-md border border-neutral-800 bg-black text-xs text-neutral-500 ${className}`}
+      className={`flex aspect-video items-center justify-center rounded-md border border-border bg-muted text-xs text-muted-foreground ${className}`}
     >
       {failed ? 'Video is not available on this device.' : 'Loading video…'}
     </div>
