@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Copy, EnvelopeSimple, FolderOpen } from '@phosphor-icons/react'
+import { Check, Copy, EnvelopeSimple, FolderOpen, WarningCircle } from '@phosphor-icons/react'
 import { Skeleton } from '@offgrid/operator-ui/operator/coss/skeleton'
-import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { writeClipboardWithFallback } from '@renderer/lib/clipboard-write'
 import { Button } from '../ui/button'
-import { IconTip } from '../IconTip'
+import { GlyphSwap, IconTip } from '../IconTip'
 import {
   Dialog,
   DialogContent,
@@ -59,6 +58,8 @@ export function ReportProblemDialog({
     )
     setCopied(ok ? 'copied' : 'failed')
   }
+  const copyLabel =
+    copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy log'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -96,12 +97,30 @@ export function ReportProblemDialog({
             </Button>
           </IconTip>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => void copy()} disabled={!log?.text}>
-              <Copy className="h-4 w-4" />
-              <TextMorph as="span">
-                {copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy log'}
-              </TextMorph>
-            </Button>
+            <IconTip label={copyLabel}>
+              <Button
+                size="icon"
+                variant="outline"
+                aria-label={copyLabel}
+                onClick={() => void copy()}
+                disabled={!log?.text}
+              >
+                <GlyphSwap glyphKey={copied}>
+                  {copied === 'copied' ? (
+                    <Check className="h-4 w-4" weight="bold" />
+                  ) : copied === 'failed' ? (
+                    <WarningCircle className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </GlyphSwap>
+              </Button>
+            </IconTip>
+            {copied === 'idle' ? null : (
+              <span role="status" className="sr-only">
+                {copyLabel}
+              </span>
+            )}
             <Button onClick={() => void window.api.analytics.emailLog()}>
               <EnvelopeSimple className="h-4 w-4" />
               Email us
