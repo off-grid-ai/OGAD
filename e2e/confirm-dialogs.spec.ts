@@ -56,7 +56,7 @@ test('deleting a project asks in the app, and text fields work after the dialog 
   if (await knowledge.isVisible()) await knowledge.click()
 
   await page.getByTitle('Delete project').click()
-  await expect(confirmDialog()).toContainText('Delete this project?')
+  await expect(confirmDialog()).toHaveAccessibleName('Delete this project?')
   await confirmDialog().getByRole('button', { name: 'Cancel' }).click()
   await expect(confirmDialog()).toBeHidden()
   await expect(page.getByRole('heading', { name: PROJECT })).toBeVisible()
@@ -78,10 +78,10 @@ test('delete all data asks twice, and cancelling the second step runs nothing', 
   await openSettingsSection(page, 'Data & privacy')
 
   await page.getByRole('button', { name: 'Delete all my data', exact: true }).click()
-  await expect(confirmDialog()).toContainText('Delete ALL your data?')
+  await expect(confirmDialog()).toHaveAccessibleName('Delete ALL your data?')
   await confirmDialog().getByRole('button', { name: 'Delete all' }).click()
 
-  await expect(confirmDialog()).toContainText('Are you absolutely sure?')
+  await expect(confirmDialog()).toHaveAccessibleName('Are you absolutely sure?')
   await confirmDialog().getByRole('button', { name: 'Cancel' }).click()
   await expect(confirmDialog()).toBeHidden()
   // A confirmed delete-all reloads the window, which would close this section.
