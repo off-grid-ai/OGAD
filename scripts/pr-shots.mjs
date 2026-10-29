@@ -27,6 +27,11 @@ const SETS = {
     grep: 'video-screens',
     covers:
       'Video home, making, watch (with the player), your videos, the shot editor, character, and the clip (text and voice mode) and film cards in chat'
+  },
+  analytics: {
+    config: 'playwright.config.ts',
+    grep: 'analytics-screens',
+    covers: 'Settings > Analytics, What we share, Report a problem, and the consent prompt'
   }
 }
 
