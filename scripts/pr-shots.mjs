@@ -68,15 +68,18 @@ if (!flag('no-build')) {
   if (built.status !== 0) process.exit(built.status ?? 1)
 }
 
-const before = new Set(fs.existsSync(shotDir) ? fs.readdirSync(shotDir) : [])
+// A retake writes over the file it took last time, so "new to the folder" would count nothing on
+// the second run. What this run produced is what it WROTE: a file whose mtime moved past the start.
+const startedAt = Date.now()
 const result = run('npx', ['playwright', 'test', '-c', set.config, set.grep], {
   VIDEO_SHOTS: phase
 })
 
-const taken = (fs.existsSync(shotDir) ? fs.readdirSync(shotDir) : []).filter(
-  (file) => file.endsWith(`-${phase}.png`) && !before.has(file)
-)
-console.log(`\n${taken.length} new screen${taken.length === 1 ? '' : 's'} in ${shotDir}`)
+const taken = (fs.existsSync(shotDir) ? fs.readdirSync(shotDir) : [])
+  .filter((file) => file.endsWith(`-${phase}.png`))
+  .filter((file) => fs.statSync(path.join(shotDir, file)).mtimeMs >= startedAt)
+  .sort()
+console.log(`\n${taken.length} screen${taken.length === 1 ? '' : 's'} taken into ${shotDir}`)
 for (const file of taken) console.log(`  ${file}`)
 if (result.status !== 0)
   console.log('\nSome screens were not reached — the run above names each one and why.')
