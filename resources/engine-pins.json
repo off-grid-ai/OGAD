@@ -80,16 +80,16 @@
   "archives": {
     "release": "native-deps-2026-09",
     "mac-native": {
-      "name": "ogad-mac-native-20261028-r8.tar.gz",
-      "sha256": "fb90e918b6580dfff7c8c428ae29269d57cd05070ad97a1af64e7d26d2d12f48"
+      "name": "ogad-mac-native-20261029-r9.tar.gz",
+      "sha256": "b610f4bb95a66176a9eb5178ea9cc4eeb0fa7f5c22a7e35b8dac6fca0dd6b3c1"
     },
     "linux-native": {
-      "name": "ogad-linux-native-x64-20261028-r8.tar.gz",
-      "sha256": "3f489d6b45c3a3ce7d12893c03017ac840b6210cec6936591d36c1dcf06a96ae"
+      "name": "ogad-linux-native-x64-20261029-r9.tar.gz",
+      "sha256": "5d5e49d07b4af1672e3cc190d450b89c23d6568b5437961fb8bf00bc3f24b571"
     },
     "linux-sd-cuda": {
-      "name": "ogad-sd-master-1017-be48649-linux-x64-cuda12.8-multiarch-20261027-r7.tar.gz",
-      "sha256": "5c78445a5c8cd5d27c47b639a46a6685e7a293bef6d43056d3800d9d1d091a2c"
+      "name": "ogad-sd-master-1024-77b72a2-linux-x64-cuda12.8-multiarch-20261029-r9.tar.gz",
+      "sha256": "fc9c1e0bb4ee90350b7b0499ba71de2b5692de86c3b5aca4829588b24130c4de"
     },
     "linux-whisper": {
       "name": "ogad-whisper-v1.9.5-linux-x64-cuda12.8-multiarch-v1.tar.gz",
