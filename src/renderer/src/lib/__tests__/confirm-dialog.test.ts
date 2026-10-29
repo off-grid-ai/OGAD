@@ -56,6 +56,24 @@ describe('confirmDialog', () => {
     expect(result.current.queue).toHaveLength(0)
     expect(result.current.shown?.title).toBe('Closing?')
   })
+
+  it('answers no to a request identical to one already waiting, so a double click acts once', async () => {
+    const first = confirmDialog(deleteModelDialog('Qwen'))
+    const repeat = confirmDialog(deleteModelDialog('Qwen'))
+    await expect(repeat).resolves.toBe(false)
+
+    const { result } = renderHook(() => useConfirmDialogState())
+    expect(result.current.queue).toHaveLength(1)
+
+    // A different question still waits its turn.
+    const other = confirmDialog(deleteModelDialog('Gemma'))
+    expect(renderHook(() => useConfirmDialogState()).result.current.queue).toHaveLength(2)
+
+    settleConfirmDialog(onScreen(), true)
+    settleConfirmDialog(onScreen(), false)
+    await expect(first).resolves.toBe(true)
+    await expect(other).resolves.toBe(false)
+  })
 })
 
 describe('noticeDialog', () => {

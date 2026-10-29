@@ -139,6 +139,25 @@ describe('rendered storage usage', () => {
     await waitFor(() => expect(api.deleteModel).toHaveBeenCalledWith('decider-vision'))
   })
 
+  it('deletes once when Delete is double-clicked', async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <StoragePanel />
+        <ConfirmDialogHost />
+      </>
+    )
+
+    await user.dblClick(await screen.findByRole('button', { name: 'Delete Local vision model' }))
+    expect(await screen.findAllByRole('alertdialog')).toHaveLength(1)
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' })
+    )
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(api.deleteModel).toHaveBeenCalledTimes(1)
+  })
+
   it('opens model settings only from the active installed model', async () => {
     const openSettings = vi.fn()
     window.addEventListener('og:open-model-settings-panel', openSettings)

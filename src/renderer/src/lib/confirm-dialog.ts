@@ -47,7 +47,17 @@ function setState(next: ConfirmDialogState): void {
   for (const listener of listeners) listener()
 }
 
+function isSameRequest(
+  a: Omit<ConfirmDialogRequest, 'resolve'>,
+  b: Omit<ConfirmDialogRequest, 'resolve'>
+): boolean {
+  return a.title === b.title && a.description === b.description && a.confirmLabel === b.confirmLabel
+}
+
+// A native confirm blocked the page, so a double click could never ask twice. Here it could, and
+// confirming both would run the action twice, so a request already waiting is answered no.
 function enqueue(options: Omit<ConfirmDialogRequest, 'resolve'>): Promise<boolean> {
+  if (state.queue.some((queued) => isSameRequest(queued, options))) return Promise.resolve(false)
   return new Promise((resolve) => {
     const queued = { ...options, resolve }
     const queue = [...state.queue, queued]
