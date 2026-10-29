@@ -137,6 +137,28 @@
   --radius-xl: 6px;
   --radius-2xl: 8px;
 
+  /*
+   * The @offgrid/design type and spacing scales (tokens.css), as utilities: text-body,
+   * text-label, px-og-xl, gap-og-sm. Size only: line-height and tracking stay with the skin.
+   * Spacing is namespaced `og-` because Tailwind resolves w-md and max-w-md through
+   * --spacing-* before --container-*, so an unprefixed --spacing-md would shrink them.
+   */
+  --text-display: var(--og-type-display-size);
+  --text-h1: var(--og-type-h1-size);
+  --text-h2: var(--og-type-h2-size);
+  --text-h3: var(--og-type-h3-size);
+  --text-body: var(--og-type-body-size);
+  /* TYPOGRAPHY.bodySmall; tokens.css has no variable for it. */
+  --text-body-small: 13px;
+  --text-label: var(--og-type-label-size);
+  --text-meta: var(--og-type-meta-size);
+  --spacing-og-xs: var(--og-space-xs);
+  --spacing-og-sm: var(--og-space-sm);
+  --spacing-og-md: var(--og-space-md);
+  --spacing-og-lg: var(--og-space-lg);
+  --spacing-og-xl: var(--og-space-xl);
+  --spacing-og-xxl: var(--og-space-xxl);
+
   @keyframes spotlight {
     0% {
       opacity: 0;
