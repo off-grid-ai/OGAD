@@ -76,13 +76,13 @@ export function ReportProblemDialog({
           <pre
             aria-label="Diagnostic log"
             tabIndex={0}
-            className="h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-neutral-800 bg-neutral-900/60 p-3 font-mono text-[10px] leading-relaxed text-neutral-300"
+            className="h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-neutral-800 bg-neutral-900/60 p-3 font-mono text-meta leading-relaxed text-neutral-300"
           >
             {log.text || 'The log is empty.'}
           </pre>
         )}
         {log?.truncated ? (
-          <p className="text-[11px] text-neutral-500">Showing the newest part of the log.</p>
+          <p className="text-meta text-neutral-500">Showing the newest part of the log.</p>
         ) : null}
         <DialogFooter className="items-center gap-2 sm:justify-between">
           <IconTip label="Show log file">

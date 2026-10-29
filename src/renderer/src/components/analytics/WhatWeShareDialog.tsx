@@ -39,7 +39,7 @@ export function WhatWeShareDialog({
           <section aria-labelledby="analytics-we-share">
             <h3
               id="analytics-we-share"
-              className="mb-2 text-[11px] uppercase tracking-wide text-neutral-400"
+              className="mb-2 text-label uppercase tracking-wide text-neutral-400"
             >
               We share
             </h3>
@@ -55,7 +55,7 @@ export function WhatWeShareDialog({
           <section aria-labelledby="analytics-never-share">
             <h3
               id="analytics-never-share"
-              className="mb-2 text-[11px] uppercase tracking-wide text-neutral-400"
+              className="mb-2 text-label uppercase tracking-wide text-neutral-400"
             >
               We never share
             </h3>
