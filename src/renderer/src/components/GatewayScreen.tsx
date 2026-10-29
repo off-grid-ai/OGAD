@@ -16,6 +16,7 @@ import {
 import { Button } from './ui/button'
 import { IconTip } from './IconTip'
 import { SettingsSelect } from './SettingsSelect'
+import { deviceNoun } from '@renderer/lib/device'
 
 // Explains the local OpenAI-compatible gateway with copyable quick-start snippets
 // and a link to the interactive playground the gateway serves. Core feature.
@@ -211,7 +212,7 @@ export function GatewayScreen(): React.ReactElement {
       <div className="flex w-full flex-col px-8 pt-8 pb-16">
         <PageHeader
           title="Gateway"
-          description="One OpenAI-compatible API for every model on this Mac."
+          description={`One OpenAI-compatible API for every model on this ${deviceNoun()}.`}
           actions={
             <IconTip label="Interactive playground">
               <Button

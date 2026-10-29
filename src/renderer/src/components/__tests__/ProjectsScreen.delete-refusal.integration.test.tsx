@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RendererEntitlementProvider } from '../../bootstrap/RendererEntitlementProvider'
 import { installAppBoundary } from '../../__tests__/harness/app-boundary'
+import { ConfirmDialogHost } from '../ConfirmDialogHost'
 
 const project = {
   id: 'protected-project',
@@ -16,10 +17,6 @@ const project = {
 }
 
 describe('<ProjectsScreen/> delete refusal', () => {
-  beforeEach(() => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-  })
-
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
@@ -39,12 +36,16 @@ describe('<ProjectsScreen/> delete refusal', () => {
     render(
       <RendererEntitlementProvider>
         <ProjectsScreen onOpenChat={() => undefined} />
+        <ConfirmDialogHost />
       </RendererEntitlementProvider>
     )
 
     expect((await screen.findAllByText(project.name)).length).toBeGreaterThan(0)
     await user.click(screen.getByRole('radio', { name: /knowledge & settings/i }))
     await user.click(screen.getByTitle('Delete project'))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('Delete this project?')).toBeTruthy()
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
 
     expect((await screen.findByRole('alert')).textContent).toContain(
       'Knowledge cleanup did not finish.'

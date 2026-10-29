@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ConfirmDialogHost } from '../../ConfirmDialogHost'
 import { DataPrivacyPanel } from '../DataPrivacyPanel'
 import { StoragePanel } from '../StoragePanel'
 
@@ -116,22 +117,45 @@ describe('rendered storage usage', () => {
       ],
       orphans: []
     })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    try {
-      const user = userEvent.setup()
-      render(<StoragePanel />)
+    const user = userEvent.setup()
+    render(
+      <>
+        <StoragePanel />
+        <ConfirmDialogHost />
+      </>
+    )
 
-      expect(await screen.findByText('Tasks')).toBeTruthy()
-      expect(screen.getByText('Decider 2B')).toBeTruthy()
-      expect(screen.getByText('Decider 2B Vision')).toBeTruthy()
-      expect(screen.getByText('2.0 GB')).toBeTruthy()
-      expect(screen.getByText('1.6 GB')).toBeTruthy()
+    expect(await screen.findByText('Tasks')).toBeTruthy()
+    expect(screen.getByText('Decider 2B')).toBeTruthy()
+    expect(screen.getByText('Decider 2B Vision')).toBeTruthy()
+    expect(screen.getByText('2.0 GB')).toBeTruthy()
+    expect(screen.getByText('1.6 GB')).toBeTruthy()
 
-      await user.click(screen.getByRole('button', { name: 'Delete Decider 2B Vision' }))
-      expect(api.deleteModel).toHaveBeenCalledWith('decider-vision')
-    } finally {
-      confirm.mockRestore()
-    }
+    await user.click(screen.getByRole('button', { name: 'Delete Decider 2B Vision' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(within(dialog).getByText('Delete "Decider 2B Vision"?')).toBeTruthy()
+    expect(api.deleteModel).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(api.deleteModel).toHaveBeenCalledWith('decider-vision'))
+  })
+
+  it('deletes once when Delete is double-clicked', async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <StoragePanel />
+        <ConfirmDialogHost />
+      </>
+    )
+
+    await user.dblClick(await screen.findByRole('button', { name: 'Delete Local vision model' }))
+    expect(await screen.findAllByRole('alertdialog')).toHaveLength(1)
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' })
+    )
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(api.deleteModel).toHaveBeenCalledTimes(1)
   })
 
   it('opens model settings only from the active installed model', async () => {

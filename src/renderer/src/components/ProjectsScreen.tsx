@@ -39,6 +39,8 @@ import { artifactKindLabel } from '@renderer/lib/artifact-labels'
 import { parseSqliteUtc, timeAgo } from '@renderer/lib/time'
 import { artifactTitle } from '../../../shared/artifact-title'
 import { useRendererEntitlement } from '@renderer/bootstrap/useRendererEntitlement'
+import { confirmDialog } from '@renderer/lib/confirm-dialog'
+import { DELETE_PROJECT_DIALOG } from '@renderer/lib/confirm-dialog-copy'
 import {
   PROJECT_DELETE_FALLBACK_REASON,
   type ProjectDeleteOutcome
@@ -268,13 +270,7 @@ export function ProjectsScreen({
   }
 
   const removeProject = async (id: string): Promise<void> => {
-    if (
-      !window.confirm(
-        'Delete this project, its knowledge base, and generated artifacts? Its chats stay in Chat.'
-      )
-    ) {
-      return
-    }
+    if (!(await confirmDialog(DELETE_PROJECT_DIALOG))) return
     setDeleteFailure('')
     const outcome = (await api.deleteProject?.(id)) as ProjectDeleteOutcome | undefined
     if (!outcome?.ok) {

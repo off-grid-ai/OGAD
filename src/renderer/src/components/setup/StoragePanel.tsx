@@ -38,6 +38,8 @@ import { formatStorageBytes } from './storage-format'
 import { formatTransferSpeed } from '@offgrid/sync'
 import { projectProgress } from '@offgrid/ui'
 import { downloadTimeRemaining } from '@renderer/lib/download-progress'
+import { confirmDialog } from '@renderer/lib/confirm-dialog'
+import { deleteModelDialog } from '@renderer/lib/confirm-dialog-copy'
 import {
   useModelDownloadProgress,
   type ModelDownloadProgressEvent
@@ -141,7 +143,7 @@ export function StoragePanel(): React.ReactElement {
   })
 
   const del = async (id: string, name: string): Promise<void> => {
-    if (!window.confirm(`Delete "${name}"? This removes its files from disk.`)) return
+    if (!(await confirmDialog(deleteModelDialog(name)))) return
     setBusy(id)
     try {
       await api.deleteModel(id)
