@@ -299,7 +299,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
+          ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: true # Mac releases bundle the default English voices for offline first use.
           submodules: recursive
@@ -682,7 +682,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
+          ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: false # The current native speech engine is macOS-only.
           persist-credentials: false
@@ -929,7 +929,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9
+          ref: d005e3509e6f608bb4e70abbe9f089120a08e973
           path: _executorch_speech
           lfs: false # Build the Linux executable from the pinned source.
           submodules: recursive
