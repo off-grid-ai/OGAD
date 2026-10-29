@@ -32,6 +32,11 @@ const SETS = {
     config: 'playwright.config.ts',
     grep: 'analytics-screens',
     covers: 'Settings > Analytics, What we share, Report a problem, and the consent prompt'
+  },
+  embedding: {
+    config: 'playwright.config.ts',
+    grep: 'embedding-notice-screens',
+    covers: 'The embedding rebuild notice: rebuilding, restored and failed'
   }
 }
 
