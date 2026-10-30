@@ -524,7 +524,7 @@ export function Onboarding({ onComplete }: OnboardingProps): JSX.Element {
                     htmlFor="onboarding-share-analytics"
                     className="cursor-pointer text-sm text-neutral-200"
                   >
-                    Share anonymous usage and crash reports
+                    Share anonymous stats and crash reports
                   </label>
                   <p className="mt-1 text-xs leading-5 text-neutral-500">
                     Helps us fix what breaks on your computer. Your chats never leave it.{' '}

@@ -45,7 +45,7 @@ const MD = `# Off Grid AI — overview
 serves text, vision, image, voice, and speech — no cloud, no accounts, no API keys.
 
 ## Why Off Grid AI
-- **Private by default** — your chats and files never leave your machine. Anonymous usage data and crash reports only if you turn them on.
+- **Private by default** — your chats and files never leave your machine.
 - **Every modality, one endpoint** — \`http://127.0.0.1:7878/v1\`.
 - **Bring any GGUF** — download from the catalog or Hugging Face.
 `
@@ -135,7 +135,7 @@ async function seedKnowledge(): Promise<void> {
       write: () =>
         fs.writeFileSync(
           path.join(dir, 'offgrid-faq.txt'),
-          'Off Grid AI — FAQ\n\nQ: Does anything leave my device?\nA: Your chats and files never do. All inference runs locally; no cloud, no accounts, no API keys. Anonymous usage data and crash reports are sent only if you turn them on in Settings > Analytics.\n\nQ: What can it run?\nA: Open models for text, vision, image, voice and speech, via one OpenAI-compatible gateway on 127.0.0.1:7878.\n\nQ: What is Pro?\nA: The sees/remembers/acts layer — capture, unified search, a proactive secretary — live now, $119 once or $7.99/month.\n'
+          'Off Grid AI — FAQ\n\nQ: Does anything leave my device?\nA: Your chats and files never do. All inference runs locally; no cloud, no accounts, no API keys. Anonymous stats and crash reports are off unless you turn them on, and never include your prompts, replies or files.\n\nQ: What can it run?\nA: Open models for text, vision, image, voice and speech, via one OpenAI-compatible gateway on 127.0.0.1:7878.\n\nQ: What is Pro?\nA: The sees/remembers/acts layer — capture, unified search, a proactive secretary — live now, $119 once or $7.99/month.\n'
         )
     },
     {

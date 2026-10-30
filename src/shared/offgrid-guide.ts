@@ -3,7 +3,7 @@
 // user asks about features or what is new. Parsers are pure so they are tested without network.
 
 /** What Off Grid AI does today, in short. Kept with the app so God answers without network. */
-export const OFFGRID_FEATURES = `Off Grid AI runs AI on your own computer and phone. Nothing you ask leaves your device unless you connect something that needs it. Analytics are opt-in and off by default: only if you turn them on (in setup, a prompt, or Settings > Analytics) does the app send anonymous usage data and crash reports to PostHog Cloud EU. Your chats and files never leave your device.
+export const OFFGRID_FEATURES = `Off Grid AI runs AI on your own computer and phone. Nothing you ask leaves your device unless you connect something that needs it. Your chats and files never leave your device. Anonymous stats and crash reports are off unless you turn them on in setup, a prompt or Settings > Analytics. They never include your prompts, replies or files.
 
 Free on Desktop (macOS, Windows, Linux):
 - Chat with text and vision models, with a thinking mode, answer versions and per-chat settings.

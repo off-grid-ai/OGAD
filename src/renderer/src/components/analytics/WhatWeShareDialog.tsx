@@ -6,13 +6,13 @@ export const WE_SHARE = [
   'Which screens and features you use, and for how long',
   'Model downloads and loads: the public model name, its size and how long it took',
   'How each reply went: speed, a rough length and whether it finished',
-  'Crash reports with file names and line numbers only',
+  'Crash reports, with file paths and typed text removed',
   'Your platform, app version, memory size, OS version and language'
 ] as const
 
 export const WE_NEVER_SHARE = [
   'Your prompts, replies, transcripts or tool results',
-  'File names, document names, paths, web addresses or IP addresses',
+  'Names of your files and documents, file paths or web addresses',
   'What you search for',
   'Names of models you imported or connectors you added yourself',
   'Your email, license key or any account or device ID'

@@ -36,12 +36,12 @@ export function AnalyticsPanel(): React.ReactElement {
     <Section label="On this computer" className="font-mono">
       <div className="grid gap-x-6 sm:grid-cols-2">
         <SettingRow
-          title="Usage data"
-          description="Which screens and features you use, and how models perform. Helps us fix what is slow."
+          title="Anonymous stats"
+          description="How many times each feature is used, and how fast models run. Never your prompts, replies or files."
           className="pt-0"
         >
           <Switch
-            aria-label="Usage data"
+            aria-label="Anonymous stats"
             checked={consent.usage}
             disabled={busy}
             onCheckedChange={(checked) => void change({ usage: checked === true })}
@@ -49,7 +49,7 @@ export function AnalyticsPanel(): React.ReactElement {
         </SettingRow>
         <SettingRow
           title="Crash reports"
-          description="What broke and where in the app, with file names and line numbers only."
+          description="What broke and where in our code. File paths and typed text are removed."
           className="pt-0"
         >
           <Switch

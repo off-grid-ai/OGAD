@@ -304,7 +304,7 @@ export function Settings({
             </SettingsCard>
             <SettingsCard
               title="Analytics"
-              summary="Share anonymous usage and crash reports, see what is shared, or report a problem."
+              summary="Share anonymous stats and crash reports, see what is shared, or report a problem."
               delay={0.43}
             >
               <AnalyticsPanel />

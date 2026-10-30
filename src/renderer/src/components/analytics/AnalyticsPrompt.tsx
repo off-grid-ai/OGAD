@@ -16,7 +16,7 @@ const TITLES: Record<AnalyticsPromptKind, string> = {
   first_chat: 'Help us fix what breaks'
 }
 
-const BODY = 'Send anonymous crash reports and usage. Your chats stay on this computer.'
+const BODY = 'Send anonymous stats and crash reports. We never see your prompts, replies or files.'
 
 /**
  * The consent prompt main asks for: after a failure (at most once in 30 days) or, for someone who

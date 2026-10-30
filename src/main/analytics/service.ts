@@ -190,7 +190,7 @@ export class AnalyticsService {
     }
   }
 
-  /** A usage event. Sent only while Usage data is on. */
+  /** A usage event. Sent only while Anonymous stats is on. */
   capture(event: string, properties: Record<string, AnalyticsValue | undefined> = {}): void {
     if (!this.client || !this.consent().usage) return
     if (event === 'feature_used' && this.recentlyUsed(String(properties.feature))) return
