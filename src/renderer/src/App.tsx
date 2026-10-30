@@ -961,7 +961,10 @@ function AppContent(): React.JSX.Element {
     if (!proReady || !isPro) return
     return window.api.proOn?.(NOTIFICATION_OPEN_TARGET_CHANNEL, (rawTarget) => {
       const destination = callHook<ProNavigationIntent>(NOTIFICATION_RESOLVE_TARGET_HOOK, rawTarget)
-      if (destination) handleProNavigate(destination)
+      if (destination) {
+        track('notification_clicked', { type: destination.view })
+        handleProNavigate(destination)
+      }
     })
   }, [handleProNavigate, isPro, proReady])
 
@@ -1018,6 +1021,7 @@ function AppContent(): React.JSX.Element {
       navigateTo('memory-chat', () => setChatTarget({ presetId: preset.id }))
     },
     [navigateTo]
+        track('shortcut_used', { shortcut: direction === 'back' ? 'back' : 'forward' })
   )
 
   // Back and Forward (Cmd+[ / Cmd+], Ctrl on Windows and Linux) come from the app menu, so they

@@ -27,6 +27,7 @@ import {
 } from '@offgrid/operator-ui/operator/coss/command'
 import { Highlight } from '@offgrid/operator-ui/operator/presence'
 import { acquireNativeSurfaceOcclusion } from '@renderer/lib/native-surface-occlusion'
+import { track } from '@renderer/lib/analytics'
 import type { SearchHit } from '@/types'
 import { paletteScreenMatches, type PaletteScreen } from '../lib/paletteScreens'
 
@@ -69,6 +70,7 @@ export function CommandPalette({
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        track('shortcut_used', { shortcut: 'command_palette' })
         setOpen((o) => !o)
       }
     }
@@ -96,16 +98,19 @@ export function CommandPalette({
   }, [query])
 
   const open_ = (hit: SearchHit): void => {
+    track('command_used', { command: 'open_result' })
     setOpen(false)
     onOpenHit(hit)
   }
   const seeAll = (): void => {
     if (query.trim()) {
+      track('command_used', { command: 'see_all' })
       setOpen(false)
       onSeeAll(query)
     }
   }
   const goTo = (view: string, subroute?: string): void => {
+    track('command_used', { command: 'go_to', target: view })
     setOpen(false)
     setQuery('')
     onGoTo?.(view, subroute)
