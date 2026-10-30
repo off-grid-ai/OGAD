@@ -66,6 +66,37 @@ function stageSpeakerDiarize() {
 
 stageSpeakerDiarize()
 
+/**
+ * Pro's Scribe overlay: Windows builds scribe-overlay-win.exe into resources/bin; Linux stages the
+ * X11 helper into build/linux-bin. macOS builds it below with the other Swift helpers.
+ * @returns {void}
+ */
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+function stageScribeOverlay() {
+  const scripts = path.join(root, 'pro', 'scripts')
+  if (process.platform === 'win32') {
+    const script = path.join(scripts, 'build-scribe-overlay-win.ps1')
+    if (!fs.existsSync(script)) return
+    const result = spawnSync('pwsh', ['-NoProfile', '-File', script, '-StageDir', stageDir], {
+      cwd: root,
+      stdio: 'inherit'
+    })
+    if (result.error) throw result.error
+    if (result.status !== 0) process.exit(result.status ?? 1)
+  } else if (process.platform === 'linux') {
+    const script = path.join(scripts, 'build-scribe-overlay-linux.sh')
+    if (!fs.existsSync(script)) return
+    const result = spawnSync('bash', [script, path.join(root, 'build', 'linux-bin')], {
+      cwd: root,
+      stdio: 'inherit'
+    })
+    if (result.error) throw result.error
+    if (result.status !== 0) process.exit(result.status ?? 1)
+  }
+}
+
+stageScribeOverlay()
+
 if (process.platform !== 'darwin') process.exit(0)
 
 /**
