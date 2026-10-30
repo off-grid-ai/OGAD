@@ -529,7 +529,7 @@ export function ModelsScreen({
       const result: { status: string; newModels: number } = await api.checkForNewModels()
       toast?.showToast(
         result.status === 'failed'
-          ? { message: "Couldn't check for new models", tone: 'error' }
+          ? { message: "Couldn't check for new models", tone: 'error', code: 'model_check_failed' }
           : result.newModels > 0
             ? {
                 message: `${result.newModels} new model${result.newModels === 1 ? '' : 's'}`,
@@ -540,7 +540,11 @@ export function ModelsScreen({
               : { message: 'Up to date', tone: 'neutral' }
       )
     } catch {
-      toast?.showToast({ message: "Couldn't check for new models", tone: 'error' })
+      toast?.showToast({
+        message: "Couldn't check for new models",
+        tone: 'error',
+        code: 'model_check_failed'
+      })
     } finally {
       setCheckingCatalog(false)
     }
