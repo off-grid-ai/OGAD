@@ -110,6 +110,7 @@
     "kdbxweb": "^2.1.1",
     "kokoro-js": "1.2.1",
     "mammoth": "^1.8.0",
+    "marked": "17.0.6",
     "media-chrome": "4.19.3",
     "node-machine-id": "^1.1.12",
     "ollama": "^0.6.3",
