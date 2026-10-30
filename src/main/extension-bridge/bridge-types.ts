@@ -71,6 +71,8 @@ export interface BridgeData extends Partial<BridgeMediaData> {
   }): Promise<{ success: boolean; error?: string }>
   /** `kinds`: the vault entry kinds the extension can read; absent from extensions older than 0.0.5. */
   vault(request: unknown, browser: PairedBrowser, kinds?: readonly string[]): Promise<unknown>
+  /** One Scribe request (grammar, rewrite, tone, review, feedback). Absent without Pro. */
+  writing?(request: unknown, browser: PairedBrowser): Promise<unknown>
   /** One section of the desktop's settings (settings.ts), as its Settings screen shows it. */
   readSettings(section: SettingsSection): Promise<unknown>
   /** Apply an already-validated patch through the desktop's own setters. */
