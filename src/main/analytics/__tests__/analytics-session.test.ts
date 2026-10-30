@@ -265,6 +265,19 @@ describe('time to first message', () => {
   })
 })
 
+describe('flows', () => {
+  it('keeps a film final render detail', async () => {
+    const service = build()
+    service.optIn('settings')
+    service.flow({ flow: 'video_story', action: 'step', step: 'final_started', detail: 'tonight' })
+    service.flow({ flow: 'video_story', action: 'step', step: 'final_started', detail: 'my film' })
+    await service.shutdown()
+    const steps = named('flow_step')
+    expect(steps[0]).toMatchObject({ step: 'final_started', detail: 'tonight' })
+    expect(steps[1]!.detail).toBeUndefined()
+  })
+})
+
 describe('daily usage snapshot', () => {
   it('buckets every count and never sends an exact number', () => {
     expect([0, 1, 5, 6, 20, 21, 100, 101, 500, 501, -3, Number.NaN].map(countBucket)).toEqual([

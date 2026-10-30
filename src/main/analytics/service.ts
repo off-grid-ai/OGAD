@@ -511,6 +511,8 @@ export class AnalyticsService {
       if (flow === 'pro_upgrade') extra.feature = detail
       if (flow === 'connector_add') extra.connector = detail
     }
+    // A film's final render: now, or tonight while the Mac is idle.
+    if (flow === 'video_story' && (detail === 'now' || detail === 'tonight')) extra.detail = detail
     this.capture('flow_step', { flow, step, ...extra })
   }
 
