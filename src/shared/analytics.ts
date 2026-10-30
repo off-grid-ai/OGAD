@@ -176,6 +176,9 @@ export const CHAT_INPUT_METHODS = ['drop', 'paste'] as const
 /** What the person did with an error toast. */
 export const ERROR_RESPONSES = ['action', 'dismiss'] as const
 
+/** What was deleted, sent as `item_deleted`. */
+export const DELETED_ITEMS = ['chat', 'project', 'document'] as const
+
 /** Where a model was picked, for `model_selected`. */
 export const MODEL_PICK_SOURCES = [
   'model_picker',

@@ -565,6 +565,7 @@ export function setupIPC(): void {
     const { deleteArtifactsForConversation } = await import('./artifacts')
     deleteArtifactsForConversation(id)
     const deleted = deleteRagConversation(id)
+    track('item_deleted', { item: 'chat' })
     // Documents only this chat used go with it, now rather than at the 30-day cleanup.
     const documents = await import('./documents')
     const { forgetConversationExclusions } = await import('./documents/sqlite-store')
