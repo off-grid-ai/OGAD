@@ -1151,7 +1151,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
     // Divergence fix: the dropdown MUST write through the same owner as the
     // Active-models panel, or the two silently disagree on which model runs.
-    await waitFor(() => expect(setActiveModalModel).toHaveBeenCalledWith('image', FEW_STEP))
+    await waitFor(() => expect(setActiveModalModel).toHaveBeenCalledWith('image', FEW_STEP, 'chat'))
 
     await sendPrompt(user, 'a mountain lake')
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
@@ -1196,11 +1196,11 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       modelDisplayName('sdxl-lightning') ?? 'sdxl-lightning'
     )
     await waitFor(() =>
-      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FEW_STEP)
+      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FEW_STEP, 'chat')
     )
     await chooseOption(firstUser, modelSelect, modelDisplayName(FULL) ?? FULL)
     await waitFor(() =>
-      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FULL)
+      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FULL, 'chat')
     )
 
     const sizes = screen.getByRole('radiogroup', { name: 'Size' })

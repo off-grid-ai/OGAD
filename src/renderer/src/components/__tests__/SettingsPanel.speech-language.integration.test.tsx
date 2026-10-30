@@ -436,7 +436,7 @@ describe('<SettingsPanel/> speech languages', () => {
     await user.click(await screen.findByRole('option', { name: 'Parakeet v2' }))
 
     await waitFor(() =>
-      expect(setActiveModalModel).toHaveBeenCalledWith('transcription', 'parakeet-v2')
+      expect(setActiveModalModel).toHaveBeenCalledWith('transcription', 'parakeet-v2', 'settings')
     )
     expect(model.textContent).toContain('Parakeet v2')
     expect(screen.getByRole('combobox', { name: 'Spoken language' }).textContent).toContain(
