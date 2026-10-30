@@ -5274,9 +5274,6 @@ export function MemoryChat({
                           ) : null}
                           {showGenerationProgress && !activeImageTimelineMessageId ? (
                             <div className="mb-5 flex flex-col items-start">
-                              <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
-                                Off Grid AI
-                              </div>
                               {generatingVideo ? (
                                 <div className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start`}>
                                   {ChatVideoProgress ? <ChatVideoProgress job={videoJob} /> : null}
