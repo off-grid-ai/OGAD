@@ -110,6 +110,7 @@ import {
   registerFeatureSnapshotSource,
   reportAppOpened
 } from './analytics'
+import { registerCoreAnalyticsSources } from './analytics-sources'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -615,6 +616,7 @@ app.whenReady().then(async () => {
       registerShutdown: (owner) => applicationShutdown.register(owner),
       freeMemoryMB: () => liveMemory().availableMB
     })
+    registerCoreAnalyticsSources()
     // Video is on when a local video model is active or a remote server's video model is picked.
     registerFeatureSnapshotSource(async () => ({
       video_generation: Boolean(

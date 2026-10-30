@@ -46,7 +46,7 @@ import {
 } from './properties'
 import { AnalyticsService, type AnalyticsServiceDeps } from './service'
 import { UncleanExitMarker, UNCLEAN_EXIT_MARKER_FILE } from './unclean-exit'
-import { buildUsageSnapshot, modelCountKey, type UsageCountSource } from './usage-snapshot'
+import { buildUsageSnapshot, type UsageCountSource } from './usage-snapshot'
 import { registerAnalyticsIpc } from './ipc'
 import { getMainWindow } from '../main-window'
 
@@ -590,26 +590,8 @@ export async function readFeatureSnapshot(): Promise<Record<string, boolean>> {
   snapshot.tools = tools
   snapshot.web_search = tools && !(Array.isArray(disabled) && disabled.includes('web_search'))
   snapshot.mcp_tool = getSetting<unknown>('connectorsEnabled', false) === true
-  try {
-    const { getActiveRemoteVisionServer } = await import('../vision/remote-vision-server')
-    snapshot.remote_server = Boolean(getActiveRemoteVisionServer())
-  } catch {
-    /* unknown stays false */
-  }
-  // A modality is on while a model is picked for it, here or on a remote server.
-  try {
-    const active = (await import('../models-manager')).getActiveModalities()
-    snapshot.image_generation = Boolean(active.image)
-    snapshot.tts = Boolean(active.speech)
-    snapshot.voice_input = Boolean(active.transcription)
-  } catch {
-    /* unknown stays false */
-  }
-  try {
-    snapshot.vision = (await import('../llm')).llm.hasVision()
-  } catch {
-    /* unknown stays false */
-  }
+  // Models, vision, image, voice and remote servers come from registered sources
+  // (main/analytics-sources.ts), so analytics never imports the modules that report to it.
   for (const source of featureSources) {
     try {
       for (const [feature, on] of Object.entries(await source())) {
@@ -631,8 +613,9 @@ export function registerUsageCountSource(source: UsageCountSource): () => void {
   return () => usageSources.delete(source)
 }
 
-/** Core's counts: cheap COUNT queries and the libraries' own listings. Never a name or an id. */
-const coreUsageCounts: UsageCountSource = async () => {
+/** Core's database counts: cheap COUNT queries, never a name or an id. Media and model counts come
+ * from registered sources (main/analytics-sources.ts). */
+const coreUsageCounts: UsageCountSource = () => {
   const counts: Record<string, number | undefined> = {
     chats: sqlCount('SELECT COUNT(*) AS n FROM rag_conversations'),
     messages: sqlCount('SELECT COUNT(*) AS n FROM rag_messages'),
@@ -640,33 +623,6 @@ const coreUsageCounts: UsageCountSource = async () => {
     projects: sqlCount('SELECT COUNT(*) AS n FROM projects'),
     knowledge_documents: sqlCount('SELECT COUNT(*) AS n FROM rag_documents'),
     mcp_servers: sqlCount('SELECT COUNT(*) AS n FROM connectors')
-  }
-  try {
-    counts.generated_images = (await import('../imagegen')).listGeneratedImages().length
-  } catch {
-    /* left out */
-  }
-  try {
-    counts.generated_videos = (
-      await import('../generated-videos/library')
-    ).listGeneratedVideos().length
-  } catch {
-    /* left out */
-  }
-  try {
-    const { getRemoteVisionServerSettings } = await import('../vision/remote-vision-server')
-    counts.remote_servers = getRemoteVisionServerSettings().servers.length
-  } catch {
-    /* left out */
-  }
-  try {
-    const { models } = await (await import('../models-manager')).getStorageInfo()
-    for (const model of models) {
-      const key = modelCountKey(model.kind)
-      if (key) counts[key] = (counts[key] ?? 0) + 1
-    }
-  } catch {
-    /* left out */
   }
   return Object.fromEntries(
     Object.entries(counts).filter((entry): entry is [string, number] => entry[1] !== undefined)
