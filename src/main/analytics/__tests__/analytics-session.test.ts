@@ -242,6 +242,29 @@ describe('sessions', () => {
   })
 })
 
+describe('time to first message', () => {
+  it('sends first_message once per launch, with the install age only for the first ever', async () => {
+    let now = 50_000
+    const service = build({
+      now: () => now,
+      launchedAt: 40_000,
+      firstMessageInfo: () => ({ firstEver: true, installedAt: 20_000 })
+    })
+    service.optIn('settings')
+    service.captureFromRenderer('message_sent', {})
+    now += 1_000
+    service.captureFromRenderer('message_sent', {})
+    await service.shutdown()
+    expect(named('first_message')).toEqual([
+      expect.objectContaining({
+        since_launch_ms: 10_000,
+        first_ever: true,
+        since_install_ms: 30_000
+      })
+    ])
+  })
+})
+
 describe('daily usage snapshot', () => {
   it('buckets every count and never sends an exact number', () => {
     expect([0, 1, 5, 6, 20, 21, 100, 101, 500, 501, -3, Number.NaN].map(countBucket)).toEqual([

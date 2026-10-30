@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import os from 'node:os'
 import { app, BrowserWindow, ipcMain, type IpcMain } from 'electron'
 import {
@@ -101,6 +102,19 @@ function sqlCount(sql: string): number | undefined {
   }
 }
 
+/** The install's first message is the one just sent; its age is the data folder's. */
+function firstMessageInfo(): { firstEver: boolean; installedAt: number | null } {
+  const userMessages = sqlCount(`SELECT COUNT(*) AS n FROM rag_messages WHERE role = 'user'`)
+  let installedAt: number | null = null
+  try {
+    const stats = fs.statSync(app.getPath('userData'))
+    installedAt = stats.birthtimeMs > 0 ? stats.birthtimeMs : null
+  } catch {
+    /* unknown */
+  }
+  return { firstEver: userMessages !== undefined && userMessages <= 1, installedAt }
+}
+
 /**
  * Build the owner over the app's real collaborators: the settings database, the PostHog SDK and
  * the in-flight marker in userData. `overrides` exist for integration tests, which point the
@@ -126,6 +140,8 @@ export function createAnalyticsService(
     onConsentChanged: (consent: AnalyticsConsent) =>
       broadcast(ANALYTICS_CHANNELS.consentChanged, consent),
     onPrompt: (kind: AnalyticsPromptKind) => broadcast(ANALYTICS_CHANNELS.prompt, kind),
+    launchedAt: Date.now() - process.uptime() * 1000,
+    firstMessageInfo,
     ...overrides
   })
 }

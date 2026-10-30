@@ -53,6 +53,13 @@ export interface AnalyticsServiceDeps {
    * build's list; an id outside it is dropped, so visible or user text never passes.
    */
   uiActionIds?: ReadonlySet<string>
+  /** When this launch started, for `first_message`. */
+  launchedAt?: number
+  /**
+   * Read once, at this launch's first message: whether it is the install's first message ever, and
+   * when the install was first used (null when unknown).
+   */
+  firstMessageInfo?: () => { firstEver: boolean; installedAt: number | null }
 }
 
 function buildUiActionIds(): ReadonlySet<string> {
@@ -92,15 +99,18 @@ export class AnalyticsService {
   private readonly now: () => number
   private readonly randomId: () => string
   private readonly uiActionIds: ReadonlySet<string>
+  private readonly launchedAt: number
   private session: SessionTally | null = null
   private sessionsEnded = 0
   private persistedAt = 0
+  private firstMessageSent = false
   private appearanceState: Record<string, AnalyticsValue> | null = null
 
   constructor(private readonly deps: AnalyticsServiceDeps) {
     this.now = deps.now ?? Date.now
     this.randomId = deps.randomId ?? (() => crypto.randomUUID())
     this.uiActionIds = deps.uiActionIds ?? buildUiActionIds()
+    this.launchedAt = deps.launchedAt ?? this.now()
   }
 
   // --- consent ------------------------------------------------------------------------------
@@ -241,6 +251,29 @@ export class AnalyticsService {
     this.observeForFlows(event)
     if (event === 'screen_viewed' && typeof properties.screen === 'string')
       this.session?.screenViewed(properties.screen, this.now())
+    if (event === 'message_sent') this.noteFirstMessage()
+  }
+
+  /** `first_message`: once per launch, the time from launch, and from install for the first ever. */
+  private noteFirstMessage(): void {
+    if (this.firstMessageSent) return
+    this.firstMessageSent = true
+    const now = this.now()
+    let firstEver = false
+    let sinceInstall: number | null = null
+    try {
+      const info = this.deps.firstMessageInfo?.()
+      firstEver = info?.firstEver === true
+      if (firstEver && info?.installedAt != null && info.installedAt <= now)
+        sinceInstall = roundMs(now - info.installedAt)
+    } catch {
+      /* unknown stays false and null */
+    }
+    this.send('first_message', {
+      since_launch_ms: roundMs(now - this.launchedAt),
+      first_ever: firstEver,
+      since_install_ms: sinceInstall
+    })
   }
 
   private recentlyUsed(feature: string): boolean {

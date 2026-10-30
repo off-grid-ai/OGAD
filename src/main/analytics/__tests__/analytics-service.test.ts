@@ -191,6 +191,7 @@ describe('after the user opts in', () => {
     expect(events.map((event) => event.event)).toEqual([
       'screen_viewed',
       'message_sent',
+      'first_message',
       'feature_used',
       'reply_regenerated',
       '$exception'
