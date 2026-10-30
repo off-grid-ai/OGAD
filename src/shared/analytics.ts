@@ -14,7 +14,9 @@ export const ANALYTICS_SETTING_KEYS = {
   lastPromptAt: 'analyticsLastPromptAt',
   installId: 'analyticsInstallId',
   /** The day the last daily `features_snapshot` went, so a relaunch does not send another. */
-  snapshotDay: 'analyticsSnapshotDay'
+  snapshotDay: 'analyticsSnapshotDay',
+  /** The open session's counters, so a crash still reports them on the next launch. */
+  pendingSession: 'analyticsPendingSession'
 } as const
 
 export type AnalyticsSettingKey =
@@ -136,6 +138,43 @@ export function normalizeUiActionId(raw: string): string | null {
   return UI_ACTION_ID.test(id) ? id : null
 }
 
+/** The deepest point reached on a screen, in quarters. */
+export const SCROLL_BUCKETS = [0, 25, 50, 75, 100] as const
+export type ScrollBucket = (typeof SCROLL_BUCKETS)[number]
+
+/** A scroll fraction (0..1) rounded down to its quarter; the very bottom counts as 100. */
+export function scrollBucket(fraction: number): ScrollBucket {
+  if (!Number.isFinite(fraction) || fraction <= 0) return 0
+  if (fraction >= 0.98) return 100
+  return SCROLL_BUCKETS[Math.min(3, Math.floor(fraction * 4))]!
+}
+
+/** Keyboard shortcuts counted in `session_summary.shortcuts`. */
+export const SHORTCUTS = [
+  'command_palette',
+  'back',
+  'forward',
+  'zoom_in',
+  'zoom_out',
+  'zoom_reset',
+  'clipboard_popup',
+  'dictation'
+] as const
+export type AnalyticsShortcut = (typeof SHORTCUTS)[number]
+
+/** Command palette choices counted in `session_summary.commands`. */
+export const PALETTE_COMMANDS = ['go_to', 'open_result', 'see_all'] as const
+export type PaletteCommand = (typeof PALETTE_COMMANDS)[number]
+
+/** What a notification opens: its type, never its content. */
+export const NOTIFICATION_TYPES = ['actions', 'day', 'replay', 'meetings', 'chat'] as const
+
+/** How a file reached the chat composer. */
+export const CHAT_INPUT_METHODS = ['drop', 'paste'] as const
+
+/** What the person did with an error toast. */
+export const ERROR_RESPONSES = ['action', 'dismiss'] as const
+
 /** Events the renderer may report, with the only properties main will forward. */
 export interface RendererAnalyticsEvents {
   screen_viewed: { screen: string; prev_screen: string | null; prev_ms: number }
@@ -143,6 +182,16 @@ export interface RendererAnalyticsEvents {
   reply_regenerated: Record<string, never>
   feature_used: { feature: AnalyticsFeature }
   problem_reported: Record<string, never>
+  // Counted on the device into `session_summary`; never sent one by one.
+  ui_action: { screen: string; action: string }
+  scroll_depth: { screen: string; pct: ScrollBucket }
+  shortcut_used: { shortcut: AnalyticsShortcut }
+  command_used: { command: PaletteCommand; target?: string }
+  error_shown: { error_code: string }
+  error_response: { error_code: string; response: (typeof ERROR_RESPONSES)[number] }
+  empty_state_seen: { screen: string }
+  notification_clicked: { type: (typeof NOTIFICATION_TYPES)[number] }
+  chat_input: { method: (typeof CHAT_INPUT_METHODS)[number]; extension: string }
 }
 export type RendererAnalyticsEvent = keyof RendererAnalyticsEvents
 

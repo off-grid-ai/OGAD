@@ -570,6 +570,7 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
   setRuntimeLoadObserver(runtimeLoadObserver)
   options.registerShutdown({ name: 'core:analytics', shutdown: () => analytics().shutdown() })
   void analytics().reportPreviousExit()
+  analytics().reportPreviousSession()
 
   // Crash capture. Each handler only observes: the existing behaviour stays.
   process.on('uncaughtExceptionMonitor', (error) =>
@@ -647,4 +648,16 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
 /** The main window finished its first load: the cold start is over. */
 export function reportAppOpened(): void {
   track('app_opened', { cold_start_ms: roundMs(process.uptime() * 1000), resumed: false })
+}
+
+/** Count one interaction from a main-process seam (a zoom key, a setting) into the session. */
+export function countInteraction(
+  counter: Parameters<AnalyticsService['countInteraction']>[0],
+  key: string
+): void {
+  try {
+    maybeAnalytics()?.countInteraction(counter, key)
+  } catch {
+    /* best effort */
+  }
 }

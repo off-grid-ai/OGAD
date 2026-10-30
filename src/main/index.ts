@@ -105,6 +105,7 @@ import { shutdownRuntimes } from './runtime-manager'
 import { shutdownModelDownloads } from './models/download-queue'
 import {
   analytics,
+  countInteraction,
   installAnalytics,
   registerFeatureSnapshotSource,
   reportAppOpened
@@ -264,6 +265,10 @@ async function createWindow(): Promise<void> {
     if (nextZoomLevel === null) return
 
     event.preventDefault()
+    countInteraction(
+      'shortcuts',
+      input.code === 'Equal' ? 'zoom_in' : input.code === 'Minus' ? 'zoom_out' : 'zoom_reset'
+    )
     setWindowZoom(mainWindow, nextZoomLevel)
   })
 
@@ -280,6 +285,7 @@ async function createWindow(): Promise<void> {
     (delta: number) =>
     (_item: unknown, window: unknown): void => {
       if (!(window instanceof BrowserWindow) || window.isDestroyed()) return
+      countInteraction('shortcuts', delta > 0 ? 'zoom_in' : delta < 0 ? 'zoom_out' : 'zoom_reset')
       setWindowZoom(window, delta === 0 ? 0 : window.webContents.getZoomLevel() + delta)
     }
   Menu.setApplicationMenu(
