@@ -41,6 +41,7 @@ const ComputerUseSupervisor: FC =
 // DictationOverlay is a free-tier / open-core feature — lives in core, not pro.
 import { DictationOverlay } from './components/DictationOverlay'
 import { installRendererErrorReporting } from './lib/analytics'
+import { installUsageTracking } from './lib/usage-tracker'
 // The Pro computer-use supervisor has its own surface so it can float over the
 // app being driven. A free build resolves no component and renders nothing.
 
@@ -64,7 +65,11 @@ if (isDictation || isGodTwin) {
 // Analytics are opt-in and off by default. The renderer only reports to the main process
 // (src/main/analytics), which sends anonymous usage data and crash reports to PostHog after the
 // user turns them on in setup, a prompt or Settings > Analytics. Chats and files never leave.
-if (!isClipPopup && !isDictation && !isCuSupervisor && !isGodTwin) installRendererErrorReporting()
+if (!isClipPopup && !isDictation && !isCuSupervisor && !isGodTwin) {
+  installRendererErrorReporting()
+  // Screens, fixed-id presses and scroll depth, counted by main into one summary per session.
+  if (hash !== '#ai-activity') installUsageTracking()
+}
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}

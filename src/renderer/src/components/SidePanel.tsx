@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useRef,
   type CSSProperties,
   type KeyboardEvent,
@@ -13,6 +14,7 @@ import {
 } from '@offgrid/operator-ui/operator/animate-ui/primitives/radix/sheet'
 import { isNestedPopupEscape, useEscapeToClose } from '@renderer/lib/use-escape-to-close'
 import { acquireNativeSurfaceOcclusion } from '@renderer/lib/native-surface-occlusion'
+import { openUsageOverlay, overlayScreenName } from '@renderer/lib/usage-tracker'
 
 type SidePanelProps = {
   ariaLabel: string
@@ -82,6 +84,8 @@ export function SidePanel({
 }: SidePanelProps): React.JSX.Element {
   useEscapeToClose(onClose)
   const panelRef = useRef<HTMLDivElement>(null)
+  // An open panel is a screen of its own for opt-in usage data (lib/usage-tracker.ts).
+  useEffect(() => openUsageOverlay(overlayScreenName('panel', ariaLabel)), [ariaLabel])
 
   const trapFocus = (event: KeyboardEvent<HTMLDivElement>): void => {
     const panel = panelRef.current

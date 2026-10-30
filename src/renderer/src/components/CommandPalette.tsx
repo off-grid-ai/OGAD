@@ -28,6 +28,7 @@ import {
 import { Highlight } from '@offgrid/operator-ui/operator/presence'
 import { acquireNativeSurfaceOcclusion } from '@renderer/lib/native-surface-occlusion'
 import { track } from '@renderer/lib/analytics'
+import { openUsageOverlay } from '@renderer/lib/usage-tracker'
 import type { SearchHit } from '@/types'
 import { paletteScreenMatches, type PaletteScreen } from '../lib/paletteScreens'
 
@@ -55,6 +56,16 @@ const screenId = (screen: PaletteScreen): string =>
 // ⌘K universal search launcher. Fast (keyword-only) results; Enter opens, or jump
 // to the full Search screen for the semantic pass. Pre-ranked server-side, so the
 // command bar's own filtering is off (mode="none"): it shows exactly the groups built here.
+/** Native views stay below the palette, and it counts as a screen of its own while open. */
+function acquirePaletteOverlay(): () => void {
+  const release = acquireNativeSurfaceOcclusion()
+  const close = openUsageOverlay('command_palette')
+  return () => {
+    release()
+    close()
+  }
+}
+
 export function CommandPalette({
   onOpenHit,
   onSeeAll,
@@ -185,7 +196,7 @@ export function CommandPalette({
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       {/* Native child views stay below the bar from the moment it opens until its exit ends. */}
-      <CommandDialogPopup className="border-border/60" occlusion={acquireNativeSurfaceOcclusion}>
+      <CommandDialogPopup className="border-border/60" occlusion={acquirePaletteOverlay}>
         <CommandDialogPrimitive.Title className="sr-only">
           Search Off Grid AI
         </CommandDialogPrimitive.Title>

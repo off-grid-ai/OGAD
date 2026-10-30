@@ -88,6 +88,7 @@ import {
 } from './lib/model-settings-panel'
 import { callHook } from './bootstrap/hookRegistry'
 import { track } from './lib/analytics'
+import { setUsageScreen, usageScreenName } from './lib/usage-tracker'
 import { AnalyticsPrompt } from './components/analytics/AnalyticsPrompt'
 import { markTasksSeen } from './lib/task-side-panel'
 import { internalTabLocation, internalTabPath, isInternalTabView } from './lib/internal-tab-route'
@@ -564,20 +565,12 @@ function AppContent(): React.JSX.Element {
     ;(window.api as any)?.reportSelfView?.(viewMode)
   }, [viewMode])
 
-  // Opt-in usage data: one view per screen change, with the screen left and the time spent on it.
-  // The screen is the view's fixed name; nothing about its content is sent.
-  const screenViewRef = useRef<{ screen: string; at: number } | null>(null)
+  // Opt-in usage data: one view per screen change (a view, its settings section, internal tab or
+  // Video Studio page), with the screen left and the time spent on it while the window was in use.
+  // The screen is a fixed name; nothing about its content is sent.
   useEffect(() => {
-    const at = performance.now()
-    const previous = screenViewRef.current
-    if (previous?.screen === viewMode) return
-    screenViewRef.current = { screen: viewMode, at }
-    track('screen_viewed', {
-      screen: viewMode,
-      prev_screen: previous?.screen ?? null,
-      prev_ms: previous ? Math.round(at - previous.at) : 0
-    })
-  }, [viewMode])
+    setUsageScreen(usageScreenName(viewMode, navigationSubroute, settingsSection))
+  }, [viewMode, navigationSubroute, settingsSection])
 
   // Browser history is the one navigation stack. `routeIndex` is where this screen sits in it and
   // `routeMax` how far Forward can go, so the toolbar arrows know when they apply.
@@ -1021,7 +1014,6 @@ function AppContent(): React.JSX.Element {
       navigateTo('memory-chat', () => setChatTarget({ presetId: preset.id }))
     },
     [navigateTo]
-        track('shortcut_used', { shortcut: direction === 'back' ? 'back' : 'forward' })
   )
 
   // Back and Forward (Cmd+[ / Cmd+], Ctrl on Windows and Linux) come from the app menu, so they
@@ -1029,6 +1021,7 @@ function AppContent(): React.JSX.Element {
   useEffect(
     () =>
       window.api.onHistoryNavigate((direction) => {
+        track('shortcut_used', { shortcut: direction === 'back' ? 'back' : 'forward' })
         if (direction === 'back') {
           if (activeModelsOpen) setActiveModelsOpen(false)
           else if (modelSettingsOpen) setModelSettingsOpen(false)
