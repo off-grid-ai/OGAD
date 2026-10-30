@@ -124,3 +124,63 @@ test('redirects a second launch to the running owner without starting competing 
     .catch(() => false)
   expect(gatewayHealthy).toBe(true)
 })
+
+const minimizeOwner = async (): Promise<void> => {
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.minimize())
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMinimized())
+    )
+    .toBe(true)
+}
+
+test('an offgrid:// link from a second launch brings the running app back (Windows, Linux)', async () => {
+  await minimizeOwner()
+
+  // Windows and Linux start the app with the link as an argument; the lock sends it to the owner.
+  secondProcess = spawn(executable, ['.', 'offgrid://open'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      OFFGRID_USER_DATA: userDataDir,
+      OFFGRID_PRO: '0',
+      NODE_ENV: 'production'
+    },
+    stdio: 'ignore'
+  })
+
+  expect(await waitForExit(secondProcess)).toBe(0)
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMinimized())
+    )
+    .toBe(false)
+  await expect(page.locator('#root')).not.toBeEmpty()
+})
+
+test('an offgrid:// link brings the running app back (macOS open-url)', async () => {
+  await minimizeOwner()
+
+  // macOS delivers the link to the running app as open-url; the OS is the only part not real here.
+  const handled = await app.evaluate(({ app: electronApp }) => {
+    let prevented = false
+    electronApp.emit(
+      'open-url',
+      {
+        preventDefault: () => {
+          prevented = true
+        }
+      },
+      'offgrid://open'
+    )
+    return prevented
+  })
+
+  expect(handled).toBe(true)
+  await expect
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isMinimized())
+    )
+    .toBe(false)
+  await expect(page.locator('#root')).not.toBeEmpty()
+})
