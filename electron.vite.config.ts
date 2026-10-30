@@ -170,6 +170,10 @@ export default defineConfig({
   renderer: {
     define: proDefine,
     build: { sourcemap: coverageSourcemap },
+    // Renderer Web Workers (`new Worker(new URL('./x.ts', import.meta.url), { type: 'module' })`)
+    // bundle as ES modules, so a worker may code-split (Pro's Scribe checker loads its dictionary
+    // lazily). The default IIFE format refuses a worker with dynamic imports.
+    worker: { format: 'es' },
     html: { cspNonce: rendererStyleNonce },
     resolve: {
       alias: [
