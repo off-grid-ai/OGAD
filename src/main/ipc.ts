@@ -1,5 +1,5 @@
 import { ANALYTICS_SETTING_KEYS, isAnalyticsSettingKey } from '../shared/analytics'
-import { analytics, reportModelSelected, track } from './analytics'
+import { analytics, countInteraction, reportModelSelected, track } from './analytics'
 import { backendChoicesForUi } from './backend-facts'
 import { settingsChanged } from './settings-version'
 import { storageDownloadsActive } from './model-storage-guard'
@@ -636,7 +636,12 @@ export function setupIPC(): void {
       else if (key === ANALYTICS_SETTING_KEYS.crashes)
         analytics().setConsent({ crashes: value }, 'settings')
       else return false
-    } else saveSetting(key, value)
+    } else {
+      saveSetting(key, value)
+      // The key, and the value only when it is a switch: a typed value never leaves.
+      if (/^[a-zA-Z][a-zA-Z0-9_]{1,47}$/.test(key))
+        countInteraction('settings_changed', typeof value === 'boolean' ? `${key}=${value}` : key)
+    }
     return true
   })
 
