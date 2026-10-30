@@ -353,14 +353,14 @@ else { __ogShow('No React component found — define a component named App or a 
             )
             if (!selected?.id) throw new Error('Speech model not found')
             if (selected.remoteServerId) {
-              return window.api.activateModel(selected.id, 'speech')
+              return window.api.activateModel(selected.id, 'speech', 'artifact')
             }
             const primary =
               selected.primary ??
               selected.files?.find((file) => file.role === 'primary')?.name ??
               selected.files?.[0]?.name ??
               selected.id
-            return window.api.setActiveModalModel('speech', primary)
+            return window.api.setActiveModalModel('speech', primary, 'artifact')
           })
           .then(() => sendCatalog())
           .then(() => {

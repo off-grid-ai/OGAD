@@ -569,7 +569,7 @@ export function SettingsPanel({
 
   const pickTranscriptionModel = (value: string): void => {
     const modelId = value === DEFAULT_TRANSCRIPTION_MODEL ? null : value
-    void Promise.resolve(window.api.setActiveModalModel('transcription', modelId))
+    void Promise.resolve(window.api.setActiveModalModel('transcription', modelId, 'settings'))
       .then(() => (window.api as Partial<typeof window.api>).getTranscriptionInfo?.())
       .then((info) => {
         if (info) setTranscriptionInfo(info)

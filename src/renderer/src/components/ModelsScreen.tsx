@@ -867,8 +867,8 @@ export function ModelsScreen({
       // Single activation seam — main process routes by kind (chat LLM vs modal default).
       const res =
         activeKind === 'computer_use'
-          ? await api.activateModel?.(id, activeKind)
-          : await api.activateModel?.(id)
+          ? await api.activateModel?.(id, activeKind, 'models_screen')
+          : await api.activateModel?.(id, undefined, 'models_screen')
       if (res?.success) refreshActive()
       else setSwitchError(res?.error ? `Couldn't switch: ${res.error}` : "Couldn't switch model")
     } catch (e) {
@@ -888,7 +888,9 @@ export function ModelsScreen({
     let res: { success?: boolean; error?: string } | undefined
     try {
       res =
-        tab === 'computer_use' ? await api.activateModel?.(id, tab) : await api.activateModel?.(id)
+        tab === 'computer_use'
+          ? await api.activateModel?.(id, tab, 'models_screen')
+          : await api.activateModel?.(id, undefined, 'models_screen')
     } catch (e) {
       setSwitchError(e instanceof Error ? e.message : "Couldn't switch model")
       return

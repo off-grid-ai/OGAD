@@ -47,6 +47,7 @@ import {
   type AnalyticsConsent,
   type AnalyticsPromptKind,
   type FlowReport,
+  type ModelPickSource,
   type OptInSource,
   type RendererAnalyticsEvent,
   type RendererAnalyticsEvents,
@@ -607,15 +608,17 @@ const offGridApi = {
     ipcRenderer.invoke('models:download', modelId, fileName),
   cancelModelDownload: (modelId: string) => ipcRenderer.invoke('models:cancel-download', modelId),
   deleteModel: (modelId: string) => ipcRenderer.invoke('models:delete', modelId),
-  setActiveModel: (modelId: string) => ipcRenderer.invoke('models:set-active', modelId),
+  // `source` is where the pick was made, for opt-in usage data (`model_selected`).
+  setActiveModel: (modelId: string, source?: ModelPickSource) =>
+    ipcRenderer.invoke('models:set-active', modelId, source),
   // Activate any model for its type. A dual-capability model can name the rail
   // that the user selected; main validates that rail against the catalog.
-  activateModel: (modelId: string, requestedKind?: string) =>
-    ipcRenderer.invoke('models:activate', modelId, requestedKind),
+  activateModel: (modelId: string, requestedKind?: string, source?: ModelPickSource) =>
+    ipcRenderer.invoke('models:activate', modelId, requestedKind, source),
   getActiveModel: () => ipcRenderer.invoke('models:get-active'),
   getActiveModelIds: () => ipcRenderer.invoke('models:active-ids'),
-  setActiveModalModel: (kind: string, modelId: string | null) =>
-    ipcRenderer.invoke('models:set-active-modal', kind, modelId),
+  setActiveModalModel: (kind: string, modelId: string | null, source?: ModelPickSource) =>
+    ipcRenderer.invoke('models:set-active-modal', kind, modelId, source),
   getActiveModalities: () => ipcRenderer.invoke('models:active-modalities'),
   getComputerUseActiveModels: () => ipcRenderer.invoke('models:computer-use-active'),
   getWebUseActiveModels: () => ipcRenderer.invoke('models:web-use-active'),
