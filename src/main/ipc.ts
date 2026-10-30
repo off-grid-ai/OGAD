@@ -1401,7 +1401,9 @@ export function setupIPC(): void {
     await (await import('./generated-videos/library')).exportGeneratedVideo(source, result.filePath)
     // A film (its sidecar names a Studio story) ends the video_story flow when it is exported.
     const { readGeneratedVideoSidecar } = await import('./generated-videos/gallery-sidecar')
-    if (readGeneratedVideoSidecar(source).storyId) {
+    const isFilm = Boolean(readGeneratedVideoSidecar(source).storyId)
+    track('media_exported', { kind: isFilm ? 'film' : 'clip' })
+    if (isFilm) {
       const { trackFlow } = await import('./analytics')
       trackFlow({ flow: 'video_story', action: 'step', step: 'exported' })
       trackFlow({ flow: 'video_story', action: 'finish', outcome: 'done' })
