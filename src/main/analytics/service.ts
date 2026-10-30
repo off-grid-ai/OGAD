@@ -16,6 +16,7 @@ import type { AnalyticsClient, ClientOptions } from './client'
 import type { AnalyticsProperties, AnalyticsValue } from './properties'
 import { roundMs } from './properties'
 import { scrubException } from './scrub'
+import { SessionTally } from './session-tally'
 import type { InflightWork, UncleanExitMarker } from './unclean-exit'
 
 export interface AnalyticsSettings {
@@ -64,6 +65,8 @@ export class AnalyticsService {
   private readonly featureUsedAt = new Map<string, number>()
   private readonly now: () => number
   private readonly randomId: () => string
+  private session: SessionTally | null = null
+  private sessionsEnded = 0
 
   constructor(private readonly deps: AnalyticsServiceDeps) {
     this.now = deps.now ?? Date.now
@@ -151,6 +154,7 @@ export class AnalyticsService {
     this.client = null
     this.flows.clear()
     this.onboardingSteps = null
+    this.session = null
     try {
       this.deps.settings.delete(ANALYTICS_SETTING_KEYS.installId)
     } catch {
@@ -420,14 +424,49 @@ export class AnalyticsService {
     return true
   }
 
+  // --- sessions -----------------------------------------------------------------------------
+
+  /**
+   * One of the app's windows took focus. Starts a session, or resumes the open one. A session that
+   * starts after an earlier one ended in this launch sends `app_opened` (resumed), so every
+   * `app_backgrounded` has its opening.
+   */
+  sessionFocused(): void {
+    const now = this.now()
+    if (this.session) {
+      this.session.foreground(now)
+      return
+    }
+    this.session = SessionTally.start(now)
+    if (this.sessionsEnded > 0) this.capture('app_opened', { cold_start_ms: null, resumed: true })
+  }
+
+  /** No window of the app has focus. The session stays open until `endSession`. */
+  sessionBlurred(): void {
+    if (!this.session) return
+    this.session.background(this.now())
+  }
+
+  /** Close the open session with `app_backgrounded` and its foreground time. */
+  endSession(): void {
+    const session = this.session
+    if (!session) return
+    this.session = null
+    this.sessionsEnded += 1
+    const now = this.now()
+    session.background(now)
+    this.capture('app_backgrounded', { session_ms: session.sessionMs(now) })
+  }
+
   // --- lifecycle ----------------------------------------------------------------------------
 
   flush(): Promise<void> {
     return this.client?.flush() ?? Promise.resolve()
   }
 
-  /** A clean quit: nothing in flight crashed, and what is queued is sent. */
+  /** A clean quit: the session closes, nothing in flight crashed, and what is queued is sent. */
   async shutdown(): Promise<void> {
+    this.endSession()
     await this.deps.marker.clear()
     const client = this.client
     this.client = null

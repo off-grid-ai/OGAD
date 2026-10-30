@@ -155,6 +155,16 @@ interface DownloadState {
 }
 const downloads = new Map<string, DownloadState>()
 
+/** Voice, image and video models have their own setup funnels: the pick is the download starting. */
+function setupFlowFor(
+  kind: string | undefined
+): 'image_setup' | 'video_setup' | 'voice_setup' | null {
+  if (kind === 'image') return 'image_setup'
+  if (kind === 'video') return 'video_setup'
+  if (kind === 'voice' || kind === 'transcription') return 'voice_setup'
+  return null
+}
+
 /**
  * One download's status changed (models-manager's `send`). Reports started, finished and failed
  * once each. `freeStorageBytes` is read by the caller, which owns the models folder.
@@ -165,15 +175,7 @@ export function reportDownloadStatus(
   freeStorageBytes?: () => number | undefined,
   kind?: string
 ): void {
-  // Voice, image and video models have their own setup funnels: the pick is the download starting.
-  const setupFlow =
-    kind === 'image'
-      ? ('image_setup' as const)
-      : kind === 'video'
-        ? ('video_setup' as const)
-        : kind === 'voice' || kind === 'transcription'
-        ? ('voice_setup' as const)
-        : null
+  const setupFlow = setupFlowFor(kind)
   try {
     const owner = maybeAnalytics()
     if (!owner) return
@@ -551,6 +553,8 @@ export interface AnalyticsInstallOptions {
 }
 
 let installed = false
+/** Away this long, the session ends: `app_backgrounded` and `session_summary` go. */
+const SESSION_IDLE_MS = 5 * 60 * 1000
 
 /**
  * Wire analytics into the app at ready: IPC, observers, crash capture, the shutdown flush and the
@@ -594,14 +598,17 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
     )
   })
 
-  // Session time: the app is in the foreground while one of its windows has focus.
-  let sessionStartedAt: number | null = null
+  // Sessions: the app is in the foreground while one of its windows has focus. A session ends
+  // after SESSION_IDLE_MS away (or at quit), so switching apps for a moment does not split it.
   let blurTimer: ReturnType<typeof setTimeout> | undefined
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
   const focused = (): void => {
     if (blurTimer) clearTimeout(blurTimer)
+    if (idleTimer) clearTimeout(idleTimer)
     blurTimer = undefined
+    idleTimer = undefined
     analytics().setForeground(true)
-    if (sessionStartedAt === null) sessionStartedAt = Date.now()
+    analytics().sessionFocused()
   }
   const blurred = (): void => {
     if (blurTimer) clearTimeout(blurTimer)
@@ -610,11 +617,13 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
       blurTimer = undefined
       if (BrowserWindow.getFocusedWindow()) return
       analytics().setForeground(false)
-      if (sessionStartedAt === null) return
-      analytics().capture('app_backgrounded', {
-        session_ms: roundMs(Date.now() - sessionStartedAt)
-      })
-      sessionStartedAt = null
+      analytics().sessionBlurred()
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        idleTimer = undefined
+        analytics().endSession()
+      }, SESSION_IDLE_MS)
+      idleTimer.unref()
     }, 1_000)
     blurTimer.unref()
   }
@@ -637,5 +646,5 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
 
 /** The main window finished its first load: the cold start is over. */
 export function reportAppOpened(): void {
-  track('app_opened', { cold_start_ms: roundMs(process.uptime() * 1000) })
+  track('app_opened', { cold_start_ms: roundMs(process.uptime() * 1000), resumed: false })
 }

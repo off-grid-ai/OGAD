@@ -1375,10 +1375,7 @@ export function setupIPC(): void {
       filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
     })
     if (result.canceled || !result.filePath) return false
-    await (await import('./generated-videos/library')).exportGeneratedVideo(
-      source,
-      result.filePath
-    )
+    await (await import('./generated-videos/library')).exportGeneratedVideo(source, result.filePath)
     // A film (its sidecar names a Studio story) ends the video_story flow when it is exported.
     const { readGeneratedVideoSidecar } = await import('./generated-videos/gallery-sidecar')
     if (readGeneratedVideoSidecar(source).storyId) {
