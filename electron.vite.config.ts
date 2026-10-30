@@ -131,7 +131,11 @@ export default defineConfig({
           'embeddings-worker': resolve('src/main/embeddings-worker.ts'),
           'documents-extract-worker': resolve('src/main/documents/extract-worker.ts'),
           'documents-ocr-worker': resolve('src/main/documents/ocr-worker.ts'),
-          'tts-onnx-worker': resolve('src/main/tts-onnx-worker.ts')
+          'tts-onnx-worker': resolve('src/main/tts-onnx-worker.ts'),
+          // Pro's Scribe grammar model runs in its own utility process, like tts-onnx-worker.
+          ...(proExists
+            ? { 'scribe-grammar-worker': resolve('pro/main/writing/grammar-worker.ts') }
+            : {})
         }
       }
     },
