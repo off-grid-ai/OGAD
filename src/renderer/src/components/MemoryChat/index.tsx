@@ -4161,6 +4161,7 @@ export function MemoryChat({
       navigator.clipboard.writeText(text)
     )
     if (!copied) return
+    track('message_action', { action: 'copy' })
     // Brief "Copied" confirmation on the button that was pressed.
     const k = key ?? 'copy'
     setCopiedKey(k)
