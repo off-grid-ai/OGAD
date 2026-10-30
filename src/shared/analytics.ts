@@ -117,6 +117,25 @@ export type FlowReport =
     }
   | { flow: AnalyticsFlow; action: 'finish'; outcome: FlowOutcome; errorCode?: string }
 
+/**
+ * A `ui_action` id: a `data-action`, a `data-testid` or a fixed `aria-label`, normalised. Main
+ * accepts only ids collected from source at build time (scripts/config/ui-action-ids.ts), so no
+ * visible or user text can pass, whatever the renderer sends.
+ */
+export const UI_ACTION_ID = /^[a-z0-9][a-z0-9:_-]{0,63}$/
+
+/** `Close panel` → `close-panel`. Null when nothing usable is left. */
+export function normalizeUiActionId(raw: string): string | null {
+  const id = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, '-')
+    .replace(/^[-:_]+|[-:_]+$/g, '')
+    .slice(0, 64)
+    .replace(/[-:_]+$/, '')
+  return UI_ACTION_ID.test(id) ? id : null
+}
+
 /** Events the renderer may report, with the only properties main will forward. */
 export interface RendererAnalyticsEvents {
   screen_viewed: { screen: string; prev_screen: string | null; prev_ms: number }

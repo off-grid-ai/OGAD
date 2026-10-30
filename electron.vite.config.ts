@@ -6,6 +6,7 @@ import { loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { createRendererContentSecurityPolicy } from './src/shared/renderer-csp'
+import { collectUiActionIds } from './scripts/config/ui-action-ids'
 import {
   checkOauthBuildConfig,
   readUserBuildEnv,
@@ -108,6 +109,13 @@ const googleClientSecret = oauth.google.clientSecret
 // Gated on the same variable that turns the capture on, so a normal build - and every shipped
 // artifact - is byte-identical to what it was: no maps emitted, nothing referenced, no size cost.
 const coverageSourcemap = process.env.OFFGRID_E2E_COVERAGE ? ('inline' as const) : false
+// The `ui_action` allow-list (docs/ANALYTICS.md): fixed ids from the renderer source this build
+// ships, so main can drop any id that is not one of them.
+const uiActionIds = collectUiActionIds([
+  resolve('src/renderer/src'),
+  ...(proExists ? [resolve('pro/renderer')] : []),
+  resolve('node_modules/@offgrid/operator-ui/dist')
+])
 const rendererStyleNonce = randomBytes(18).toString('base64url')
 const rendererContentSecurityPolicy = createRendererContentSecurityPolicy(rendererStyleNonce)
 
@@ -116,6 +124,7 @@ export default defineConfig({
     define: {
       ...proDefine,
       __OFFGRID_APP_VERSION__: JSON.stringify(appVersion),
+      __OFFGRID_UI_ACTION_IDS__: JSON.stringify(uiActionIds),
       __OFFGRID_MICROSOFT_CLIENT_ID__: JSON.stringify(microsoftClientId),
       __OFFGRID_GOOGLE_CLIENT_ID__: JSON.stringify(googleClientId),
       __OFFGRID_GOOGLE_CLIENT_SECRET__: JSON.stringify(googleClientSecret)
