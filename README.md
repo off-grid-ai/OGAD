@@ -313,10 +313,9 @@ simply absent in this build, so the open app compiles and runs entirely on its o
 All model inference is local. Your conversations, documents, and models stay on your device
 — there's no cloud inference, no account, and no API key. You can run it fully offline.
 
-Analytics are opt-in and off by default. If you turn them on (in setup, a prompt, or
-**Settings > Analytics**), the app sends anonymous usage data and crash reports to PostHog
-Cloud EU. It never sends prompts, replies, file names, paths, URLs or search terms. The full
-list is in [docs/ANALYTICS.md](docs/ANALYTICS.md).
+Anonymous stats and crash reports are off unless you turn them on. Stats are counts of what
+was used and how fast models run. They never include prompts, replies, file names, paths,
+URLs or search terms. The full list is in [docs/ANALYTICS.md](docs/ANALYTICS.md).
 
 ## Community
 
