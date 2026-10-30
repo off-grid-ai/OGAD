@@ -517,14 +517,18 @@ export function setupIPC(): void {
       role: 'user' | 'assistant',
       content: string,
       context?: unknown
-    ) =>
-      (await import('./database')).addRagMessageVersion(
+    ) => {
+      const version = (await import('./database')).addRagMessageVersion(
         conversationId,
         ofUuid,
         role,
         content,
         context
       )
+      // A new version of the person's own message is an edit; of a reply, a regeneration.
+      if (role === 'user') track('message_action', { action: 'edit' })
+      return version
+    }
   )
   ipcMain.handle(
     'rag:select-version',

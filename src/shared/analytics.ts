@@ -176,6 +176,9 @@ export const CHAT_INPUT_METHODS = ['drop', 'paste'] as const
 /** What the person did with an error toast. */
 export const ERROR_RESPONSES = ['action', 'dismiss'] as const
 
+/** Message actions, sent as `message_action`. */
+export const MESSAGE_ACTIONS = ['copy', 'edit', 'delete'] as const
+
 /** What was deleted, sent as `item_deleted`. */
 export const DELETED_ITEMS = ['chat', 'project', 'document'] as const
 
@@ -206,6 +209,7 @@ export interface RendererAnalyticsEvents {
   reply_regenerated: Record<string, never>
   feature_used: { feature: AnalyticsFeature }
   problem_reported: Record<string, never>
+  message_action: { action: (typeof MESSAGE_ACTIONS)[number] }
   // Counted on the device into `session_summary`; never sent one by one.
   ui_action: { screen: string; action: string }
   scroll_depth: { screen: string; pct: ScrollBucket }

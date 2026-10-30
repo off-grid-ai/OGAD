@@ -6,6 +6,7 @@ import {
   FAILURE_PROMPT_INTERVAL_DAYS,
   FEATURES,
   FLOW_STEPS,
+  MESSAGE_ACTIONS,
   NOTIFICATION_TYPES,
   OPT_IN_SOURCES,
   PALETTE_COMMANDS,
@@ -352,6 +353,10 @@ export class AnalyticsService {
         if ((FEATURES as readonly unknown[]).includes(props.feature)) {
           this.capture('feature_used', { feature: props.feature as string })
         }
+        return
+      case 'message_action':
+        if ((MESSAGE_ACTIONS as readonly unknown[]).includes(props.action))
+          this.capture('message_action', { action: props.action as string })
         return
       default:
         this.countFromRenderer(event, props)

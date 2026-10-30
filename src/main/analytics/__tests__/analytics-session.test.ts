@@ -265,13 +265,16 @@ describe('time to first message', () => {
   })
 })
 
-describe('flows', () => {
-  it('keeps a film final render detail', async () => {
+describe('message actions and flows', () => {
+  it('sends fixed message actions and keeps a film final render detail', async () => {
     const service = build()
     service.optIn('settings')
+    service.captureFromRenderer('message_action', { action: 'copy' })
+    service.captureFromRenderer('message_action', { action: 'share to twitter' })
     service.flow({ flow: 'video_story', action: 'step', step: 'final_started', detail: 'tonight' })
     service.flow({ flow: 'video_story', action: 'step', step: 'final_started', detail: 'my film' })
     await service.shutdown()
+    expect(named('message_action')).toEqual([expect.objectContaining({ action: 'copy' })])
     const steps = named('flow_step')
     expect(steps[0]).toMatchObject({ step: 'final_started', detail: 'tonight' })
     expect(steps[1]!.detail).toBeUndefined()
