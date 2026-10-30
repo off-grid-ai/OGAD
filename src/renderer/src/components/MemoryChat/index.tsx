@@ -1,4 +1,5 @@
 import { track } from '@renderer/lib/analytics'
+import { reportChatInput } from '@renderer/lib/usage-tracker'
 import { restoredStreamMessage, withRestoredStream } from '@renderer/lib/chat-stream-restore'
 import { stopChatRun } from '@renderer/lib/chat-stop'
 import { observeOwnedRun, type RunEvent } from '@renderer/lib/chat-run-owner'
@@ -4347,12 +4348,14 @@ export function MemoryChat({
       if (pasteFiles.length) {
         e.preventDefault()
         void addFiles(pasteFiles)
+        reportChatInput('paste', pasteFiles)
         return
       }
       const text = dt.getData('text')
       if (text && text.length > 1200) {
         e.preventDefault()
         const id = crypto.randomUUID()
+        reportChatInput('paste', [{ name: 'pasted.txt' }])
         setAttachments((prev) => [
           ...prev,
           {
@@ -5564,7 +5567,10 @@ export function MemoryChat({
                         onDrop={(e) => {
                           e.preventDefault()
                           setDragOver(false)
-                          if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files)
+                          if (e.dataTransfer.files.length) {
+                            reportChatInput('drop', e.dataTransfer.files)
+                            void addFiles(e.dataTransfer.files)
+                          }
                         }}
                         className={broadcasting && !hostsSharedComposer ? 'hidden' : 'relative'}
                       >
