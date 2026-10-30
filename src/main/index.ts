@@ -343,12 +343,22 @@ const isolatedEvidenceInstance = mayUseIsolatedEvidenceInstance(process.env, tmp
 if (!isolatedEvidenceInstance && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  const focusExistingWindow = (): void => {
     const win = BrowserWindow.getAllWindows()[0]
     if (win) {
       if (win.isMinimized()) win.restore()
       if (windowPresentation.showWindow) win.focus()
     }
+  }
+  // Windows and Linux deliver an offgrid:// link to the running app as a second instance.
+  app.on('second-instance', focusExistingWindow)
+  // offgrid:// opens or focuses the app (the browser extension's "Open Off Grid"). The link is never
+  // read: it carries no command, so a web page can do nothing with it beyond bringing the app forward.
+  // Only an installed build claims the scheme; a dev run would take it from the installed app.
+  if (app.isPackaged && !isolatedEvidenceInstance) app.setAsDefaultProtocolClient('offgrid')
+  app.on('open-url', (event) => {
+    event.preventDefault()
+    focusExistingWindow()
   })
 }
 

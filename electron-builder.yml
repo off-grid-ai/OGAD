@@ -2,6 +2,12 @@
 # existing Pro installs auto-update into it (bundle id + granted TCC permissions match).
 extends: scripts/config/electron-builder-runtime.yml
 appId: co.getoffgridai.desktop.pro
+# offgrid:// opens or focuses the app (src/main/index.ts). Registers the scheme in Info.plist and the
+# Linux .desktop file; Windows registers it at runtime.
+protocols:
+  - name: Off Grid AI
+    schemes:
+      - offgrid
 productName: Off Grid AI Desktop
 copyright: © Off Grid AI
 # This hook runs before electron-builder emits artifactCreated, which is the event
