@@ -109,7 +109,7 @@ All multi-step journeys use three events with a `flow` property, so every funnel
 | `video_setup` | `opened`, `model_picked`, `downloaded` |
 | `video_story` | `storyboard_shown`, `draft_started`, `draft_finished`, `final_started` (`detail`: `now`, `tonight`), `final_finished`, `exported`. A film made on another device reports on the device that rendered it. Never the sentence, shot text or narration. |
 | `connector_add` | `opened`, `connector_picked` (`catalog_id` or `custom`), `authorised` |
-| `pro_upgrade` | `gate_shown` (`feature`), `paywall_viewed`, `trial_started`, `purchased` |
+| `pro_upgrade` | `gate_shown` (`feature`), `paywall_viewed`, `purchased`. There is no trial. |
 
 ### Crashes
 

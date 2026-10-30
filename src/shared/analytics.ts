@@ -102,7 +102,7 @@ export const FLOW_STEPS = {
     'exported'
   ],
   connector_add: ['opened', 'connector_picked', 'authorised'],
-  pro_upgrade: ['gate_shown', 'paywall_viewed', 'trial_started', 'purchased']
+  pro_upgrade: ['gate_shown', 'paywall_viewed', 'purchased']
 } as const
 export type AnalyticsFlow = keyof typeof FLOW_STEPS
 export type FlowStep<F extends AnalyticsFlow = AnalyticsFlow> = (typeof FLOW_STEPS)[F][number]
