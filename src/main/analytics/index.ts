@@ -1,9 +1,11 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import { app, BrowserWindow, ipcMain, type IpcMain } from 'electron'
+import { CATALOG } from '@offgrid/models'
 import {
   ANALYTICS_CHANNELS,
   FEATURES,
+  MODEL_PICK_SOURCES,
   type AnalyticsFeature,
   type AnalyticsConsent,
   type AnalyticsPromptKind
@@ -504,6 +506,45 @@ export function reportDocumentAdded(fileName: string, bytes: number): void {
     maybeAnalytics()?.capture('document_added', {
       file_type: documentFileType(fileName),
       size_bucket: documentSizeBucket(bytes)
+    })
+  } catch {
+    /* best effort */
+  }
+}
+
+const MODEL_KINDS = [
+  'text',
+  'vision',
+  'image',
+  'video',
+  'speech',
+  'voice',
+  'transcription',
+  'embedding',
+  'computer_use'
+] as const
+
+/**
+ * A model was picked for a modality. `source` is the fixed place it was picked from; the model is
+ * a catalog ID or `custom`. Sent only when the pick took.
+ */
+export function reportModelSelected(
+  modelId: string,
+  kind: unknown,
+  source: unknown,
+  result: unknown
+): void {
+  try {
+    if ((result as { success?: unknown } | null)?.success !== true) return
+    const ref = modelRef(modelId)
+    const catalogKind = CATALOG.find((entry) => entry.id === ref.model)?.kind
+    const picked = (MODEL_KINDS as readonly unknown[]).includes(kind) ? (kind as string) : null
+    track('model_selected', {
+      model: ref.model,
+      kind: picked ?? catalogKind ?? null,
+      source: (MODEL_PICK_SOURCES as readonly unknown[]).includes(source)
+        ? (source as string)
+        : 'unknown'
     })
   } catch {
     /* best effort */

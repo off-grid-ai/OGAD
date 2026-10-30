@@ -1,5 +1,5 @@
 import { ANALYTICS_SETTING_KEYS, isAnalyticsSettingKey } from '../shared/analytics'
-import { analytics, track } from './analytics'
+import { analytics, reportModelSelected, track } from './analytics'
 import { backendChoicesForUi } from './backend-facts'
 import { settingsChanged } from './settings-version'
 import { storageDownloadsActive } from './model-storage-guard'
@@ -825,19 +825,24 @@ export function setupIPC(): void {
       .then((m) => m.ensureBestSettings())
       .catch((error: unknown) => console.warn('[best-settings] refresh failed', error))
   }
-  ipcMain.handle('models:set-active', async (_, modelId: string) => {
+  ipcMain.handle('models:set-active', async (_, modelId: string, source?: unknown) => {
     const result = await import('./models-manager').then((m) => m.setActiveModel(modelId))
     refreshBestSettings()
+    reportModelSelected(modelId, 'text', source, result)
     return result
   })
   // Single activation seam: route any model to the right backend by its kind.
-  ipcMain.handle('models:activate', async (_, modelId: string, requestedKind?: string) => {
-    const result = await import('./models-manager').then((m) =>
-      m.activateModel(modelId, requestedKind)
-    )
-    refreshBestSettings()
-    return result
-  })
+  ipcMain.handle(
+    'models:activate',
+    async (_, modelId: string, requestedKind?: string, source?: unknown) => {
+      const result = await import('./models-manager').then((m) =>
+        m.activateModel(modelId, requestedKind)
+      )
+      refreshBestSettings()
+      reportModelSelected(modelId, requestedKind, source, result)
+      return result
+    }
+  )
   ipcMain.handle('models:get-active', () =>
     import('./models-manager').then((m) => m.getActiveModel())
   )
@@ -845,8 +850,15 @@ export function setupIPC(): void {
   ipcMain.handle('models:active-ids', () =>
     import('./models-manager').then((m) => m.getActiveModelIds())
   )
-  ipcMain.handle('models:set-active-modal', (_, kind: string, modelId: string | null) =>
-    import('./models-manager').then((m) => m.setActiveModalChoice(kind, modelId))
+  ipcMain.handle(
+    'models:set-active-modal',
+    async (_, kind: string, modelId: string | null, source?: unknown) => {
+      const result = await import('./models-manager').then((m) =>
+        m.setActiveModalChoice(kind, modelId)
+      )
+      if (modelId) reportModelSelected(modelId, kind, source, result)
+      return result
+    }
   )
   ipcMain.handle('models:active-modalities', () =>
     import('./models-manager').then((m) => m.getActiveModalities())

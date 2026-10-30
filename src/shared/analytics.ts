@@ -176,6 +176,24 @@ export const CHAT_INPUT_METHODS = ['drop', 'paste'] as const
 /** What the person did with an error toast. */
 export const ERROR_RESPONSES = ['action', 'dismiss'] as const
 
+/** Where a model was picked, for `model_selected`. */
+export const MODEL_PICK_SOURCES = [
+  'model_picker',
+  'models_screen',
+  'setup',
+  'chat',
+  'settings',
+  'image_settings',
+  'video_settings',
+  'video',
+  'meetings',
+  'voice',
+  'computer_use',
+  'artifact',
+  'unknown'
+] as const
+export type ModelPickSource = (typeof MODEL_PICK_SOURCES)[number]
+
 export const THEME_MODES = ['system', 'light', 'dark'] as const
 
 /** Events the renderer may report, with the only properties main will forward. */
