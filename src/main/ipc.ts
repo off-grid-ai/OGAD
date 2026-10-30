@@ -1364,6 +1364,7 @@ export function setupIPC(): void {
     if (res.canceled || !res.filePath) return false
     const { exportGeneratedImage } = await import('./imagegen')
     await exportGeneratedImage(srcPath, res.filePath)
+    track('media_exported', { kind: 'image' })
     return true
   })
 
