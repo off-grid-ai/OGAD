@@ -11,6 +11,7 @@ import {
   PALETTE_COMMANDS,
   SCROLL_BUCKETS,
   SHORTCUTS,
+  THEME_MODES,
   UI_ACTION_ID,
   type ScrollBucket,
   type AnalyticsConsent,
@@ -94,6 +95,7 @@ export class AnalyticsService {
   private session: SessionTally | null = null
   private sessionsEnded = 0
   private persistedAt = 0
+  private appearanceState: Record<string, AnalyticsValue> | null = null
 
   constructor(private readonly deps: AnalyticsServiceDeps) {
     this.now = deps.now ?? Date.now
@@ -394,6 +396,11 @@ export class AnalyticsService {
       const extension = str('extension').slice(0, 16)
       const type = documentFileType(extension ? `file.${extension}` : 'file')
       this.countInteraction('chat_inputs', `${method}:${type}`)
+    },
+    appearance: ({ props, oneOf }) => {
+      const theme = oneOf(THEME_MODES, 'theme')
+      if (!theme || typeof props.ui_animations !== 'boolean') return
+      this.appearanceState = { theme, ui_animations: props.ui_animations }
     }
   }
 
@@ -402,6 +409,11 @@ export class AnalyticsService {
     if (!this.session || !this.usageOn()) return
     this.session.count(counter, key, this.now())
     this.persistSoon()
+  }
+
+  /** The appearance the renderer last reported, for the daily snapshot. */
+  appearance(): Record<string, AnalyticsValue> {
+    return this.appearanceState ?? {}
   }
 
   // --- prompts ------------------------------------------------------------------------------
@@ -531,15 +543,23 @@ export class AnalyticsService {
 
   // --- daily snapshot -----------------------------------------------------------------------
 
-  /** Send `features_snapshot` at most once a calendar day. Returns true when it was sent. */
-  async snapshotFeatures(read: () => Promise<Record<string, boolean>>): Promise<boolean> {
+  /**
+   * Send `features_snapshot`, and `usage_snapshot` when given its reader, at most once a calendar
+   * day. Returns true when they were sent.
+   */
+  async snapshotFeatures(
+    read: () => Promise<Record<string, boolean>>,
+    readUsage?: () => Promise<AnalyticsProperties>
+  ): Promise<boolean> {
     if (!this.client || !this.consent().usage) return false
     const day = new Date(this.now()).toISOString().slice(0, 10)
     if (this.deps.settings.get<unknown>(ANALYTICS_SETTING_KEYS.snapshotDay, null) === day)
       return false
     const features = await read()
+    const usage = readUsage ? await readUsage() : null
     this.deps.settings.set(ANALYTICS_SETTING_KEYS.snapshotDay, day)
     this.capture('features_snapshot', features)
+    if (usage) this.capture('usage_snapshot', usage)
     return true
   }
 

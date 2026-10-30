@@ -80,7 +80,8 @@ export const FEATURES = [
   'browser_action',
   'clipboard',
   'meetings',
-  'sync'
+  'sync',
+  'capture'
 ] as const
 export type AnalyticsFeature = (typeof FEATURES)[number]
 
@@ -175,6 +176,8 @@ export const CHAT_INPUT_METHODS = ['drop', 'paste'] as const
 /** What the person did with an error toast. */
 export const ERROR_RESPONSES = ['action', 'dismiss'] as const
 
+export const THEME_MODES = ['system', 'light', 'dark'] as const
+
 /** Events the renderer may report, with the only properties main will forward. */
 export interface RendererAnalyticsEvents {
   screen_viewed: { screen: string; prev_screen: string | null; prev_ms: number }
@@ -192,6 +195,8 @@ export interface RendererAnalyticsEvents {
   empty_state_seen: { screen: string }
   notification_clicked: { type: (typeof NOTIFICATION_TYPES)[number] }
   chat_input: { method: (typeof CHAT_INPUT_METHODS)[number]; extension: string }
+  // Kept on the device for the daily snapshot.
+  appearance: { theme: (typeof THEME_MODES)[number]; ui_animations: boolean }
 }
 export type RendererAnalyticsEvent = keyof RendererAnalyticsEvents
 

@@ -8,6 +8,7 @@ import { AnalyticsService, type AnalyticsServiceDeps } from '../service'
 import { createPostHogClient } from '../client'
 import { UncleanExitMarker } from '../unclean-exit'
 import { SUMMARY_KEY_CAP } from '../session-tally'
+import { buildUsageSnapshot, countBucket } from '../usage-snapshot'
 import {
   ANALYTICS_SETTING_KEYS,
   normalizeUiActionId,
@@ -238,6 +239,59 @@ describe('sessions', () => {
     await service.shutdown()
     expect(settings.get(ANALYTICS_SETTING_KEYS.pendingSession, null)).toBeNull()
     expect(fake.events).toEqual([])
+  })
+})
+
+describe('daily usage snapshot', () => {
+  it('buckets every count and never sends an exact number', () => {
+    expect([0, 1, 5, 6, 20, 21, 100, 101, 500, 501, -3, Number.NaN].map(countBucket)).toEqual([
+      '0',
+      '1-5',
+      '1-5',
+      '6-20',
+      '6-20',
+      '21-100',
+      '21-100',
+      '101-500',
+      '101-500',
+      '>500',
+      '0',
+      '0'
+    ])
+  })
+
+  it('merges sources, drops unknown keys and failing sources, and adds the appearance', async () => {
+    const snapshot = await buildUsageSnapshot(
+      [
+        () => ({ chats: 12, messages: 900, models_text: 2 }),
+        async () => ({ devices: 1, films: 3, secret_name: 7 }) as never,
+        () => {
+          throw new Error('pro store closed')
+        }
+      ],
+      { theme: 'dark', ui_animations: false, zoom_level: 0.7 }
+    )
+    expect(snapshot).toEqual({
+      chats: '6-20',
+      messages: '>500',
+      models_text: '1-5',
+      devices: '1-5',
+      films: '1-5',
+      theme: 'dark',
+      ui_animations: false,
+      zoom_level: 0.5
+    })
+  })
+
+  it('goes once a day beside features_snapshot', async () => {
+    const service = build({ now: () => Date.parse('2026-10-30T10:00:00Z') })
+    service.optIn('settings')
+    const features = async (): Promise<Record<string, boolean>> => ({ tools: true })
+    const usage = async (): Promise<Record<string, string>> => ({ chats: '1-5' })
+    expect(await service.snapshotFeatures(features, usage)).toBe(true)
+    expect(await service.snapshotFeatures(features, usage)).toBe(false)
+    await service.shutdown()
+    expect(named('usage_snapshot')).toEqual([expect.objectContaining({ chats: '1-5' })])
   })
 })
 

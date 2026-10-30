@@ -7,7 +7,7 @@ import {
   type AnalyticsConsent,
   type AnalyticsPromptKind
 } from '../../shared/analytics'
-import { deleteSetting, getSetting, saveSetting } from '../database'
+import { deleteSetting, getDB, getSetting, saveSetting } from '../database'
 import { isProEntitled } from '../licensing/license-service'
 import {
   setAIRequestObserver,
@@ -43,6 +43,7 @@ import {
 } from './properties'
 import { AnalyticsService, type AnalyticsServiceDeps } from './service'
 import { UncleanExitMarker, UNCLEAN_EXIT_MARKER_FILE } from './unclean-exit'
+import { buildUsageSnapshot, modelCountKey, type UsageCountSource } from './usage-snapshot'
 import { registerAnalyticsIpc } from './ipc'
 import { getMainWindow } from '../main-window'
 
@@ -91,6 +92,14 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 let service: AnalyticsService | null = null
+
+function sqlCount(sql: string): number | undefined {
+  try {
+    return Number((getDB().prepare(sql).get() as { n: number } | undefined)?.n ?? 0)
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Build the owner over the app's real collaborators: the settings database, the PostHog SDK and
@@ -529,6 +538,20 @@ export async function readFeatureSnapshot(): Promise<Record<string, boolean>> {
   } catch {
     /* unknown stays false */
   }
+  // A modality is on while a model is picked for it, here or on a remote server.
+  try {
+    const active = (await import('../models-manager')).getActiveModalities()
+    snapshot.image_generation = Boolean(active.image)
+    snapshot.tts = Boolean(active.speech)
+    snapshot.voice_input = Boolean(active.transcription)
+  } catch {
+    /* unknown stays false */
+  }
+  try {
+    snapshot.vision = (await import('../llm')).llm.hasVision()
+  } catch {
+    /* unknown stays false */
+  }
   for (const source of featureSources) {
     try {
       for (const [feature, on] of Object.entries(await source())) {
@@ -540,6 +563,57 @@ export async function readFeatureSnapshot(): Promise<Record<string, boolean>> {
     }
   }
   return snapshot
+}
+
+const usageSources = new Set<UsageCountSource>()
+
+/** Pro adds the counts it owns (films, paired devices). Returns the unregister function. */
+export function registerUsageCountSource(source: UsageCountSource): () => void {
+  usageSources.add(source)
+  return () => usageSources.delete(source)
+}
+
+/** Core's counts: cheap COUNT queries and the libraries' own listings. Never a name or an id. */
+const coreUsageCounts: UsageCountSource = async () => {
+  const counts: Record<string, number | undefined> = {
+    chats: sqlCount('SELECT COUNT(*) AS n FROM rag_conversations'),
+    messages: sqlCount('SELECT COUNT(*) AS n FROM rag_messages'),
+    user_messages: sqlCount(`SELECT COUNT(*) AS n FROM rag_messages WHERE role = 'user'`),
+    projects: sqlCount('SELECT COUNT(*) AS n FROM projects'),
+    knowledge_documents: sqlCount('SELECT COUNT(*) AS n FROM rag_documents'),
+    connectors: sqlCount('SELECT COUNT(*) AS n FROM connectors')
+  }
+  try {
+    counts.images = (await import('../imagegen')).listGeneratedImages().length
+  } catch {
+    /* left out */
+  }
+  try {
+    counts.videos = (await import('../generated-videos/library')).listGeneratedVideos().length
+  } catch {
+    /* left out */
+  }
+  try {
+    const { models } = await (await import('../models-manager')).getStorageInfo()
+    for (const model of models) {
+      const key = modelCountKey(model.kind)
+      if (key) counts[key] = (counts[key] ?? 0) + 1
+    }
+  } catch {
+    /* left out */
+  }
+  return Object.fromEntries(
+    Object.entries(counts).filter((entry): entry is [string, number] => entry[1] !== undefined)
+  )
+}
+
+/** The daily `usage_snapshot`: bucketed counts and the appearance settings. */
+export function readUsageSnapshot(): Promise<AnalyticsProperties> {
+  const zoom = getSetting<unknown>('windowZoomLevel', 0)
+  return buildUsageSnapshot([coreUsageCounts, ...usageSources], {
+    ...analytics().appearance(),
+    zoom_level: typeof zoom === 'number' ? zoom : 0
+  })
 }
 
 const SNAPSHOT_CHECK_MS = 60 * 60 * 1000
@@ -639,7 +713,7 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
   // The daily snapshot: checked shortly after launch, then hourly; sent once a calendar day.
   const snapshot = (): void =>
     void analytics()
-      .snapshotFeatures(readFeatureSnapshot)
+      .snapshotFeatures(readFeatureSnapshot, readUsageSnapshot)
       .catch(() => {})
   setTimeout(snapshot, 60_000).unref()
   setInterval(snapshot, SNAPSHOT_CHECK_MS).unref()
