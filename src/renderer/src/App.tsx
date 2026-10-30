@@ -130,6 +130,8 @@ type ViewMode =
   | 'vault'
   | 'devices'
   | 'video'
+  | 'scribe'
+  | 'notes'
 
 interface LaunchRoute {
   view: ViewMode
@@ -158,7 +160,9 @@ const LAUNCH_VIEWS: Record<string, ViewMode> = {
   '/voice': 'voice',
   '/vault': 'vault',
   '/devices': 'devices',
-  '/video': 'video'
+  '/video': 'video',
+  '/scribe': 'scribe',
+  '/notes': 'notes'
 }
 
 /**
@@ -172,6 +176,10 @@ function launchRoute(path: string): LaunchRoute | null {
   if (internalTab) return { view: internalTab.view, subroute: internalTab.subroute, section: null }
   if (path.startsWith('/video/'))
     return { view: 'video', subroute: path.slice('/video/'.length) || null, section: null }
+  if (path.startsWith('/notes/'))
+    return { view: 'notes', subroute: path.slice('/notes/'.length) || null, section: null }
+  if (path.startsWith('/scribe/'))
+    return { view: 'scribe', subroute: path.slice('/scribe/'.length) || null, section: null }
   if (path.startsWith('/settings/')) {
     let section: string | null = null
     try {
@@ -222,7 +230,9 @@ function routePath(
     voice: '/voice',
     vault: '/vault',
     devices: '/devices',
-    video: '/video'
+    video: '/video',
+    scribe: '/scribe',
+    notes: '/notes'
   }
 
   if (viewMode === 'settings' && settingsSection)
@@ -1076,6 +1086,7 @@ function AppContent(): React.JSX.Element {
         proItem('meetings'),
         proItem('actions'),
         proItem('entities'),
+        proItem('notes'),
         {
           label: 'Projects',
           icon: <IconFolders className="h-5 w-5 shrink-0" />,
@@ -1089,6 +1100,7 @@ function AppContent(): React.JSX.Element {
         proItem('explore'),
         proItem('tasks'),
         proItem('voice'),
+        proItem('scribe'),
         proItem('video')
       )
     },
