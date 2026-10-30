@@ -127,7 +127,9 @@ describe('sessions', () => {
     service.captureFromRenderer('notification_clicked', { type: 'meetings' })
     service.captureFromRenderer('chat_input', { method: 'drop', extension: 'pdf' })
     service.captureFromRenderer('chat_input', { method: 'paste', extension: 'clientsecret' })
-    service.countInteraction('settings_changed', 'toolsEnabled=false')
+    service.countInteraction('settings_changed', 'tools_enabled=false')
+    service.captureFromRenderer('appearance', { theme: 'system', ui_animations: true })
+    service.captureFromRenderer('appearance', { theme: 'dark', ui_animations: true })
     await service.shutdown()
 
     // Not one of these went as an event of its own.
@@ -146,7 +148,7 @@ describe('sessions', () => {
       empty_states: { projects: 1 },
       notifications_clicked: { meetings: 1 },
       chat_inputs: { 'drop:pdf': 1, 'paste:other': 1 },
-      settings_changed: { 'toolsEnabled=false': 1 }
+      settings_changed: { 'tools_enabled=false': 1, 'theme=dark': 1 }
     })
   })
 
@@ -282,20 +284,9 @@ describe('message actions and flows', () => {
 })
 
 describe('daily usage snapshot', () => {
-  it('buckets every count and never sends an exact number', () => {
-    expect([0, 1, 5, 6, 20, 21, 100, 101, 500, 501, -3, Number.NaN].map(countBucket)).toEqual([
-      '0',
-      '1-5',
-      '1-5',
-      '6-20',
-      '6-20',
-      '21-100',
-      '21-100',
-      '101-500',
-      '101-500',
-      '>500',
-      '0',
-      '0'
+  it('rounds every count down to the scale shared with OGAM, never an exact number', () => {
+    expect([0, 1, 2, 4, 5, 9, 24, 99, 260, 999, 5000, -3, Number.NaN].map(countBucket)).toEqual([
+      0, 1, 2, 2, 5, 5, 10, 50, 250, 500, 1000, 0, 0
     ])
   })
 
@@ -303,7 +294,7 @@ describe('daily usage snapshot', () => {
     const snapshot = await buildUsageSnapshot(
       [
         () => ({ chats: 12, messages: 900, models_text: 2 }),
-        async () => ({ devices: 1, films: 3, secret_name: 7 }) as never,
+        async () => ({ paired_devices: 1, films: 3, secret_name: 7 }) as never,
         () => {
           throw new Error('pro store closed')
         }
@@ -311,11 +302,11 @@ describe('daily usage snapshot', () => {
       { theme: 'dark', ui_animations: false, zoom_level: 0.7 }
     )
     expect(snapshot).toEqual({
-      chats: '6-20',
-      messages: '>500',
-      models_text: '1-5',
-      devices: '1-5',
-      films: '1-5',
+      chats: 10,
+      messages: 500,
+      models_text: 2,
+      paired_devices: 1,
+      films: 2,
       theme: 'dark',
       ui_animations: false,
       zoom_level: 0.5
@@ -326,11 +317,11 @@ describe('daily usage snapshot', () => {
     const service = build({ now: () => Date.parse('2026-10-30T10:00:00Z') })
     service.optIn('settings')
     const features = async (): Promise<Record<string, boolean>> => ({ tools: true })
-    const usage = async (): Promise<Record<string, string>> => ({ chats: '1-5' })
+    const usage = async (): Promise<Record<string, number>> => ({ chats: 2 })
     expect(await service.snapshotFeatures(features, usage)).toBe(true)
     expect(await service.snapshotFeatures(features, usage)).toBe(false)
     await service.shutdown()
-    expect(named('usage_snapshot')).toEqual([expect.objectContaining({ chats: '1-5' })])
+    expect(named('usage_snapshot')).toEqual([expect.objectContaining({ chats: 2 })])
   })
 })
 

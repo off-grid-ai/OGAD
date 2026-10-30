@@ -177,7 +177,7 @@ export const CHAT_INPUT_METHODS = ['drop', 'paste'] as const
 export const ERROR_RESPONSES = ['action', 'dismiss'] as const
 
 /** Message actions, sent as `message_action`. */
-export const MESSAGE_ACTIONS = ['copy', 'edit', 'delete'] as const
+export const MESSAGE_ACTIONS = ['copy', 'edit'] as const
 
 /** What was deleted, sent as `item_deleted`. */
 export const DELETED_ITEMS = ['chat', 'project', 'document'] as const
@@ -196,6 +196,7 @@ export const MODEL_PICK_SOURCES = [
   'voice',
   'computer_use',
   'artifact',
+  'home',
   'unknown'
 ] as const
 export type ModelPickSource = (typeof MODEL_PICK_SOURCES)[number]

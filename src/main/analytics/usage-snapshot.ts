@@ -1,37 +1,37 @@
 import type { AnalyticsProperties } from './properties'
 
 /**
- * The daily `usage_snapshot`: how much of each thing exists on this device, as a bucket, never an
- * exact number (an exact count can tell one install from another) and never a name or an id.
+ * The daily `usage_snapshot`: how much of each thing exists on this device, rounded down to a
+ * step of one scale shared with OGAM (an exact count can tell one install from another), and
+ * never a name or an id.
  */
-export type CountBucket = '0' | '1-5' | '6-20' | '21-100' | '101-500' | '>500'
+export const COUNT_STEPS = [0, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000] as const
 
-export function countBucket(count: number): CountBucket {
-  if (!Number.isFinite(count) || count < 1) return '0'
-  if (count <= 5) return '1-5'
-  if (count <= 20) return '6-20'
-  if (count <= 100) return '21-100'
-  if (count <= 500) return '101-500'
-  return '>500'
+export function countBucket(count: number): number {
+  if (!Number.isFinite(count) || count < 1) return 0
+  let step = 0
+  for (const value of COUNT_STEPS) if (count >= value) step = value
+  return step
 }
 
-/** The counts in the snapshot. Pro adds the ones it owns (films, paired devices). */
+/** The counts in the snapshot, named as OGAM names them. Pro adds films and paired devices. */
 export const USAGE_COUNTS = [
   'chats',
   'messages',
   'user_messages',
   'projects',
   'knowledge_documents',
-  'images',
-  'videos',
+  'generated_images',
+  'generated_videos',
   'films',
-  'connectors',
-  'devices',
+  'mcp_servers',
+  'paired_devices',
+  'remote_servers',
   'models_text',
   'models_vision',
   'models_image',
   'models_video',
-  'models_voice',
+  'models_tts',
   'models_stt',
   'models_embedding'
 ] as const
@@ -50,7 +50,7 @@ export function modelCountKey(kind: string | undefined): UsageCount | null {
       return 'models_video'
     case 'voice':
     case 'speech':
-      return 'models_voice'
+      return 'models_tts'
     case 'transcription':
       return 'models_stt'
     case 'embedding':

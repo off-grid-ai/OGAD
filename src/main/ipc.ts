@@ -643,8 +643,11 @@ export function setupIPC(): void {
     } else {
       saveSetting(key, value)
       // The key, and the value only when it is a switch: a typed value never leaves.
-      if (/^[a-zA-Z][a-zA-Z0-9_]{1,47}$/.test(key))
-        countInteraction('settings_changed', typeof value === 'boolean' ? `${key}=${value}` : key)
+      if (/^[a-zA-Z][a-zA-Z0-9_]{1,47}$/.test(key)) {
+        // snake_case, as OGAM names settings.
+        const name = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+        countInteraction('settings_changed', typeof value === 'boolean' ? `${name}=${value}` : name)
+      }
     }
     return true
   })

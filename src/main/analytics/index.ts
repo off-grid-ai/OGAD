@@ -512,17 +512,18 @@ export function reportDocumentAdded(fileName: string, bytes: number): void {
   }
 }
 
-const MODEL_KINDS = [
-  'text',
-  'vision',
-  'image',
-  'video',
-  'speech',
-  'voice',
-  'transcription',
-  'embedding',
-  'computer_use'
-] as const
+/** A model kind, as `model_selected.modality` names it (shared with OGAM). */
+const MODALITY_OF_KIND: Record<string, string> = {
+  text: 'text',
+  vision: 'vision',
+  image: 'image',
+  video: 'video',
+  speech: 'tts',
+  voice: 'tts',
+  transcription: 'stt',
+  embedding: 'embedding',
+  computer_use: 'computer_use'
+}
 
 /**
  * A model was picked for a modality. `source` is the fixed place it was picked from; the model is
@@ -538,10 +539,10 @@ export function reportModelSelected(
     if ((result as { success?: unknown } | null)?.success !== true) return
     const ref = modelRef(modelId)
     const catalogKind = CATALOG.find((entry) => entry.id === ref.model)?.kind
-    const picked = (MODEL_KINDS as readonly unknown[]).includes(kind) ? (kind as string) : null
+    const picked = typeof kind === 'string' ? kind : catalogKind
     track('model_selected', {
+      modality: (picked && MODALITY_OF_KIND[picked]) ?? null,
       model: ref.model,
-      kind: picked ?? catalogKind ?? null,
       source: (MODEL_PICK_SOURCES as readonly unknown[]).includes(source)
         ? (source as string)
         : 'unknown'
@@ -638,15 +639,23 @@ const coreUsageCounts: UsageCountSource = async () => {
     user_messages: sqlCount(`SELECT COUNT(*) AS n FROM rag_messages WHERE role = 'user'`),
     projects: sqlCount('SELECT COUNT(*) AS n FROM projects'),
     knowledge_documents: sqlCount('SELECT COUNT(*) AS n FROM rag_documents'),
-    connectors: sqlCount('SELECT COUNT(*) AS n FROM connectors')
+    mcp_servers: sqlCount('SELECT COUNT(*) AS n FROM connectors')
   }
   try {
-    counts.images = (await import('../imagegen')).listGeneratedImages().length
+    counts.generated_images = (await import('../imagegen')).listGeneratedImages().length
   } catch {
     /* left out */
   }
   try {
-    counts.videos = (await import('../generated-videos/library')).listGeneratedVideos().length
+    counts.generated_videos = (
+      await import('../generated-videos/library')
+    ).listGeneratedVideos().length
+  } catch {
+    /* left out */
+  }
+  try {
+    const { getRemoteVisionServerSettings } = await import('../vision/remote-vision-server')
+    counts.remote_servers = getRemoteVisionServerSettings().servers.length
   } catch {
     /* left out */
   }

@@ -438,6 +438,12 @@ export class AnalyticsService {
     appearance: ({ props, oneOf }) => {
       const theme = oneOf(THEME_MODES, 'theme')
       if (!theme || typeof props.ui_animations !== 'boolean') return
+      // A change after the first report is a setting changed, named as OGAM names it.
+      const before = this.appearanceState
+      if (before && before.theme !== theme)
+        this.countInteraction('settings_changed', `theme=${theme}`)
+      if (before && before.ui_animations !== props.ui_animations)
+        this.countInteraction('settings_changed', `ui_animations=${props.ui_animations}`)
       this.appearanceState = { theme, ui_animations: props.ui_animations }
     }
   }
