@@ -95,6 +95,7 @@ run(path.join(root, 'scripts', 'build-computer-use-capture.sh'), root)
 run(path.join(root, 'scripts', 'build-ocr.sh'), root)
 run(path.join(root, 'scripts', 'build-actions-helper.sh'), root)
 run(path.join(root, 'pro', 'scripts', 'build-proximity-helper.sh'), path.join(root, 'pro'))
+run(path.join(root, 'pro', 'scripts', 'build-scribe-overlay.sh'), path.join(root, 'pro'))
 
 // c2patool signs the AI label into exported videos, on every platform that has a build.
 {
