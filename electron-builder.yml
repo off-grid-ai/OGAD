@@ -97,7 +97,7 @@ mac:
     # first time the agent uses that capability; without it a hardened-runtime build
     # is refused access before any prompt. Copy follows off-grid-ai/brand: lead with
     # what the user gets, privacy as the proof, no em dashes.
-    NSAppleEventsUsageDescription: Off Grid AI controls apps like Messages, Mail, and Notes to carry out actions you approve. Everything runs on your Mac and nothing leaves the device.
+    NSAppleEventsUsageDescription: Off Grid AI controls apps like Messages, Mail, and Notes to carry out actions you approve. Everything runs on your Mac.
     NSCalendarsFullAccessUsageDescription: Off Grid AI reads and creates calendar events when you ask, on your device. Your calendar never leaves your Mac.
     NSCalendarsUsageDescription: Off Grid AI reads and creates calendar events when you ask, on your device. Your calendar never leaves your Mac.
     NSRemindersFullAccessUsageDescription: Off Grid AI reads and creates reminders when you ask, on your device. Your reminders never leave your Mac.
