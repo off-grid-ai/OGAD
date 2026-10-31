@@ -4,8 +4,9 @@
 // process boundary is our real code.
 //
 // The test steers it through files beside the binary, the way a real engine is steered by its
-// model: `hold` keeps /health at 503 "Loading model" (a slow load), `launches.log` records every
-// start as `<engine folder> <pid> <args>` so a test can count launches and find the process.
+// model: `hold` keeps /health at 503 "Loading model" (a slow load), `<folder>.oom` makes that engine
+// fail its load the way llama.cpp does when memory runs out, `reply.json` is the body of every
+// POST, and `launches.log` records every start as `<engine folder> <pid> <args>`.
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
@@ -21,6 +22,10 @@ const root = path.dirname(__dirname)
 const folder = path.basename(__dirname)
 const model = path.basename(valueAfter('-m') || 'model.gguf')
 fs.appendFileSync(path.join(root, 'launches.log'), folder + ' ' + process.pid + ' ' + args.join(' ') + '\\n')
+if (fs.existsSync(path.join(root, folder + '.oom'))) {
+  process.stderr.write('ggml_backend_cuda_buffer_type_alloc_buffer: allocating 4096.00 MiB on device 0: cudaMalloc failed: out of memory\\n')
+  process.exit(1)
+}
 const held = () => fs.existsSync(path.join(root, 'hold'))
 // llama-server prints while it loads; the owner treats a silent engine as stalled.
 const progress = setInterval(() => process.stderr.write('.'), 100)
@@ -37,6 +42,8 @@ const server = http.createServer((req, res) => {
   req.on('data', (chunk) => (body += chunk))
   req.on('end', () => {
     fs.appendFileSync(path.join(root, 'requests.log'), req.method + ' ' + req.url + ' ' + body.replace(/\\n/g, ' ') + '\\n')
+    const reply = path.join(root, 'reply.json')
+    if (fs.existsSync(reply)) return json(res, 200, JSON.parse(fs.readFileSync(reply, 'utf8')))
     json(res, 200, { choices: [{ message: { role: 'assistant', content: 'ok' } }] })
   })
 })
@@ -54,6 +61,10 @@ export interface FakeLlamaEngine {
   /** Keep the engine loading (503) until release(). */
   hold(): void
   release(): void
+  /** Make the engine in `folder` run out of memory while loading. */
+  outOfMemory(folder: string): void
+  /** The JSON body the engine answers every POST with. */
+  reply(body: unknown): void
   /** Every start so far, oldest first. */
   launches(): { folder: string; pid: number; args: string[] }[]
   /** Every non-probe request the engine served: method, path and body. */
@@ -83,6 +94,8 @@ export function installFakeLlamaEngine(
     binDir,
     hold: () => fs.writeFileSync(path.join(binDir, 'hold'), ''),
     release: () => fs.rmSync(path.join(binDir, 'hold'), { force: true }),
+    outOfMemory: (folder) => fs.writeFileSync(path.join(binDir, `${folder}.oom`), ''),
+    reply: (body) => fs.writeFileSync(path.join(binDir, 'reply.json'), JSON.stringify(body)),
     launches: () =>
       read('launches.log').map((line) => {
         const [folder = '', pid = '0', ...args] = line.split(' ')

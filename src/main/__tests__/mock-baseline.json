@@ -12,7 +12,6 @@
   "src/main/__tests__/use-runtime.integration.dbtest.ts": 1,
   "src/main/accessibility/__tests__/ax-observation.test.ts": 1,
   "src/main/accessibility/__tests__/decision-model-loader.test.ts": 9,
-  "src/main/accessibility/__tests__/decision-runtime.test.ts": 10,
   "src/main/actions/__tests__/actions-ipc.test.ts": 1,
   "src/main/browser/__tests__/web-use-decision-none.integration.test.ts": 1,
   "src/main/browser/__tests__/web-use-host.test.ts": 5,
