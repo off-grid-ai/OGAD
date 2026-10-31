@@ -6,7 +6,6 @@
   "src/main/__tests__/model-storage-move.test.ts": 7,
   "src/main/__tests__/system-status-ipc.test.ts": 3,
   "src/main/__tests__/task-history-ipc.dbtest.ts": 10,
-  "src/main/__tests__/task-role-models.test.ts": 3,
   "src/main/accessibility/__tests__/decision-model-loader.test.ts": 9,
   "src/main/browser/__tests__/web-use-decision-none.integration.test.ts": 1,
   "src/main/browser/__tests__/web-use-host.test.ts": 5,
