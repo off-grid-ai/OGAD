@@ -22,7 +22,8 @@ const root = path.dirname(__dirname)
 const folder = path.basename(__dirname)
 const model = path.basename(valueAfter('-m') || 'model.gguf')
 fs.appendFileSync(path.join(root, 'launches.log'), folder + ' ' + process.pid + ' ' + args.join(' ') + '\\n')
-if (fs.existsSync(path.join(root, folder + '.oom'))) {
+const oom = path.join(root, folder + '.oom')
+if (fs.existsSync(oom) && args.join(' ').includes(fs.readFileSync(oom, 'utf8'))) {
   process.stderr.write('ggml_backend_cuda_buffer_type_alloc_buffer: allocating 4096.00 MiB on device 0: cudaMalloc failed: out of memory\\n')
   process.exit(1)
 }
@@ -61,8 +62,9 @@ export interface FakeLlamaEngine {
   /** Keep the engine loading (503) until release(). */
   hold(): void
   release(): void
-  /** Make the engine in `folder` run out of memory while loading. */
-  outOfMemory(folder: string): void
+  /** Make the engine in `folder` run out of memory while loading; with `whenArgsInclude`, only
+   *  the launches whose arguments contain that text (one owner's launch, not another's). */
+  outOfMemory(folder: string, whenArgsInclude?: string): void
   /** The JSON body the engine answers every POST with. */
   reply(body: unknown): void
   /** Every start so far, oldest first. */
@@ -94,7 +96,8 @@ export function installFakeLlamaEngine(
     binDir,
     hold: () => fs.writeFileSync(path.join(binDir, 'hold'), ''),
     release: () => fs.rmSync(path.join(binDir, 'hold'), { force: true }),
-    outOfMemory: (folder) => fs.writeFileSync(path.join(binDir, `${folder}.oom`), ''),
+    outOfMemory: (folder, whenArgsInclude = '') =>
+      fs.writeFileSync(path.join(binDir, `${folder}.oom`), whenArgsInclude),
     reply: (body) => fs.writeFileSync(path.join(binDir, 'reply.json'), JSON.stringify(body)),
     launches: () =>
       read('launches.log').map((line) => {
