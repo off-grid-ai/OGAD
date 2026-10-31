@@ -4,7 +4,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises'
-import * as downloadVerify from '../models/download-verify'
 import { createWindowAndScheduleModelStorageCleanup } from '../bootstrap/model-storage-cleanup'
 import {
   moveModelStorage,
@@ -23,8 +22,24 @@ import {
 import { configureRuntime, modelsDir } from '../runtime-env'
 import { modelReadDirectories, resolveModelAsset } from '../model-paths'
 import { installedDownloadedIds, readDownloaded } from '../downloaded-models'
-import * as modelPaths from '../model-paths'
+import { resolveModelReference } from '../model-paths'
 import { withStorageDownload } from '../model-storage-guard'
+
+/**
+ * The disk boundary: every file the cleanup reads in full (to hash it) is opened as a read stream.
+ * `onOpen` runs as each one opens, so a test can act while a file is being hashed.
+ */
+function watchHashing(onOpen: (file: string, done: Promise<void>) => void = () => {}): string[] {
+  const opened: string[] = []
+  const createReadStream = fs.createReadStream
+  vi.spyOn(fs, 'createReadStream').mockImplementation(((file: fs.PathLike, options?: unknown) => {
+    const stream = (createReadStream as (...args: unknown[]) => fs.ReadStream)(file, options)
+    opened.push(String(file))
+    onOpen(String(file), new Promise<void>((resolve) => stream.once('end', () => resolve())))
+    return stream
+  }) as typeof fs.createReadStream)
+  return opened
+}
 
 const roots: string[] = []
 afterEach(() => {
@@ -272,9 +287,9 @@ describe('verified model storage move', () => {
       size: 7,
       sourceMtimeMs: fs.lstatSync(path.join(f.source, 'weight.gguf')).mtimeMs
     })
-    const hash = vi.spyOn(downloadVerify, 'sha256File')
+    const hashed = watchHashing()
     await cleanupMovedModelStorage(f.profile, readModelStorageChoice(f.profile)!)
-    expect(hash.mock.calls).toEqual([[path.join(f.destination, 'weight.gguf')]])
+    expect(hashed).toEqual([path.join(f.destination, 'weight.gguf')])
     expect(fs.readdirSync(f.source)).toEqual(['personal'])
     expect(fs.readFileSync(path.join(f.destination, 'weight.gguf'), 'utf8')).toBe('weights')
     expect(readPendingModelCleanup(f.profile)).toEqual([])
@@ -286,12 +301,12 @@ describe('verified model storage move', () => {
     const source = path.join(f.source, 'weight.gguf')
     const stat = fs.lstatSync(source)
     fs.utimesSync(source, stat.atime, new Date(stat.mtimeMs + 10_000))
-    const hash = vi.spyOn(downloadVerify, 'sha256File')
+    const hashed = watchHashing()
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     await cleanupMovedModelStorage(f.profile, f.destination)
+    expect(hashed).toEqual([])
     expect(fs.readFileSync(source, 'utf8')).toBe('weights')
     expect(readPendingModelCleanup(f.profile)).toEqual(records)
-    expect(hash).not.toHaveBeenCalled()
   })
   it('hashes both copies for a legacy record without a source modification time', async () => {
     const f = fixture()
@@ -300,11 +315,11 @@ describe('verified model storage move', () => {
       ({ sourceMtimeMs: _, ...record }) => record
     )
     saveModelStorageChoice(f.profile, f.destination, records)
-    const hash = vi.spyOn(downloadVerify, 'sha256File')
+    const hashed = watchHashing()
     await cleanupMovedModelStorage(f.profile, f.destination)
-    expect(hash.mock.calls).toEqual([
-      [path.join(f.source, 'weight.gguf')],
-      [path.join(f.destination, 'weight.gguf')]
+    expect(hashed).toEqual([
+      path.join(f.source, 'weight.gguf'),
+      path.join(f.destination, 'weight.gguf')
     ])
     expect(fs.existsSync(path.join(f.source, 'weight.gguf'))).toBe(false)
     expect(readPendingModelCleanup(f.profile)).toEqual([])
@@ -327,22 +342,23 @@ describe('verified model storage move', () => {
     fs.writeFileSync(path.join(f.source, 'second.gguf'), 'second')
     f.deps.ownedFiles.push({ name: 'second.gguf' })
     await move(f)
-    const originalHash = downloadVerify.sha256File
     let hashing = false
     let eventLoopTurnCompleted = true
-    vi.spyOn(downloadVerify, 'sha256File').mockImplementation(async (file) => {
-      expect(hashing).toBe(false)
-      expect(eventLoopTurnCompleted).toBe(true)
+    const overlaps: string[] = []
+    const hashed = watchHashing((file, done) => {
+      if (hashing || !eventLoopTurnCompleted) overlaps.push(file)
       hashing = true
-      const hash = await originalHash(file)
-      hashing = false
-      eventLoopTurnCompleted = false
-      setImmediate(() => {
-        eventLoopTurnCompleted = true
+      void done.then(() => {
+        hashing = false
+        eventLoopTurnCompleted = false
+        setImmediate(() => {
+          eventLoopTurnCompleted = true
+        })
       })
-      return hash
     })
     await cleanupMovedModelStorage(f.profile, f.destination)
+    expect(hashed.length).toBeGreaterThan(1)
+    expect(overlaps).toEqual([])
     expect(readPendingModelCleanup(f.profile)).toEqual([])
     await yieldToEventLoop()
   })
@@ -350,13 +366,9 @@ describe('verified model storage move', () => {
     const f = fixture()
     await move(f)
     const records = readPendingModelCleanup(f.profile)
-    const originalHash = downloadVerify.sha256File
     const extra = { ...records[0]!, name: 'new.gguf' }
-    vi.spyOn(downloadVerify, 'sha256File').mockImplementation(async (file) => {
-      const hash = await originalHash(file)
-      saveModelStorageChoice(f.profile, f.source, [...records, extra])
-      return hash
-    })
+    // The person switches the active folder back while a file is being hashed.
+    watchHashing(() => saveModelStorageChoice(f.profile, f.source, [...records, extra]))
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     await cleanupMovedModelStorage(f.profile, f.destination)
     expect(fs.existsSync(path.join(f.source, 'weight.gguf'))).toBe(true)
@@ -367,13 +379,11 @@ describe('verified model storage move', () => {
     const f = fixture()
     await move(f)
     const records = readPendingModelCleanup(f.profile)
-    const originalHash = downloadVerify.sha256File
-    vi.spyOn(downloadVerify, 'sha256File').mockImplementation(async (file) => {
-      const hash = await originalHash(file)
+    // The source copy is written to while the destination is being hashed.
+    watchHashing(() => {
       const source = path.join(f.source, 'weight.gguf')
       const stat = fs.lstatSync(source)
       fs.utimesSync(source, stat.atime, new Date(stat.mtimeMs + 10_000))
-      return hash
     })
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     await cleanupMovedModelStorage(f.profile, f.destination)
@@ -565,7 +575,7 @@ describe('Leave registry metadata', () => {
       }
       if (shape === 'strings') expect(installedDownloadedIds(f.destination)).toEqual(['fixture'])
       for (const reference of references) {
-        expect(modelPaths.resolveModelReference(reference)).toBe(reference)
+        expect(resolveModelReference(reference)).toBe(reference)
         expect(fs.statSync(reference).size).toBeGreaterThan(0)
         expect(fs.existsSync(path.join(f.destination, path.basename(reference)))).toBe(false)
       }
@@ -604,15 +614,11 @@ describe('Leave registry metadata', () => {
     expect(fs.readFileSync(path.join(f.source, 'weight.gguf'), 'utf8')).toBe('weights')
   })
 
-  it('copies the original bytes if reference resolution throws after a partial transform', () => {
+  it('copies the original bytes when a damaged registry cannot be rewritten', () => {
     const f = fixture()
-    const bytes = '[ {"files":["weight.gguf","projector.gguf"]} ]'
+    // One entry names its file by a number: the registry is damaged, so nothing of it is rewritten.
+    const bytes = '[ {"files":["weight.gguf"]}, {"files":[{"name":42}]} ]'
     fs.writeFileSync(path.join(f.source, 'downloaded-models.json'), bytes)
-    vi.spyOn(modelPaths, 'resolveModelReference')
-      .mockReturnValueOnce('/rewritten/weight.gguf')
-      .mockImplementationOnce(() => {
-        throw new Error('private resolver detail')
-      })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     expect(() => leaveModelStorage(f.profile, f.source, f.destination)).not.toThrow()
     expect(fs.readFileSync(path.join(f.destination, 'downloaded-models.json'), 'utf8')).toBe(bytes)
