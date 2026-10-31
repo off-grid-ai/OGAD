@@ -1,7 +1,6 @@
 {
   "src/main/__tests__/ax-frame-success.dbtest.ts": 2,
   "src/main/__tests__/ax-host-lifecycle.dbtest.ts": 24,
-  "src/main/__tests__/mcp-remote-task.integration.test.ts": 4,
   "src/main/__tests__/task-history-ipc.dbtest.ts": 10,
   "src/main/browser/__tests__/web-use-host.test.ts": 5,
   "src/main/extension-bridge/__tests__/bridge-media.test.ts": 3,
