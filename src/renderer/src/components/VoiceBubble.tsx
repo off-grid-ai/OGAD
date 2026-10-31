@@ -370,7 +370,8 @@ function PlayButton({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="icon-lg"
+          size="icon"
+          variant="outline"
           onClick={onClick}
           aria-label={
             status === 'loading'
@@ -443,7 +444,7 @@ function SeekWaveform({
       aria-valuemax={Math.round(totalDuration)}
       aria-valuenow={Math.round(progress * totalDuration)}
       aria-valuetext={`${formatDuration(progress * totalDuration)} of ${formatDuration(totalDuration)}`}
-      className="group relative order-last min-w-0 basis-full cursor-pointer touch-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/60 @sm:order-none @sm:basis-0 @sm:flex-1"
+      className="group relative order-last min-w-0 basis-full cursor-pointer touch-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/60 @2xs:order-none @2xs:basis-0 @2xs:flex-1"
       onKeyDown={(event) => {
         const key = event.key
         if (key === 'ArrowRight') seekTo(progress + SEEK_STEP)
@@ -943,7 +944,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
     // Its own provider: voice notes also render outside the app shell's provider.
     <TooltipProvider delayDuration={300}>
       <div className={`@container ${surface}`}>
-        {/* One row: play, waveform, time, then the actions. Narrow cards drop the waveform below. */}
+        {/* One row: play, waveform, time, then the actions. Only a very narrow pane drops the waveform below. */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {/* A second press while the clip is being prepared would start a second synthesis. */}
           <PlayButton
@@ -960,7 +961,7 @@ export const VoiceBubble: React.FC<VoiceBubbleProps> = ({
             seekTo={seekTo}
           />
 
-          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums @sm:ml-0">
+          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums @2xs:ml-0">
             <span className="text-foreground">{formatDuration(currentTime)}</span>
             <span className="mx-1 text-muted-foreground/50">/</span>
             {formatDuration(totalDuration)}
