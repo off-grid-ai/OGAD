@@ -84,6 +84,7 @@ export function EmbeddingRebuildNotice(): React.JSX.Element | null {
     <div
       role="status"
       aria-live="polite"
+      aria-busy="true"
       className="absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 border-b border-border bg-card/90 px-4 py-1.5 font-mono text-meta text-foreground/80"
     >
       <span>
