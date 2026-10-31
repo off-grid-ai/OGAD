@@ -40,7 +40,32 @@ E=$(node -p 'require("electron")'); OFFGRID_DATA_DIR=$(mktemp -d) ELECTRON_RUN_A
 
 - **RAG tables were created once per process.** The guard was a process-wide flag, so a reopened or switched profile database never got its tables, and a restore failed with "no such table: projects". The tables are now ensured once per database connection (`src/main/rag/store.ts`).
 
+## Baseline burn-down (every other core test)
+
+The baseline started at 33 files and 133 mocks of our code. **Now: 12 files, 72 mocks**, as of `280a8a11e`.
+
+Rewritten so far, each faking only a boundary:
+- ax-observation, files-audio-upload, supervisor-window
+- use-runtime: a native-helper executable, run from a temp working directory so the real Swift helper is never found
+- actions-ipc, task-role-models, system-status-ipc: macOS TCC and the multicast socket are the boundaries
+- ai-request-log-ipc, ConnectorsScreen
+- model-storage-move: hashing is watched at the disk
+- reconcile-projector, mcpConnectorToolExtension, decision-model-loader, web-use-lifecycle
+
+**New shared fakes:**
+- `harness/fake-kev-runtime.ts`
+- `harness/fake-actions-helper.ts`
+- `harness/decision-port-lock.ts`
+- `useModelBrain` in `harness/fake-llama-engine.ts`: the engine process stays real, and the test supplies its replies
+
+**Guard rule:** `vi.mock(x, () => import(real))` points a stubbed alias at the real module. That is wiring, not a fake, so the guard allows it.
+
+**Findings fixed:**
+- The RAG tables were missed on a reopened profile (see above).
+- Two Decision-runtime test files could answer each other's requests on the shared port range. They now take turns.
+
+**Left:** web-use-decision-none, web-use-host, general-vision-operator-adapter, hybrid-vision-strategy, bridge-tools, bridge-media, mcp-remote-task, task-retry-context, task-history-ipc, ax-frame-success, ax-host-lifecycle, loadProFeaturesRenderer.
+
 ## Not covered yet
 
-- **The `active-model.json` file in the web-task e2e is still written by hand.** It is product state on disk, not an `INSERT`. It is left for the baseline burn-down.
-- **The baseline burn-down (every other core test) is the next batch.** Progress is in `mock-baseline.json`.
+- **The `active-model.json` file in the web-task e2e is still written by hand.** It is product state on disk, not an `INSERT`.
