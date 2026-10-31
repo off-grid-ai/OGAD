@@ -5,6 +5,8 @@ import { CommandPalette } from './components/CommandPalette'
 import logo from './assets/logo.png'
 import { useMeetingRecorder } from './useMeetingRecorder'
 import { MemoryChat } from './components/MemoryChat'
+import { PageShell } from './components/PageShell'
+import type { ViewMode } from './lib/view-modes'
 import {
   ACTIVE_CHAT_TAB_KEY,
   OPEN_CHAT_TABS_KEY,
@@ -106,31 +108,6 @@ import {
   type NotificationExternalItemSubscriber,
   type NotificationExternalUnreadSubscriber
 } from './lib/notification-hooks'
-
-type ViewMode =
-  | 'dashboard'
-  | 'explore'
-  | 'day'
-  | 'replay'
-  | 'reflect'
-  | 'actions'
-  | 'connectors'
-  | 'meetings'
-  | 'chats'
-  | 'entities'
-  | 'memory-chat'
-  | 'tasks'
-  | 'models'
-  | 'gateway'
-  | 'projects'
-  | 'notifications'
-  | 'settings'
-  | 'search'
-  | 'clipboard'
-  | 'voice'
-  | 'vault'
-  | 'devices'
-  | 'video'
 
 interface LaunchRoute {
   view: ViewMode
@@ -1468,11 +1445,8 @@ function AppContent(): React.JSX.Element {
                     ? `chat-detail-${selectedSessionId}`
                     : viewMode
                 }
-                className={
-                  viewMode === 'chats' && selectedSessionId
-                    ? 'h-full'
-                    : 'h-full overflow-y-auto p-6'
-                }
+                // No padding here: every screen renders in PageShell, which owns the gutters.
+                className="h-full"
               >
                 {viewMode === 'chats' && selectedSessionId ? (
                   <ChatDetail
@@ -1514,7 +1488,8 @@ function AppContent(): React.JSX.Element {
                         <UpgradeScreen feature={getProFeature('explore')} />
                       )
                     ) : viewMode === 'memory-chat' && chatPanes ? (
-                      <div className="flex h-full min-h-0 flex-col bg-neutral-950">
+                      // Split chat is still the Chat page: the shell's header, panes on its gutters.
+                      <PageShell fill title="Chat" className="bg-neutral-950">
                         <div
                           className={`grid min-h-0 flex-1 gap-px bg-neutral-800 ${chatPanes.length >= 5 ? 'grid-cols-3 grid-rows-2' : chatPanes.length === 4 ? 'grid-cols-2 grid-rows-2' : chatPanes.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}
                         >
@@ -1570,7 +1545,7 @@ function AppContent(): React.JSX.Element {
                             className="border-t border-neutral-800 p-3"
                           />
                         )}
-                      </div>
+                      </PageShell>
                     ) : viewMode === 'memory-chat' ? (
                       <MemoryChat
                         onToggleSplit={toggleChatSplit}
@@ -1597,7 +1572,9 @@ function AppContent(): React.JSX.Element {
                       />
                     ) : viewMode === 'tasks' ? (
                       TaskWorkspace ? (
-                        <TaskWorkspace standalone onDetailModeChange={setTaskDetailSidebarMode} />
+                        <PageShell fill title="Tasks">
+                          <TaskWorkspace standalone onDetailModeChange={setTaskDetailSidebarMode} />
+                        </PageShell>
                       ) : (
                         <UpgradeScreen feature={getProFeature(viewMode)} />
                       )
