@@ -1,18 +1,28 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('electron', () => ({ shell: { openExternal: vi.fn() } }))
-vi.mock('../../mcp', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../mcp')>()),
-  listConnectors: () => [{ id: 7, name: 'Test', enabled: true }],
-  fetchTools: vi.fn(),
-  callConnectorTool: vi.fn(),
-  setConnectorStatus: vi.fn()
+// Electron is the boundary; the connector list, settings and chat engine owner are real, in a temp
+// profile. Each connector's MCP transport is the extension's own injected boundary below.
+vi.mock('electron', () => ({
+  shell: { openExternal: vi.fn() },
+  safeStorage: { isEncryptionAvailable: () => false },
+  app: {
+    getPath: () => process.env.OFFGRID_DATA_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  },
+  BrowserWindow: { getAllWindows: () => [] }
 }))
-vi.mock('../../database', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../database')>()),
-  getSetting: (_key: string, fallback: unknown) => fallback
-}))
-vi.mock('../../llm', () => ({ llm: { contextWindow: async () => 8192 } }))
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-mcp-ext-'))
+const previousDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = profile
+afterAll(() => {
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 
 import { McpConnectorToolExtension } from '../mcpConnectorToolExtension'
 import {
@@ -24,7 +34,7 @@ import {
   type ToolExtension
 } from '../../tools'
 import { PAIRED_BROWSER_AGENT_MODE_REFUSAL } from '../tool-origin'
-import type { ConnectorToolDefinition } from '../../mcp'
+import { addConnector, type ConnectorToolDefinition } from '../../mcp'
 import {
   buildConnectorToolSchema,
   formatConnectorToolResult,
@@ -132,6 +142,9 @@ describe('formatConnectorToolResult', () => {
   })
 })
 
+// One connector, added the way the Connectors screen adds it.
+const connectorId = addConnector({ name: 'Test', transport: 'http', url: 'http://127.0.0.1:9/mcp' })
+
 const connectorDefinitions: ConnectorToolDefinition[] = [
   { name: 'get_safe', annotations: { readOnlyHint: true } },
   { name: 'get_write', annotations: { readOnlyHint: false } },
@@ -175,7 +188,7 @@ describe('paired-browser connector admission', () => {
     expect(connectorSchemas).toEqual(
       connectorDefinitions
         .filter((tool) => opts.all || tool.name === 'get_safe')
-        .map((tool) => buildConnectorToolSchema({ id: 7, name: 'Test' }, tool))
+        .map((tool) => buildConnectorToolSchema({ id: connectorId, name: 'Test' }, tool))
     )
     expect(JSON.stringify(connectorSchemas)).not.toContain('annotations')
   })
@@ -185,8 +198,7 @@ describe('paired-browser connector admission', () => {
     async (tool) => {
       const { extension, callTool } = connectorFixture()
       await extension.schemas()
-      const execute = vi.spyOn(extension, 'execute')
-      const name = `mcp__7__${tool}`
+      const name = `mcp__${connectorId}__${tool}`
       const context: ToolContext = { origin: 'bridge', acting: false }
       const refused = {
         text: PAIRED_BROWSER_AGENT_MODE_REFUSAL,
@@ -194,7 +206,7 @@ describe('paired-browser connector admission', () => {
         authoritative: true
       }
       expect(await runTool(name, {}, context, [extension])).toEqual(refused)
-      expect(execute).not.toHaveBeenCalled()
+      expect(callTool).not.toHaveBeenCalled()
       expect(await extension.execute(name, {}, context)).toEqual(refused)
       expect(callTool).not.toHaveBeenCalled()
     }
@@ -205,7 +217,9 @@ describe('paired-browser connector admission', () => {
     async (context) => {
       const { extension, callTool } = connectorFixture()
       await extension.schemas()
-      expect(await runTool('mcp__7__get_write', {}, context, [extension])).toEqual({ text: 'done' })
+      expect(await runTool(`mcp__${connectorId}__get_write`, {}, context, [extension])).toEqual({
+        text: 'done'
+      })
       expect(callTool).toHaveBeenCalledOnce()
     }
   )
@@ -213,7 +227,9 @@ describe('paired-browser connector admission', () => {
   it('executes a declared read in plain browser chat', async () => {
     const { extension, callTool } = connectorFixture()
     await extension.schemas()
-    expect(await runTool('mcp__7__get_safe', {}, { origin: 'bridge' }, [extension])).toEqual({
+    expect(
+      await runTool(`mcp__${connectorId}__get_safe`, {}, { origin: 'bridge' }, [extension])
+    ).toEqual({
       text: 'done'
     })
     expect(callTool).toHaveBeenCalledOnce()
@@ -224,8 +240,8 @@ describe('paired-browser connector admission', () => {
     await extension.schemas()
     fetchTools.mockResolvedValue([{ name: 'get_safe' }])
     await extension.schemas()
-    expect(extension.isReadOnlyTool('mcp__7__get_safe')).toBe(false)
-    expect(extension.isReadOnlyTool('mcp__7__absent')).toBe(false)
+    expect(extension.isReadOnlyTool(`mcp__${connectorId}__get_safe`)).toBe(false)
+    expect(extension.isReadOnlyTool(`mcp__${connectorId}__absent`)).toBe(false)
   })
 
   it.each(['tool', 'connector', undefined] as const)(
