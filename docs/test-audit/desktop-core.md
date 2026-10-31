@@ -42,29 +42,48 @@ E=$(node -p 'require("electron")'); OFFGRID_DATA_DIR=$(mktemp -d) ELECTRON_RUN_A
 
 ## Baseline burn-down (every other core test)
 
-The baseline started at 33 files and 133 mocks of our code. **Now: 12 files, 72 mocks**, as of `280a8a11e`.
+The baseline started at 33 files and 133 mocks of our code. **Now: 2 files, 34 mocks**, as of `d2cced3f8`.
 
-Rewritten so far, each faking only a boundary:
+**Rewritten, each faking only a boundary:**
 - ax-observation, files-audio-upload, supervisor-window
 - use-runtime: a native-helper executable, run from a temp working directory so the real Swift helper is never found
-- actions-ipc, task-role-models, system-status-ipc: macOS TCC and the multicast socket are the boundaries
+- actions-ipc, task-role-models
+- system-status-ipc: macOS TCC and the multicast socket
 - ai-request-log-ipc, ConnectorsScreen
 - model-storage-move: hashing is watched at the disk
 - reconcile-projector, mcpConnectorToolExtension, decision-model-loader, web-use-lifecycle
+- web-use-decision-none: the Decider rejects through its engine
+- general-vision-operator-adapter, hybrid-vision-strategy: native tool calls and reasoning stream from the engine
+- mcp-remote-task
+- bridge-tools: context size from Settings; Pro switched on by its build constant and env
+- web-use-host and task-retry-context: real pairing, link registry, both browser hosts, retry IPC and privacy gate. The paired browser is its socket link, and Electron's view is inert.
+- ax-frame-success: the macOS capture helper executable and Electron's displays
+- bridge-media: the real voice worker, with only kokoro-js faked
 
-**New shared fakes:**
+**Allowed by the guard:**
+- `vi.mock(x, () => import(real))` points a stubbed alias at the real module. That is wiring, not a fake.
+- `BOUNDARY_ALLOW` in `mock-guard.ts` names one real plugin boundary: the core loader's view of the private Pro package. The reason is written beside it.
+
+**Shared fakes:**
+- `harness/fake-llama-engine.ts`: the engine process, plus `useModelBrain`, which gives queued, delayed, abortable, tool-call and raw replies
+- `harness/fake-download-host.ts`
 - `harness/fake-kev-runtime.ts`
 - `harness/fake-actions-helper.ts`
 - `harness/decision-port-lock.ts`
-- `useModelBrain` in `harness/fake-llama-engine.ts`: the engine process stays real, and the test supplies its replies
-
-**Guard rule:** `vi.mock(x, () => import(real))` points a stubbed alias at the real module. That is wiring, not a fake, so the guard allows it.
 
 **Findings fixed:**
-- The RAG tables were missed on a reopened profile (see above).
-- Two Decision-runtime test files could answer each other's requests on the shared port range. They now take turns.
+- The RAG tables were missed on a reopened profile.
+- Decision tests could answer each other's requests on the shared port range.
+- A performance-pack wait depended on time, not on the pack's status.
 
-**Left:** web-use-decision-none, web-use-host, general-vision-operator-adapter, hybrid-vision-strategy, bridge-tools, bridge-media, mcp-remote-task, task-retry-context, task-history-ipc, ax-frame-success, ax-host-lifecycle, loadProFeaturesRenderer.
+**Left:**
+- `task-history-ipc.dbtest.ts`: its computer routing through AX and vision
+- `ax-host-lifecycle.dbtest.ts`: 24 mocks
+
+Both need a fake Mac desktop:
+- the `text-extractor` AX helper as an executable (`--apps`, `--elements`, `--default-browser`, `--set-slider-value`)
+- `/usr/bin/open`, `mdfind`, `mdls` and `PlistBuddy` faked at `node:child_process`
+- **nut-js faked through Node's module cache.** Under vitest, `loadActuation()` really loads nut-js through `require`. So un-mocking actuation without that fake would move this Mac's real mouse and keyboard.
 
 ## Not covered yet
 
