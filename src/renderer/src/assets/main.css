@@ -126,6 +126,17 @@
   --color-ring: var(--og-primary);
 
   /*
+   * Over a photo or a video, the same in light and dark: the picture sets the ground, not the
+   * theme (mobile's MEDIA). A player is black with white controls; a badge on a picture is a
+   * dark scrim (bg-media/60) with white text.
+   */
+  --color-media: #000000;
+  --color-media-foreground: #ffffff;
+  /* A card lifted off the page: a soft shadow that reads on the light field and sinks into dark. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+  --shadow-card-lg: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 32px rgb(0 0 0 / 0.07);
+
+  /*
    * Brutalist/terminal radius scale — Off Grid AI is flat, sharp, dense. Remapping
    * the radius tokens globally makes EVERY approved-library component (shadcn,
    * Aceternity, Magic UI) sharp and on-brand with no per-component overrides.
@@ -136,6 +147,28 @@
   --radius-lg: 4px;
   --radius-xl: 6px;
   --radius-2xl: 8px;
+
+  /*
+   * The @offgrid/design type and spacing scales (tokens.css), as utilities: text-body,
+   * text-label, px-og-xl, gap-og-sm. Size only: line-height and tracking stay with the skin.
+   * Spacing is namespaced `og-` because Tailwind resolves w-md and max-w-md through
+   * --spacing-* before --container-*, so an unprefixed --spacing-md would shrink them.
+   */
+  --text-display: var(--og-type-display-size);
+  --text-h1: var(--og-type-h1-size);
+  --text-h2: var(--og-type-h2-size);
+  --text-h3: var(--og-type-h3-size);
+  --text-body: var(--og-type-body-size);
+  /* TYPOGRAPHY.bodySmall; tokens.css has no variable for it. */
+  --text-body-small: 13px;
+  --text-label: var(--og-type-label-size);
+  --text-meta: var(--og-type-meta-size);
+  --spacing-og-xs: var(--og-space-xs);
+  --spacing-og-sm: var(--og-space-sm);
+  --spacing-og-md: var(--og-space-md);
+  --spacing-og-lg: var(--og-space-lg);
+  --spacing-og-xl: var(--og-space-xl);
+  --spacing-og-xxl: var(--og-space-xxl);
 
   @keyframes spotlight {
     0% {
@@ -269,6 +302,16 @@ button:disabled,
   border-color: var(--color-input);
 }
 
+/* The skin glows any element whose class contains "border" round a focused input three levels
+   down. A row with only a divider (border-b, border-t) holding a search field matched it, so the
+   whole Models filter bar lit up as a boxed panel whenever its search had focus. A divider row is
+   not a field: the beam already marks the field. Only all-round bordered boxes keep the glow. */
+:where([class*='border']):not([class~='border']):has(
+    :is(input, textarea):not([type='checkbox'], [type='radio'], [type='range']):focus
+  ) {
+  box-shadow: none;
+}
+
 /* The beam takes its corners from the outermost field slot (borderRadius: inherit). A combobox or
    autocomplete wraps its rounded control (input-control, rounded-lg) in a group slot with no
    radius, so the beam traced a square box round a rounded field. Give the group the control's
@@ -284,6 +327,106 @@ button:disabled,
    bordered box, so ringing the bare input leaves the icon outside the ring. */
 :root[data-user-modality='keyboard'] [data-focus-surface] :is(input, textarea):focus-visible {
   outline: none;
+}
+
+/* A segmented group is a row of choices in the page, not a boxed-off panel. operator-ui draws a
+   1px track ring round every group, which on the Models filter bar framed the tabs, the size
+   chips and the layout toggle as separate panels. The chosen option keeps its own pill, so the
+   state still reads without the frame. Dropped once here for every screen that uses Segmented. */
+[data-slot='segmented'] {
+  box-shadow: none;
+}
+
+/* Settings > UI > Hover and click animations, switched off (data-ui-animations on <html>, set by
+   ui-animations.ts). Nothing lifts, presses in, tilts, glows or fades under the pointer, and a
+   click flashes no card or button (the LivingField canvas ring is drawn in JS, outside CSS).
+   Colours, borders and focus rings still change, so a control still shows it is live.
+   Scoped to the controls and hover/press utilities that move, so a hovered dialog or popover that
+   is centred with a translate keeps its place. */
+:root[data-ui-animations='off'] * {
+  --og-lp: 0 !important;
+  --og-wave-a: 0 !important;
+  --og-edge-a: 0 !important;
+}
+:root[data-ui-animations='off']
+  :is(
+    [data-slot='button'],
+    [data-variant][data-slot$='-trigger'],
+    [data-slot='toolbar-button'],
+    [data-slot='toggle'],
+    [data-slot='tabs-tab'],
+    [data-slot='checkbox'],
+    [data-slot='radio'],
+    [data-slot='switch'],
+    [data-slot='slider-thumb']
+  ):is(:hover, :active),
+:root[data-ui-animations='off']
+  :is([data-slot='button'], [data-slot='toolbar-button'], [data-slot='toggle']):hover
+  > svg,
+:root[data-ui-animations='off']
+  :is([class*='hover:scale'], [class*='hover:translate'], [class*='hover:-translate']):hover,
+:root[data-ui-animations='off']
+  .group:hover
+  :is(
+    [class*='group-hover:scale'],
+    [class*='group-hover:translate'],
+    [class*='group-hover:-translate']
+  ),
+:root[data-ui-animations='off'] [class*='active:scale']:active,
+:root[data-ui-animations='off'] :is(button, [role='button'], summary):not([data-slot]):active,
+:root[data-ui-animations='off'] input[type='range']:not([data-slot]):active::-webkit-slider-thumb {
+  translate: none !important;
+  scale: none !important;
+  rotate: none !important;
+}
+/* The sheen that sweeps a hovered button. */
+:root[data-ui-animations='off'] [data-slot='button']:hover::after {
+  animation: none !important;
+}
+/* A hovered primary button keeps its resting halo instead of flaring: alive.css's for a default
+   button, then the OGAD skin's for an emerald fill (later, so it wins where both apply). */
+:root[data-ui-animations='off'] [data-slot='button'][data-variant='default']:not(:disabled):hover {
+  box-shadow:
+    0 0 0 1px rgb(var(--og-glow) / 0.35),
+    0 6px 26px -10px rgb(var(--og-glow) / 0.75),
+    0 0 46px -18px rgb(var(--og-glow) / 0.9) !important;
+}
+:root[data-ui-animations='off']
+  :is(
+    [class~='bg-green-500'],
+    [class~='bg-emerald-500'],
+    [class~='bg-emerald-600'],
+    [class~='bg-primary']
+  ):is(button, a, [role='button']):not(:disabled):hover {
+  box-shadow:
+    0 0 0 1px rgb(var(--og-skin-glow) / 0.4),
+    0 6px 22px -10px rgb(var(--og-skin-glow) / 0.8),
+    0 0 40px -16px rgb(var(--og-skin-glow) / 0.85) !important;
+}
+/* Cards next to a hovered card stay as they are instead of fading back. */
+:root[data-ui-animations='off']
+  :has(> :is([data-og-living], [data-slot='card'], [data-og-surface='glow']):hover)
+  > :is([data-og-living], [data-slot='card'], [data-og-surface='glow']):not(
+    :hover,
+    :focus-within,
+    [data-og-pending]
+  ) {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+/* A pinned header (data-sticky-header) casts a soft shadow only while content scrolls under it,
+   so at rest it reads as part of the page. */
+[data-sticky-header] {
+  container-type: scroll-state;
+}
+[data-sticky-header-face] {
+  transition: box-shadow var(--og-dur, 320ms) ease-out;
+}
+@container scroll-state(stuck: top) {
+  [data-sticky-header-face] {
+    box-shadow: 0 8px 16px -12px rgb(var(--og-rgb-text) / 0.35);
+  }
 }
 
 /* Settings lays its cards out in three columns, or four when the cards this build draws fill

@@ -20,6 +20,7 @@ import { llm } from './llm'
 import { generateImage, imageGenStatus } from './imagegen'
 import * as tts from './tts'
 import { embeddings } from './embeddings'
+import { DEFAULT_EMBEDDER } from './embedding-models'
 import { mediaText } from './media-text'
 import { parseDataUrl } from './mcp-parse-data-url'
 import { runTool, getToolExtensions } from './tools'
@@ -44,7 +45,7 @@ const EXECUTION_DEVICE_DESCRIPTION =
   'Exact paired Desktop name or alias. Omit to select any enabled connected Desktop.'
 // Write a data URL / http(s) URL / file path / bare path to a temp file and
 // return its path (for tools that take an image or audio input).
-async function materialize(ref: string, fallbackExt: string): Promise<string> {
+export async function materialize(ref: string, fallbackExt: string): Promise<string> {
   const url = ref.trim()
   if (url.startsWith('data:')) {
     const { data, ext } = parseDataUrl(url, fallbackExt)
@@ -87,6 +88,17 @@ const TEXT = (t: string): { content: { type: 'text'; text: string }[] } => ({
 /** Build a fresh MCP server. Model/inference tools are always registered (open);
  *  the ACTION tools are registered ONLY when the request is authorized with the
  *  desktop's action token, so an unpaired LAN device can't see or run them. */
+
+/** Tools a Pro feature adds to this MCP server while it is active. Core never names them. */
+export type McpToolProvider = (server: McpServer) => void
+const toolProviders = new Set<McpToolProvider>()
+export function registerMcpToolProvider(provider: McpToolProvider): () => void {
+  toolProviders.add(provider)
+  return () => {
+    toolProviders.delete(provider)
+  }
+}
+
 export function buildMcpServer(
   actionsAllowed: boolean,
   authenticatedDeviceId: string | null = null
@@ -184,6 +196,9 @@ export function buildMcpServer(
       return { content: [{ type: 'image', data: b64, mimeType: 'image/png' }] }
     }
   )
+
+  // Pro features add their own tools (video, for one) only while they are active.
+  for (const provide of toolProviders) provide(server)
 
   server.registerTool(
     'edit_image',
@@ -285,7 +300,11 @@ export function buildMcpServer(
         : await embeddings.generateEmbedding(input)
       return {
         content: [{ type: 'text', text: JSON.stringify(embedding) }],
-        structuredContent: { model: 'all-MiniLM-L6-v2', dimensions: embedding.length, embedding }
+        structuredContent: {
+          model: DEFAULT_EMBEDDER.model.replace(/^Xenova\//, ''),
+          dimensions: embedding.length,
+          embedding
+        }
       }
     }
   )

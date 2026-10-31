@@ -11,21 +11,14 @@ const host = vi.hoisted(() => ({
   readDirectories: [] as string[],
   device: 'coreml' as string
 }))
-vi.mock('node:worker_threads', () => ({
-  parentPort: { on: host.on, postMessage: host.post },
-  workerData: {
-    get modelsDir() {
-      return host.modelsDir
-    },
-    get modelReadDirectories() {
-      return host.readDirectories
-    }
-  }
-}))
+// The process boundary: a helper process's parent port (utility-host.ts sends init, then requests).
+Object.defineProperty(process, 'parentPort', {
+  value: { on: host.on, postMessage: host.post },
+  configurable: true
+})
 vi.mock('kokoro-js', () => ({ KokoroTTS: { from_pretrained: host.load } }))
 vi.mock('../embeddings-env', () => ({ configureTransformersEnv: vi.fn() }))
 vi.mock('../onnx-device', () => ({
-  onnxDeviceCandidates: () => [host.device, 'cpu'],
   loadWithOnnxFallback: async (load: (device: string) => Promise<unknown>) => ({
     runtime: await load(host.device),
     device: host.device
@@ -33,6 +26,23 @@ vi.mock('../onnx-device', () => ({
 }))
 let profile: string
 let output: string
+
+/** Load the helper, send it the host's init message, and return its request channel. */
+async function startWorker(): Promise<(request: unknown) => void> {
+  await import('../tts-onnx-worker')
+  const listener = host.on.mock.calls[0]![1] as (event: { data: unknown }) => void
+  listener({
+    data: {
+      type: 'init',
+      data: {
+        modelsDir: host.modelsDir,
+        modelReadDirectories: host.readDirectories,
+        devices: [host.device, 'cpu']
+      }
+    }
+  })
+  return (request) => listener({ data: request })
+}
 beforeEach(() => {
   profile = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-onnx-speech-')))
   host.modelsDir = path.join(profile, 'models')
@@ -43,19 +53,25 @@ beforeEach(() => {
   host.device = 'coreml'
   for (const mock of [host.on, host.post, host.load, host.generate]) mock.mockReset()
   host.load.mockImplementation(async (_id, options) => {
-    options.progress_callback({
-      status: 'progress',
-      progress: 50,
-      loaded: 5,
-      total: 10,
-      file: 'model.onnx'
-    })
+    // What Transformers.js sends while a voice downloads: each file as it streams, a few-KB config
+    // first, then the model in chunks.
+    const file = (name: string, loaded: number, total: number): void =>
+      options.progress_callback({
+        status: 'progress',
+        file: name,
+        loaded,
+        total,
+        progress: (loaded / total) * 100
+      })
+    file('config.json', 44, 44)
+    file('model.onnx', 30_000_000, 326_000_000)
+    file('model.onnx', 163_000_000, 326_000_000)
     return { generate: host.generate }
   })
   host.generate.mockResolvedValue({ data: new Float32Array([-1, 0, 1]), sampling_rate: 24000 })
 })
 afterEach(() => fs.rmSync(profile, { recursive: true, force: true }))
-describe('ONNX speech worker response evidence', () => {
+describe('voice helper response evidence', () => {
   it('loads a complete scan-folder package while the chosen folder is offline', async () => {
     const scan = path.join(profile, 'scan')
     const packageRoot = path.join(scan, '.cache/onnx-community/Kokoro-82M-v1.0-ONNX')
@@ -72,8 +88,7 @@ describe('ONNX speech worker response evidence', () => {
     }
     host.readDirectories.push(scan)
     fs.rmdirSync(host.modelsDir)
-    await import('../tts-onnx-worker')
-    host.on.mock.calls[0]![1]({ id: 8, type: 'prepare', voice: 'af_heart' })
+    ;(await startWorker())({ id: 8, type: 'prepare', voice: 'af_heart' })
     await vi.waitFor(() =>
       expect(host.post).toHaveBeenCalledWith({ id: 8, type: 'complete', device: 'coreml' })
     )
@@ -86,8 +101,7 @@ describe('ONNX speech worker response evidence', () => {
 
   it('refuses a speech download when storage is offline and the package is incomplete', async () => {
     fs.rmdirSync(host.modelsDir)
-    await import('../tts-onnx-worker')
-    host.on.mock.calls[0]![1]({ id: 9, type: 'prepare', voice: 'af_heart' })
+    ;(await startWorker())({ id: 9, type: 'prepare', voice: 'af_heart' })
     await vi.waitFor(() =>
       expect(host.post).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -103,21 +117,34 @@ describe('ONNX speech worker response evidence', () => {
 
   it('uses FP32 for CUDA speech so the T4 does not return NaN audio', async () => {
     host.device = 'cuda'
-    await import('../tts-onnx-worker')
-    host.on.mock.calls[0]![1]({ id: 7, type: 'prepare', voice: 'af_heart' })
-    await vi.waitFor(() => expect(host.post).toHaveBeenCalledWith({ id: 7, type: 'complete', device: 'cuda' }))
+    ;(await startWorker())({ id: 7, type: 'prepare', voice: 'af_heart' })
+    await vi.waitFor(() =>
+      expect(host.post).toHaveBeenCalledWith({ id: 7, type: 'complete', device: 'cuda' })
+    )
     expect(host.load.mock.calls[0]![1]).toMatchObject({ dtype: 'fp32', device: 'cuda' })
   })
   it('reports the actual provider, emits progress and reuses its loaded runtime', async () => {
-    await import('../tts-onnx-worker')
-    const receive = host.on.mock.calls[0]![1]
+    const receive = await startWorker()
     receive({ id: 1, type: 'prepare', voice: 'af_heart' })
     await vi.waitFor(() =>
       expect(host.post).toHaveBeenCalledWith({ id: 1, type: 'complete', device: 'coreml' })
     )
-    expect(host.post).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'progress', percentage: 50 })
-    )
+    // The whole voice, never one file of it, and nothing for the config file alone.
+    const progress = host.post.mock.calls
+      .map(([message]) => message)
+      .filter((message: { type: string }) => message.type === 'progress')
+    expect(progress).toEqual([
+      expect.objectContaining({
+        percentage: 9,
+        downloadedBytes: 30_000_044,
+        totalBytes: 326_000_044
+      }),
+      expect.objectContaining({
+        percentage: 50,
+        downloadedBytes: 163_000_044,
+        totalBytes: 326_000_044
+      })
+    ])
     receive({
       id: 2,
       type: 'synthesize',
@@ -139,8 +166,7 @@ describe('ONNX speech worker response evidence', () => {
     ])
   })
   it('returns an error for incomplete synthesis without claiming completion', async () => {
-    await import('../tts-onnx-worker')
-    host.on.mock.calls[0]![1]({ id: 3, type: 'synthesize', voice: 'af_heart' })
+    ;(await startWorker())({ id: 3, type: 'synthesize', voice: 'af_heart' })
     await vi.waitFor(() =>
       expect(host.post).toHaveBeenCalledWith({
         id: 3,
@@ -153,8 +179,7 @@ describe('ONNX speech worker response evidence', () => {
 
   it('does not write a silent voice reply', async () => {
     host.generate.mockResolvedValue({ data: new Float32Array(2400), sampling_rate: 24000 })
-    await import('../tts-onnx-worker')
-    host.on.mock.calls[0]![1]({
+    ;(await startWorker())({
       id: 6,
       type: 'synthesize',
       text: 'Hello',
@@ -175,11 +200,14 @@ describe('ONNX speech worker response evidence', () => {
 
   it('retries model loading after a provider failure', async () => {
     host.load.mockRejectedValueOnce(new Error('provider unavailable'))
-    await import('../tts-onnx-worker')
-    const receive = host.on.mock.calls[0]![1]
+    const receive = await startWorker()
     receive({ id: 4, type: 'prepare', voice: 'af_heart' })
     await vi.waitFor(() =>
-      expect(host.post).toHaveBeenCalledWith({ id: 4, type: 'error', error: 'provider unavailable' })
+      expect(host.post).toHaveBeenCalledWith({
+        id: 4,
+        type: 'error',
+        error: 'provider unavailable'
+      })
     )
     receive({ id: 5, type: 'prepare', voice: 'af_heart' })
     await vi.waitFor(() =>

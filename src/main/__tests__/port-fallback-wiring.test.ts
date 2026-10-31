@@ -55,7 +55,9 @@ describe('model-server.ts — the gateway itself falls back off a held port', ()
   const src = read('model-server.ts')
 
   it('scans for a free gateway port with pickFreePort before listening', () => {
-    expect(src).toMatch(/pickFreePort\(port, \(candidate\) =>\s*isPortFree\(candidate, GATEWAY_BIND_HOST\)\s*\)/)
+    expect(src).toMatch(
+      /pickFreePort\(port, \(candidate\) =>\s*isPortFreeOnAll\(candidate, \[GATEWAY_BIND_HOST, GATEWAY_HOST\]\)\s*\)/
+    )
     expect(src).toMatch(/boundGatewayPort = availablePort/)
     // It binds the LIVE chosen port, not the fixed GATEWAY_PORT constant.
     expect(src).toMatch(/\.listen\(boundGatewayPort/)

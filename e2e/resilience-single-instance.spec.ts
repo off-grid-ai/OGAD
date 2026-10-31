@@ -6,7 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import electronExecutable from 'electron'
 import { GATEWAY_PORT, MEDIA_PORT } from '../src/shared/ports'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 
 const executable = electronExecutable as unknown as string
 
@@ -43,11 +43,10 @@ const waitForOwnedPortsToClose = async (): Promise<void> => {
 }
 
 // This whole spec is about exclusive ownership of the fixed model ports — including the
-// teardown assertion that they close. It cannot share them with a running app, so skip
-// rather than emit a false failure. CI runs clean and executes it for real.
+// teardown assertion that they close. It cannot share them with a running app, so it fails
+// first and names the owner, rather than a misleading failure later or a silent skip.
 test.beforeAll(async () => {
-  const reason = await enginePortsUnavailableReason()
-  test.skip(reason !== null, reason ?? '')
+  await assertEnginePortsFree()
 })
 
 test.beforeEach(async () => {

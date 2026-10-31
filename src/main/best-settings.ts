@@ -4,14 +4,21 @@
 
 import os from 'node:os'
 import { usableCpuCount } from './cpu-cores'
-import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { llm, type LlmSettings } from './llm'
 import { probedGpuMemoryMB } from './llm/gpu-device-probe'
 import { cudaVramMB } from './llm/vram-probe'
-import { selectLocalEngine } from './llm/select-local-engine'
+import {
+  backendChoicesFor,
+  backendReasonText,
+  type ModalityPlacement,
+  type OnnxDevice
+} from '@offgrid/models'
+import { backendFacts, nativeLadder, onnxLadder, type NativeStep } from './backend-facts'
 import { getBackendPreferences, setBackendPreference } from './backend-preferences'
+import { providerLabel } from './runtime-backends'
+import { getVideoMemoryMode, setVideoMemoryMode } from './video-memory'
 import { getResidency, setResidencyMode } from './runtime-residency'
 import { getSetting, saveSetting } from './database'
 import { getComputerUseSettings, setComputerUseSettings } from './computer-use-settings'
@@ -40,20 +47,22 @@ async function applePerformanceCores(): Promise<number | null> {
 }
 
 /** The GPU backend of the engine llama.cpp would load with, after its own device probe. */
-function nativeGpu(engine: string | undefined): NativeGpu | null {
+function nativeGpu(step: NativeStep | undefined): NativeGpu | null {
   if (process.platform === 'darwin') return 'Metal'
-  const directory = engine ? path.basename(path.dirname(engine)) : ''
-  if (directory === 'llama-cuda') return 'CUDA'
-  if (directory === 'llama') return 'Vulkan'
-  return null
+  return step?.backend === 'cuda' ? 'CUDA' : step?.backend === 'vulkan' ? 'Vulkan' : null
 }
 
 export async function detectMachine(): Promise<MachineProfile> {
   const cpus = os.cpus()
   const logical = usableCpuCount()
   const performance = process.platform === 'darwin' ? await applePerformanceCores() : null
-  const engine = process.platform === 'darwin' ? undefined : await selectLocalEngine('auto')
-  const gpu = nativeGpu(engine)
+  // The engine chat would load on Auto, from the shared backend policy.
+  const step =
+    process.platform === 'darwin'
+      ? undefined
+      : (await nativeLadder('llm', undefined, 'auto')).find((candidate) => !candidate.cpuOnly)
+  const engine = step?.path
+  const gpu = nativeGpu(step)
   return {
     platform: process.platform,
     cpuModel: (cpus[0]?.model ?? 'CPU').trim(),
@@ -76,6 +85,64 @@ function gpuMemoryGb(gpu: NativeGpu | null, engine: string | undefined): number 
 export interface BestSettingsResult {
   machine: MachineProfile
   plan: BestSettingsPlan
+  /** Where each modality now runs, one entry per modality, in display order. */
+  placements: ModalityPlacement[]
+}
+
+const PLACEMENT_ORDER = ['llm', 'image', 'video', 'stt', 'tts', 'embeddings'] as const
+type PlacedModality = (typeof PLACEMENT_ORDER)[number]
+const NATIVE_ENGINE: Record<'llm' | 'image' | 'video' | 'stt', string> = {
+  llm: 'llama.cpp',
+  image: 'sd.cpp',
+  video: 'sd.cpp',
+  stt: 'whisper.cpp'
+}
+
+function onnxPlace(device: OnnxDevice): ModalityPlacement['place'] {
+  return device === 'cpu' ? 'cpu' : device === 'coreml' ? 'npu' : 'gpu'
+}
+
+/** The first working rung of the modality's ladder: the backend its engine starts on. The ladders
+ *  skip devices that are missing, too old or failed this session, and fall back to the CPU. */
+async function placementFor(modality: PlacedModality): Promise<ModalityPlacement | null> {
+  if (modality === 'tts' || modality === 'embeddings') {
+    const device = onnxLadder(modality)[0]
+    if (!device) return null
+    const place = onnxPlace(device)
+    return {
+      modality,
+      place,
+      engine: `ONNX Runtime, ${providerLabel(device)}`,
+      // The shared ladder keeps search on the CPU on a Mac: faster there, and the GPU stays free.
+      ...(modality === 'embeddings' && place === 'cpu' && process.platform === 'darwin'
+        ? { reason: 'faster on this Mac and keeps the GPU free for chat' }
+        : {})
+    }
+  }
+  const [first] = await nativeLadder(modality, modality === 'video' ? 'sd-cli' : undefined)
+  if (!first) return null
+  if (!first.cpuOnly) return { modality, place: 'gpu', engine: NATIVE_ENGINE[modality] }
+  const blocked = backendChoicesFor(modality, await backendFacts(modality)).find(
+    (choice) => choice.value !== 'auto' && choice.value !== 'cpu' && choice.reason
+  )
+  return {
+    modality,
+    place: 'cpu',
+    engine: NATIVE_ENGINE[modality],
+    ...(blocked?.reason ? { reason: backendReasonText(blocked.reason) } : {})
+  }
+}
+
+async function modalityPlacements(): Promise<ModalityPlacement[]> {
+  const placed = await Promise.all(
+    PLACEMENT_ORDER.map((modality) =>
+      placementFor(modality).catch((error: unknown) => {
+        console.warn(`[best-settings] could not read the ${modality} backend`, error)
+        return null
+      })
+    )
+  )
+  return placed.filter((placement): placement is ModalityPlacement => placement !== null)
 }
 
 /** 'auto': the app keeps speed settings at their best for this machine and model.
@@ -116,7 +183,9 @@ function readState(): BestSettingsState | null {
     : null
 }
 
-async function currentPlan(): Promise<BestSettingsResult & { fingerprint: string }> {
+async function currentPlan(): Promise<
+  Omit<BestSettingsResult, 'placements'> & { fingerprint: string }
+> {
   const machine = await machineProfile()
   const current = llm.getSettings() as LlmSettings & { modelMaxCtx?: number | null }
   // A draft-model or DFlash choice is the person's own and stays.
@@ -149,10 +218,11 @@ async function apply(): Promise<BestSettingsResult> {
     setResidencyMode(modality as Modality, mode)
   }
   setComputerUseSettings({ ...getComputerUseSettings(), screenshotSize: plan.screenshotSize })
+  setVideoMemoryMode(plan.videoMemory)
   saveSetting(STATE_KEY, { mode: 'auto', fingerprint } satisfies BestSettingsState)
   // Last: a launch-setting change restarts the chat engine with the new backend too.
   await llm.setSettings(plan.chat)
-  return { machine, plan }
+  return { machine, plan, placements: await modalityPlacements() }
 }
 
 /** "Use fastest settings": apply now and keep them current as hardware or model change. */
@@ -173,7 +243,8 @@ export async function bestSettingsStatus(): Promise<{ applied: boolean }> {
       chat,
       backends: getBackendPreferences(),
       residency: getResidency(),
-      screenshotSize: getComputerUseSettings().screenshotSize
+      screenshotSize: getComputerUseSettings().screenshotSize,
+      videoMemory: getVideoMemoryMode()
     })
   }
 }

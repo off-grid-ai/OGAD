@@ -743,19 +743,3 @@ export async function chooseFactorizedElementStep(
     ...(writerTargetIndex !== undefined ? { writerTargetIndex } : {})
   }
 }
-
-/** Keep every model call within the model's trained A-J option head. Large AX
- * trees are narrowed through bounded groups, then scored again inside the
- * selected group. */
-export async function chooseElementStep(
-  context: string,
-  snapshot: AxSnapshot,
-  score: ScoreOptions
-): Promise<{ step: ElementStep; confidence: number }> {
-  const decision = await chooseFactorizedElementStep(context, snapshot, score)
-  return { step: decision.step, confidence: decision.result.combinedConfidence }
-}
-
-export function serializeElementStep(step: ElementStep): string {
-  return JSON.stringify(step)
-}

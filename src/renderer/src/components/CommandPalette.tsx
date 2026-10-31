@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   IconPhoto,
   IconUser,
-  IconHash,
   IconVideo,
-  IconBulb,
   IconSearch,
   IconCornerDownLeft,
   IconLayoutSidebar,
@@ -29,6 +27,8 @@ import {
 } from '@offgrid/operator-ui/operator/coss/command'
 import { Highlight } from '@offgrid/operator-ui/operator/presence'
 import { acquireNativeSurfaceOcclusion } from '@renderer/lib/native-surface-occlusion'
+import { track } from '@renderer/lib/analytics'
+import { openUsageOverlay } from '@renderer/lib/usage-tracker'
 import type { SearchHit } from '@/types'
 import { paletteScreenMatches, type PaletteScreen } from '../lib/paletteScreens'
 
@@ -38,9 +38,7 @@ const api = (window as any).api
 const KIND_ICON = {
   screen: IconPhoto,
   meeting: IconVideo,
-  memory: IconBulb,
-  entity: IconUser,
-  fact: IconHash
+  entity: IconUser
 } as const
 
 interface CommandPaletteProps {
@@ -58,6 +56,16 @@ const screenId = (screen: PaletteScreen): string =>
 // ⌘K universal search launcher. Fast (keyword-only) results; Enter opens, or jump
 // to the full Search screen for the semantic pass. Pre-ranked server-side, so the
 // command bar's own filtering is off (mode="none"): it shows exactly the groups built here.
+/** Native views stay below the palette, and it counts as a screen of its own while open. */
+function acquirePaletteOverlay(): () => void {
+  const release = acquireNativeSurfaceOcclusion()
+  const close = openUsageOverlay('command_palette')
+  return () => {
+    release()
+    close()
+  }
+}
+
 export function CommandPalette({
   onOpenHit,
   onSeeAll,
@@ -73,6 +81,7 @@ export function CommandPalette({
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        track('shortcut_used', { shortcut: 'command_palette' })
         setOpen((o) => !o)
       }
     }
@@ -100,16 +109,19 @@ export function CommandPalette({
   }, [query])
 
   const open_ = (hit: SearchHit): void => {
+    track('command_used', { command: 'open_result' })
     setOpen(false)
     onOpenHit(hit)
   }
   const seeAll = (): void => {
     if (query.trim()) {
+      track('command_used', { command: 'see_all' })
       setOpen(false)
       onSeeAll(query)
     }
   }
   const goTo = (view: string, subroute?: string): void => {
+    track('command_used', { command: 'go_to', target: view })
     setOpen(false)
     setQuery('')
     onGoTo?.(view, subroute)
@@ -184,7 +196,7 @@ export function CommandPalette({
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       {/* Native child views stay below the bar from the moment it opens until its exit ends. */}
-      <CommandDialogPopup className="border-border/60" occlusion={acquireNativeSurfaceOcclusion}>
+      <CommandDialogPopup className="border-border/60" occlusion={acquirePaletteOverlay}>
         <CommandDialogPrimitive.Title className="sr-only">
           Search Off Grid AI
         </CommandDialogPrimitive.Title>

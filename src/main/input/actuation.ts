@@ -171,7 +171,3 @@ function keyCodes(keys: readonly string[], keyMap: Record<string, number>): numb
     return code
   })
 }
-
-export function actuationAvailable(): boolean {
-  return loadActuation() !== null
-}

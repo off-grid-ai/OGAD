@@ -169,7 +169,7 @@ const launch = async (pro: '0' | '1'): Promise<void> => {
   await navigation.getByRole('button', { name: 'Pin sidebar', exact: true }).click()
   if (pro === '1') {
     await navigation.getByRole('button', { name: 'Devices', exact: true }).click()
-    await page.getByPlaceholder('XXXX-XXXX-XXXX-XXXX').fill(SYNTHETIC_LICENSE)
+    await page.getByPlaceholder('key/...').fill(SYNTHETIC_LICENSE)
     await page.getByRole('button', { name: 'Activate', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Devices', exact: true })).toBeVisible({
       timeout: 60_000

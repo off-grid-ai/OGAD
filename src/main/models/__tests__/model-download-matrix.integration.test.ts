@@ -58,7 +58,11 @@ const chatModel = byKind('vision', 2)
 const visionModel = byKind('vision', 2)
 const holoGrounder = CATALOG.find((candidate) => candidate.id === 'mradermacher/Holo-3.1-4B-GGUF')
 if (!holoGrounder) throw new Error('Model catalog needs the dual-capability Holo3.1-4B fixture')
+// A multi-file image pack (diffusion model + text encoder + VAE). Its files carry checksums, which
+// synthetic bytes cannot match, so the fixture serves this pack without them: this case is about the
+// whole stack landing, not verification.
 const imageModel = byKind('image', 3)
+for (const file of imageModel.files) delete file.sha256
 const speechModel = CATALOG.find(
   (candidate) => candidate.kind === 'transcription' && candidate.engine === 'parakeet'
 )
@@ -346,6 +350,22 @@ describe('model download release matrix', () => {
     expect(await manager.activateModel(speechModel.id)).toEqual({ success: true })
     const dictation = getActiveTranscription(noStoredPreferences)
 
+    // A real recording: one second of 16 kHz mono PCM, which the engine now reads to cut into pieces.
+    const samples = 16_000
+    const recording = Buffer.alloc(44 + samples * 2)
+    recording.write('RIFF', 0)
+    recording.writeUInt32LE(36 + samples * 2, 4)
+    recording.write('WAVEfmt ', 8)
+    recording.writeUInt32LE(16, 16)
+    recording.writeUInt16LE(1, 20)
+    recording.writeUInt16LE(1, 22)
+    recording.writeUInt32LE(16_000, 24)
+    recording.writeUInt32LE(32_000, 28)
+    recording.writeUInt16LE(2, 32)
+    recording.writeUInt16LE(16, 34)
+    recording.write('data', 36)
+    recording.writeUInt32LE(samples * 2, 40)
+    fs.writeFileSync(path.join(testRoot, 'synthetic.wav'), recording)
     expect(dictation.isAvailable()).toBe(true)
     await expect(
       dictation.transcribe({ path: path.join(testRoot, 'synthetic.wav') }, { alreadyWav16k: true })

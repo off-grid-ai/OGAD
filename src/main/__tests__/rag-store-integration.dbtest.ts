@@ -96,8 +96,15 @@ describe('rag/store.ts - projects CRUD', () => {
     addRagMessage('chat-sibling', 'user', 'Quartz budget is 300')
     addRagMessage('chat-other', 'user', 'Quartz budget is 400')
 
+    // Each hit names its conversation and when it was said, so a citation can open it, dated.
     expect(searchProjectConversations('p-chat-search', 'Quartz budget', 'chat-current')).toEqual([
-      { role: 'user', content: 'Quartz budget is 300', title: 'Sibling' }
+      {
+        role: 'user',
+        content: 'Quartz budget is 300',
+        title: 'Sibling',
+        conversation_id: 'chat-sibling',
+        created_at: expect.any(String)
+      }
     ])
     const { runTool } = await import('../tools')
     const result = await runTool(

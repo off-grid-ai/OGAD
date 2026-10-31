@@ -8,11 +8,8 @@ const originalApi = window.api
 
 beforeEach(() => {
   // The Electron preload is the external boundary. Render the real panel and controls
-  // against the same session-record contract returned by its three read-only IPC calls.
-  const sessionApi: Pick<
-    Window['api'],
-    'getChatSessions' | 'getEntitiesForSession' | 'getMemoryRecordsForSession'
-  > = {
+  // against the same session-record contract returned by its two read-only IPC calls.
+  const sessionApi: Pick<Window['api'], 'getChatSessions' | 'getEntitiesForSession'> = {
     getChatSessions: async () => [
       {
         session_id: 'keyboard-session',
@@ -22,8 +19,7 @@ beforeEach(() => {
         summary: 'Read the [source](https://example.test/source).'
       }
     ],
-    getEntitiesForSession: async () => [],
-    getMemoryRecordsForSession: async () => []
+    getEntitiesForSession: async () => []
   }
   window.api = { ...originalApi, ...sessionApi }
 })
@@ -34,7 +30,7 @@ afterEach(() => {
 })
 
 describe('Chat Detail keyboard access', () => {
-  for (const section of ['summary', 'memories', 'entities']) {
+  for (const section of ['summary', 'entities']) {
     for (const key of ['{Enter}', ' ']) {
       it(`opens ${section} with ${key} and closes with Escape`, async () => {
         const user = userEvent.setup()

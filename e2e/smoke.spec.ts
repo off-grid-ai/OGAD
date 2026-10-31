@@ -15,18 +15,17 @@ import { launchOffGrid } from './helpers/launch'
 import os from 'os'
 import path from 'path'
 import fs from 'fs'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 
 let app: ElectronApplication
 let page: Page
 let userDataDir: string
-// Two tests below assert against the FIXED engine ports, which are single-owner. Resolved
-// once, before any app launch (launching binds them), so those tests can skip honestly
-// instead of failing against another process's gateway. See helpers/ports.ts.
-let enginePortsBlocked: string | null = null
+// Two tests below assert against the FIXED engine ports, which are single-owner. Checked
+// once, before any app launch (launching binds them): another owner fails the run and is
+// named, instead of a skip that reads as green. See helpers/ports.ts.
 
 test.beforeAll(async () => {
-  enginePortsBlocked = await enginePortsUnavailableReason()
+  await assertEnginePortsFree()
 })
 
 test.beforeEach(async () => {
@@ -127,8 +126,7 @@ test('completes onboarding and lands in the app shell', async () => {
 
 test('system:health IPC returns the component list', async () => {
   // Asserts llama-server is UNREACHABLE on a fresh profile — a foreign llama-server on the
-  // fixed port inverts that, so do not pretend to test it.
-  test.skip(enginePortsBlocked !== null, enginePortsBlocked ?? '')
+  // fixed port inverts that; beforeAll fails the run first.
   const health = await page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (window as any).api?.systemHealth?.()
@@ -185,7 +183,6 @@ test('system:health IPC returns the component list', async () => {
 
 test('gateway /v1/models serves active local models with modality metadata', async () => {
   // Polls the fixed gateway port for THIS app's fixture model; another owner never serves it.
-  test.skip(enginePortsBlocked !== null, enginePortsBlocked ?? '')
   const modelsDir = path.join(userDataDir, 'models')
   fs.mkdirSync(modelsDir, { recursive: true })
   fs.writeFileSync(path.join(modelsDir, 'e2e-active.gguf'), 'synthetic gateway model fixture')

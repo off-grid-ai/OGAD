@@ -30,7 +30,9 @@ describe('model switch during startup', () => {
   it('does not try another engine after the current load is cancelled', async () => {
     const service = new LLMService()
     const internals = service as unknown as {
-      launchWithFallback(paths: string[]): Promise<boolean>
+      launchWithFallback(
+        steps: { path: string; backend: string; cpuOnly: boolean }[]
+      ): Promise<boolean>
       launchServer(path: string, args: string[], layers: number): Promise<boolean>
       launchArgsFor(context: number, layers: number): string[]
       prepareModelPort(): Promise<void>
@@ -41,9 +43,12 @@ describe('model switch during startup', () => {
       return false
     })
     const prepare = vi.spyOn(internals, 'prepareModelPort').mockResolvedValue(undefined)
-    await expect(internals.launchWithFallback(['/old/server', '/old/fallback'])).resolves.toBe(
-      false
-    )
+    await expect(
+      internals.launchWithFallback([
+        { path: '/old/server', backend: 'metal', cpuOnly: false },
+        { path: '/old/fallback', backend: 'metal', cpuOnly: true }
+      ])
+    ).resolves.toBe(false)
     expect(launch).toHaveBeenCalledTimes(1)
     expect(prepare).not.toHaveBeenCalled()
   })

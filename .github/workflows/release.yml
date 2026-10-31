@@ -40,7 +40,7 @@ concurrency:
 # source (cloned from off-grid-ai/desktop-pro) and is license-gated at runtime —
 # free = unlicensed (pro tabs locked), a valid Keygen key unlocks in place (no
 # re-download). The ASAR integrity fuse (electron-builder.yml) makes a tampered
-# app.asar refuse to load — our local-first anti-tamper lever (we don't phone home).
+# app.asar refuse to load — our local-first anti-tamper lever (no telemetry unless the user opts in).
 # Actions are pinned to commit SHAs. macOS, Windows, and Linux share the one
 # `version` job and publish to the same release. Each platform stages its own
 # native engine. Linux also bundles the pinned Pro source and gates it by license.
@@ -122,6 +122,8 @@ jobs:
   build-mac:
     needs: version
     runs-on: macos-15 # Standard arm64 runner; matches the pinned native payload.
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -143,13 +145,12 @@ jobs:
             "https://github.com/off-grid-ai/OGAD/releases/download/$release/$name"
           echo "$sha  $RUNNER_TEMP/mac-native.tar.gz" | shasum -a 256 -c -
           tar -xzf "$RUNNER_TEMP/mac-native.tar.gz" -C resources/bin
+      - name: Build macOS image engine for macOS 13
+        run: bash scripts/build-sd-macos.sh
       - name: Verify cached macOS engines
         run: |
           for variant in llama llama-prism; do
             test -x "resources/bin/$variant/llama-server"
-            minos=$(otool -l "resources/bin/$variant/llama-server" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')
-            test -n "$minos"
-            case "$minos" in 1[0-3].*|[1-9].*) ;; *) echo "Unsupported $variant minos $minos" >&2; exit 1 ;; esac
             DYLD_LIBRARY_PATH="resources/bin/$variant" "resources/bin/$variant/llama-server" --help >/dev/null
           done
           test -x resources/bin/whisper/whisper-cli
@@ -216,15 +217,12 @@ jobs:
           tar -xzf "$RUNNER_TEMP/kev-runtime.tar.gz" -C "$RUNNER_TEMP/kev"
           "$RUNNER_TEMP/kev/kev-runtime/python/bin/python3" -c 'import kev, mlx_lm, torch, uvicorn'
           "$RUNNER_TEMP/kev/kev-runtime/python/bin/python3" resources/bin/kev-local-server.py --help >/dev/null
-      # Stage the Parakeet STT runtime (sherpa-onnx CLI + ONNX model) into
-      # resources/bin/parakeet. Additive: with SHERPA_ONNX_URL / PARAKEET_MODEL_URL
-      # unset this is a no-op and transcription stays on whisper, so it can't break a
-      # release. Set those vars once the exact sherpa-onnx build + Parakeet export are pinned.
-      - name: Stage Parakeet STT runtime (optional)
+      # Parakeet's runtime: the sherpa-onnx CLI pinned in resources/engine-pins.json (`sherpa`),
+      # hash-checked, into resources/bin/parakeet. Its models download from the Models screen.
+      - name: Stage the pinned sherpa-onnx (Parakeet)
         env:
-          SHERPA_ONNX_URL: ${{ vars.SHERPA_ONNX_URL }}
-          PARAKEET_MODEL_URL: ${{ vars.PARAKEET_MODEL_URL }}
-        run: bash scripts/fetch-parakeet.sh
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/fetch-sherpa.mjs --check
       # Private pro source into pro/ → __OFFGRID_PRO__ true. The checkout action
       # injects the token as an http.extraheader (never in a clone URL) and scrubs
       # it afterwards — safer than embedding ${TOKEN} in a git URL.
@@ -301,9 +299,10 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
+          ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: true # Mac releases bundle the default English voices for offline first use.
+          submodules: recursive
           persist-credentials: false
       - name: Put the speech runtime beside this checkout
         run: |
@@ -313,6 +312,17 @@ jobs:
           fi
           rm -rf ../executorch-speech
           mv _executorch_speech ../executorch-speech
+      - name: Build macOS speech runtime for macOS 13
+        run: |
+          npm --prefix ../executorch-speech ci
+          # Use the bundled Python and its existing torchgen, YAML, and Jinja dependencies.
+          speech_python="$GITHUB_WORKSPACE/resources/bin/kev-runtime/python/bin/python3"
+          "$speech_python" -c 'import torchgen, yaml, jinja2'
+          cmake -S ../executorch-speech/native -B ../executorch-speech/native/build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DFLATCC_ALLOW_WERROR=OFF -DPYTHON_EXECUTABLE="$speech_python"
+          cmake --build ../executorch-speech/native/build --config Release --parallel 4 \
+            --target executorch-speech
       - name: Let npm read the private UI package (core and Pro)
         # @offgrid/operator-ui is a private Wednesday package that core and Pro both render with
         # (skin, primitives, motion). It is listed as optional, so npm would skip it silently
@@ -403,6 +413,7 @@ jobs:
           printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
           npm run prepare:speech-defaults
+          node scripts/check-macos-minos.mjs 13.0
           # Build every artifact with publication disabled. The artifact hook verifies
           # both the updater ZIP and DMG before this command can complete.
           npx electron-builder --mac --arm64 \
@@ -671,7 +682,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9 # ExecuTorch 1.5.1; the same commit on every platform
+          ref: d005e3509e6f608bb4e70abbe9f089120a08e973 # ExecuTorch 1.5.1; the same commit on every platform
           path: _executorch_speech
           lfs: false # The current native speech engine is macOS-only.
           persist-credentials: false
@@ -722,12 +733,25 @@ jobs:
           fi
       - name: Install dependencies
         run: npm ci
+      - name: Install Vulkan SDK for Whisper
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: '1.4.321.1'
+          cache: true
+      - name: Build Windows Vulkan Whisper
+        shell: pwsh
+        run: ./scripts/build-whisper-vulkan-win.ps1
       - name: Fetch Windows native binaries (llama/whisper/sd/ffmpeg)
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # raises the GitHub API rate limit
           OFFGRID_INCLUDE_CUDA: '0'
         run: ./scripts/fetch-win-binaries.ps1
+      - name: Stage the pinned sherpa-onnx (Parakeet)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/fetch-sherpa.mjs --check
       - name: Stamp build version
         run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
       - name: Stage native files and bundle
@@ -738,7 +762,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
-        run: node scripts/stage-native.mjs && npx electron-vite build && node scripts/check-windows-onnx-preload.mjs
+        run: node scripts/stage-native.mjs && npx electron-vite build
       - name: Package Windows web installer, payload, and update metadata
         shell: bash
         env:
@@ -752,10 +776,10 @@ jobs:
         shell: bash
         run: |
           test -s dist/win-unpacked/resources/performance-packs.json
-          for binary in llama/llama-server.exe llama-cpu/llama-server.exe llama-prism/llama-server.exe llama-prism-cpu/llama-server.exe whisper-cpu/whisper-cli.exe sd/sd-cli.exe sd-cpu/sd-cli.exe ffmpeg.exe; do
+          for binary in llama/llama-server.exe llama-cpu/llama-server.exe llama-prism/llama-server.exe llama-prism-cpu/llama-server.exe whisper-cpu/whisper-cli.exe whisper-vulkan/whisper-cli.exe whisper-vulkan/whisper-server.exe sd/sd-cli.exe sd-cpu/sd-cli.exe ffmpeg.exe parakeet/bin/sherpa-onnx-offline.exe parakeet/bin/onnxruntime.dll parakeet/LICENSE; do
             test -s "dist/win-unpacked/resources/bin/$binary"
           done
-          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper kev-runtime; do
+          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper kev-runtime onnx-cuda; do
             test ! -e "dist/win-unpacked/resources/bin/$folder"
           done
       - name: Report Windows native payload sizes
@@ -905,7 +929,7 @@ jobs:
         with:
           repository: off-grid-ai/executorch-speech
           token: ${{ secrets.CI_CROSS_REPO_TOKEN }}
-          ref: 45d7fd41a1cbf268fa3e712aa5558f08fa1a75d9
+          ref: d005e3509e6f608bb4e70abbe9f089120a08e973
           path: _executorch_speech
           lfs: false # Build the Linux executable from the pinned source.
           submodules: recursive
@@ -973,6 +997,14 @@ jobs:
         run: npm ci
       - name: Install Linux GPU runtime dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y libgomp1 libvulkan1 libvulkan-dev glslc spirv-headers unzip
+      - name: Stage Vulkan loaders beside cached Linux engines
+        run: |
+          source="$(ldconfig -p | awk '$1 == "libvulkan.so.1" && /x86-64/ && !found { found=$NF } END { print found }')"
+          test -n "$source"
+          for folder in llama llama-prism whisper; do
+            install -m 755 "$(readlink -f "$source")" "build/linux-bin/$folder/libvulkan.so.1"
+            test -s "build/linux-bin/$folder/libvulkan.so.1"
+          done
       - name: Typecheck Linux main process
         env:
           OFFGRID_FORCE_CORE: '0'
@@ -1001,8 +1033,21 @@ jobs:
       - name: Verify Linux package inputs
         run: |
           test -s dist/linux-unpacked/resources/performance-packs.json
+          provider="$(find dist/linux-unpacked/resources/app.asar.unpacked/node_modules \
+            -path '*/onnxruntime-node/*' -name libonnxruntime_providers_cuda.so -type f -print -quit)"
+          test -n "$provider"
+          test -s "$provider"
+          for folder in llama llama-prism whisper; do
+            test -s "dist/linux-unpacked/resources/bin/$folder/libvulkan.so.1"
+          done
+          while IFS= read -r -d '' binary; do
+            if file "$binary" | grep -q 'ELF.*executable'; then
+              glibc="$(objdump -T "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1 || true)"
+              printf '[ci] %s highest GLIBC: %s\n' "$binary" "${glibc:-none (static binary)}"
+            fi
+          done < <(find dist/linux-unpacked/resources/bin -type f -print0)
           cmp resources/bin/kev-local-server.py dist/linux-unpacked/resources/bin/kev-local-server.py
-          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper-cuda kev-runtime; do
+          for folder in llama-cuda llama-prism-cuda cuda-runtime sd-cuda whisper-cuda kev-runtime onnx-cuda; do
             test ! -e "dist/linux-unpacked/resources/bin/$folder"
           done
           for variant in llama llama-cpu llama-prism llama-prism-cpu; do
@@ -1026,7 +1071,7 @@ jobs:
           dist/linux-unpacked/resources/bin/ffmpeg -version >/dev/null
           dist/linux-unpacked/resources/bin/whisper/whisper-cli --help >/dev/null 2>&1
           dist/linux-unpacked/resources/bin/whisper-cpu/whisper-cli --help >/dev/null 2>&1
-          for helper in sd/sd-cli sd/sd-server executorch-speech; do
+          for helper in sd/sd-cli sd/sd-server executorch-speech parakeet/bin/sherpa-onnx-offline; do
             binary="dist/linux-unpacked/resources/bin/$helper"
             test -x "$binary"
             file "$binary" | grep -q 'ELF 64-bit.*x86-64'
@@ -1055,9 +1100,6 @@ jobs:
             const root = path.resolve("dist/linux-unpacked/resources/app.asar/node_modules")
             const Database = require(path.join(root, "better-sqlite3-multiple-ciphers"))
             new Database(":memory:").close()
-            if (typeof require(path.join(root, "@lancedb/lancedb")).connect !== "function") {
-              throw new Error("LanceDB native package did not load")
-            }
             if (typeof require(path.join(root, "sharp")) !== "function") {
               throw new Error("Sharp native package did not load")
             }
@@ -1080,7 +1122,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in llama/libvulkan.so.1 llama-prism/libvulkan.so.1 whisper/libvulkan.so.1 whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech parakeet/bin/sherpa-onnx-offline parakeet/lib/libonnxruntime.so parakeet/LICENSE licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/squashfs-root" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"
@@ -1097,7 +1139,7 @@ jobs:
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$variant/llama-server" "$bundled"
           done
-          for helper in whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech licenses/libgomp1.txt licenses/libvulkan1.txt; do
+          for helper in llama/libvulkan.so.1 llama-prism/libvulkan.so.1 whisper/libvulkan.so.1 whisper/whisper-cli whisper-cpu/whisper-cli whisper/LICENSE ffmpeg licenses/ffmpeg.txt sd/sd-cli sd/sd-server sd/libggml-vulkan.so sd/libgomp.so.1 sd/libvulkan.so.1 executorch-speech parakeet/bin/sherpa-onnx-offline parakeet/lib/libonnxruntime.so parakeet/LICENSE licenses/libgomp1.txt licenses/libvulkan1.txt; do
             bundled="$(find "$extraction/deb" -path "*/resources/bin/$helper" -type f -print -quit)"
             test -n "$bundled"
             cmp "dist/linux-unpacked/resources/bin/$helper" "$bundled"

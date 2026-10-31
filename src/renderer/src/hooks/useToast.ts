@@ -3,6 +3,8 @@ import { createContext, useContext } from 'react'
 interface ToastRequest {
   message: string
   tone?: 'success' | 'error' | 'neutral'
+  /** An error toast's fixed code (`[a-z0-9_]`), for opt-in usage counts. Never its message. */
+  code?: string
   actionLabel?: string
   onAction?: () => void
   durationMs?: number

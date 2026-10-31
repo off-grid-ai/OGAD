@@ -2,13 +2,12 @@
 // Extracted from model-server.ts so the branch logic (OpenAI size, OpenRouter
 // aspect_ratio + resolution, explicit width/height) is unit-testable.
 
-// Round to a multiple of 64 (diffusion models require it), clamped sane. A non-finite input
+import { snapImageDimension } from '../../shared/image-dimensions'
+
+// Round to a multiple of 64 (diffusion models require it), clamped 256-2048. A non-finite input
 // (NaN/Infinity - e.g. a bad size string or a 0-denominator aspect ratio) clamps to the 256 floor
-// rather than leaking NaN downstream into image generation.
-export function round64(n: number): number {
-  if (!Number.isFinite(n)) return 256
-  return Math.max(256, Math.min(2048, Math.round(n / 64) * 64))
-}
+// rather than leaking NaN downstream into image generation. Same rule as the in-app size controls.
+export const round64 = snapImageDimension
 
 /** Parse an OpenAI "WIDTHxHEIGHT" size string. */
 export function parseSize(size: unknown): { width?: number; height?: number } {

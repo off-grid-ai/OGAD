@@ -78,6 +78,8 @@ export interface ActiveChatStreamContract {
     | 'loading_model'
     | 'loading_image_model'
     | 'generating_image'
+    | 'loading_video_model'
+    | 'generating_video'
   tools?: Array<{
     name: string
     status: 'running' | 'completed' | 'failed' | 'pending'
@@ -149,6 +151,8 @@ export interface GatewayApiKeyContract {
   expiresAt: number | null
   lastUsedAt: number | null
   revokedAt: number | null
+  /** Set on a key Sync issued to a paired device; revoked when that device is forgotten. */
+  deviceId?: string
 }
 
 export interface GatewayApiKeySettingsContract {

@@ -5,6 +5,7 @@
 
 // Collections whose `<collection>/{id}` GET path resolves to a request resource.
 export const POLL_COLLECTIONS = [
+  '/v1/videos',
   '/v1/images',
   '/v1/images/generations',
   '/v1/images/edits',

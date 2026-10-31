@@ -32,6 +32,25 @@ export function isPortFree(port: number, host = '127.0.0.1'): Promise<boolean> {
   })
 }
 
+/** The port a service prefers. `override` (an env var) moves it only in an unpackaged build, so dev
+ *  and e2e lanes running side by side can each take their own; a packaged app keeps `fixed`. Pure. */
+export function preferredPort(
+  fixed: number,
+  override: string | undefined,
+  packaged: boolean
+): number {
+  const port = Number(override)
+  return !packaged && Number.isInteger(port) && port > 0 && port <= 65535 ? port : fixed
+}
+
+/** True if `port` is free on every one of `hosts`. A server listening on every interface (0.0.0.0)
+ *  can still bind a port that another process holds on 127.0.0.1 alone, and then loopback clients
+ *  reach that other process instead: so a port counts as free only when loopback is free too. */
+export async function isPortFreeOnAll(port: number, hosts: readonly string[]): Promise<boolean> {
+  for (const host of hosts) if (!(await isPortFree(port, host))) return false
+  return true
+}
+
 /**
  * The first free port at or after `preferred`, scanning upward in single steps. Returns null if none
  * in the window is free (caller decides whether to surface a conflict). `isFree` is injected so the

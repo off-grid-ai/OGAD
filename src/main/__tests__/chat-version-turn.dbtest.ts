@@ -69,3 +69,56 @@ describe('a reply saved after switching versions', () => {
     ])
   })
 })
+
+// A retry that fails is kept as a version, and the answer it retried stays the one shown. The
+// failure is saved in one write: an app closing during a resend fails the stream, and a second
+// write to choose the earlier answer again did not always land before the app quit, which left the
+// error shown in place of a good saved answer after restart.
+describe('a retry that fails', () => {
+  const versionsOf = (
+    conversationId: string
+  ): Array<{ index: number; count: number } | undefined> =>
+    db.getRagMessages(conversationId).map((message) => message.versions)
+
+  it('keeps the earlier answer shown and the failure one step newer', () => {
+    const chat = db.createRagConversation('version-failed-retry', 'Versions')
+    db.addRagMessage(chat, 'user', 'Keep the saved answer during retry.')
+    const saved = db.addRagMessage(chat, 'assistant', 'The saved answer remains available.')
+
+    expect(db.prepareAnswerVersion(chat, saved.uuid)).toBe(true)
+    const failed = db.addRagMessage(
+      chat,
+      'assistant',
+      'connect ECONNREFUSED 127.0.0.1:8439',
+      undefined,
+      undefined,
+      { keepShownVersion: true }
+    )
+
+    expect(shown(chat)).toEqual([
+      'Keep the saved answer during retry.',
+      'The saved answer remains available.'
+    ])
+    expect(versionsOf(chat)).toEqual([undefined, { index: 0, count: 2 }])
+    expect(db.selectRagMessageVersion(chat, saved.uuid, 1)).toBe(true)
+    expect(db.getRagMessages(chat).at(-1)?.uuid).toBe(failed.uuid)
+    expect(shown(chat).at(-1)).toBe('connect ECONNREFUSED 127.0.0.1:8439')
+  })
+
+  it('keeps the version shown when it was itself a retry', async () => {
+    const chat = db.createRagConversation('version-failed-second-retry', 'Versions')
+    db.addRagMessage(chat, 'user', 'Answer twice.')
+    const first = db.addRagMessage(chat, 'assistant', 'First answer.')
+    expect(db.prepareAnswerVersion(chat, first.uuid)).toBe(true)
+    const second = db.addRagMessage(chat, 'assistant', 'Second answer.')
+
+    await nextMillisecond()
+    expect(db.prepareAnswerVersion(chat, second.uuid)).toBe(true)
+    db.addRagMessage(chat, 'assistant', 'Synthetic model unavailable.', undefined, undefined, {
+      keepShownVersion: true
+    })
+
+    expect(shown(chat)).toEqual(['Answer twice.', 'Second answer.'])
+    expect(versionsOf(chat)).toEqual([undefined, { index: 1, count: 3 }])
+  })
+})

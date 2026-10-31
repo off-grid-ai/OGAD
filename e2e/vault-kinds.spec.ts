@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
+import { createVaultThroughGate } from './helpers/vault'
 
 // All values belong to this temporary demo profile. No personal profile is opened.
 const MASTER_PASSWORD = 'Demo-vault-master-2026!'
@@ -167,13 +168,8 @@ test.describe('Vault item kinds with demo data', () => {
     if (await expand.isVisible()) await expand.click()
     await setTheme('Light')
     await openVault()
-    await expect(page.getByRole('heading', { name: 'Create Vault', exact: true })).toBeVisible()
-    await page.getByLabel('Master password', { exact: true }).fill(MASTER_PASSWORD)
-    await page.getByLabel('Confirm password', { exact: true }).fill(MASTER_PASSWORD)
-    await page.getByRole('button', { name: 'Create Vault', exact: true }).click()
-    // The unlocked status opens the list directly in this create flow.
+    await createVaultThroughGate(page, MASTER_PASSWORD)
     await expect(page.getByRole('button', { name: 'All Items', exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Lock vault', exact: true })).toBeVisible()
     await expect(entryRows()).toHaveCount(0)
   })
 

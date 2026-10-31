@@ -4,11 +4,13 @@ import { Button } from './ui/button'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
 import { deviceNoun } from '@renderer/lib/device'
+import type { ModalityPlacement } from '@offgrid/models'
 import type { BestSettingsPlan, MachineProfile } from '../../../shared/best-settings'
 
 interface BestSettingsResult {
   machine: MachineProfile
   plan: BestSettingsPlan
+  placements?: ModalityPlacement[]
 }
 
 type Status =
@@ -16,11 +18,37 @@ type Status =
   | { kind: 'hidden' }
   | { kind: 'offer' }
   | { kind: 'applying' }
-  | { kind: 'done'; machine: MachineProfile }
+  | { kind: 'done'; machine: MachineProfile; placements: ModalityPlacement[] }
   | { kind: 'error'; message: string }
 
 // Long enough to read the confirmation before the row slides away.
 const CONFIRMATION_MS = 2500
+// Each modality line adds reading time.
+const LINE_MS = 1200
+
+const MODALITY_LABEL: Record<string, string> = {
+  llm: 'Text',
+  image: 'Image',
+  video: 'Video',
+  stt: 'Speech to text',
+  tts: 'Voice',
+  embeddings: 'Search'
+}
+const PLACE_LABEL: Record<ModalityPlacement['place'], string> = {
+  npu: 'NPU',
+  gpu: 'GPU',
+  cpu: 'CPU'
+}
+
+/** One plain line per modality, e.g. "Video: GPU (sd.cpp), loads for each clip". */
+function placementLine(placement: ModalityPlacement): string {
+  const label = MODALITY_LABEL[placement.modality] ?? placement.modality
+  const notes = [
+    ...(placement.modality === 'video' ? ['loads for each clip'] : []),
+    ...(placement.reason ? [placement.reason] : [])
+  ]
+  return `${label}: ${PLACE_LABEL[placement.place]} (${placement.engine})${notes.length ? `, ${notes.join(', ')}` : ''}`
+}
 
 function machineLabel(machine: MachineProfile): string {
   return `${machine.cpuModel}, ${machine.gpu ? `${machine.gpu} GPU` : 'CPU'}`
@@ -48,15 +76,16 @@ export function BestSettingsCard({ onApplied }: { onApplied: () => void }): Reac
 
   useEffect(() => {
     if (status.kind !== 'done') return
-    const timer = setTimeout(() => setStatus({ kind: 'hidden' }), CONFIRMATION_MS)
+    const lines = status.placements.length
+    const timer = setTimeout(() => setStatus({ kind: 'hidden' }), CONFIRMATION_MS + lines * LINE_MS)
     return () => clearTimeout(timer)
-  }, [status.kind])
+  }, [status])
 
   const apply = async (): Promise<void> => {
     setStatus({ kind: 'applying' })
     try {
       const result = (await window.api.applyBestSettings()) as BestSettingsResult
-      setStatus({ kind: 'done', machine: result.machine })
+      setStatus({ kind: 'done', machine: result.machine, placements: result.placements ?? [] })
       onApplied()
     } catch (error) {
       setStatus({
@@ -76,12 +105,23 @@ export function BestSettingsCard({ onApplied }: { onApplied: () => void }): Reac
           className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-2"
         >
           {status.kind === 'done' ? (
-            <p className="flex min-w-0 items-center gap-2 text-xs text-green-500">
-              <CheckCircleIcon weight="fill" className="size-4 shrink-0" />
-              <span className="truncate">
-                Fastest settings on for {machineLabel(status.machine)}
-              </span>
-            </p>
+            <div className="flex min-w-0 flex-col gap-1">
+              <p className="flex min-w-0 items-center gap-2 text-xs text-green-500">
+                <CheckCircleIcon weight="fill" className="size-4 shrink-0" />
+                <span className="truncate">
+                  Fastest settings on for {machineLabel(status.machine)}
+                </span>
+              </p>
+              {status.placements.length ? (
+                <ul aria-label="Where each model runs" className="pl-6 text-xs text-neutral-400">
+                  {status.placements.map((placement) => (
+                    <li key={placement.modality} className="truncate">
+                      {placementLine(placement)}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           ) : status.kind === 'error' ? (
             <p role="alert" className="min-w-0 truncate text-xs text-red-400">
               {status.message}

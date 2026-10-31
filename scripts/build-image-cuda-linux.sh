@@ -48,9 +48,7 @@ fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
-git clone --depth 1 --branch "$SD_REF" --recurse-submodules \
-  https://github.com/leejet/stable-diffusion.cpp "$WORK/src"
-test "$(git -C "$WORK/src" rev-parse HEAD)" = "$SD_COMMIT"
+node "$ROOT/scripts/prepare-image-runtime.mjs" "$WORK/src"
 mkdir -p "$WORK/build"
 DOCKER=(docker)
 if ! docker info >/dev/null 2>&1; then DOCKER=(sudo docker); fi
@@ -82,4 +80,6 @@ for name in sd-cli sd-server; do
   test -z "$missing" || { printf '%s\n' "$missing" >&2; exit 1; }
 done
 install -m 644 "$WORK/src/LICENSE" "$DEST/LICENSE"
-echo '[build-image-cuda-linux] staged CUDA image CLI and server'
+help="$(LD_LIBRARY_PATH="$DEST:$ROOT/build/linux-bin/cuda-runtime" "$DEST/sd-cli" --help 2>&1)"
+grep -q -- '--decode-preview-path' <<< "$help"
+echo '[build-image-cuda-linux] staged CUDA image/video CLI with decoded previews'

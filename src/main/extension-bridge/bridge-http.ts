@@ -10,6 +10,7 @@
 //                       requires an extension origin, so a site you visit cannot start one
 //   sealed traffic      rpc bodies are AES-GCM under a key only a paired browser holds
 
+import { withExtensionRequestOrigin } from '../ai-request-log'
 import type http from 'http'
 import type { Duplex } from 'stream'
 import { WebSocketServer } from 'ws'
@@ -87,7 +88,9 @@ export async function handleExtensionBridge(
       return send(res, origin, await bridge.pair(await readJson(req), req.socket.remoteAddress))
     }
     if (url === '/v1/extension/rpc' && method === 'POST') {
-      return send(res, origin, await bridge.rpc(await readJson(req)))
+      const body = await readJson(req)
+      // Model work the extension asks for is counted as the extension's, not the app's or the API's.
+      return send(res, origin, await withExtensionRequestOrigin(() => bridge.rpc(body)))
     }
     return send(res, origin, { status: 404, body: { error: 'not_found' } })
   } catch {

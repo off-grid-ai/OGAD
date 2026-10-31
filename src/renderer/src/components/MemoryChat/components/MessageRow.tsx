@@ -34,6 +34,8 @@ import {
   standardMessageRowClass
 } from '../utlis'
 import { ChatImagePreview } from './ChatImagePreview'
+import { ChatVideoPreview } from './ChatVideoPreview'
+import { getSlot, SLOTS, useSlotRevision } from '@/bootstrap/slotRegistry'
 import { NoticeMessageRow } from './NoticeMessageRow'
 import { PromptEnhancementMessageRow } from './PromptEnhancementMessageRow'
 import { ToolMessageTimelineRow } from './ToolMessageTimelineRow'
@@ -282,6 +284,22 @@ function VoiceMessageRow({
         }
       />
     )
+  } else if (message.videoPath) {
+    const VideoCard = getSlot(SLOTS.chatVideoCard)
+    const VideoActions = getSlot(SLOTS.chatVideoActions)
+    body = VideoCard ? (
+      <div className={standardMessageBubbleClass(message, false)}>
+        <VideoCard messageId={message.id} videoPath={message.videoPath} />
+      </div>
+    ) : (
+      <div className={standardMessageBubbleClass(message, false)}>
+        <ChatVideoPreview path={message.videoPath} />
+        {VideoActions ? (
+          <VideoActions messageId={message.id} videoPath={message.videoPath} />
+        ) : null}
+        <p className="mt-2 text-xs text-neutral-400">{message.content}</p>
+      </div>
+    )
   } else if (message.image) {
     body = (
       <>
@@ -439,6 +457,8 @@ function VoiceMessageRow({
           {showGenerationDetails ? (
             <GenerationMetricsRow
               metrics={message.metrics}
+              videoMetadata={message.videoMetadata}
+              generationTimeMs={message.generationTimeMs}
               open={openFooterDetail === 'generation'}
               onOpenChange={(open) => setOpenFooterDetail(open ? 'generation' : null)}
             />
@@ -465,6 +485,8 @@ function MessageBubble({
   navigation: ContextNavigation
 }>): React.JSX.Element {
   const editing = state.editingId === message.id
+  // Pro fills the clip and film slots after the first screen; a new revision remounts them.
+  const slotRevision = useSlotRevision()
   const artifact = message.role === 'assistant' ? parseArtifact(message.content) : null
   const ask = message.role === 'assistant' ? parseAsk(message.content) : null
   const selected = state.askSelections[message.id] ?? []
@@ -489,6 +511,12 @@ function MessageBubble({
           onOpenImage={actions.openImage}
         />
       ) : null}
+      {message.videoPath ? (
+        <VideoCardSlot key={slotRevision} messageId={message.id} videoPath={message.videoPath} />
+      ) : null}
+      {message.context?.videoStoryId ? (
+        <FilmCardSlot key={slotRevision} storyId={message.context.videoStoryId} />
+      ) : null}
       {message.image ? (
         <ChatImagePreview
           src={message.image}
@@ -507,7 +535,7 @@ function MessageBubble({
           onCancel={actions.cancelEdit}
           onSave={actions.saveEdit}
         />
-      ) : (
+      ) : isVideoEcho(message) ? null : (
         <MessageMarkdown message={message} navigation={navigation} withoutArtifact={!!artifact} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
@@ -557,6 +585,7 @@ function StandardMessageRow({
   const [openFooterDetail, setOpenFooterDetail] = useState<'tools' | 'generation' | null>(null)
   const speechState = speechControlState(message.id, state.speakingId, state.speakLoadingId)
   const speechError = state.speakError?.id === message.id ? state.speakError.message : undefined
+  const speechDownload = state.speakDownload?.id === message.id ? state.speakDownload : undefined
   const preparingToolCalls =
     (message.activity as { kind?: unknown } | undefined)?.kind === 'preparing_tool_calls'
   const liveActivity = activityLabel(message.activity)
@@ -675,6 +704,8 @@ function StandardMessageRow({
           {state.showGenerationDetails ? (
             <GenerationMetricsRow
               metrics={message.metrics}
+              videoMetadata={message.videoMetadata}
+              generationTimeMs={message.generationTimeMs}
               open={openFooterDetail === 'generation'}
               onOpenChange={(open) => setOpenFooterDetail(open ? 'generation' : null)}
             />
@@ -686,6 +717,7 @@ function StandardMessageRow({
             copied={copied}
             speechState={speechState}
             speechError={speechError}
+            speechDownload={speechDownload}
             speechEnabled={state.ttsEnabled}
             onCopy={() => actions.copy(message.content, message.id)}
             onOpenArtifact={(opened) => actions.openArtifact(opened, message.id)}
@@ -865,6 +897,8 @@ function sameMessageState(
     (left.speakLoadingId === messageId) === (right.speakLoadingId === messageId) &&
     (left.speakError?.id === messageId ? left.speakError.message : undefined) ===
       (right.speakError?.id === messageId ? right.speakError.message : undefined) &&
+    (left.speakDownload?.id === messageId ? left.speakDownload : undefined) ===
+      (right.speakDownload?.id === messageId ? right.speakDownload : undefined) &&
     left.ttsEnabled === right.ttsEnabled &&
     left.ttsSpeed === right.ttsSpeed &&
     (left.latestVoiceAssistantId === messageId) === (right.latestVoiceAssistantId === messageId) &&
@@ -874,6 +908,47 @@ function sameMessageState(
     left.showToolsSent === right.showToolsSent &&
     left.regenerationDisabled === right.regenerationDisabled
   )
+}
+
+// The line stored with a video reply ("Generated for: …", "Storyboard ready: 3 shots.", a film's
+// title) only echoes the prompt above it, the card, or a step already past. It stays stored.
+const VIDEO_ECHO = /^(Generated( video)? for: .*|Storyboard ready: \d+ shots?\.)$/s
+
+function isVideoEcho(message: ChatMessage): boolean {
+  // A film's line is its title or a step past ("Storyboard ready…"): its card carries the film.
+  if (message.context?.videoStoryId) return true
+  return Boolean(message.videoPath) && VIDEO_ECHO.test(message.content.trim())
+}
+
+/** A film started from this chat. Pro draws it; without Pro the message line stands alone. */
+/** A clip in text chat. Pro draws the whole card (its player and actions, the same as the watch
+ *  page's); without Pro, the basic player. */
+function VideoCardSlot({
+  messageId,
+  videoPath
+}: {
+  messageId: string
+  videoPath: string
+}): React.JSX.Element {
+  const [VideoCard] = useState(() => getSlot(SLOTS.chatVideoCard))
+  const [VideoActions] = useState(() => getSlot(SLOTS.chatVideoActions))
+  if (VideoCard)
+    return (
+      <div className="mb-2">
+        <VideoCard messageId={messageId} videoPath={videoPath} />
+      </div>
+    )
+  return (
+    <div className="mb-2 flex flex-col gap-2.5">
+      <ChatVideoPreview path={videoPath} />
+      {VideoActions ? <VideoActions messageId={messageId} videoPath={videoPath} /> : null}
+    </div>
+  )
+}
+
+function FilmCardSlot({ storyId }: { storyId: string }): React.JSX.Element | null {
+  const [FilmCard] = useState(() => getSlot(SLOTS.chatFilmCard))
+  return FilmCard ? <FilmCard storyId={storyId} /> : null
 }
 
 export const MessageRow = memo(

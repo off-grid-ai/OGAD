@@ -14,6 +14,8 @@ import path from 'path'
 import { modelMetadataFile, modelReadDirectories, resolveModelReference } from './model-paths'
 import { modelsDir } from './runtime-env'
 import { modelPackageIdentity } from '@offgrid/sync'
+import { extractQuantization, videoArchitecture, videoPackFiles } from '@offgrid/models'
+import { isValidGgufFile } from './models/gguf'
 import { isProjectorFileName } from './models/catalog-logic'
 import { isImageModelFile } from './imagegen/model-filter'
 import { readGgufContextLength } from './models/gguf-metadata'
@@ -76,10 +78,24 @@ export function readDownloaded(dir: string): DownloadedModel[] {
         'utf-8'
       )
     )
-    return Array.isArray(arr) ? (arr as DownloadedModel[]) : []
+    return Array.isArray(arr) ? arr.flatMap(usableDownloadedModel) : []
   } catch {
     return []
   }
+}
+
+/** A registry copied or edited by hand can hold rows without an id, or without a file list. A row
+ *  without an id names no model, so readers skip it. Older rows name their files only as primary
+ *  and mmproj; readers get those as the file list, so no row makes every model read fail. */
+function usableDownloadedModel(value: unknown): DownloadedModel[] {
+  if (typeof value !== 'object' || value === null) return []
+  const entry = value as Partial<DownloadedModel> & { primary?: unknown; mmproj?: unknown }
+  if (typeof entry.id !== 'string') return []
+  if (Array.isArray(entry.files)) return [entry as DownloadedModel]
+  const files = [entry.primary, entry.mmproj].filter(
+    (file): file is string => typeof file === 'string'
+  )
+  return [{ ...entry, files } as DownloadedModel]
 }
 
 function writeDownloaded(dir: string, list: DownloadedModel[]): void {
@@ -92,6 +108,7 @@ function writeDownloaded(dir: string, list: DownloadedModel[]): void {
 
 export interface DownloadedRegistryCatalogEntry {
   id: string
+  name?: string
   kind?: string
   files: Array<{ name: string }>
 }
@@ -128,9 +145,23 @@ export function reconcileDownloadedModelRegistry(
     viewOf.set(model, view)
     return model
   }
+  // A catalog video entry whose exact pack these files are: its own row already lists them.
+  const catalogVideoPack = (names: readonly string[]): boolean =>
+    catalog.some(
+      (entry) =>
+        entry.kind === 'video' &&
+        entry.files.length === names.length &&
+        names.every((name) => entry.files.some((file) => file.name === name))
+    )
   let changed = false
   const migrated: DownloadedModel[] = []
   for (const model of current) {
+    // An adopted video copy that is some catalog entry's exact pack showed the same files twice.
+    // Only the registry row goes; the files stay.
+    if (model.kind === 'video' && model.packageIdentity && catalogVideoPack(model.files)) {
+      changed = true
+      continue
+    }
     if (model.familyId || model.packageIdentity) {
       const family = model.familyId
         ? catalog.find((entry) => entry.id === model.familyId)
@@ -190,6 +221,40 @@ export function reconcileDownloadedModelRegistry(
     viewOf.set(migratedModel, kind === model.kind ? migratedModel : { ...migratedModel, kind })
     changed = true
   }
+  // Adopt complete copied video variants into the existing package registry.
+  // Their normal Use/Delete/Transfer controls must use the same identity as downloads.
+  let entries: string[] = []
+  try { entries = fs.readdirSync(dir) } catch { /* no model directory yet */ }
+  for (const weight of entries) {
+    const architecture = videoArchitecture(weight)
+    if (!architecture || migrated.some((model) => model.kind === 'video' && model.files.includes(weight))) continue
+    const names = Object.values(videoPackFiles(weight)!)
+    // The catalog already provides controls when this is any entry's exact default pack.
+    if (catalogVideoPack(names)) continue
+    const family = catalog.find((entry) => entry.kind === 'video' &&
+      entry.files.some((file) => videoArchitecture(file.name) === architecture))
+    if (!family) continue
+    const files: Array<{ name: string; sizeBytes: number; role: 'primary' }> = []
+    for (const name of names) {
+      try {
+        const filePath = path.join(dir, name)
+        const stat = fs.lstatSync(filePath)
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 ||
+          (name.endsWith('.gguf') && !isValidGgufFile(filePath, fs))) break
+        files.push({ name, sizeBytes: stat.size, role: 'primary' })
+      } catch { break }
+    }
+    if (files.length !== names.length) continue
+    const name = `${family.name ?? 'Video model'} · ${extractQuantization(weight)}`
+    const packageIdentity = modelPackageIdentity({
+      id: family.id, name, kind: 'video', source: 'downloaded',
+      files: files as [(typeof files)[number], ...typeof files]
+    })
+    migrated.push({ id: packageIdentity, familyId: family.id, packageIdentity,
+      name, kind: 'video', files: names })
+    changed = true
+  }
+
   const unique = [...new Map(migrated.map((model) => [model.id, model])).values()]
   if (changed || unique.length !== current.length) writeDownloaded(dir, unique)
   return unique.map((model) => viewOf.get(model) ?? model)

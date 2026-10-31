@@ -94,7 +94,7 @@ test.describe('Licence seats', () => {
     const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
     await navigation.hover()
     await navigation.getByRole('button', { name: 'Devices', exact: true }).click()
-    await page.getByPlaceholder('XXXX-XXXX-XXXX-XXXX').fill(LICENCE)
+    await page.getByPlaceholder('key/...').fill(LICENCE)
     await page.getByRole('button', { name: 'Activate', exact: true }).click()
 
     // This Mac is Pro, and nobody was told the licence is full.

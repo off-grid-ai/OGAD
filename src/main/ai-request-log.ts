@@ -13,6 +13,9 @@ type Metadata = {
   request?: unknown
   signal?: AbortSignal
   isCancelled?: (error: unknown) => boolean
+  /** False keeps this request out of usage statistics; the request log still keeps it.
+   *  For work that is part of another feature (a Studio key still is not an image generation). */
+  countAsGeneration?: boolean
 }
 type Update = Partial<
   Pick<AIRequestRecord, 'model' | 'effectiveRequest' | 'metrics' | 'response' | 'source'>
@@ -22,6 +25,74 @@ let sink: Sink | undefined
 let epoch = 0
 const context = new AsyncLocalStorage<AIRequestHandle>()
 const unrecorded = new AsyncLocalStorage<true>()
+/** Who asked for this work: the browser extension, or (by default) the app or the gateway API. */
+const requestOrigin = new AsyncLocalStorage<'extension'>()
+
+/** Where a request came from, for usage statistics. */
+export type AIRequestOrigin = 'app' | 'api' | 'extension'
+
+/**
+ * What one top-level request was, without its content: the input to opt-in usage statistics.
+ * Nested attempts (a retry inside a request) are not reported on their own.
+ */
+export interface AIRequestOutcome {
+  modality: AIModality
+  origin: AIRequestOrigin
+  model?: string
+  backend?: string
+  status: 'completed' | 'failed' | 'cancelled'
+  durationMs: number
+  /** True when the request carried an image for the model to read. */
+  hasImage: boolean
+  /** Video only: true when the clip started from an image (a start image or a continued shot). */
+  hasInitImage?: boolean
+  error?: unknown
+  metrics?: Record<string, unknown>
+}
+
+/** Observes request starts and ends. Never sees prompts or replies. */
+export interface AIRequestObserver {
+  started(request: {
+    id: string
+    modality: AIModality
+    origin: AIRequestOrigin
+    model?: string
+  }): void
+  finished(request: { id: string } & AIRequestOutcome): void
+}
+let observer: AIRequestObserver | undefined
+
+/** Install the usage-statistics observer. It runs inline, so it must not block or throw. */
+export function setAIRequestObserver(next: AIRequestObserver | undefined): void {
+  observer = next
+}
+
+/** Run `fn` as work the browser extension asked for. */
+export function withExtensionRequestOrigin<T>(fn: () => T): T {
+  return requestOrigin.run('extension', fn)
+}
+
+function currentOrigin(): AIRequestOrigin {
+  if (requestOrigin.getStore() === 'extension') return 'extension'
+  return gatewayCaller.getStore() ? 'api' : 'app'
+}
+
+function carriesImage(request: unknown): boolean {
+  const messages = (request as { messages?: unknown } | undefined)?.messages
+  if (!Array.isArray(messages)) return false
+  return messages.some(
+    (message) =>
+      Array.isArray((message as { content?: unknown } | null)?.content) &&
+      (message as { content: unknown[] }).content.some(
+        (part) => (part as { type?: unknown } | null)?.type === 'image_url'
+      )
+  )
+}
+function carriesInitImage(request: unknown): boolean {
+  const initImage = (request as { initImage?: unknown } | undefined)?.initImage
+  return typeof initImage === 'string' && initImage.length > 0
+}
+
 /** The gateway request a record belongs to: which API key sent it, once the key is checked. */
 const gatewayCaller = new AsyncLocalStorage<{ keyName?: string }>()
 
@@ -121,9 +192,17 @@ export class AIRequestHandle {
   private reasoning = ''
   private runtime?: RuntimeBackend
   private readonly parent = context.getStore()
+  private readonly observed: boolean
+  private readonly origin: AIRequestOrigin = currentOrigin()
+  private readonly hasImage: boolean
+  private readonly hasInitImage: boolean
   private record: AIRequestRecord
   constructor(meta: Metadata) {
     const parent = context.getStore()
+    this.observed =
+      !!observer && !parent && unrecorded.getStore() !== true && meta.countAsGeneration !== false
+    this.hasImage = this.observed && meta.modality === 'text' && carriesImage(meta.request)
+    this.hasInitImage = this.observed && meta.modality === 'video' && carriesInitImage(meta.request)
     this.record = {
       id: this.id,
       parentId: parent?.id,
@@ -139,6 +218,18 @@ export class AIRequestHandle {
     const keyName = gatewayCaller.getStore()?.keyName
     if (keyName !== undefined) this.record.keyName = keyName
     this.publish()
+    if (this.observed) {
+      try {
+        observer?.started({
+          id: this.id,
+          modality: meta.modality,
+          origin: this.origin,
+          ...(meta.model ? { model: meta.model } : {})
+        })
+      } catch {
+        /* Statistics must never break generation. */
+      }
+    }
   }
   private publish(): void {
     if (!this.enabled || this.generation !== epoch) return
@@ -158,7 +249,13 @@ export class AIRequestHandle {
   }
   /** Keep request evidence separate from the live state, which is cleared on unload. */
   useRuntime(runtime: RuntimeBackend): void {
-    if (!this.enabled || this.done || runtime.state !== 'loaded' || !runtime.backend) return
+    if (
+      (!this.enabled && !this.observed) ||
+      this.done ||
+      runtime.state !== 'loaded' ||
+      !runtime.backend
+    )
+      return
     if (
       this.runtime?.id === runtime.id &&
       this.runtime.model === runtime.model &&
@@ -249,6 +346,39 @@ export class AIRequestHandle {
       /* A malformed payload must not change the inference result. */
     }
     this.publish()
+    this.observe(result, error)
+  }
+  private observe(result: unknown, error: unknown): void {
+    if (!this.observed || this.record.status === 'running' || this.record.status === 'interrupted')
+      return
+    try {
+      const output = result && typeof result === 'object' ? (result as Record<string, unknown>) : {}
+      const metrics =
+        output.metrics && typeof output.metrics === 'object'
+          ? (output.metrics as Record<string, unknown>)
+          : undefined
+      const backend =
+        this.runtime?.backend ??
+        (typeof output.computeBackend === 'string' ? output.computeBackend : undefined) ??
+        (typeof metrics?.computeBackend === 'string' ? metrics.computeBackend : undefined) ??
+        this.record.backend
+      const model = typeof output.model === 'string' ? output.model : this.record.model
+      observer?.finished({
+        id: this.id,
+        modality: this.record.modality,
+        origin: this.origin,
+        ...(model ? { model } : {}),
+        ...(backend ? { backend } : {}),
+        status: this.record.status,
+        durationMs: this.record.durationMs ?? 0,
+        hasImage: this.hasImage,
+        ...(this.record.modality === 'video' ? { hasInitImage: this.hasInitImage } : {}),
+        ...(error !== undefined ? { error } : {}),
+        ...(metrics ? { metrics } : {})
+      })
+    } catch {
+      /* Statistics must never change the inference result. */
+    }
   }
   run<T>(fn: () => T): T {
     return context.run(this, fn)

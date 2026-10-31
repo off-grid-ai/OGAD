@@ -5,6 +5,7 @@ import {
   isSupportingChatContext,
   preprocessChatMarkdown
 } from '@offgrid/sync'
+import { splitCitations } from '@offgrid/rag/documents'
 import { toSpeakableText } from '@renderer/lib/speakable'
 import { runningToolLabel } from '@renderer/lib/tool-display'
 import type { ImageGenerationJobContract } from '../../../../shared/image-generation-contract'
@@ -17,9 +18,8 @@ export const EMPTY_MSGS: ChatMessage[] = []
 export const OPEN_CHAT_TABS_KEY = 'offgrid:chat:open-tabs'
 export const ACTIVE_CHAT_TAB_KEY = 'offgrid:chat:active-tab'
 
-export const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i
+const ASK_FENCE = /```ask\s*\n[\s\S]*?```/i
 const ARTIFACT_FENCE = /```(?:html|svg|mermaid|jsx|tsx|react|image)\s*\n[\s\S]*?```/gi
-const CITATION = /\[S(\d+)\]/g
 export const IMAGE_MESSAGE_COLUMN_WIDTH = 'w-full max-w-2xl'
 
 export function imageProgressLabel(
@@ -75,9 +75,16 @@ export function parseAsk(content: string): AskBlock | null {
   return null
 }
 
+/** Each `[S#]` tag (grouped tags too) replaced, read the way the shared engine reads them. */
+function mapCitations(text: string, citation: (index: number) => string): string {
+  return splitCitations(text)
+    .map((segment) => (segment.kind === 'citation' ? citation(segment.index) : segment.text))
+    .join('')
+}
+
 export function messageToSpeakable(raw: string): string {
   return toSpeakableText(
-    (raw || '').replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, '').replace(CITATION, '').trim()
+    mapCitations((raw || '').replace(ASK_FENCE, '').replace(ARTIFACT_FENCE, ''), () => '').trim()
   )
 }
 
@@ -88,6 +95,8 @@ export function activityLabel(activity?: {
   label?: string
 }): string {
   if (!activity) return ''
+  if (activity.kind === 'restarting_model') return 'Restarting the model…'
+  if (activity.kind === 'waiting') return ''
   if (activity.kind === 'planning') return 'Planning next action…'
   if (activity.kind === 'preparing_tool_calls')
     return activity.name === 'generate_image' ? 'Preparing image requests…' : 'Preparing actions…'
@@ -99,12 +108,7 @@ export function activityLabel(activity?: {
   if (activity.kind === 'searching') return 'Searching your memory…'
   if (activity.kind === 'memory') {
     const counts = activity.counts || {}
-    const total =
-      (counts.memories || 0) +
-      (counts.summaries || 0) +
-      (counts.entities || 0) +
-      (counts.facts || 0) +
-      (counts.unified || 0)
+    const total = (counts.summaries || 0) + (counts.entities || 0) + (counts.unified || 0)
     return `Searched your memory — ${total} result${total === 1 ? '' : 's'}`
   }
   if (activity.kind === 'project') {
@@ -143,11 +147,12 @@ export function withoutArtifactFences(content: string): string {
 export function renderedMessageContent(message: ChatMessage): string {
   const selected = selectedMessageContent(message)
   if (message.role !== 'assistant') return preprocessChatMarkdown(selected)
+  // Keep saved history intact while presenting old native video failures clearly.
+  if (/^Error invoking remote method 'videogen:generate':/.test(selected)) {
+    return videoGenerationErrorContent(selected)
+  }
   return preprocessChatMarkdown(
-    selected
-      .replace(ASK_FENCE, '')
-      .replace(/\[S(\d+)\]/g, '[S$1](cite:$1)')
-      .trim()
+    mapCitations(selected.replace(ASK_FENCE, ''), (index) => `[S${index}](cite:${index})`).trim()
   )
 }
 
@@ -210,15 +215,34 @@ export function assistantWorkIsSettled(message: ChatMessage): boolean {
 export function contextResultCount(context: RagContext): number {
   return (
     (context.sources?.length ?? 0) +
-    (context.memories?.length ?? 0) +
     (context.summaries?.length ?? 0) +
     (context.entities?.length ?? 0) +
-    (context.entityFacts?.length ?? 0) +
     (context.unified?.length ?? 0)
   )
 }
 
 export { generationErrorContent } from '../../../../shared/chat-generation-error'
+
+/** Native video diagnostics stay in the app log, not in the chat answer. */
+export function videoGenerationErrorContent(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? '')
+  if (/extends beyond.*model file|new_sd_ctx_t failed|loading diffusion model.*failed/i.test(raw)) {
+    return 'The video model could not load. In Models, choose another video model or download its files again. Technical details are in the app log.'
+  }
+  if (/already generating/i.test(raw)) {
+    return 'A video is still running or stopping. Wait for it to stop, then try again.'
+  }
+  if (/not enough|memory limit|out of memory/i.test(raw)) {
+    return 'There is not enough free memory for this video. Use a smaller video model or reduce the video size in Video options.'
+  }
+  if (/engine.*not found|encoder.*not found|encoder.*does not support/i.test(raw)) {
+    return 'The video engine or encoder is unavailable. Update Off Grid AI Desktop, then try again. Technical details are in the app log.'
+  }
+  if (/select.*video model|download a complete video model pack/i.test(raw)) {
+    return 'Choose a complete video model in Models, then try again.'
+  }
+  return 'Video generation failed. Check the selected video model, then try again. Technical details are in the app log.'
+}
 
 export function nextVoicePlaybackOwner(
   current: string | null,

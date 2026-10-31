@@ -21,6 +21,17 @@ EMBEDDINGS            POST ${b}/v1/embeddings          {input}  (local all-MiniL
 SPEECH -> TEXT (STT)  POST ${b}/v1/audio/transcriptions  multipart: file
 TEXT -> SPEECH (TTS)  POST ${b}/v1/audio/speech        {input, voice?}  -> audio/wav
   voices              GET  ${b}/v1/audio/voices
+TEXT -> VIDEO (Pro)   POST ${b}/v1/videos             OpenAI video API: {model?, prompt, seconds?, size?, input_reference?} (+ Off Grid: negative_prompt, steps, guidance, seed, fps, frames, consent, client_job_id) -> Video object
+  models + limits     GET ${b}/v1/videos/models
+  status              GET ${b}/v1/videos/:id
+  download            GET ${b}/v1/videos/:id/content -> video/mp4 (?variant=thumbnail -> image/png)
+  stop                DELETE ${b}/v1/videos/:id
+STORY -> FILM (Pro)   POST ${b}/v1/stories            {story, characters?, photos?, init_images?, quality?, schedule?} -> 202 job
+  status              GET ${b}/v1/stories/:id
+  download            GET ${b}/v1/stories/:id/content -> video/mp4 (captions: /captions -> text/vtt)
+  stop                POST ${b}/v1/stories/:id/cancel
+  Without Pro both answer 402 pro_required; an unsafe request answers 422 safety_refused.
+SEARCH (Pro)          POST ${b}/v1/search             {query, limit?, sources?} -> {data:[{id, title, snippet, kind, source, timestamp, deepLinkId}]}
 TEXT -> IMAGE         POST ${b}/v1/images              {prompt, aspect_ratio?, resolution?, seed?}
 IMAGE -> IMAGE        POST ${b}/v1/images              {prompt, input_references:[{image_url:{url}}]}
   (OpenAI aliases)    POST ${b}/v1/images/generations  |  POST ${b}/v1/images/edits (multipart)
@@ -77,6 +88,58 @@ export function openApiSpec(
     schema: { type: 'boolean', default: false },
     description:
       'Run asynchronously: returns 202 + a request_id and poll_url instead of waiting for the result.'
+  }
+
+  const videoCreateSchema = {
+    type: 'object',
+    required: ['prompt'],
+    properties: {
+      model: { type: 'string', description: 'An id from GET /v1/videos/models. Default: the active model.' },
+      prompt: { type: 'string' },
+      seconds: { type: 'string', description: 'Whole seconds, e.g. "4".' },
+      size: { type: 'string', description: 'WIDTHxHEIGHT, e.g. "832x480". Multiples of 16 (32 for LTX), up to 1280x720.' },
+      input_reference: {
+        type: 'object',
+        properties: { image_url: { type: 'string' } },
+        description: 'Start image: a PNG or JPEG data URL or http(s) URL (≤ 8 MB). Needs a model whose supported_frame_images lists first_frame.'
+      },
+      negative_prompt: { type: 'string' },
+      steps: { type: 'integer', minimum: 4, maximum: 50 },
+      guidance: { type: 'number', minimum: 0, maximum: 20 },
+      seed: { type: 'integer', minimum: -1, maximum: 2147483647 },
+      fps: { type: 'integer', minimum: 4, maximum: 24 },
+      frames: { type: 'integer', minimum: 9, maximum: 121, description: '4n + 1 for Wan and Hunyuan; 8n + 1 for LTX.' },
+      enhance_prompt: { type: 'boolean' },
+      init_image_source: { type: 'string', enum: ['photo', 'generated'], description: 'generated: a frame of a clip Off Grid made, which needs no consent.' },
+      ref_images: { type: 'array', maxItems: 4, items: { type: 'string' }, description: 'Photos of a person to keep, as data URLs. Send consent: true.' },
+      consent: { type: 'boolean', description: 'The photos show the sender or people who agreed.' },
+      client_job_id: { type: 'string', minLength: 16, maxLength: 100 },
+      format: { type: 'string', enum: ['portrait', 'landscape', 'square'] },
+      use_remote: { type: 'boolean', default: false, description: 'Use the active OpenRouter video model. Stop ends local polling; OpenRouter may continue and charge for it.' }
+    }
+  }
+
+  const videoObjectSchema = {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      object: { type: 'string', enum: ['video'] },
+      status: { type: 'string', enum: ['queued', 'in_progress', 'completed', 'failed'] },
+      progress: { type: 'integer', minimum: 0, maximum: 100 },
+      created_at: { type: 'integer' },
+      completed_at: { type: 'integer', nullable: true },
+      expires_at: { type: 'integer', nullable: true },
+      model: { type: 'string' },
+      prompt: { type: 'string' },
+      seconds: { type: 'string' },
+      size: { type: 'string' },
+      remixed_from_video_id: { type: 'string', nullable: true },
+      error: { type: 'object', nullable: true, properties: { code: { type: 'string' }, message: { type: 'string' } } },
+      stage: { type: 'string', nullable: true },
+      step_progress: { type: 'object', nullable: true },
+      preview: { type: 'object', nullable: true },
+      result: { type: 'object', nullable: true }
+    }
   }
 
   const errorResponse = {
@@ -154,6 +217,7 @@ const client = new OpenAI({ baseURL: "${b(port)}/v1", apiKey: "YOUR_API_KEY" });
 Off Grid AI is **also an MCP server** (Streamable HTTP, stateless) at \`POST ${b(port)}/mcp\`. Any MCP client can run the on-device models as tools — the inference layer for the whole device.
 
 **Tools:** \`generate_text\`, \`describe_image\`, \`generate_image\`, \`edit_image\`, \`transcribe_audio\`, \`text_to_speech\`, \`embed\`.
+With Pro and a video model, MCP also lists \`generate_video\` and \`video_generation_status\`. In the app's chat, Pro adds \`generate_video\` (\`prompt\`, optional \`start_image: "last_image"\` to animate the chat's last image) and \`make_film\` (\`sentence\`: starts a draft film in Video Studio).
 
 List the tools:
 
@@ -498,6 +562,176 @@ Models swap in/out (Apple Silicon unified memory): image generation pauses the L
               content: { 'application/json': { schema: imageResultSchema } }
             },
             '501': errorResponse,
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Generate a silent video (OpenAI video API)',
+          description:
+            "OpenAI's POST /v1/videos: answers with a Video object at once; poll GET /v1/videos/{id}. Off Grid fields are optional extras. seconds becomes the nearest valid frame count at the model's own frame rate, up to its longest clip; frames wins over seconds. Reuse client_job_id with the same body to recover a lost response without generating another clip.",
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': { schema: videoCreateSchema },
+              'multipart/form-data': {
+                schema: {
+                  ...videoCreateSchema,
+                  properties: {
+                    ...videoCreateSchema.properties,
+                    input_reference: { type: 'string', format: 'binary', description: 'Start image, PNG or JPEG.' }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'The Video object', content: { 'application/json': { schema: videoObjectSchema } } },
+            '402': { description: 'Video needs Off Grid AI Pro (error type pro_required)' },
+            '422': { description: 'The request was refused by the safety check (safety_refused)' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/videos/models': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Installed video models and their limits',
+          description:
+            "OpenRouter's fields (supported_durations, supported_sizes, supported_aspect_ratios, supported_frame_images), plus limits: the exact grid each model renders on.",
+          responses: { '200': { description: '{object: "list", data: [...]}' }, default: errorResponse }
+        }
+      },
+      '/v1/search': {
+        post: {
+          tags: ['Search'],
+          summary: 'Search everything this computer has seen (Pro)',
+          description:
+            'The Search screen engine: keywords and meaning, best first. Paired apps only; a website origin is refused.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['query'],
+                  properties: {
+                    query: { type: 'string' },
+                    limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+                    sources: { type: 'array', items: { type: 'string' } }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '200': { description: 'Ranked results: id, title, snippet, kind, source, timestamp, deepLinkId' },
+            '402': { description: 'Search needs Off Grid AI Pro (pro_required)' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/stories': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Render a narrated short film from a story (Pro)',
+          description:
+            'The story holds 1–8 shots. Character photos and start images travel as data URLs keyed by id. The film renders in the queue of this computer: draft first, or final now or tonight.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['story'],
+                  properties: {
+                    story: { type: 'object' },
+                    characters: { type: 'array', items: { type: 'object' } },
+                    photos: { type: 'object', additionalProperties: { type: 'string' } },
+                    init_images: { type: 'object', additionalProperties: { type: 'string' } },
+                    quality: { type: 'string', enum: ['draft', 'final'] },
+                    schedule: { type: 'string', enum: ['now', 'tonight'] }
+                  }
+                }
+              }
+            }
+          },
+          responses: {
+            '202': { description: 'Accepted: request_id, poll_url, estimate_seconds, ready_at' },
+            '402': { description: 'Video needs Off Grid AI Pro (pro_required)' },
+            '422': { description: 'Refused by the safety check (safety_refused)' },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/stories/{id}': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Story status, per-shot progress and estimate',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Story with status and progress' }, default: errorResponse }
+        }
+      },
+      '/v1/stories/{id}/content': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Download the finished film (MP4 with narration and captions)',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': { description: 'Film', content: { 'video/mp4': { schema: { type: 'string', format: 'binary' } } } },
+            default: errorResponse
+          }
+        }
+      },
+      '/v1/stories/{id}/cancel': {
+        post: {
+          tags: ['Videos'],
+          summary: 'Stop this film',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'Stop requested' }, default: errorResponse }
+        }
+      },
+      '/v1/videos/{id}': {
+        get: {
+          tags: ['Videos'],
+          summary: 'The Video object: status, progress and result',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {
+            '200': {
+              description:
+                'status is queued, in_progress, completed or failed; progress is 0-100. A stopped job fails with error.code cancelled; a job a restart interrupted fails with error.code interrupted. Off Grid extras while running: stage, step_progress and preview (a decoded frame at content?variant=thumbnail). A completed job carries result: the clip metadata and its sync id.',
+              content: { 'application/json': { schema: videoObjectSchema } }
+            },
+            default: errorResponse
+          }
+        },
+        delete: {
+          tags: ['Videos'],
+          summary: 'Stop a running job, or forget a finished one',
+          description: 'A stopped job stays readable and fails with error.code cancelled. The clip stays in the library.',
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: '{id, object: "video.deleted", deleted: true}' }, default: errorResponse }
+        }
+      },
+      '/v1/videos/{id}/content': {
+        get: {
+          tags: ['Videos'],
+          summary: 'Download the completed MP4, or the thumbnail',
+          parameters: [
+            { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'variant', in: 'query', schema: { type: 'string', enum: ['video', 'thumbnail'], default: 'video' } }
+          ],
+          responses: {
+            '200': {
+              description: 'video/mp4, or image/png for the thumbnail',
+              content: {
+                'video/mp4': { schema: { type: 'string', format: 'binary' } },
+                'image/png': { schema: { type: 'string', format: 'binary' } }
+              }
+            },
+            '404': { description: 'Not ready yet' },
             default: errorResponse
           }
         }

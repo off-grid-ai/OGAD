@@ -299,6 +299,8 @@ const TOOL_LABELS: Record<string, string> = {
   computer_use: 'Computer Use',
   generate_image: 'Generated image',
   image_generation: 'Generated image',
+  generate_video: 'Video requested',
+  make_film: 'Film started',
   search_memory: 'Searched memory',
   search_knowledge_base: 'Searched knowledge base',
   search_documents: 'Searched documents',

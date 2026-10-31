@@ -77,6 +77,23 @@ module.exports = {
       to: { path: 'bootstrap/proStub\\.ts$|(^|/)pro/(main|renderer)/' }
     },
     {
+      name: 'no-video-generation-in-core',
+      comment:
+        'Video generation, Studio, stories and characters are Pro (private). Core keeps only the ' +
+        'seams: the free video library, the player, hooks, slots and gateway routes. The open build ' +
+        'must compile and run with video absent.',
+      severity: 'error',
+      from: { path: '^src/' },
+      to: { path: '(^|/)(videogen|video-studio|video-story|video-character)(/|\\.|$)|VideoSettingsTab' }
+    },
+    {
+      name: 'no-video-generation-module-in-core',
+      comment: 'A video generation module was added under core src/. Put it in pro/.',
+      severity: 'error',
+      from: { path: '^src/.*(videogen|video-studio|video-story|video-character)' },
+      to: {}
+    },
+    {
       name: 'pure-stays-pure',
       comment:
         'Isolate pure logic from I/O (§A). These extracted decision modules are unit-tested BECAUSE they ' +

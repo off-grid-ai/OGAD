@@ -119,4 +119,20 @@ describe('<VoiceBubble/> player', () => {
     await user.click(screen.getByRole('button', { name: 'Regenerate' }))
     expect(retried).toBe(1)
   })
+
+  // jsdom has no layout, so the row is checked as the DOM the browser lays out: the play control,
+  // the waveform, the time and the speed are siblings in one row, in that order.
+  it('keeps play, waveform, time and speed in one row', () => {
+    renderReply({ showTranscriptInitially: false })
+    const play = screen.getByRole('button', { name: 'Play voice note' })
+    const waveform = screen.getByRole('slider', { name: 'Seek voice note' })
+    const speed = screen.getByRole('button', { name: 'Playback speed 1x' })
+    const row = waveform.parentElement!
+    expect(play.parentElement).toBe(row)
+    expect(row.contains(speed)).toBe(true)
+    const order = [play, waveform, speed].map((el) =>
+      [...row.querySelectorAll('*')].indexOf(el as Element)
+    )
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+  })
 })

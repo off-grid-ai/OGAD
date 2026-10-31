@@ -7,7 +7,10 @@ describe('Whisper CUDA libraries', () => {
       whisperRuntimeLibraryEnv('linux', '/app/bin/whisper-cuda/whisper-cli', {
         LD_LIBRARY_PATH: '/host/lib'
       })
-    ).toEqual({ LD_LIBRARY_PATH: '/app/bin/whisper-cuda:/app/bin/cuda-runtime:/host/lib' })
+    ).toEqual({
+      CUDA_CACHE_MAXSIZE: '4294967296',
+      LD_LIBRARY_PATH: '/app/bin/whisper-cuda:/app/bin/cuda-runtime:/host/lib'
+    })
   })
 
   it('uses bundled Windows CUDA libraries for the accelerated Whisper binary', () => {
@@ -15,12 +18,16 @@ describe('Whisper CUDA libraries', () => {
       whisperRuntimeLibraryEnv('win32', 'C:\\app\\bin\\whisper\\whisper-cli.exe', {
         PATH: 'C:\\Windows'
       })
-    ).toEqual({ PATH: 'C:\\app\\bin\\whisper;C:\\app\\bin\\cuda-runtime;C:\\Windows' })
+    ).toEqual({
+      CUDA_CACHE_MAXSIZE: '4294967296',
+      GGML_VK_DISABLE_BFLOAT16: '1',
+      PATH: 'C:\\app\\bin\\whisper;C:\\app\\bin\\cuda-runtime;C:\\Windows'
+    })
   })
 
   it('does not add CUDA libraries to the CPU binary', () => {
-    expect(
-      whisperRuntimeLibraryEnv('linux', '/app/bin/whisper-cpu/whisper-cli', {})
-    ).toEqual({ LD_LIBRARY_PATH: '/app/bin/whisper-cpu' })
+    expect(whisperRuntimeLibraryEnv('linux', '/app/bin/whisper-cpu/whisper-cli', {})).toEqual({
+      LD_LIBRARY_PATH: '/app/bin/whisper-cpu'
+    })
   })
 })

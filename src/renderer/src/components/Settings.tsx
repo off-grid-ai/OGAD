@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ProgressiveBlur } from './ui/progressive-blur'
-import { PageHeader, Section } from '@offgrid/operator-ui/operator/experience'
+import { Section } from '@offgrid/operator-ui/operator/experience'
+import { PageShell } from './PageShell'
 import { Badge } from '@offgrid/operator-ui/operator/coss/badge'
 import { SetupPanel } from './setup/SetupPanel'
 import { PerformancePackPanel } from './setup/PerformancePackPanel'
 import { EngineUpdatesSection } from './setup/EngineUpdatesSection'
 import { StoragePanel } from './setup/StoragePanel'
 import { DataPrivacyPanel } from './setup/DataPrivacyPanel'
+import { AnalyticsPanel } from './analytics/AnalyticsPanel'
 import { getRegisteredSettingsSections } from '../bootstrap/sectionRegistry'
 import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
 import { getSlot, SLOTS } from '../bootstrap/slotRegistry'
@@ -16,6 +18,7 @@ import { PRO_SETTINGS_SLOTS } from './pro/proSettingsCatalog'
 // importing this whole god-file (which pulls SetupPanel/etc. + their window.api types).
 import { SettingsCard, ProPlaceholder, SettingsCardsGroup } from './SettingsCard'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
+import { UiSettingsSection } from './UiSettingsSection'
 import { currentPlatform } from '@renderer/lib/device'
 import { getProFeature, proComingSoonHere, featureSupportsPlatform } from './pro/proCatalog'
 import { SoftwareUpdateSection } from './SoftwareUpdateSection'
@@ -40,7 +43,9 @@ const SETTINGS_SECTION_TITLES: Record<string, string> = {
   secretary: 'What Off Grid AI has learned',
   'pro-plan': 'Your Pro plan',
   privacy: 'Data & privacy',
+  analytics: 'Analytics',
   backup: 'Backup & restore',
+  ui: 'UI',
   shortcuts: 'Keyboard shortcuts',
   update: 'Software update'
 }
@@ -142,20 +147,16 @@ export function Settings({
   }, [selectedSection, onInitialSectionConsumed])
 
   return (
-    <div className="relative flex h-full flex-col">
-      {/* Fixed header — stays put while the content below scrolls. */}
-      <PageHeader
-        className="shrink-0 px-1 pb-6"
-        title="Settings"
-        description={
-          isPro
-            ? 'Who you are, what Off Grid AI has learned, and your devices'
-            : 'Personalization & automation unlock with Pro'
-        }
-      />
-
-      {/* Scrolling content below the fixed header */}
-      <div className="relative flex-1 overflow-y-auto overflow-x-hidden px-1 pt-2 pb-16">
+    <PageShell
+      className="relative"
+      title="Settings"
+      description={
+        isPro
+          ? 'Who you are, what Off Grid AI has learned, and your devices'
+          : 'Personalization & automation unlock with Pro'
+      }
+    >
+      <div className="relative overflow-x-hidden pt-2 pb-16">
         <motion.div
           ref={gridRef}
           data-columns={columns}
@@ -200,7 +201,7 @@ export function Settings({
 
             <SettingsCard
               title="Engines"
-              summary="Keep chat, image and transcription engines current, and manage GPU components."
+              summary="Keep chat, image, video and transcription engines current, and manage GPU components."
               delay={0.135}
             >
               <PerformancePackPanel showUnavailable />
@@ -298,6 +299,13 @@ export function Settings({
             >
               <DataPrivacyPanel />
             </SettingsCard>
+            <SettingsCard
+              title="Analytics"
+              summary="Share anonymous stats and crash reports, see what is shared, or report a problem."
+              delay={0.43}
+            >
+              <AnalyticsPanel />
+            </SettingsCard>
 
             <SettingsCard
               title="Backup & restore"
@@ -305,6 +313,14 @@ export function Settings({
               delay={0.44}
             >
               <BackupRestoreSection />
+            </SettingsCard>
+
+            <SettingsCard
+              title="UI"
+              summary="Choose whether buttons and cards animate when you hover and click."
+              delay={0.448}
+            >
+              <UiSettingsSection />
             </SettingsCard>
 
             {/* Keyboard shortcuts — one reference for every hotkey (core + pro rows). */}
@@ -335,6 +351,6 @@ export function Settings({
       </div>
 
       <ProgressiveBlur height="80px" position="bottom" className="pointer-events-none" />
-    </div>
+    </PageShell>
   )
 }

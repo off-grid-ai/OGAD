@@ -23,6 +23,15 @@ function optionalElectronApp(): OptionalElectronApp | undefined {
   return (loadOptionalModule('electron') as { app?: OptionalElectronApp }).app
 }
 
+/** Whether this is an installed app rather than a dev or test build. False outside Electron. */
+export function isPackagedHost(): boolean {
+  try {
+    return optionalElectronApp()?.isPackaged === true
+  } catch {
+    return false
+  }
+}
+
 interface RuntimeConfig {
   dataDir?: string // writable per-user dir (models, caches, generated output)
   modelsDir?: string // Electron host may place model files outside the profile

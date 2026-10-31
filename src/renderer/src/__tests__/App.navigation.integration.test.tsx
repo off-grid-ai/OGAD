@@ -121,7 +121,11 @@ describe('<App/> desktop navigation integration', () => {
       observer.disconnect()
     }
 
-    await waitFor(() => expect(screen.getAllByText('Project Beta')).toHaveLength(2))
+    // Back is a real history step (popstate, then the Projects screen renders again): the same
+    // 5 s the other screen changes in this test allow.
+    await waitFor(() => expect(screen.getAllByText('Project Beta')).toHaveLength(2), {
+      timeout: 5_000
+    })
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ']', metaKey: true, bubbles: true }))
@@ -769,10 +773,16 @@ describe('<App/> desktop navigation integration', () => {
     act(() => openTaskSidePanel())
     const taskPanel = await screen.findByTestId('task-side-panel')
     const chatTaskWorkspace = taskPanel.closest('[data-testid="main-task-workspace"]')
-    const chatHeader = screen.getByRole('heading', { name: 'Off Grid AI' }).closest('header')
+    // The task panel opens inside the Chat page, under its header.
+    const chatPage = screen
+      .getByRole('heading', { name: 'Chat', level: 1 })
+      .closest('[data-slot="page-shell"]')
+    const chatHeader = chatPage?.querySelector('[data-slot="page-shell-header"]')
     expect(chatTaskWorkspace).toBeTruthy()
-    expect(chatHeader?.nextElementSibling).toBe(chatTaskWorkspace)
-    expect(chatHeader?.parentElement).toBe(chatTaskWorkspace?.parentElement)
+    expect(chatPage?.contains(chatTaskWorkspace!)).toBe(true)
+    expect(
+      chatHeader!.compareDocumentPosition(chatTaskWorkspace!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     setRegion.mockClear()
 
     act(() => {
@@ -871,7 +881,7 @@ describe('<App/> desktop navigation integration', () => {
     expect(await screen.findByTestId('task-details-web-start-task')).toBeTruthy()
     await waitFor(() => {
       expect(navigation.getAttribute('aria-expanded')).toBe('false')
-      expect(screen.getByRole('heading', { name: 'Off Grid AI' })).toBeTruthy()
+      expect(screen.getByRole('heading', { name: 'Chat', level: 1 })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Show conversations' })).toBeTruthy()
     })
@@ -937,7 +947,7 @@ describe('<App/> desktop navigation integration', () => {
     expect(await screen.findByTestId('task-details-web-start-task')).toBeTruthy()
     await waitFor(() => {
       expect(navigation.getAttribute('aria-expanded')).toBe('false')
-      expect(screen.getByRole('heading', { name: 'Off Grid AI' })).toBeTruthy()
+      expect(screen.getByRole('heading', { name: 'Chat', level: 1 })).toBeTruthy()
       expect(screen.getByRole('button', { name: 'Expand Chat' })).toBeTruthy()
     })
 

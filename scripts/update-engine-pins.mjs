@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Moves resources/engine-pins.json to the newest upstream engines: llama.cpp, the Prism fork,
-// stable-diffusion.cpp, whisper.cpp and the NVIDIA CUDA libraries the ONNX pack carries.
+// stable-diffusion.cpp, whisper.cpp, sherpa-onnx (Parakeet) and the NVIDIA CUDA libraries the ONNX
+// pack carries.
 // Every asset hash comes from the SHA-256 GitHub (or PyPI) publishes for it. An engine whose
 // newest release lacks any asset we ship is left on its current pin and reported, so a changed
 // upstream layout never produces a half-updated pin.
 //
 //   node scripts/update-engine-pins.mjs [--summary <file.md>] [--dry-run]
-//     [--engines llama,prism,sd,whisper,nvidia] [--llama-min-builds <n>]
+//     [--engines llama,prism,sd,whisper,sherpa,nvidia] [--llama-min-builds <n>]
 //
 // llama.cpp tags several builds a day; --llama-min-builds moves it only once upstream is at least
 // that many builds ahead, so a nightly run does not rebuild every engine every night.
@@ -19,11 +20,16 @@ const { values } = parseArgs({
   options: {
     summary: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
-    engines: { type: 'string', default: 'llama,prism,sd,whisper,nvidia' },
+    engines: { type: 'string', default: 'llama,prism,sd,whisper,sherpa,nvidia' },
     'llama-min-builds': { type: 'string', default: '1' }
   }
 })
-const engines = new Set(values.engines.split(',').map((e) => e.trim()).filter(Boolean))
+const engines = new Set(
+  values.engines
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean)
+)
 const llamaMinBuilds = Number(values['llama-min-builds'])
 const PINS_FILE = new URL('../resources/engine-pins.json', import.meta.url)
 const pins = JSON.parse(fs.readFileSync(PINS_FILE, 'utf8'))
@@ -91,7 +97,10 @@ async function updateLlama() {
   const ref = release.tag_name
   const ahead = Number(ref.slice(1)) - Number(pins.llama.ref.slice(1))
   if (ahead > 0 && ahead < llamaMinBuilds) {
-    skipped.push({ engine: 'llama', reason: `${ref} is ${ahead} builds ahead; waiting for ${llamaMinBuilds}` })
+    skipped.push({
+      engine: 'llama',
+      reason: `${ref} is ${ahead} builds ahead; waiting for ${llamaMinBuilds}`
+    })
     return
   }
   const { sha256, missing } = digests(release, {
@@ -108,7 +117,9 @@ async function updateLlama() {
 }
 
 async function updatePrism() {
-  const release = await latestRelease(pins.prism.repo, /^prism-b\d+-[0-9a-f]+$/, { prerelease: true })
+  const release = await latestRelease(pins.prism.repo, /^prism-b\d+-[0-9a-f]+$/, {
+    prerelease: true
+  })
   const ref = release.tag_name
   const { sha256, missing } = digests(release, {
     'linux-cuda': `llama-${ref}-bin-linux-cuda-12.8-x64.tar.gz`,
@@ -157,7 +168,25 @@ async function updateWhisper() {
     'win-cuda': 'whisper-bin-win-cuda-12.4.0-x64.zip',
     'win-cpu': 'whisper-bin-x64.zip'
   })
-  apply('whisper', { ref, commit, winRef: winRelease.tag_name, sha256, missing }, pins.whisper.ref, ref)
+  apply(
+    'whisper',
+    { ref, commit, winRef: winRelease.tag_name, sha256, missing },
+    pins.whisper.ref,
+    ref
+  )
+}
+
+/** sherpa-onnx ships prebuilt shared builds for every platform; release jobs fetch them as-is
+ *  (scripts/fetch-sherpa.mjs), so a new pin needs no archive rebuild. */
+async function updateSherpa() {
+  const release = await latestRelease(pins.sherpa.repo, /^v\d+\.\d+\.\d+$/)
+  const ref = release.tag_name
+  const { sha256, missing } = digests(release, {
+    'mac-universal': `sherpa-onnx-${ref}-osx-universal2-shared.tar.bz2`,
+    'linux-x64': `sherpa-onnx-${ref}-linux-x64-shared.tar.bz2`,
+    'win-x64': `sherpa-onnx-${ref}-win-x64-shared-MT-Release.tar.bz2`
+  })
+  apply('sherpa', { ref, sha256, missing }, pins.sherpa.ref, ref)
 }
 
 /** Newest release in the same major version that has a wheel for the platform. */
@@ -200,7 +229,14 @@ async function updateNvidia() {
   if (JSON.stringify(pins.nvidia) !== before) changed.push('nvidia')
 }
 
-const updates = { llama: updateLlama, prism: updatePrism, sd: updateSd, whisper: updateWhisper, nvidia: updateNvidia }
+const updates = {
+  llama: updateLlama,
+  prism: updatePrism,
+  sd: updateSd,
+  whisper: updateWhisper,
+  sherpa: updateSherpa,
+  nvidia: updateNvidia
+}
 for (const [engine, update] of Object.entries(updates)) {
   if (!engines.has(engine)) continue
   try {
@@ -215,7 +251,9 @@ if (changed.length && !values['dry-run']) {
 }
 if (values.summary) {
   const body = [
-    changed.length ? '| Engine | From | To |\n|---|---|---|\n' + lines.join('\n') : 'Every engine is on its newest release.',
+    changed.length
+      ? '| Engine | From | To |\n|---|---|---|\n' + lines.join('\n')
+      : 'Every engine is on its newest release.',
     ...(skipped.length
       ? ['', '**Left on the current pin:**', ...skipped.map((s) => `- ${s.engine}: ${s.reason}`)]
       : [])

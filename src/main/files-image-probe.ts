@@ -31,7 +31,7 @@ export type ImageDecodeVerdict =
 
 /** Load sharp on demand. Returns null when the module cannot load at all, so the
  *  caller can distinguish a missing checker from a bad file. */
-export async function loadImageProbe(): Promise<ImageProbe | null> {
+async function loadImageProbe(): Promise<ImageProbe | null> {
   try {
     const mod = (await import('sharp')) as unknown as {
       default?: (p: string, o?: unknown) => { metadata(): Promise<unknown> }

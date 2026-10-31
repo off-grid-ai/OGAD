@@ -11,7 +11,8 @@ import {
   transcriptionModelOptions,
   transcriptionActiveInfo,
   resolveConfiguredTranscriptionLanguage,
-  withConfiguredTranscriptionLanguage
+  withConfiguredTranscriptionLanguage,
+  withWhisperFallback
 } from '../select'
 import type { TranscriptionService } from '../types'
 
@@ -27,10 +28,12 @@ const three = (
 ): {
   whisper: TranscriptionService
   parakeet: TranscriptionService
+  qwen3Asr: TranscriptionService
   whisperResident: TranscriptionService
 } => ({
   whisper: svc(w, 'w'),
   parakeet: svc(p, 'p'),
+  qwen3Asr: svc(p, 'q'),
   whisperResident: svc(r, 'r')
 })
 
@@ -51,6 +54,16 @@ describe('pickTranscription', () => {
     const r = pickTranscription('parakeet', three(true, false, false))
     expect(r.engine).toBe('whisper')
     expect(r.fellBack).toBe(true)
+  })
+
+  it('uses Qwen3-ASR when requested and installed, and Whisper when its model is not', async () => {
+    const used = pickTranscription('qwen3-asr', three(true, true, false))
+    expect(used.engine).toBe('qwen3-asr')
+    expect(await used.service.transcribe({ path: '/a.wav' })).toEqual({ text: 'q' })
+    expect(pickTranscription('qwen3-asr', three(true, false, false))).toMatchObject({
+      engine: 'whisper',
+      fellBack: true
+    })
   })
 
   it('uses the resident whisper-server when requested and available', () => {
@@ -238,14 +251,15 @@ describe('effectiveEngine (fallback-aware labeling)', () => {
 })
 
 describe('catalogEngine (single-source engine classification)', () => {
-  it('classifies a tagged parakeet entry as parakeet', () => {
+  it('classifies a tagged parakeet or qwen3-asr entry as that engine', () => {
     expect(catalogEngine({ engine: 'parakeet' })).toBe('parakeet')
+    expect(catalogEngine({ engine: 'qwen3-asr' })).toBe('qwen3-asr')
   })
   it('classifies an untagged entry as whisper (whisper is the untagged default)', () => {
     expect(catalogEngine({})).toBe('whisper')
     expect(catalogEngine({ engine: undefined })).toBe('whisper')
   })
-  it('classifies an unknown engine string as whisper (only parakeet is tagged)', () => {
+  it('classifies an unknown engine string as whisper', () => {
     expect(catalogEngine({ engine: 'something-else' })).toBe('whisper')
   })
   it('treats null/undefined entry as whisper', () => {
@@ -421,5 +435,40 @@ describe('transcriptionModelOptions — switchable models for the picker', () =>
   it('reads the id as a name when a catalog entry has none', () => {
     const opts = transcriptionModelOptions(null, [{ id: 'x/y', files: [{ name: 'y.bin' }] }])
     expect(opts[1]).toEqual({ id: 'x/y', name: 'Y', active: false })
+  })
+})
+
+describe('withWhisperFallback', () => {
+  const failing: TranscriptionService = {
+    isAvailable: () => true,
+    transcribe: async () => {
+      throw new Error('sherpa-onnx exited with code 1')
+    }
+  }
+
+  it('tells the person and lets Whisper transcribe a recording the engine failed on', async () => {
+    const notices: unknown[] = []
+    const service = withWhisperFallback(failing, 'parakeet', svc(true, 'whisper text'), (n) =>
+      notices.push(n)
+    )
+    expect(await service.transcribe({ path: '/a.wav' })).toEqual({ text: 'whisper text' })
+    expect(notices).toEqual([{ engine: 'parakeet', reason: 'sherpa-onnx exited with code 1' }])
+  })
+
+  it('keeps the error when no Whisper model is installed, or when the caller cancelled', async () => {
+    const notices: unknown[] = []
+    const report = (n: unknown): number => notices.push(n)
+    await expect(
+      withWhisperFallback(failing, 'qwen3-asr', svc(false, 'w'), report).transcribe({ path: '/a' })
+    ).rejects.toThrow('sherpa-onnx exited with code 1')
+    const cancelled = new AbortController()
+    cancelled.abort()
+    await expect(
+      withWhisperFallback(failing, 'qwen3-asr', svc(true, 'w'), report).transcribe(
+        { path: '/a' },
+        { signal: cancelled.signal }
+      )
+    ).rejects.toThrow('sherpa-onnx exited with code 1')
+    expect(notices).toEqual([])
   })
 })

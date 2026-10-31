@@ -10,6 +10,7 @@ import { registerToolExtension, unregisterToolExtension, type ToolExtension } fr
 import { isProEntitled } from '../licensing/license-service'
 import { getForcedProActivation } from './pro-activation'
 import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { registerGatewayRoute, type GatewayRoute } from '../gateway-routes'
 
 // IPC is an untyped Electron boundary. Individual handlers validate and type
 // their own argument tuples before use.
@@ -25,6 +26,8 @@ export interface ProMainApi {
   registerHook: typeof registerHook
   registerToolExtension: typeof registerToolExtension
   registerIpcHandler(channel: string, handler: ProIpcHandler): void
+  /** An authenticated gateway route. It refuses work once the licence lapses. */
+  registerGatewayRoute(route: GatewayRoute): void
   readonly runtimeSignal: AbortSignal
   requestRelaunch(): void
   registerShutdownOwner(name: string, shutdown: () => void | Promise<void>): () => void
@@ -58,6 +61,7 @@ function createRuntimeSession(options: RuntimeSessionOptions): {
   const hooks = new Map<string, (...args: never[]) => unknown>()
   const toolExtensions = new Map<string, ToolExtension>()
   const ipcChannels = new Set<string>()
+  const gatewayRoutes = new Set<() => void>()
   const activeIpcOperations = new Set<Promise<unknown>>()
   const controller = new AbortController()
   let stopped = false
@@ -87,6 +91,14 @@ function createRuntimeSession(options: RuntimeSessionOptions): {
       })
       ipcChannels.add(channel)
     },
+    registerGatewayRoute: (route) => {
+      gatewayRoutes.add(
+        registerGatewayRoute((context) => {
+          if (stopped || (options.entitlementRequired && !proEnabled())) return false
+          return route(context)
+        })
+      )
+    },
     runtimeSignal: controller.signal,
     requestRelaunch: options.requestRelaunch,
     registerShutdownOwner: (name, shutdown) => {
@@ -110,6 +122,8 @@ function createRuntimeSession(options: RuntimeSessionOptions): {
         // can enter while capture, Sync, clipboard, and owned jobs are stopping.
         for (const channel of ipcChannels) ipcMain.removeHandler(channel)
         ipcChannels.clear()
+        for (const unregister of gatewayRoutes) unregister()
+        gatewayRoutes.clear()
         for (const [name, hook] of hooks) unregisterHook(name, hook)
         for (const [id, extension] of toolExtensions) unregisterToolExtension(id, extension)
 

@@ -1,3 +1,5 @@
+import { videoGenerationStatus } from './generated-videos/status'
+import { dispatchGatewayRoute, proGatewayFeature } from './gateway-routes'
 // Off Grid AI local inference gateway — ONE OpenAI-compatible endpoint for every
 // modality, on :7878. Any local tool (IDE, app, script) points here and gets the
 // on-device models, and so does a phone on the same LAN - Off Grid AI Mobile scans the
@@ -36,6 +38,7 @@ import { randomUUID, randomBytes, createHash } from 'crypto'
 import { getSecret, setSecret, listSecretKeys } from './secrets'
 import { getSetting, saveSetting } from './database'
 import { authorizeBearer } from './mcp-auth-logic'
+import { GATEWAY_HEALTH_COMPUTER_ID } from '@offgrid/sync'
 import type { GatewayApiKeyContract, GatewayApiKeySettingsContract } from '../shared/ipc-contracts'
 import { getActiveTranscription } from './transcription/select'
 import { transcriptionRequestOptions } from './model-server/transcription-request'
@@ -51,12 +54,14 @@ import { whisperModel } from './media-text'
 import { getActiveModal } from './active-models'
 import { modalityForKind } from './active-models-logic'
 import { embeddings } from './embeddings'
+import { DEFAULT_EMBEDDER } from './embedding-models'
 import { docsText, docsHtml, openApiSpec } from './api-docs'
 import { handleMcpRequest } from './mcp-server'
 import { logActionTokenForDev } from './mcp-auth'
 import { llm, type LlmSettings } from './llm'
 import { GATEWAY_HOST, GATEWAY_BIND_HOST, GATEWAY_PORT } from '../shared/ports'
-import { isPortFree, pickFreePort } from './free-port'
+import { isPortFreeOnAll, pickFreePort, preferredPort } from './free-port'
+import { isPackagedHost } from './runtime-env'
 import { retryWithDeadline } from './lib/retry'
 import { resolveDims } from './model-server/dimensions'
 import { guardProxyStreams } from './stream-guards'
@@ -88,7 +93,16 @@ import {
 } from './model-server/chat-messages'
 import { applyThinkingPayload, requestedThinking } from './llm/chat-payload'
 import { parseMultipart } from './model-server/multipart'
-import { tagLlmEntries, modelEntry, ollamaMirror, specialistModelEntries, installedTextModelEntries, installedImageModelEntries, leadWithActiveChatModel, liveChatCapabilities } from './model-server/models-list'
+import {
+  tagLlmEntries,
+  modelEntry,
+  ollamaMirror,
+  specialistModelEntries,
+  installedTextModelEntries,
+  installedImageModelEntries,
+  leadWithActiveChatModel,
+  liveChatCapabilities
+} from './model-server/models-list'
 import { buildGatewayModalities, type GatewayModalities } from './model-server/health'
 import { safeProxyResponse } from './model-server/proxy-response'
 import { writeDiagnosticLog } from './diagnostics-log'
@@ -198,7 +212,8 @@ function readGatewayKeys(): StoredGatewayKeys {
         typeof key.digest !== 'string' ||
         !/^[a-f0-9]{64}$/.test(key.digest) ||
         (key.expiresAt !== null && !Number.isFinite(key.expiresAt)) ||
-        (key.revokedAt !== null && !Number.isFinite(key.revokedAt))
+        (key.revokedAt !== null && !Number.isFinite(key.revokedAt)) ||
+        (key.deviceId !== undefined && typeof key.deviceId !== 'string')
     )
   )
     throw new Error('API key storage could not be read.')
@@ -225,6 +240,8 @@ function writeGatewayKeys(value: StoredGatewayKeys): void {
   }
   recordGatewayKeysRequired(value.enabled)
 }
+
+const digestOf = (key: string): string => createHash('sha256').update(key).digest('hex')
 
 export function gatewayApiKeySettings(): GatewayApiKeySettingsContract {
   const state = readGatewayKeys()
@@ -263,7 +280,7 @@ export function createGatewayApiKey(
     id: randomUUID(),
     name: name.trim(),
     prefix: key.slice(0, 13),
-    digest: createHash('sha256').update(key).digest('hex'),
+    digest: digestOf(key),
     createdAt: now,
     expiresAt,
     revokedAt: null,
@@ -281,6 +298,73 @@ export function revokeGatewayApiKey(id: string): GatewayApiKeySettingsContract {
   key.revokedAt ??= Date.now()
   writeGatewayKeys(state)
   return gatewayApiKeySettings()
+}
+
+/**
+ * Stores the gateway key Sync derived for a paired device. Idempotent: the same key on every
+ * reconnect is one stored key. A new key for the device (it paired again) replaces its old one.
+ * Whether keys are required is the owner's choice and stays as it is.
+ * Returns 'revoked' when the owner revoked this exact key: it is not brought back.
+ */
+export function issueDeviceGatewayApiKey(
+  deviceId: string,
+  name: string,
+  key: string
+): 'active' | 'revoked' {
+  if (!deviceId || !/^ogad_[a-f0-9]{64}$/.test(key)) throw new Error('Invalid device key.')
+  const state = readGatewayKeys()
+  const digest = digestOf(key)
+  const existing = state.keys.find((stored) => stored.digest === digest)
+  if (existing) return existing.revokedAt === null ? 'active' : 'revoked'
+  const now = Date.now()
+  for (const stored of state.keys) {
+    if (stored.deviceId === deviceId) stored.revokedAt ??= now
+  }
+  state.keys.push({
+    id: randomUUID(),
+    name: name.trim().slice(0, 80) || 'Paired device',
+    prefix: key.slice(0, 13),
+    digest,
+    createdAt: now,
+    expiresAt: null,
+    revokedAt: null,
+    lastUsedAt: null,
+    deviceId
+  })
+  writeGatewayKeys(state)
+  return 'active'
+}
+
+function revokeDeviceKeysWhere(revoke: (deviceId: string) => boolean): void {
+  const state = readGatewayKeys()
+  const now = Date.now()
+  let changed = false
+  for (const stored of state.keys) {
+    if (stored.deviceId !== undefined && stored.revokedAt === null && revoke(stored.deviceId)) {
+      stored.revokedAt = now
+      changed = true
+    }
+  }
+  if (changed) writeGatewayKeys(state)
+}
+
+/** Revokes every gateway key issued to a device. Sync calls this when the device is forgotten. */
+export function revokeDeviceGatewayApiKeys(deviceId: string): void {
+  revokeDeviceKeysWhere((id) => id === deviceId)
+}
+
+/** Revokes the keys of devices no longer paired: a forget that could not reach the key store. */
+export function revokeUnpairedDeviceGatewayApiKeys(pairedDeviceIds: readonly string[]): void {
+  const paired = new Set(pairedDeviceIds)
+  revokeDeviceKeysWhere((id) => !paired.has(id))
+}
+
+// The computer's Sync device id, named by /health so a phone knows which computer answered,
+// whatever address it reached it at. Sync sets it when it starts; absent without Sync.
+let gatewayComputerId: string | undefined
+
+export function setGatewayComputerId(id: string | undefined): void {
+  gatewayComputerId = id
 }
 
 function authorizeGateway(req: http.IncomingMessage): boolean {
@@ -348,6 +432,7 @@ async function liveGatewayModalities(imageAvailable: boolean): Promise<GatewayMo
     speech:
       !!getActiveRemoteVisionServerForModality('voice') ||
       (!!speech && installed.includes(speech)),
+    video: videoGenerationStatus({ localOnly: true }).available,
     image: imageAvailable
   })
 }
@@ -387,10 +472,11 @@ interface ApiRequest {
 
 const requests = new Map<string, ApiRequest>()
 const REQUESTS_MAX = 500
-
 function createRequest(id: string, kind: string, collection: string): ApiRequest {
   if (requests.size >= REQUESTS_MAX) {
-    const oldest = requests.keys().next().value
+    const oldest = [...requests.values()].find(
+      (item) => item.status === 'completed' || item.status === 'failed'
+    )?.id
     if (oldest) requests.delete(oldest)
   }
   const now = Date.now()
@@ -415,6 +501,7 @@ function settle<T>(r: ApiRequest, work: Promise<T>): Promise<T> {
     (e) => {
       const { type, message } = errMeta(e)
       r.status = 'failed'
+      // Image cancellation aborts the controller.
       r.error = r.controller?.signal.aborted
         ? { message: IMAGE_CANCELLED_MESSAGE, type: 'cancelled' }
         : { message, type }
@@ -1686,9 +1773,9 @@ async function handleTeamCompletion(
 }
 
 // ─── Embeddings (local MiniLM) ───────────────────────────────────────────────
-// Served by the in-app embedder (all-MiniLM-L6-v2) rather than proxied to
-// llama-server, which isn't started with --embeddings. Same model the RAG/memory
-// layer uses, so vectors are consistent across the app.
+// Served by the in-app embedder (DEFAULT_EMBEDDER, all-MiniLM-L6-v2) rather than
+// proxied to llama-server, which isn't started with --embeddings. Same path every
+// in-app embedding takes (embeddings.embed).
 async function handleEmbeddings(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -1708,19 +1795,22 @@ async function handleEmbeddings(
     return
   }
   const run = async (): Promise<unknown> => {
-    const data: { object: string; index: number; embedding: number[] }[] = []
+    const vectors: number[][] = []
     if (teamMode()) {
       // Team mode: the whole input in one forward pass, ahead of background indexing.
-      const vectors = await embedCoalesced(inputs)
-      vectors.forEach((embedding, index) => data.push({ object: 'embedding', index, embedding }))
-    } else for (let i = 0; i < inputs.length; i++) {
-      const embedding = await embeddings.generateEmbedding(inputs[i]!)
-      data.push({ object: 'embedding', index: i, embedding })
+      vectors.push(...(await embedCoalesced(inputs)))
+    } else {
+      // One forward pass per batch: padding to the longest input stays bounded.
+      for (let i = 0; i < inputs.length; i += 32) {
+        vectors.push(
+          ...(await embeddings.embed(inputs.slice(i, i + 32), { model: DEFAULT_EMBEDDER.model }))
+        )
+      }
     }
     return {
       object: 'list',
-      data,
-      model: 'all-MiniLM-L6-v2',
+      data: vectors.map((embedding, index) => ({ object: 'embedding', index, embedding })),
+      model: DEFAULT_EMBEDDER.model.replace(/^Xenova\//, ''),
       usage: { prompt_tokens: 0, total_tokens: 0 }
     }
   }
@@ -1861,6 +1951,16 @@ async function handleModelsList(
       (whisperModel() ? path.basename(whisperModel() as string) : null)
   const transcription = sttId ? [tag(sttId, 'transcription')] : []
 
+  const video = videoGenerationStatus({ localOnly: true })
+  const videos =
+    video.available && video.active
+      ? [
+          tag(video.active, 'video', {
+            video_api: 'offgrid-video-v1',
+            architecture: { input_modalities: ['text'], output_modalities: ['video'] }
+          })
+        ]
+      : []
   const { desktopCatalog, listInstalled, getCatalog, getActiveModel } = await import('./models-manager')
   const installed = await listInstalled()
   const catalog = (await getCatalog()).models as { id: string; name: string; kind: string; remoteServerId?: string }[]
@@ -1896,6 +1996,7 @@ async function handleModelsList(
     ...text,
     ...specialists.filter((model) => !text.some((entry) => entry.id === model.id)),
     ...images,
+    ...videos,
     ...speech,
     ...transcription
   ]
@@ -1907,7 +2008,9 @@ async function handleModelsList(
     requested?.length && !requested.includes('all')
       ? data.filter((entry) =>
           requested.includes(
-            entry.kind === 'speech' || entry.kind === 'image' ? entry.kind : 'text'
+            entry.kind === 'video' || entry.kind === 'speech' || entry.kind === 'image'
+              ? entry.kind
+              : 'text'
           )
         )
       : data
@@ -2406,7 +2509,7 @@ function isLocalCaller(req: http.IncomingMessage): boolean {
   return remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
 }
 
-/** Routes a website must never reach: tool and file access over /mcp, settings writes, and model
+/** Routes a website must never reach: tool and file access over /mcp, search, settings writes, and model
  *  management writes (download, cancel, activate, delete, task roles). The OpenAI-compatible
  *  inference routes stay open to any origin, as in 0.0.54, so tools that call the gateway from a
  *  browser or an Electron app keep working. A preflight is judged by the method it asks for. */
@@ -2422,6 +2525,8 @@ export function protectedGatewayRoute(
   ).toUpperCase()
   const pathname = new URL(url ?? '/', 'http://localhost').pathname
   if (pathname === '/mcp' || pathname.startsWith('/mcp/')) return true
+  // Search reads everything this computer has seen; only the paired apps may ask.
+  if (pathname === '/v1/search') return true
   if (pathname === '/v1/settings') return effective !== 'GET'
   if (pathname === '/v1/models' || pathname.startsWith('/v1/models/')) return effective !== 'GET'
   return false
@@ -2429,12 +2534,17 @@ export function protectedGatewayRoute(
 
 /** Start the unified local model gateway. Bound to loopback (local-only). Async because it scans
  *  for a free port when the preferred one is taken. */
-export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
+export async function startModelServer(
+  // OFFGRID_GATEWAY_PORT gives a dev or e2e instance its own gateway port; an installed app keeps 7878.
+  port = preferredPort(GATEWAY_PORT, process.env.OFFGRID_GATEWAY_PORT, isPackagedHost())
+): Promise<void> {
   if (server || startingGateway) return
   startingGateway = true
   try {
+    // Free on every interface and on loopback: a port another app holds on 127.0.0.1 only would
+    // let local clients reach that app instead of this gateway.
     const availablePort = await pickFreePort(port, (candidate) =>
-      isPortFree(candidate, GATEWAY_BIND_HOST)
+      isPortFreeOnAll(candidate, [GATEWAY_BIND_HOST, GATEWAY_HOST])
     )
     if (availablePort === null) throw new Error(`No free gateway port on ${GATEWAY_BIND_HOST}.`)
     boundGatewayPort = availablePort
@@ -2507,7 +2617,10 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         json(
           res,
           503,
-          errBody(locked ? 'API key storage is locked.' : 'API key storage is unavailable.', 'server_error')
+          errBody(
+            locked ? 'API key storage is locked.' : 'API key storage is unavailable.',
+            'server_error'
+          )
         )
         return
       }
@@ -2543,6 +2656,27 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
       )
     })
 
+    if (
+      await dispatchGatewayRoute({
+        req,
+        res,
+        url,
+        method,
+        rid,
+        query: new URLSearchParams((req.url || '').split('?')[1] ?? ''),
+        readJson: () => readJson(req),
+        readForm: async () =>
+          parseMultipart(await readBody(req, MAX_UPLOAD), req.headers['content-type'] || ''),
+        json: (status, body) => json(res, status, body)
+      })
+    )
+      return
+    const proFeature = proGatewayFeature(url)
+    if (proFeature) {
+      json(res, 402, errBody(`${proFeature} needs Off Grid AI Pro.`, 'pro_required'))
+      return
+    }
+
     // RESTful polling: GET the request resource. Canonical /v1/requests/{id}, or
     // the per-collection resource (e.g. /v1/images/{id}, /v1/audio/speech/{id}).
     if (method === 'GET') {
@@ -2565,8 +2699,11 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
         docs: `http://${GATEWAY_HOST}:${boundGatewayPort}/docs`,
         mcp: `http://${GATEWAY_HOST}:${boundGatewayPort}/mcp`,
         modalities,
+        video_api: 'offgrid-video-v1',
+        video_models: videoGenerationStatus({ localOnly: true }).models,
         image_models: img.models,
-        image_reason: img.available ? undefined : img.reason
+        image_reason: img.available ? undefined : img.reason,
+        [GATEWAY_HEALTH_COMPUTER_ID]: gatewayComputerId
       })
       return
     }
@@ -2608,7 +2745,16 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
           'GET  /v1/audio/voices',
           'POST /v1/images',
           'POST /v1/images/generations',
-          'POST /v1/images/edits'
+          'POST /v1/images/edits',
+          'POST /v1/videos',
+          'GET /v1/videos/models',
+          'GET /v1/videos/:id',
+          'GET /v1/videos/:id/content',
+          'DELETE /v1/videos/:id',
+          'POST /v1/stories',
+          'GET /v1/stories/:id',
+          'GET /v1/stories/:id/content',
+          'POST /v1/stories/:id/cancel'
         ],
         docs: `http://${GATEWAY_HOST}:${boundGatewayPort}/docs`
       })
@@ -2749,10 +2895,13 @@ export async function startModelServer(port = GATEWAY_PORT): Promise<void> {
             )
           }
           if (url === '/v1/models/pull' && method === 'POST') {
-            const { id } = await readJson(req)
+            const { id, fileName } = await readJson(req)
             if (!id) return json(res, 400, { error: 'id required' })
+            if (fileName !== undefined && (typeof fileName !== 'string' || !fileName.trim()))
+              return json(res, 400, { error: 'fileName must be a non-empty string' })
+            // The model manager resolves the selected weights and their companion files.
             // Kick off async; clients poll /v1/models/pull/status?id=.
-            void mm.downloadModel(String(id))
+            void mm.downloadModel(String(id), undefined, fileName)
             return json(res, 202, {
               status: 'started',
               id,

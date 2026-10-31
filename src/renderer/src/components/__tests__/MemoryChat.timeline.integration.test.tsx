@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { createVideoBoundary } from './harness/video-boundary'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -81,6 +82,7 @@ function chatBoundary(
     getRagConversation: async () => conversation,
     getRagMessages: async () => messages.map((message) => ({ ...message })),
     getActiveRagStreams: async () => options?.activeStreams ?? [],
+    ...createVideoBoundary(),
     onImageGenJobState: () => () => {},
     onImageGenConversationUpdated: () => () => {},
     imageGenJobStatus: async () => ({
@@ -350,7 +352,9 @@ describe('<MemoryChat/> ordered tool turn', () => {
       'true'
     )
     expect(progress).toBeTruthy()
-    expect(screen.getAllByText('Off Grid AI')).toHaveLength(1)
+    // The page header names the screen; the turn adds no assistant name label of its own.
+    expect(screen.getAllByRole('heading', { name: 'Chat', level: 1 })).toHaveLength(1)
+    expect(screen.queryByText('Off Grid AI')).toBeNull()
   })
 
   it('replaces failed model text with the new answer and keeps the model-change row after reload', async () => {

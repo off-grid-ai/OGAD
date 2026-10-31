@@ -25,7 +25,7 @@ import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { Empty, EmptyDescription, EmptyMedia } from '@offgrid/operator-ui/operator/coss/empty'
 import { cn } from '@renderer/lib/utils'
 import { modelKindLabel } from '@renderer/lib/model-kind-labels'
-import { companionDownloadLabel } from '@renderer/lib/download-label'
+import { companionDownloadLabel, modelSetupErrorMessage } from '@renderer/lib/download-label'
 import {
   modelSettingsTabForKind,
   openModelSettingsPanel,
@@ -57,6 +57,8 @@ interface StorageInfo {
   freeBytes: number
   models: ModelDiskEntry[]
   orphans: { name: string; bytes: number }[]
+  /** Videos and films, and the document/search index. Read-only here. */
+  dataUsage?: { id: string; label: string; count: number; bytes: number }[]
 }
 interface DownloadEntry {
   modelId: string
@@ -75,7 +77,7 @@ interface DownloadEntry {
 
 // Group order for the by-type storage layout. Display labels come from the shared
 // model-kind-labels source (single source of truth with the Models screen).
-const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'voice', 'transcription', 'other']
+const KIND_ORDER = ['text', 'vision', 'computer_use', 'image', 'video', 'voice', 'transcription', 'embedding', 'other']
 
 /** Disk usage for downloaded models, orphan cleanup, and a download manager
  *  (active / failed / interrupted downloads with retry + cancel). */
@@ -152,10 +154,12 @@ export function StoragePanel(): React.ReactElement {
   }
   // Activate a downloaded model straight from Storage. One call — the main process
   // routes by kind (chat LLM vs image/voice/STT default). The UI never branches.
-  const use = async (id: string): Promise<void> => {
+  const use = async (id: string, kind?: string): Promise<void> => {
     setBusy(id)
     try {
-      await api.activateModel(id)
+      // A search model change rebuilds the index, so it asks first (main shows the dialog).
+      if (kind === 'embedding') await api.chooseEmbeddingModel(id)
+      else await api.activateModel(id, undefined, 'setup')
       await refresh()
     } finally {
       setBusy(null)
@@ -374,7 +378,7 @@ export function StoragePanel(): React.ReactElement {
                 Other model folders
               </div>
               <div className="mt-1 text-[10px] text-neutral-500">
-                Add a folder to reuse compatible chat, image, voice, and transcription models. Files
+                Add a folder to reuse compatible chat, image, video, voice, and transcription models. Files
                 stay in their current folder.
               </div>
             </div>
@@ -536,8 +540,8 @@ export function StoragePanel(): React.ReactElement {
                 >
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[11px] text-neutral-300">{d.modelName}</div>
-                    <div className="truncate text-[10px] text-neutral-500">
-                      {d.error ?? d.status}
+                    <div className="text-[10px] text-neutral-500">
+                      {d.error ? modelSetupErrorMessage(d.error) : d.status}
                     </div>
                   </div>
                   <IconTip label="Retry">
@@ -632,7 +636,7 @@ export function StoragePanel(): React.ReactElement {
                               {/* Hover actions: activate (text/vision) + delete. Size shows when idle. */}
                               {activatable && (
                                 <button
-                                  onClick={() => use(m.id)}
+                                  onClick={() => use(m.id, m.kind)}
                                   disabled={busy === m.id}
                                   className="hidden shrink-0 rounded border border-neutral-700 px-1.5 text-[9px] leading-4 text-neutral-300 transition-all duration-150 hover:border-green-500 hover:text-emerald-500 active:scale-95 disabled:opacity-40 group-hover:block"
                                 >
@@ -678,6 +682,29 @@ export function StoragePanel(): React.ReactElement {
             </div>
           )}
         </div>
+
+        {info?.dataUsage && info.dataUsage.some((d) => d.bytes > 0 || d.count > 0) && (
+          <div className="border-t border-neutral-800/40 px-4 py-2.5">
+            <div className="mb-1.5 text-[9px] font-medium uppercase tracking-widest text-neutral-500">
+              Other data
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 xl:grid-cols-4">
+              {info.dataUsage.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex h-7 items-center gap-2 rounded border border-neutral-800/60 bg-neutral-900/30 px-2.5"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-neutral-200">
+                    {d.label}
+                  </span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-neutral-500">
+                    {d.count.toLocaleString()} · {formatStorageBytes(d.bytes)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {info && info.orphans.length > 0 && (
           <div className="flex items-center justify-between border-t border-neutral-800/60 px-4 py-2.5">

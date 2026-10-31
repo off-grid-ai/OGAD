@@ -2,6 +2,7 @@ import { useRuntimeBackends } from '../hooks/useRuntimeBackends'
 import {
   canonicalModelId,
   modelCapabilities,
+  modelDisplayName,
   modelSizeLabel,
   type ModelFile as CatalogModelFile
 } from '@offgrid/models'
@@ -26,6 +27,8 @@ import { isStagedDecisionModel, useTaskRoles } from '../lib/task-roles'
 import { resolveActiveTextModel } from '../lib/model-summary'
 import { invalidateLlmSettings } from '../lib/settings-invalidation'
 import { Field, FieldError } from '@offgrid/operator-ui/operator/coss/field'
+import { useRendererEntitlement } from '../bootstrap/useRendererEntitlement'
+import { VideoProUpsell } from './VideoProUpsell'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = (): any => (window as any).api
@@ -58,10 +61,11 @@ interface ModelEntry {
 const MODALITIES: {
   label: string
   kinds: string[]
-  mode: 'text' | 'image' | 'speech' | 'transcription'
+  mode: 'text' | 'image' | 'video' | 'speech' | 'transcription'
 }[] = [
   { label: 'Text & Vision', kinds: ['text', 'vision'], mode: 'text' },
   { label: 'Image', kinds: ['image'], mode: 'image' },
+  { label: 'Video', kinds: ['video'], mode: 'video' },
   { label: 'Voice', kinds: ['voice', 'speech'], mode: 'speech' },
   { label: 'Transcription', kinds: ['transcription'], mode: 'transcription' }
 ]
@@ -72,6 +76,7 @@ type PickerMode = (typeof MODALITIES)[number]['mode']
 const MODE_TO_MODALITY: Record<PickerMode, string> = {
   text: 'llm',
   image: 'image',
+  video: 'video',
   speech: 'tts',
   transcription: 'stt'
 }
@@ -117,6 +122,50 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
   const [selectionError, setSelectionError] = useState<string | null>(null)
   const [unload, setUnload] = useState<Record<string, UnloadStatus>>({})
   const [taskRoles, reloadTaskRoles] = useTaskRoles()
+  // Video is Pro: free users see the upsell instead of video models.
+  const { isPro } = useRendererEntitlement()
+  // Search (embedding) model: the active one and the ones on disk.
+  const [embedding, setEmbedding] = useState<{
+    active: string
+    models: { id: string; name: string }[]
+  } | null>(null)
+  const loadEmbedding = useCallback(async () => {
+    const [choices, storage] = await Promise.all([
+      api().getEmbeddingModelChoices?.(),
+      api().getStorageInfo?.()
+    ])
+    if (!choices) return
+    const onDisk: { id: string; kind?: string }[] = storage?.models ?? []
+    const names = new Map<string, string>(
+      (choices.models as { id: string; name: string }[]).map((m) => [m.id, m.name])
+    )
+    const ids = new Set(onDisk.filter((m) => m.kind === 'embedding').map((m) => m.id))
+    ids.add(choices.active)
+    setEmbedding({
+      active: choices.active,
+      models: [...ids].map((id) => ({ id, name: names.get(id) ?? modelDisplayName(id) ?? id }))
+    })
+  }, [])
+  useEffect(() => {
+    void loadEmbedding()
+    return api().onEmbeddingRebuildStatusChanged?.((status: { phase: string }) => {
+      if (['done', 'error', 'restored'].includes(status.phase)) void loadEmbedding()
+    })
+  }, [loadEmbedding])
+  const chooseEmbedding = async (id: string): Promise<void> => {
+    setBusy(id)
+    setSelectionError(null)
+    try {
+      // Main asks first: a change rebuilds the search index.
+      const result = await api().chooseEmbeddingModel?.(id)
+      if (result?.error) throw new Error(result.error)
+      await loadEmbedding()
+    } catch (error) {
+      setSelectionError(error instanceof Error ? error.message : 'Could not select the model.')
+    } finally {
+      setBusy(null)
+    }
+  }
   const load = useCallback(async () => {
     const cat = await api().getModelCatalog?.()
     const catalogModels: ModelEntry[] = cat?.models ?? []
@@ -126,10 +175,21 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     const modal = (await api().getActiveModalities?.()) ?? {}
     const nextActiveIds = new Set<string>((await api().getActiveModelIds?.()) ?? [])
     const remoteTextActive = resolveActiveTextModel(catalogModels, text, nextActiveIds).remote
+    // With no saved pick, the image and video engines still use one (the first installed): show
+    // that one, as Settings does, rather than "None selected" while it makes every picture.
+    const [imageStatus, videoStatus] = await Promise.all([
+      api()
+        .imageGenStatus?.()
+        .catch(() => null),
+      api()
+        .videoGenStatus?.()
+        .catch(() => null)
+    ])
     setActiveIds(nextActiveIds)
     setActive({
       text: remoteTextActive ? null : (text ?? modal.text ?? null),
-      image: modal.image ?? null,
+      image: modal.image ?? imageStatus?.active ?? null,
+      video: modal.video ?? videoStatus?.active ?? null,
       speech: modal.speech ?? null,
       transcription: modal.transcription ?? null,
       computer_use: modal.computer_use ?? null
@@ -157,7 +217,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
     try {
       if (mode === 'text') {
-        const result = await api().activateModel?.(m.id)
+        const result = await api().activateModel?.(m.id, undefined, 'model_picker')
         if (!result?.success) {
           throw new Error(result?.error ?? 'Model selection is unavailable. Restart the app.')
         }
@@ -170,13 +230,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       } else {
         const fname = primaryFile(m)
         if (m.remoteServerId) {
-          const result = await api().activateModel?.(m.id)
+          const result = await api().activateModel?.(m.id, undefined, 'model_picker')
           if (!result?.success) {
             throw new Error(result?.error ?? 'Model selection is unavailable. Restart the app.')
           }
           await load()
         } else {
-          await api().setActiveModalModel?.(mode, fname)
+          await api().setActiveModalModel?.(mode, fname, 'model_picker')
           setActive((a) => ({ ...a, [mode]: fname }))
         }
       }
@@ -256,6 +316,16 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
         </AnimatePresence>
         {/* Same order as the Models screen's tabs: Text, Image, Tasks, Voice, Transcription. */}
         {MODALITIES.flatMap(({ label, kinds, mode }) => {
+          if (mode === 'video' && !isPro)
+            return (
+              <ActiveModelSlot
+                key={mode}
+                ariaLabel={label}
+                label={label}
+                active={null}
+                empty={<VideoProUpsell onOpen={onClose} />}
+              />
+            )
           const list = models.filter(
             (m) => kinds.includes(m.kind) && installed.includes(m.id) && !isStagedDecisionModel(m)
           )
@@ -300,7 +370,9 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                       capabilities: modelCapabilities(current).length ? <ModelCapabilityIcons model={current} /> : null,
                       detail: current.remoteServerId
                         ? null
-                        : backendFor(mode === 'text' ? 'chat' : mode, [
+                        : mode === 'video'
+                          ? 'Local · loads for each clip'
+                          : backendFor(mode === 'text' ? 'chat' : mode, [
                             current.id,
                             primaryFile(current),
                             ...(mode === 'speech' ? ['Kokoro'] : [])
@@ -309,7 +381,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
                   : null
               }
               unload={
-                current && !current.remoteServerId
+                current && !current.remoteServerId && mode !== 'video'
                   ? { status: unload[mode], onUnload: () => void unloadModel(mode) }
                   : undefined
               }
@@ -363,18 +435,42 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
               ]
             : [slot]
         )}
-        <section aria-label="Embeddings">
-          <Section label="Embeddings">
-            <ListRow
-              title="Search and RAG"
-              meta={runtimeBackendLabel(backends.find((value) => value.id === 'embeddings'))}
-              density="compact"
-            />
-          </Section>
-        </section>
+        {embedding ? (
+          <ActiveModelSlot
+            ariaLabel="Embeddings"
+            label="Embeddings"
+            does="Search and RAG"
+            busy={busy !== null && embedding.models.some((m) => m.id === busy)}
+            active={{
+              name:
+                embedding.models.find((m) => m.id === embedding.active)?.name ?? embedding.active,
+              detail: runtimeBackendLabel(backends.find((value) => value.id === 'embeddings'))
+            }}
+            select={{
+              id: 'active-model-embedding',
+              label: 'Search model',
+              value: embedding.active,
+              disabled: busy !== null,
+              options: embedding.models.map((m) => ({ value: m.id, label: m.name })),
+              onValueChange: (id) => {
+                if (id !== embedding.active) void chooseEmbedding(id)
+              }
+            }}
+          />
+        ) : (
+          <section aria-label="Embeddings">
+            <Section label="Embeddings">
+              <ListRow
+                title="Search and RAG"
+                meta={runtimeBackendLabel(backends.find((value) => value.id === 'embeddings'))}
+                density="compact"
+              />
+            </Section>
+          </section>
+        )}
         <p className="text-xs leading-relaxed text-neutral-500">
           Your selected Text &amp; Vision model handles chat and supported vision work. Image,
-          Voice, and Transcription use their selected models.
+          Video, Voice, Transcription, and Search use their selected models.
         </p>
       </div>
     </SidePanel>

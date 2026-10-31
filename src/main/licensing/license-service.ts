@@ -5,7 +5,7 @@ export const PRO_PAY_PAGE_URL = PRO_PURCHASE_URL
 
 export type ActivateResult = PersonalMeshActivationResult
 
-export type ProTier = 'lifetime' | 'monthly' | 'annual' | 'subscription'
+type ProTier = 'lifetime' | 'monthly' | 'annual' | 'subscription'
 
 export interface ProLicenseInfo {
   isPro: boolean

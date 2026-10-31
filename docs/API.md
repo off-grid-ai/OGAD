@@ -7,7 +7,7 @@ speech-to-text, text-to-speech, and image generation/editing — is exposed thro
 - **Base URL:** `http://127.0.0.1:7878/v1`
 - **Auth:** optional Bearer API keys, managed in Gateway > API keys.
 - **Compatibility:** OpenAI API surface. Point any OpenAI SDK at the base URL and supply an issued key when authentication is enabled.
-- **Privacy:** everything runs on the bundled local models. Nothing leaves the device.
+- **Privacy:** everything runs on the bundled local models. Requests and replies never leave the device.
 
 ## API keys
 
@@ -70,6 +70,7 @@ speech are always ready (models download on first use). Image generation/edit re
 | Text → Speech (TTS)      | `/v1/audio/speech`                         | POST   | Kokoro-82M (ONNX)              |
 | List TTS voices          | `/v1/audio/voices`                         | GET    | Kokoro-82M                     |
 | Text → Image             | `/v1/images` (or `/v1/images/generations`) | POST   | stable-diffusion.cpp / Core ML |
+| Text → Video             | `/v1/videos`                              | POST   | stable-diffusion.cpp (Wan)      |
 | Image → Image            | `/v1/images` (or `/v1/images/edits`)       | POST   | stable-diffusion.cpp           |
 
 This surface follows the [OpenRouter multimodal](https://openrouter.ai/docs/guides/overview/multimodal/overview)
@@ -462,3 +463,47 @@ memory carefully (Apple Silicon shares RAM between CPU/GPU/ANE):
 The gateway (`src/main/model-server.ts`) is the only port you call (`7878`); it proxies
 or invokes the right backend per route. Models live in the app's `userData/models`
 directory; install them from the in-app Models screen.
+
+## Video generation
+
+Video speaks OpenAI's video API (`POST /v1/videos` answers with a Video object),
+so the OpenAI SDKs work with `base_url` set to this gateway. Off Grid fields
+(`negative_prompt`, `steps`, `guidance`, `seed`, `fps`, `frames`, `consent`,
+`client_job_id`) are optional extras.
+
+```bash
+curl http://127.0.0.1:7878/v1/videos \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"Wan2.2-TI2V-5B-Q5_K_M.gguf","prompt":"A red ball rolls across a wooden table","seconds":"4","size":"832x480"}'
+```
+
+`seconds` becomes the nearest valid frame count at the model's own frame rate,
+up to its longest clip. A start image goes in `input_reference`
+(`{"image_url": "data:image/png;base64,..."}`, or a multipart upload).
+
+- `GET /v1/videos/models`: installed models with OpenRouter's limit fields
+  (`supported_durations`, `supported_sizes`, `supported_aspect_ratios`,
+  `supported_frame_images`) plus `limits`, the exact grid each model renders on.
+- `GET /v1/videos/:id`: the Video object: `status`, `progress` (0-100), `error`;
+  while running also `stage`, `step_progress` and `preview`; when done, `result`.
+- `GET /v1/videos/:id/content`: download the completed MP4.
+  `?variant=thumbnail` returns the decoded frame as a PNG.
+- `DELETE /v1/videos/:id`: stop a running job (it then fails with
+  `error.code: "cancelled"`), or forget a finished one. The clip stays in the library.
+
+To recover a lost submission response, include a stable `client_job_id` and reuse
+it with the same request. The gateway returns the existing job.
+
+Requests use local generation by default. Install a complete model pack in
+Models → Video first. `/health` lists local `video_models` and the video API version.
+Local clips are silent.
+
+To use the active remote video model, set `"use_remote":true` in the request.
+Select that model in the app first. OpenRouter jobs use the provider's supported
+duration, resolution, and aspect ratio. Provider charges apply. Stopping an
+OpenRouter job stops local tracking; it does not cancel the provider job or its
+charges.
+
+A local preview reuses a frame from final decoding; it does not run another
+generation or decode. It is not available during sampling. See `/openapi.json`
+for all settings and bounds.

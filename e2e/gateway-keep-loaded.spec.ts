@@ -13,7 +13,7 @@ import { GATEWAY_PORT } from '../src/shared/ports'
 import { ggufFile } from './helpers/gguf'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid } from './helpers/launch'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import { closeAndWait, gotoScreen, mainWindow } from './helpers/windows'
 
 const SMALL = 'unsloth/Qwen3.5-0.8B-GGUF'
@@ -95,8 +95,7 @@ const launch = async (): Promise<void> => {
 
 test.describe('Gateway keep loaded', () => {
   test.beforeEach(async () => {
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-keep-loaded-'))
     stageModels()
     await launch()

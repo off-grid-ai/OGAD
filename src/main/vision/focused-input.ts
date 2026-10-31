@@ -4,7 +4,7 @@ import { accessibilityHelperPath } from '../accessibility/ax-helper'
 
 const execFileAsync = promisify(execFile)
 
-export type FocusedInputState = 'safe' | 'secure' | 'unknown'
+type FocusedInputState = 'safe' | 'secure' | 'unknown'
 
 export interface FocusedInputTarget {
   state: FocusedInputState

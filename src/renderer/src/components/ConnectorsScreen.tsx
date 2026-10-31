@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef, type ReactElement } from 'react'
 import { ConnectorPullQueryField } from './ConnectorPullQueryField'
+import { flow } from '@renderer/lib/analytics'
 import { ConnectorSecretsForm } from './ConnectorSecretsForm'
 import {
   IconLoader2,
@@ -26,7 +27,7 @@ import { QuickConnections } from './QuickConnections'
 import { QUICK_CONNECTION_IDS } from './quickConnectionCatalog'
 import { CONNECTIONS_CHANGED_EVENT } from './useQuickConnection'
 import { Segmented } from '@offgrid/operator-ui/operator/segmented'
-import { PageHeader } from '@offgrid/operator-ui/operator/experience'
+import { PageShell } from './PageShell'
 import { Button } from './ui/button'
 import { GlyphSwap, IconTip } from './IconTip'
 import { Skeleton } from '@offgrid/operator-ui/operator/coss/skeleton'
@@ -382,6 +383,11 @@ export function ConnectorsScreen(): ReactElement {
       setLoading(false)
     }
   }, [])
+  // The connector funnel opens with this screen.
+  useEffect(() => {
+    flow.start('connector_add')
+    flow.step('connector_add', 'opened')
+  }, [])
   useEffect(() => {
     void load()
     const changed = (): void => {
@@ -440,6 +446,7 @@ export function ConnectorsScreen(): ReactElement {
     setConnecting(entry.id)
     cancelledConnections.current.delete(entry.id)
     setErrorFor((p) => ({ ...p, [entry.id]: '' }))
+    flow.step('connector_add', 'connector_picked', entry.id)
     let id: number | undefined
     try {
       id = await api.mcpAdd?.({
@@ -453,6 +460,7 @@ export function ConnectorsScreen(): ReactElement {
       if (id != null) pendingConnectorIds.current.set(entry.id, id)
       if (cancelledConnections.current.has(entry.id)) {
         await removePendingConnector(id)
+        flow.finish('connector_add', 'cancelled')
         return
       }
       await persistConnectorSecrets(id, secretVals)
@@ -463,14 +471,21 @@ export function ConnectorsScreen(): ReactElement {
         res
       )
       if (outcome.connected) {
+        flow.step('connector_add', 'authorised')
+        flow.finish('connector_add', 'done')
         // Truly connected → it moves into "Connected" and out of the gallery.
         // The secrets form closes with the card, and the typed secrets go with it.
         setTokenFor(null)
       } else if (outcome.error) {
+        flow.finish('connector_add', 'failed', 'connect_failed')
         setErrorFor((p) => ({ ...p, [entry.id]: outcome.error ?? '' }))
+      } else if (cancelledConnections.current.has(entry.id)) {
+        flow.finish('connector_add', 'cancelled')
       }
     } catch (e) {
       await removePendingConnector(id)
+      if (cancelledConnections.current.has(entry.id)) flow.finish('connector_add', 'cancelled')
+      else flow.finish('connector_add', 'failed', 'connect_failed')
       if (!cancelledConnections.current.has(entry.id)) {
         setErrorFor((p) => ({
           ...p,
@@ -507,6 +522,8 @@ export function ConnectorsScreen(): ReactElement {
 
   const addCustom = async (): Promise<void> => {
     if (!name.trim()) return
+    // A connector the user typed in is always `custom`: its name never leaves.
+    flow.step('connector_add', 'connector_picked', 'custom')
     await api.mcpAdd?.({
       name: name.trim(),
       transport,
@@ -514,6 +531,7 @@ export function ConnectorsScreen(): ReactElement {
       command: transport === 'stdio' ? command.trim() : undefined,
       args: transport === 'stdio' && args.trim() ? args.trim().split(/\s+/) : undefined
     })
+    flow.finish('connector_add', 'done')
     setName('')
     setUrl('')
     setCommand('')
@@ -611,49 +629,47 @@ export function ConnectorsScreen(): ReactElement {
   }
 
   return (
-    <div className="flex h-full flex-col bg-neutral-950 font-mono">
-      <PageHeader
-        className="px-8 pt-8 pb-6"
-        title="Integrations"
-        description="Connect a tool. Actions it takes run only after you approve them."
-        actions={
-          <div className="flex items-center gap-3">
-            {detailId == null && (
-              <Segmented
-                label="Filter connectors"
-                size="sm"
-                value={tab}
-                onValueChange={setTab}
-                options={(['all', 'connected', 'disconnected'] as const).map((t) => ({
-                  id: t,
-                  label: t === 'connected' && items.length > 0 ? `${t} ${items.length}` : t,
-                  icon: (
-                    <span className="capitalize">
-                      {t}
-                      {t === 'connected' && items.length > 0 && (
-                        <span className="ml-1 text-neutral-500">{items.length}</span>
-                      )}
-                    </span>
-                  )
-                }))}
-              />
-            )}
-            <IconTip label="Custom">
-              <Button
-                variant="outline"
-                size="icon-sm"
-                aria-label="Custom"
-                aria-expanded={adding}
-                onClick={() => setAdding((v) => !v)}
-              >
-                <IconPlus className="h-4 w-4" />
-              </Button>
-            </IconTip>
-          </div>
-        }
-      />
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-10">
+    <PageShell
+      className="bg-neutral-950 font-mono"
+      title="Integrations"
+      description="Connect a tool. Actions it takes run only after you approve them."
+      actions={
+        <div className="flex items-center gap-3">
+          {detailId == null && (
+            <Segmented
+              label="Filter connectors"
+              size="sm"
+              value={tab}
+              onValueChange={setTab}
+              options={(['all', 'connected', 'disconnected'] as const).map((t) => ({
+                id: t,
+                label: t === 'connected' && items.length > 0 ? `${t} ${items.length}` : t,
+                icon: (
+                  <span className="capitalize">
+                    {t}
+                    {t === 'connected' && items.length > 0 && (
+                      <span className="ml-1 text-neutral-500">{items.length}</span>
+                    )}
+                  </span>
+                )
+              }))}
+            />
+          )}
+          <IconTip label="Custom">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              aria-label="Custom"
+              aria-expanded={adding}
+              onClick={() => setAdding((v) => !v)}
+            >
+              <IconPlus className="h-4 w-4" />
+            </Button>
+          </IconTip>
+        </div>
+      }
+    >
+      <div className="pb-2">
         {detailId == null && tab !== 'connected' && (
           <div className="mb-10">
             <QuickConnections hideConnected={tab === 'disconnected'} />
@@ -671,7 +687,7 @@ export function ConnectorsScreen(): ReactElement {
               ? (JSON.parse(detail.tools) as { name: string; description?: string }[])
               : []
             return (
-              <div className="mx-auto max-w-[1500px] space-y-5">
+              <div className="space-y-5">
                 <IconTip label="All integrations">
                   <Button
                     variant="ghost"
@@ -985,7 +1001,7 @@ export function ConnectorsScreen(): ReactElement {
             )
           }
           return (
-            <div className="mx-auto max-w-[1600px] space-y-6">
+            <div className="space-y-6">
               {/* Custom (advanced) form */}
               {adding && (
                 <div className="space-y-3 rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
@@ -1210,6 +1226,6 @@ export function ConnectorsScreen(): ReactElement {
           )
         })()}
       </div>
-    </div>
+    </PageShell>
   )
 }

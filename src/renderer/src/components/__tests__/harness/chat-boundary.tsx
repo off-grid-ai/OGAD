@@ -1,3 +1,4 @@
+import { createVideoBoundary } from './video-boundary'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, vi } from 'vitest'
@@ -22,6 +23,7 @@ export type ThinkSplitterFactory = (
   emit: (event: { text: string; kind: 'content' | 'reasoning' }) => void
 ) => ThinkSplitter
 type RagResult = RagChatResultContract & {
+  videoRequests?: Array<{ prompt: string; enhancePrompt?: boolean }>
   imageRequests?: Array<{ prompt: string; enhancePrompt?: boolean }>
   unified?: unknown[]
   toolCalls?: Array<{
@@ -96,6 +98,12 @@ function deferred<T>(): {
   return { promise, resolve, reject }
 }
 
+type VoiceProgress = {
+  progress: number | null
+  totalBytes?: number | null
+  downloadedBytes?: number
+}
+
 export class ChatBoundary {
   constructor(private readonly createSplitter?: ThinkSplitterFactory) {}
 
@@ -128,6 +136,12 @@ export class ChatBoundary {
   readonly toolQueries: { query: string; options: Record<string, unknown> }[] = []
 
   readonly speechTurns: ReturnType<typeof deferred<{ dataUrl: string }>>[] = []
+  private readonly voiceProgressListeners = new Set<(data: VoiceProgress) => void>()
+
+  /** The main process reporting a voice download (tts:voice-progress) while speech waits on it. */
+  voiceProgress(data: VoiceProgress): void {
+    for (const listener of this.voiceProgressListeners) listener(data)
+  }
   readonly settings: Record<string, unknown> = {}
   readonly activeRagStreams: ActiveChatStreamContract[] = []
 
@@ -160,7 +174,8 @@ export class ChatBoundary {
       conversationId: string,
       role: 'user' | 'assistant',
       content: string,
-      context?: unknown
+      context?: unknown,
+      placement?: { keepShownVersion?: boolean }
     ) => {
       if (role === 'user' && this.pendingUserWrite) {
         const gate = this.pendingUserWrite
@@ -169,7 +184,13 @@ export class ChatBoundary {
         this.heldUserWrites.delete(gate)
       }
       this.messages[conversationId] ??= []
-      const placed = this.thread.place(this.messages[conversationId]!, conversationId, role, context)
+      const placed = this.thread.place(
+        this.messages[conversationId]!,
+        conversationId,
+        role,
+        context,
+        placement
+      )
       const id = this.nextMessageId++
       const uuid = `message-${id}`
       this.messages[conversationId]!.push({
@@ -216,6 +237,7 @@ export class ChatBoundary {
     },
     vision: { control: this.stopComputerTask },
     onImageGenProgress: vi.fn(() => () => {}),
+    ...createVideoBoundary(),
     onImageGenJobState: vi.fn(() => () => {}),
     onImageGenConversationUpdated: vi.fn(() => () => {}),
     imageGenJobStatus: vi.fn(async () => ({
@@ -345,7 +367,10 @@ export class ChatBoundary {
       { id: 'bf_emma', label: 'Emma', language: 'en-GB' }
     ]),
     prepareTtsVoice: vi.fn(async () => ({ ready: true })),
-    onTtsVoiceProgress: vi.fn(() => () => {}),
+    onTtsVoiceProgress: (listener: (data: VoiceProgress) => void) => {
+      this.voiceProgressListeners.add(listener)
+      return () => void this.voiceProgressListeners.delete(listener)
+    },
     getSettings: vi.fn(async () => structuredClone(this.settings)),
     getLlmSettings: vi.fn(async () => ({})),
     saveSetting: vi.fn(async (key: string, value: unknown) => {

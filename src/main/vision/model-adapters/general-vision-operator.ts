@@ -149,7 +149,7 @@ export function buildCanonicalVisionOperatorRequest(
   return buildVisionOperatorRequest(input, 'general')
 }
 
-export function isBonsaiQwenVisionModel(model: { id: string; primaryFile: string }): boolean {
+function isBonsaiQwenVisionModel(model: { id: string; primaryFile: string }): boolean {
   return /(?:^|[/_-])(?:(?:ternary-)?bonsai-2-27b|qwen3[._-]?8)(?:[/_.-]|$)/i.test(
     `${model.id}/${model.primaryFile}`
   )

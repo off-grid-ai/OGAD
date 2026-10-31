@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   resolveImageParams,
+  setDimensions,
   setOverride,
-  type ImageParamOverride,
+  type ImageParamKey,
   type ImageParamStore
 } from '@renderer/lib/image-params'
+import { IMAGE_SIZE_PRESETS } from '../../../shared/image-dimensions'
+import { ImageDimensionFields } from './ImageDimensionFields'
 import { announceImageSettingsChanged } from '@renderer/lib/image-settings-events'
 import { modelDisplayName } from '@offgrid/models'
 import { useRuntimeBackends } from '@renderer/hooks/useRuntimeBackends'
@@ -42,6 +45,7 @@ export function ImageSettingsTab(): React.JSX.Element {
   const [seed, setSeed] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [enhance, setEnhance] = useState(true)
+  const [customSize, setCustomSize] = useState(false)
   const settingsChangedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // On CUDA the image and chat models stay loaded together (runtime-manager), so they share
   // GPU memory. Only a running engine's confirmed backend counts; nothing here probes the GPU.
@@ -105,26 +109,27 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   const chooseModel = (nextModel: string): void => {
     setModel(nextModel)
-    void Promise.resolve(window.api.setActiveModalModel('image', nextModel))
+    void Promise.resolve(window.api.setActiveModalModel('image', nextModel, 'image_settings'))
       .then(announceImageSettingsChanged)
       .catch(() => {})
   }
 
-  const saveOverride = (key: keyof ImageParamOverride, value: number): void => {
-    if (!model) return
-    const next = setOverride(params, model, key, value)
+  const saveParams = (next: ImageParamStore): void => {
     setParams(next)
     persist('imageParams', next)
   }
 
+  const saveOverride = (key: ImageParamKey, value: number): void => {
+    if (model) saveParams(setOverride(params, model, key, value))
+  }
+
+  const saveDimensions = (width: number, height: number): void => {
+    if (model) saveParams(setDimensions(params, model, width, height))
+  }
+
   // Save each complete value as it is typed. Closing Settings with Esc or an outside click
   // removes the field without a blur, so a blur-only save silently dropped the edit.
-  const saveTypedOverride = (
-    key: keyof ImageParamOverride,
-    raw: string,
-    min: number,
-    max: number
-  ): void => {
+  const saveTypedOverride = (key: ImageParamKey, raw: string, min: number, max: number): void => {
     const value = Number(raw)
     if (raw.trim() && Number.isFinite(value) && value >= min && value <= max)
       saveOverride(key, value)
@@ -153,7 +158,11 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   const modelName =
     models.find((item) => item.value === model)?.label ?? modelDisplayName(model) ?? ''
-  const generationSummary = `${modelName} · ${effective.size} × ${effective.size}`
+  const generationSummary = `${modelName} · ${effective.width} × ${effective.height}`
+  const presetSize =
+    effective.width === effective.height &&
+    (IMAGE_SIZE_PRESETS as readonly number[]).includes(effective.width)
+  const showCustomSize = customSize || !presetSize
   const tuningSummary = `${effective.steps} steps · guidance ${effective.cfgScale} · ${seed ? `seed ${seed}` : 'random seed'}`
   const promptsSummary = `${enhance ? 'Enhanced by the chat model' : 'Sent as written'} · ${negativePrompt.trim() ? 'negative prompt set' : 'no negative prompt'}`
 
@@ -185,16 +194,31 @@ export function ImageSettingsTab(): React.JSX.Element {
             />
           </SettingsRow>
           <SettingsRow label="Size" controlId="image-size" inline>
-            <SettingsSelect
-              id="image-size"
-              label="Image size"
-              value={String(effective.size)}
-              onValueChange={(value) => saveOverride('size', Number(value))}
-              options={[256, 512, 640, 768, 1024].map((size) => ({
-                value: String(size),
-                label: `${size} × ${size}`
-              }))}
-            />
+            <div className="flex items-center gap-2">
+              {showCustomSize && (
+                <ImageDimensionFields
+                  width={effective.width}
+                  height={effective.height}
+                  onChange={saveDimensions}
+                />
+              )}
+              <SettingsSelect
+                id="image-size"
+                label="Image size"
+                value={showCustomSize ? 'custom' : String(effective.size)}
+                onValueChange={(value) => {
+                  setCustomSize(value === 'custom')
+                  if (value !== 'custom') saveOverride('size', Number(value))
+                }}
+                options={[
+                  ...IMAGE_SIZE_PRESETS.map((size) => ({
+                    value: String(size),
+                    label: `${size} × ${size}`
+                  })),
+                  { value: 'custom', label: 'Custom' }
+                ]}
+              />
+            </div>
           </SettingsRow>
         </div>
       </SettingsSection>

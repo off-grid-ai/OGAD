@@ -14,6 +14,7 @@
 // window.api.addRagMessage — asserted through the REAL readReasoning reader (the exact path a
 // reload uses to restore the block), not an intermediate field.
 
+import { createVideoBoundary } from './harness/video-boundary'
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -41,6 +42,7 @@ function installApi(): { addRagMessage: AddRagMessageBoundary } {
     imageGenStatus: vi.fn(async () => ({ available: false, models: [], active: '' })),
     cancelImageGen: vi.fn(),
     onImageGenProgress: vi.fn(() => () => { }),
+    ...createVideoBoundary(),
     onImageGenJobState: vi.fn(() => () => { }),
     onImageGenConversationUpdated: vi.fn(() => () => { }),
     imageGenJobStatus: vi.fn(async () => ({

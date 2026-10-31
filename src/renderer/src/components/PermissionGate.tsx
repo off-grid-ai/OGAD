@@ -318,7 +318,7 @@ export function PermissionGate({ children }: PermissionGateProps): React.JSX.Ele
             description={
               isPro
                 ? 'Grant permissions and download a model to get started. Everything runs locally on your device.'
-                : 'Download a model to get started. Everything runs locally on your device — no cloud, no account.'
+                : 'Download a model to get started. Everything runs locally on your device, with no cloud and no account.'
             }
           />
 

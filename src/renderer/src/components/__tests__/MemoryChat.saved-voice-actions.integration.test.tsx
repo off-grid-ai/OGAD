@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { createVideoBoundary } from './harness/video-boundary'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -65,6 +66,7 @@ function installSavedVoiceBoundary(): void {
     isPro: false,
     imageGenStatus: async () => ({ available: false, models: [], active: '' }),
     onImageGenProgress: () => () => { },
+    ...createVideoBoundary(),
     onImageGenJobState: () => () => { },
     onImageGenConversationUpdated: () => () => { },
     imageGenJobStatus: async () => ({
@@ -97,9 +99,10 @@ function installSavedVoiceBoundary(): void {
       conversationId: string,
       role: 'user' | 'assistant',
       content: string,
-      context?: StoredMessage['context']
+      context?: StoredMessage['context'],
+      placement?: { keepShownVersion?: boolean }
     ) => {
-      const placed = thread.place(messages, conversationId, role, context)
+      const placed = thread.place(messages, conversationId, role, context, placement)
       const id = nextId++
       const uuid = `saved-voice-${id}`
       messages.push({

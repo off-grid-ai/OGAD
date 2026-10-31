@@ -17,7 +17,7 @@ const appleM5: MachineProfile = {
 const qwen9b = { weightsGb: 6.4, supportsMtp: true, modelMaxCtx: 262_144 }
 
 describe('planBestSettings', () => {
-  it('runs everything on Metal with MTP, a full-precision cache and warm engines on a 32 GB Mac', () => {
+  it('lets every engine pick its fastest backend, with MTP, a full-precision cache and warm engines on a 32 GB Mac', () => {
     const plan = planBestSettings(appleM5, qwen9b)
 
     expect(plan.chat).toEqual({
@@ -28,10 +28,10 @@ describe('planBestSettings', () => {
       ctxSize: 16_384,
       threads: 0,
       speculativeDecoding: 'mtp',
-      speculativeDraftMax: 2,
+      speculativeDraftMax: 3,
       draftModel: ''
     })
-    expect(Object.values(plan.backends)).toEqual(Array(7).fill('metal'))
+    expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
     expect(plan.residency).toEqual({
       image: 'resident',
       stt: 'resident',
@@ -40,14 +40,15 @@ describe('planBestSettings', () => {
     })
     expect(plan.screenshotSize).toBe('balanced')
     expect(plan.summary[0]).toBe(
-      'Chat and vision run on the Apple M5 GPU (Metal) with automatic GPU placement, MTP with 2 draft tokens, a full-precision (f16) cache and a 16K context.'
+      'Chat and vision run on the Apple M5 GPU (Metal) with automatic GPU placement, MTP with 3 draft tokens, a full-precision (f16) cache and a 16K context.'
     )
+    expect(plan.summary[1]).toBe('Auto picks the fastest processor that works on this computer.')
     expect(plan.summary[2]).toBe(
       'Kept ready in memory: image generation, transcription, voice, search.'
     )
   })
 
-  it('uses CUDA for the native engines and DirectML for ONNX models on a Windows NVIDIA PC', () => {
+  it('leaves an NVIDIA PC on Auto, which tries CUDA first wherever it can run', () => {
     const plan = planBestSettings(
       {
         platform: 'win32',
@@ -59,18 +60,12 @@ describe('planBestSettings', () => {
       qwen9b
     )
 
-    expect(plan.backends).toEqual({
-      llm: 'cuda',
-      image: 'cuda',
-      stt: 'cuda',
-      tts: 'directml',
-      grounding: 'cuda',
-      decision: 'cuda',
-      embeddings: 'directml'
-    })
+    expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
+    expect(plan.chat.gpuPlacement).toBe('auto')
+    expect(plan.chat.gpuLayers).toBe(99)
   })
 
-  it('keeps choices the platform does not offer on Auto for a Linux Vulkan GPU', () => {
+  it('leaves a Linux Vulkan GPU on Auto, which tries Vulkan before the CPU', () => {
     const plan = planBestSettings(
       {
         platform: 'linux',
@@ -82,8 +77,8 @@ describe('planBestSettings', () => {
       qwen9b
     )
 
-    expect(plan.backends.llm).toBe('vulkan')
-    expect(plan.backends.stt).toBe('vulkan')
+    expect(plan.backends.llm).toBe('auto')
+    expect(plan.backends.stt).toBe('auto')
     expect(plan.backends.tts).toBe('auto')
     expect(plan.backends.embeddings).toBe('auto')
     expect(plan.residency).toEqual({ stt: 'resident', tts: 'resident', embeddings: 'resident' })
@@ -105,11 +100,11 @@ describe('planBestSettings', () => {
       gpuLayers: 0,
       threads: 4,
       kvCacheType: 'q4_0',
-      // No MTP head: the n-gram cache needs no extra model.
-      speculativeDecoding: 'ngram',
+      // No MTP head: no speculation, the engine default.
+      speculativeDecoding: 'off',
       speculativeDraftMax: 0
     })
-    expect(Object.values(plan.backends)).toEqual(Array(7).fill('auto'))
+    expect(Object.values(plan.backends)).toEqual(Array(8).fill('auto'))
     expect(plan.residency).toEqual({})
     expect(plan.summary[0]).toContain('4 CPU threads')
   })
@@ -122,7 +117,7 @@ describe('planBestSettings', () => {
 
     expect(plan.chat.kvCacheType).toBe('q8_0')
     expect(plan.chat.ctxSize).toBe(16_384)
-    expect(plan.chat.speculativeDecoding).toBe('ngram')
+    expect(plan.chat.speculativeDecoding).toBe('off')
   })
 
   it('never asks for more context than the model was trained on', () => {
@@ -137,7 +132,8 @@ describe('planBestSettings', () => {
       chat: { ...plan.chat, draftModel: undefined, temperature: 0.7 },
       backends: plan.backends,
       residency: { ...plan.residency, llm: 'resident' },
-      screenshotSize: 'balanced'
+      screenshotSize: 'balanced',
+      videoMemory: plan.videoMemory
     }
 
     expect(matchesBestSettings(plan, current)).toBe(true)
@@ -149,6 +145,7 @@ describe('planBestSettings', () => {
     ).toBe(false)
     expect(matchesBestSettings(plan, { ...current, residency: {} })).toBe(false)
     expect(matchesBestSettings(plan, { ...current, screenshotSize: 'large' })).toBe(false)
+    expect(matchesBestSettings(plan, { ...current, videoMemory: undefined })).toBe(false)
   })
 })
 
@@ -167,17 +164,17 @@ describe('planBestSettings speculation and placement', () => {
     expect(planBestSettings(cudaPc(32), moe).chat).toMatchObject({
       gpuPlacement: 'auto',
       speculativeDecoding: 'mtp',
-      speculativeDraftMax: 2
+      speculativeDraftMax: 3
     })
     // On a 12 GB card the experts spill to the CPU: the MTP head would cost VRAM and slow decoding,
-    // so the n-gram cache, which costs no VRAM, takes its place.
+    // so speculation is off.
     expect(planBestSettings(cudaPc(12), moe).chat).toMatchObject({
       gpuPlacement: 'auto',
-      speculativeDecoding: 'ngram',
+      speculativeDecoding: 'off',
       speculativeDraftMax: 0
     })
     // VRAM the engine did not report never counts as fitting.
-    expect(planBestSettings(cudaPc(null), moe).chat.speculativeDecoding).toBe('ngram')
+    expect(planBestSettings(cudaPc(null), moe).chat.speculativeDecoding).toBe('off')
   })
 
   it('keeps MTP on a CPU-only machine, where no VRAM is shared with the head', () => {
@@ -192,17 +189,17 @@ describe('planBestSettings speculation and placement', () => {
       gpuLayers: 0,
       threads: 6,
       speculativeDecoding: 'mtp',
-      speculativeDraftMax: 2
+      speculativeDraftMax: 3
     })
   })
 
-  it('uses the n-gram cache for a model without an MTP head', () => {
+  it('turns speculation off for a model without an MTP head', () => {
     const plan = planBestSettings(cudaPc(32), { ...moe, supportsMtp: false })
-    expect(plan.chat.speculativeDecoding).toBe('ngram')
-    expect(plan.summary[0]).toContain('n-gram speculation')
+    expect(plan.chat.speculativeDecoding).toBe('off')
+    expect(plan.summary[0]).toContain('no speculative decoding')
   })
 
-  it('keeps the person\'s DFlash or draft-model choice', () => {
+  it("keeps the person's DFlash or draft-model choice", () => {
     const plan = planBestSettings(appleM5, {
       ...qwen9b,
       ownSpeculation: { mode: 'dflash', draftModel: 'Qwen3.5-9B-DFlash.gguf', draftMax: 6 }

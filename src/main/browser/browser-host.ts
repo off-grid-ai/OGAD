@@ -15,6 +15,11 @@
  * on a real display in the e2e tour and the real-machine pass, not here.
  */
 import { BrowserWindow, WebContentsView, ipcMain } from 'electron'
+import { createBrowserVisionScreen } from './browser-vision-screen'
+import {
+  getActiveRemoteVisionServer,
+  getRemoteVisionServerSettings
+} from '../vision/remote-vision-server'
 import { randomUUID } from 'node:crypto'
 import {
   BrowserDriver,
@@ -763,7 +768,8 @@ class BrowserHost implements BrowserRailHost {
         : continuingJourney
           ? undefined
           : 'https://www.google.com')
-    console.log(`[web-use] runTask goal="${goal}" url="${start ?? record.chrome.url}"`)
+    // The log holds metadata only: never the task the user typed or the page it starts on.
+    console.log(`[web-use] runTask goal=${goal.length} chars`)
 
     // The browser rail's surface is the in-app watched pane (browser:*), which
     // shows the live page + step feed inline - so NO floating supervisor window
@@ -939,6 +945,13 @@ class BrowserHost implements BrowserRailHost {
         const page = this.sessions.findJourney(journeyId) ?? record
         return { view: page.resource, driver: this.driverFor(page) }
       }
+      const semanticScreen = createBrowserVisionScreen({
+        goal,
+        taskId,
+        journeyId,
+        activePage,
+        settings: getWebUseSettings()
+      })
       const recordSemanticEvidence = createBrowserSemanticEvidenceRecorder({
         goal,
         taskId,
@@ -1037,6 +1050,28 @@ class BrowserHost implements BrowserRailHost {
                 currentStep,
                 currentAction: action
               })
+            },
+            captureObservationImage: async () => {
+              // The semantic route has selected its model before entering this loop.
+              // Keep existing text-only model and extension behavior unchanged.
+              const { llm } = await import('../llm')
+              const session = currentRemoteScreenTaskSession()
+              const remote = session ? session.activeServer : getActiveRemoteVisionServer()
+              if (remote) {
+                const saved = getRemoteVisionServerSettings().servers.find(
+                  (server) =>
+                    server.id === remote.id &&
+                    server.enabled !== false &&
+                    server.endpoint === remote.endpoint
+                )
+                const supportsImages = saved?.modelCatalog?.some(
+                  (model) => model.id === remote.model && model.inputModalities?.includes('image')
+                )
+                return saved?.screenFramesAllowed && supportsImages
+                  ? semanticScreen.capture()
+                  : undefined
+              }
+              return llm.hasVision() ? semanticScreen.capture() : undefined
             },
             onObservation: recordSemanticEvidence,
             signal: owner.controller.signal

@@ -11,7 +11,7 @@ import {
   type SpeedDeviceClass,
   type SpeedSpeculativeMode
 } from '@offgrid/models'
-import { backendChoices, type BackendModality, type BackendPreference } from './backend-preferences'
+import { type BackendModality, type BackendPreference } from './backend-preferences'
 import { DEFAULT_CTX_SIZE } from './llm-defaults'
 import type { Modality } from './runtime-residency-types'
 
@@ -60,6 +60,9 @@ export interface BestSettingsPlan {
   backends: Record<BackendModality, BackendPreference>
   residency: Partial<Record<Modality, 'resident'>>
   screenshotSize: 'balanced'
+  /** Video skips CPU offload and VAE tiling when the GPU has enough free memory. Video is never
+   *  kept in memory: it loads for each clip and frees the GPU after. */
+  videoMemory: 'fit'
   /** One plain line per area, shown to the person after the settings apply. */
   summary: string[]
 }
@@ -67,6 +70,7 @@ export interface BestSettingsPlan {
 const BACKEND_ORDER: BackendModality[] = [
   'llm',
   'image',
+  'video',
   'stt',
   'tts',
   'grounding',
@@ -77,20 +81,8 @@ const MANY_RAM_GB = 32
 const ENOUGH_RAM_GB = 16
 
 /** The fastest available processor for one modality, chosen from what the platform offers. */
-export function bestBackend(
-  modality: BackendModality,
-  machine: Pick<MachineProfile, 'platform' | 'gpu'>
-): BackendPreference {
-  const offered = backendChoices(modality, machine.platform)
-  const wanted: BackendPreference[] =
-    machine.platform === 'darwin'
-      ? ['metal']
-      : machine.gpu === 'CUDA'
-        ? ['cuda', 'directml', 'vulkan']
-        : machine.gpu === 'Vulkan'
-          ? ['vulkan', 'directml']
-          : []
-  return wanted.find((choice) => offered.includes(choice)) ?? 'auto'
+function bestBackend(): BackendPreference {
+  return 'auto'
 }
 
 /** f16 when RAM holds the context at full precision (the reference path), else the
@@ -113,10 +105,7 @@ function gpuMemoryGb(machine: MachineProfile): number | null {
   return machine.gpu ? (machine.gpuMemoryGb ?? null) : null
 }
 
-export function bestChatSettings(
-  machine: MachineProfile,
-  model: ChatModelProfile
-): BestChatSettings {
+function bestChatSettings(machine: MachineProfile, model: ChatModelProfile): BestChatSettings {
   const ctxSize =
     model.modelMaxCtx && model.modelMaxCtx > 0
       ? Math.min(DEFAULT_CTX_SIZE, model.modelMaxCtx)
@@ -155,7 +144,7 @@ export function bestChatSettings(
 }
 
 /** Engines kept in memory skip their cold start. More RAM keeps more of them ready. */
-export function bestResidency(totalRamGb: number): Partial<Record<Modality, 'resident'>> {
+function bestResidency(totalRamGb: number): Partial<Record<Modality, 'resident'>> {
   if (totalRamGb >= MANY_RAM_GB) {
     return { image: 'resident', stt: 'resident', tts: 'resident', embeddings: 'resident' }
   }
@@ -196,7 +185,7 @@ function summarize(machine: MachineProfile, plan: Omit<BestSettingsPlan, 'summar
   const kept = (Object.keys(plan.residency) as Modality[]).map((m) => KEPT_LABEL[m] ?? m)
   return [
     `Chat and vision run on the ${processorName(machine)} with ${machine.gpu ? 'automatic GPU placement' : `${chat.threads} CPU threads`}, ${speculation}, ${KV_LABEL[chat.kvCacheType]} and a ${chat.ctxSize / 1024}K context.`,
-    `Images, voice, transcription and search use ${machine.platform === 'darwin' ? 'Metal and Core ML' : machine.gpu ? `the ${machine.gpu} GPU` : 'the best available processor'}.`,
+    'Auto picks the fastest processor that works on this computer.',
     kept.length
       ? `Kept ready in memory: ${kept.join(', ')}.`
       : 'Models load when needed, leaving memory free on this machine.',
@@ -209,13 +198,14 @@ export function planBestSettings(
   model: ChatModelProfile
 ): BestSettingsPlan {
   const backends = Object.fromEntries(
-    BACKEND_ORDER.map((modality) => [modality, bestBackend(modality, machine)])
+    BACKEND_ORDER.map((modality) => [modality, bestBackend()])
   ) as Record<BackendModality, BackendPreference>
   const plan = {
     chat: bestChatSettings(machine, model),
     backends,
     residency: bestResidency(machine.totalRamGb),
-    screenshotSize: 'balanced' as const
+    screenshotSize: 'balanced' as const,
+    videoMemory: 'fit' as const
   }
   return { ...plan, summary: summarize(machine, plan) }
 }
@@ -225,6 +215,7 @@ export interface CurrentSpeedSettings {
   backends: Partial<Record<BackendModality, BackendPreference>>
   residency: Partial<Record<Modality, string>>
   screenshotSize: string
+  videoMemory?: string
 }
 
 /** True when every setting the plan chooses is already in place. */
@@ -236,7 +227,10 @@ export function matchesBestSettings(
     // An unset draft model and an empty one mean the same thing.
     key === 'draftModel'
       ? (current.chat.draftModel ?? '') === plan.chat.draftModel
-      : current.chat[key] === plan.chat[key]
+      : key === 'gpuLayers'
+        ? (current.chat.gpuLayers === 99 ? null : current.chat.gpuLayers) ===
+          (plan.chat.gpuLayers === 99 ? null : plan.chat.gpuLayers)
+        : current.chat[key] === plan.chat[key]
   )
   return (
     chatMatches &&
@@ -244,7 +238,8 @@ export function matchesBestSettings(
     Object.entries(plan.residency).every(
       ([modality, mode]) => current.residency[modality as Modality] === mode
     ) &&
-    current.screenshotSize === plan.screenshotSize
+    current.screenshotSize === plan.screenshotSize &&
+    current.videoMemory === plan.videoMemory
   )
 }
 

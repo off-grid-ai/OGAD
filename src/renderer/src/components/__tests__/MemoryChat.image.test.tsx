@@ -20,6 +20,7 @@
 //   (b) divergence — the composer's model dropdown didn't write through the same owner
 //       as the Active-models panel, so the two disagreed on which model ran.
 
+import { createVideoBoundary } from './harness/video-boundary'
 import { afterEach, describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { render, screen, waitFor, cleanup, fireEvent, act, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -304,6 +305,7 @@ function installApi(opts: InstallApiOptions): InstalledApi {
           finishedAt: null
         }
     ),
+    ...createVideoBoundary(),
     onImageGenJobState: vi.fn((cb: (job: ImageGenerationJobContract) => void) => {
       jobStateCb = cb
       return () => {
@@ -651,7 +653,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       'transition-[flex-grow]'
     )
     const toggle = screen.getByRole('button', { name: 'Collapse conversation list' })
-    expect(toggle.closest('header')?.firstElementChild).toBe(toggle)
+    // The toggle sits in the page header, not inside the list it collapses.
+    expect(toggle.closest('[data-slot="page-header"]')).not.toBeNull()
     expect(historyPanel?.querySelector('[aria-label="Collapse conversation list"]')).toBeNull()
     expect(screen.queryByTitle('Show conversations')).toBeNull()
   })
@@ -1149,7 +1152,7 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
 
     // Divergence fix: the dropdown MUST write through the same owner as the
     // Active-models panel, or the two silently disagree on which model runs.
-    await waitFor(() => expect(setActiveModalModel).toHaveBeenCalledWith('image', FEW_STEP))
+    await waitFor(() => expect(setActiveModalModel).toHaveBeenCalledWith('image', FEW_STEP, 'chat'))
 
     await sendPrompt(user, 'a mountain lake')
     await waitFor(() => expect(generateImage).toHaveBeenCalledTimes(1))
@@ -1179,6 +1182,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
     await waitFor(async () => expect((await api.getSettings()).imgSeed).toBe('777'))
   })
 
+  // A long journey (two mounts, every setting typed in): about 4.5 s alone, so it gets the 30 s
+  // CI allows under the coverage gate rather than 15 s, which a loaded parallel run can exceed.
   it('applies every existing image setting at the native boundary and reloads persisted values (#64)', async () => {
     const boundary = installApi({ active: FULL, models: [FULL, FEW_STEP] })
     const firstUser = userEvent.setup()
@@ -1192,11 +1197,11 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       modelDisplayName('sdxl-lightning') ?? 'sdxl-lightning'
     )
     await waitFor(() =>
-      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FEW_STEP)
+      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FEW_STEP, 'chat')
     )
     await chooseOption(firstUser, modelSelect, modelDisplayName(FULL) ?? FULL)
     await waitFor(() =>
-      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FULL)
+      expect(boundary.setActiveModalModel).toHaveBeenLastCalledWith('image', FULL, 'chat')
     )
 
     const sizes = screen.getByRole('radiogroup', { name: 'Size' })
@@ -1264,6 +1269,38 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       cfgScale: 5.5,
       seed: 4242
     })
+  }, 30_000)
+
+  it('generates at a custom width × height and keeps it for the next visit', async () => {
+    const boundary = installApi({ active: FULL, models: [FULL] })
+    const user = userEvent.setup()
+    const first = renderChat()
+    await openImageComposer(user)
+
+    const sizes = screen.getByRole('radiogroup', { name: 'Size' })
+    await user.click(within(sizes).getByRole('radio', { name: 'Custom' }))
+    const width = screen.getByLabelText('Image width')
+    await user.clear(width)
+    await user.type(width, '1200{Enter}')
+    const height = screen.getByLabelText('Image height')
+    await user.clear(height)
+    await user.type(height, '832{Enter}')
+    expect((width as HTMLInputElement).value).toBe('1216')
+    await sendPrompt(user, 'a wide desert road at dusk')
+
+    await waitFor(() => expect(boundary.generateImage).toHaveBeenCalledTimes(1))
+    expect(boundary.generateImage.mock.calls[0]![0]).toMatchObject({ width: 1216, height: 832 })
+
+    first.unmount()
+    const nextUser = userEvent.setup()
+    renderChat()
+    await openImageComposer(nextUser)
+    expect(
+      within(screen.getByRole('radiogroup', { name: 'Size' }))
+        .getByRole('radio', { name: 'Custom' })
+        .getAttribute('aria-checked')
+    ).toBe('true')
+    expect((screen.getByLabelText('Image height') as HTMLInputElement).value).toBe('832')
   })
 })
 

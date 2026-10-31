@@ -7,7 +7,7 @@
  */
 import type { ActionRecord, ExecuteResult } from '@offgrid/use'
 
-export interface ConnectorCallResult {
+interface ConnectorCallResult {
   ok: boolean
   result?: unknown
   error?: string

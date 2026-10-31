@@ -9,11 +9,9 @@ import {
 import { IMAGE_MEMORY_GUARD_ERROR_CODE, imageMemoryGuardErrorMessage } from '../shared/image-generation-contract'
 import { getActiveRemoteVisionServerForModality } from './vision/remote-vision-server'
 
-type RemoteServer = NonNullable<ReturnType<typeof getActiveRemoteVisionServerForModality>>
+export type RemoteServer = NonNullable<ReturnType<typeof getActiveRemoteVisionServerForModality>>
 
-let cachedRemoteVoices:
-  | { key: string; expiresAt: number; voices: RuntimeSpeechVoice[] }
-  | undefined
+let cachedRemoteVoices: { key: string; expiresAt: number; voices: RuntimeSpeechVoice[] } | undefined
 
 /** Speakers of the selected remote speech model. An Off Grid gateway lists them at
  * `/audio/voices`; OpenRouter and other OpenAI-compatible servers put them on the model's
@@ -93,7 +91,7 @@ function remoteSpeechVoice(model: string, id: string): RuntimeSpeechVoice {
   }
 }
 
-function headers(server: RemoteServer, contentType?: string): Record<string, string> {
+export function headers(server: RemoteServer, contentType?: string): Record<string, string> {
   return {
     ...(server.apiKey ? { Authorization: `Bearer ${server.apiKey}` } : {}),
     ...(contentType ? { 'Content-Type': contentType } : {})
@@ -105,20 +103,32 @@ async function providerFailure(response: Response): Promise<never> {
   let message = body.trim()
   let code = ''
   try {
-    const parsed = JSON.parse(body) as { error?: { message?: string; code?: string } | string; message?: string; code?: string }
-    message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.message ?? ''
-    code = parsed.error && typeof parsed.error === 'object'
-      ? parsed.error.code ?? parsed.code ?? ''
-      : parsed.code ?? ''
-  } catch { /* A plain-text server error is still useful. */ }
+    const parsed = JSON.parse(body) as {
+      error?: { message?: string; code?: string } | string
+      message?: string
+      code?: string
+    }
+    message =
+      typeof parsed.error === 'string'
+        ? parsed.error
+        : (parsed.error?.message ?? parsed.message ?? '')
+    code =
+      parsed.error && typeof parsed.error === 'object'
+        ? (parsed.error.code ?? parsed.code ?? '')
+        : (parsed.code ?? '')
+  } catch {
+    /* A plain-text server error is still useful. */
+  }
   message = (message || `Server returned HTTP ${response.status}.`).slice(0, 500)
   if (code === IMAGE_MEMORY_GUARD_ERROR_CODE || message.includes(IMAGE_MEMORY_GUARD_ERROR_CODE)) {
-    throw new Error(imageMemoryGuardErrorMessage(message.replace(`${IMAGE_MEMORY_GUARD_ERROR_CODE}:`, '').trim()))
+    throw new Error(
+      imageMemoryGuardErrorMessage(message.replace(`${IMAGE_MEMORY_GUARD_ERROR_CODE}:`, '').trim())
+    )
   }
   throw new Error(message)
 }
 
-async function checked(response: Response): Promise<Response> {
+export async function checked(response: Response): Promise<Response> {
   if (!response.ok) await providerFailure(response)
   return response
 }
@@ -194,19 +204,27 @@ export async function generateRemoteImage(
   return { bytes, mime }
 }
 
-export async function synthesizeRemoteVoice(server: RemoteServer, text: string, voice?: string): Promise<{ dataUrl: string }> {
-  const response = await checked(await fetch(`${server.endpoint}/audio/speech`, {
-    method: 'POST',
-    headers: headers(server, 'application/json'),
-    body: JSON.stringify({
-      model: server.selectedModel,
-      input: text,
-      ...(voice ? { voice } : {}),
-      ...(server.provider === 'openrouter' ? { response_format: 'mp3' } : {})
+export async function synthesizeRemoteVoice(
+  server: RemoteServer,
+  text: string,
+  voice?: string
+): Promise<{ dataUrl: string }> {
+  const response = await checked(
+    await fetch(`${server.endpoint}/audio/speech`, {
+      method: 'POST',
+      headers: headers(server, 'application/json'),
+      body: JSON.stringify({
+        model: server.selectedModel,
+        input: text,
+        ...(voice ? { voice } : {}),
+        ...(server.provider === 'openrouter' ? { response_format: 'mp3' } : {})
+      })
     })
-  }))
+  )
   const mime = response.headers.get('content-type')?.split(';')[0] || 'audio/mpeg'
-  return { dataUrl: `data:${mime};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}` }
+  return {
+    dataUrl: `data:${mime};base64,${Buffer.from(await response.arrayBuffer()).toString('base64')}`
+  }
 }
 
 export async function transcribeRemoteAudio(
@@ -219,14 +237,21 @@ export async function transcribeRemoteAudio(
   form.append('model', server.selectedModel)
   if (language && language !== 'auto') form.append('language', language)
   const bytes = await fs.promises.readFile(audioPath)
-  form.append('file', new Blob([bytes], { type: 'application/octet-stream' }), path.basename(audioPath))
-  const response = await checked(await fetch(`${server.endpoint}/audio/transcriptions`, {
-    method: 'POST',
-    headers: headers(server),
-    body: form,
-    signal
-  }))
-  const result = await response.json() as { text?: string; language?: string }
-  if (typeof result.text !== 'string' || !result.text.trim()) throw new Error('The remote server returned no transcript.')
+  form.append(
+    'file',
+    new Blob([bytes], { type: 'application/octet-stream' }),
+    path.basename(audioPath)
+  )
+  const response = await checked(
+    await fetch(`${server.endpoint}/audio/transcriptions`, {
+      method: 'POST',
+      headers: headers(server),
+      body: form,
+      signal
+    })
+  )
+  const result = (await response.json()) as { text?: string; language?: string }
+  if (typeof result.text !== 'string' || !result.text.trim())
+    throw new Error('The remote server returned no transcript.')
   return { text: result.text.trim(), language: result.language }
 }

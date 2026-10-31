@@ -309,7 +309,13 @@ describe('team mode', () => {
 describe('team mode with a resident whisper-server installed', () => {
   beforeAll(() => {
     // whisper-server: loads its model once at start (logged as a spawn), then serves /inference.
-    const file = path.join(binDir, 'whisper-server', 'whisper-server')
+    // It lives where each platform's package puts it (b6904476d): its own folder on macOS, beside
+    // whisper-cli elsewhere.
+    const file = path.join(
+      binDir,
+      process.platform === 'darwin' ? 'whisper-server' : 'whisper',
+      'whisper-server'
+    )
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(
       file,

@@ -732,6 +732,27 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     expect(audios[0]!.pause).toHaveBeenCalledOnce()
   })
 
+  it('says a voice is downloading, with its size, before speaking a reply', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-b' })
+
+    await screen.findByText('Conversation B baseline')
+    await openActionsFor('Conversation B baseline')
+    await user.click(screen.getByRole('menuitem', { name: 'Speak' }))
+    await waitFor(() => expect(boundary.speechTurns).toHaveLength(1))
+    // The voice is not on this computer yet: the main process fetches it before the first word.
+    act(() => boundary.voiceProgress({ progress: 40, totalBytes: 92_361_116 }))
+
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Getting a voice ready · 92 MB · 40%'
+    )
+
+    boundary.speechTurns[0]!.resolve({ dataUrl: 'data:audio/wav;base64,UklGRg==' })
+    await waitFor(() => expect(screen.queryByText(/Getting a voice ready/)).toBeNull())
+  })
+
   it('shows an actionable error when assistant speech cannot be generated (#105)', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
@@ -1381,6 +1402,26 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     ])
   })
 
+  it('keeps what already streamed when the engine fails mid-answer, with the error under it', async () => {
+    const boundary = new ChatBoundary()
+    installBoundary(boundary)
+    const user = userEvent.setup()
+    renderChat({ conversationId: 'conversation-a' })
+
+    await send('write the long answer', user)
+    await waitFor(() => expect(boundary.calls).toHaveLength(1))
+    boundary.emit(0, 'The first half of the answer arrived.')
+    expect(await screen.findByText(/The first half of the answer arrived\./)).toBeTruthy()
+    // The engine goes away (the app closing, a crash) before the answer ends.
+    boundary.reject(0, new Error('connect ECONNREFUSED 127.0.0.1:8439'))
+
+    expect(await screen.findByText(/connect ECONNREFUSED/)).toBeTruthy()
+    expect(screen.getByText(/The first half of the answer arrived\./)).toBeTruthy()
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /stop generating/i })).toBeNull()
+    )
+  })
+
   it('shows the remote provider failure instead of hiding it behind a generic error', async () => {
     const boundary = new ChatBoundary()
     installBoundary(boundary)
@@ -1915,9 +1956,10 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     await send('Follow up', user)
     await waitFor(() => expect(boundary.calls).toHaveLength(2))
     expect(vi.mocked(boundary.api.toolChat).mock.calls[1]![1]).toEqual(
+      // Earlier turns carry their day (a dated header and createdAt); the pair is what matters.
       expect.arrayContaining([
-        { role: 'user', content: 'Original question' },
-        { role: 'assistant', content: 'Original answer' }
+        expect.objectContaining({ role: 'user', content: expect.stringContaining('Original question') }),
+        expect.objectContaining({ role: 'assistant', content: 'Original answer' })
       ])
     )
     boundary.resolve(1, 'Follow up answer')
@@ -1964,8 +2006,8 @@ describe('<MemoryChat/> - chat lifecycle integration (#36-#42, #47-#48)', () => 
     const history = vi.mocked(boundary.api.toolChat).mock.calls[2]![1]
     expect(history).toEqual(
       expect.arrayContaining([
-        { role: 'user', content: 'Edited question' },
-        { role: 'assistant', content: 'Edited first answer' }
+        expect.objectContaining({ role: 'user', content: expect.stringContaining('Edited question') }),
+        expect.objectContaining({ role: 'assistant', content: 'Edited first answer' })
       ])
     )
     expect(JSON.stringify(history)).not.toContain('Old branch answer')

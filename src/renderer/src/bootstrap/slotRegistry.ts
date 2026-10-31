@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import { useSyncExternalStore, type ComponentType } from 'react'
 
 // Component-slot seam. Pro registers UI components into named slots inside core
 // screens during activation; core renders whatever is registered and renders its
@@ -7,10 +7,17 @@ import type { ComponentType } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const slots: Record<string, ComponentType<any>> = {}
+const listeners = new Set<() => void>()
+let revision = 0
+const notify = (): void => {
+  revision += 1
+  listeners.forEach((listener) => listener())
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerSlot(name: string, component: ComponentType<any>): void {
   slots[name] = component
+  notify()
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,6 +27,22 @@ export function getSlot(name: string): ComponentType<any> | undefined {
 
 export function clearRegisteredSlots(): void {
   for (const name of Object.keys(slots)) delete slots[name]
+  notify()
+}
+
+/**
+ * Changes whenever a slot is filled or cleared. Pro's renderer loads after the first screen, so a
+ * component that read `getSlot` once (a memoised chat row) kept the empty slot until it remounted;
+ * keyed by this, it remounts and reads the slot Pro filled.
+ */
+export function useSlotRevision(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => revision
+  )
 }
 
 /** Known slot names, centralised so core and pro stay in sync. */
@@ -46,6 +69,18 @@ export const SLOTS = {
    *  app root, OUTSIDE the route switch: the whole point is to survive navigation, so anything
    *  route-scoped unmounts it exactly when it is needed. */
   taskFloatingView: 'tasks.floatingView',
+  /** A video rendering in chat. Receives `{ job }` (VideoGenerationJobContract). Pro. */
+  chatVideoProgress: 'chat.videoProgress',
+  /** Under a finished clip in chat: Continue, New shot, Make it a story. Receives
+   *  `{ conversationId, messageId, videoPath }`. Pro. */
+  chatVideoActions: 'chat.videoActions',
+  /** A generated clip in chat, drawn by Pro in place of the plain player (poster, open, actions).
+   *  Receives `{ messageId, videoPath }`. Pro. */
+  chatVideoCard: 'chat.videoCard',
+  /** A film started from chat: its progress, shot strip and player. Receives `{ storyId }`. Pro. */
+  chatFilmCard: 'chat.filmCard',
+  /** Video settings inside the shared Settings drawer. Pro. */
+  videoSettings: 'video.settings',
   /** The God screen. Receives `{ onRunPreset, chat }`. */
   godScreen: 'god.screen',
   /** Always mounted at the app root while Pro runs. Receives `{ isOpen, open }`. */

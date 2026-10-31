@@ -182,13 +182,27 @@ async function closest(
   return Math.max(-1, ...vecs.map((v) => dot(query, v)))
 }
 
+/** Example requests for tools a Pro feature adds while it is active. Core never names them. */
+const extensionExamples = new Map<string, readonly string[]>()
+export function registerToolIntentExamples(name: string, examples: readonly string[]): () => void {
+  extensionExamples.set(name, examples)
+  return () => {
+    if (extensionExamples.get(name) === examples) extensionExamples.delete(name)
+  }
+}
+
+/** A routed tool's example requests: core's own, or ones a Pro feature registered. */
+export function toolIntentExamples(name: string): readonly string[] | undefined {
+  return TOOL_INTENT_EXAMPLES[name] ?? extensionExamples.get(name)
+}
+
 /** The routed tools (by name) this request is for, with their scores. `query` is the request's
  *  embedding; `sentences` are the embeddings of its sentences: each is matched against the code
  *  examples, and each can ask for a tool on its own. Tools without examples are not judged here. */
 export async function toolIntents(
   query: number[],
   embed: Embed,
-  names: readonly string[] = Object.keys(TOOL_INTENT_EXAMPLES),
+  names: readonly string[] = [...Object.keys(TOOL_INTENT_EXAMPLES), ...extensionExamples.keys()],
   sentences: readonly number[][] = []
 ): Promise<Map<string, number>> {
   let chat = await closest(query, ANSWER_IN_CHAT, embed)
@@ -196,7 +210,7 @@ export async function toolIntents(
     chat = Math.max(chat, await closest(sentence, BUILD_IN_CHAT, embed))
   const picked = new Map<string, number>()
   for (const name of names) {
-    const examples = TOOL_INTENT_EXAMPLES[name]
+    const examples = toolIntentExamples(name)
     if (!examples) continue
     const score = await closest(query, examples, embed)
     if (score >= TOOL_INTENT_FLOOR && score > chat + TOOL_INTENT_MARGIN) picked.set(name, score)

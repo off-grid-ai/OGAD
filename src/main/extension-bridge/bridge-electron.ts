@@ -55,7 +55,8 @@ import { listTools as listDesktopTools, setToolEnabled } from '../tools'
 import { addConnector, listConnectors, removeConnector, setConnectorEnabled } from '../mcp'
 import { imageGenStatus } from '../imagegen'
 import { readTranscriptionInfo } from '../transcription/select'
-import { resolveImageParameters, setImageParameterOverride } from '@offgrid/models'
+import { resolveImageParameters } from '@offgrid/models'
+import { setImageParameter } from '../../shared/image-dimensions'
 import { createSettingsStore } from './bridge-settings-store'
 import {
   activateRemoteVisionModel,
@@ -349,7 +350,16 @@ const settingsStore = createSettingsStore({
     }
   },
   setText: async (patch: TextSettings) => {
-    await llm.setSettings(patch)
+    // A null layer count is Auto: llama.cpp places the layers itself.
+    const { gpuLayers, ...rest } = patch
+    await llm.setSettings({
+      ...rest,
+      ...(gpuLayers === null
+        ? { gpuPlacement: 'auto' as const }
+        : typeof gpuLayers === 'number'
+          ? { gpuLayers, gpuPlacement: 'manual' as const }
+          : {})
+    })
   },
   activeIds: readActiveModelIds,
   web: getWebUseSettings,
@@ -401,8 +411,8 @@ const settingsStore = createSettingsStore({
   imageParams: (model, settings) =>
     resolveImageParameters({ id: model }, settings as Parameters<typeof resolveImageParameters>[1]),
   setImageParam: (settings, model, key, value) =>
-    setImageParameterOverride(
-      settings as Parameters<typeof setImageParameterOverride>[0],
+    setImageParameter(
+      settings as Parameters<typeof setImageParameter>[0],
       model,
       key,
       value
@@ -525,10 +535,11 @@ const data: BridgeData = {
     const { setTaskRoleFromRequest } = await import('../task-role-requests')
     return setTaskRoleFromRequest(request)
   },
-  vault: async (request, browser) =>
+  vault: async (request, browser, kinds) =>
     callHookAsync(HOOKS.extensionVaultRequest, request, {
       deviceName: browser.name,
-      deviceId: browser.id
+      deviceId: browser.id,
+      ...(kinds ? { kinds } : {})
     }),
   readSettings: (section) => settingsStore.read(section),
   writeSettings: (section, patch) => settingsStore.write(section, patch)

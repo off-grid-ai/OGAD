@@ -20,15 +20,12 @@ describe('universal-search typed navigation seam', () => {
     const opened: string[] = []
     const ports: SearchNavigationPorts = {
       selectEntity: (id) => opened.push(`entity:${String(id)}`),
-      selectMemory: (id) => opened.push(`memory:${String(id)}`),
       openMeeting: (id) => opened.push(`meeting:${String(id)}`),
       openChat: (target) => opened.push(JSON.stringify(target)),
       openReplay: (timestamp) => opened.push(`replay:${String(timestamp)}`)
     }
 
     navigateSearchHit(hit('entity', 11), ports)
-    navigateSearchHit(hit('fact', 11), ports)
-    navigateSearchHit(hit('memory', 12), ports)
     navigateSearchHit(hit('meeting', 13), ports)
     navigateSearchHit(hit('chat', 0, 'conversation-14'), ports)
     navigateSearchHit(hit('doc', 15, 'project-15'), ports)
@@ -36,8 +33,6 @@ describe('universal-search typed navigation seam', () => {
 
     expect(opened).toEqual([
       'entity:11',
-      'entity:11',
-      'memory:12',
       'meeting:13',
       JSON.stringify({ conversationId: 'conversation-14' }),
       JSON.stringify({ projectId: 'project-15' }),
@@ -49,7 +44,6 @@ describe('universal-search typed navigation seam', () => {
     const opened: string[] = []
     const ports: SearchNavigationPorts = {
       selectEntity: () => undefined,
-      selectMemory: () => undefined,
       openMeeting: (id) => opened.push(`meeting:${String(id)}`),
       openChat: (target) => opened.push(String(target)),
       openReplay: (timestamp) => opened.push(`replay:${String(timestamp)}`)

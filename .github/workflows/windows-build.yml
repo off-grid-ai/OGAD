@@ -238,6 +238,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # raises the GitHub API rate limit
         run: ./scripts/fetch-win-binaries.ps1
 
+      - name: Stage the pinned sherpa-onnx (Parakeet)
+        shell: bash
+        run: node scripts/fetch-sherpa.mjs --check
+
       - name: Build Kev server runtime (model weights excluded)
         shell: pwsh
         run: ./scripts/build-kev-runtime.ps1

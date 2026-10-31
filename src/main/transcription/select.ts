@@ -1,8 +1,9 @@
 // Transcription engine selection. Whisper (one-shot whisper-cli) is the default and
-// the terminal fallback. Two opt-in engines degrade to it when their runtime isn't
-// installed, so a missing/not-yet-staged binary never breaks dictation or file
-// transcription:
-//   - 'parakeet'         — higher-accuracy sherpa-onnx model (opt-in in dictation).
+// the terminal fallback. The opt-in engines degrade to it when their runtime or model isn't
+// installed, and Parakeet and Qwen3-ASR also hand a recording to it when they fail on it (the
+// person is told), so a missing or failing engine never breaks dictation or file transcription:
+//   - 'parakeet'         — NVIDIA Parakeet on the bundled sherpa-onnx CLI.
+//   - 'qwen3-asr'        — Qwen3-ASR on the bundled llama.cpp server.
 //   - 'whisper-resident' — the resident whisper-server (model stays warm) for live
 //                          interim, so ticks don't reload the model each call.
 // Everything that turns audio into text depends on this seam, never on a concrete
@@ -10,6 +11,8 @@
 import type { TranscriptionService, TranscribeOptions } from './types'
 import { transcriptionService as whisper } from './whisper-cli'
 import { parakeetTranscription as parakeet } from './parakeet-cli'
+import { qwen3AsrTranscription as qwen3Asr } from './qwen3-asr'
+import { reportTranscriptionFallback } from './fallback-notice'
 import { whisperServer } from './whisper-server'
 import { whisperServerTranscription as whisperResident } from './whisper-server-transcription'
 import { getActiveModal } from '../active-models'
@@ -28,12 +31,41 @@ import { recordAIRequest } from '../ai-request-log'
 import { catalogEngine, modelsByEngine, type CatalogTranscriptionEngine } from './classify'
 export { catalogEngine, modelsByEngine, type CatalogTranscriptionEngine }
 
-export type TranscriptionEngine = 'whisper' | 'parakeet' | 'whisper-resident'
+export type TranscriptionEngine = 'whisper' | 'parakeet' | 'qwen3-asr' | 'whisper-resident'
 
 interface Services {
   whisper: TranscriptionService
   parakeet: TranscriptionService
+  qwen3Asr: TranscriptionService
   whisperResident: TranscriptionService
+}
+
+/** The opt-in engines that hand a recording to Whisper when they fail on it. */
+type FallbackEngine = 'parakeet' | 'qwen3-asr'
+
+/**
+ * An opt-in engine that, when it fails on a recording (not when the caller cancels), says so and
+ * lets Whisper transcribe it instead, if a Whisper model is installed. Otherwise the error stands.
+ */
+export function withWhisperFallback(
+  primary: TranscriptionService,
+  engine: FallbackEngine,
+  whisperService: TranscriptionService,
+  report: (notice: { engine: FallbackEngine; reason: string }) => void = reportTranscriptionFallback
+): TranscriptionService {
+  return {
+    isAvailable: () => primary.isAvailable(),
+    transcribe: async (input, opts) => {
+      try {
+        return await primary.transcribe(input, opts)
+      } catch (error) {
+        if (opts?.signal?.aborted || !whisperService.isAvailable()) throw error
+        console.error(`[transcription] ${engine} failed; Whisper transcribes instead`, error)
+        report({ engine, reason: error instanceof Error ? error.message : String(error) })
+        return whisperService.transcribe(input, opts)
+      }
+    }
+  }
 }
 
 /**
@@ -46,9 +78,14 @@ export function pickTranscription(
   engine: TranscriptionEngine,
   services: Services
 ): { service: TranscriptionService; engine: TranscriptionEngine; fellBack: boolean } {
-  if (engine === 'parakeet') {
-    if (services.parakeet.isAvailable())
-      return { service: services.parakeet, engine: 'parakeet', fellBack: false }
+  if (engine === 'parakeet' || engine === 'qwen3-asr') {
+    const primary = engine === 'parakeet' ? services.parakeet : services.qwen3Asr
+    if (primary.isAvailable())
+      return {
+        service: withWhisperFallback(primary, engine, services.whisper),
+        engine,
+        fellBack: false
+      }
     return { service: services.whisper, engine: 'whisper', fellBack: true }
   }
   if (engine === 'whisper-resident') {
@@ -59,7 +96,7 @@ export function pickTranscription(
   return { service: services.whisper, engine: 'whisper', fellBack: false }
 }
 
-const ALL: Services = { whisper, parakeet, whisperResident }
+const ALL: Services = { whisper, parakeet, qwen3Asr, whisperResident }
 
 /**
  * The single dispatcher every real (non-test) caller goes through to resolve an engine
@@ -265,7 +302,8 @@ export interface ActiveTranscriptionInfo {
 const ENGINE_LABEL: Record<TranscriptionEngine, string> = {
   whisper: 'Whisper',
   'whisper-resident': 'Whisper',
-  parakeet: 'Parakeet'
+  parakeet: 'Parakeet',
+  'qwen3-asr': 'Qwen3-ASR'
 }
 
 /** Pure provenance label for an ALREADY-resolved engine + active model choice. Kept pure
@@ -355,7 +393,7 @@ export function transcriptionModelOptions(
  *  pure engine-picking half of resolveTranscription's `mode` fold, exported for callers
  *  (pro dictation) that need the requested engine without touching the service singletons. */
 export function residentAwareEngine(
-  chosen: 'whisper' | 'parakeet',
+  chosen: 'whisper' | 'parakeet' | 'qwen3-asr',
   mode: ResidencyMode
 ): TranscriptionEngine {
   if (chosen === 'whisper' && mode === 'resident') return 'whisper-resident'
@@ -372,21 +410,24 @@ export function residentWhisperAvailable(): boolean {
   return whisperResident.isAvailable()
 }
 
-/** STT as a ManagedRuntime for the shared residency seam. The only resident STT
- *  holder is the whisper-server; the whisper-cli and Parakeet paths are one-shot
- *  CLIs that free their model on exit. So evict stops the server; it lazily re-spawns
- *  via ensureUp on the next resident transcription. */
+/** STT as a ManagedRuntime for the shared residency seam. The resident STT holders are the
+ *  whisper-server and the Qwen3-ASR llama-server; the whisper-cli and Parakeet paths are
+ *  one-shot CLIs that free their model on exit. So evict stops the servers; each lazily
+ *  re-spawns on its next transcription. */
 export const sttRuntime: ManagedRuntime = {
   modality: 'stt',
   // Team mode's extra whisper-server lanes hold a model copy each: counted and freed with it.
-  footprintMB: () => whisperServer.residentMB() + (extraLanes?.residentMB() ?? 0),
+  footprintMB: () =>
+    whisperServer.residentMB() + qwen3Asr.residentMB() + (extraLanes?.residentMB() ?? 0),
   evict: () => {
     extraLanes?.stop()
     whisperServer.stop()
+    qwen3Asr.stop()
   },
   release: () => {
     extraLanes?.stop()
     whisperServer.stop()
+    qwen3Asr.stop()
   }
 }
 

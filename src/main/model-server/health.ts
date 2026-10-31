@@ -7,6 +7,7 @@ export interface GatewayCapabilityFacts {
   transcription: boolean
   speech: boolean
   image: boolean
+  video?: boolean
 }
 
 export type GatewayModalities = Record<
@@ -16,7 +17,8 @@ export type GatewayModalities = Record<
   | 'transcription'
   | 'speech'
   | 'image_generation'
-  | 'image_edit',
+  | 'image_edit'
+  | 'video_generation',
   GatewayModalityStatus
 >
 
@@ -31,6 +33,7 @@ export function buildGatewayModalities(facts: GatewayCapabilityFacts): GatewayMo
     transcription: status(facts.transcription),
     speech: status(facts.speech),
     image_generation: status(facts.image),
-    image_edit: status(facts.image)
+    image_edit: status(facts.image),
+    video_generation: status(facts.video === true)
   }
 }

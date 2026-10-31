@@ -1,12 +1,6 @@
 import { modelKindLabel } from './model-kind-labels'
 
-export const INTERNAL_TAB_VIEWS = [
-  'devices',
-  'entities',
-  'meetings',
-  'models',
-  'notifications'
-] as const
+const INTERNAL_TAB_VIEWS = ['devices', 'entities', 'meetings', 'models', 'notifications'] as const
 export type InternalTabView = (typeof INTERNAL_TAB_VIEWS)[number]
 
 export interface InternalTabRoute {
@@ -41,9 +35,11 @@ const ROUTES: Record<InternalTabView, readonly InternalTabRoute[]> = {
   models: [
     { id: 'text', slug: null, label: modelKindLabel('text') },
     { id: 'image', slug: 'image', label: modelKindLabel('image') },
+    { id: 'video', slug: 'video', label: modelKindLabel('video') },
     { id: 'computer_use', slug: 'computer-use', label: modelKindLabel('computer_use') },
     { id: 'voice', slug: 'voice', label: modelKindLabel('voice') },
     { id: 'transcription', slug: 'transcription', label: modelKindLabel('transcription') },
+    { id: 'embedding', slug: 'embedding', label: modelKindLabel('embedding') },
     { id: 'storage', slug: 'storage', label: 'Storage' }
   ],
   notifications: [
@@ -78,7 +74,7 @@ export function internalTabSubroute(view: InternalTabView, id: string): string |
 }
 
 /** Reject unknown tabs and screen-owned detail segments under tabs that do not allow them. */
-export function canonicalInternalTabSubroute(
+function canonicalInternalTabSubroute(
   view: InternalTabView,
   subroute: string | null
 ): string | null {

@@ -19,7 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { targetIsPackaged } from './helpers/launch'
 import { completeOnboarding } from './helpers/onboarding'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import { closeAndWait } from './helpers/windows'
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
@@ -105,8 +105,7 @@ test.describe('Suggested to-dos', () => {
 
   test.beforeEach(async () => {
     test.skip(!PRO_PRESENT, 'pro package not present: to-dos are a Pro surface')
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-suggested-todos-'))
     controlPath = path.join(userDataDir, 'native-control.json')
     installModel()

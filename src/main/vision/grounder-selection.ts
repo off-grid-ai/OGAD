@@ -5,7 +5,7 @@
 import { getActiveModal } from '../active-models'
 import { getComputerUseSettings } from '../computer-use-settings'
 
-export const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
+const DEFAULT_GROUNDER_MODEL_ID = 'mradermacher/UI-TARS-1.5-7B-GGUF'
 
 export function selectedGrounderModelId(): string {
   return (

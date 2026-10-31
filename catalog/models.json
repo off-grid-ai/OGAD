@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-23",
+  "updatedAt": "2026-10-27",
   "sections": {
     "models": [
       {
@@ -195,6 +195,820 @@
             "sizeBytes": 899283680,
             "sha256": "8971ee4f331ff0a4c609374f32984b3d4e6dc086c0aa35f1d637fad1829e887f",
             "role": "mmproj"
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/Qwen-Image-2.1-Turbo-GGUF",
+        "nonCommercial": true,
+        "quantLabel": "Full quality",
+        "sourceModelId": "Qwen/Qwen-Image-2.1-Turbo",
+        "name": "Qwen-Image 2.1 Turbo",
+        "kind": "image",
+        "tags": [
+          "2026",
+          "Fast",
+          "Image editing"
+        ],
+        "org": "Off Grid AI",
+        "description": "The few-step Qwen-Image 2.1: 8 steps instead of 40, with the same text rendering and editing. Converted to GGUF by Off Grid; the Qwen3-VL encoder, vision projector, and VAE are included in the download.",
+        "minRamGb": 32,
+        "quant": "Q8_0",
+        "releaseDate": "2026-10-15",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "qwen_image_2.1-turbo-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-Turbo-GGUF/resolve/406376296fb600561c27d90571ebeb31657cbf0a/turbo-q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 7591548960,
+            "sha256": "8d8b22c81d8e51d97886c8963504866032e13b5deac3e7e5968a824558cb6c2e"
+          },
+          {
+            "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-Turbo-GGUF/resolve/406376296fb600561c27d90571ebeb31657cbf0a/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "role": "aux",
+            "sizeBytes": 5027784800,
+            "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2"
+          },
+          {
+            "name": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "role": "mmproj",
+            "sizeBytes": 1159029824,
+            "sha256": "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"
+          },
+          {
+            "name": "qwen_image_2.1_vae_bf16.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-Turbo-GGUF/resolve/406376296fb600561c27d90571ebeb31657cbf0a/qwen_image_2.1_vae_bf16.safetensors",
+            "role": "aux",
+            "sizeBytes": 675509688,
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/Qwen-Image-2.1-Turbo-GGUF-Q4",
+        "nonCommercial": true,
+        "quantOf": "offgrid-ai/Qwen-Image-2.1-Turbo-GGUF",
+        "quantLabel": "Light",
+        "sourceModelId": "Qwen/Qwen-Image-2.1-Turbo",
+        "name": "Qwen-Image 2.1 Turbo (Light)",
+        "kind": "image",
+        "tags": [
+          "2026",
+          "Light",
+          "Fast",
+          "Image editing"
+        ],
+        "org": "Off Grid AI",
+        "description": "The few-step Qwen-Image 2.1: 8 steps instead of 40, with the same text rendering and editing. Converted to GGUF by Off Grid; the Qwen3-VL encoder, vision projector, and VAE are included in the download.",
+        "minRamGb": 24,
+        "quant": "Q4_K",
+        "releaseDate": "2026-10-15",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "qwen_image_2.1-turbo-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-Turbo-GGUF/resolve/406376296fb600561c27d90571ebeb31657cbf0a/turbo-q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 4050907168,
+            "sha256": "537c16461fc5185559121d5010d0dd6cf9feeb5ceda5830a97d63301357903fb"
+          },
+          {
+            "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-Turbo-GGUF/resolve/406376296fb600561c27d90571ebeb31657cbf0a/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "role": "aux",
+            "sizeBytes": 5027784800,
+            "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2"
+          },
+          {
+            "name": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "role": "mmproj",
+            "sizeBytes": 1159029824,
+            "sha256": "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"
+          },
+          {
+            "name": "qwen_image_2.1_vae_bf16.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-Turbo-GGUF/resolve/406376296fb600561c27d90571ebeb31657cbf0a/qwen_image_2.1_vae_bf16.safetensors",
+            "role": "aux",
+            "sizeBytes": 675509688,
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/Qwen-Image-2.1-GGUF",
+        "nonCommercial": true,
+        "quantLabel": "Full quality",
+        "sourceModelId": "Qwen/Qwen-Image-2.1",
+        "name": "Qwen-Image 2.1 (Off Grid)",
+        "kind": "image",
+        "tags": [
+          "2026",
+          "Top quality",
+          "Image editing"
+        ],
+        "org": "Off Grid AI",
+        "description": "Full-quality Qwen-Image 2.1 generation and editing with strong text rendering. Converted to GGUF by Off Grid; the Qwen3-VL encoder, vision projector, and VAE are included in the download.",
+        "minRamGb": 32,
+        "quant": "Q8_0",
+        "releaseDate": "2026-10-15",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "qwen_image_2.1-base-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-GGUF/resolve/c194a4dc3b92bab9dd342b282cf4c53218d901af/base-q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 7591548960,
+            "sha256": "4d65f4f32e4e41d39e230fe97dbfa655a81393c78ffbfa7adddccc735096e1f8"
+          },
+          {
+            "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-GGUF/resolve/c194a4dc3b92bab9dd342b282cf4c53218d901af/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "role": "aux",
+            "sizeBytes": 5027784800,
+            "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2"
+          },
+          {
+            "name": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "role": "mmproj",
+            "sizeBytes": 1159029824,
+            "sha256": "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"
+          },
+          {
+            "name": "qwen_image_2.1_vae_bf16.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-GGUF/resolve/c194a4dc3b92bab9dd342b282cf4c53218d901af/qwen_image_2.1_vae_bf16.safetensors",
+            "role": "aux",
+            "sizeBytes": 675509688,
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/Qwen-Image-2.1-GGUF-Q4",
+        "nonCommercial": true,
+        "quantOf": "offgrid-ai/Qwen-Image-2.1-GGUF",
+        "quantLabel": "Light",
+        "sourceModelId": "Qwen/Qwen-Image-2.1",
+        "name": "Qwen-Image 2.1 (Light)",
+        "kind": "image",
+        "tags": [
+          "2026",
+          "Light",
+          "Top quality",
+          "Image editing"
+        ],
+        "org": "Off Grid AI",
+        "description": "Full-quality Qwen-Image 2.1 generation and editing with strong text rendering. Converted to GGUF by Off Grid; the Qwen3-VL encoder, vision projector, and VAE are included in the download.",
+        "minRamGb": 24,
+        "quant": "Q4_K",
+        "releaseDate": "2026-10-15",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "qwen_image_2.1-base-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-GGUF/resolve/c194a4dc3b92bab9dd342b282cf4c53218d901af/base-q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 4050907168,
+            "sha256": "4b42021571f5c4535c95948f3da9714aeee3d40ceae3e7e0bca91babfa354c0b"
+          },
+          {
+            "name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-GGUF/resolve/c194a4dc3b92bab9dd342b282cf4c53218d901af/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            "role": "aux",
+            "sizeBytes": 5027784800,
+            "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2"
+          },
+          {
+            "name": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+            "role": "mmproj",
+            "sizeBytes": 1159029824,
+            "sha256": "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"
+          },
+          {
+            "name": "qwen_image_2.1_vae_bf16.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Qwen-Image-2.1-GGUF/resolve/c194a4dc3b92bab9dd342b282cf4c53218d901af/qwen_image_2.1_vae_bf16.safetensors",
+            "role": "aux",
+            "sizeBytes": 675509688,
+            "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/realvisxl-v5.0-GGUF",
+        "quantLabel": "Full quality",
+        "name": "RealVisXL v5.0 (photoreal)",
+        "kind": "image",
+        "tags": [
+          "High quality",
+          "Photoreal"
+        ],
+        "org": "RealVis",
+        "description": "Top photorealism SDXL — Off Grid GGUF build of SG161222/RealVisXL_V5.0.",
+        "minRamGb": 8,
+        "quant": "Q8_0",
+        "releaseDate": "2024-08-05",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "realvisxl-v5.0-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/realvisxl-v5.0-GGUF/resolve/main/realvisxl-v5.0-Q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 4180188864
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/realvisxl-v5.0-GGUF-Q4",
+        "quantOf": "offgrid-ai/realvisxl-v5.0-GGUF",
+        "quantLabel": "Light",
+        "name": "RealVisXL v5.0 (Light)",
+        "kind": "image",
+        "tags": [
+          "Photoreal",
+          "Light"
+        ],
+        "org": "RealVis",
+        "description": "Top photorealism SDXL. Q4 quant: ~35% less memory, small quality trade-off. Runs on a 16GB Mac. Off Grid GGUF build of SG161222/RealVisXL_V5.0.",
+        "minRamGb": 8,
+        "quant": "Q4_K",
+        "releaseDate": "2024-08-05",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "realvisxl-v5.0-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/realvisxl-v5.0-GGUF/resolve/main/realvisxl-v5.0-Q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 2797755008
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/realvisxl-v5.0-lightning-GGUF",
+        "quantLabel": "Full quality",
+        "name": "RealVisXL v5.0 Lightning (photoreal)",
+        "kind": "image",
+        "tags": [
+          "Photoreal"
+        ],
+        "org": "RealVis",
+        "description": "Photoreal SDXL, few-step (fast) — Off Grid GGUF build of SG161222/RealVisXL_V5.0_Lightning.",
+        "minRamGb": 8,
+        "quant": "Q8_0",
+        "releaseDate": "2024-09-02",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "realvisxl-v5.0-lightning-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/realvisxl-v5.0-lightning-GGUF/resolve/main/realvisxl-v5.0-lightning-Q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 4180188864
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/realvisxl-v5.0-lightning-GGUF-Q4",
+        "quantOf": "offgrid-ai/realvisxl-v5.0-lightning-GGUF",
+        "quantLabel": "Light",
+        "name": "RealVisXL v5.0 Lightning (Light)",
+        "kind": "image",
+        "tags": [
+          "Fast",
+          "Photoreal",
+          "Light"
+        ],
+        "org": "RealVis",
+        "description": "Photoreal SDXL, few-step (fast). Q4 quant: ~35% less memory, small quality trade-off. Runs on a 16GB Mac. Off Grid GGUF build of SG161222/RealVisXL_V5.0_Lightning.",
+        "minRamGb": 8,
+        "quant": "Q4_K",
+        "releaseDate": "2024-09-02",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "realvisxl-v5.0-lightning-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/realvisxl-v5.0-lightning-GGUF/resolve/main/realvisxl-v5.0-lightning-Q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 2797755008
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/dreamshaper-xl-v2-turbo-GGUF",
+        "quantLabel": "Full quality",
+        "name": "DreamShaper XL v2 Turbo (versatile)",
+        "kind": "image",
+        "tags": [
+          "Versatile"
+        ],
+        "org": "Lykon",
+        "description": "The all-rounder — photoreal, art, fantasy, 3D. Off Grid GGUF build of Lykon/dreamshaper-xl-v2-turbo. Full Q8 quant (best quality); best on 24GB+ RAM.",
+        "minRamGb": 8,
+        "quant": "Q8_0",
+        "releaseDate": "2024-02-07",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "dreamshaper-xl-v2-turbo-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/dreamshaper-xl-v2-turbo-GGUF/resolve/main/dreamshaper-xl-v2-turbo-Q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 4180813664
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/dreamshaper-xl-v2-turbo-GGUF-Q4",
+        "quantOf": "offgrid-ai/dreamshaper-xl-v2-turbo-GGUF",
+        "quantLabel": "Light",
+        "name": "DreamShaper XL v2 Turbo (Light)",
+        "kind": "image",
+        "tags": [
+          "Versatile",
+          "Fast",
+          "Light"
+        ],
+        "org": "Lykon",
+        "description": "The all-rounder — photoreal, art, fantasy, 3D. Q4 quant: ~35% less memory than the full model, small quality trade-off. Runs on a 16GB Mac. Off Grid GGUF build of Lykon/dreamshaper-xl-v2-turbo.",
+        "minRamGb": 8,
+        "quant": "Q4_K",
+        "releaseDate": "2024-02-07",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "dreamshaper-xl-v2-turbo-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/dreamshaper-xl-v2-turbo-GGUF/resolve/main/dreamshaper-xl-v2-turbo-Q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 2798084896
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/juggernaut-xl-v9-GGUF",
+        "quantLabel": "Full quality",
+        "name": "Juggernaut XL v9 (photoreal)",
+        "kind": "image",
+        "tags": [
+          "High quality",
+          "Photoreal"
+        ],
+        "org": "RunDiffusion",
+        "description": "Versatile photoreal SDXL — cinematic, portraits, landscapes. Off Grid GGUF build of RunDiffusion/Juggernaut-XL-v9.",
+        "minRamGb": 8,
+        "quant": "Q8_0",
+        "releaseDate": "2024-02-18",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "juggernaut-xl-v9-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/juggernaut-xl-v9-GGUF/resolve/main/juggernaut-xl-v9-Q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 4347454816
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/juggernaut-xl-v9-GGUF-Q4",
+        "quantOf": "offgrid-ai/juggernaut-xl-v9-GGUF",
+        "quantLabel": "Light",
+        "name": "Juggernaut XL v9 (Light)",
+        "kind": "image",
+        "tags": [
+          "Photoreal",
+          "Light"
+        ],
+        "org": "RunDiffusion",
+        "description": "Versatile photoreal SDXL. Q4 quant: ~35% less memory, small quality trade-off. Runs on a 16GB Mac. Off Grid GGUF build of RunDiffusion/Juggernaut-XL-v9.",
+        "minRamGb": 8,
+        "quant": "Q4_K",
+        "releaseDate": "2024-02-18",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "juggernaut-xl-v9-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/juggernaut-xl-v9-GGUF/resolve/main/juggernaut-xl-v9-Q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 2965023776
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/animagine-xl-4.0-GGUF",
+        "quantLabel": "Full quality",
+        "name": "Animagine XL 4.0 (anime)",
+        "kind": "image",
+        "tags": [
+          "High quality",
+          "Anime"
+        ],
+        "org": "Cagliostro",
+        "description": "Leading anime SDXL — strong character knowledge. Off Grid GGUF build of cagliostrolab/animagine-xl-4.0.",
+        "minRamGb": 8,
+        "quant": "Q8_0",
+        "releaseDate": "2025-01-10",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "animagine-xl-4.0-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/animagine-xl-4.0-GGUF/resolve/main/animagine-xl-4.0-Q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 4180186816
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/animagine-xl-4.0-GGUF-Q4",
+        "quantOf": "offgrid-ai/animagine-xl-4.0-GGUF",
+        "quantLabel": "Light",
+        "name": "Animagine XL 4.0 (Light)",
+        "kind": "image",
+        "tags": [
+          "Anime",
+          "Light"
+        ],
+        "org": "Cagliostro",
+        "description": "Leading anime SDXL — strong character knowledge. Q4 quant: ~35% less memory, small quality trade-off. Runs on a 16GB Mac. Off Grid GGUF build of cagliostrolab/animagine-xl-4.0.",
+        "minRamGb": 8,
+        "quant": "Q4_K",
+        "releaseDate": "2025-01-10",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "animagine-xl-4.0-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/animagine-xl-4.0-GGUF/resolve/main/animagine-xl-4.0-Q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 2797752960
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/illustrious-xl-v2.0-GGUF",
+        "quantLabel": "Full quality",
+        "name": "Illustrious XL v2.0 (anime)",
+        "kind": "image",
+        "tags": [
+          "High quality",
+          "Anime"
+        ],
+        "org": "OnomaAI",
+        "description": "Top anime / illustration SDXL base. Off Grid GGUF build of OnomaAIResearch/Illustrious-XL-v2.0.",
+        "minRamGb": 8,
+        "quant": "Q8_0",
+        "releaseDate": "2025-04-18",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "illustrious-xl-v2.0-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/illustrious-xl-v2.0-GGUF/resolve/main/illustrious-xl-v2.0-Q8_0.gguf",
+            "role": "primary",
+            "sizeBytes": 4180186816
+          }
+        ]
+      },
+      {
+        "id": "offgrid-ai/illustrious-xl-v2.0-GGUF-Q4",
+        "quantOf": "offgrid-ai/illustrious-xl-v2.0-GGUF",
+        "quantLabel": "Light",
+        "name": "Illustrious XL v2.0 (Light)",
+        "kind": "image",
+        "tags": [
+          "Anime",
+          "Light"
+        ],
+        "org": "OnomaAI",
+        "description": "Top anime / illustration SDXL base. Q4 quant: ~35% less memory, small quality trade-off. Runs on a 16GB Mac. Off Grid GGUF build of OnomaAIResearch/Illustrious-XL-v2.0.",
+        "minRamGb": 8,
+        "quant": "Q4_K",
+        "releaseDate": "2025-04-18",
+        "imageModes": [
+          "txt2img",
+          "img2img"
+        ],
+        "files": [
+          {
+            "name": "illustrious-xl-v2.0-Q4_K.gguf",
+            "url": "https://huggingface.co/off-grid-ai/illustrious-xl-v2.0-GGUF/resolve/main/illustrious-xl-v2.0-Q4_K.gguf",
+            "role": "primary",
+            "sizeBytes": 2797752960
+          }
+        ]
+      },
+      {
+        "id": "off-grid-ai/Wan2.1-T2V-1.3B-GGUF",
+        "quantLabel": "Full quality",
+        "sourceModelId": "Wan-AI/Wan2.1-T2V-1.3B",
+        "name": "Wan 2.1 (1.3B)",
+        "kind": "video",
+        "org": "Off Grid AI",
+        "description": "Create short, silent videos from a description. Converted to GGUF by Off Grid AI; the text encoder and VAE are included in the download.",
+        "minRamGb": 16,
+        "quant": "Q8_0",
+        "videoModes": [
+          "text-to-video"
+        ],
+        "tags": [
+          "Text to video",
+          "Short clips"
+        ],
+        "files": [
+          {
+            "name": "Wan2.1-T2V-1.3B-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Wan2.1-T2V-1.3B-GGUF/resolve/main/Wan2.1-T2V-1.3B-Q8_0.gguf",
+            "sizeBytes": 1519435360,
+            "sha256": "de0eb6b6b75abe801b59d7b2004ecc0ca424d4ed0eeb9eed34f0d8aaf321f888",
+            "role": "primary"
+          },
+          {
+            "name": "wan_2.1_vae.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/wan_2.1_vae.safetensors",
+            "sizeBytes": 253815318,
+            "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+            "role": "aux"
+          },
+          {
+            "name": "umt5-xxl-encoder-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/umt5-xxl-encoder-Q4_K_M.gguf",
+            "sizeBytes": 3655145312,
+            "sha256": "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40",
+            "role": "aux"
+          }
+        ]
+      },
+      {
+        "id": "off-grid-ai/Wan2.1-T2V-1.3B-GGUF-Q4",
+        "quantOf": "off-grid-ai/Wan2.1-T2V-1.3B-GGUF",
+        "quantLabel": "Light",
+        "sourceModelId": "Wan-AI/Wan2.1-T2V-1.3B",
+        "name": "Wan 2.1 (1.3B), Light",
+        "kind": "video",
+        "org": "Off Grid AI",
+        "description": "Create short, silent videos from a description. Converted to GGUF by Off Grid AI; the text encoder and VAE are included in the download.",
+        "minRamGb": 16,
+        "quant": "Q4_K",
+        "videoModes": [
+          "text-to-video"
+        ],
+        "tags": [
+          "Text to video",
+          "Short clips",
+          "Light"
+        ],
+        "files": [
+          {
+            "name": "Wan2.1-T2V-1.3B-calibrated-Q4_K_S.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Wan2.1-T2V-1.3B-GGUF/resolve/main/Wan2.1-T2V-1.3B-calibrated-Q4_K_S.gguf",
+            "sizeBytes": 816061024,
+            "sha256": "82788a4a3ce6e206edd3e8e5fe512b2a75344a3d272d80f07cd4e48b60b7aaf7",
+            "role": "primary"
+          },
+          {
+            "name": "wan_2.1_vae.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/wan_2.1_vae.safetensors",
+            "sizeBytes": 253815318,
+            "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+            "role": "aux"
+          },
+          {
+            "name": "umt5-xxl-encoder-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/umt5-xxl-encoder-Q4_K_M.gguf",
+            "sizeBytes": 3655145312,
+            "sha256": "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40",
+            "role": "aux"
+          }
+        ]
+      },
+      {
+        "id": "off-grid-ai/Wan2.2-TI2V-5B-GGUF",
+        "quantLabel": "Full quality",
+        "sourceModelId": "Wan-AI/Wan2.2-TI2V-5B",
+        "name": "Wan 2.2 (5B)",
+        "kind": "video",
+        "org": "Off Grid AI",
+        "description": "Create short, silent videos with Wan 2.2, from a description or a photo. Converted to GGUF by Off Grid AI; the text encoder and VAE are included in the download.",
+        "minRamGb": 24,
+        "quant": "Q8_0",
+        "videoModes": [
+          "text-to-video"
+        ],
+        "tags": [
+          "Text to video",
+          "Short clips"
+        ],
+        "files": [
+          {
+            "name": "Wan2.2-TI2V-5B-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Wan2.2-TI2V-5B-GGUF/resolve/main/Wan2.2-TI2V-5B-Q8_0.gguf",
+            "sizeBytes": 5344405728,
+            "sha256": "050819a3bf10a2cd63aee5791050ed95adffedac99a103a25801b9be00f50455",
+            "role": "primary"
+          },
+          {
+            "name": "wan2.2_vae.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Wan2.2-TI2V-5B-GGUF/resolve/main/wan2.2_vae.safetensors",
+            "sizeBytes": 1409400960,
+            "sha256": "e40321bd36b9709991dae2530eb4ac303dd168276980d3e9bc4b6e2b75fed156",
+            "role": "aux"
+          },
+          {
+            "name": "umt5-xxl-encoder-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/umt5-xxl-encoder-Q4_K_M.gguf",
+            "sizeBytes": 3655145312,
+            "sha256": "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40",
+            "role": "aux"
+          }
+        ]
+      },
+      {
+        "id": "off-grid-ai/Wan2.2-TI2V-5B-GGUF-Q4",
+        "quantOf": "off-grid-ai/Wan2.2-TI2V-5B-GGUF",
+        "quantLabel": "Light",
+        "sourceModelId": "Wan-AI/Wan2.2-TI2V-5B",
+        "name": "Wan 2.2 (5B), Light",
+        "kind": "video",
+        "org": "Off Grid AI",
+        "description": "Create short, silent videos with Wan 2.2, from a description or a photo. Converted to GGUF by Off Grid AI; the text encoder and VAE are included in the download.",
+        "minRamGb": 24,
+        "quant": "Q4_K",
+        "videoModes": [
+          "text-to-video"
+        ],
+        "tags": [
+          "Text to video",
+          "Short clips",
+          "Light"
+        ],
+        "files": [
+          {
+            "name": "Wan2.2-TI2V-5B-Q4_K_S.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Wan2.2-TI2V-5B-GGUF/resolve/main/Wan2.2-TI2V-5B-Q4_K_S.gguf",
+            "sizeBytes": 2861621472,
+            "sha256": "2221abe02e0f9024181aafebd92944cd999518955a0ae7706650fbc0941a14c2",
+            "role": "primary"
+          },
+          {
+            "name": "wan2.2_vae.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Wan2.2-TI2V-5B-GGUF/resolve/main/wan2.2_vae.safetensors",
+            "sizeBytes": 1409400960,
+            "sha256": "e40321bd36b9709991dae2530eb4ac303dd168276980d3e9bc4b6e2b75fed156",
+            "role": "aux"
+          },
+          {
+            "name": "umt5-xxl-encoder-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/umt5-xxl-encoder-Q4_K_M.gguf",
+            "sizeBytes": 3655145312,
+            "sha256": "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40",
+            "role": "aux"
+          }
+        ]
+      },
+      {
+        "id": "off-grid-ai/LingBot-Video-Dense-1.3B-GGUF",
+        "quantLabel": "Full quality",
+        "sourceModelId": "robbyant/lingbot-video-dense-1.3b",
+        "name": "LingBot Video (1.3B)",
+        "kind": "video",
+        "org": "Off Grid AI",
+        "description": "Create short, silent videos from a description. Converted to GGUF by Off Grid AI; the Qwen3-VL text encoder and VAE are included in the download.",
+        "minRamGb": 16,
+        "quant": "Q8_0",
+        "videoModes": [
+          "text-to-video"
+        ],
+        "tags": [
+          "Text to video",
+          "Short clips"
+        ],
+        "files": [
+          {
+            "name": "LingBot-Video-Dense-1.3B-Q8_0.gguf",
+            "url": "https://huggingface.co/off-grid-ai/LingBot-Video-Dense-1.3B-GGUF/resolve/main/LingBot-Video-Dense-1.3B-Q8_0.gguf",
+            "sizeBytes": 1451852448,
+            "sha256": "05036765fb09e68094387b87ba896be96f0cf6e04b646f44197706eb4d01794b",
+            "role": "primary"
+          },
+          {
+            "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "sizeBytes": 2497281664,
+            "sha256": "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a",
+            "role": "aux"
+          },
+          {
+            "name": "wan_2.1_vae.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/wan_2.1_vae.safetensors",
+            "sizeBytes": 253815318,
+            "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+            "role": "aux"
+          }
+        ]
+      },
+      {
+        "id": "off-grid-ai/LingBot-Video-Dense-1.3B-GGUF-Q4",
+        "quantOf": "off-grid-ai/LingBot-Video-Dense-1.3B-GGUF",
+        "quantLabel": "Light",
+        "sourceModelId": "robbyant/lingbot-video-dense-1.3b",
+        "name": "LingBot Video (1.3B), Light",
+        "kind": "video",
+        "org": "Off Grid AI",
+        "description": "Create short, silent videos from a description. Converted to GGUF by Off Grid AI; the Qwen3-VL text encoder and VAE are included in the download.",
+        "minRamGb": 16,
+        "quant": "Q4_K",
+        "videoModes": [
+          "text-to-video"
+        ],
+        "tags": [
+          "Text to video",
+          "Short clips",
+          "Light"
+        ],
+        "files": [
+          {
+            "name": "LingBot-Video-Dense-1.3B-Q4_K_S.gguf",
+            "url": "https://huggingface.co/off-grid-ai/LingBot-Video-Dense-1.3B-GGUF/resolve/main/LingBot-Video-Dense-1.3B-Q4_K_S.gguf",
+            "sizeBytes": 778380448,
+            "sha256": "6f0a19c9c3872fccc6e58fe2587c4674e9e018b231c79850729ae9ceb05cdeeb",
+            "role": "primary"
+          },
+          {
+            "name": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+            "sizeBytes": 2497281664,
+            "sha256": "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a",
+            "role": "aux"
+          },
+          {
+            "name": "wan_2.1_vae.safetensors",
+            "url": "https://huggingface.co/off-grid-ai/Video-Companions-GGUF/resolve/main/wan_2.1_vae.safetensors",
+            "sizeBytes": 253815318,
+            "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+            "role": "aux"
+          }
+        ]
+      },
+      {
+        "id": "ggerganov/whisper.cpp/large-v3-turbo-q5_0",
+        "quantOf": "ggerganov/whisper.cpp/large-v3-turbo",
+        "quantLabel": "Light",
+        "sourceModelId": "openai/whisper-large-v3-turbo",
+        "name": "Whisper Large v3 Turbo (Light)",
+        "kind": "transcription",
+        "org": "ggerganov",
+        "description": "Near-best accuracy, much faster, at about a third of the download.",
+        "minRamGb": 4,
+        "files": [
+          {
+            "name": "ggml-large-v3-turbo-q5_0.bin",
+            "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+            "role": "primary",
+            "sizeBytes": 574041195,
+            "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"
           }
         ]
       }

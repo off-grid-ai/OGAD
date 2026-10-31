@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { dataDir } from './runtime-env'
-import { createDiagnosticWriter, type DiagnosticWriterStats } from './diagnostics-writer'
+import { createDiagnosticWriter } from './diagnostics-writer'
 
 export type DiagnosticLevel = 'info' | 'warn' | 'error'
 export type DiagnosticValue = string | number | boolean | null | undefined
@@ -79,11 +79,6 @@ const writer = createDiagnosticWriter({
   }
 })
 
-/** What this log has buffered, dropped and failed to write. Observable, not hidden. */
-export function diagnosticWriterStats(): DiagnosticWriterStats {
-  return writer.stats()
-}
-
 /** Drain buffered diagnostics on a controlled shutdown. Bounded: quit is never held hostage. */
 export function flushDiagnosticLog(timeoutMs?: number): Promise<void> {
   return writer.flush(timeoutMs)
@@ -115,7 +110,7 @@ export function formatConsoleMessage(values: unknown[]): string {
 }
 
 /** Set to `1` to print every diagnostic line, including the per-request IPC trace. */
-export const VERBOSE_DIAGNOSTICS_ENV = 'OFFGRID_DIAGNOSTIC_VERBOSE'
+const VERBOSE_DIAGNOSTICS_ENV = 'OFFGRID_DIAGNOSTIC_VERBOSE'
 
 function verboseDiagnosticsEnabled(): boolean {
   return process.env[VERBOSE_DIAGNOSTICS_ENV] === '1'

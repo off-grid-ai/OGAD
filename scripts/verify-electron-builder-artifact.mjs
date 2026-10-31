@@ -20,27 +20,33 @@ export default async function verifyElectronBuilderArtifact(event) {
 
   // nsis-web stores its payload in dist/nsis-web, while the staged app stays in
   // dist/win-unpacked. The target output directory is not the app directory.
-  const packageOutDir = event.target.name === 'nsis-web'
-    ? path.dirname(event.target.outDir)
-    : event.target.outDir
+  const packageOutDir =
+    event.target.name === 'nsis-web' ? path.dirname(event.target.outDir) : event.target.outDir
   const appOutDir = event.packager.computeAppOutDir(packageOutDir, event.arch)
+  const resourcesDir = asarOnlyArtifact
+    ? path.join(appOutDir, 'resources')
+    : path.join(appOutDir, `${event.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
+  if (fs.existsSync(path.join(resourcesDir, 'bin', 'onnx-cuda'))) {
+    throw new Error('installer input includes optional GPU runtime: bin/onnx-cuda')
+  }
   if (asarOnlyArtifact) {
     assertAsarArchiveInventory(path.join(appOutDir, 'resources', 'app.asar'))
     const executable = artifact.endsWith('.exe') ? 'llama-server.exe' : 'llama-server'
     const required = [
-      ...[
-        'llama',
-        'llama-cpu',
-        'llama-prism',
-        'llama-prism-cpu'
-      ].map((variant) => path.join('bin', variant, executable))
+      ...['llama', 'llama-cpu', 'llama-prism', 'llama-prism-cpu'].map((variant) =>
+        path.join('bin', variant, executable)
+      )
     ]
     if (artifact.endsWith('.exe')) {
       required.push(
         path.join('bin', 'whisper-cpu', 'whisper-cli.exe'),
+        path.join('bin', 'whisper-vulkan', 'whisper-cli.exe'),
+        path.join('bin', 'whisper-vulkan', 'whisper-server.exe'),
         path.join('bin', 'sd', 'sd-cli.exe'),
         path.join('bin', 'sd-cpu', 'sd-cli.exe'),
         path.join('bin', 'ffmpeg.exe'),
+        // Signs the AI label into exported videos: a release without it must fail.
+        path.join('bin', 'c2patool.exe'),
         path.join('bin', 'kev-local-server.py')
       )
     }
@@ -49,8 +55,13 @@ export default async function verifyElectronBuilderArtifact(event) {
         path.join('bin', 'whisper', 'whisper-cli'),
         path.join('bin', 'whisper-cpu', 'whisper-cli'),
         path.join('bin', 'whisper', 'LICENSE'),
+        ...['llama', 'llama-prism', 'whisper'].map((folder) =>
+          path.join('bin', folder, 'libvulkan.so.1')
+        ),
         path.join('bin', 'ffmpeg'),
         path.join('bin', 'licenses', 'ffmpeg.txt'),
+        path.join('bin', 'c2patool'),
+        path.join('bin', 'licenses', 'c2patool.txt'),
         path.join('bin', 'sd', 'sd-cli'),
         path.join('bin', 'sd', 'sd-server'),
         path.join('bin', 'sd', 'libggml-vulkan.so'),
@@ -70,7 +81,11 @@ export default async function verifyElectronBuilderArtifact(event) {
       }
     }
     const optionalGpuFolders = [
-      'llama-cuda', 'llama-prism-cuda', 'cuda-runtime', 'sd-cuda', 'kev-runtime',
+      'llama-cuda',
+      'llama-prism-cuda',
+      'cuda-runtime',
+      'sd-cuda',
+      'kev-runtime',
       ...(artifact.endsWith('.exe') ? ['whisper'] : ['whisper-cuda'])
     ]
     for (const folder of optionalGpuFolders) {

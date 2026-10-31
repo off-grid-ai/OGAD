@@ -53,6 +53,7 @@ export class ActiveModalityStore {
     return {
       computer_use: all.computer_use ?? null,
       image: all.image ?? null,
+      video: all.video ?? null,
       speech: all.speech ?? null,
       transcription: all.transcription ?? null
     }
@@ -61,7 +62,7 @@ export class ActiveModalityStore {
 
 const activeModalStore = new ActiveModalityStore()
 
-export type RemoteModelModality = 'text' | 'image' | 'voice' | 'transcription'
+export type RemoteModelModality = 'text' | 'image' | 'video' | 'voice' | 'transcription'
 
 function remoteSelectionKey(modality: RemoteModelModality): `remote_${RemoteModelModality}` {
   return `remote_${modality}`
@@ -118,8 +119,4 @@ export function setRemoteModelSelected(
 
 export function remoteVoiceSelected(): boolean {
   return remoteModelSelected('voice')
-}
-
-export function setRemoteVoiceSelected(selected: boolean): void {
-  setRemoteModelSelected('voice', selected)
 }

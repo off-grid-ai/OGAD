@@ -17,7 +17,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import { pairedBrowser, type FakeExtension } from './helpers/fake-extension'
 import { closeAndWait, mainWindow } from './helpers/windows'
 
@@ -92,8 +92,7 @@ test.describe('Paired-browser chat', () => {
 
   test.beforeEach(async () => {
     test.skip(!PRO_PRESENT, 'pro package not present: browser chats are a Pro surface')
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-browser-chat-'))
     modelLog = path.join(profileDir, 'model-requests.jsonl')
     const modelsDir = path.join(profileDir, 'models')

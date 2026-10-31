@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import net from 'node:net'
 import { GATEWAY_HOST, GATEWAY_PORT, LLAMA_SERVER_PORT, MEDIA_PORT } from '../../src/shared/ports'
 
@@ -18,9 +19,9 @@ import { GATEWAY_HOST, GATEWAY_PORT, LLAMA_SERVER_PORT, MEDIA_PORT } from '../..
  * auto-falls-back to a free port when a fixed one is held, so the e2e instance may not even
  * be on the port the spec is probing.
  *
- * Rather than assert against a port we do not own, these specs SKIP with the reason. CI runs
- * on a clean machine, so it still executes them for real — which is what lets the e2e job
- * gate instead of running advisory.
+ * These specs FAIL before launching, naming the process that holds the port. They used to
+ * skip, and a skipped spec reads as green: on a box where another app held a port, a run
+ * "passed" without testing anything. A failure that names the owner is one you can act on.
  */
 
 const ENGINE_PORTS: { port: number; what: string }[] = [
@@ -56,12 +57,30 @@ export const busyEnginePorts = async (): Promise<string[]> => {
   return checks.filter((entry): entry is string => entry !== null)
 }
 
+/** The process listening on a port, as "name (pid N)", when the OS can say. */
+export const portOwner = (port: number): string => {
+  const lsof = spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc'], {
+    encoding: 'utf8'
+  })
+  const lines = (lsof.stdout ?? '').split('\n')
+  const pid = lines.find((line) => line.startsWith('p'))?.slice(1)
+  const name = lines.find((line) => line.startsWith('c'))?.slice(1)
+  return pid ? `${name ?? 'unknown'} (pid ${pid})` : 'an unknown process'
+}
+
 /**
- * Reason string to pass to test.skip() when the fixed ports are not ours, or null when they
- * are all free and the spec can run for real. Call BEFORE launching the Electron app.
+ * Throws when a fixed engine port is already owned, naming the port and its owner. Call BEFORE
+ * launching the Electron app.
  */
-export const enginePortsUnavailableReason = async (): Promise<string | null> => {
-  const busy = await busyEnginePorts()
-  if (busy.length === 0) return null
-  return `engine ports already owned by another process (${busy.join(', ')}) — quit Off Grid AI Desktop / npm run dev and re-run. These specs assert against the fixed ports and cannot share them.`
+export const assertEnginePortsFree = async (): Promise<void> => {
+  const owned = await Promise.all(
+    ENGINE_PORTS.map(async ({ port, what }) =>
+      (await portIsBusy(port)) ? `${what} :${port} is held by ${portOwner(port)}` : null
+    )
+  )
+  const busy = owned.filter((entry): entry is string => entry !== null)
+  if (busy.length === 0) return
+  throw new Error(
+    `Engine ports are already owned: ${busy.join('; ')}. Quit that process (Off Grid AI Desktop, npm run dev, another e2e lane) and re-run. These specs assert against the fixed ports and cannot share them.`
+  )
 }

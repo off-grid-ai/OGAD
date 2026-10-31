@@ -159,7 +159,7 @@ const TOOL_GROUPS = [
   },
   {
     label: 'Media',
-    matches: (name: string): boolean => name === 'generate_image'
+    matches: (name: string): boolean => name === 'generate_image' || name === 'generate_video'
   },
   {
     label: 'Utilities',
@@ -178,7 +178,7 @@ function groupTools(tools: ToolSetting[]): { label: string; tools: ToolSetting[]
 }
 
 type TranscriptionInfo = {
-  engine: 'whisper' | 'parakeet' | 'whisper-resident' | 'remote'
+  engine: 'whisper' | 'parakeet' | 'qwen3-asr' | 'whisper-resident' | 'remote'
   modelId: string | null
   label: string
   language: string
@@ -382,6 +382,7 @@ export function SettingsPanel({
   initialTab?: Tab
 }): React.JSX.Element {
   const TaskSettings = getSlot(SLOTS.taskSettings)
+  const [VideoSettings] = useState(() => getSlot(SLOTS.videoSettings))
   const [replySound, setReplySound] = useReplySound()
   const [tab, setTab] = useState<Tab>(initialTab)
   const [s, setS] = useState<LlmSettings>({})
@@ -568,7 +569,7 @@ export function SettingsPanel({
 
   const pickTranscriptionModel = (value: string): void => {
     const modelId = value === DEFAULT_TRANSCRIPTION_MODEL ? null : value
-    void Promise.resolve(window.api.setActiveModalModel('transcription', modelId))
+    void Promise.resolve(window.api.setActiveModalModel('transcription', modelId, 'settings'))
       .then(() => (window.api as Partial<typeof window.api>).getTranscriptionInfo?.())
       .then((info) => {
         if (info) setTranscriptionInfo(info)
@@ -683,6 +684,7 @@ export function SettingsPanel({
             [
               'model',
               'image',
+              ...(VideoSettings ? (['video'] as const) : []),
               'voice',
               'transcription',
               'remote',
@@ -1219,6 +1221,7 @@ export function SettingsPanel({
         )}
 
         {tab === 'image' && <ImageSettingsTab />}
+        {tab === 'video' && VideoSettings ? <VideoSettings /> : null}
 
         {tab === 'remote' && <RemoteVisionSettingsTab />}
 

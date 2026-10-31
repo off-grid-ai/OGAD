@@ -104,7 +104,7 @@ describe('GrounderRuntime', () => {
       writeEngine(true)
       configureRuntime({ binRoots: [binaries] })
       runtime = new GrounderRuntime()
-      await expect(runtime.connection(modelId)).rejects.toThrow('does not have enough free memory')
+      await expect(runtime.connection(modelId)).rejects.toThrow('Out of memory - this model is too large')
       expect(runtime.running).toBe(false)
     }
   )

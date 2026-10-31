@@ -35,6 +35,9 @@ export interface StopDependencies extends Pick<
   setImageGenConv: (cid: string | null) => void
   setImgProgress: (progress: null) => void
   setLoading: (loading: boolean) => void
+  videoGenConv?: string | null
+  videoCancelPendingRef?: { current: Set<string> }
+  cancelVideoGen?: () => Promise<unknown>
 }
 export async function stopChatRun(
   dependencies: StopDependencies,
@@ -64,7 +67,10 @@ export async function stopChatRun(
     cancelImageGen,
     setImageGenConv,
     setImgProgress,
-    setLoading
+    setLoading,
+    videoGenConv,
+    videoCancelPendingRef,
+    cancelVideoGen
   } = dependencies
   const convId = cid ?? activeConversationId
   if (!convId) return
@@ -75,6 +81,22 @@ export async function stopChatRun(
   if (!preserveQueue && queuedRef.current[convId]?.length) {
     queuedRef.current = clearQueue(queuedRef.current, convId)
     setQueuedByConv({ ...queuedRef.current })
+  }
+  // Keep the turn busy until the video job publishes its terminal state.
+  // The cancel IPC only requests an abort; clearing ownership here lets
+  // Resend truncate the chat while the old engine is still stopping.
+  if (videoGenConv === convId && videoCancelPendingRef && cancelVideoGen) {
+    if (videoCancelPendingRef.current.has(convId)) return
+    videoCancelPendingRef.current.add(convId)
+    try {
+      await cancelVideoGen()
+    } catch (error) {
+      console.error('Failed to stop video generation:', error)
+      setAttachWarn('Video could not be stopped. Try Stop again.')
+    } finally {
+      videoCancelPendingRef.current.delete(convId)
+    }
+    return
   }
   const preparationIds = preparingRunIds(streamConvRef.current, convId)
   const preparing = preparationIds.length > 0

@@ -15,6 +15,7 @@ describe('nativeLibraryEnv', () => {
 
   it('uses the Windows executable path only on Windows', () => {
     expect(nativeLibraryEnv('win32', 'C:\\app\\bin', { PATH: 'C:\\Windows' })).toEqual({
+      GGML_VK_DISABLE_BFLOAT16: '1',
       PATH: 'C:\\app\\bin;C:\\Windows'
     })
   })

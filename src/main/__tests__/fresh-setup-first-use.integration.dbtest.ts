@@ -277,10 +277,17 @@ describe('fresh setup to first use', () => {
     } finally {
       totalmem.mockRestore()
     }
-    expect(plan.items.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
+    // The plan lists the opt-in extras too; Configure for me installs only the baseline.
+    expect(plan.items.map((item) => item.kind)).toEqual(
+      expect.arrayContaining(['chat', 'transcription', 'voice', 'image', 'video'])
+    )
     expect(plan.items.every((item) => item.installed === false)).toBe(true)
+    const baselineItems = plan.items.filter((item) =>
+      ['chat', 'transcription', 'voice'].includes(item.kind)
+    )
+    expect(baselineItems.map((item) => item.kind)).toEqual(['chat', 'transcription', 'voice'])
 
-    const baselineModels: JourneyModel[] = plan.items.map((item) => {
+    const baselineModels: JourneyModel[] = baselineItems.map((item) => {
       const catalogEntry = CATALOG.find((entry) => entry.id === item.id)
       if (!catalogEntry) throw new Error(`Setup selected a model outside the catalog: ${item.id}`)
       if (!isFirstUseModelKind(catalogEntry.kind)) {
@@ -462,7 +469,8 @@ describe('fresh setup to first use', () => {
       image: expect.any(String),
       computer_use: null,
       transcription: transcriptionModel.id,
-      speech: voiceModel.id
+      speech: voiceModel.id,
+      video: null
     })
     expect(await resumedManager.getActiveModelIds()).toEqual(
       expect.arrayContaining([visionModel.id, imageModel.id, transcriptionModel.id, voiceModel.id])
@@ -501,8 +509,21 @@ describe('fresh setup to first use', () => {
     relaunchedRuntimeManager.registerRuntime(relaunchedTranscription.sttRuntime)
     relaunchedRuntimeManager.registerRuntime(relaunchedTts.ttsRuntime)
     const relaunchedPlan = await relaunchedSetup.getSetupPlan()
-    expect(relaunchedPlan.items.every((item) => item.installed)).toBe(true)
-    expect(relaunchedPlan.totalDownloadGb).toBe(0)
+    // Everything set up is installed; only the opt-in extras nobody picked remain to download.
+    const optIn = (item: { kind: string }): boolean =>
+      item.kind === 'video' ||
+      item.kind === 'embedding' ||
+      (item.kind === 'image' && relaunchedPlan.mode === 'conservative')
+    expect(
+      relaunchedPlan.items
+        .filter((item) => !optIn(item) && !item.installed)
+        .map((item) => `${item.kind}:${item.id}`)
+    ).toEqual([])
+    expect(relaunchedPlan.totalDownloadGb).toBeCloseTo(
+      relaunchedPlan.items
+        .filter((item) => optIn(item) && !item.installed)
+        .reduce((sum, item) => sum + (item.downloadSizeGb ?? item.sizeGb), 0)
+    )
     expect(await relaunchedManager.listInstalled()).toEqual(
       expect.arrayContaining(models.map((model) => model.id))
     )

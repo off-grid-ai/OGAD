@@ -94,7 +94,7 @@ const quoteBareKeys = (text: string): string =>
  * Repair candidates in trust order: the raw text first, then progressively
  * repaired variants. Deduped; each is tried against the fail-closed schema.
  */
-export function extractCandidates(raw: string): string[] {
+function extractCandidates(raw: string): string[] {
   const candidates: string[] = [raw.trim()]
   const unfenced = stripFences(raw).trim()
   candidates.push(unfenced)

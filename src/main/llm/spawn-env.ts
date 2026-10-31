@@ -55,7 +55,13 @@ export interface EngineSpawnEnvInput {
  */
 export function engineSpawnEnv(i: EngineSpawnEnvInput): Record<string, string> {
   const pathApi = i.platform === 'win32' ? path.win32 : path.posix
-  const cudaRuntimeDir = i.binDir.endsWith('-cuda')
+  const folder = pathApi.basename(i.binDir)
+  const cudaEnv: Record<string, string> =
+    (folder.endsWith('-cuda') || (i.platform === 'win32' && folder === 'whisper')) &&
+    i.currentEnv?.CUDA_CACHE_MAXSIZE === undefined
+      ? { CUDA_CACHE_MAXSIZE: '4294967296' }
+      : {}
+  const cudaRuntimeDir = folder.endsWith('-cuda')
     ? pathApi.join(pathApi.dirname(i.binDir), 'cuda-runtime')
     : null
   if (i.platform === 'linux') {
@@ -63,10 +69,12 @@ export function engineSpawnEnv(i: EngineSpawnEnvInput): Record<string, string> {
     const libraryDirs = cudaRuntimeDir ? [i.binDir, cudaRuntimeDir] : [i.binDir]
     if (inherited.LD_LIBRARY_PATH) libraryDirs.push(inherited.LD_LIBRARY_PATH)
     return {
+      ...cudaEnv,
       LD_LIBRARY_PATH: libraryDirs.join(path.posix.delimiter)
     }
   }
   const env: Record<string, string> = {
+    ...cudaEnv,
     // macOS: rpath for the co-located dylibs. Harmless elsewhere.
     DYLD_LIBRARY_PATH: i.binDir
   }

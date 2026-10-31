@@ -43,6 +43,7 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     }),
     getModelCatalog: async () => ({ kinds: ['text'], models: [] }),
     getInstalledModels: async () => [],
+    getModelScanFolders: async () => [],
     getActiveModelIds: async () => [],
     listProjects: async () => APP_PROJECTS.map((project) => ({ ...project })),
     getRagConversations: async () => [],
@@ -54,8 +55,18 @@ export function installAppBoundary(overrides: Record<string, unknown> = {}): voi
     universalSearch: async () => [],
     onNewAction: eventSubscription,
     onUpdateDownloaded: eventSubscription,
-    onReprocessProgress: eventSubscription,
     onNavigate: eventSubscription,
+    // The app menu's View > Back / Forward (main/index.ts): its CmdOrCtrl+[ and CmdOrCtrl+]
+    // accelerators send 'navigate:history'. jsdom has no menu, so the keys stand in for it.
+    onHistoryNavigate: (cb: (direction: 'back' | 'forward') => void): (() => void) => {
+      const onKey = (event: KeyboardEvent): void => {
+        if (!(event.metaKey || event.ctrlKey)) return
+        if (event.key === '[') cb('back')
+        else if (event.key === ']') cb('forward')
+      }
+      window.addEventListener('keydown', onKey)
+      return () => window.removeEventListener('keydown', onKey)
+    },
     onMeetingState: eventSubscription,
     onModelProgress: eventSubscription,
     proOn: eventSubscription,

@@ -8,8 +8,10 @@ describe('MODEL_KIND_LABELS — the shared model-kind display labels', () => {
       vision: 'Vision',
       computer_use: 'Tasks',
       image: 'Image',
+      video: 'Video',
       voice: 'Voice',
       transcription: 'Transcription',
+      embedding: 'Embedding',
       other: 'Other'
     })
   })

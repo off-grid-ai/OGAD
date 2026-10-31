@@ -31,12 +31,15 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — stable-diffusion.cpp asset', (
     expect(activeAvx2).toBe(false)
   })
 
-  it('stages CUDA, Vulkan, and CPU image runtimes with one shared CUDA runtime', () => {
+  it('stages CUDA, Vulkan, and CPU image runtimes, with the image engine’s own CUDA 12.8 runtime', () => {
     expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-cuda12-x64\\\.zip\$'/)
     expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-vulkan-x64\\\.zip\$'/)
     expect(SRC).toMatch(/leejet\/stable-diffusion\.cpp'\s+'bin-win-cpu-x64\\\.zip\$'/)
     expect(SRC).toMatch(/Copy-Runtime \$x 'sd-cuda'/)
-    expect(SRC).not.toMatch(/cudart-sd-bin-win/)
+    // stable-diffusion.cpp builds against CUDA 12.8 and llama.cpp against 12.4: sd-cuda carries
+    // its own three runtime DLLs instead of borrowing llama's.
+    expect(SRC).toMatch(/cudart-sd-bin-win-cu12-x64/)
+    expect(SRC).toMatch(/'cudart64_12\.dll', 'cublas64_12\.dll', 'cublasLt64_12\.dll'/)
   })
 
   it('still renames upstream sd.exe to the sd-cli.exe the app resolves', () => {
@@ -64,7 +67,9 @@ describe.skipIf(!SRC)('fetch-win-binaries.ps1 — Bonsai runtime', () => {
 
   it('stages the shared CUDA runtime and checks it before packaging', () => {
     expect(SRC).toMatch(/ggml-org\/llama\.cpp'\s+'\^llama-\.\+-bin-win-cuda-12\\\.4-x64\\\.zip\$'/)
-    expect(SRC).toMatch(/ggml-org\/llama\.cpp'\s+'\^cudart-llama-bin-win-cuda-12\\\.4-x64\\\.zip\$'/)
+    expect(SRC).toMatch(
+      /ggml-org\/llama\.cpp'\s+'\^cudart-llama-bin-win-cuda-12\\\.4-x64\\\.zip\$'/
+    )
     expect(SRC).toMatch(/Copy-Runtime \$x 'cuda-runtime'/)
     expect(SRC).toMatch(/cuda-runtime\\cudart64_12\.dll/)
     expect(SRC).toMatch(/cuda-runtime\\cublas64_12\.dll/)

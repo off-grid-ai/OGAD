@@ -1,7 +1,13 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import net from 'node:net'
-import { portCandidates, isPortFree, pickFreePort } from '../free-port'
+import {
+  portCandidates,
+  isPortFree,
+  isPortFreeOnAll,
+  pickFreePort,
+  preferredPort
+} from '../free-port'
 
 describe('portCandidates — gradual +1 increments', () => {
   it('starts at the preferred port and steps up by 1', () => {
@@ -65,6 +71,36 @@ describe('isPortFree — real socket probe', () => {
       expect(await isPortFree(chosen as number)).toBe(true)
     } finally {
       await new Promise<void>((r) => srv.close(() => r()))
+    }
+  })
+})
+
+describe('isPortFreeOnAll — a gateway on every interface never takes a port held on loopback', () => {
+  it('counts a port held on 127.0.0.1 as taken, though 0.0.0.0 could still bind it', async () => {
+    const loopbackOnly = net.createServer()
+    await new Promise<void>((r) => loopbackOnly.listen(0, '127.0.0.1', r))
+    const held = (loopbackOnly.address() as net.AddressInfo).port
+    try {
+      expect(await isPortFreeOnAll(held, ['0.0.0.0', '127.0.0.1'])).toBe(false)
+      const picked = await pickFreePort(held, (p) => isPortFreeOnAll(p, ['0.0.0.0', '127.0.0.1']))
+      expect(picked).not.toBe(held)
+      expect(picked).not.toBeNull()
+    } finally {
+      await new Promise<void>((r) => loopbackOnly.close(() => r()))
+    }
+  })
+})
+
+describe('preferredPort — an env override moves a dev or test build, never an installed app', () => {
+  it('uses the override in an unpackaged build', () => {
+    expect(preferredPort(7878, '17878', false)).toBe(17878)
+  })
+  it('keeps the fixed port in a packaged build, whatever the override says', () => {
+    expect(preferredPort(7878, '17878', true)).toBe(7878)
+  })
+  it('keeps the fixed port when the override is missing or not a port', () => {
+    for (const value of [undefined, '', 'abc', '0', '70000', '78.5']) {
+      expect(preferredPort(7878, value, false)).toBe(7878)
     }
   })
 })

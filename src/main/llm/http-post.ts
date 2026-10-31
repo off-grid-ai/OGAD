@@ -10,6 +10,7 @@
 // integration test drives postCompletionOnce against a real socket-closing server (behaviour).
 
 import * as http from 'http'
+import { GPU_FAULT_PATTERN } from '../llama-error'
 
 /**
  * WHY a failure happened, decided by the only layer that can see it.
@@ -20,12 +21,14 @@ import * as http from 'http'
  *   identical request can never succeed against this model.
  * - `rejected` — the server is up and refused this request (malformed body, uncompilable grammar).
  *   Also deterministic for this input.
+ * - `device_fault` — the GPU failed while answering; recover without changing the model.
  * - `aborted` — the caller cancelled. Not a failure of the request at all.
  *
  * A caller must NOT re-derive this from the message text. Capture did exactly that, called every
  * refusal `capture-model-unavailable`, and retried a permanently broken request 32 times.
  */
-export type ModelServerFailureKind = 'unavailable' | 'overflow' | 'rejected' | 'aborted'
+export type ModelServerFailureKind =
+  'unavailable' | 'overflow' | 'rejected' | 'aborted' | 'device_fault'
 
 export class ModelServerError extends Error {
   readonly kind: ModelServerFailureKind
@@ -56,7 +59,7 @@ function serverDetail(body: string): string {
  *  llama-server returns a JSON body like {"error":{"message":"request (22825 tokens) exceeds
  *  the available context size (16384 tokens) …"}}; the bare status code alone is useless both
  *  to the user and to a retry policy. */
-export function classifyServerError(
+function classifyServerError(
   statusCode: number | undefined,
   body: string
 ): { kind: ModelServerFailureKind; message: string } {
@@ -87,6 +90,9 @@ export function classifyServerError(
       message: `LLM Server Error: ${statusCode ?? '?'}${detail ? ` ${detail}` : ''}`
     }
   }
+  if (GPU_FAULT_PATTERN.test(detail)) {
+    return { kind: 'device_fault', message: 'The GPU stopped responding while answering.' }
+  }
   // A 4xx means the server understood the request and refused it. Anything else — 502, 503, 504, a
   // bare 500 — is the server failing to service it, which is the definition of an outage.
   //
@@ -96,11 +102,6 @@ export function classifyServerError(
   const refused = statusCode !== undefined && statusCode >= 400 && statusCode < 500
   const kind: ModelServerFailureKind = refused ? 'rejected' : 'unavailable'
   return { kind, message: `LLM Server Error: ${statusCode ?? '?'}${detail ? ` ${detail}` : ''}` }
-}
-
-/** Turn a non-200 model-server response into an ACTIONABLE message. */
-export function describeServerError(statusCode: number | undefined, body: string): string {
-  return classifyServerError(statusCode, body).message
 }
 
 /** The typed rejection for a non-200 response, carrying the reason with the message. */
@@ -181,6 +182,18 @@ export function postCompletionOnce(
     const req = http.request(
       modelRequestOptions(port, Buffer.byteLength(body), requestPath),
       (res) => {
+        res.on('error', (error) =>
+          finish(() =>
+            reject(
+              new ModelServerError(
+                'unavailable',
+                'The model server connection closed.',
+                undefined,
+                error
+              )
+            )
+          )
+        )
         let data = ''
         res.on('data', (chunk) => {
           data += chunk

@@ -25,15 +25,20 @@ export function AudioClip({
   transcript?: string
   autoPlay?: boolean
 }>): React.JSX.Element {
+  // Outside a chat thread (a card, a request, an attachment) the player fills its container's
+  // width; the chat bubble's narrower width is for a message in a thread.
   return (
-    <VoiceBubble
-      messageId={id ?? src}
-      isUser
-      audioUrl={src}
-      durationSeconds={durationSeconds}
-      transcript={transcript}
-      synthesize={noSynthesis}
-      autoPlay={autoPlay}
-    />
+    <div className="flex w-full flex-col rounded-2xl border border-primary/25 bg-primary/[0.06] px-4 py-3">
+      <VoiceBubble
+        messageId={id ?? src}
+        isUser
+        embedded
+        audioUrl={src}
+        durationSeconds={durationSeconds}
+        transcript={transcript}
+        synthesize={noSynthesis}
+        autoPlay={autoPlay}
+      />
+    </div>
   )
 }

@@ -36,7 +36,8 @@ async function waitFor<T>(read: () => T | null, timeoutMs = 5_000): Promise<T> {
 
 function installWhisperBoundary(root: string): { trace: string; state: string } {
   const binDir = path.join(root, 'bin')
-  const runtimeDir = path.join(binDir, 'whisper-server')
+  // Where each platform's package puts it (b6904476d): its own folder on macOS, whisper/ elsewhere.
+  const runtimeDir = path.join(binDir, process.platform === 'darwin' ? 'whisper-server' : 'whisper')
   const trace = path.join(root, 'trace.log')
   const state = path.join(root, 'state.txt')
   fs.mkdirSync(runtimeDir, { recursive: true })

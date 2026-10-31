@@ -5,7 +5,6 @@ import {
   type PresetCapability,
   type PresetRequirement
 } from './presetCatalog'
-import { deviceNoun } from '@renderer/lib/device'
 import { Badge } from '@offgrid/operator-ui/operator/coss/badge'
 import { Card } from '@offgrid/operator-ui/operator/coss/card'
 import { Section } from '@offgrid/operator-ui/operator/experience'
@@ -142,7 +141,7 @@ export function ExploreSection({
       {showIntro ? (
         <Section
           title="Explore what Off Grid AI can do"
-          description={`Pick one - add the details once, then start the run. Everything runs on your ${deviceNoun()}.`}
+          description="Pick one, add your details, then start the run."
         >
           {panels}
           {requestLink}

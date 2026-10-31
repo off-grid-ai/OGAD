@@ -59,7 +59,9 @@ describe('<ModelsScreen/> remote inventory', () => {
     expect(within(card as HTMLElement).queryByTitle('Delete from disk')).toBeNull()
 
     await user.click(within(card as HTMLElement).getByRole('button', { name: 'Use' }))
-    await waitFor(() => expect(activateModel).toHaveBeenCalledWith(REMOTE_ID))
+    await waitFor(() =>
+      expect(activateModel).toHaveBeenCalledWith(REMOTE_ID, undefined, 'models_screen')
+    )
     expect(await within(card as HTMLElement).findByText('Active')).toBeTruthy()
   })
 })

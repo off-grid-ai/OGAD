@@ -171,7 +171,7 @@ function publicServer(server: StoredRemoteVisionServer): RemoteVisionSavedServer
   return { ...server, hasApiKey: Boolean(serverApiKey(server.id)) }
 }
 
-const MODALITIES: RemoteModelModality[] = ['text', 'image', 'voice', 'transcription']
+const MODALITIES: RemoteModelModality[] = ['text', 'image', 'video', 'voice', 'transcription']
 
 /** The enabled server a modality's remote selection names, or null when it runs locally. */
 function selectedServer(
@@ -257,7 +257,9 @@ export function getActiveRemoteVisionServerForModality(
 ): (StoredRemoteVisionServer & { apiKey: string; selectedModel: string }) | null {
   const active = selectedServer(readStored(), modality)
   const selectedModel = active?.mediaModels?.[modality]
-  return active && selectedModel
+  return active &&
+    selectedModel &&
+    (modality !== 'video' || ['ogad', 'openrouter'].includes(active.provider))
     ? { ...active, apiKey: serverApiKey(active.id), selectedModel }
     : null
 }
@@ -431,6 +433,7 @@ export async function testRemoteVisionServer(
         name?: unknown
         model?: unknown
         kind?: unknown
+        video_api?: unknown
         supported_parameters?: unknown
         reasoning?: unknown
         architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -440,6 +443,7 @@ export async function testRemoteVisionServer(
         name?: unknown
         model?: unknown
         kind?: unknown
+        video_api?: unknown
         supported_parameters?: unknown
         reasoning?: unknown
         architecture?: { input_modalities?: unknown; output_modalities?: unknown }
@@ -458,6 +462,7 @@ export async function testRemoteVisionServer(
       name?: unknown
       model?: unknown
       kind?: unknown
+      video_api?: unknown
       supported_parameters?: unknown
       reasoning?: unknown
       capabilities?: unknown
@@ -472,6 +477,10 @@ export async function testRemoteVisionServer(
     // A server relaying a model from one of this app's own servers (this Mac's gateway relaying
     // its remote chat model) would list it twice, once by a longer road.
     const ownServers = new Set(readStored().servers.map((server) => server.id))
+    // An OGAD server can use a custom port or sit behind a reverse proxy.
+    const provider = update.provider === 'custom' &&
+      entries.some((entry) => entry.video_api === 'offgrid-video-v1')
+      ? 'ogad' : update.provider
     const models = entries.flatMap((entry) => {
       const id =
         typeof entry.id === 'string' ? entry.id : typeof entry.model === 'string' ? entry.model : ''
@@ -479,6 +488,13 @@ export async function testRemoteVisionServer(
       const relayed = parseRemoteVisionModelId(id)
       if (relayed && ownServers.has(relayed.serverId)) return []
       const kind = entry.kind
+      if (
+        (kind === 'video' ||
+          (Array.isArray(entry.architecture?.output_modalities) &&
+            entry.architecture.output_modalities.includes('video'))) &&
+        !['ogad', 'openrouter'].includes(provider)
+      )
+        return []
       const outputs = Array.isArray(entry.architecture?.output_modalities)
         ? entry.architecture.output_modalities
         : []
@@ -501,6 +517,8 @@ export async function testRemoteVisionServer(
       const modality: RemoteVisionModality =
         role
           ? 'text'
+          : kind === 'video' || outputs.includes('video')
+          ? 'video'
           : kind === 'image'
           ? 'image'
           : kind === 'transcription'
@@ -538,7 +556,7 @@ export async function testRemoteVisionServer(
         }
       ]
     })
-    return { ok: true, latencyMs: Date.now() - startedAt, models }
+    return { ok: true, latencyMs: Date.now() - startedAt, models, provider }
   } catch (error) {
     return {
       ok: false,

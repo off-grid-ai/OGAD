@@ -1,3 +1,5 @@
+import { track } from '@renderer/lib/analytics'
+import { reportChatInput } from '@renderer/lib/usage-tracker'
 import { restoredStreamMessage, withRestoredStream } from '@renderer/lib/chat-stream-restore'
 import { stopChatRun } from '@renderer/lib/chat-stop'
 import { observeOwnedRun, type RunEvent } from '@renderer/lib/chat-run-owner'
@@ -84,8 +86,16 @@ import { AnimatedNumber } from '@offgrid/operator-ui/operator/motion/animated-nu
 import { TextEffect } from '@offgrid/operator-ui/operator/text-effect'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { SidePanel } from '../SidePanel'
+import { PageShell } from '../PageShell'
 import { ImageLightbox } from '../media/ImageLightbox'
-import { resolveImageParams, setOverride, type ImageParamStore } from '@renderer/lib/image-params'
+import {
+  resolveImageParams,
+  setDimensions,
+  setOverride,
+  type ImageParamStore
+} from '@renderer/lib/image-params'
+import { IMAGE_SIZE_PRESETS } from '../../../../shared/image-dimensions'
+import { ImageDimensionFields } from '../ImageDimensionFields'
 import { IMAGE_SETTINGS_CHANGED_EVENT } from '@renderer/lib/image-settings-events'
 import {
   DISPLAY_SETTINGS_INVALIDATED_EVENT,
@@ -103,6 +113,9 @@ import { primaryModifier } from '@renderer/lib/device'
 import { buildAssistantContext, type AssistantTimelineEntry } from '../../lib/message-persistence'
 import type { GenerationMetrics } from '../../../../shared/generation-metrics'
 import { withGeneratedImageReference } from '../../../../shared/generated-image-reference'
+import { withGeneratedVideoReference } from '../../../../shared/generated-video-reference'
+import { chatVideo, requireChatVideo, useChatVideoState } from '../../lib/chat-video'
+import { ChatVideoPreview } from './components/ChatVideoPreview'
 import type { RagConversationContract } from '../../../../shared/ipc-contracts'
 import {
   parseImageMemoryGuardError,
@@ -161,6 +174,7 @@ import {
   Plus,
   Paperclip,
   Image as ImageIcon,
+  VideoCamera,
   Sparkle as Sparkles,
   FolderPlus,
   Wrench,
@@ -216,6 +230,7 @@ import type {
   ImageGenerationMetadata,
   ImageProgress,
   MessageRowActions,
+  MessageRowState,
   ProjectLite,
   RagContext,
   StoredMessageAttachment
@@ -235,6 +250,7 @@ import {
 import {
   findDurableWorkMessageId,
   generationErrorContent,
+  videoGenerationErrorContent,
   IMAGE_MESSAGE_COLUMN_WIDTH,
   imageProgressLabel,
   isPromptEnhancementMessage,
@@ -301,10 +317,10 @@ const QUEUE_LABELS: MessageQueueLabels = {
 }
 
 /** The image sizes the composer offers, as segmented options. */
-const IMAGE_SIZE_OPTIONS = [256, 512, 640, 768, 1024].map((size) => ({
-  id: String(size),
-  label: String(size)
-}))
+const IMAGE_SIZE_OPTIONS = [
+  ...IMAGE_SIZE_PRESETS.map((size) => ({ id: String(size), label: String(size) })),
+  { id: 'custom', label: 'Custom' }
+]
 
 /** A new turn rises into the thread; it animates on mount only, never as tokens stream. */
 const MESSAGE_ROW_ENTER = {
@@ -316,7 +332,7 @@ const MESSAGE_ROW_ENTER = {
 /** God's own voice turn mode (hands-free unless changed in its voice composer). */
 
 export function MemoryChat({
-  onNavigateToMemory,
+  onNavigateToAction,
   onNavigateToChat,
   onNavigateToMeeting,
   onNavigateToEntity,
@@ -648,7 +664,21 @@ export function MemoryChat({
   const [mode, setMode] = useState<ChatMode>('ask')
   const [showImageOptions, setShowImageOptions] = useState(false)
   const [imageAvailable, setImageAvailable] = useState(false)
-  const [imgSize, setImgSize] = useState(512)
+  const videoController = chatVideo()
+  const {
+    available: videoAvailable,
+    startImage: videoStartImage,
+    job: videoJob
+  } = useChatVideoState()
+  const [videoGenConv, setVideoGenConv] = useState<string | null>(null)
+  const videoCancelPendingRef = useRef(new Set<string>())
+  const generatingVideo = videoGenConv !== null && videoGenConv === activeConversationId
+  const [imgDims, setImgDims] = useState({ width: 512, height: 512 })
+  const [customImgSize, setCustomImgSize] = useState(false)
+  const showCustomImgSize =
+    customImgSize ||
+    imgDims.width !== imgDims.height ||
+    !(IMAGE_SIZE_PRESETS as readonly number[]).includes(imgDims.width)
   const [imgSteps, setImgSteps] = useState(10)
   const [imgCfgScale, setImgCfgScale] = useState(2)
   const [imgSeed, setImgSeed] = useState('')
@@ -897,9 +927,10 @@ export function MemoryChat({
   const [speakingId, setSpeakingId] = useState<string | null>(null)
   const [speakLoadingId, setSpeakLoadingId] = useState<string | null>(null)
   const [speakError, setSpeakError] = useState<{ id: string; message: string } | null>(null)
+  const [speakDownload, setSpeakDownload] = useState<MessageRowState['speakDownload']>(null)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'model' | 'voice'>('model')
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'model' | 'voice' | 'video'>('model')
   // Active text model + running context window, shown in the composer. Refreshes when
   // the model picker closes (the selection may have changed).
   const modelSummary = useActiveModelSummary(modelPickerOpen)
@@ -946,6 +977,7 @@ export function MemoryChat({
   // execution-chat approval cannot stay hidden behind a value cached before Pro activation.
   const ChatMessagesFooter = isPro ? getSlot(SLOTS.chatMessagesFooter) : undefined
   const TaskSupervisorOverlay = isPro ? getSlot(SLOTS.taskSupervisorOverlay) : undefined
+  const ChatVideoProgress = getSlot(SLOTS.chatVideoProgress)
   // Esc closes the open overlay (attachment viewer / image lightbox).
   useEffect(() => {
     console.log('MemoryChat effect: overlay escape handler')
@@ -992,7 +1024,10 @@ export function MemoryChat({
     setCanvasArtifact(null)
   }, [activeConversationId])
   const [gallery, setGallery] = useState<{ path: string; name: string; mtime: number }[]>([])
-  const [galleryTab, setGalleryTab] = useState<'images' | 'artifacts'>('images')
+  const [videoGallery, setVideoGallery] = useState<
+    { path: string; name: string; mtime: number; durationSeconds?: number }[]
+  >([])
+  const [galleryTab, setGalleryTab] = useState<'images' | 'videos' | 'artifacts'>('images')
   const [galleryScope, setGalleryScope] = useState<'chat' | 'project' | 'all'>('all')
   const [artifacts, setArtifacts] = useState<
     (Artifact & { id: string; title: string; created: number })[]
@@ -1226,8 +1261,8 @@ export function MemoryChat({
   useEffect(() => {
     console.log('MemoryChat effect: resolve image parameters')
     if (!imgModel) return
-    const { steps, size, cfgScale } = resolveImageParams(imgModel, imgParamStore)
-    setImgSize(size)
+    const { steps, width, height, cfgScale } = resolveImageParams(imgModel, imgParamStore)
+    setImgDims({ width, height })
     setImgSteps(steps)
     setImgCfgScale(cfgScale)
   }, [imgModel, imgParamStore])
@@ -1242,7 +1277,7 @@ export function MemoryChat({
     // silent reject would let the composer and Active-models panel diverge again
     // (the exact drift this binding prevents), with no signal.
     void window.api
-      .setActiveModalModel('image', value)
+      .setActiveModalModel('image', value, 'chat')
       .catch((e) => console.error('[image] failed to persist active model', e))
   }, [])
   // Steps/size edits persist as a per-model override so they survive a remount and
@@ -1257,9 +1292,17 @@ export function MemoryChat({
   )
   const setSizeOverride = useCallback(
     (value: number) => {
-      setImgSize(value)
+      setImgDims({ width: value, height: value })
       if (!imgModel) return
       setImgParamStore((prev) => setOverride(prev, imgModel, 'size', value))
+    },
+    [imgModel]
+  )
+  const setDimensionsOverride = useCallback(
+    (width: number, height: number) => {
+      setImgDims({ width, height })
+      if (!imgModel) return
+      setImgParamStore((prev) => setDimensions(prev, imgModel, width, height))
     },
     [imgModel]
   )
@@ -1410,6 +1453,28 @@ export function MemoryChat({
       offConversation()
     }
   }, [refreshConversationMessages, markGenerating])
+
+  useEffect(() => {
+    if (!videoJob?.conversationId) return
+    const conversationId = videoJob.conversationId
+    if (videoJob.phase === 'running') {
+      setVideoGenConv(conversationId)
+      markGenerating(conversationId, true)
+    } else {
+      setVideoGenConv((owner) => (owner === conversationId ? null : owner))
+      markGenerating(conversationId, false)
+    }
+  }, [videoJob, markGenerating])
+  useEffect(
+    () =>
+      videoController?.onConversationUpdated((conversationId) => {
+        void refreshConversationMessages(conversationId)
+      }),
+    [videoController, refreshConversationMessages]
+  )
+  useEffect(() => {
+    videoController?.refresh()
+  }, [videoController, modelPickerOpen, settingsOpen])
 
   const conversationListRequestRef = useRef<Promise<void> | null>(null)
   const conversationListRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1857,6 +1922,17 @@ export function MemoryChat({
       ))
     )
       return
+    // Opt-in usage data: that a message went, and what kind. Never its text or attachments.
+    // Counted once the message is accepted, so guidance a running task refuses is not a send.
+    const reportSent = (): void => {
+      if (regen) track('reply_regenerated')
+      else
+        track('message_sent', {
+          has_image: imagePaths.length > 0,
+          has_document: turnDocuments.length > 0,
+          tools_enabled: assistantForTurn
+        })
+    }
     // A live operator task owns this journey until it finishes. New Chat input is
     // guidance for that task, not a second memory/model turn running beside it.
     if (!regen && targetConv && !opts?.imageRequest) {
@@ -1889,6 +1965,7 @@ export function MemoryChat({
             setAttachments([])
           }
           setAttachWarn(null)
+          reportSent()
           return
         } catch (error) {
           console.error('Failed to guide the running task:', error)
@@ -1897,6 +1974,7 @@ export function MemoryChat({
         }
       }
     }
+    reportSent()
     if (isInput) setAttachments([])
 
     // An installed /skill-name anywhere in the prompt prepends that skill's instructions.
@@ -2124,6 +2202,78 @@ export function MemoryChat({
         }
       }
 
+      if (mode === 'video') {
+        setVideoGenConv(convId)
+        try {
+          // An attached photo is the start image (or, if Pro asks, a person to keep).
+          const startImage = atts.find(
+            (attachment) => attachment.kind === 'image' && attachment.path
+          )
+          const request = {
+            prompt: trimmed,
+            conversationId: convId,
+            projectId,
+            ...(startImage?.path ? { initImage: startImage.path } : {})
+          }
+          const controller = requireChatVideo()
+          const film = await controller.startFilm?.(request)
+          if (film) {
+            const context = { videoStoryId: film.storyId }
+            const stored = await window.api.addRagMessage(convId, 'assistant', film.line, context)
+            setConvMessages(convId, (previous) => [
+              ...previous,
+              { id: stored.uuid, role: 'assistant', content: film.line, context }
+            ])
+            return
+          }
+          const video = await controller.generate({ ...request, storeReply: true })
+          const videoMetadata = {
+            width: video.width,
+            height: video.height,
+            durationSeconds: video.durationSeconds,
+            fps: video.fps,
+            frames: video.frames,
+            model: video.model
+          }
+          const content = `Generated for: ${trimmed}`
+          const context = withGeneratedVideoReference(
+            { videoMetadata, durationMs: video.durationMs },
+            { id: video.syncId, path: video.path }
+          )
+          // The job stores the reply itself (it survives this window reloading mid-render).
+          const storedId =
+            video.messageId ??
+            (await window.api.addRagMessage(convId, 'assistant', content, context)).uuid
+          setConvMessages(convId, (previous) => [
+            ...previous.filter((message) => message.id !== storedId),
+            {
+              id: storedId,
+              role: 'assistant',
+              content,
+              context,
+              videoPath: video.path,
+              videoMetadata,
+              generationTimeMs: video.durationMs
+            }
+          ])
+          if (!video.messageId) await chatVideo()?.acknowledge(convId, storedId)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (!/stopped|cancel/i.test(message)) {
+            console.error('Video generation failed:', error)
+            const content = videoGenerationErrorContent(error)
+            setConvMessages(convId, (previous) => [
+              ...previous,
+              { id: `a-${Date.now()}`, role: 'assistant', content }
+            ])
+            await window.api.addRagMessage(convId, 'assistant', content).catch(() => {})
+          }
+        } finally {
+          setVideoGenConv((owner) => (owner === convId ? null : owner))
+        }
+        return
+      }
+
       // Image-generation mode: render a prompt → image instead of a memory answer. Otherwise the
       // renderer does not decide: every turn goes to the model through toolChat, where MiniLM
       // offers generate_image when the request is for a picture. A word rule here sent "Create a
@@ -2143,8 +2293,8 @@ export function MemoryChat({
         const imageRequest: ImageGenerationRequestContract = opts?.imageRequest ?? {
           prompt: fullPrompt,
           negativePrompt: imgNegative.trim() || undefined,
-          width: imgSize,
-          height: imgSize,
+          width: imgDims.width,
+          height: imgDims.height,
           steps: imgSteps,
           cfgScale: imgCfgScale,
           seed: Number.isNaN(seedNum) ? -1 : seedNum,
@@ -2161,8 +2311,8 @@ export function MemoryChat({
             projectId: projectId
           })
           const imageMetadata: ImageGenerationMetadata = {
-            width: img.width ?? imageRequest.width ?? imgSize,
-            height: img.height ?? imageRequest.height ?? imgSize,
+            width: img.width ?? imageRequest.width ?? imgDims.width,
+            height: img.height ?? imageRequest.height ?? imgDims.height,
             steps: img.steps ?? imageRequest.steps ?? imgSteps,
             cfgScale: img.cfgScale ?? imageRequest.cfgScale ?? imgCfgScale,
             seed:
@@ -2492,9 +2642,16 @@ export function MemoryChat({
       )
       const context = tr?.unified?.length ? { unified: tr.unified } : undefined
       // Persist the citation sources + tool calls so they survive a reload.
+      // A film a tool started (make_film) keeps its card on this message.
+      const filmStoryId = (tr as { videoStoryId?: string } | undefined)?.videoStoryId
       const toolCtx =
-        tr?.unified?.length || toolCalls.length || tr?.toolsOffered?.length
-          ? { unified: tr?.unified ?? [], toolCalls, toolsOffered: tr?.toolsOffered }
+        tr?.unified?.length || toolCalls.length || tr?.toolsOffered?.length || filmStoryId
+          ? {
+              unified: tr?.unified ?? [],
+              toolCalls,
+              toolsOffered: tr?.toolsOffered,
+              ...(filmStoryId ? { videoStoryId: filmStoryId } : {})
+            }
           : undefined
       if (cancelledRef.current.has(convId)) {
         // Stop also ends a comic page that started while the model was writing.
@@ -2514,6 +2671,8 @@ export function MemoryChat({
       }
       const answer = tr?.answer || 'No response returned.'
       const priorVariants = opts?.priorVariants
+      const videoRequests: Array<{ prompt: string; enhancePrompt?: boolean }> =
+        tr?.videoRequests ?? []
       let imageRequests = tr?.imageRequests ?? []
       if (imageRequests.length === 0 && tr?.imageRequest?.prompt) {
         imageRequests = [tr.imageRequest]
@@ -2539,7 +2698,8 @@ export function MemoryChat({
       delete timelineByStream.current[toolStreamId]
       delete answerByStream.current[toolStreamId]
       const pendingToolCalls = toolCalls.map((toolCall) =>
-        imageRequests.length > 0 && toolCall.name === 'generate_image'
+        (imageRequests.length > 0 && toolCall.name === 'generate_image') ||
+        (videoRequests.length > 0 && toolCall.name === 'generate_video')
           ? { ...toolCall, status: 'running' as const }
           : toolCall
       )
@@ -2598,6 +2758,63 @@ export function MemoryChat({
           .catch(() => {
             /* The answer remains available if artifact persistence fails. */
           })
+      }
+      if (videoRequests.length > 0 && !cancelledRef.current.has(convId)) {
+        setVideoGenConv(convId)
+        const created: ChatMessage[] = []
+        try {
+          for (const request of videoRequests) {
+            if (cancelledRef.current.has(convId)) break
+            const video = await requireChatVideo().generate({
+              ...request,
+              conversationId: convId,
+              projectId
+            })
+            const videoMetadata = {
+              width: video.width,
+              height: video.height,
+              durationSeconds: video.durationSeconds,
+              fps: video.fps,
+              frames: video.frames,
+              model: video.model
+            }
+            const context = withGeneratedVideoReference(
+              { videoMetadata, durationMs: video.durationMs, ...toolCtxWithReasoning },
+              { id: video.syncId, path: video.path }
+            )
+            const content = `${answer}\n\nGenerated for: ${request.prompt}`
+            const stored = await window.api.addRagMessage(convId, 'assistant', content, context)
+            created.push({
+              id: stored.uuid,
+              role: 'assistant',
+              content,
+              context,
+              videoPath: video.path,
+              videoMetadata,
+              reasoning: toolReasoning,
+              timeline: toolTimeline,
+              toolCalls,
+              toolsOffered: tr?.toolsOffered,
+              generationTimeMs: video.durationMs
+            })
+            await chatVideo()?.acknowledge(convId, stored.uuid)
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (!/stopped|cancel/i.test(message)) {
+            console.error('Video generation failed:', error)
+            const content = videoGenerationErrorContent(error)
+            created.push({ id: `a-${Date.now()}`, role: 'assistant', content })
+            await window.api.addRagMessage(convId, 'assistant', content).catch(() => {})
+          }
+        } finally {
+          setVideoGenConv((owner) => (owner === convId ? null : owner))
+        }
+        setConvMessages(convId, (previous) => [
+          ...previous.filter((message) => message.id !== toolStreamId),
+          ...created
+        ])
+        if (imageRequests.length === 0) return
       }
       // Deferred image generation: the tool loop only RECORDS prompts (it never generates inline,
       // which would evict the LLM). Each completed request gets one generated file and one durable
@@ -2944,7 +3161,14 @@ export function MemoryChat({
       const failedReasoning = sid ? reasoningByStream.current[sid] : undefined
       const failedTimeline = sid ? timelineByStream.current[sid] : undefined
       const failedToolCalls = sid ? toolCallsByStream.current[sid] : undefined
-      const failed = failedAnswerVersion(opts?.priorAnswer, errorContent, opts?.priorVariants)
+      // What already streamed stays, with the error under it: a reply never disappears because the
+      // engine went away mid-answer (the app closing, a crash), just as Stop keeps a partial answer.
+      const streamed = sid ? (answerByStream.current[sid] ?? '').trim() : ''
+      const failed = failedAnswerVersion(
+        opts?.priorAnswer,
+        streamed ? `${streamed}\n\n${errorContent}` : errorContent,
+        opts?.priorVariants
+      )
       setConvMessages(convId, (previous) => {
         if (sid && previous.some((message) => message.id === sid))
           return previous.map((message) =>
@@ -2972,10 +3196,15 @@ export function MemoryChat({
               failed.content,
               context
             )
-          : await window.api.addRagMessage(convId, 'assistant', failed.content, context)
-        // A retry that failed is kept as a version, and the answer it was retrying stays shown.
-        if (stored && stored !== true && opts?.versionOf)
-          await window.api.selectRagMessageVersion(convId, stored.uuid, -1)
+          : // A retry that failed is kept as a version, and the answer it was retrying stays
+            // shown: one write, so an app closing mid-retry cannot leave the error shown instead.
+            await window.api.addRagMessage(
+              convId,
+              'assistant',
+              failed.content,
+              context,
+              opts?.versionOf ? { keepShownVersion: true } : undefined
+            )
         if (stored && sid)
           setConvMessages(convId, (previous) =>
             previous.map((message) =>
@@ -3322,7 +3551,10 @@ export function MemoryChat({
         cancelImageGen: () => window.api.cancelImageGen(),
         setImageGenConv,
         setImgProgress,
-        setLoading
+        setLoading,
+        videoGenConv,
+        videoCancelPendingRef,
+        cancelVideoGen: () => chatVideo()?.cancel() ?? Promise.resolve(false)
       },
       cid,
       task,
@@ -3411,6 +3643,11 @@ export function MemoryChat({
           console.error('[tts] audio element error')
           failed()
         }
+        // A voice that is not on this computer yet downloads before the first word: say so, with
+        // its size, under this reply rather than leaving the button spinning.
+        const stopDownload = window.api.onTtsVoiceProgress(({ progress, totalBytes }) =>
+          setSpeakDownload({ id, totalBytes: totalBytes ?? null, percent: progress })
+        )
         const made = window.api
           .speak(messageToSpeakable(text), undefined, (pass) =>
             audio.addPass(pass.index, pass.dataUrl)
@@ -3418,6 +3655,10 @@ export function MemoryChat({
           .then(({ dataUrl }) => {
             if (!dataUrl) throw new Error('empty dataUrl')
             audio.setFull(dataUrl)
+          })
+          .finally(() => {
+            stopDownload()
+            setSpeakDownload((cur) => (cur?.id === id ? null : cur))
           })
         const playing = audio.play()
         // The first audio, or the synthesis failing before any audio exists.
@@ -3463,6 +3704,7 @@ export function MemoryChat({
           : undefined
     try {
       setGallery((await window.api.listGeneratedImages(scope)) || [])
+      setVideoGallery(await window.api.listGeneratedVideos(scope))
     } catch (e) {
       console.error(e)
     }
@@ -3643,6 +3885,18 @@ export function MemoryChat({
     }
   }, [])
 
+  const deleteVideo = useCallback(async (path: string): Promise<void> => {
+    if (!(await window.api.deleteGeneratedVideo(path))) return
+    setVideoGallery((previous) => previous.filter((item) => item.path !== path))
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.videoPath === path
+          ? { ...message, videoPath: undefined, content: `${message.content} (deleted)` }
+          : message
+      )
+    )
+  }, [])
+
   useEffect(() => {
     console.log('MemoryChat effect: load skills')
     window.api
@@ -3687,6 +3941,51 @@ export function MemoryChat({
         return
       }
       if (data.type === 'done') return
+      if (
+        data.type === 'step' &&
+        data.step &&
+        typeof data.step === 'object' &&
+        'kind' in data.step &&
+        data.step.kind === 'restarting_model'
+      ) {
+        // The same model restarts after a GPU fault; the reply placeholder starts over.
+        reasoningByStream.current[data.streamId] = ''
+        answerByStream.current[data.streamId] = ''
+        timelineByStream.current[data.streamId] = []
+        toolCallsByStream.current[data.streamId] = []
+        resetStreamViewMessage(data.streamId)
+      }
+      if (
+        data.type === 'step' &&
+        data.step &&
+        typeof data.step === 'object' &&
+        'kind' in data.step &&
+        data.step.kind === 'device_fallback' &&
+        'message' in data.step &&
+        typeof data.step.message === 'string'
+      ) {
+        // Chat moved to the CPU: one notice above the reply. The same model answers, so the reply
+        // (which may already be complete) is left as it is.
+        const content = data.step.message
+        const noticeId = crypto.randomUUID()
+        setConvMessages(cid, (previous) => {
+          const notice: ChatMessage = { id: noticeId, role: 'assistant', content, notice: true }
+          const streamIndex = previous.findIndex((message) => message.id === data.streamId)
+          if (streamIndex < 0) return [...previous, notice]
+          return [...previous.slice(0, streamIndex), notice, ...previous.slice(streamIndex)]
+        })
+        void window.api
+          .addRagMessage(cid, 'assistant', content, { notice: true })
+          .then((stored) =>
+            setConvMessages(cid, (previous) =>
+              previous.map((message) =>
+                message.id === noticeId ? { ...message, id: stored.uuid } : message
+              )
+            )
+          )
+          .catch((error) => console.warn('Could not save the CPU notice', error))
+        return
+      }
       if (
         data.type === 'step' &&
         data.step &&
@@ -3824,6 +4123,10 @@ export function MemoryChat({
             !paneChats.has(stream.conversationId)
           )
             continue
+          // Video jobs restore through their own job-state subscription. Their sync
+          // stream has no text-stream completion event to settle a restored row.
+          if (stream.phase === 'loading_video_model' || stream.phase === 'generating_video')
+            continue
           attachRendererRun(stream.conversationId)
           streamConvRef.current.set(stream.streamId, stream.conversationId)
           reasoningByStream.current[stream.streamId] = stream.reasoning
@@ -3859,6 +4162,7 @@ export function MemoryChat({
       navigator.clipboard.writeText(text)
     )
     if (!copied) return
+    track('message_action', { action: 'copy' })
     // Brief "Copied" confirmation on the button that was pressed.
     const k = key ?? 'copy'
     setCopiedKey(k)
@@ -3868,7 +4172,8 @@ export function MemoryChat({
   const replacementDependencies = (): ReplacementDependencies => ({
     conversationId: activeConversationId,
     messages,
-    generating: generatingRef.current,
+    // A video that is still stopping keeps its turn: replacing it would race the old engine.
+    generating: new Set([...generatingRef.current, ...videoCancelPendingRef.current]),
     cancelled: cancelledRef.current,
     newId: () => crypto.randomUUID(),
     listen: listenToRun,
@@ -4044,12 +4349,14 @@ export function MemoryChat({
       }
       if (pasteFiles.length) {
         e.preventDefault()
+        reportChatInput('paste', pasteFiles)
         void addFiles(pasteFiles)
         return
       }
       const text = dt.getData('text')
       if (text && text.length > 1200) {
         e.preventDefault()
+        reportChatInput('paste', [{ name: 'pasted.txt' }])
         const id = crypto.randomUUID()
         setAttachments((prev) => [
           ...prev,
@@ -4068,8 +4375,19 @@ export function MemoryChat({
     [addFiles]
   )
 
+  // Video is Pro. Without it the button opens the upgrade screen instead of a dead mode.
+  const chooseVideoMode = (): void => {
+    if (videoController) setMode('video')
+    else window.dispatchEvent(new CustomEvent('og:navigate', { detail: 'video' }))
+  }
+
   let examples = ASK_EXAMPLES
   if (mode === 'image') examples = IMAGE_EXAMPLES
+  else if (mode === 'video')
+    examples = [
+      'A quiet lake at sunrise, with slow camera movement',
+      'A small robot walks through a rainy city street'
+    ]
   else if (isPro) examples = ASK_EXAMPLES_PRO
 
   const installedSkillNames = useMemo(() => skills.map((skill) => skill.name), [skills])
@@ -4081,7 +4399,7 @@ export function MemoryChat({
   }, [contextDocuments])
   const messageNavigation = useMemo<ContextNavigation>(
     () => ({
-      onNavigateToMemory,
+      onNavigateToAction,
       onNavigateToChat,
       onNavigateToMeeting,
       onNavigateToEntity,
@@ -4129,7 +4447,7 @@ export function MemoryChat({
       onNavigateToChat,
       onNavigateToEntity,
       onNavigateToMeeting,
-      onNavigateToMemory,
+      onNavigateToAction,
       onOpenProject,
       onOpenSkillPreset,
       onSeekReplay
@@ -4258,7 +4576,7 @@ export function MemoryChat({
     activeConversationId &&
     !liveJourneyTask &&
     generatingConvs.has(activeConversationId) &&
-    (generatingImage || !messages.some((message) => message.streaming))
+    (generatingImage || generatingVideo || !messages.some((message) => message.streaming))
   )
   const activeImageTimelineMessageId =
     showGenerationProgress && generatingImage
@@ -4374,24 +4692,209 @@ export function MemoryChat({
     )
   }, [contentMatchIds, convSearch, conversations, conversationIds])
 
-  return (
-    <ActiveConversationProvider conversationId={activeConversationId}>
-      {/* prettier-ignore */}
+  // The pane header: split panes and God keep this compact row (God's page owns its header).
+  const chatHeaderControls = (
+    <>
+      {/* Active models and Settings: the same drawers in Chat and God (God runs tasks too). They
+              are app-wide, so a split view shows them once, in the pane that holds its controls. */}
+      {(!split || onToggleSplit) && (
+        <>
+          {/* Active models — pick the model per modality (text/image/voice/STT) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  closePanels()
+                  setModelPickerOpen(true)
+                }}
+                className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Active models"
+              >
+                <Cpu className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Active models</TooltipContent>
+          </Tooltip>
+
+          {/* Keep the conversation in place while its model settings drawer is open. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  closePanels()
+                  setSettingsInitialTab('model')
+                  setSettingsOpen(true)
+                }}
+                className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Settings"
+              >
+                <Gear className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
+        </>
+      )}
+      {/* God has no image gallery. */}
+      {!god && (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                ref={galleryTriggerRef}
+                onClick={openGallery}
+                className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Gallery"
+              >
+                <Images className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Gallery</TooltipContent>
+          </Tooltip>
+        </>
+      )}
+      {onToggleSplit && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={onToggleSplit}
+              className={`rounded-md border p-1.5 transition-colors ${split ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+              aria-label={split ? 'One chat' : 'Open tabs side by side'}
+            >
+              {split ? (
+                <Square className="h-4 w-4" />
+              ) : (
+                <SquareSplitHorizontal className="h-4 w-4" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{split ? 'One chat' : 'Open tabs side by side'}</TooltipContent>
+        </Tooltip>
+      )}
+      {split && paneCount !== undefined && onPaneCountChange && (
+        <div className="flex items-center rounded-md border border-neutral-800 text-neutral-500">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => onPaneCountChange(paneCount - 1)}
+                disabled={paneCount <= 2}
+                className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
+                aria-label="Remove the last pane"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Remove the last pane</TooltipContent>
+          </Tooltip>
+          <span className="min-w-4 text-center text-xs tabular-nums text-neutral-300">
+            {paneCount}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => onPaneCountChange(paneCount + 1)}
+                disabled={paneCount >= 6}
+                className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
+                aria-label="Add a pane"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Add a pane</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+      {split && onToggleBroadcast && (
+        <div
+          role="radiogroup"
+          aria-label="Chat inputs"
+          className="flex items-center rounded-md border border-neutral-800"
+        >
+          {[
+            { shared: true, label: 'One input for every pane', Icon: Textbox },
+            { shared: false, label: 'An input in each pane', Icon: SquaresFour }
+          ].map(({ shared, label, Icon }) => (
+            <Tooltip key={label}>
+              <TooltipTrigger asChild>
+                <button
+                  role="radio"
+                  aria-checked={Boolean(broadcast) === shared}
+                  aria-label={label}
+                  onClick={() => {
+                    if (Boolean(broadcast) !== shared) onToggleBroadcast()
+                  }}
+                  className={`p-1.5 transition-colors ${Boolean(broadcast) === shared ? 'text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                >
+                  <Icon className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{label}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+      )}
+      <TaskPanelTrigger conversationId={activeConversationId} />
+    </>
+  )
+  const chatFrameStyle: React.CSSProperties = {
+    // Only the code/artifact canvas reflows content beside it (a deliberate
+    // side-by-side edit surface). The drawers (settings, models, skills, gallery,
+    // lightbox) are fixed overlays with their own opaque backdrop — they draw ON
+    // TOP, so reserving width here just squeezed the chat to one word per line.
+    paddingRight: canvasArtifact
+      ? canvasWidth
+        ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
+        : 'max(360px, 30vw)'
+      : undefined
+  }
+  // Chat as a top-level screen renders in the one page shell; a split pane or God's embedded chat
+  // is not a page, so it keeps the compact pane header.
+  const renderChatFrame = (body: React.ReactNode): React.ReactNode =>
+    !split && !god ? (
+      <PageShell
+        fill
+        className="font-mono bg-neutral-950 transition-[padding] duration-200"
+        style={chatFrameStyle}
+        title="Chat"
+        description={
+          activeProjectId && activeProjectName ? (
+            <button
+              onClick={() => onOpenProject?.(activeProjectId)}
+              title={`Open project “${activeProjectName}”`}
+              className="flex max-w-full items-center gap-1 truncate text-xs text-neutral-500 transition-colors hover:text-green-500"
+            >
+              <FolderOpen className="h-3 w-3 shrink-0" />
+              <span className="truncate">In {activeProjectName}</span>
+            </button>
+          ) : (
+            'Private and on this device. Chat, generate, and build.'
+          )
+        }
+        actions={
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={toggleConversationList}
+                  className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
+                  aria-label={conversationsToggleLabel}
+                >
+                  <SidebarSimple className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{conversationsToggleLabel}</TooltipContent>
+            </Tooltip>
+            {chatHeaderControls}
+          </>
+        }
+      >
+        {body}
+      </PageShell>
+    ) : (
       <div
         className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-        style={{
-          // Only the code/artifact canvas reflows content beside it (a deliberate
-          // side-by-side edit surface). The drawers (settings, models, skills, gallery,
-          // lightbox) are fixed overlays with their own opaque backdrop — they draw ON
-          // TOP, so reserving width here just squeezed the chat to one word per line.
-          paddingRight: canvasArtifact
-            ? canvasWidth
-              ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
-              : 'max(360px, 30vw)'
-            : undefined
-        }}
+        style={chatFrameStyle}
       >
-        {/* Header */}
         <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -4447,142 +4950,17 @@ export function MemoryChat({
             )}
           </div>
 
-          {/* Active models and Settings: the same drawers in Chat and God (God runs tasks too). They
-              are app-wide, so a split view shows them once, in the pane that holds its controls. */}
-          {(!split || onToggleSplit) && (
-            <>
-          {/* Active models — pick the model per modality (text/image/voice/STT) */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => {
-                  closePanels()
-                  setModelPickerOpen(true)
-                }}
-                className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                aria-label="Active models"
-              >
-                <Cpu className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Active models</TooltipContent>
-          </Tooltip>
-
-          {/* Keep the conversation in place while its model settings drawer is open. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => {
-                  closePanels()
-                  setSettingsInitialTab('model')
-                  setSettingsOpen(true)
-                }}
-                className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                aria-label="Settings"
-              >
-                <Gear className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Settings</TooltipContent>
-          </Tooltip>
-            </>
-          )}
-          {/* God has no image gallery. */}
-          {!god && (
-            <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                ref={galleryTriggerRef}
-                onClick={openGallery}
-                className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                aria-label="Gallery"
-              >
-                <Images className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Gallery</TooltipContent>
-          </Tooltip>
-            </>
-          )}
-          {onToggleSplit && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={onToggleSplit}
-                  className={`rounded-md border p-1.5 transition-colors ${split ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                  aria-label={split ? 'One chat' : 'Open tabs side by side'}
-                >
-                  {split ? <Square className="h-4 w-4" /> : <SquareSplitHorizontal className="h-4 w-4" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{split ? 'One chat' : 'Open tabs side by side'}</TooltipContent>
-            </Tooltip>
-          )}
-          {split && paneCount !== undefined && onPaneCountChange && (
-            <div className="flex items-center rounded-md border border-neutral-800 text-neutral-500">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => onPaneCountChange(paneCount - 1)}
-                    disabled={paneCount <= 2}
-                    className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
-                    aria-label="Remove the last pane"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Remove the last pane</TooltipContent>
-              </Tooltip>
-              <span className="min-w-4 text-center text-xs tabular-nums text-neutral-300">
-                {paneCount}
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => onPaneCountChange(paneCount + 1)}
-                    disabled={paneCount >= 6}
-                    className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
-                    aria-label="Add a pane"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Add a pane</TooltipContent>
-              </Tooltip>
-            </div>
-          )}
-          {split && onToggleBroadcast && (
-            <div
-              role="radiogroup"
-              aria-label="Chat inputs"
-              className="flex items-center rounded-md border border-neutral-800"
-            >
-              {[
-                { shared: true, label: 'One input for every pane', Icon: Textbox },
-                { shared: false, label: 'An input in each pane', Icon: SquaresFour }
-              ].map(({ shared, label, Icon }) => (
-                <Tooltip key={label}>
-                  <TooltipTrigger asChild>
-                    <button
-                      role="radio"
-                      aria-checked={Boolean(broadcast) === shared}
-                      aria-label={label}
-                      onClick={() => {
-                        if (Boolean(broadcast) !== shared) onToggleBroadcast()
-                      }}
-                      className={`p-1.5 transition-colors ${Boolean(broadcast) === shared ? 'text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{label}</TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-          )}
-          <TaskPanelTrigger conversationId={activeConversationId} />
+          {chatHeaderControls}
         </header>
+        {body}
+      </div>
+    )
+
+  return (
+    <ActiveConversationProvider conversationId={activeConversationId}>
+      {renderChatFrame(
+        // prettier-ignore
+        <>
 
         {/* Body */}
         <PanelGroup
@@ -4789,13 +5167,17 @@ export function MemoryChat({
                                     ? `Ask ${god.name}`
                                     : mode === 'image'
                                       ? 'Create an image'
-                                      : 'Start a conversation'}
+                                      : mode === 'video'
+                                        ? 'Create a video'
+                                        : 'Start a conversation'}
                                 </TextEffect>
                                 <p className="mt-3 max-w-md text-sm text-muted-foreground">
                                   {god
                                     ? 'It knows your day, memory and accounts, and asks before it acts.'
                                     : mode === 'image'
                                     ? 'Pick a style, then describe your subject — generated on-device.'
+                                    : mode === 'video'
+                                    ? 'Describe a short, silent clip.'
                                     : activeProjectName
                                       ? `Grounded in the “${activeProjectName}” knowledge base.`
                                       : isPro
@@ -4804,7 +5186,7 @@ export function MemoryChat({
                                 </p>
                               </div>
                               {/* God's workflows and suggestions sit beside Ares. */}
-                              {god ? null : mode !== 'image' ? (
+                              {god ? null : mode === 'ask' ? (
                                 <ExploreSection
                                   onRun={(preset) => {
                                     setPresetSetup(preset)
@@ -4920,6 +5302,7 @@ export function MemoryChat({
                                       speakingId,
                                       speakLoadingId,
                                       speakError,
+                                      speakDownload,
                                       ttsEnabled,
                                       ttsSpeed,
                                       latestVoiceAssistantId,
@@ -4956,10 +5339,11 @@ export function MemoryChat({
                           ) : null}
                           {showGenerationProgress && !activeImageTimelineMessageId ? (
                             <div className="mb-5 flex flex-col items-start">
-                              <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-600">
-                                Off Grid AI
-                              </div>
-                              {mode === 'image' || generatingImage ? (
+                              {generatingVideo ? (
+                                <div className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start`}>
+                                  {ChatVideoProgress ? <ChatVideoProgress job={videoJob} /> : null}
+                                </div>
+                              ) : mode === 'image' || generatingImage ? (
                                 <div
                                   className={`flex ${IMAGE_MESSAGE_COLUMN_WIDTH} flex-col items-start gap-2`}
                                 >
@@ -5029,10 +5413,20 @@ export function MemoryChat({
                             <Segmented
                               label="Size"
                               size="sm"
-                              value={String(imgSize)}
+                              value={showCustomImgSize ? 'custom' : String(imgDims.width)}
                               options={IMAGE_SIZE_OPTIONS}
-                              onValueChange={(value) => setSizeOverride(Number(value))}
+                              onValueChange={(value) => {
+                                setCustomImgSize(value === 'custom')
+                                if (value !== 'custom') setSizeOverride(Number(value))
+                              }}
                             />
+                            {showCustomImgSize && (
+                              <ImageDimensionFields
+                                width={imgDims.width}
+                                height={imgDims.height}
+                                onChange={setDimensionsOverride}
+                              />
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5">
                             Steps
@@ -5235,7 +5629,10 @@ export function MemoryChat({
                         onDrop={(e) => {
                           e.preventDefault()
                           setDragOver(false)
-                          if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files)
+                          if (e.dataTransfer.files.length) {
+                            reportChatInput('drop', e.dataTransfer.files)
+                            void addFiles(e.dataTransfer.files)
+                          }
                         }}
                         className={broadcasting && !hostsSharedComposer ? 'hidden' : 'relative'}
                       >
@@ -5446,15 +5843,34 @@ export function MemoryChat({
                                 <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
                                   <Paperclip /> Attach files
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
-                                  <ImageIcon /> Add image
-                                </DropdownMenuItem>
+                                {/* In video mode an image is the start image: without a model that takes
+                                    one, the item stays, dimmed, and offers that model. */}
+                                {mode === 'video' && !videoStartImage ? (
+                                  <DropdownMenuItem
+                                    aria-disabled
+                                    title="Needs a video model that starts from an image. Click to get it."
+                                    className="opacity-50"
+                                    onSelect={() => videoController?.offerStartImage?.()}
+                                  >
+                                    <ImageIcon /> Add image
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}>
+                                    <ImageIcon /> Add image
+                                  </DropdownMenuItem>
+                                )}
                                 {!god && (
 <><DropdownMenuItem
                                   disabled={!imageAvailable}
                                   onSelect={() => setMode('image')}
                                 >
                                   <Sparkles /> Generate image
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={Boolean(videoController) && !videoAvailable}
+                                  onSelect={chooseVideoMode}
+                                >
+                                  <VideoCamera /> Generate video
                                 </DropdownMenuItem>
                                 {projects.length > 0 ? (
                                   <DropdownMenuSub>
@@ -5755,7 +6171,43 @@ export function MemoryChat({
                                   ? 'Image mode on — your prompt generates an image (click to return to chat)'
                                   : 'Generate an image from your prompt'}
                               </TooltipContent>
-                            </Tooltip></>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => (mode === 'video' ? setMode('ask') : chooseVideoMode())}
+                                  className={`h-8 gap-1.5 rounded-full ${mode === 'video' ? 'border-green-500 text-primary' : 'text-neutral-400'}`}
+                                >
+                                  <VideoCamera className="h-3.5 w-3.5" /> Video
+                                  {mode === 'video' ? <X className="h-3.5 w-3.5 opacity-70" /> : null}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {!videoController
+                                  ? 'Video needs Off Grid AI Pro'
+                                  : videoAvailable
+                                    ? 'Generate a local video'
+                                    : 'Download a complete video model pack in Models'}
+                              </TooltipContent>
+                            </Tooltip>
+                            {mode === 'video' && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1.5 rounded-full"
+                                onClick={() => {
+                                  closePanels()
+                                  setSettingsInitialTab('video')
+                                  setSettingsOpen(true)
+                                }}
+                              >
+                                <SlidersHorizontal className="h-3.5 w-3.5" /> Video options
+                              </Button>
+                            )}</>
 )}
                             {mode === 'image' && (
                               <Tooltip>
@@ -5945,7 +6397,9 @@ export function MemoryChat({
               ref={taskWorkspaceRef}
               id="task-workspace"
               order={2}
-              defaultSize={48}
+              // Hidden at mount, it starts collapsed: the collapse the pane controller schedules
+              // can run before the group has a layout, which left the chat at half width.
+              defaultSize={taskWorkspaceVisible ? 48 : 0}
               minSize={32}
               collapsible
               collapsedSize={0}
@@ -6151,7 +6605,7 @@ export function MemoryChat({
               <header className="flex items-center gap-3 border-b border-neutral-900 px-4 py-2.5 text-left">
                 <h2 className="text-sm font-normal text-neutral-200">Gallery</h2>
                 <div className="flex items-center gap-1">
-                  {(['images', 'artifacts'] as const).map((tab) => (
+                  {(['images', 'videos', 'artifacts'] as const).map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setGalleryTab(tab)}
@@ -6159,7 +6613,11 @@ export function MemoryChat({
                     >
                       {tab}{' '}
                       <span className="tabular-nums text-neutral-500">
-                        {tab === 'images' ? gallery.length : artifacts.length}
+                        {tab === 'images'
+                          ? gallery.length
+                          : tab === 'videos'
+                            ? videoGallery.length
+                            : artifacts.length}
                       </span>
                     </button>
                   ))}
@@ -6207,6 +6665,41 @@ export function MemoryChat({
                             className="aspect-square w-full object-cover"
                           />
                         </button>
+                      ))}
+                    </div>
+                  )
+                ) : galleryTab === 'videos' ? (
+                  videoGallery.length === 0 ? (
+                    <p className="py-10 text-center text-xs text-neutral-600">
+                      No videos generated yet.
+                    </p>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {videoGallery.map((video) => (
+                        <div key={video.path} className="rounded-md border border-neutral-800 p-2">
+                          <ChatVideoPreview path={video.path} />
+                          <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-neutral-400">
+                            <span className="truncate">{video.name}</span>
+                            <div className="flex shrink-0 gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void window.api.exportGeneratedVideo(video.path, video.name)
+                                }
+                                className="hover:text-green-500"
+                              >
+                                Export
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteVideo(video.path)}
+                                className="hover:text-red-400"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )
@@ -6300,7 +6793,8 @@ export function MemoryChat({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
+        </>
+      )}
     </ActiveConversationProvider>
   )
 }

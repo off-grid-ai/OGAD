@@ -275,10 +275,10 @@ describe('gateway model choice', () => {
     }
   })
 
-  it.each([
-    { modality: 'speech' as const, kind: 'voice' },
-    { modality: 'transcription' as const, kind: 'transcription' }
-  ])(
+  // Switching needs two installed models of one kind. Voice has one catalog model since Piper left
+  // the catalog (it never had a runtime), so speech has no second model to switch to; transcription
+  // runs the same gateway selection (selectRequestedModal) with two real catalog models.
+  it.each([{ modality: 'transcription' as const, kind: 'transcription' }])(
     'makes a requested installed $modality model the active $modality model',
     async ({ modality, kind }) => {
       const [{ llm }, manager, server] = await Promise.all([
@@ -302,25 +302,13 @@ describe('gateway model choice', () => {
 
       await startGateway(server, gatewayPort)
       try {
-        let accepted: Response
-        if (modality === 'speech') {
-          accepted = await fetch(`http://127.0.0.1:${gatewayPort}/v1/audio/speech?async=true`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: second!.id, input: 'Hello there' })
-          })
-        } else {
-          const form = new FormData()
-          form.append('model', second!.id)
-          form.append('file', new Blob([Buffer.alloc(64, 1)], { type: 'audio/wav' }), 'clip.wav')
-          accepted = await fetch(
-            `http://127.0.0.1:${gatewayPort}/v1/audio/transcriptions?async=true`,
-            {
-              method: 'POST',
-              body: form
-            }
-          )
-        }
+        const form = new FormData()
+        form.append('model', second!.id)
+        form.append('file', new Blob([Buffer.alloc(64, 1)], { type: 'audio/wav' }), 'clip.wav')
+        const accepted = await fetch(
+          `http://127.0.0.1:${gatewayPort}/v1/audio/transcriptions?async=true`,
+          { method: 'POST', body: form }
+        )
         expect(accepted.status).toBe(202)
         expect(manager.getActiveModalities()[modality]).toBe(second!.id)
         const { request_id: requestId } = (await accepted.json()) as { request_id: string }

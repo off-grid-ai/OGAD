@@ -1,3 +1,4 @@
+import { nativeBinaryInstalled } from './backend-facts'
 import { recordManagedStorageFile } from './managed-storage-files'
 import { withStorageDownload } from './model-storage-guard'
 import { beginRuntimeBackend } from './runtime-backends'
@@ -17,7 +18,8 @@ import { modalityQueue, IMAGE_JOB, CHAT_JOB } from './modality-queue/queue'
 import { getResidencyMode } from './runtime-residency'
 import { llm } from './llm'
 import { getSetting } from './database'
-import { resolveImageParameters, type ImageParameterStore } from '@offgrid/models'
+import { QWEN_IMAGE_21_COMPANIONS, sdImagePackFor, type SDImagePack } from '@offgrid/models'
+import { resolveImageDimensions, type ImageDimensionStore } from '../shared/image-dimensions'
 import {
   generatedImageSidecarPath,
   readGeneratedImageSidecar,
@@ -48,7 +50,6 @@ import {
   imageBackendForRuntime,
   sdRuntimeLibraryEnv
 } from './imagegen/sd-runtime'
-import { getBackendPreference } from './backend-preferences'
 import { standardModelDefaults, taesdFilename } from '../shared/image-defaults'
 import { defaultImageModelFilename } from './image-default'
 import {
@@ -69,6 +70,7 @@ import {
   buildQwenImage21Args,
   qwenImageArgsForBackend,
   buildZImageArgs,
+  buildFluxKleinArgs,
   buildStandardArgs,
   DEFAULT_NEGATIVE
 } from './imagegen/args'
@@ -86,7 +88,7 @@ import {
   type ImageGenerationRequestContract
 } from '../shared/image-generation-contract'
 
-function findSdCli(): string | null {
+function findSdCli(): Promise<string | null> {
   return findSdBinary('sd-cli')
 }
 
@@ -317,6 +319,12 @@ function findInModels(re: RegExp): string | null {
   }
 }
 
+/** The FLUX klein pack (FLUX.2 klein, FLUX 3 Image Klein) a weight belongs to, if any. */
+function fluxKleinPack(base: string): SDImagePack | undefined {
+  const pack = sdImagePackFor(base)
+  return pack?.family === 'flux2-klein' || pack?.family === 'flux3-klein' ? pack : undefined
+}
+
 // A GGUF checkpoint is loadable via `-m` only if it's a FULL pipeline (UNET + VAE
 // + text encoder). Many SDXL quants on HF (e.g. animagine-xl, illustrious) ship
 // the UNET ONLY — sd.cpp then can't detect the version ("get sd version from file
@@ -401,14 +409,17 @@ function resolveModel(preferred?: string): string | null {
   // generic heuristic below when no DreamShaper quant is installed.
   const dreamshaper = defaultImageModelFilename(sd, os.totalmem() / 1e9)
   if (dreamshaper) return resolveModelAsset(dreamshaper)
-  // Preference: Juggernaut XL v9 (default photoreal) > Z-Image-Turbo >
-  // SDXL-Lightning > SDXL > SD 2.1 > anything else.
+  // Preference: FLUX 3 Image Klein > FLUX.2 klein > Juggernaut XL v9 (default photoreal) >
+  // Z-Image-Turbo > SDXL-Lightning > SDXL > SD 2.1 > anything else.
+  const flux =
+    sd.find((f) => sdImagePackFor(f)?.family === 'flux3-klein') ??
+    sd.find((f) => !!fluxKleinPack(f))
   const juggernaut = sd.find((f) => /juggernaut/i.test(f))
   const zimage = sd.find((f) => /z[-_]?image/i.test(f))
   const lightning = sd.find((f) => /lightning/i.test(f))
   const xl = sd.find((f) => /sdxl|xl/i.test(f))
   const v21 = sd.find((f) => /v2-1|v2\.1/i.test(f))
-  const pick = juggernaut ?? zimage ?? lightning ?? xl ?? v21 ?? sd[0]!
+  const pick = flux ?? juggernaut ?? zimage ?? lightning ?? xl ?? v21 ?? sd[0]!
   return resolveModelAsset(pick) ?? (pick.startsWith('mlx/') ? path.join(dir, pick) : null) // sd.length checked above
 }
 
@@ -431,7 +442,7 @@ export function imageGenStatus(): {
   // used to land on the parked Core ML model).
   const active = activeImageModel()
   // Available if EITHER runtime is usable: sd-cli (with a model) or MLX/mflux.
-  if (!findSdCli() && !mfluxAvailable())
+  if (!nativeBinaryInstalled('image', 'sd-cli') && !mfluxAvailable())
     return { available: false, models, active, reason: 'no image runtime found' }
   if (!models.length)
     return { available: false, models, active, reason: 'no image model installed' }
@@ -445,7 +456,7 @@ export type ImageGenOutput = ImageGenerationOutputContract
 /** Native runtimes receive the final prompt as input. The wrapper adds it to their output once. */
 type NativeImageGenOutput = Omit<ImageGenOutput, 'prompt'>
 
-export interface ImageGenProgress {
+interface ImageGenProgress {
   step: number
   total: number
   secPerStep: number
@@ -578,7 +589,9 @@ function imageMemoryGuard(model: string, coreml: boolean, totalGb: number): Memo
   // combo that then overflows unified memory and freezes the box.
   const zImageStack = isZImageModel(path.basename(model))
   const qwenImageStack = isQwenImage21Model(path.basename(model))
+  const flux = fluxKleinPack(path.basename(model))
   return evaluateMemoryGuard({
+    companionGb: flux ? safeSizeGb(findInModels(flux.llm)) + safeSizeGb(findInModels(flux.vae)) : 0,
     totalGb,
     modelSizeGb: safeSizeGb(model),
     coreml,
@@ -586,12 +599,12 @@ function imageMemoryGuard(model: string, coreml: boolean, totalGb: number): Memo
     zEncoderGb: zImageStack ? safeSizeGb(findInModels(/qwen3-4b-instruct.*\.gguf$/i)) : 0,
     zVaeGb: zImageStack ? safeSizeGb(findInModels(/^ae\.(safetensors|sft)$|^ae.*\.gguf$/i)) : 0,
     qwenImageStack,
-    qwenEncoderGb: qwenImageStack ? safeSizeGb(findInModels(/^Qwen3VL-8B-Instruct-.*\.gguf$/i)) : 0,
+    qwenEncoderGb: qwenImageStack ? safeSizeGb(findInModels(QWEN_IMAGE_21_COMPANIONS.llm)) : 0,
     qwenVisionGb: qwenImageStack
-      ? safeSizeGb(findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i))
+      ? safeSizeGb(findInModels(QWEN_IMAGE_21_COMPANIONS.llmVision))
       : 0,
     qwenVaeGb: qwenImageStack
-      ? safeSizeGb(findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i))
+      ? safeSizeGb(findInModels(QWEN_IMAGE_21_COMPANIONS.vae))
       : 0
   })
 }
@@ -619,7 +632,10 @@ export function expectedImageResidentMB(preferred?: string): number | undefined 
 export async function generateImage(
   params: ImageGenParams,
   onUpdate?: (update: ImageGenerationPipelineUpdateContract) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** `countAsGeneration: false` runs the job but leaves it out of usage statistics, for an image
+   *  that is part of another feature (a Studio key still). */
+  options: { countAsGeneration?: boolean } = {}
 ): Promise<ImageGenOutput> {
   return recordAIRequest(
     {
@@ -627,6 +643,7 @@ export async function generateImage(
       source: 'Image generation',
       model: params.model,
       request: params,
+      ...(options.countAsGeneration === false ? { countAsGeneration: false } : {}),
       isCancelled: (error) => error instanceof Error && error.message === IMAGE_CANCELLED_MESSAGE
     },
     async (log) => {
@@ -649,14 +666,15 @@ export async function generateImage(
       ) {
         if (remoteAbort)
           throw new Error('An image is already generating — please wait for it to finish.')
-        const stored = getSetting<ImageParameterStore>('imageParams', {})
-        const remoteParameters = resolveImageParameters(
-          { id: remoteId!, name: remote.selectedModel }, stored
+        const stored = getSetting<ImageDimensionStore>('imageParams', {})
+        const remoteParameters = resolveImageDimensions(
+          { id: remoteId!, name: remote.selectedModel },
+          stored
         )
         const effectiveRemote = {
           ...params,
-          width: params.width ?? remoteParameters.size,
-          height: params.height ?? remoteParameters.size,
+          width: params.width ?? remoteParameters.width,
+          height: params.height ?? remoteParameters.height,
           steps: params.steps ?? remoteParameters.steps,
           cfgScale: params.cfgScale ?? remoteParameters.cfgScale
         }
@@ -705,9 +723,9 @@ export async function generateImage(
       }
       const selectedModel = params.model ?? activeImageModel()
       const modelParameters = selectedModel
-        ? resolveImageParameters(
+        ? resolveImageDimensions(
             { id: selectedModel },
-            getSetting<ImageParameterStore>('imageParams', {})
+            getSetting<ImageDimensionStore>('imageParams', {})
           )
         : null
       const effective = {
@@ -717,8 +735,8 @@ export async function generateImage(
         cfgScale: params.cfgScale ?? modelParameters?.cfgScale,
         // The selected model size is authoritative for both txt2img and img2img.
         // Only fall back to source dimensions when no model size can be resolved.
-        width: params.width ?? modelParameters?.size,
-        height: params.height ?? modelParameters?.size
+        width: params.width ?? modelParameters?.width,
+        height: params.height ?? modelParameters?.height
       }
       log.update({ effectiveRequest: effective, model: selectedModel ?? undefined })
       onUpdate?.({ stage: 'preparing', enhancedPrompt: enhanced })
@@ -851,7 +869,7 @@ async function runImageGen(
         path: outPath,
         seed: params.seed ?? -1,
         model: def.label,
-        computeBackend: 'Metal'
+        computeBackend: 'MLX runtime (device unknown)'
       }
     } finally {
       generationLifecycle.finish()
@@ -887,7 +905,7 @@ async function runImageGen(
       `${coreml ? 'The selected Core ML image model' : 'The selected Z-Image model'} does not support image editing. Select a local image model that supports an init image.`
     )
   }
-  const cli = coreml ? findCoreMLBin() : findSdCli()
+  const cli = coreml ? findCoreMLBin() : await findSdCli()
   if (!cli) {
     throw new Error(
       coreml
@@ -907,7 +925,7 @@ async function runImageGen(
     throw new Error(
       imageMemoryGuardErrorMessage(
         `Not enough memory to run ${path.basename(model)} (~${guard.modelGb.toFixed(1)}GB resident) on this ${totalGb.toFixed(0)}GB machine. ` +
-          `Pick a lighter image model (e.g. SDXL-Lightning or SD 1.5) in the image options.`
+          `Pick a lighter image model (a Light build) in the image options.`
       )
     )
   }
@@ -940,27 +958,34 @@ async function runImageGen(
   const base = path.basename(model)
   const isZImage = isZImageModel(base)
   const isQwenImage21 = isQwenImage21Model(base)
+  const fluxPack = fluxKleinPack(base)
   const previewPath = path.join(outDir, `preview-${stamp}.png`)
 
   // Reuse the existing server for resident checkpoints and Qwen's companion stack.
   // Progress observers must not force a fresh CLI process for every API request.
   const eligibleForServer =
     getResidencyMode('image') === 'resident' &&
-    !coreml && !isZImage && !loras.length &&
+    !coreml &&
+    !isZImage &&
+    !fluxPack &&
+    !loras.length &&
     (isQwenImage21 || (!params.initImage && ggufIsFullCheckpoint(model)))
   if (eligibleForServer) {
     const defaults = standardModelDefaults(base)
     const context: SdServerContext = {
-      modelPath: model, diffusionFa: true,
-      taesdPath: !isQwenImage21 && params.fastVae ? resolveTaesd(base) ?? undefined : undefined
+      modelPath: model,
+      diffusionFa: true,
+      taesdPath: !isQwenImage21 && params.fastVae ? (resolveTaesd(base) ?? undefined) : undefined
     }
     if (isQwenImage21) {
       context.diffusionModel = true
       context.llmPath = findInModels(/^Qwen3VL-8B-Instruct-(?!mmproj).*\.gguf$/i) ?? undefined
-      context.llmVisionPath = findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i) ?? undefined
-      context.vaePath = findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i) ?? undefined
+      context.llmVisionPath = findInModels(QWEN_IMAGE_21_COMPANIONS.llmVision) ?? undefined
+      context.vaePath = findInModels(QWEN_IMAGE_21_COMPANIONS.vae) ?? undefined
       if (!context.llmPath || !context.vaePath || (params.initImage && !context.llmVisionPath)) {
-        throw new Error('Qwen-Image 2.1 companion files are missing. Download the complete model from Models.')
+        throw new Error(
+          'Qwen-Image 2.1 companion files are missing. Download the complete model from Models.'
+        )
       }
     }
     generationLifecycle.start(signal, cancelRuntime)
@@ -968,24 +993,31 @@ async function runImageGen(
       await sdServer.ensureUp(context)
       const residentBinary = sdServer.getBinaryPath() ?? cli
       generationLifecycle.throwIfCancelled()
-      const { png, seed: usedSeed } = await sdServer.generate({
-        prompt: params.prompt,
-        negativePrompt: params.negativePrompt?.trim() || (isQwenImage21 ? '' : DEFAULT_NEGATIVE),
-        width: params.width ?? defaults.defaultSize,
-        height: params.height ?? defaults.defaultSize,
-        steps: params.steps ?? defaults.defaultSteps,
-        cfgScale: params.cfgScale ?? defaults.defaultCfg,
-        sampleMethod: isQwenImage21 ? 'euler' : defaults.sampler,
-        scheduler: isQwenImage21 ? 'default' : defaults.scheduler,
-        seed,
-        refImages: params.initImage ? [(await fs.promises.readFile(params.initImage)).toString('base64')] : undefined
-      }, onProgress ? (progress) => onProgress({ ...progress, secPerStep: 0 }) : undefined)
+      const { png, seed: usedSeed } = await sdServer.generate(
+        {
+          prompt: params.prompt,
+          negativePrompt: params.negativePrompt?.trim() || (isQwenImage21 ? '' : DEFAULT_NEGATIVE),
+          width: params.width ?? defaults.defaultSize,
+          height: params.height ?? defaults.defaultSize,
+          steps: params.steps ?? defaults.defaultSteps,
+          cfgScale: params.cfgScale ?? defaults.defaultCfg,
+          sampleMethod: isQwenImage21 ? 'euler' : defaults.sampler,
+          scheduler: isQwenImage21 ? 'default' : defaults.scheduler,
+          seed,
+          refImages: params.initImage
+            ? [(await fs.promises.readFile(params.initImage)).toString('base64')]
+            : undefined
+        },
+        onProgress ? (progress) => onProgress({ ...progress, secPerStep: 0 }) : undefined
+      )
       generationLifecycle.throwIfCancelled()
       await fs.promises.writeFile(outPath, png)
       return {
         dataUrl: `data:image/png;base64,${png.toString('base64')}`,
-        path: outPath, seed: usedSeed, model: base,
-        computeBackend: imageBackendForRuntime(process.platform, residentBinary)
+        path: outPath,
+        seed: usedSeed,
+        model: base,
+        computeBackend: `SD runtime (${imageBackendForRuntime(process.platform, residentBinary)} build; device unknown)`
       }
     } finally {
       generationLifecycle.finish()
@@ -1041,10 +1073,33 @@ async function runImageGen(
       threads,
       previewArgs
     })
+  } else if (fluxPack) {
+    // FLUX.2 klein / FLUX 3 Image Klein: diffusion transformer + Qwen text encoder + FLUX.2 VAE.
+    const llm = findInModels(fluxPack.llm)
+    const vae = findInModels(fluxPack.vae)
+    if (!llm || !vae)
+      throw new Error(
+        `The ${fluxPack.family === 'flux3-klein' ? 'FLUX 3 Image Klein' : 'FLUX.2 klein'} ${llm ? 'VAE' : 'text encoder'} is missing. Download the complete model from Models.`
+      )
+    args = buildFluxKleinArgs({
+      model,
+      llm,
+      vae,
+      prompt: params.prompt,
+      outPath,
+      width: params.width,
+      height: params.height,
+      steps: params.steps,
+      cfgScale: params.cfgScale,
+      seed,
+      threads,
+      previewArgs,
+      initImage: params.initImage
+    })
   } else if (isQwenImage21) {
-    const llm = findInModels(/^Qwen3VL-8B-Instruct-(?!mmproj).*\.gguf$/i)
-    const llmVision = findInModels(/^mmproj-Qwen3VL-8B-Instruct-.*\.gguf$/i)
-    const vae = findInModels(/^qwen_image_2\.1_vae.*\.(safetensors|sft)$/i)
+    const llm = findInModels(QWEN_IMAGE_21_COMPANIONS.llm)
+    const llmVision = findInModels(QWEN_IMAGE_21_COMPANIONS.llmVision)
+    const vae = findInModels(QWEN_IMAGE_21_COMPANIONS.vae)
     if (!llm)
       throw new Error(
         'Qwen-Image 2.1 text encoder (Qwen3-VL-8B-Instruct) not found — download the complete model from Models.'
@@ -1148,15 +1203,18 @@ async function runImageGen(
   // model's load spike — otherwise the brief overlap causes a short stutter.
   try {
     await generationLifecycle.waitForMemoryReclaim()
-    const runNativeCli = (runtime: string): Promise<void> =>
+    const runNativeCli = (runtime: string, cpuOnly = false, backend = 'cpu'): Promise<void> =>
       new Promise<void>((resolve, reject) => {
         // cwd at the binary dir so @executable_path rpath resolves libstable-diffusion.dylib.
         const binDir = path.dirname(runtime)
-        // Qwen needs the model on the L40S for CUDA inference. Keep CPU offload
-        // for other runtimes, including a fallback after CUDA startup fails.
+        // Qwen keeps CPU offload unless the GPU is known to hold it (see qwenImageArgsForBackend).
         const runtimeArgs = isQwenImage21
-          ? qwenImageArgsForBackend(args, imageBackendForRuntime(process.platform, runtime))
-          : args
+          ? qwenImageArgsForBackend(
+              [...args],
+              cpuOnly ? 'CPU' : imageBackendForRuntime(process.platform, runtime)
+            )
+          : [...args]
+        if (cpuOnly && backend !== 'cpu') runtimeArgs.push('--backend', 'cpu')
         const child = spawn(runtime, runtimeArgs, {
           cwd: binDir,
           env: { ...process.env, ...sdRuntimeLibraryEnv(process.platform, runtime, process.env) }
@@ -1241,34 +1299,40 @@ async function runImageGen(
         })
       })
 
-    const runtimes = coreml ? [cli] : findSdBinaries('sd-cli', getBackendPreference('image'))
+    const runtimes = coreml
+      ? [{ path: cli, backend: 'metal', cpuOnly: false }]
+      : await findSdBinaries('sd-cli')
     let completedRuntime: string | undefined
+    let completedCpuOnly = false
     let lastError: unknown
-    for (const [index, runtime] of runtimes.entries()) {
+    for (const [index, step] of runtimes.entries()) {
+      const runtime = step.path
       try {
         await recordAIRequest(
           {
             modality: 'image',
             source: 'Image runtime attempt',
             model: path.basename(model),
-            backend: imageBackendForRuntime(process.platform, runtime),
+            backend: step.cpuOnly ? 'CPU' : imageBackendForRuntime(process.platform, runtime),
             request: params
           },
-          async () => runNativeCli(runtime)
+          async () => runNativeCli(runtime, step.cpuOnly, step.backend)
         )
         completedRuntime = runtime
+        completedCpuOnly = step.cpuOnly
         break
       } catch (error) {
         lastError = error
         const next = runtimes[index + 1]
         if (!next || generationLifecycle.isCancelled()) throw error
         console.warn(
-          `[imagegen] ${imageBackendForRuntime(process.platform, runtime)} runtime failed; retrying with ${imageBackendForRuntime(process.platform, next)}`,
+          `[imagegen] ${imageBackendForRuntime(process.platform, runtime)} runtime failed; retrying with ${imageBackendForRuntime(process.platform, next.path)}`,
           error
         )
       }
     }
-    if (!completedRuntime) throw lastError
+    if (!completedRuntime)
+      throw lastError ?? new Error('No image engine is installed for this choice.')
 
     if (!fs.existsSync(outPath)) throw new Error('Image generation produced no output file.')
     const b64 = fs.readFileSync(outPath).toString('base64')
@@ -1279,8 +1343,10 @@ async function runImageGen(
       seed: finalSeed,
       model: path.basename(model),
       computeBackend: coreml
-        ? 'Core ML (ANE)'
-        : imageBackendForRuntime(process.platform, completedRuntime)
+        ? 'Core ML runtime (device unknown)'
+        : completedCpuOnly
+          ? 'SD runtime (CPU only)'
+          : `SD runtime (${imageBackendForRuntime(process.platform, completedRuntime)} build; device unknown)`
     }
   } finally {
     generationLifecycle.finish()

@@ -12,7 +12,7 @@
  * The llm call and the tool dispatch are injected in planner.ts / plan-executor.ts.
  */
 
-export interface PlanBinding {
+interface PlanBinding {
   /** The arg on THIS step to fill. */
   arg: string
   /** The earlier step (0-based) whose result supplies the value. */

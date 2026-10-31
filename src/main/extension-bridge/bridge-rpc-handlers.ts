@@ -135,7 +135,10 @@ export function rpcHandlers(
     },
     vault: async (p, browser) => {
       requireFeature('vault')
-      return deps.data.vault(p.request, browser)
+      const kinds = Array.isArray(p.kinds)
+        ? p.kinds.filter((kind): kind is string => typeof kind === 'string').slice(0, 16)
+        : undefined
+      return deps.data.vault(p.request, browser, kinds)
     },
     'settings.get': async (p) => {
       if (!isSettingsSection(p.section)) {

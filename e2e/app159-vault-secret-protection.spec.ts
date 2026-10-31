@@ -13,6 +13,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid, targetIsPackaged } from './helpers/launch'
+import { createVaultThroughGate } from './helpers/vault'
 
 const PRO_PRESENT = fs.existsSync(path.resolve('pro/package.json'))
 const MASTER_PASSWORD = 'vault-master-APP159'
@@ -95,13 +96,7 @@ async function setTheme(mode: 'Light' | 'Dark'): Promise<void> {
 }
 
 async function createVault(): Promise<void> {
-  await expect(page.getByRole('heading', { name: 'Create Vault', exact: true })).toBeVisible()
-  await page.getByLabel('Master password', { exact: true }).fill(MASTER_PASSWORD)
-  await page.getByLabel('Confirm password', { exact: true }).fill(MASTER_PASSWORD)
-  await page.getByRole('button', { name: 'Create Vault', exact: true }).click()
-  // Pro cbc02a9 makes VaultScreen follow the unlocked status event from vault:init.
-  // The screen opens directly; the recovery-phrase gate is no longer a required step.
-  await expect(page.getByRole('button', { name: 'Lock vault', exact: true })).toBeVisible()
+  await createVaultThroughGate(page, MASTER_PASSWORD)
 }
 
 async function beginEntry(type: 'Login' | 'API Key' | 'Note'): Promise<void> {

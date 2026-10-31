@@ -81,6 +81,8 @@ export const HOOKS = {
    * Pro owns transfer and consent; free builds leave this inert.
    */
   syncSharedFileMutation: 'sync.sharedFileMutation',
+  /** () => RecordProvenance | undefined — origin of media produced by this host. */
+  syncLocalProvenance: 'sync.localProvenance',
   /**
    * (snapshot: { conversationId, content, reasoning } | null) => void - the reply this device is
    * generating, or null when it is generating nothing. Pro streams it live to paired devices; free
@@ -108,6 +110,9 @@ export const HOOKS = {
    */
   extensionChatRequest: 'chat.extensionRequest',
   extensionVaultRequest: 'vault.extensionRequest',
+  /** (options?: { localOnly?: boolean }) => VideoGenerationStatus - whether this computer can
+   * generate video now. Pro registers it; free builds report video as unavailable. */
+  videoStatus: 'video:status',
   /** Legacy MCP-only predecessor of actionsProposeApproval. Kept so a pro build
    *  that has not yet migrated still gates connector writes; remove once
    *  desktop-pro registers actionsProposeApproval. */

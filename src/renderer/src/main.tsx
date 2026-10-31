@@ -1,12 +1,14 @@
 import './assets/main.css'
 import './assets/onboarding.css'
-import { applyTheme } from './theme'
+import { applyTheme, getThemeMode, onThemeModeChanged } from './theme'
+import { applyUiAnimations, uiAnimationsOn, UI_ANIMATIONS_CHANGED } from './ui-animations'
 import { initFocusModality } from './lib/focus-modality'
 import { initScrollActivity } from './lib/scroll-activity'
 import { cspNonce, initShadowStyleNonce } from './lib/shadow-style-nonce'
 
 // Apply the saved/system theme (dark default) before first paint.
 applyTheme()
+applyUiAnimations()
 
 // Media players style their shadow DOM with <style> tags; give them the CSP nonce.
 initShadowStyleNonce()
@@ -38,6 +40,8 @@ const ComputerUseSupervisor: FC =
   (ProRenderer as { ComputerUseSupervisor?: FC }).ComputerUseSupervisor ?? (() => null)
 // DictationOverlay is a free-tier / open-core feature — lives in core, not pro.
 import { DictationOverlay } from './components/DictationOverlay'
+import { installRendererErrorReporting, track } from './lib/analytics'
+import { installUsageTracking } from './lib/usage-tracker'
 // The Pro computer-use supervisor has its own surface so it can float over the
 // app being driven. A free build resolves no component and renders nothing.
 
@@ -58,7 +62,22 @@ if (isDictation || isGodTwin) {
   document.body.style.backgroundImage = 'none'
 }
 
-// No analytics / telemetry. Off Grid AI is local-first — nothing leaves your device.
+// Analytics are opt-in and off by default. The renderer only reports to the main process
+// (src/main/analytics), which sends anonymous usage data and crash reports to PostHog after the
+// user turns them on in setup, a prompt or Settings > Analytics. Chats and files never leave.
+if (!isClipPopup && !isDictation && !isCuSupervisor && !isGodTwin) {
+  installRendererErrorReporting()
+  // Screens, fixed-id presses and scroll depth, counted by main into one summary per session.
+  if (hash !== '#ai-activity') {
+    installUsageTracking()
+    // Theme and motion, for the daily snapshot.
+    const reportAppearance = (): void =>
+      track('appearance', { theme: getThemeMode(), ui_animations: uiAnimationsOn() })
+    reportAppearance()
+    onThemeModeChanged(reportAppearance)
+    window.addEventListener(UI_ANIMATIONS_CHANGED, reportAppearance)
+  }
+}
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* popLayout exits pin themselves with a <style>; the CSP admits it only with the nonce. */}

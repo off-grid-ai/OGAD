@@ -19,7 +19,7 @@ import {
   type SseUsage,
   type SseWaitStatus
 } from './sse-stream'
-import { modelRequestOptions, serverResponseError } from './http-post'
+import { ModelServerError, modelRequestOptions, serverResponseError } from './http-post'
 import { generationMetrics, type GenerationMetrics } from '../../shared/generation-metrics'
 
 /** Injectable clock so the accumulator's timing is testable without waiting in real time. */
@@ -209,6 +209,19 @@ export function streamCompletion(
     armIdleTimer()
 
     const req = http.request(modelRequestOptions(port, Buffer.byteLength(body)), (res) => {
+      res.on('error', (error) => {
+        cleanup()
+        if (!timedOut && !aborted) {
+          reject(
+            new ModelServerError(
+              'unavailable',
+              'The model server connection closed.',
+              undefined,
+              error
+            )
+          )
+        }
+      })
       if (res.statusCode !== 200) {
         // Read the server's error body (small, capped) so we surface an ACTIONABLE
         // message (e.g. context overflow from too many connectors, or a tool schema

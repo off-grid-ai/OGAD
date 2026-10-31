@@ -106,7 +106,8 @@ describe('getAllActiveModals', () => {
       computer_use: null,
       image: null,
       speech: null,
-      transcription: null
+      transcription: null,
+      video: null
     })
   })
 
@@ -116,7 +117,8 @@ describe('getAllActiveModals', () => {
       computer_use: null,
       image: 'img-x',
       speech: null,
-      transcription: null
+      transcription: null,
+      video: null
     })
   })
 
@@ -129,7 +131,8 @@ describe('getAllActiveModals', () => {
       computer_use: 'grounder',
       image: 'a',
       speech: 'b',
-      transcription: 'c'
+      transcription: 'c',
+      video: null
     })
   })
 })
@@ -145,7 +148,8 @@ describe('production active-model functions', () => {
       computer_use: 'computer-use-model',
       image: 'image-model',
       speech: 'speech-model',
-      transcription: null
+      transcription: null,
+      video: null
     })
     expect(
       JSON.parse(fs.readFileSync(path.join(tmpDir, 'models', 'active-modalities.json'), 'utf-8'))

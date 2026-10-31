@@ -1,6 +1,13 @@
 // How main stores and reads a chat's versions (database.ts), for the fakes of main that renderer
 // tests use. The thread rules themselves are the real shared ones (chat-thread.ts in @offgrid/sync).
-import { appendPlace, chatThread, neighbourVersion, parentOfVersion } from '@offgrid/sync'
+import {
+  THREAD_ROOT,
+  appendPlace,
+  chatThread,
+  neighbourVersion,
+  parentOfVersion,
+  threadParents
+} from '@offgrid/sync'
 
 export interface ThreadStoredRow {
   id: string | number
@@ -50,24 +57,38 @@ export class ThreadStore {
   private readonly pending = new Map<string, string>()
 
   /** The context a new message is stored with: a version takes its parent and a choice time;
-   *  an appended message stores its parent only once the chat has versions. */
+   *  an appended message stores its parent only once the chat has versions. A failed retry
+   *  (keepShownVersion) takes no choice time, and the version shown before it is chosen again. */
   place(
     rows: readonly ThreadStoredRow[],
     conversationId: string,
     role: string,
-    context: unknown
+    context: unknown,
+    placement?: { keepShownVersion?: boolean }
   ): Context | undefined {
     const base = withoutLists(context)
     const parent = role === 'assistant' ? this.pending.get(conversationId) : undefined
     this.pending.delete(conversationId)
     if (typeof base.parent === 'string' || parent) {
       if (typeof base.parent !== 'string') base.parent = parent
-      if (typeof base.selectedAt !== 'number') base.selectedAt = nextChoice()
+      const kept = parent && placement?.keepShownVersion ? this.shownAfter(rows, parent) : undefined
+      if (kept) {
+        delete base.selectedAt
+        kept.context = { ...contextOf(kept), selectedAt: nextChoice() }
+      } else if (typeof base.selectedAt !== 'number') base.selectedAt = nextChoice()
       return base
     }
     const place = appendPlace(threadRows(rows))
     if (place.parent) return { ...base, parent: place.parent }
     return context && typeof context === 'object' ? base : undefined
+  }
+
+  private shownAfter<T extends ThreadStoredRow>(rows: readonly T[], parent: string): T | undefined {
+    const thread = threadRows(rows)
+    const parents = threadParents(thread)
+    return chatThread(thread).messages.find(
+      (message) => (parents.get(message.uuid) ?? THREAD_ROOT) === parent
+    )?.row
   }
 
   /** An update keeps the message's place in its thread. */

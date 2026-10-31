@@ -240,3 +240,9 @@ quickly. No EV needed.
 
 - [ ] Windows: bundled llama-server doesn't start — fix in progress separately.
 - [ ] Azure Trusted Signing validated + `azureSignOptions` wired (§4) — resumes with Windows.
+
+### Linux AppImage
+
+The AppImage and deb packages are x64 only. On Ubuntu 24.04, install
+`libfuse2t64` before you start the AppImage. Headless servers and some sandboxes
+need the `--no-sandbox` option.

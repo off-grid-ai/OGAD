@@ -18,7 +18,7 @@ import path from 'node:path'
 import { GATEWAY_PORT } from '../src/shared/ports'
 import { completeOnboarding } from './helpers/onboarding'
 import { launchOffGrid } from './helpers/launch'
-import { enginePortsUnavailableReason } from './helpers/ports'
+import { assertEnginePortsFree } from './helpers/ports'
 import { closeAndWait, gotoScreen, mainWindow } from './helpers/windows'
 
 const KEY_NAME = 'E2E laptop'
@@ -95,8 +95,7 @@ const localMinute = (ms: number): { value: string; at: number } => {
 
 test.describe('Gateway access', () => {
   test.beforeEach(async () => {
-    const busy = await enginePortsUnavailableReason()
-    test.skip(busy !== null, busy ?? '')
+    await assertEnginePortsFree()
     profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-gateway-access-'))
     await launch()
   })
