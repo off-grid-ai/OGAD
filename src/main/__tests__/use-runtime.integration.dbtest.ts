@@ -30,31 +30,39 @@ vi.mock('electron', () => ({
   }
 }))
 
-// The OS boundary: reminders land in memory; lists read them back; deletes
-// remove by the id the create returned (the undo path).
-const landed: Array<{ id: string; title: string }> = []
-let created = 0
-vi.mock('../actions/native-helper', () => ({
-  runNativeAction: vi.fn(async (cmd: { command: string; args: Record<string, unknown> }) => {
-    if (cmd.command === 'reminders.create') {
-      const item = { id: `rt${++created}`, title: String(cmd.args.title) }
-      landed.push(item)
-      return { ok: true, result: { id: item.id } }
-    }
-    if (cmd.command === 'reminders.list') {
-      return { ok: true, result: { reminders: landed.map(({ title }) => ({ title })) } }
-    }
-    if (cmd.command === 'reminders.delete') {
-      const index = landed.findIndex((item) => item.id === cmd.args.id)
-      if (index === -1) {
-        return { ok: false, error: `no reminder with id ${String(cmd.args.id)}` }
-      }
-      landed.splice(index, 1)
-      return { ok: true, result: { deleted: cmd.args.id } }
-    }
-    return { ok: false, error: `unhandled ${cmd.command}` }
-  })
-}))
+// The OS boundary: the native actions helper is an executable. This one keeps reminders in a JSON
+// file beside it; lists read them back; deletes remove by the id the create returned (the undo path).
+// It sits where a development build looks first (<cwd>/scripts/actions-helper), so the test runs
+// from the temp profile and the real helper, which would touch this Mac's Reminders, is never found.
+const HELPER = `#!/usr/bin/env node
+const fs = require('node:fs')
+const path = require('node:path')
+const store = path.join(__dirname, 'reminders.json')
+const state = fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')) : { created: 0, landed: [] }
+const cmd = JSON.parse(process.argv[2])
+const reply = (body) => { fs.writeFileSync(store, JSON.stringify(state)); process.stdout.write(JSON.stringify(body) + '\\n') }
+if (cmd.command === 'reminders.create') {
+  const item = { id: 'rt' + ++state.created, title: String(cmd.args.title) }
+  state.landed.push(item)
+  reply({ ok: true, result: { id: item.id } })
+} else if (cmd.command === 'reminders.list') {
+  reply({ ok: true, result: { reminders: state.landed.map(({ title }) => ({ title })) } })
+} else if (cmd.command === 'reminders.delete') {
+  const index = state.landed.findIndex((item) => item.id === cmd.args.id)
+  if (index === -1) reply({ ok: false, error: 'no reminder with id ' + cmd.args.id })
+  else { state.landed.splice(index, 1); reply({ ok: true, result: { deleted: cmd.args.id } }) }
+} else reply({ ok: false, error: 'unhandled ' + cmd.command })
+`
+const helperDir = path.join(tempDir, 'scripts', 'actions-helper')
+fs.mkdirSync(helperDir, { recursive: true })
+fs.writeFileSync(path.join(helperDir, 'actions-helper'), HELPER, { mode: 0o755 })
+const landed = (): Array<{ id: string; title: string }> => {
+  const store = path.join(helperDir, 'reminders.json')
+  return fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')).landed : []
+}
+const originalCwd = process.cwd()
+beforeAll(() => process.chdir(tempDir))
+afterAll(() => process.chdir(originalCwd))
 
 afterAll(() => {
   if (originalUserData === undefined) {
@@ -102,7 +110,7 @@ describe('getActionsRuntime', () => {
     runtime.kick()
     const outcome = await runtime.waitForOutcome(proposed.id, 10_000)
     expect(outcome?.outcome).toBe('done')
-    expect(landed.map(({ title }) => title)).toEqual(['Send the deck'])
+    expect(landed().map(({ title }) => title)).toEqual(['Send the deck'])
     expect(fanned).toEqual([{ id: proposed.id, undoable: true }])
     offOutcome()
 
@@ -112,7 +120,7 @@ describe('getActionsRuntime', () => {
       expect(outcome.record.effectId).toBe('rt1')
       const undone = await runtime.undo(outcome.record)
       expect(undone).toEqual({ ok: true })
-      expect(landed).toEqual([])
+      expect(landed()).toEqual([])
     }
   })
 
