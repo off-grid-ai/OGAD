@@ -66,6 +66,22 @@ function stageSpeakerDiarize() {
 
 stageSpeakerDiarize()
 
+// c2patool signs the AI label into exported videos, on every platform that has a build. Like the
+// diarize helper, it goes where the platform's installer takes its binaries from.
+{
+  const bin = process.platform === 'linux' ? path.join(root, 'build', 'linux-bin') : stageDir
+  const result = spawnSync(
+    process.execPath,
+    [path.join(root, 'scripts', 'fetch-c2patool.mjs'), '--bin', bin],
+    { cwd: root, stdio: 'inherit' }
+  )
+  if (result.status !== 0) {
+    // A release build must carry it; a local build can go on with the metadata label only.
+    if (process.env.CI) process.exit(result.status ?? 1)
+    console.warn('[c2patool] not staged; exports keep the metadata label only')
+  }
+}
+
 if (process.platform !== 'darwin') process.exit(0)
 
 /**
@@ -96,15 +112,3 @@ run(path.join(root, 'scripts', 'build-ocr.sh'), root)
 run(path.join(root, 'scripts', 'build-actions-helper.sh'), root)
 run(path.join(root, 'pro', 'scripts', 'build-proximity-helper.sh'), path.join(root, 'pro'))
 
-// c2patool signs the AI label into exported videos, on every platform that has a build.
-{
-  const result = spawnSync(process.execPath, [path.join(root, 'scripts', 'fetch-c2patool.mjs')], {
-    cwd: root,
-    stdio: 'inherit'
-  })
-  if (result.status !== 0) {
-    // A release build must carry it; a local build can go on with the metadata label only.
-    if (process.env.CI) process.exit(result.status ?? 1)
-    console.warn('[c2patool] not staged; exports keep the metadata label only')
-  }
-}

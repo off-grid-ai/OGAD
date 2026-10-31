@@ -734,10 +734,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install Vulkan SDK for Whisper
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: '1.4.321.1'
-          cache: true
+        # LunarG's own installer, run silently, as llama.cpp's Windows CI does. In the SDK that
+        # humbletim/install-vulkan-sdk unpacked, CMake's FindVulkan found glslc but not the loader
+        # library or headers, so Whisper's configure failed; the step below checks all three.
+        shell: pwsh
+        env:
+          VULKAN_VERSION: '1.4.321.1'
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'vulkansdk.exe'
+          curl.exe -fsSL --retry 3 -o $installer "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK download failed' }
+          $root = "C:\VulkanSDK\$env:VULKAN_VERSION"
+          & $installer --root $root --accept-licenses --default-answer --confirm-command install
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK install failed' }
+          foreach ($need in @('Lib\vulkan-1.lib', 'Include\vulkan\vulkan.h', 'Bin\glslc.exe')) {
+            if (-not (Test-Path (Join-Path $root $need))) { throw "Vulkan SDK is missing $need" }
+          }
+          "VULKAN_SDK=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$root\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: Build Windows Vulkan Whisper
         shell: pwsh
         run: ./scripts/build-whisper-vulkan-win.ps1
