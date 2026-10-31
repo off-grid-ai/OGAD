@@ -90,11 +90,11 @@ describe('LLM eviction for image generation', () => {
 
   it('waits for the engine to exit and keeps respawn blocked until release', async () => {
     const svc = await runningService()
-    const [{ pid }] = engine.launches()
+    const pid = engine.launches()[0]!.pid
 
     await svc.runtime.evict()
     // Eviction resolved only once the engine process was gone.
-    expect(processAlive(pid!)).toBe(false)
+    expect(processAlive(pid)).toBe(false)
     expect(svc.isReady()).toBe(false)
     await expect(svc.chat('hello')).rejects.toThrow('paused')
     expect(engine.launches()).toHaveLength(1)
