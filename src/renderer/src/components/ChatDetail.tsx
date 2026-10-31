@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'motion/react'
 import { Empty, EmptyDescription } from '@offgrid/operator-ui/operator/coss/empty'
 import { Skeleton } from '@offgrid/operator-ui/operator/coss/skeleton'
 import { AnimatedNumber } from '@offgrid/operator-ui/operator/motion/animated-number'
-import { PageHeader, Section } from '@offgrid/operator-ui/operator/experience'
+import { Section } from '@offgrid/operator-ui/operator/experience'
+import { PageShell } from './PageShell'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -254,39 +255,37 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity }: ChatDetailProp
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-6 pt-5">
-        <button
-          onClick={() => (expandedSection ? setExpandedSection(null) : onBack())}
-          className="mb-4 p-2 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors"
-          title={expandedSection ? `Close (${primaryModifier()}+[ or Esc)` : `Back (${primaryModifier()}+[)`}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
-        <PageHeader
-          title={readableTitle}
-          eyebrow={modelName ? llmLabel : undefined}
-          actions={
-            expandedSection ? (
-              <span className="px-2 py-1 rounded-lg bg-neutral-800 text-neutral-400 text-xs">
-                {expandedSection.charAt(0).toUpperCase() + expandedSection.slice(1)} View
-              </span>
-            ) : undefined
-          }
-          className="pb-6 [&>div:first-child]:max-w-full [&_h1]:truncate"
-        />
-      </div>
-
+    <PageShell
+      fill
+      title={readableTitle}
+      eyebrow={modelName ? llmLabel : undefined}
+      actions={
+        <>
+          <button
+            onClick={() => (expandedSection ? setExpandedSection(null) : onBack())}
+            className="p-2 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors"
+            title={expandedSection ? `Close (${primaryModifier()}+[ or Esc)` : `Back (${primaryModifier()}+[)`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+          </button>
+          {expandedSection ? (
+            <span className="px-2 py-1 rounded-lg bg-neutral-800 text-neutral-400 text-xs">
+              {expandedSection.charAt(0).toUpperCase() + expandedSection.slice(1)} View
+            </span>
+          ) : null}
+        </>
+      }
+    >
       {/* Loading state */}
       {loading && (
-        <div className="flex-1 px-6 pb-6 space-y-12 overflow-hidden" aria-busy="true">
+        <div className="flex-1 space-y-12 overflow-hidden" aria-busy="true">
           <Skeleton className="h-48 rounded-2xl" />
           <Skeleton className="h-32 rounded-2xl" />
           <Skeleton className="h-32 rounded-2xl" />
@@ -303,7 +302,7 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity }: ChatDetailProp
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex-1 px-6 pb-6 overflow-y-auto"
+              className="flex-1 overflow-y-auto"
             >
               <div className="relative min-h-full rounded-2xl p-5 bg-neutral-900/60 border border-neutral-800">
                 <BorderBeam
@@ -351,7 +350,7 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity }: ChatDetailProp
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex-1 px-6 pb-6 overflow-hidden"
+              className="flex-1 overflow-hidden"
             >
               <div className="relative h-full rounded-2xl p-5 bg-neutral-900/60 border border-neutral-800 overflow-hidden">
                 <BorderBeam
@@ -412,7 +411,7 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity }: ChatDetailProp
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex-1 px-6 pb-6 space-y-12 overflow-y-auto"
+              className="flex-1 space-y-12 overflow-y-auto"
             >
               <Section
                 label="Summary"
@@ -522,6 +521,6 @@ export function ChatDetail({ sessionId, onBack, onSelectEntity }: ChatDetailProp
           )}
         </AnimatePresence>
       )}
-    </div>
+    </PageShell>
   )
 }

@@ -86,6 +86,7 @@ import { AnimatedNumber } from '@offgrid/operator-ui/operator/motion/animated-nu
 import { TextEffect } from '@offgrid/operator-ui/operator/text-effect'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { SidePanel } from '../SidePanel'
+import { PageShell } from '../PageShell'
 import { ImageLightbox } from '../media/ImageLightbox'
 import {
   resolveImageParams,
@@ -4691,24 +4692,209 @@ export function MemoryChat({
     )
   }, [contentMatchIds, convSearch, conversations, conversationIds])
 
-  return (
-    <ActiveConversationProvider conversationId={activeConversationId}>
-      {/* prettier-ignore */}
+  // The pane header: split panes and God keep this compact row (God's page owns its header).
+  const chatHeaderControls = (
+    <>
+      {/* Active models and Settings: the same drawers in Chat and God (God runs tasks too). They
+              are app-wide, so a split view shows them once, in the pane that holds its controls. */}
+      {(!split || onToggleSplit) && (
+        <>
+          {/* Active models — pick the model per modality (text/image/voice/STT) */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  closePanels()
+                  setModelPickerOpen(true)
+                }}
+                className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Active models"
+              >
+                <Cpu className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Active models</TooltipContent>
+          </Tooltip>
+
+          {/* Keep the conversation in place while its model settings drawer is open. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => {
+                  closePanels()
+                  setSettingsInitialTab('model')
+                  setSettingsOpen(true)
+                }}
+                className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Settings"
+              >
+                <Gear className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
+        </>
+      )}
+      {/* God has no image gallery. */}
+      {!god && (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                ref={galleryTriggerRef}
+                onClick={openGallery}
+                className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+                aria-label="Gallery"
+              >
+                <Images className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Gallery</TooltipContent>
+          </Tooltip>
+        </>
+      )}
+      {onToggleSplit && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={onToggleSplit}
+              className={`rounded-md border p-1.5 transition-colors ${split ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+              aria-label={split ? 'One chat' : 'Open tabs side by side'}
+            >
+              {split ? (
+                <Square className="h-4 w-4" />
+              ) : (
+                <SquareSplitHorizontal className="h-4 w-4" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{split ? 'One chat' : 'Open tabs side by side'}</TooltipContent>
+        </Tooltip>
+      )}
+      {split && paneCount !== undefined && onPaneCountChange && (
+        <div className="flex items-center rounded-md border border-neutral-800 text-neutral-500">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => onPaneCountChange(paneCount - 1)}
+                disabled={paneCount <= 2}
+                className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
+                aria-label="Remove the last pane"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Remove the last pane</TooltipContent>
+          </Tooltip>
+          <span className="min-w-4 text-center text-xs tabular-nums text-neutral-300">
+            {paneCount}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => onPaneCountChange(paneCount + 1)}
+                disabled={paneCount >= 6}
+                className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
+                aria-label="Add a pane"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Add a pane</TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+      {split && onToggleBroadcast && (
+        <div
+          role="radiogroup"
+          aria-label="Chat inputs"
+          className="flex items-center rounded-md border border-neutral-800"
+        >
+          {[
+            { shared: true, label: 'One input for every pane', Icon: Textbox },
+            { shared: false, label: 'An input in each pane', Icon: SquaresFour }
+          ].map(({ shared, label, Icon }) => (
+            <Tooltip key={label}>
+              <TooltipTrigger asChild>
+                <button
+                  role="radio"
+                  aria-checked={Boolean(broadcast) === shared}
+                  aria-label={label}
+                  onClick={() => {
+                    if (Boolean(broadcast) !== shared) onToggleBroadcast()
+                  }}
+                  className={`p-1.5 transition-colors ${Boolean(broadcast) === shared ? 'text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
+                >
+                  <Icon className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{label}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+      )}
+      <TaskPanelTrigger conversationId={activeConversationId} />
+    </>
+  )
+  const chatFrameStyle: React.CSSProperties = {
+    // Only the code/artifact canvas reflows content beside it (a deliberate
+    // side-by-side edit surface). The drawers (settings, models, skills, gallery,
+    // lightbox) are fixed overlays with their own opaque backdrop — they draw ON
+    // TOP, so reserving width here just squeezed the chat to one word per line.
+    paddingRight: canvasArtifact
+      ? canvasWidth
+        ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
+        : 'max(360px, 30vw)'
+      : undefined
+  }
+  // Chat as a top-level screen renders in the one page shell; a split pane or God's embedded chat
+  // is not a page, so it keeps the compact pane header.
+  const renderChatFrame = (body: React.ReactNode): React.ReactNode =>
+    !split && !god ? (
+      <PageShell
+        fill
+        className="font-mono bg-neutral-950 transition-[padding] duration-200"
+        style={chatFrameStyle}
+        title="Chat"
+        description={
+          activeProjectId && activeProjectName ? (
+            <button
+              onClick={() => onOpenProject?.(activeProjectId)}
+              title={`Open project “${activeProjectName}”`}
+              className="flex max-w-full items-center gap-1 truncate text-xs text-neutral-500 transition-colors hover:text-green-500"
+            >
+              <FolderOpen className="h-3 w-3 shrink-0" />
+              <span className="truncate">In {activeProjectName}</span>
+            </button>
+          ) : (
+            'Private and on this device. Chat, generate, and build.'
+          )
+        }
+        actions={
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={toggleConversationList}
+                  className="rounded-md border border-neutral-800 p-1.5 text-neutral-500 transition-colors hover:border-green-500 hover:text-green-500"
+                  aria-label={conversationsToggleLabel}
+                >
+                  <SidebarSimple className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{conversationsToggleLabel}</TooltipContent>
+            </Tooltip>
+            {chatHeaderControls}
+          </>
+        }
+      >
+        {body}
+      </PageShell>
+    ) : (
       <div
         className="flex h-full flex-col font-mono bg-neutral-950 transition-[padding] duration-200"
-        style={{
-          // Only the code/artifact canvas reflows content beside it (a deliberate
-          // side-by-side edit surface). The drawers (settings, models, skills, gallery,
-          // lightbox) are fixed overlays with their own opaque backdrop — they draw ON
-          // TOP, so reserving width here just squeezed the chat to one word per line.
-          paddingRight: canvasArtifact
-            ? canvasWidth
-              ? `${canvasWidth}px` // canvas open + resized → reflow content to its width
-              : 'max(360px, 30vw)'
-            : undefined
-        }}
+        style={chatFrameStyle}
       >
-        {/* Header */}
         <header className="flex items-center gap-3 border-b border-neutral-900 px-6 py-4">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -4764,142 +4950,17 @@ export function MemoryChat({
             )}
           </div>
 
-          {/* Active models and Settings: the same drawers in Chat and God (God runs tasks too). They
-              are app-wide, so a split view shows them once, in the pane that holds its controls. */}
-          {(!split || onToggleSplit) && (
-            <>
-          {/* Active models — pick the model per modality (text/image/voice/STT) */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => {
-                  closePanels()
-                  setModelPickerOpen(true)
-                }}
-                className={`rounded-md border p-1.5 transition-colors ${modelPickerOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                aria-label="Active models"
-              >
-                <Cpu className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Active models</TooltipContent>
-          </Tooltip>
-
-          {/* Keep the conversation in place while its model settings drawer is open. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => {
-                  closePanels()
-                  setSettingsInitialTab('model')
-                  setSettingsOpen(true)
-                }}
-                className={`rounded-md border p-1.5 transition-colors ${settingsOpen ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                aria-label="Settings"
-              >
-                <Gear className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Settings</TooltipContent>
-          </Tooltip>
-            </>
-          )}
-          {/* God has no image gallery. */}
-          {!god && (
-            <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                ref={galleryTriggerRef}
-                onClick={openGallery}
-                className={`rounded-md border p-1.5 transition-colors ${showGallery ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                aria-label="Gallery"
-              >
-                <Images className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Gallery</TooltipContent>
-          </Tooltip>
-            </>
-          )}
-          {onToggleSplit && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={onToggleSplit}
-                  className={`rounded-md border p-1.5 transition-colors ${split ? 'border-green-500 text-green-500' : 'border-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
-                  aria-label={split ? 'One chat' : 'Open tabs side by side'}
-                >
-                  {split ? <Square className="h-4 w-4" /> : <SquareSplitHorizontal className="h-4 w-4" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{split ? 'One chat' : 'Open tabs side by side'}</TooltipContent>
-            </Tooltip>
-          )}
-          {split && paneCount !== undefined && onPaneCountChange && (
-            <div className="flex items-center rounded-md border border-neutral-800 text-neutral-500">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => onPaneCountChange(paneCount - 1)}
-                    disabled={paneCount <= 2}
-                    className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
-                    aria-label="Remove the last pane"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Remove the last pane</TooltipContent>
-              </Tooltip>
-              <span className="min-w-4 text-center text-xs tabular-nums text-neutral-300">
-                {paneCount}
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => onPaneCountChange(paneCount + 1)}
-                    disabled={paneCount >= 6}
-                    className="p-1.5 transition-colors hover:text-neutral-300 disabled:opacity-40"
-                    aria-label="Add a pane"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Add a pane</TooltipContent>
-              </Tooltip>
-            </div>
-          )}
-          {split && onToggleBroadcast && (
-            <div
-              role="radiogroup"
-              aria-label="Chat inputs"
-              className="flex items-center rounded-md border border-neutral-800"
-            >
-              {[
-                { shared: true, label: 'One input for every pane', Icon: Textbox },
-                { shared: false, label: 'An input in each pane', Icon: SquaresFour }
-              ].map(({ shared, label, Icon }) => (
-                <Tooltip key={label}>
-                  <TooltipTrigger asChild>
-                    <button
-                      role="radio"
-                      aria-checked={Boolean(broadcast) === shared}
-                      aria-label={label}
-                      onClick={() => {
-                        if (Boolean(broadcast) !== shared) onToggleBroadcast()
-                      }}
-                      className={`p-1.5 transition-colors ${Boolean(broadcast) === shared ? 'text-green-500' : 'text-neutral-500 hover:text-neutral-300'}`}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{label}</TooltipContent>
-                </Tooltip>
-              ))}
-            </div>
-          )}
-          <TaskPanelTrigger conversationId={activeConversationId} />
+          {chatHeaderControls}
         </header>
+        {body}
+      </div>
+    )
+
+  return (
+    <ActiveConversationProvider conversationId={activeConversationId}>
+      {renderChatFrame(
+        // prettier-ignore
+        <>
 
         {/* Body */}
         <PanelGroup
@@ -6732,7 +6793,8 @@ export function MemoryChat({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
+        </>
+      )}
     </ActiveConversationProvider>
   )
 }

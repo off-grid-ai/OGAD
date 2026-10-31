@@ -653,7 +653,8 @@ describe('<MemoryChat/> image mode — the generateImage payload is the terminal
       'transition-[flex-grow]'
     )
     const toggle = screen.getByRole('button', { name: 'Collapse conversation list' })
-    expect(toggle.closest('header')?.firstElementChild).toBe(toggle)
+    // The toggle sits in the page header, not inside the list it collapses.
+    expect(toggle.closest('[data-slot="page-header"]')).not.toBeNull()
     expect(historyPanel?.querySelector('[aria-label="Collapse conversation list"]')).toBeNull()
     expect(screen.queryByTitle('Show conversations')).toBeNull()
   })

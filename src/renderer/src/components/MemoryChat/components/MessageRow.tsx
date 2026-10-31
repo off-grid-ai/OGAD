@@ -535,7 +535,7 @@ function MessageBubble({
           onCancel={actions.cancelEdit}
           onSave={actions.saveEdit}
         />
-      ) : (
+      ) : isVideoEcho(message) ? null : (
         <MessageMarkdown message={message} navigation={navigation} withoutArtifact={!!artifact} />
       )}
       <ResponseCutoffNotice cutoff={message.cutoff} />
@@ -910,8 +910,19 @@ function sameMessageState(
   )
 }
 
+// The line stored with a video reply ("Generated for: …", "Storyboard ready: 3 shots.", a film's
+// title) only echoes the prompt above it, the card, or a step already past. It stays stored.
+const VIDEO_ECHO = /^(Generated( video)? for: .*|Storyboard ready: \d+ shots?\.)$/s
+
+function isVideoEcho(message: ChatMessage): boolean {
+  // A film's line is its title or a step past ("Storyboard ready…"): its card carries the film.
+  if (message.context?.videoStoryId) return true
+  return Boolean(message.videoPath) && VIDEO_ECHO.test(message.content.trim())
+}
+
 /** A film started from this chat. Pro draws it; without Pro the message line stands alone. */
-/** A clip in text chat: the player, then Pro's actions (Continue, New shot, Make it a story). */
+/** A clip in text chat. Pro draws the whole card (its player and actions, the same as the watch
+ *  page's); without Pro, the basic player. */
 function VideoCardSlot({
   messageId,
   videoPath
@@ -919,7 +930,14 @@ function VideoCardSlot({
   messageId: string
   videoPath: string
 }): React.JSX.Element {
+  const [VideoCard] = useState(() => getSlot(SLOTS.chatVideoCard))
   const [VideoActions] = useState(() => getSlot(SLOTS.chatVideoActions))
+  if (VideoCard)
+    return (
+      <div className="mb-2">
+        <VideoCard messageId={messageId} videoPath={videoPath} />
+      </div>
+    )
   return (
     <div className="mb-2 flex flex-col gap-2.5">
       <ChatVideoPreview path={videoPath} />

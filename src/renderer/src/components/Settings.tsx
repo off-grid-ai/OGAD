@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ProgressiveBlur } from './ui/progressive-blur'
-import { PageHeader, Section } from '@offgrid/operator-ui/operator/experience'
+import { Section } from '@offgrid/operator-ui/operator/experience'
+import { PageShell } from './PageShell'
 import { Badge } from '@offgrid/operator-ui/operator/coss/badge'
 import { SetupPanel } from './setup/SetupPanel'
 import { PerformancePackPanel } from './setup/PerformancePackPanel'
@@ -146,20 +147,16 @@ export function Settings({
   }, [selectedSection, onInitialSectionConsumed])
 
   return (
-    <div className="relative flex h-full flex-col">
-      {/* Fixed header — stays put while the content below scrolls. */}
-      <PageHeader
-        className="shrink-0 px-1 pb-6"
-        title="Settings"
-        description={
-          isPro
-            ? 'Who you are, what Off Grid AI has learned, and your devices'
-            : 'Personalization & automation unlock with Pro'
-        }
-      />
-
-      {/* Scrolling content below the fixed header */}
-      <div className="relative flex-1 overflow-y-auto overflow-x-hidden px-1 pt-2 pb-16">
+    <PageShell
+      className="relative"
+      title="Settings"
+      description={
+        isPro
+          ? 'Who you are, what Off Grid AI has learned, and your devices'
+          : 'Personalization & automation unlock with Pro'
+      }
+    >
+      <div className="relative overflow-x-hidden pt-2 pb-16">
         <motion.div
           ref={gridRef}
           data-columns={columns}
@@ -354,6 +351,6 @@ export function Settings({
       </div>
 
       <ProgressiveBlur height="80px" position="bottom" className="pointer-events-none" />
-    </div>
+    </PageShell>
   )
 }

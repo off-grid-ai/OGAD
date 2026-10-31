@@ -3,14 +3,13 @@ import { flow } from '@renderer/lib/analytics'
 import {
   ArrowSquareOut,
   Check,
-  Sparkle,
   Key,
   CircleNotch,
   DeviceMobile,
   Clock,
   Desktop
 } from '@phosphor-icons/react'
-import { TextEffect } from '@offgrid/operator-ui/operator/text-effect'
+import { PageShell } from '../PageShell'
 import { AnimatedGroup } from '@offgrid/operator-ui/operator/motion/animated-group'
 import { Button } from '../ui/button'
 import { PRO_PAY_URL, PRO_FEATURES, featureSupportsPlatform, type ProFeature } from './proCatalog'
@@ -140,48 +139,19 @@ export function UpgradeScreen({
   }, [gateFeature])
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-10 font-mono lg:px-12">
-      <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-x-12 gap-y-8 lg:grid-cols-[1.4fr_minmax(320px,1fr)]">
+    <PageShell
+      className="font-mono"
+      eyebrow={
+        showComingSoonBadge(comingSoon, linux, f)
+          ? 'Off Grid AI Pro · Coming soon'
+          : `Off Grid AI Pro · ${linux && !f && platformNotice ? 'Available features' : 'Available now'}`
+      }
+      title={f ? f.label : linux ? 'Off Grid AI Pro on Linux' : 'Off Grid AI Pro is here'}
+      description={f?.tagline}
+    >
+      <div className="grid grid-cols-1 items-start gap-x-12 gap-y-8 lg:grid-cols-[1.4fr_minmax(320px,1fr)]">
         {/* Left — the pitch (left-aligned, desktop reading column) */}
         <div className="flex flex-col gap-5">
-          {showComingSoonBadge(comingSoon, linux, f) ? (
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-neutral-700 bg-neutral-800/50 px-3 py-1 text-[11px] uppercase tracking-wide text-neutral-300">
-              <Clock weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro · Coming soon
-            </span>
-          ) : (
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] uppercase tracking-wide text-emerald-400">
-              <Sparkle weight="fill" className="h-3.5 w-3.5" /> Off Grid AI Pro ·{' '}
-              {linux && !f && platformNotice ? 'Available features' : 'Available now'}
-            </span>
-          )}
-
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-neutral-800 bg-neutral-900/60">
-              {f ? (
-                <f.icon
-                  weight="duotone"
-                  className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
-                />
-              ) : (
-                <Sparkle
-                  weight="duotone"
-                  className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
-                />
-              )}
-            </div>
-            <div className="min-w-0">
-              <TextEffect
-                as="h1"
-                preset="fade-in-blur"
-                per="word"
-                className="text-3xl font-semibold tracking-tight text-white"
-              >
-                {f ? f.label : linux ? 'Off Grid AI Pro on Linux' : 'Off Grid AI Pro is here'}
-              </TextEffect>
-              {f && <p className="mt-1 text-base text-neutral-300">{f.tagline}</p>}
-            </div>
-          </div>
-
           <p className="max-w-2xl text-sm leading-relaxed text-neutral-400">
             {f
               ? f.description
@@ -224,7 +194,7 @@ export function UpgradeScreen({
         </div>
 
         {/* Right - account-aware action card, shared by upgrade and entitlement states. */}
-        <aside className="flex flex-col gap-4 rounded-xl border border-neutral-800 bg-neutral-900/40 p-5 lg:sticky lg:top-10">
+        <aside className="flex flex-col gap-4 rounded-xl border border-neutral-800 bg-neutral-900/40 p-5 lg:sticky lg:top-0">
           {comingSoon ? (
             <>
               <div className="text-[10px] uppercase tracking-widest text-neutral-500">
@@ -334,6 +304,6 @@ export function UpgradeScreen({
           </button>
         </aside>
       </div>
-    </div>
+    </PageShell>
   )
 }

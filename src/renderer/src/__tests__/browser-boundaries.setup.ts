@@ -95,6 +95,18 @@ vi.mock('motion/react', async () => {
 })
 
 /**
+ * jsdom loads no stylesheet, so the CSS variable the voice waveform paints with is unset here (in
+ * the app its Tailwind class sets `--foreground` on the canvas's parent). The waveform reads it from
+ * its canvas on every meter frame, and jsdom (29) resolves an inherited property that no ancestor
+ * sets by walking the ancestors again at each level: the cost doubles per level of nesting, about
+ * 0.6 s a read at the chat's depth. Set it on <html> so the read finds a value, as it does in
+ * Chromium.
+ */
+if (typeof document !== 'undefined') {
+  document.documentElement.style.setProperty('--foreground', 'rgb(52 211 153)')
+}
+
+/**
  * jsdom implements no scrolling at all, so Element.scrollIntoView is simply absent - calling it
  * throws. Real browsers always have it. Stub it here rather than guarding each call site, so
  * product code is not shaped around a gap in the test environment.
