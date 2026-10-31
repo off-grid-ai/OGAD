@@ -312,32 +312,6 @@ button:disabled,
   box-shadow: none;
 }
 
-/* A focused field shows a 1px emerald border and nothing more: no ring, no halo, and no glow on the
-   box around it (DESIGN_PHILOSOPHY bans glows). The OGAD skin and the pinned alive-semantic.css
-   both still draw them; these rules come later and are unlayered, so they win in every build.
-   Beamed field slots ([data-slot]) keep the beam above. A box holding a focused field goes back to
-   its own layered shadow (Tailwind's, alive's), as if the skin had never lit it.
-   TODO: delete these two rules once the @offgrid/operator-ui pin includes ui-library's skin.css and
-   alive-semantic.css focus fix (0dfd8fc and the skin.css fix); the library is the one source. */
-:where(input, textarea, select):where([class*='border']):not(
-    [type='checkbox'],
-    [type='radio'],
-    [type='range'],
-    [class~='border-0'],
-    [class~='border-none'],
-    [data-slot]
-  ):focus {
-  border-color: rgb(var(--og-rgb-primary));
-  box-shadow: none;
-}
-:where([class*='border']):not(input, textarea, select, button):has(
-    > :is(input, textarea):not([type='checkbox'], [type='radio'], [type='range']):focus,
-    > * > :is(input, textarea):not([type='checkbox'], [type='radio'], [type='range']):focus,
-    > * > * > :is(input, textarea):not([type='checkbox'], [type='radio'], [type='range']):focus
-  ) {
-  box-shadow: revert-layer;
-}
-
 /* The beam takes its corners from the outermost field slot (borderRadius: inherit). A combobox or
    autocomplete wraps its rounded control (input-control, rounded-lg) in a group slot with no
    radius, so the beam traced a square box round a rounded field. Give the group the control's
