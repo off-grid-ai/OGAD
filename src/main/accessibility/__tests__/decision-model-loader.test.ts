@@ -23,6 +23,7 @@ import {
   installKevModel,
   type FakeKevRuntime
 } from '../../__tests__/harness/fake-kev-runtime'
+import { holdDecisionPorts } from '../../__tests__/harness/decision-port-lock'
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-decision-loader-'))
 const BIN = path.join(ROOT, 'bin')
@@ -143,7 +144,9 @@ beforeAll(async () => {
   expect(await setActiveModel(chatId)).toEqual({ success: true })
 })
 
+let releasePorts: () => void = () => {}
 beforeEach(async () => {
+  releasePorts = await holdDecisionPorts()
   fs.rmSync(BIN, { recursive: true, force: true })
   fs.rmSync(path.join(ROOT, 'reports'), { recursive: true, force: true })
   process.env.OFFGRID_BIN_DIR = BIN
@@ -170,6 +173,7 @@ afterEach(async () => {
   llm.stop()
   for (const { pid } of [...engine.launches(), ...kev.starts()])
     if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  releasePorts()
 })
 
 afterAll(() => {
