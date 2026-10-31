@@ -39,7 +39,7 @@ const json = (res, status, body) => {
 const server = http.createServer((req, res) => {
   if (req.url === '/health') return held() ? json(res, 503, { error: { message: 'Loading model' } }) : json(res, 200, { status: 'ok' })
   if (held()) return json(res, 503, { error: { message: 'Loading model' } })
-  if (req.url === '/props') return json(res, 200, { modalities: { vision: false }, chat_template_caps: { supports_tools: true } })
+  if (req.url === '/props') return json(res, 200, { modalities: { vision: args.includes('--mmproj') }, chat_template_caps: { supports_tools: true } })
   if (req.url === '/v1/models') return json(res, 200, { data: [{ id: model }] })
   const brain = path.join(root, 'brain')
   if (fs.existsSync(brain)) {
@@ -129,6 +129,18 @@ export interface BrainRequest {
   signal: AbortSignal
 }
 
+/** A reply richer than text: reasoning, native tool calls, a finish reason, or a raw JSON body
+ *  (llama-server's /completion shape, say). */
+export type BrainReply =
+  | string
+  | { json: unknown }
+  | {
+      content?: string
+      reasoning?: string
+      toolCalls?: Array<{ id?: string; name: string; arguments: unknown }>
+      finishReason?: string
+    }
+
 export interface ModelBrain {
   /** Every request answered so far, oldest first. */
   requests: BrainRequest[]
@@ -148,7 +160,7 @@ const messageText = (content: unknown): string =>
  */
 export async function useModelBrain(
   engine: FakeLlamaEngine,
-  answer: (request: BrainRequest) => string | Promise<string>
+  answer: (request: BrainRequest) => BrainReply | Promise<BrainReply>
 ): Promise<ModelBrain> {
   const requests: BrainRequest[] = []
   const server = http.createServer((req, res) => {
@@ -171,9 +183,9 @@ export async function useModelBrain(
         signal: controller.signal
       }
       requests.push(request)
-      let content: string
+      let reply: BrainReply
       try {
-        content = await answer(request)
+        reply = await answer(request)
       } catch (error) {
         if (!res.writableEnded && !controller.signal.aborted) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -182,17 +194,49 @@ export async function useModelBrain(
         return
       }
       if (controller.signal.aborted) return
+      if (typeof reply === 'object' && 'json' in reply) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(reply.json))
+        return
+      }
+      const turn = typeof reply === 'string' ? { content: reply } : reply
+      const toolCalls = (turn.toolCalls ?? []).map((call, index) => ({
+        index,
+        id: call.id ?? `call_${index}`,
+        type: 'function',
+        function: {
+          name: call.name,
+          arguments:
+            typeof call.arguments === 'string' ? call.arguments : JSON.stringify(call.arguments)
+        }
+      }))
+      const finish = turn.finishReason ?? (toolCalls.length ? 'tool_calls' : 'stop')
       if (body.stream === true) {
+        const frame = (delta: Record<string, unknown>, reason: string | null = null): string =>
+          `data: ${JSON.stringify({ choices: [{ delta, finish_reason: reason }] })}\n\n`
         res.writeHead(200, { 'Content-Type': 'text/event-stream' })
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
+        if (turn.reasoning) res.write(frame({ reasoning_content: turn.reasoning }))
+        if (turn.content) res.write(frame({ content: turn.content }))
+        if (toolCalls.length) res.write(frame({ tool_calls: toolCalls }))
+        res.write(frame({}, finish))
         res.end('data: [DONE]\n\n')
         return
       }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(
         JSON.stringify({
-          content,
-          choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }]
+          content: turn.content ?? '',
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: turn.content ?? '',
+                ...(turn.reasoning ? { reasoning_content: turn.reasoning } : {}),
+                ...(toolCalls.length ? { tool_calls: toolCalls } : {})
+              },
+              finish_reason: finish
+            }
+          ]
         })
       )
     })
