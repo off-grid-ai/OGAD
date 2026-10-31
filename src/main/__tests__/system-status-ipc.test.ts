@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * The one truth record the renderer gets about this machine's health.
@@ -14,52 +14,94 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
  * handling are all real.
  */
 
-const permissions = vi.hoisted(() => ({ getPermissionStatus: vi.fn() }))
-vi.mock('../permissions', () => permissions)
+// The boundaries: macOS's permission store (TCC, read through Electron's systemPreferences) and the
+// multicast route Local Network needs (a UDP socket). Permissions, the health composition, the setup
+// health owner and the chat engine owner are all real, on a Mac, in a temp profile.
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import type * as Dgram from 'node:dgram'
 
-const setup = vi.hoisted(() => ({ getChatHealth: vi.fn(), getSystemHealth: vi.fn() }))
-vi.mock('../setup', () => setup)
-
-const llmBoundary = vi.hoisted(() => ({
-  listener: undefined as (() => void) | undefined,
-  onHealthInvalidated: vi.fn((listener: () => void) => {
-    llmBoundary.listener = listener
-    return vi.fn()
-  })
-}))
-vi.mock('../llm', () => ({ llm: llmBoundary }))
-
-const GRANTED = {
+const tcc = vi.hoisted(() => ({
   accessibility: true,
   screenRecording: true,
   localNetwork: true,
-  allGranted: true
+  failure: undefined as unknown,
+  reads: 0
+}))
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => process.env.OFFGRID_DATA_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  },
+  safeStorage: { isEncryptionAvailable: () => false },
+  BrowserWindow: { getAllWindows: () => [] },
+  shell: {},
+  desktopCapturer: {},
+  systemPreferences: {
+    isTrustedAccessibilityClient: () => {
+      tcc.reads++
+      if (tcc.failure !== undefined) throw tcc.failure
+      return tcc.accessibility
+    },
+    getMediaAccessStatus: () => (tcc.screenRecording ? 'granted' : 'denied')
+  }
+}))
+vi.mock('node:dgram', async (importOriginal) => {
+  const actual = await importOriginal<typeof Dgram>()
+  const createSocket = (() => ({
+    once: () => {},
+    close: () => {},
+    send: (_b: Buffer, _p: number, _h: string, done: (error: Error | null) => void) =>
+      queueMicrotask(() => done(tcc.localNetwork ? null : new Error('EHOSTUNREACH')))
+  })) as unknown as typeof actual.createSocket
+  return { ...actual, default: { ...actual, createSocket }, createSocket }
+})
+
+import { getChatHealth, getSystemHealth } from '../setup'
+import { llm } from '../llm'
+
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-system-status-'))
+const previous = {
+  data: process.env.OFFGRID_DATA_DIR,
+  platform: Object.getOwnPropertyDescriptor(process, 'platform')!
 }
+process.env.OFFGRID_DATA_DIR = profile
+Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+afterAll(() => {
+  Object.defineProperty(process, 'platform', previous.platform)
+  if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previous.data
+  fs.rmSync(profile, { recursive: true, force: true })
+})
+
+const grant = (granted: {
+  accessibility: boolean
+  screenRecording: boolean
+  localNetwork: boolean
+}): void => {
+  Object.assign(tcc, granted, { failure: undefined })
+}
+const GRANTED = { accessibility: true, screenRecording: true, localNetwork: true }
 
 describe('the system health record the renderer is handed', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    setup.getSystemHealth.mockResolvedValue({
-      ramGb: 32,
-      activeModel: 'gemma-4-E4B-it-Q4_K_M.gguf',
-      components: [
-        { id: 'chat-engine', label: 'Chat engine', status: 'granted', detail: 'Running' }
-      ]
-    })
+    grant(GRANTED)
   })
 
   it('appends a component per permission to whatever the runtime reported', async () => {
-    permissions.getPermissionStatus.mockResolvedValue(GRANTED)
     const { getRenderedSystemHealth } = await import('../system-status-ipc')
 
     const health = await getRenderedSystemHealth()
+    const runtime = await getSystemHealth()
 
     // The runtime's own facts survive untouched and its components come first - permissions are added to
     // the picture, not substituted for it.
-    expect(health.ramGb).toBe(32)
-    expect(health.activeModel).toBe('gemma-4-E4B-it-Q4_K_M.gguf')
+    expect(health.ramGb).toBe(runtime.ramGb)
+    expect(health.activeModel).toBe(runtime.activeModel)
     expect(health.components.map(({ id }) => id)).toEqual([
-      'chat-engine',
+      ...runtime.components.map(({ id }) => id),
       'permission-accessibility',
       'permission-screen-recording',
       'permission-local-network'
@@ -67,7 +109,6 @@ describe('the system health record the renderer is handed', () => {
   })
 
   it('describes each granted permission by what it enables, not by its own name', async () => {
-    permissions.getPermissionStatus.mockResolvedValue(GRANTED)
     const { getRenderedSystemHealth } = await import('../system-status-ipc')
 
     const health = await getRenderedSystemHealth()
@@ -86,12 +127,7 @@ describe('the system health record the renderer is handed', () => {
   })
 
   it('tells the user where to go when a permission is denied', async () => {
-    permissions.getPermissionStatus.mockResolvedValue({
-      accessibility: false,
-      screenRecording: false,
-      localNetwork: false,
-      allGranted: false
-    })
+    grant({ accessibility: false, screenRecording: false, localNetwork: false })
     const { getRenderedSystemHealth } = await import('../system-status-ipc')
 
     const health = await getRenderedSystemHealth()
@@ -105,12 +141,7 @@ describe('the system health record the renderer is handed', () => {
   })
 
   it('reports each permission independently rather than collapsing them into one verdict', async () => {
-    permissions.getPermissionStatus.mockResolvedValue({
-      accessibility: true,
-      screenRecording: false,
-      localNetwork: true,
-      allGranted: false
-    })
+    grant({ accessibility: true, screenRecording: false, localNetwork: true })
     const { getRenderedSystemHealth } = await import('../system-status-ipc')
 
     const health = await getRenderedSystemHealth()
@@ -125,7 +156,7 @@ describe('the system health record the renderer is handed', () => {
   })
 
   it('says the status is UNAVAILABLE when the permission owner throws, not that it was denied', async () => {
-    permissions.getPermissionStatus.mockRejectedValue(new Error('TCC database is locked'))
+    tcc.failure = new Error('TCC database is locked')
     const { getRenderedSystemHealth } = await import('../system-status-ipc')
 
     const health = await getRenderedSystemHealth()
@@ -142,18 +173,20 @@ describe('the system health record the renderer is handed', () => {
   })
 
   it('still reports the rest of the runtime when permissions cannot be read', async () => {
-    permissions.getPermissionStatus.mockRejectedValue(new Error('nope'))
+    tcc.failure = new Error('nope')
     const { getRenderedSystemHealth } = await import('../system-status-ipc')
 
     const health = await getRenderedSystemHealth()
+    const runtime = await getSystemHealth()
 
     // A failed permission read must not blank the System Health screen - the chat engine's state is
     // exactly what a user checks that screen for.
-    expect(health.components[0]).toMatchObject({ id: 'chat-engine', status: 'granted' })
+    expect(runtime.components.length).toBeGreaterThan(0)
+    expect(health.components.slice(0, runtime.components.length)).toEqual(runtime.components)
   })
 
   it('still reports down when the boundary rejects with something that is not an Error', async () => {
-    permissions.getPermissionStatus.mockRejectedValue({ code: 'EPERM' })
+    tcc.failure = { code: 'EPERM' }
     const { getRenderedSystemHealth } = await import('../system-status-ipc')
 
     const health = await getRenderedSystemHealth()
@@ -171,10 +204,8 @@ describe('the system health record the renderer is handed', () => {
 
 describe('registering the status channels', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    setup.getChatHealth.mockResolvedValue({ id: 'chat', label: 'Chat model', status: 'ready' })
-    setup.getSystemHealth.mockResolvedValue({ ramGb: 32, activeModel: null, components: [] })
-    permissions.getPermissionStatus.mockResolvedValue(GRANTED)
+    grant(GRANTED)
+    tcc.reads = 0
   })
 
   it('answers system:health with the composed record', async () => {
@@ -193,7 +224,7 @@ describe('registering the status channels', () => {
       components: { id: string }[]
     }
     // Registered AND wired: a handler that exists but returns something else is the failure this catches.
-    expect(health.components.map(({ id }) => id)).toEqual([
+    expect(health.components.map(({ id }) => id).slice(-3)).toEqual([
       'permission-accessibility',
       'permission-screen-recording',
       'permission-local-network'
@@ -206,13 +237,8 @@ describe('registering the status channels', () => {
 
     setupSystemStatusIpc({ handle: (channel, listener) => handlers.set(channel, listener) })
 
-    await expect(handlers.get('system:chat-health')!({})).resolves.toMatchObject({
-      id: 'chat',
-      status: 'ready'
-    })
-    expect(setup.getChatHealth).toHaveBeenCalledTimes(1)
-    expect(setup.getSystemHealth).not.toHaveBeenCalled()
-    expect(permissions.getPermissionStatus).not.toHaveBeenCalled()
+    await expect(handlers.get('system:chat-health')!({})).resolves.toEqual(await getChatHealth())
+    expect(tcc.reads).toBe(0)
   })
 
   it('publishes the authoritative chat record when the engine lifecycle changes', async () => {
@@ -224,14 +250,14 @@ describe('registering the status channels', () => {
       { handle: (channel, listener) => handlers.set(channel, listener) },
       { publish }
     )
-    llmBoundary.listener?.()
+    // The chat engine's lifecycle changes: it is unloaded.
+    await llm.unload()
 
     await vi.waitFor(() =>
-      expect(publish).toHaveBeenCalledWith({ id: 'chat', label: 'Chat model', status: 'ready' })
+      expect(publish).toHaveBeenCalledWith(expect.objectContaining({ id: 'chat' }))
     )
-    expect(setup.getChatHealth).toHaveBeenCalledTimes(1)
-    expect(setup.getSystemHealth).not.toHaveBeenCalled()
-    expect(permissions.getPermissionStatus).not.toHaveBeenCalled()
+    expect(publish.mock.calls.at(-1)![0]).toEqual(await getChatHealth())
+    expect(tcc.reads).toBe(0)
   })
 
   it('answers permissions:get-status from the production permission owner', async () => {
@@ -240,7 +266,10 @@ describe('registering the status channels', () => {
 
     setupSystemStatusIpc({ handle: (channel, listener) => handlers.set(channel, listener) })
 
-    await expect(handlers.get('permissions:get-status')!({})).resolves.toEqual(GRANTED)
-    expect(permissions.getPermissionStatus).toHaveBeenCalledTimes(1)
+    await expect(handlers.get('permissions:get-status')!({})).resolves.toEqual({
+      ...GRANTED,
+      allGranted: true
+    })
+    expect(tcc.reads).toBe(1)
   })
 })

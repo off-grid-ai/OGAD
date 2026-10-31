@@ -4,7 +4,6 @@
   "src/main/__tests__/ax-host-lifecycle.dbtest.ts": 24,
   "src/main/__tests__/mcp-remote-task.integration.test.ts": 4,
   "src/main/__tests__/model-storage-move.test.ts": 7,
-  "src/main/__tests__/system-status-ipc.test.ts": 3,
   "src/main/__tests__/task-history-ipc.dbtest.ts": 10,
   "src/main/accessibility/__tests__/decision-model-loader.test.ts": 9,
   "src/main/browser/__tests__/web-use-decision-none.integration.test.ts": 1,
