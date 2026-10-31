@@ -19,6 +19,18 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+/**
+ * The boundary allow-list: modules of ours that are a real boundary for ONE test file, and why.
+ * Keep it short; every entry is reviewed like code.
+ */
+export const BOUNDARY_ALLOW: Readonly<Record<string, { modules: readonly string[]; why: string }>> =
+  {
+    'src/renderer/src/bootstrap/__tests__/loadProFeaturesRenderer.test.ts': {
+      modules: ['@offgrid/pro/renderer'],
+      why: 'The open-core plugin boundary. To the core loader, the private Pro package is an optional, separately built module that may be absent, broken or partial; this test proves the loader survives each.'
+    }
+  }
+
 /** A module specifier that names our own code (see the header). */
 export function isOurs(specifier: string): boolean {
   return (
@@ -31,12 +43,13 @@ export function isOurs(specifier: string): boolean {
 }
 
 /** Each mock or spy of our code in one test file's source, as `mock <specifier>` / `spyOn <target>`. */
-export function mocksOfOurs(source: string): string[] {
+export function mocksOfOurs(source: string, allowed: readonly string[] = []): string[] {
   const found: string[] = []
   for (const match of source.matchAll(
     /vi\.(?:mock|doMock)\(\s*(?:import\(\s*)?(['"`])([^'"`]+)\1\)?(\s*,\s*(?:async\s*)?\(\)\s*=>\s*import\()?/g
   )) {
-    if (isOurs(match[2]!) && !match[3]) found.push(`mock ${match[2]}`)
+    if (isOurs(match[2]!) && !match[3] && !allowed.includes(match[2]!))
+      found.push(`mock ${match[2]}`)
   }
   // Names bound to our modules: import x / import { a, b } / import * as x / await import(...).
   const bound = new Set<string>()
@@ -80,7 +93,8 @@ export function scanMocks(
   for (const file of dirs.flatMap((dir) => testFiles(path.join(root, dir)))) {
     const relative = path.relative(root, file)
     if (skip.includes(relative)) continue
-    const count = mocksOfOurs(fs.readFileSync(file, 'utf8')).length
+    const allowed = BOUNDARY_ALLOW[relative]?.modules ?? []
+    const count = mocksOfOurs(fs.readFileSync(file, 'utf8'), allowed).length
     if (count) counts[relative] = count
   }
   return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)))
