@@ -187,20 +187,35 @@ export default defineConfig({
         { find: '@offgrid/pro/renderer', replacement: proRenderer },
         ...operatorUiAliases()
       ],
-      // Linked library source imports these from its own node_modules: one copy each (two Reacts
-      // break hooks; two motions break shared animation context; two Base UIs drop the CSP nonce
-      // that main.tsx's CSPProvider gives the library's selects and menus).
-      dedupe: operatorUiRoot
-        ? [
-            'react',
-            'react-dom',
-            'motion',
-            'radix-ui',
-            '@base-ui/react',
-            '@phosphor-icons/react',
-            'react-resizable-panels'
-          ]
-        : undefined
+      // One copy each of the editor cores in every build: CodeMirror rejects extensions made by a
+      // second @codemirror/state ("Unrecognized extension value"), and the library carries its own
+      // copies (nested @codemirror/view when pinned, a whole set when linked).
+      // Linked library source also imports these from its own node_modules: two Reacts break hooks;
+      // two motions break shared animation context; two Base UIs drop the CSP nonce that main.tsx's
+      // CSPProvider gives the library's selects and menus.
+      dedupe: [
+        '@codemirror/state',
+        '@codemirror/view',
+        '@codemirror/language',
+        '@codemirror/commands',
+        '@codemirror/search',
+        '@codemirror/autocomplete',
+        '@codemirror/lint',
+        '@lezer/common',
+        '@lezer/highlight',
+        '@lezer/lr',
+        ...(operatorUiRoot
+          ? [
+              'react',
+              'react-dom',
+              'motion',
+              'radix-ui',
+              '@base-ui/react',
+              '@phosphor-icons/react',
+              'react-resizable-panels'
+            ]
+          : [])
+      ]
     },
     server: operatorUiRoot ? { fs: { allow: [resolve('.'), operatorUiRoot] } } : undefined,
     plugins: [
