@@ -30,6 +30,7 @@ it('names our code and leaves the device boundary alone', () => {
     "vi.mock('../backend-preferences', () => ({}))",
     "vi.mock(import('../runtime-env'), async () => ({}))",
     "vi.mock('electron', () => ({}))",
+    "vi.mock('@offgrid/pro/renderer', async () => import('../../../../pro/renderer/index'))",
     "vi.spyOn(llm, 'unload')",
     "vi.spyOn(os, 'totalmem')",
     "vi.spyOn(console, 'warn')",

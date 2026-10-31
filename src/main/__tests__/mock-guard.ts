@@ -8,6 +8,9 @@
  * browser globals, and third-party native libraries (onnx, transformers, kokoro). Those are
  * packages or globals, so they never match the rule.
  *
+ * One form is wiring, not a fake, and is allowed: `vi.mock('<ours>', () => import('<real path>'))`,
+ * which points an alias the test config stubs (the free build's `@offgrid/pro/*`) at the real code.
+ *
  * Files written before the rule are listed in a baseline JSON with how many mocks of ours they
  * still hold. A file outside the list may hold none; a listed file may never gain one; a file down
  * to zero must leave the list. So the list only shrinks. Core and pro each keep their own baseline
@@ -31,9 +34,9 @@ export function isOurs(specifier: string): boolean {
 export function mocksOfOurs(source: string): string[] {
   const found: string[] = []
   for (const match of source.matchAll(
-    /vi\.(?:mock|doMock)\(\s*(?:import\(\s*)?(['"`])([^'"`]+)\1/g
+    /vi\.(?:mock|doMock)\(\s*(?:import\(\s*)?(['"`])([^'"`]+)\1\)?(\s*,\s*(?:async\s*)?\(\)\s*=>\s*import\()?/g
   )) {
-    if (isOurs(match[2]!)) found.push(`mock ${match[2]}`)
+    if (isOurs(match[2]!) && !match[3]) found.push(`mock ${match[2]}`)
   }
   // Names bound to our modules: import x / import { a, b } / import * as x / await import(...).
   const bound = new Set<string>()
