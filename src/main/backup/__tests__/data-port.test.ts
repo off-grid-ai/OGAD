@@ -1,103 +1,28 @@
 import crypto from 'node:crypto'
-import { DatabaseSync } from 'node:sqlite'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type Database from 'better-sqlite3-multiple-ciphers'
 import { DesktopBackupDataPort } from '../data-port'
-import { ensureAttachedDocumentSchema } from '../../documents/sqlite-store'
+import { documentStore } from '../../documents/sqlite-store'
 import type { DesktopBackupData } from '../types'
 import { registerHook, unregisterHook, HOOKS } from '../../bootstrap/hookRegistry'
+import { configureRuntime } from '../../runtime-env'
+import { addRagMessage, createRagConversation, getDB } from '../../database'
+import { createProject, ensureRagStoreSchema, insertRagDocument } from '../../rag/store'
 
 /**
  * What a backup takes out of the database, and what restoring one puts back.
  *
- * Run against a REAL SQLite engine (node:sqlite) using the app's own DDL, because every interesting
- * question here is a question about SQL: which rows a project-scoped export includes, whether a restore
- * skips a project that already exists, whether a document is recognised as already-present, what happens
- * to a conversation whose project is absent. A hand-written fake matcher would answer those from its
- * author's beliefs about the queries rather than from the queries.
- *
- * The app ships better-sqlite3-multiple-ciphers, which needs a native build for the runner's ABI; the one
- * API this port uses beyond prepare() is transaction(), so that is supplied over the real engine below.
- * Everything the port does - the SQL, the row mapping, the JSON handling, the ordering - is real.
+ * Runs against the app's own encrypted-capable SQLite database (getDB) in a temp profile, with the
+ * app's own schema and migrations. Data enters the way the app writes it: projects, knowledge-base
+ * files, indexed pages, conversations and messages through their real write paths, and anything
+ * with a past date through a restore, which is how dated rows reach this database in the app.
  */
 
-/** The schema these queries run against, copied from the app's own migrations. */
-const SCHEMA = `
-  CREATE TABLE projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    system_prompt TEXT NOT NULL DEFAULT '',
-    icon TEXT,
-    include_memory INTEGER NOT NULL DEFAULT 1,
-    origin_device_id TEXT,
-    origin_device_name TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE rag_documents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sync_id TEXT,
-    project_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    path TEXT NOT NULL,
-    size INTEGER NOT NULL DEFAULT 0,
-    kind TEXT NOT NULL DEFAULT 'text',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    document_id TEXT
-  );
-  CREATE TABLE rag_conversations (
-    id TEXT PRIMARY KEY,
-    title TEXT,
-    project_id TEXT,
-    origin_device_id TEXT,
-    origin_device_name TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE rag_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    conversation_id TEXT NOT NULL,
-    uuid TEXT,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    context TEXT,
-    origin_device_id TEXT,
-    origin_device_name TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`
-
-/**
- * A real SQLite database presented the way the port expects one.
- *
- * node:sqlite IS SQLite - the queries, the types and the ordering are genuine. It has no transaction()
- * helper, so that one method is provided here with the semantics better-sqlite3 documents: run the body
- * inside BEGIN, COMMIT on return, ROLLBACK if it throws. That matters for the assertions about a failed
- * restore leaving nothing behind, which would pass vacuously against a fake that ignored transactions.
- */
-function realDatabase(): Database.Database {
-  const db = new DatabaseSync(':memory:')
-  db.exec(SCHEMA)
-  const transaction =
-    (body: (...args: unknown[]) => unknown) =>
-    (...args: unknown[]): unknown => {
-      db.exec('BEGIN')
-      try {
-        const result = body(...args)
-        db.exec('COMMIT')
-        return result
-      } catch (error) {
-        db.exec('ROLLBACK')
-        throw error
-      }
-    }
-  // Assigned through a record cast: better-sqlite3's transaction() is a generic overload set that a plain
-  // function cannot satisfy structurally, and the port only ever calls it the one way implemented above.
-  ;(db as unknown as Record<string, unknown>).transaction = transaction
-  return db as unknown as Database.Database
-}
+// The OS keychain is the boundary: none here, so the database opens unencrypted.
+vi.mock('electron', () => ({ safeStorage: { isEncryptionAvailable: () => false } }))
 
 // The port announces every restored row so pro sync can pick it up. Asserting on the announcements is how
 // a test can tell that a restore joined the mesh rather than quietly writing rows only this device knows.
@@ -106,55 +31,77 @@ const mutations: { entity: string; kind: string }[] = []
 const recordMutation = (mutation: { entity: string; kind: string }): void => {
   mutations.push({ entity: mutation.entity, kind: mutation.kind })
 }
-const sha256 = (text: string): string => crypto.createHash('sha256').update(text, 'utf8').digest('hex')
+const sha256 = (text: string): string =>
+  crypto.createHash('sha256').update(text, 'utf8').digest('hex')
+
+const profiles: string[] = []
+/** A fresh, empty profile; the app's database opens there on first use. */
+function freshDatabase(): Database.Database {
+  if (profiles.length) getDB().close()
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-data-port-'))
+  profiles.push(profile)
+  configureRuntime({ dataDir: profile })
+  // As the backup engine is composed in the app (createDesktopBackupEngine).
+  ensureRagStoreSchema()
+  return getDB()
+}
 
 describe('taking a backup out of the database, and putting one back', () => {
   let db: Database.Database
   let port: DesktopBackupDataPort
 
   beforeEach(() => {
+    db = freshDatabase()
+    port = new DesktopBackupDataPort(db)
     mutations.length = 0
     registerHook(HOOKS.syncRecordLocalMutation, recordMutation)
-    db = realDatabase()
-    port = new DesktopBackupDataPort(db)
   })
 
   afterEach(() => {
     unregisterHook(HOOKS.syncRecordLocalMutation, recordMutation)
-    db.close()
+    getDB().close()
+    configureRuntime({ dataDir: undefined })
+    for (const profile of profiles.splice(0)) fs.rmSync(profile, { recursive: true, force: true })
   })
 
-  const insertProject = (id: string, name = id, updatedAt = '2026-01-01 09:00:00'): void => {
-    db.prepare(
-      `INSERT INTO projects (id, name, description, system_prompt, icon, include_memory, created_at, updated_at)
-       VALUES (?, ?, 'desc', 'prompt', 'icon.png', 1, '2026-01-01 09:00:00', ?)`
-    ).run(id, name, updatedAt)
-  }
+  const insertProject = (id: string, name = id): void =>
+    createProject({ id, name, description: 'desc', systemPrompt: 'prompt', icon: 'icon.png' })
 
-  const insertDocument = (projectId: string, name: string, documentId: string | null = null): number => {
-    const info = db
-      .prepare(
-        `INSERT INTO rag_documents (sync_id, project_id, name, path, size, kind, enabled, created_at, document_id)
-         VALUES (?, ?, ?, ?, ?, 'pdf', 1, '2026-01-01 09:00:00', ?)`
-      )
-      .run(`sync-${name}`, projectId, name, `/docs/${name}`, 42, documentId)
-    return Number(info.lastInsertRowid)
-  }
+  const insertDocument = (projectId: string, name: string, documentId?: string): number =>
+    insertRagDocument({
+      projectId,
+      name,
+      path: `/docs/${name}`,
+      size: 42,
+      kind: 'pdf',
+      syncId: `sync-${name}`,
+      createdAt: '2026-01-01 09:00:00',
+      ...(documentId ? { documentId } : {})
+    })
 
   /** The pages the document engine read from a file, kept under its document id. */
-  const insertIndexedText = (documentId: string, name: string, pages: string[]): void => {
-    ensureAttachedDocumentSchema(db)
-    db.prepare(
-      `INSERT INTO attached_documents (id, name, kind, state, page_count, chunk_count, embedded_count,
-         unreadable_pages, embedder, schema_version, created_at, last_used_at)
-       VALUES (?, ?, 'pdf', 'ready', ?, 0, 0, 0, 'none', 1, 0, 0)`
-    ).run(documentId, name, pages.length)
-    pages.forEach((text, i) =>
-      db
-        .prepare(
-          'INSERT INTO attached_document_pages (document_id, page, label, text, needs_ocr) VALUES (?, ?, NULL, ?, 0)'
-        )
-        .run(documentId, i + 1, text)
+  const insertIndexedText = async (
+    documentId: string,
+    name: string,
+    pages: string[]
+  ): Promise<void> => {
+    await documentStore.putDocument({
+      id: documentId,
+      name,
+      kind: 'pdf',
+      state: 'ready',
+      pageCount: pages.length,
+      chunkCount: 0,
+      embeddedCount: 0,
+      unreadablePages: 0,
+      embedder: 'none',
+      schemaVersion: 1,
+      createdAt: 0,
+      lastUsedAt: 0
+    })
+    await documentStore.putPages(
+      documentId,
+      pages.map((text, i) => ({ page: i + 1, text }))
     )
   }
 
@@ -163,34 +110,24 @@ describe('taking a backup out of the database, and putting one back', () => {
       .prepare('SELECT page, text FROM attached_document_pages WHERE document_id = ? ORDER BY page')
       .all(documentId)
 
-  const insertConversation = (
-    id: string,
-    projectId: string | null,
-    title: string | null = 'A chat'
-  ): void => {
-    db.prepare(
-      `INSERT INTO rag_conversations (id, title, project_id, created_at, updated_at)
-       VALUES (?, ?, ?, '2026-01-01 09:00:00', '2026-01-01 09:00:00')`
-    ).run(id, title, projectId)
+  const insertConversation = (id: string, projectId: string | null, title = 'A chat'): void => {
+    createRagConversation(id, title, projectId)
   }
 
   const insertMessage = (
     conversationId: string,
     role: 'user' | 'assistant',
     content: string,
-    context: string | null = null
+    context?: unknown
   ): void => {
-    db.prepare(
-      `INSERT INTO rag_messages (conversation_id, role, content, context, created_at)
-       VALUES (?, ?, ?, ?, '2026-01-01 09:00:00')`
-    ).run(conversationId, role, content, context)
+    addRagMessage(conversationId, role, content, context)
   }
 
   describe('exporting everything', () => {
     it('carries every project with its documents and their text, and every conversation with its messages', async () => {
       insertProject('p1')
       insertDocument('p1', 'Contract.pdf', 'doc-contract')
-      insertIndexedText('doc-contract', 'Contract.pdf', ['first page', 'second page'])
+      await insertIndexedText('doc-contract', 'Contract.pdf', ['first page', 'second page'])
       insertConversation('c1', 'p1')
       insertMessage('c1', 'user', 'what does it say?')
       insertMessage('c1', 'assistant', 'it says hello')
@@ -250,14 +187,13 @@ describe('taking a backup out of the database, and putting one back', () => {
 
     it('parses a message context back into an object, and drops one that is not JSON', async () => {
       insertConversation('c1', null)
-      insertMessage(
-        'c1',
-        'assistant',
-        'with context',
-        JSON.stringify({ unified: [], image: 'a.png' })
-      )
-      insertMessage('c1', 'assistant', 'corrupt context', '{ truncated')
-      insertMessage('c1', 'assistant', 'no context', null)
+      insertMessage('c1', 'assistant', 'with context', { unified: [], image: 'a.png' })
+      insertMessage('c1', 'assistant', 'corrupt context', { unified: [] })
+      insertMessage('c1', 'assistant', 'no context')
+      // A damaged file: the stored context of one message is cut short (a disk fault, not a write path).
+      db.prepare(
+        "UPDATE rag_messages SET context = '{ truncated' WHERE content = 'corrupt context'"
+      ).run()
 
       const [conversation] = (await port.collectAll()).conversations
 
@@ -269,8 +205,25 @@ describe('taking a backup out of the database, and putting one back', () => {
     })
 
     it('lists projects most-recently-updated first', async () => {
-      insertProject('older', 'older', '2026-01-01 09:00:00')
-      insertProject('newer', 'newer', '2026-02-01 09:00:00')
+      // Dated projects reach this database the way a restore brings them.
+      const project = (id: string, updatedAt: string): DesktopBackupData['projects'][number] => ({
+        id,
+        name: id,
+        description: '',
+        systemPrompt: '',
+        includeMemory: true,
+        createdAt: '2026-01-01T09:00:00.000Z',
+        updatedAt,
+        documents: []
+      })
+      await port.apply({
+        surface: 'offgrid-desktop',
+        projects: [
+          project('older', '2026-01-01T09:00:00.000Z'),
+          project('newer', '2026-02-01T09:00:00.000Z')
+        ],
+        conversations: []
+      })
 
       expect((await port.collectAll()).projects.map(({ id }) => id)).toEqual(['newer', 'older'])
     })
@@ -422,16 +375,24 @@ describe('taking a backup out of the database, and putting one back', () => {
     })
 
     it('fills in messages the archive has for a conversation that already exists', async () => {
-      // Synced from another device, or half-restored by an earlier run: the conversation is here, one of its
-      // messages is not.
-      db.prepare(
-        `INSERT INTO rag_conversations (id, title, project_id, created_at, updated_at)
-         VALUES ('c1', 'Existing', NULL, '2026-01-01T09:00:00.000Z', '2026-01-01T09:00:00.000Z')`
-      ).run()
-      db.prepare(
-        `INSERT INTO rag_messages (uuid, conversation_id, role, content, context, created_at)
-         VALUES ('m-existing', 'c1', 'user', 'first question', NULL, '2026-01-01T09:00:00.000Z')`
-      ).run()
+      // Half-restored by an earlier run: the conversation is here, one of its messages is not.
+      await port.apply(
+        bundle({
+          projects: [],
+          conversations: [
+            {
+              id: 'c1',
+              title: 'Existing',
+              projectId: null,
+              createdAt: '2026-01-01T09:00:00.000Z',
+              updatedAt: '2026-01-01T09:00:00.000Z',
+              messages: [
+                { role: 'user', content: 'first question', createdAt: '2026-01-01T09:00:00.000Z' }
+              ]
+            }
+          ]
+        })
+      )
 
       await port.apply(
         bundle({
@@ -533,9 +494,7 @@ describe('taking a backup out of the database, and putting one back', () => {
         document_id: 'doc-contract'
       })
       expect(
-        db
-          .prepare('SELECT page, label, text FROM attached_document_pages ORDER BY page')
-          .all()
+        db.prepare('SELECT page, label, text FROM attached_document_pages ORDER BY page').all()
       ).toEqual([
         { page: 1, label: null, text: 'the parties' },
         { page: 2, label: 'Annex', text: 'the annex' }
@@ -543,12 +502,17 @@ describe('taking a backup out of the database, and putting one back', () => {
     })
 
     it('keeps the pages a document already has when an archive carries the same document', async () => {
-      insertIndexedText('doc-contract', 'Contract.pdf', ['the copy on this Mac'])
+      await insertIndexedText('doc-contract', 'Contract.pdf', ['the copy on this Mac'])
 
       await port.apply(
         bundle({
           attachedDocuments: [
-            { id: 'doc-contract', name: 'Contract.pdf', kind: 'pdf', pages: [{ page: 1, text: 'archived' }] }
+            {
+              id: 'doc-contract',
+              name: 'Contract.pdf',
+              kind: 'pdf',
+              pages: [{ page: 1, text: 'archived' }]
+            }
           ]
         })
       )
@@ -648,12 +612,12 @@ describe('taking a backup out of the database, and putting one back', () => {
     it('survives the full round trip: export, restore into an empty database, export again', async () => {
       insertProject('p1')
       insertDocument('p1', 'Contract.pdf', 'doc-contract')
-      insertIndexedText('doc-contract', 'Contract.pdf', ['the text'])
+      await insertIndexedText('doc-contract', 'Contract.pdf', ['the text'])
       insertConversation('c1', 'p1')
       insertMessage('c1', 'user', 'hello')
       const exported = await port.collectAll()
 
-      const restoredDb = realDatabase()
+      const restoredDb = freshDatabase()
       await new DesktopBackupDataPort(restoredDb).apply(exported)
       const reExported = await new DesktopBackupDataPort(restoredDb).collectAll()
 
