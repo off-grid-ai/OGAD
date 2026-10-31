@@ -10,6 +10,7 @@ import os from 'os'
 import path from 'path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
+import { installFakeActionsHelper } from './harness/fake-actions-helper'
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-use-runtime-'))
 // process.env is shared across files in a worker: set the profile override in
@@ -30,39 +31,14 @@ vi.mock('electron', () => ({
   }
 }))
 
-// The OS boundary: the native actions helper is an executable. This one keeps reminders in a JSON
-// file beside it; lists read them back; deletes remove by the id the create returned (the undo path).
-// It sits where a development build looks first (<cwd>/scripts/actions-helper), so the test runs
-// from the temp profile and the real helper, which would touch this Mac's Reminders, is never found.
-const HELPER = `#!/usr/bin/env node
-const fs = require('node:fs')
-const path = require('node:path')
-const store = path.join(__dirname, 'reminders.json')
-const state = fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')) : { created: 0, landed: [] }
-const cmd = JSON.parse(process.argv[2])
-const reply = (body) => { fs.writeFileSync(store, JSON.stringify(state)); process.stdout.write(JSON.stringify(body) + '\\n') }
-if (cmd.command === 'reminders.create') {
-  const item = { id: 'rt' + ++state.created, title: String(cmd.args.title) }
-  state.landed.push(item)
-  reply({ ok: true, result: { id: item.id } })
-} else if (cmd.command === 'reminders.list') {
-  reply({ ok: true, result: { reminders: state.landed.map(({ title }) => ({ title })) } })
-} else if (cmd.command === 'reminders.delete') {
-  const index = state.landed.findIndex((item) => item.id === cmd.args.id)
-  if (index === -1) reply({ ok: false, error: 'no reminder with id ' + cmd.args.id })
-  else { state.landed.splice(index, 1); reply({ ok: true, result: { deleted: cmd.args.id } }) }
-} else reply({ ok: false, error: 'unhandled ' + cmd.command })
-`
-const helperDir = path.join(tempDir, 'scripts', 'actions-helper')
-fs.mkdirSync(helperDir, { recursive: true })
-fs.writeFileSync(path.join(helperDir, 'actions-helper'), HELPER, { mode: 0o755 })
-const landed = (): Array<{ id: string; title: string }> => {
-  const store = path.join(helperDir, 'reminders.json')
-  return fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')).landed : []
-}
-const originalCwd = process.cwd()
-beforeAll(() => process.chdir(tempDir))
-afterAll(() => process.chdir(originalCwd))
+// The OS boundary: the native actions helper, an executable (harness/fake-actions-helper).
+const helper = installFakeActionsHelper(tempDir)
+const landed = helper.landed
+let restoreCwd: () => void = () => {}
+beforeAll(() => {
+  restoreCwd = helper.useFrom()
+})
+afterAll(() => restoreCwd())
 
 afterAll(() => {
   if (originalUserData === undefined) {
