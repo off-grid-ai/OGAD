@@ -5,7 +5,9 @@ import { useEffect, useState } from 'react'
 // the motion off in one place instead of every component asking.
 
 const KEY = 'og-ui-animations'
-const CHANGED = 'og:ui-animations-changed'
+/** Fired on window when the setting changes; `detail` is the new value. */
+export const UI_ANIMATIONS_CHANGED = 'og:ui-animations-changed'
+const CHANGED = UI_ANIMATIONS_CHANGED
 
 export function uiAnimationsOn(): boolean {
   try {

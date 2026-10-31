@@ -1,4 +1,5 @@
 import { track } from '@renderer/lib/analytics'
+import { reportChatInput } from '@renderer/lib/usage-tracker'
 import { restoredStreamMessage, withRestoredStream } from '@renderer/lib/chat-stream-restore'
 import { stopChatRun } from '@renderer/lib/chat-stop'
 import { observeOwnedRun, type RunEvent } from '@renderer/lib/chat-run-owner'
@@ -1275,7 +1276,7 @@ export function MemoryChat({
     // silent reject would let the composer and Active-models panel diverge again
     // (the exact drift this binding prevents), with no signal.
     void window.api
-      .setActiveModalModel('image', value)
+      .setActiveModalModel('image', value, 'chat')
       .catch((e) => console.error('[image] failed to persist active model', e))
   }, [])
   // Steps/size edits persist as a per-model override so they survive a remount and
@@ -4160,6 +4161,7 @@ export function MemoryChat({
       navigator.clipboard.writeText(text)
     )
     if (!copied) return
+    track('message_action', { action: 'copy' })
     // Brief "Copied" confirmation on the button that was pressed.
     const k = key ?? 'copy'
     setCopiedKey(k)
@@ -4346,12 +4348,14 @@ export function MemoryChat({
       }
       if (pasteFiles.length) {
         e.preventDefault()
+        reportChatInput('paste', pasteFiles)
         void addFiles(pasteFiles)
         return
       }
       const text = dt.getData('text')
       if (text && text.length > 1200) {
         e.preventDefault()
+        reportChatInput('paste', [{ name: 'pasted.txt' }])
         const id = crypto.randomUUID()
         setAttachments((prev) => [
           ...prev,
@@ -5564,7 +5568,10 @@ export function MemoryChat({
                         onDrop={(e) => {
                           e.preventDefault()
                           setDragOver(false)
-                          if (e.dataTransfer.files.length) void addFiles(e.dataTransfer.files)
+                          if (e.dataTransfer.files.length) {
+                            reportChatInput('drop', e.dataTransfer.files)
+                            void addFiles(e.dataTransfer.files)
+                          }
                         }}
                         className={broadcasting && !hostsSharedComposer ? 'hidden' : 'relative'}
                       >

@@ -217,7 +217,7 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
     clearUnloadStatus(mode) // re-selecting reloads this modality on next use
     try {
       if (mode === 'text') {
-        const result = await api().activateModel?.(m.id)
+        const result = await api().activateModel?.(m.id, undefined, 'model_picker')
         if (!result?.success) {
           throw new Error(result?.error ?? 'Model selection is unavailable. Restart the app.')
         }
@@ -230,13 +230,13 @@ export function ModelPicker({ onClose }: { onClose: () => void }): React.ReactEl
       } else {
         const fname = primaryFile(m)
         if (m.remoteServerId) {
-          const result = await api().activateModel?.(m.id)
+          const result = await api().activateModel?.(m.id, undefined, 'model_picker')
           if (!result?.success) {
             throw new Error(result?.error ?? 'Model selection is unavailable. Restart the app.')
           }
           await load()
         } else {
-          await api().setActiveModalModel?.(mode, fname)
+          await api().setActiveModalModel?.(mode, fname, 'model_picker')
           setActive((a) => ({ ...a, [mode]: fname }))
         }
       }

@@ -159,7 +159,7 @@ export function StoragePanel(): React.ReactElement {
     try {
       // A search model change rebuilds the index, so it asks first (main shows the dialog).
       if (kind === 'embedding') await api.chooseEmbeddingModel(id)
-      else await api.activateModel(id)
+      else await api.activateModel(id, undefined, 'setup')
       await refresh()
     } finally {
       setBusy(null)

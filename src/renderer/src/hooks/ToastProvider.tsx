@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { CheckIcon, InfoIcon, WarningCircleIcon, XIcon } from '@phosphor-icons/react'
 import { ToastContext, type ToastContextType } from './useToast'
+import { track } from '../lib/analytics'
 
 // Transient top-right toast with an optional action (e.g. Undo). Distinct from
 // the persistent notification center (useNotifications): a toast auto-dismisses
@@ -11,11 +12,18 @@ interface Toast {
   id: string
   message: string
   tone: 'success' | 'error' | 'neutral'
+  code: string
   actionLabel?: string
   onAction?: () => void
 }
 
 const DEFAULT_DURATION = 6000
+const ERROR_CODE = /^[a-z0-9_]{1,40}$/
+
+/** An error toast's response, counted by its fixed code only. */
+function reportResponse(toast: Toast, response: 'action' | 'dismiss'): void {
+  if (toast.tone === 'error') track('error_response', { error_code: toast.code, response })
+}
 
 export function ToastProvider({ children }: { children: ReactNode }): React.ReactElement {
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -31,10 +39,12 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
   }, [])
 
   const showToast = useCallback<ToastContextType['showToast']>(
-    ({ message, tone = 'success', actionLabel, onAction, durationMs }) => {
+    ({ message, tone = 'success', code, actionLabel, onAction, durationMs }) => {
       const id = crypto.randomUUID()
+      const fixedCode = code && ERROR_CODE.test(code) ? code : 'toast'
+      if (tone === 'error') track('error_shown', { error_code: fixedCode })
       setToasts((previous) =>
-        [{ id, message, tone, actionLabel, onAction }, ...previous].slice(0, 4)
+        [{ id, message, tone, code: fixedCode, actionLabel, onAction }, ...previous].slice(0, 4)
       )
       timers.current[id] = setTimeout(() => dismiss(id), durationMs ?? DEFAULT_DURATION)
     },
@@ -63,6 +73,7 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
             {toast.actionLabel && toast.onAction && (
               <button
                 onClick={() => {
+                  reportResponse(toast, 'action')
                   toast.onAction?.()
                   dismiss(toast.id)
                 }}
@@ -72,7 +83,10 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
               </button>
             )}
             <button
-              onClick={() => dismiss(toast.id)}
+              onClick={() => {
+                reportResponse(toast, 'dismiss')
+                dismiss(toast.id)
+              }}
               aria-label="Dismiss"
               className="shrink-0 text-neutral-600 hover:text-neutral-300"
             >

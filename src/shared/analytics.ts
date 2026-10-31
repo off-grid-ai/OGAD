@@ -14,7 +14,9 @@ export const ANALYTICS_SETTING_KEYS = {
   lastPromptAt: 'analyticsLastPromptAt',
   installId: 'analyticsInstallId',
   /** The day the last daily `features_snapshot` went, so a relaunch does not send another. */
-  snapshotDay: 'analyticsSnapshotDay'
+  snapshotDay: 'analyticsSnapshotDay',
+  /** The open session's counters, so a crash still reports them on the next launch. */
+  pendingSession: 'analyticsPendingSession'
 } as const
 
 export type AnalyticsSettingKey =
@@ -78,7 +80,8 @@ export const FEATURES = [
   'browser_action',
   'clipboard',
   'meetings',
-  'sync'
+  'sync',
+  'capture'
 ] as const
 export type AnalyticsFeature = (typeof FEATURES)[number]
 
@@ -99,7 +102,7 @@ export const FLOW_STEPS = {
     'exported'
   ],
   connector_add: ['opened', 'connector_picked', 'authorised'],
-  pro_upgrade: ['gate_shown', 'paywall_viewed', 'trial_started', 'purchased']
+  pro_upgrade: ['gate_shown', 'paywall_viewed', 'purchased']
 } as const
 export type AnalyticsFlow = keyof typeof FLOW_STEPS
 export type FlowStep<F extends AnalyticsFlow = AnalyticsFlow> = (typeof FLOW_STEPS)[F][number]
@@ -117,6 +120,89 @@ export type FlowReport =
     }
   | { flow: AnalyticsFlow; action: 'finish'; outcome: FlowOutcome; errorCode?: string }
 
+/**
+ * A `ui_action` id: a `data-action`, a `data-testid` or a fixed `aria-label`, normalised. Main
+ * accepts only ids collected from source at build time (scripts/config/ui-action-ids.ts), so no
+ * visible or user text can pass, whatever the renderer sends.
+ */
+export const UI_ACTION_ID = /^[a-z0-9][a-z0-9:_-]{0,63}$/
+
+/** `Close panel` → `close-panel`. Null when nothing usable is left. */
+export function normalizeUiActionId(raw: string): string | null {
+  const id = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9:_-]+/g, '-')
+    .replace(/^[-:_]+|[-:_]+$/g, '')
+    .slice(0, 64)
+    .replace(/[-:_]+$/, '')
+  return UI_ACTION_ID.test(id) ? id : null
+}
+
+/** The deepest point reached on a screen, in quarters. */
+export const SCROLL_BUCKETS = [0, 25, 50, 75, 100] as const
+export type ScrollBucket = (typeof SCROLL_BUCKETS)[number]
+
+/** A scroll fraction (0..1) rounded down to its quarter; the very bottom counts as 100. */
+export function scrollBucket(fraction: number): ScrollBucket {
+  if (!Number.isFinite(fraction) || fraction <= 0) return 0
+  if (fraction >= 0.98) return 100
+  return SCROLL_BUCKETS[Math.min(3, Math.floor(fraction * 4))]!
+}
+
+/** Keyboard shortcuts counted in `session_summary.shortcuts`. */
+export const SHORTCUTS = [
+  'command_palette',
+  'back',
+  'forward',
+  'zoom_in',
+  'zoom_out',
+  'zoom_reset',
+  'clipboard_popup',
+  'dictation'
+] as const
+export type AnalyticsShortcut = (typeof SHORTCUTS)[number]
+
+/** Command palette choices counted in `session_summary.commands`. */
+export const PALETTE_COMMANDS = ['go_to', 'open_result', 'see_all'] as const
+export type PaletteCommand = (typeof PALETTE_COMMANDS)[number]
+
+/** What a notification opens: its type, never its content. */
+export const NOTIFICATION_TYPES = ['actions', 'day', 'replay', 'meetings', 'chat'] as const
+
+/** How a file reached the chat composer. */
+export const CHAT_INPUT_METHODS = ['drop', 'paste'] as const
+
+/** What the person did with an error toast. */
+export const ERROR_RESPONSES = ['action', 'dismiss'] as const
+
+/** Message actions, sent as `message_action`. */
+export const MESSAGE_ACTIONS = ['copy', 'edit'] as const
+
+/** What was deleted, sent as `item_deleted`. */
+export const DELETED_ITEMS = ['chat', 'project', 'document'] as const
+
+/** Where a model was picked, for `model_selected`. */
+export const MODEL_PICK_SOURCES = [
+  'model_picker',
+  'models_screen',
+  'setup',
+  'chat',
+  'settings',
+  'image_settings',
+  'video_settings',
+  'video',
+  'meetings',
+  'voice',
+  'computer_use',
+  'artifact',
+  'home',
+  'unknown'
+] as const
+export type ModelPickSource = (typeof MODEL_PICK_SOURCES)[number]
+
+export const THEME_MODES = ['system', 'light', 'dark'] as const
+
 /** Events the renderer may report, with the only properties main will forward. */
 export interface RendererAnalyticsEvents {
   screen_viewed: { screen: string; prev_screen: string | null; prev_ms: number }
@@ -124,6 +210,19 @@ export interface RendererAnalyticsEvents {
   reply_regenerated: Record<string, never>
   feature_used: { feature: AnalyticsFeature }
   problem_reported: Record<string, never>
+  message_action: { action: (typeof MESSAGE_ACTIONS)[number] }
+  // Counted on the device into `session_summary`; never sent one by one.
+  ui_action: { screen: string; action: string }
+  scroll_depth: { screen: string; pct: ScrollBucket }
+  shortcut_used: { shortcut: AnalyticsShortcut }
+  command_used: { command: PaletteCommand; target?: string }
+  error_shown: { error_code: string }
+  error_response: { error_code: string; response: (typeof ERROR_RESPONSES)[number] }
+  empty_state_seen: { screen: string }
+  notification_clicked: { type: (typeof NOTIFICATION_TYPES)[number] }
+  chat_input: { method: (typeof CHAT_INPUT_METHODS)[number]; extension: string }
+  // Kept on the device for the daily snapshot.
+  appearance: { theme: (typeof THEME_MODES)[number]; ui_animations: boolean }
 }
 export type RendererAnalyticsEvent = keyof RendererAnalyticsEvents
 

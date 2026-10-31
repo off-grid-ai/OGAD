@@ -1,5 +1,5 @@
 import { ANALYTICS_SETTING_KEYS, isAnalyticsSettingKey } from '../shared/analytics'
-import { analytics, track } from './analytics'
+import { analytics, countInteraction, reportModelSelected, track } from './analytics'
 import { backendChoicesForUi } from './backend-facts'
 import { settingsChanged } from './settings-version'
 import { storageDownloadsActive } from './model-storage-guard'
@@ -517,14 +517,18 @@ export function setupIPC(): void {
       role: 'user' | 'assistant',
       content: string,
       context?: unknown
-    ) =>
-      (await import('./database')).addRagMessageVersion(
+    ) => {
+      const version = (await import('./database')).addRagMessageVersion(
         conversationId,
         ofUuid,
         role,
         content,
         context
       )
+      // A new version of the person's own message is an edit; of a reply, a regeneration.
+      if (role === 'user') track('message_action', { action: 'edit' })
+      return version
+    }
   )
   ipcMain.handle(
     'rag:select-version',
@@ -565,6 +569,7 @@ export function setupIPC(): void {
     const { deleteArtifactsForConversation } = await import('./artifacts')
     deleteArtifactsForConversation(id)
     const deleted = deleteRagConversation(id)
+    track('item_deleted', { item: 'chat' })
     // Documents only this chat used go with it, now rather than at the 30-day cleanup.
     const documents = await import('./documents')
     const { forgetConversationExclusions } = await import('./documents/sqlite-store')
@@ -635,7 +640,15 @@ export function setupIPC(): void {
       else if (key === ANALYTICS_SETTING_KEYS.crashes)
         analytics().setConsent({ crashes: value }, 'settings')
       else return false
-    } else saveSetting(key, value)
+    } else {
+      saveSetting(key, value)
+      // The key, and the value only when it is a switch: a typed value never leaves.
+      if (/^[a-zA-Z][a-zA-Z0-9_]{1,47}$/.test(key)) {
+        // snake_case, as OGAM names settings.
+        const name = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+        countInteraction('settings_changed', typeof value === 'boolean' ? `${name}=${value}` : name)
+      }
+    }
     return true
   })
 
@@ -825,19 +838,24 @@ export function setupIPC(): void {
       .then((m) => m.ensureBestSettings())
       .catch((error: unknown) => console.warn('[best-settings] refresh failed', error))
   }
-  ipcMain.handle('models:set-active', async (_, modelId: string) => {
+  ipcMain.handle('models:set-active', async (_, modelId: string, source?: unknown) => {
     const result = await import('./models-manager').then((m) => m.setActiveModel(modelId))
     refreshBestSettings()
+    reportModelSelected(modelId, 'text', source, result)
     return result
   })
   // Single activation seam: route any model to the right backend by its kind.
-  ipcMain.handle('models:activate', async (_, modelId: string, requestedKind?: string) => {
-    const result = await import('./models-manager').then((m) =>
-      m.activateModel(modelId, requestedKind)
-    )
-    refreshBestSettings()
-    return result
-  })
+  ipcMain.handle(
+    'models:activate',
+    async (_, modelId: string, requestedKind?: string, source?: unknown) => {
+      const result = await import('./models-manager').then((m) =>
+        m.activateModel(modelId, requestedKind)
+      )
+      refreshBestSettings()
+      reportModelSelected(modelId, requestedKind, source, result)
+      return result
+    }
+  )
   ipcMain.handle('models:get-active', () =>
     import('./models-manager').then((m) => m.getActiveModel())
   )
@@ -845,8 +863,15 @@ export function setupIPC(): void {
   ipcMain.handle('models:active-ids', () =>
     import('./models-manager').then((m) => m.getActiveModelIds())
   )
-  ipcMain.handle('models:set-active-modal', (_, kind: string, modelId: string | null) =>
-    import('./models-manager').then((m) => m.setActiveModalChoice(kind, modelId))
+  ipcMain.handle(
+    'models:set-active-modal',
+    async (_, kind: string, modelId: string | null, source?: unknown) => {
+      const result = await import('./models-manager').then((m) =>
+        m.setActiveModalChoice(kind, modelId)
+      )
+      if (modelId) reportModelSelected(modelId, kind, source, result)
+      return result
+    }
   )
   ipcMain.handle('models:active-modalities', () =>
     import('./models-manager').then((m) => m.getActiveModalities())
@@ -1351,6 +1376,7 @@ export function setupIPC(): void {
     if (res.canceled || !res.filePath) return false
     const { exportGeneratedImage } = await import('./imagegen')
     await exportGeneratedImage(srcPath, res.filePath)
+    track('media_exported', { kind: 'image' })
     return true
   })
 
@@ -1375,13 +1401,12 @@ export function setupIPC(): void {
       filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
     })
     if (result.canceled || !result.filePath) return false
-    await (await import('./generated-videos/library')).exportGeneratedVideo(
-      source,
-      result.filePath
-    )
+    await (await import('./generated-videos/library')).exportGeneratedVideo(source, result.filePath)
     // A film (its sidecar names a Studio story) ends the video_story flow when it is exported.
     const { readGeneratedVideoSidecar } = await import('./generated-videos/gallery-sidecar')
-    if (readGeneratedVideoSidecar(source).storyId) {
+    const isFilm = Boolean(readGeneratedVideoSidecar(source).storyId)
+    track('media_exported', { kind: isFilm ? 'film' : 'clip' })
+    if (isFilm) {
       const { trackFlow } = await import('./analytics')
       trackFlow({ flow: 'video_story', action: 'step', step: 'exported' })
       trackFlow({ flow: 'video_story', action: 'finish', outcome: 'done' })

@@ -20,6 +20,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { TextMorph } from '@offgrid/operator-ui/operator/motion/text-morph'
 import { TextShimmer } from '@offgrid/operator-ui/operator/text-shimmer'
 import { SettingsSelect } from './SettingsSelect'
+import { openUsageOverlay, overlayScreenName } from '../lib/usage-tracker'
 import { GlyphSwap, IconTip } from './IconTip'
 import { ListRow } from '@offgrid/operator-ui/operator/list-row'
 import { LiveStatus } from '@offgrid/operator-ui/operator/presence'
@@ -38,6 +39,15 @@ export function GatewayApiKeysSettings(): React.JSX.Element {
     id?: string
     name?: string
   } | null>(null)
+  const confirming = confirm !== null
+  // The confirmation is a screen of its own for opt-in usage data.
+  useEffect(
+    () =>
+      confirming
+        ? openUsageOverlay(overlayScreenName('dialog', 'Confirm API key change'))
+        : undefined,
+    [confirming]
+  )
 
   useEffect(() => {
     let mounted = true

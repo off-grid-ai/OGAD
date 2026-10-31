@@ -149,7 +149,11 @@ describe('<ModelPicker/> dismissal', () => {
     // The row now also carries capability icons, so match the model by name within the option.
     await user.click(await screen.findByRole('option', { name: /google\/gemma-4 · Remote/ }))
     await waitFor(() =>
-      expect(activateModel).toHaveBeenCalledWith('remote-vision:home:google%2Fgemma-4')
+      expect(activateModel).toHaveBeenCalledWith(
+        'remote-vision:home:google%2Fgemma-4',
+        undefined,
+        'model_picker'
+      )
     )
     await waitFor(() => expect(card().textContent).toContain('google/gemma-4'))
     // Remote now reads as a cloud icon, not the word — its accessible name still says "Remote".
@@ -187,7 +191,9 @@ describe('<ModelPicker/> dismissal', () => {
     await user.click(
       await screen.findByRole('option', { name: 'Google: Lyria 3 Pro Preview · Remote' })
     )
-    await waitFor(() => expect(activateModel).toHaveBeenCalledWith(voiceId))
+    await waitFor(() =>
+      expect(activateModel).toHaveBeenCalledWith(voiceId, undefined, 'model_picker')
+    )
   })
 
   it('closes on Escape', () => {

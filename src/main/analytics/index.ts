@@ -1,13 +1,16 @@
+import fs from 'node:fs'
 import os from 'node:os'
 import { app, BrowserWindow, ipcMain, type IpcMain } from 'electron'
+import { CATALOG } from '@offgrid/models'
 import {
   ANALYTICS_CHANNELS,
   FEATURES,
+  MODEL_PICK_SOURCES,
   type AnalyticsFeature,
   type AnalyticsConsent,
   type AnalyticsPromptKind
 } from '../../shared/analytics'
-import { deleteSetting, getSetting, saveSetting } from '../database'
+import { deleteSetting, getDB, getSetting, saveSetting } from '../database'
 import { isProEntitled } from '../licensing/license-service'
 import {
   setAIRequestObserver,
@@ -43,6 +46,7 @@ import {
 } from './properties'
 import { AnalyticsService, type AnalyticsServiceDeps } from './service'
 import { UncleanExitMarker, UNCLEAN_EXIT_MARKER_FILE } from './unclean-exit'
+import { buildUsageSnapshot, type UsageCountSource } from './usage-snapshot'
 import { registerAnalyticsIpc } from './ipc'
 import { getMainWindow } from '../main-window'
 
@@ -92,6 +96,27 @@ function broadcast(channel: string, payload: unknown): void {
 
 let service: AnalyticsService | null = null
 
+function sqlCount(sql: string): number | undefined {
+  try {
+    return Number((getDB().prepare(sql).get() as { n: number } | undefined)?.n ?? 0)
+  } catch {
+    return undefined
+  }
+}
+
+/** The install's first message is the one just sent; its age is the data folder's. */
+function firstMessageInfo(): { firstEver: boolean; installedAt: number | null } {
+  const userMessages = sqlCount(`SELECT COUNT(*) AS n FROM rag_messages WHERE role = 'user'`)
+  let installedAt: number | null = null
+  try {
+    const stats = fs.statSync(app.getPath('userData'))
+    installedAt = stats.birthtimeMs > 0 ? stats.birthtimeMs : null
+  } catch {
+    /* unknown */
+  }
+  return { firstEver: userMessages !== undefined && userMessages <= 1, installedAt }
+}
+
 /**
  * Build the owner over the app's real collaborators: the settings database, the PostHog SDK and
  * the in-flight marker in userData. `overrides` exist for integration tests, which point the
@@ -117,6 +142,8 @@ export function createAnalyticsService(
     onConsentChanged: (consent: AnalyticsConsent) =>
       broadcast(ANALYTICS_CHANNELS.consentChanged, consent),
     onPrompt: (kind: AnalyticsPromptKind) => broadcast(ANALYTICS_CHANNELS.prompt, kind),
+    launchedAt: Date.now() - process.uptime() * 1000,
+    firstMessageInfo,
     ...overrides
   })
 }
@@ -155,6 +182,16 @@ interface DownloadState {
 }
 const downloads = new Map<string, DownloadState>()
 
+/** Voice, image and video models have their own setup funnels: the pick is the download starting. */
+function setupFlowFor(
+  kind: string | undefined
+): 'image_setup' | 'video_setup' | 'voice_setup' | null {
+  if (kind === 'image') return 'image_setup'
+  if (kind === 'video') return 'video_setup'
+  if (kind === 'voice' || kind === 'transcription') return 'voice_setup'
+  return null
+}
+
 /**
  * One download's status changed (models-manager's `send`). Reports started, finished and failed
  * once each. `freeStorageBytes` is read by the caller, which owns the models folder.
@@ -165,15 +202,7 @@ export function reportDownloadStatus(
   freeStorageBytes?: () => number | undefined,
   kind?: string
 ): void {
-  // Voice, image and video models have their own setup funnels: the pick is the download starting.
-  const setupFlow =
-    kind === 'image'
-      ? ('image_setup' as const)
-      : kind === 'video'
-        ? ('video_setup' as const)
-        : kind === 'voice' || kind === 'transcription'
-        ? ('voice_setup' as const)
-        : null
+  const setupFlow = setupFlowFor(kind)
   try {
     const owner = maybeAnalytics()
     if (!owner) return
@@ -483,6 +512,46 @@ export function reportDocumentAdded(fileName: string, bytes: number): void {
   }
 }
 
+/** A model kind, as `model_selected.modality` names it (shared with OGAM). */
+const MODALITY_OF_KIND: Record<string, string> = {
+  text: 'text',
+  vision: 'vision',
+  image: 'image',
+  video: 'video',
+  speech: 'tts',
+  voice: 'tts',
+  transcription: 'stt',
+  embedding: 'embedding',
+  computer_use: 'computer_use'
+}
+
+/**
+ * A model was picked for a modality. `source` is the fixed place it was picked from; the model is
+ * a catalog ID or `custom`. Sent only when the pick took.
+ */
+export function reportModelSelected(
+  modelId: string,
+  kind: unknown,
+  source: unknown,
+  result: unknown
+): void {
+  try {
+    if ((result as { success?: unknown } | null)?.success !== true) return
+    const ref = modelRef(modelId)
+    const catalogKind = CATALOG.find((entry) => entry.id === ref.model)?.kind
+    const picked = typeof kind === 'string' ? kind : catalogKind
+    track('model_selected', {
+      modality: (picked && MODALITY_OF_KIND[picked]) ?? null,
+      model: ref.model,
+      source: (MODEL_PICK_SOURCES as readonly unknown[]).includes(source)
+        ? (source as string)
+        : 'unknown'
+    })
+  } catch {
+    /* best effort */
+  }
+}
+
 /** A usage event from a main-process seam. Never throws. */
 export function track(event: string, properties: AnalyticsProperties = {}): void {
   try {
@@ -521,12 +590,8 @@ export async function readFeatureSnapshot(): Promise<Record<string, boolean>> {
   snapshot.tools = tools
   snapshot.web_search = tools && !(Array.isArray(disabled) && disabled.includes('web_search'))
   snapshot.mcp_tool = getSetting<unknown>('connectorsEnabled', false) === true
-  try {
-    const { getActiveRemoteVisionServer } = await import('../vision/remote-vision-server')
-    snapshot.remote_server = Boolean(getActiveRemoteVisionServer())
-  } catch {
-    /* unknown stays false */
-  }
+  // Models, vision, image, voice and remote servers come from registered sources
+  // (main/analytics-sources.ts), so analytics never imports the modules that report to it.
   for (const source of featureSources) {
     try {
       for (const [feature, on] of Object.entries(await source())) {
@@ -540,6 +605,39 @@ export async function readFeatureSnapshot(): Promise<Record<string, boolean>> {
   return snapshot
 }
 
+const usageSources = new Set<UsageCountSource>()
+
+/** Pro adds the counts it owns (films, paired devices). Returns the unregister function. */
+export function registerUsageCountSource(source: UsageCountSource): () => void {
+  usageSources.add(source)
+  return () => usageSources.delete(source)
+}
+
+/** Core's database counts: cheap COUNT queries, never a name or an id. Media and model counts come
+ * from registered sources (main/analytics-sources.ts). */
+const coreUsageCounts: UsageCountSource = () => {
+  const counts: Record<string, number | undefined> = {
+    chats: sqlCount('SELECT COUNT(*) AS n FROM rag_conversations'),
+    messages: sqlCount('SELECT COUNT(*) AS n FROM rag_messages'),
+    user_messages: sqlCount(`SELECT COUNT(*) AS n FROM rag_messages WHERE role = 'user'`),
+    projects: sqlCount('SELECT COUNT(*) AS n FROM projects'),
+    knowledge_documents: sqlCount('SELECT COUNT(*) AS n FROM rag_documents'),
+    mcp_servers: sqlCount('SELECT COUNT(*) AS n FROM connectors')
+  }
+  return Object.fromEntries(
+    Object.entries(counts).filter((entry): entry is [string, number] => entry[1] !== undefined)
+  )
+}
+
+/** The daily `usage_snapshot`: bucketed counts and the appearance settings. */
+export function readUsageSnapshot(): Promise<AnalyticsProperties> {
+  const zoom = getSetting<unknown>('windowZoomLevel', 0)
+  return buildUsageSnapshot([coreUsageCounts, ...usageSources], {
+    ...analytics().appearance(),
+    zoom_level: typeof zoom === 'number' ? zoom : 0
+  })
+}
+
 const SNAPSHOT_CHECK_MS = 60 * 60 * 1000
 
 // --- lifecycle ----------------------------------------------------------------------------------
@@ -551,6 +649,8 @@ export interface AnalyticsInstallOptions {
 }
 
 let installed = false
+/** Away this long, the session ends: `app_backgrounded` and `session_summary` go. */
+const SESSION_IDLE_MS = 5 * 60 * 1000
 
 /**
  * Wire analytics into the app at ready: IPC, observers, crash capture, the shutdown flush and the
@@ -566,6 +666,7 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
   setRuntimeLoadObserver(runtimeLoadObserver)
   options.registerShutdown({ name: 'core:analytics', shutdown: () => analytics().shutdown() })
   void analytics().reportPreviousExit()
+  analytics().reportPreviousSession()
 
   // Crash capture. Each handler only observes: the existing behaviour stays.
   process.on('uncaughtExceptionMonitor', (error) =>
@@ -594,14 +695,17 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
     )
   })
 
-  // Session time: the app is in the foreground while one of its windows has focus.
-  let sessionStartedAt: number | null = null
+  // Sessions: the app is in the foreground while one of its windows has focus. A session ends
+  // after SESSION_IDLE_MS away (or at quit), so switching apps for a moment does not split it.
   let blurTimer: ReturnType<typeof setTimeout> | undefined
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
   const focused = (): void => {
     if (blurTimer) clearTimeout(blurTimer)
+    if (idleTimer) clearTimeout(idleTimer)
     blurTimer = undefined
+    idleTimer = undefined
     analytics().setForeground(true)
-    if (sessionStartedAt === null) sessionStartedAt = Date.now()
+    analytics().sessionFocused()
   }
   const blurred = (): void => {
     if (blurTimer) clearTimeout(blurTimer)
@@ -610,11 +714,13 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
       blurTimer = undefined
       if (BrowserWindow.getFocusedWindow()) return
       analytics().setForeground(false)
-      if (sessionStartedAt === null) return
-      analytics().capture('app_backgrounded', {
-        session_ms: roundMs(Date.now() - sessionStartedAt)
-      })
-      sessionStartedAt = null
+      analytics().sessionBlurred()
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        idleTimer = undefined
+        analytics().endSession()
+      }, SESSION_IDLE_MS)
+      idleTimer.unref()
     }, 1_000)
     blurTimer.unref()
   }
@@ -629,7 +735,7 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
   // The daily snapshot: checked shortly after launch, then hourly; sent once a calendar day.
   const snapshot = (): void =>
     void analytics()
-      .snapshotFeatures(readFeatureSnapshot)
+      .snapshotFeatures(readFeatureSnapshot, readUsageSnapshot)
       .catch(() => {})
   setTimeout(snapshot, 60_000).unref()
   setInterval(snapshot, SNAPSHOT_CHECK_MS).unref()
@@ -637,5 +743,17 @@ export function installAnalytics(options: AnalyticsInstallOptions): void {
 
 /** The main window finished its first load: the cold start is over. */
 export function reportAppOpened(): void {
-  track('app_opened', { cold_start_ms: roundMs(process.uptime() * 1000) })
+  track('app_opened', { cold_start_ms: roundMs(process.uptime() * 1000), resumed: false })
+}
+
+/** Count one interaction from a main-process seam (a zoom key, a setting) into the session. */
+export function countInteraction(
+  counter: Parameters<AnalyticsService['countInteraction']>[0],
+  key: string
+): void {
+  try {
+    maybeAnalytics()?.countInteraction(counter, key)
+  } catch {
+    /* best effort */
+  }
 }

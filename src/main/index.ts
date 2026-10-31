@@ -105,10 +105,12 @@ import { shutdownRuntimes } from './runtime-manager'
 import { shutdownModelDownloads } from './models/download-queue'
 import {
   analytics,
+  countInteraction,
   installAnalytics,
   registerFeatureSnapshotSource,
   reportAppOpened
 } from './analytics'
+import { registerCoreAnalyticsSources } from './analytics-sources'
 
 // Before anything logs: a broken stdout/stderr pipe (parent/e2e-harness exited, closed pipe)
 // must never crash main via an uncaught EPIPE. See stream-guards.ts.
@@ -264,6 +266,10 @@ async function createWindow(): Promise<void> {
     if (nextZoomLevel === null) return
 
     event.preventDefault()
+    countInteraction(
+      'shortcuts',
+      input.code === 'Equal' ? 'zoom_in' : input.code === 'Minus' ? 'zoom_out' : 'zoom_reset'
+    )
     setWindowZoom(mainWindow, nextZoomLevel)
   })
 
@@ -280,6 +286,7 @@ async function createWindow(): Promise<void> {
     (delta: number) =>
     (_item: unknown, window: unknown): void => {
       if (!(window instanceof BrowserWindow) || window.isDestroyed()) return
+      countInteraction('shortcuts', delta > 0 ? 'zoom_in' : delta < 0 ? 'zoom_out' : 'zoom_reset')
       setWindowZoom(window, delta === 0 ? 0 : window.webContents.getZoomLevel() + delta)
     }
   Menu.setApplicationMenu(
@@ -619,6 +626,7 @@ app.whenReady().then(async () => {
       registerShutdown: (owner) => applicationShutdown.register(owner),
       freeMemoryMB: () => liveMemory().availableMB
     })
+    registerCoreAnalyticsSources()
     // Video is on when a local video model is active or a remote server's video model is picked.
     registerFeatureSnapshotSource(async () => ({
       video_generation: Boolean(

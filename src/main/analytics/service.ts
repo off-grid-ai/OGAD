@@ -1,10 +1,20 @@
 import {
   ANALYTICS_SETTING_KEYS,
   ANALYTICS_SETTING_KEY_LIST,
+  CHAT_INPUT_METHODS,
+  ERROR_RESPONSES,
   FAILURE_PROMPT_INTERVAL_DAYS,
   FEATURES,
   FLOW_STEPS,
+  MESSAGE_ACTIONS,
+  NOTIFICATION_TYPES,
   OPT_IN_SOURCES,
+  PALETTE_COMMANDS,
+  SCROLL_BUCKETS,
+  SHORTCUTS,
+  THEME_MODES,
+  UI_ACTION_ID,
+  type ScrollBucket,
   type AnalyticsConsent,
   type AnalyticsFlow,
   type AnalyticsPromptKind,
@@ -14,8 +24,9 @@ import {
 } from '../../shared/analytics'
 import type { AnalyticsClient, ClientOptions } from './client'
 import type { AnalyticsProperties, AnalyticsValue } from './properties'
-import { roundMs } from './properties'
+import { documentFileType, roundMs } from './properties'
 import { scrubException } from './scrub'
+import { SessionTally, type SummaryCounter } from './session-tally'
 import type { InflightWork, UncleanExitMarker } from './unclean-exit'
 
 export interface AnalyticsSettings {
@@ -38,9 +49,27 @@ export interface AnalyticsServiceDeps {
   randomId?: () => string
   onConsentChanged?: (consent: AnalyticsConsent) => void
   onPrompt?: (kind: AnalyticsPromptKind) => void
+  /**
+   * The `ui_action` ids main accepts: the fixed ids found in source at build time. Defaults to the
+   * build's list; an id outside it is dropped, so visible or user text never passes.
+   */
+  uiActionIds?: ReadonlySet<string>
+  /** When this launch started, for `first_message`. */
+  launchedAt?: number
+  /**
+   * Read once, at this launch's first message: whether it is the install's first message ever, and
+   * when the install was first used (null when unknown).
+   */
+  firstMessageInfo?: () => { firstEver: boolean; installedAt: number | null }
+}
+
+function buildUiActionIds(): ReadonlySet<string> {
+  return new Set(typeof __OFFGRID_UI_ACTION_IDS__ === 'undefined' ? [] : __OFFGRID_UI_ACTION_IDS__)
 }
 
 const DAY_MS = 86_400_000
+/** The open session's counters are written at most this often, so a crash loses little. */
+const PERSIST_EVERY_MS = 10_000
 /** A feature counts at most once in this window: speech plays sentence by sentence, tools loop. */
 const FEATURE_USE_WINDOW_MS = 10 * 60 * 1000
 const SCREEN_NAME = /^[a-z0-9][a-z0-9:_-]{0,47}$/
@@ -48,6 +77,12 @@ const ERROR_CODE = /^[a-z0-9_]{1,40}$/
 const CATALOG_OR_CUSTOM = /^(custom|[A-Za-z0-9][\w.-]{0,63}(?:\/[\w.-]{1,96})?)$/
 
 type CrashEvent = '$exception' | 'unclean_exit' | 'llama_server_crashed'
+
+interface CountInput {
+  props: Record<string, unknown>
+  str: (key: string) => string
+  oneOf: (list: readonly string[], key: string) => string | null
+}
 
 /**
  * The one owner of opt-in analytics: consent, the anonymous ID, the PostHog client, consent
@@ -64,10 +99,19 @@ export class AnalyticsService {
   private readonly featureUsedAt = new Map<string, number>()
   private readonly now: () => number
   private readonly randomId: () => string
+  private readonly uiActionIds: ReadonlySet<string>
+  private readonly launchedAt: number
+  private session: SessionTally | null = null
+  private sessionsEnded = 0
+  private persistedAt = 0
+  private firstMessageSent = false
+  private appearanceState: Record<string, AnalyticsValue> | null = null
 
   constructor(private readonly deps: AnalyticsServiceDeps) {
     this.now = deps.now ?? Date.now
     this.randomId = deps.randomId ?? (() => crypto.randomUUID())
+    this.uiActionIds = deps.uiActionIds ?? buildUiActionIds()
+    this.launchedAt = deps.launchedAt ?? this.now()
   }
 
   // --- consent ------------------------------------------------------------------------------
@@ -151,6 +195,12 @@ export class AnalyticsService {
     this.client = null
     this.flows.clear()
     this.onboardingSteps = null
+    this.session = null
+    try {
+      this.deps.settings.delete(ANALYTICS_SETTING_KEYS.pendingSession)
+    } catch {
+      /* best effort */
+    }
     try {
       this.deps.settings.delete(ANALYTICS_SETTING_KEYS.installId)
     } catch {
@@ -175,6 +225,10 @@ export class AnalyticsService {
     return id
   }
 
+  private usageOn(): boolean {
+    return this.client !== null && this.consent().usage
+  }
+
   private send(event: string, properties: Record<string, unknown>): void {
     const client = this.client
     if (!client) return
@@ -196,6 +250,31 @@ export class AnalyticsService {
     if (event === 'feature_used' && this.recentlyUsed(String(properties.feature))) return
     this.send(event, withoutUndefined(properties))
     this.observeForFlows(event)
+    if (event === 'screen_viewed' && typeof properties.screen === 'string')
+      this.session?.screenViewed(properties.screen, this.now())
+    if (event === 'message_sent') this.noteFirstMessage()
+  }
+
+  /** `first_message`: once per launch, the time from launch, and from install for the first ever. */
+  private noteFirstMessage(): void {
+    if (this.firstMessageSent) return
+    this.firstMessageSent = true
+    const now = this.now()
+    let firstEver = false
+    let sinceInstall: number | null = null
+    try {
+      const info = this.deps.firstMessageInfo?.()
+      firstEver = info?.firstEver === true
+      if (firstEver && info?.installedAt != null && info.installedAt <= now)
+        sinceInstall = roundMs(now - info.installedAt)
+    } catch {
+      /* unknown stays false and null */
+    }
+    this.send('first_message', {
+      since_launch_ms: roundMs(now - this.launchedAt),
+      first_ever: firstEver,
+      since_install_ms: sinceInstall
+    })
   }
 
   private recentlyUsed(feature: string): boolean {
@@ -249,13 +328,12 @@ export class AnalyticsService {
     const bool = (key: string): boolean => props[key] === true
     switch (event) {
       case 'screen_viewed': {
-        const screen = typeof props.screen === 'string' ? props.screen : ''
-        if (!SCREEN_NAME.test(screen)) return
-        const prev = typeof props.prev_screen === 'string' ? props.prev_screen : null
+        const screen = this.screenName(props.screen)
+        if (!screen) return
         const prevMs = typeof props.prev_ms === 'number' ? props.prev_ms : 0
         this.capture('screen_viewed', {
           screen,
-          prev_screen: prev && SCREEN_NAME.test(prev) ? prev : null,
+          prev_screen: this.screenName(props.prev_screen),
           prev_ms: roundMs(prevMs)
         })
         return
@@ -276,9 +354,110 @@ export class AnalyticsService {
           this.capture('feature_used', { feature: props.feature as string })
         }
         return
+      case 'message_action':
+        if ((MESSAGE_ACTIONS as readonly unknown[]).includes(props.action))
+          this.capture('message_action', { action: props.action as string })
+        return
       default:
+        this.countFromRenderer(event, props)
         return
     }
+  }
+
+  /**
+   * A screen name the renderer reported: a view, `view:sub`, or an overlay. A dialog or panel keeps
+   * its id only when the id is a fixed one from source (a computed label can carry a name).
+   */
+  private screenName(value: unknown): string | null {
+    if (typeof value !== 'string' || !SCREEN_NAME.test(value)) return null
+    const overlay = /^(dialog|panel):(.+)$/.exec(value)
+    if (overlay) return this.uiActionIds.has(overlay[2]!) ? value : overlay[1]!
+    return value
+  }
+
+  /** Renderer interactions that are counted into `session_summary`, never sent one by one. */
+  private countFromRenderer(event: unknown, props: Record<string, unknown>): void {
+    const handle = typeof event === 'string' ? this.counted[event] : undefined
+    if (!handle || !Object.hasOwn(this.counted, event as string)) return
+    const str = (key: string): string => (typeof props[key] === 'string' ? props[key] : '')
+    const oneOf = (list: readonly string[], key: string): string | null =>
+      list.includes(str(key)) ? str(key) : null
+    handle({ props, str, oneOf })
+  }
+
+  /** One handler per counted renderer event: validate, then count under a fixed key. */
+  private readonly counted: Record<string, (input: CountInput) => void> = {
+    ui_action: ({ props, str }) => {
+      const action = str('action')
+      const screen = this.screenName(props.screen)?.split(':')[0]
+      if (!screen || !UI_ACTION_ID.test(action) || !this.uiActionIds.has(action)) return
+      this.countInteraction('actions', `${screen}:${action}`)
+    },
+    scroll_depth: ({ props }) => {
+      const screen = this.screenName(props.screen)
+      if (!screen || !(SCROLL_BUCKETS as readonly unknown[]).includes(props.pct)) return
+      if (!this.usageOn()) return
+      this.session?.scrolled(screen, props.pct as ScrollBucket, this.now())
+      this.persistSoon()
+    },
+    shortcut_used: ({ oneOf }) => {
+      const shortcut = oneOf(SHORTCUTS, 'shortcut')
+      if (shortcut) this.countInteraction('shortcuts', shortcut)
+    },
+    command_used: ({ props, oneOf }) => {
+      const command = oneOf(PALETTE_COMMANDS, 'command')
+      if (!command) return
+      const target = command === 'go_to' ? this.screenName(props.target) : null
+      this.countInteraction('commands', target ? `${command}:${target}` : command)
+    },
+    error_shown: ({ str }) => {
+      if (ERROR_CODE.test(str('error_code')))
+        this.countInteraction('errors_shown', str('error_code'))
+    },
+    error_response: ({ str, oneOf }) => {
+      const response = oneOf(ERROR_RESPONSES, 'response')
+      if (ERROR_CODE.test(str('error_code')) && response)
+        this.countInteraction('error_responses', `${str('error_code')}:${response}`)
+    },
+    empty_state_seen: ({ props }) => {
+      const screen = this.screenName(props.screen)
+      if (screen) this.countInteraction('empty_states', screen)
+    },
+    notification_clicked: ({ oneOf }) => {
+      const type = oneOf(NOTIFICATION_TYPES, 'type')
+      if (type) this.countInteraction('notifications_clicked', type)
+    },
+    chat_input: ({ str, oneOf }) => {
+      const method = oneOf(CHAT_INPUT_METHODS, 'method')
+      if (!method) return
+      // The extension maps to a type the app opens, else `other`: a private suffix never passes.
+      const extension = str('extension').slice(0, 16)
+      const type = documentFileType(extension ? `file.${extension}` : 'file')
+      this.countInteraction('chat_inputs', `${method}:${type}`)
+    },
+    appearance: ({ props, oneOf }) => {
+      const theme = oneOf(THEME_MODES, 'theme')
+      if (!theme || typeof props.ui_animations !== 'boolean') return
+      // A change after the first report is a setting changed, named as OGAM names it.
+      const before = this.appearanceState
+      if (before && before.theme !== theme)
+        this.countInteraction('settings_changed', `theme=${theme}`)
+      if (before && before.ui_animations !== props.ui_animations)
+        this.countInteraction('settings_changed', `ui_animations=${props.ui_animations}`)
+      this.appearanceState = { theme, ui_animations: props.ui_animations }
+    }
+  }
+
+  /** Count one interaction into the open session. Only while Anonymous stats is on. */
+  countInteraction(counter: SummaryCounter, key: string): void {
+    if (!this.session || !this.usageOn()) return
+    this.session.count(counter, key, this.now())
+    this.persistSoon()
+  }
+
+  /** The appearance the renderer last reported, for the daily snapshot. */
+  appearance(): Record<string, AnalyticsValue> {
+    return this.appearanceState ?? {}
   }
 
   // --- prompts ------------------------------------------------------------------------------
@@ -343,6 +522,8 @@ export class AnalyticsService {
       if (flow === 'pro_upgrade') extra.feature = detail
       if (flow === 'connector_add') extra.connector = detail
     }
+    // A film's final render: now, or tonight while the Mac is idle.
+    if (flow === 'video_story' && (detail === 'now' || detail === 'tonight')) extra.detail = detail
     this.capture('flow_step', { flow, step, ...extra })
   }
 
@@ -408,16 +589,101 @@ export class AnalyticsService {
 
   // --- daily snapshot -----------------------------------------------------------------------
 
-  /** Send `features_snapshot` at most once a calendar day. Returns true when it was sent. */
-  async snapshotFeatures(read: () => Promise<Record<string, boolean>>): Promise<boolean> {
+  /**
+   * Send `features_snapshot`, and `usage_snapshot` when given its reader, at most once a calendar
+   * day. Returns true when they were sent.
+   */
+  async snapshotFeatures(
+    read: () => Promise<Record<string, boolean>>,
+    readUsage?: () => Promise<AnalyticsProperties>
+  ): Promise<boolean> {
     if (!this.client || !this.consent().usage) return false
     const day = new Date(this.now()).toISOString().slice(0, 10)
     if (this.deps.settings.get<unknown>(ANALYTICS_SETTING_KEYS.snapshotDay, null) === day)
       return false
     const features = await read()
+    const usage = readUsage ? await readUsage() : null
     this.deps.settings.set(ANALYTICS_SETTING_KEYS.snapshotDay, day)
     this.capture('features_snapshot', features)
+    if (usage) this.capture('usage_snapshot', usage)
     return true
+  }
+
+  // --- sessions -----------------------------------------------------------------------------
+
+  /**
+   * One of the app's windows took focus. Starts a session, or resumes the open one. A session that
+   * starts after an earlier one ended in this launch sends `app_opened` (resumed), so every
+   * `app_backgrounded` has its opening.
+   */
+  sessionFocused(): void {
+    const now = this.now()
+    if (this.session) {
+      this.session.foreground(now)
+      return
+    }
+    this.session = SessionTally.start(now)
+    if (this.sessionsEnded > 0) this.capture('app_opened', { cold_start_ms: null, resumed: true })
+  }
+
+  /** No window of the app has focus. The session stays open until `endSession`. */
+  sessionBlurred(): void {
+    if (!this.session) return
+    this.session.background(this.now())
+    this.persist()
+  }
+
+  /** Close the open session: `app_backgrounded` and `session_summary`, then forget its counters. */
+  endSession(): void {
+    const session = this.session
+    if (!session) return
+    this.session = null
+    this.sessionsEnded += 1
+    const now = this.now()
+    session.background(now)
+    if (this.usageOn()) {
+      const summary = session.summary(now)
+      this.capture('app_backgrounded', { session_ms: summary.session_ms as number })
+      this.send('session_summary', summary)
+    }
+    this.forgetPending()
+  }
+
+  /** On launch: a session the previous launch never closed (it crashed) is reported now. */
+  reportPreviousSession(): void {
+    let raw: unknown = null
+    try {
+      raw = this.deps.settings.get<unknown>(ANALYTICS_SETTING_KEYS.pendingSession, null)
+    } catch {
+      return
+    }
+    if (raw === null) return
+    this.forgetPending()
+    const previous = SessionTally.restore(raw)
+    if (!previous || !this.usageOn()) return
+    this.send('session_summary', { ...previous.summary(previous.state.lastAt), recovered: true })
+  }
+
+  private persistSoon(): void {
+    if (this.now() - this.persistedAt >= PERSIST_EVERY_MS) this.persist()
+  }
+
+  private persist(): void {
+    if (!this.session || !this.usageOn()) return
+    this.persistedAt = this.now()
+    try {
+      this.deps.settings.set(ANALYTICS_SETTING_KEYS.pendingSession, this.session.toJSON())
+    } catch {
+      /* the counters still go at the session's end */
+    }
+  }
+
+  private forgetPending(): void {
+    try {
+      this.deps.settings.delete(ANALYTICS_SETTING_KEYS.pendingSession)
+    } catch {
+      /* best effort */
+    }
   }
 
   // --- lifecycle ----------------------------------------------------------------------------
@@ -426,8 +692,9 @@ export class AnalyticsService {
     return this.client?.flush() ?? Promise.resolve()
   }
 
-  /** A clean quit: nothing in flight crashed, and what is queued is sent. */
+  /** A clean quit: the session closes, nothing in flight crashed, and what is queued is sent. */
   async shutdown(): Promise<void> {
+    this.endSession()
     await this.deps.marker.clear()
     const client = this.client
     this.client = null

@@ -109,7 +109,7 @@ export function ImageSettingsTab(): React.JSX.Element {
 
   const chooseModel = (nextModel: string): void => {
     setModel(nextModel)
-    void Promise.resolve(window.api.setActiveModalModel('image', nextModel))
+    void Promise.resolve(window.api.setActiveModalModel('image', nextModel, 'image_settings'))
       .then(announceImageSettingsChanged)
       .catch(() => {})
   }
