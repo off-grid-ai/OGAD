@@ -8,9 +8,21 @@ const ROOT = path.join(__dirname, '../../..')
 const BASELINE = path.join(__dirname, 'mock-baseline.json')
 
 it('names our code and leaves the device boundary alone', () => {
-  for (const ours of ['../llm', '../../backend-preferences', '@offgrid/core/main/database', '@offgrid/pro', '@renderer/lib/api'])
+  for (const ours of [
+    '../llm',
+    '../../backend-preferences',
+    '@offgrid/core/main/database',
+    '@offgrid/pro',
+    '@renderer/lib/api'
+  ])
     expect(isOurs(ours)).toBe(true)
-  for (const boundary of ['electron', 'node:fs', 'child_process', '@huggingface/transformers', 'kokoro-js'])
+  for (const boundary of [
+    'electron',
+    'node:fs',
+    'child_process',
+    '@huggingface/transformers',
+    'kokoro-js'
+  ])
     expect(isOurs(boundary)).toBe(false)
   const sample = [
     "import { LLMService, llm } from '../llm'",
@@ -33,9 +45,10 @@ it('names our code and leaves the device boundary alone', () => {
 })
 
 it('no core test mocks our code beyond the baseline, and the baseline only shrinks', () => {
-  const now = scanMocks(ROOT, ['src', 'integration-tests'], [
-    path.relative(ROOT, __filename),
-    path.relative(ROOT, path.join(__dirname, 'mock-guard.ts'))
-  ])
+  const now = scanMocks(
+    ROOT,
+    ['src', 'integration-tests'],
+    [path.relative(ROOT, __filename), path.relative(ROOT, path.join(__dirname, 'mock-guard.ts'))]
+  )
   expect(checkMockBaseline(BASELINE, now)).toEqual([])
 })

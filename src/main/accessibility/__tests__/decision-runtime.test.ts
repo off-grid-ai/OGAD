@@ -80,7 +80,10 @@ function installKev(modelId: string): { checkpoint: string; base: string } {
   write(path.join(checkpoint, 'head.pt'))
   write(path.join(checkpoint, 'adapter_model.safetensors'))
   write(path.join(base, 'config.json'), '{}')
-  write(path.join(base, 'model.safetensors.index.json'), JSON.stringify({ weight_map: { a: 'model-1.safetensors' } }))
+  write(
+    path.join(base, 'model.safetensors.index.json'),
+    JSON.stringify({ weight_map: { a: 'model-1.safetensors' } })
+  )
   write(path.join(base, 'model-1.safetensors'))
   write(path.join(base, 'tokenizer.json'), '{}')
   write(path.join(base, 'tokenizer_config.json'), '{}')
@@ -103,7 +106,7 @@ const kevReply = (body: unknown): void =>
   fs.writeFileSync(path.join(bin, 'kev-reply.json'), JSON.stringify(body))
 
 /** llama-server's /completion body for one forced token with these option probabilities. */
-const tokenProbabilities = (probs: Record<string, number>) => ({
+const tokenProbabilities = (probs: Record<string, number>): Record<string, unknown> => ({
   content: 'B',
   completion_probabilities: [
     { top_probs: Object.entries(probs).map(([token, prob]) => ({ token, prob })) }

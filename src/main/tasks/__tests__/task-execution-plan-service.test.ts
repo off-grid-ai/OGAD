@@ -49,7 +49,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   llm.stop()
-  for (const { pid } of engine?.launches() ?? []) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  for (const { pid } of engine?.launches() ?? [])
+    if (processAlive(pid)) process.kill(pid, 'SIGKILL')
   fs.rmSync(ROOT, { recursive: true, force: true })
   if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
   else process.env.OFFGRID_DATA_DIR = previous.data
@@ -191,8 +192,14 @@ describe('task execution plan service', () => {
     const run = telemetry()
 
     const plan = await runWithRemoteScreenTaskSession(
-      { taskKind: 'computer_use', modelStrategy: 'same_as_chat', activeServer: null, telemetry: run },
-      () => createTaskExecutionPlan({ goal: 'Write a note', surface: 'computer', targetLabel: 'Notes' })
+      {
+        taskKind: 'computer_use',
+        modelStrategy: 'same_as_chat',
+        activeServer: null,
+        telemetry: run
+      },
+      () =>
+        createTaskExecutionPlan({ goal: 'Write a note', surface: 'computer', targetLabel: 'Notes' })
     )
 
     expect(plan.phases.map((phase) => phase.title)).toEqual(['Open Notes', 'Write the note'])

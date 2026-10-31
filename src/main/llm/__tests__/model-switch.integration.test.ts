@@ -33,7 +33,9 @@ beforeAll(async () => {
   // Activation reloads the app's own engine; with no engine installed yet that ends at once.
   process.env.OFFGRID_BIN_DIR = fs.mkdtempSync(path.join(PROFILE_DIR, 'no-engines-'))
   const manager = await import('../../models-manager')
-  const model = await manager.importLocalModel(writeGguf(path.join(PROFILE_DIR, 'fixtures'), 'switch.gguf'))
+  const model = await manager.importLocalModel(
+    writeGguf(path.join(PROFILE_DIR, 'fixtures'), 'switch.gguf')
+  )
   expect(await manager.setActiveModel(model.id!)).toEqual({ success: true })
 })
 
@@ -48,7 +50,8 @@ async function startService(folders: string[]): Promise<void> {
 
 afterEach(() => {
   service?.stop()
-  for (const { pid } of engine?.launches() ?? []) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  for (const { pid } of engine?.launches() ?? [])
+    if (processAlive(pid)) process.kill(pid, 'SIGKILL')
 })
 
 afterAll(async () => {

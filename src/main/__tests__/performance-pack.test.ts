@@ -17,7 +17,10 @@ vi.mock('node:fs', async (importOriginal) => {
       ? fixture.driver
         ? ['null', 'nvidia0', 'nvidiactl']
         : ['null']
-      : (actual.readdirSync as (...args: unknown[]) => unknown)(dir, ...rest)) as typeof actual.readdirSync
+      : (actual.readdirSync as (...args: unknown[]) => unknown)(
+          dir,
+          ...rest
+        )) as typeof actual.readdirSync
   const readFileSync = ((file: FsModule.PathOrFileDescriptor, ...rest: unknown[]) => {
     if (String(file) !== '/proc/driver/nvidia/version')
       return (actual.readFileSync as (...args: unknown[]) => unknown)(file, ...rest)
@@ -35,7 +38,10 @@ const url = `${PACK_ORIGIN}${packPath}`
 let host: FakeDownloadHost | undefined
 
 /** Serve the pack from a local host that answers Range requests as `range` says. */
-async function serve(bytes: Buffer, range: 'honest' | 'refuse-416' | 'wrong-range' = 'honest') {
+async function serve(
+  bytes: Buffer,
+  range: 'honest' | 'refuse-416' | 'wrong-range' = 'honest'
+): Promise<FakeDownloadHost> {
   host = await startFakeDownloadHost({ [packPath]: { bytes, range } })
   vi.stubGlobal('fetch', host.fetchFor(PACK_ORIGIN))
   return host

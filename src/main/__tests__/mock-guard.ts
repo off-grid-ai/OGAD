@@ -68,7 +68,11 @@ function testFiles(dir: string): string[] {
 }
 
 /** Mocks of ours per test file under `dirs`, keyed by path relative to `root`. */
-export function scanMocks(root: string, dirs: string[], skip: string[] = []): Record<string, number> {
+export function scanMocks(
+  root: string,
+  dirs: string[],
+  skip: string[] = []
+): Record<string, number> {
   const counts: Record<string, number> = {}
   for (const file of dirs.flatMap((dir) => testFiles(path.join(root, dir)))) {
     const relative = path.relative(root, file)

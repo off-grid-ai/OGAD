@@ -364,9 +364,7 @@ describe('<App/> desktop navigation integration', () => {
 
     // The real renderer activation runs; notification routes open once it has finished.
     render(<App />)
-    await waitFor(() =>
-      expect(proOn).toHaveBeenCalledWith('capture:changed', expect.any(Function))
-    )
+    await waitFor(() => expect(proOn).toHaveBeenCalledWith('capture:changed', expect.any(Function)))
     await waitFor(() =>
       expect(proOn).toHaveBeenCalledWith('notification:open-target', expect.any(Function))
     )
