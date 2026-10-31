@@ -1,5 +1,4 @@
 {
-  "src/main/__tests__/ai-request-log-ipc.test.ts": 3,
   "src/main/__tests__/ax-frame-success.dbtest.ts": 2,
   "src/main/__tests__/ax-host-lifecycle.dbtest.ts": 24,
   "src/main/__tests__/mcp-remote-task.integration.test.ts": 4,
