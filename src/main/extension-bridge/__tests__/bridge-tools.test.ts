@@ -2,6 +2,16 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import {
+  installFakeLlamaEngine,
+  processAlive,
+  unusedPort,
+  useModelBrain,
+  writeGguf,
+  type BrainReply,
+  type FakeLlamaEngine,
+  type ModelBrain
+} from '../../__tests__/harness/fake-llama-engine'
 
 const pairingDialogs: Array<{ detail: string }> = []
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-tools-'))
@@ -43,7 +53,14 @@ import { llm } from '../../llm'
 import { saveSetting, getDB } from '../../database'
 import { configureRuntime } from '../../runtime-env'
 import { HOOKS, registerHook, unregisterHook } from '../../bootstrap/hookRegistry'
-import * as proBootstrap from '../../bootstrap/loadProFeaturesMain'
+import { importLocalModel, setActiveModel } from '../../models-manager'
+
+// The chat model is a llama-server executable whose replies come from this test ("Ready" unless a
+// test queues a tool call); the chat engine owner, settings and tool registry are real.
+const replies: BrainReply[] = []
+let engine: FakeLlamaEngine
+let brain: ModelBrain
+const previousBinDir = process.env.OFFGRID_BIN_DIR
 
 const extension = new NativeActionToolExtension(
   {
@@ -60,17 +77,21 @@ beforeAll(async () => {
   saveSetting('toolsEnabled', true)
   saveSetting('disabledTools', [])
   registerToolExtension(extension)
-  vi.spyOn(llm, 'init').mockResolvedValue(undefined)
-  vi.spyOn(llm, 'toolPlannerPreflight').mockResolvedValue(null)
-  vi.spyOn(llm, 'streamChat').mockResolvedValue({
-    content: 'Ready',
-    toolCalls: [],
-    finishReason: 'stop'
-  })
+  process.env.OFFGRID_BIN_DIR = fs.mkdtempSync(path.join(profile, 'no-engines-'))
+  const chat = await importLocalModel(writeGguf(path.join(profile, 'fixtures'), 'chat.gguf'))
+  expect(await setActiveModel(chat.id!)).toEqual({ success: true })
+  process.env.OFFGRID_BIN_DIR = path.join(profile, 'bin')
+  engine = installFakeLlamaEngine(path.join(profile, 'bin'))
+  brain = await useModelBrain(engine, () => replies.shift() ?? 'Ready')
+  ;(llm as unknown as { port: number }).port = await unusedPort()
 })
 afterAll(async () => {
   unregisterToolExtension(extension.id, extension)
-  vi.restoreAllMocks()
+  llm.stop()
+  await brain.close()
+  for (const { pid } of engine.launches()) if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  if (previousBinDir === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = previousBinDir
   getDB().close()
   fs.rmSync(profile, { recursive: true, force: true })
 })
@@ -94,7 +115,10 @@ describe('pairing dialog peer address', () => {
 
 describe('browser chat capability in the state response', () => {
   it('tracks registration and removal of the Pro chat hook', async () => {
-    const pro = vi.spyOn(proBootstrap, 'proEnabled').mockReturnValue(true)
+    // A development build with Pro bundled (the build constant) and switched on (OFFGRID_PRO=1).
+    vi.stubGlobal('__OFFGRID_PRO__', true)
+    const previousPro = process.env.OFFGRID_PRO
+    process.env.OFFGRID_PRO = '1'
     const desktop = await generateKeyPair(true)
     const browser = await generateKeyPair()
     const deviceId = 'capability-browser'
@@ -140,7 +164,9 @@ describe('browser chat capability in the state response', () => {
       unregisterHook(HOOKS.extensionChatRequest, chat)
     }
     expect(await state()).toMatchObject({ result: { features: { browserChat: 0 } } })
-    pro.mockRestore()
+    if (previousPro === undefined) delete process.env.OFFGRID_PRO
+    else process.env.OFFGRID_PRO = previousPro
+    vi.unstubAllGlobals()
   })
 })
 
@@ -217,11 +243,13 @@ describe('bridge origin with the real tool registry', () => {
         const { name, description, parameters } = tool as Record<string, unknown>
         return { type: 'function', function: { name, description, parameters } }
       })
-    const context = vi.spyOn(llm, 'contextWindow').mockResolvedValue(32768)
+    const saved = llm.getSettings().ctxSize
+    // The context size the person sets in Settings.
+    await llm.setSettings({ ctxSize: 32768 })
     try {
       const normal = await listBridgeTools(task)
       expect(normal.length).toBeGreaterThan(0)
-      context.mockResolvedValue(2048)
+      await llm.setSettings({ ctxSize: 2048 })
       const budgeted = await listBridgeTools(task)
       expect(budgeted.length).toBeGreaterThan(0)
       expect(budgeted.length).toBeLessThanOrEqual(normal.length)
@@ -232,7 +260,7 @@ describe('bridge origin with the real tool registry', () => {
       expect(new Set(names(budgeted)).size).toBe(budgeted.length)
       for (const name of names(budgeted)) expect(names(catalog)).toContain(name)
     } finally {
-      context.mockRestore()
+      await llm.setSettings({ ctxSize: saved })
     }
   })
 
@@ -261,7 +289,8 @@ describe('bridge origin with the real tool registry', () => {
       isReadOnlyTool: (name: string) => schemas.some((schema) => schema.function.name === name),
       execute: () => 'Found'
     }
-    const context = vi.spyOn(llm, 'contextWindow').mockResolvedValue(2048)
+    const saved = llm.getSettings().ctxSize
+    await llm.setSettings({ ctxSize: 2048 })
     registerToolExtension(connector)
     try {
       const task = schemas.map((schema) => schema.function.name).join(' ')
@@ -278,7 +307,7 @@ describe('bridge origin with the real tool registry', () => {
         expect(tool).toMatchObject({ source: 'connector', connector: connector.id })
       }
     } finally {
-      context.mockRestore()
+      await llm.setSettings({ ctxSize: saved })
       unregisterToolExtension(connector.id, connector)
     }
   })
@@ -443,11 +472,7 @@ describe('bridge origin with the real tool registry', () => {
     expect(result.toolsOffered).not.toContain('computer_use')
   })
   it('refuses a model-made web call in plain bridge chat', async () => {
-    vi.mocked(llm.streamChat).mockResolvedValueOnce({
-      content: '',
-      finishReason: 'tool_calls',
-      toolCalls: [{ id: 'blocked', name: 'web_use', arguments: '{"acting":true}' }]
-    })
+    replies.push({ toolCalls: [{ id: 'blocked', name: 'web_use', arguments: { acting: true } }] })
     const result = await toolChat('web_use', [], {
       origin: 'bridge',
       assistantOnly: false,
@@ -459,11 +484,7 @@ describe('bridge origin with the real tool registry', () => {
     expect(result.toolsOffered).not.toContain('computer_use')
   })
   it('refuses a model-made desktop call in bridge chat without a starting tab', async () => {
-    vi.mocked(llm.streamChat).mockResolvedValueOnce({
-      content: '',
-      finishReason: 'tool_calls',
-      toolCalls: [{ id: 'blocked', name: 'computer_use', arguments: '{}' }]
-    })
+    replies.push({ toolCalls: [{ id: 'blocked', name: 'computer_use', arguments: {} }] })
     const result = await toolChat('computer_use', [], {
       origin: 'bridge',
       assistantOnly: true,

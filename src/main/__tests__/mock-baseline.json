@@ -4,6 +4,5 @@
   "src/main/__tests__/task-history-ipc.dbtest.ts": 10,
   "src/main/browser/__tests__/web-use-host.test.ts": 5,
   "src/main/extension-bridge/__tests__/bridge-media.test.ts": 3,
-  "src/main/extension-bridge/__tests__/bridge-tools.test.ts": 6,
   "src/main/tasks/__tests__/task-retry-context.test.ts": 9
 }
