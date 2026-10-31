@@ -910,15 +910,14 @@ function sameMessageState(
   )
 }
 
-// The line stored with a video reply ("Generated for: …", "Storyboard ready: 3 shots.") only echoes
-// the prompt above it or a step already past; the card says it all. It stays stored, for history.
+// The line stored with a video reply ("Generated for: …", "Storyboard ready: 3 shots.", a film's
+// title) only echoes the prompt above it, the card, or a step already past. It stays stored.
 const VIDEO_ECHO = /^(Generated( video)? for: .*|Storyboard ready: \d+ shots?\.)$/s
 
 function isVideoEcho(message: ChatMessage): boolean {
-  return (
-    Boolean(message.videoPath || message.context?.videoStoryId) &&
-    VIDEO_ECHO.test(message.content.trim())
-  )
+  // A film's line is its title or a step past ("Storyboard ready…"): its card carries the film.
+  if (message.context?.videoStoryId) return true
+  return Boolean(message.videoPath) && VIDEO_ECHO.test(message.content.trim())
 }
 
 /** A film started from this chat. Pro draws it; without Pro the message line stands alone. */
