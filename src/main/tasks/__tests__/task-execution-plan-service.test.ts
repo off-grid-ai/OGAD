@@ -1,36 +1,90 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+/**
+ * Task planning. The default generator is the real chat engine owner (`llm`) talking to a fake
+ * llama-server executable (harness/fake-llama-engine); telemetry is the real remote-screen
+ * session, read back from the model-call log the app writes.
+ */
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import {
+  installFakeLlamaEngine,
+  processAlive,
+  unusedPort,
+  writeGguf,
+  type FakeLlamaEngine
+} from '../../__tests__/harness/fake-llama-engine'
 
-const mocks = vi.hoisted(() => ({
-  chat: vi.fn(),
-  metric: vi.fn(),
-  modelCall: vi.fn(),
-  session: vi.fn()
+const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-task-plan-'))
+const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
+process.env.OFFGRID_DATA_DIR = ROOT
+process.env.OFFGRID_BIN_DIR = fs.mkdtempSync(path.join(ROOT, 'no-engines-'))
+
+vi.mock('electron', () => ({
+  app: { getPath: () => ROOT, isPackaged: false, getAppPath: () => process.cwd() },
+  safeStorage: { isEncryptionAvailable: () => false }
 }))
 
-vi.mock('../../llm', () => ({
-  llm: {
-    activeModelInfo: () => ({ id: 'offgrid/reasoner' }),
-    chat: mocks.chat
-  }
-}))
-vi.mock('../../actions/remote-screen-session', () => ({
-  currentRemoteScreenTaskSession: mocks.session,
-  recordComputerUseMetric: mocks.metric,
-  recordComputerUseModelCall: mocks.modelCall
-}))
 import { decodeTaskExecutionPlan } from '../../../shared/task-execution-plan'
 import {
   createTaskExecutionPlan,
   createTaskPhaseReporter,
   prepareTaskExecutionPlan
 } from '../task-execution-plan-service'
+import { llm } from '../../llm'
+import { importLocalModel, setActiveModel } from '../../models-manager'
+import {
+  runWithRemoteScreenTaskSession,
+  type ComputerUseRunTelemetry
+} from '../../actions/remote-screen-session'
+
+let modelId: string
+let engine: FakeLlamaEngine | undefined
+
+beforeAll(async () => {
+  const model = await importLocalModel(writeGguf(path.join(ROOT, 'fixtures'), 'reasoner.gguf'))
+  modelId = model.id!
+  expect(await setActiveModel(modelId)).toEqual({ success: true })
+})
+
+afterAll(() => {
+  llm.stop()
+  for (const { pid } of engine?.launches() ?? [])
+    if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  fs.rmSync(ROOT, { recursive: true, force: true })
+  if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previous.data
+  if (previous.bin === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = previous.bin
+})
+
+function telemetry(): ComputerUseRunTelemetry {
+  return {
+    runId: 'run-1',
+    actionId: 'action-1',
+    task: 'plan',
+    startedAt: Date.now(),
+    strategy: 'same_as_chat',
+    reasoningModel: 'session-reasoner',
+    groundingModel: '',
+    deciderModel: '',
+    axSteps: 0,
+    visionSteps: 0,
+    actions: 0,
+    groundingCalls: 0,
+    reasoningCalls: 0,
+    deciderCalls: 0,
+    modelCallIndex: 0
+  }
+}
+
+/** The model-call rows the app wrote under reports/, header dropped. */
+function modelCallRows(): string[] {
+  const file = path.join(ROOT, 'reports', 'computer-use-model-calls.csv')
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').slice(1) : []
+}
 
 describe('task execution plan service', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.session.mockReturnValue(null)
-  })
-
   it('asks for distinct web phases with visible, non-repeated outcomes', async () => {
     const plan = await createTaskExecutionPlan({
       goal: 'Find round-trip flights from Seattle to London for September 1 to 8, 2027',
@@ -126,37 +180,53 @@ describe('task execution plan service', () => {
   })
 
   it('uses the active reasoner and records successful default generation', async () => {
-    mocks.chat.mockResolvedValue('{"phases":["Open Notes","Write the note"]}')
-
-    const plan = await createTaskExecutionPlan({
-      goal: 'Write a note',
-      surface: 'computer',
-      targetLabel: 'Notes'
+    const bin = fs.mkdtempSync(path.join(ROOT, 'bin-'))
+    process.env.OFFGRID_BIN_DIR = bin
+    engine = installFakeLlamaEngine(bin)
+    engine.reply({
+      choices: [
+        { message: { role: 'assistant', content: '{"phases":["Open Notes","Write the note"]}' } }
+      ]
     })
+    ;(llm as unknown as { port: number }).port = await unusedPort()
+    const run = telemetry()
 
-    expect(plan.phases).toHaveLength(2)
-    expect(mocks.metric).toHaveBeenCalledWith('reasoningCalls')
-    expect(mocks.modelCall).toHaveBeenCalledWith(
-      expect.objectContaining({
-        role: 'reasoning',
-        stage: 'task_plan',
-        rail: 'ax',
-        model: 'offgrid/reasoner',
-        response: expect.any(String)
-      })
+    const plan = await runWithRemoteScreenTaskSession(
+      {
+        taskKind: 'computer_use',
+        modelStrategy: 'same_as_chat',
+        activeServer: null,
+        telemetry: run
+      },
+      () =>
+        createTaskExecutionPlan({ goal: 'Write a note', surface: 'computer', targetLabel: 'Notes' })
     )
+
+    expect(plan.phases.map((phase) => phase.title)).toEqual(['Open Notes', 'Write the note'])
+    expect(run.reasoningCalls).toBe(1)
+    const [row] = modelCallRows()
+    expect(row).toContain(',task_plan,ax,reasoning,')
+    expect(row).toContain(`,${modelId},completed,`)
+    expect(row).toContain('Open Notes')
+    llm.stop()
   })
 
   it('records a reasoner error and returns the safe fallback plan', async () => {
-    const failure = new Error('model unavailable')
-    mocks.chat.mockRejectedValue(failure)
-    mocks.session.mockReturnValue({ activeServer: { id: 'remote' } })
+    fs.rmSync(path.join(ROOT, 'reports'), { recursive: true, force: true })
+    // No chat engine is installed, so the reasoner cannot answer.
+    process.env.OFFGRID_BIN_DIR = fs.mkdtempSync(path.join(ROOT, 'no-engines-'))
+    llm.stop()
+    const run = telemetry()
 
-    const plan = await createTaskExecutionPlan({ goal: 'Open settings', surface: 'web' })
+    const plan = await runWithRemoteScreenTaskSession(
+      { taskKind: 'web_use', modelStrategy: 'same_as_chat', activeServer: null, telemetry: run },
+      () => createTaskExecutionPlan({ goal: 'Open settings', surface: 'web' })
+    )
 
     expect(plan.phases.length).toBeGreaterThan(0)
-    expect(mocks.modelCall).toHaveBeenCalledWith(
-      expect.objectContaining({ stage: 'task_plan', rail: 'vision', error: failure })
-    )
+    const [row] = modelCallRows()
+    expect(row).toContain(',task_plan,vision,reasoning,')
+    expect(row).toContain(',failed,')
+    expect(row).toContain('No chat engine is installed')
   })
 })

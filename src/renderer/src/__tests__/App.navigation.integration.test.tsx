@@ -30,14 +30,6 @@ import {
   installAppStorage
 } from './harness/app-boundary'
 
-const rendererActivation = vi.hoisted(() => ({
-  load: vi.fn<() => Promise<void>>()
-}))
-
-vi.mock('../bootstrap/loadProFeaturesRenderer', () => ({
-  loadProFeaturesRenderer: rendererActivation.load
-}))
-
 let App: typeof import('../App').default
 
 function routedTabButton(label: string, role: 'button' | 'radio'): HTMLButtonElement {
@@ -66,7 +58,6 @@ describe('<App/> desktop navigation integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     Element.prototype.scrollIntoView = (): void => {}
-    rendererActivation.load.mockResolvedValue(undefined)
     installAppStorage().setItem('onboarding_completed', 'true')
     window.history.replaceState(null, '', '/projects')
     installAppBoundary()
@@ -367,25 +358,13 @@ describe('<App/> desktop navigation integration', () => {
   })
 
   it('activates Pro notification routes without subscribing to action events', async () => {
-    let finishActivation: (() => void) | undefined
-    rendererActivation.load.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finishActivation = resolve
-        })
-    )
     const onNewAction = vi.fn(() => () => {})
     const proOn = vi.fn(() => () => {})
     installAppBoundary({ isPro: true, onNewAction, proOn })
 
+    // The real renderer activation runs; notification routes open once it has finished.
     render(<App />)
-    await waitFor(() => expect(rendererActivation.load).toHaveBeenCalledTimes(1))
-    expect(onNewAction).not.toHaveBeenCalled()
-    expect(proOn).toHaveBeenCalledWith('capture:changed', expect.any(Function))
-    expect(proOn).not.toHaveBeenCalledWith('notification:open-target', expect.any(Function))
-
-    act(() => finishActivation?.())
-
+    await waitFor(() => expect(proOn).toHaveBeenCalledWith('capture:changed', expect.any(Function)))
     await waitFor(() =>
       expect(proOn).toHaveBeenCalledWith('notification:open-target', expect.any(Function))
     )

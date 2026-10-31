@@ -5,18 +5,9 @@ import { configureRuntime } from '../runtime-env'
 import { addModelScanFolder } from '../model-storage-choice'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-const host = vi.hoisted(() => ({ pipeline: vi.fn() }))
-vi.mock('@huggingface/transformers', () => ({ pipeline: host.pipeline }))
-vi.mock('../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
-vi.mock('../runtime-residency', () => ({ getResidencyMode: () => 'resident' }))
-vi.mock('../embeddings-env', () => ({ configureTransformersEnv: vi.fn() }))
-vi.mock('../onnx-device', () => ({
-  onnxDeviceCandidates: () => ['cpu'],
-  loadWithOnnxFallback: async (load: (device: string) => Promise<unknown>) => ({
-    runtime: await load('cpu'),
-    device: 'cpu'
-  })
-}))
+// The ONNX library is the boundary: our settings, residency, env and device ladder run for real.
+const host = vi.hoisted(() => ({ pipeline: vi.fn(), env: {} as Record<string, unknown> }))
+vi.mock('@huggingface/transformers', () => ({ pipeline: host.pipeline, env: host.env }))
 
 import { disposeEmbeddingModel } from '../embeddings-core'
 
@@ -60,9 +51,12 @@ it('loads embeddings from a scan folder while the chosen folder is offline', asy
   )
   const { embeddings } = await import('../embeddings')
   await expect(embeddings.generateEmbedding('memory query')).resolves.toEqual([0.25, 0.5])
-  expect(host.pipeline).toHaveBeenCalledWith('feature-extraction', fs.realpathSync(packageRoot), {
-    device: 'cpu',
-    local_files_only: true
-  })
+  expect(host.pipeline).toHaveBeenCalledWith(
+    'feature-extraction',
+    fs.realpathSync(packageRoot),
+    expect.objectContaining({ local_files_only: true })
+  )
+  // A local package is read-only: nothing may be fetched or cached beside it.
+  expect(host.env).toMatchObject({ allowRemoteModels: false, useFSCache: false })
   expect(fs.existsSync(selected)).toBe(false)
 })

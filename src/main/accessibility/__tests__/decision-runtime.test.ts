@@ -1,244 +1,218 @@
-import { EventEmitter } from 'node:events'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+/**
+ * The Decision runtime starts a local model server, asks it to choose, and stops it. The
+ * executables are the only fake: llama-server (harness/fake-llama-engine) for the Decider, and
+ * Kev's Python server for Kev. Model files sit in a temp models folder the way a download leaves
+ * them; the catalog, artifact resolution, engine ladder, ports, launch arguments and the HTTP
+ * calls are production code.
+ */
+import fs from 'node:fs'
+import http from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  installFakeLlamaEngine,
+  processAlive,
+  writeGguf,
+  type FakeLlamaEngine
+} from '../../__tests__/harness/fake-llama-engine'
+import {
+  installFakeKevRuntime,
+  installKevModel,
+  type FakeKevRuntime,
+  type KevStart
+} from '../../__tests__/harness/fake-kev-runtime'
+import { holdDecisionPorts } from '../../__tests__/harness/decision-port-lock'
 
-const mocks = vi.hoisted(() => ({
-  artifact: vi.fn(),
-  kevArtifact: vi.fn(),
-  parse: vi.fn(),
-  pickPort: vi.fn(),
-  post: vi.fn(),
-  reap: vi.fn(),
-  spawn: vi.fn(),
-  exists: vi.fn()
-}))
+const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-decision-runtime-'))
+const previous = { data: process.env.OFFGRID_DATA_DIR, bin: process.env.OFFGRID_BIN_DIR }
+process.env.OFFGRID_DATA_DIR = ROOT
 
-vi.mock('node:child_process', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('node:child_process')>()),
-  spawn: mocks.spawn
-}))
-vi.mock('../../llm/gpu-device-probe', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../llm/gpu-device-probe')>()),
-  gpuDeviceAvailable: vi.fn(async () => true)
-}))
-vi.mock('node:fs', () => ({ default: { existsSync: mocks.exists } }))
-vi.mock('../../llm', () => ({
-  buildDecisionPrompt: vi.fn(() => 'decision prompt'),
-  buildDecisionRequest: vi.fn(() => ({ prompt: 'request' })),
-  parseOptionDecision: mocks.parse
-}))
-vi.mock('../../llm/http-post', () => ({ postCompletionOnce: mocks.post }))
-vi.mock('../../llm/settings-math', () => ({ buildLaunchArgs: vi.fn(() => ['--serve']) }))
-vi.mock('../../llm/spawn-env', () => ({ engineSpawnEnv: vi.fn(() => ({ TEST_ENGINE: '1' })) }))
-vi.mock('../../runtime-env', () => ({
-  binRoots: () => ['/bundle'],
-  exe: (name: string) => name,
-  // No CUDA pack manifest in this build.
-  resourceFile: () => null,
-  dataDir: () => '/data'
-}))
-vi.mock('../../backend-preferences', () => ({ getBackendPreference: () => 'auto' }))
-vi.mock('../../free-port', () => ({ isPortFree: vi.fn(), pickFreePort: mocks.pickPort }))
-vi.mock('../../kill-orphan-port', () => ({ reapOrphanProcessesOnPort: mocks.reap }))
-vi.mock('../../models-manager', () => ({
-  KEV_9B_ID: 'offgrid/kev-9b',
-  downloadModel: vi.fn(),
-  kevNeedsOnlyRuntime: () => false,
-  isKevModel: (id: string | null | undefined) => id === 'offgrid/kev-4b' || id === 'offgrid/kev-9b',
-  resolveComputerUseModelArtifact: mocks.artifact,
-  resolveKevRuntimeArtifact: mocks.kevArtifact
+vi.mock('electron', () => ({
+  app: { getPath: () => ROOT, isPackaged: false, getAppPath: () => process.cwd() },
+  safeStorage: { isEncryptionAvailable: () => false }
 }))
 
 import { DecisionRuntime, DecisionRuntimeError } from '../decision-runtime'
+import { DECIDER_2B, KEV_4B_ID, KEV_9B_ID } from '../../models-manager'
+import { llm } from '../../llm'
 
-class FakeProcess extends EventEmitter {
-  exitCode: number | null = null
-  stdout = new EventEmitter()
-  stderr = new EventEmitter()
-  killed: NodeJS.Signals[] = []
+let bin: string
+let engine: FakeLlamaEngine
+let kev: FakeKevRuntime
+const runtimes: DecisionRuntime[] = []
 
-  kill(signal: NodeJS.Signals): boolean {
-    this.killed.push(signal)
-    this.exitCode = 0
-    this.emit('close', 0)
-    return true
-  }
+function runtime(): DecisionRuntime {
+  const created = new DecisionRuntime()
+  runtimes.push(created)
+  return created
 }
 
-beforeEach(() => {
-  mocks.artifact.mockResolvedValue({ primaryPath: '/models/decision.gguf' })
-  mocks.kevArtifact.mockReturnValue({
-    checkpoint: '/models/kev',
-    base: '/models/base',
-    python: '/runtime/python',
-    script: '/runtime/server.py'
-  })
-  // A macOS bundle: one Metal engine folder (no CUDA, CPU-only or legacy root engine).
-  mocks.exists.mockImplementation(
-    (candidate: string) =>
-      !candidate.includes('llama-cuda') &&
-      !candidate.includes('llama-cpu') &&
-      candidate !== '/bundle/llama-server'
-  )
-  mocks.pickPort.mockResolvedValue(8460)
-  mocks.parse.mockReturnValue({ choice: 1, confidence: 0.8, probabilities: [0.2, 0.8] })
-  mocks.post.mockResolvedValue('{"choice":"B"}')
-  mocks.spawn.mockImplementation(() => new FakeProcess())
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }))
-  )
+function modelsDir(): string {
+  return llm.getModelsDir()
+}
+
+/** The Decider's GGUF, where its download puts it. */
+function installDecider(): void {
+  writeGguf(modelsDir(), DECIDER_2B.files[0]!.name)
+}
+
+const installKev = (modelId: string): { checkpoint: string; base: string } =>
+  installKevModel(modelsDir(), modelId)
+const kevStarts = (): KevStart[] => kev.starts()
+const kevReply = (body: unknown): void => kev.reply(body)
+
+/** llama-server's /completion body for one forced token with these option probabilities. */
+const tokenProbabilities = (probs: Record<string, number>): Record<string, unknown> => ({
+  content: 'B',
+  completion_probabilities: [
+    { top_probs: Object.entries(probs).map(([token, prob]) => ({ token, prob })) }
+  ]
 })
 
-afterEach(() => vi.unstubAllGlobals())
+let releasePorts: () => void = () => {}
+beforeEach(async () => {
+  releasePorts = await holdDecisionPorts()
+  fs.rmSync(path.join(ROOT, 'models'), { recursive: true, force: true })
+  bin = fs.mkdtempSync(path.join(ROOT, 'bin-'))
+  process.env.OFFGRID_BIN_DIR = bin
+  engine = installFakeLlamaEngine(bin, ['llama'])
+  kev = installFakeKevRuntime(bin)
+})
+
+afterEach(async () => {
+  await Promise.all(runtimes.splice(0).map((created) => created.shutdown()))
+  for (const { pid } of [...engine.launches(), ...kevStarts()])
+    if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+  releasePorts()
+})
+
+afterAll(() => {
+  fs.rmSync(ROOT, { recursive: true, force: true })
+  if (previous.data === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previous.data
+  if (previous.bin === undefined) delete process.env.OFFGRID_BIN_DIR
+  else process.env.OFFGRID_BIN_DIR = previous.bin
+})
 
 describe('DecisionRuntime', () => {
   it('starts, reuses, decides with, checks, and stops a local decision server', async () => {
-    const runtime = new DecisionRuntime()
-    await runtime.start('offgrid/decider')
+    installDecider()
+    engine.reply(tokenProbabilities({ A: 0.2, B: 0.8 }))
+    const decision = runtime()
+    await decision.start(DECIDER_2B.id)
 
-    expect(runtime.running).toBe(true)
-    expect(runtime.activeModelId).toBe('offgrid/decider')
-    expect(runtime.activePort).toBe(8460)
-    expect(mocks.reap).toHaveBeenCalled()
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/bundle/llama/llama-server',
-      ['--serve'],
-      expect.objectContaining({ stdio: ['ignore', 'ignore', 'pipe'] })
+    expect(decision.running).toBe(true)
+    expect(decision.activeModelId).toBe(DECIDER_2B.id)
+    const [launch] = engine.launches()
+    const modelArg = launch!.args[launch!.args.indexOf('-m') + 1]!
+    expect(fs.realpathSync(modelArg)).toBe(
+      fs.realpathSync(path.join(modelsDir(), DECIDER_2B.files[0]!.name))
     )
+    expect(launch?.args).toContain(String(decision.activePort))
 
-    await runtime.start('offgrid/decider')
-    expect(mocks.spawn).toHaveBeenCalledTimes(1)
-    await expect(runtime.decide('state', 'next?', ['A', 'B'])).resolves.toEqual({
+    await decision.start(DECIDER_2B.id)
+    expect(engine.launches()).toHaveLength(1)
+    await expect(decision.decide('state', 'next?', ['A', 'B'])).resolves.toEqual({
       choice: 1,
       confidence: 0.8,
       probabilities: [0.2, 0.8]
     })
-    await expect(runtime.health()).resolves.toBe(true)
+    expect(engine.requests().some((line) => line.startsWith('POST /completion'))).toBe(true)
+    await expect(decision.health()).resolves.toBe(true)
 
-    const child = mocks.spawn.mock.results[0]?.value as FakeProcess
-    await runtime.shutdown()
-    expect(child.killed).toEqual(['SIGTERM'])
-    expect(runtime.running).toBe(false)
-    expect(runtime.activeModelId).toBeNull()
-    await expect(runtime.health()).resolves.toBe(false)
-    await expect(runtime.decide('state', 'next?', ['A'])).rejects.toMatchObject({
+    await decision.shutdown()
+    expect(processAlive(launch!.pid)).toBe(false)
+    expect(decision.running).toBe(false)
+    expect(decision.activeModelId).toBeNull()
+    await expect(decision.health()).resolves.toBe(false)
+    await expect(decision.decide('state', 'next?', ['A'])).rejects.toMatchObject({
       code: 'startup'
     })
   })
 
-  it('reports missing models, exhausted ports, and missing engines', async () => {
-    const runtime = new DecisionRuntime()
-    mocks.artifact.mockResolvedValueOnce(null)
-    await expect(runtime.start('missing')).rejects.toEqual(
+  it('reports a missing model, exhausted ports, and a missing engine', async () => {
+    await expect(runtime().start(DECIDER_2B.id)).rejects.toEqual(
       expect.objectContaining<Partial<DecisionRuntimeError>>({ code: 'missing' })
     )
 
-    mocks.pickPort.mockResolvedValueOnce(null)
-    await expect(runtime.start('no-port')).rejects.toThrow('No private port')
+    installDecider()
+    // Every port the runtime may use (8459 and the 19 after it) is held by another program.
+    const held: http.Server[] = []
+    for (let port = 8459; port < 8479; port++) {
+      const server = http.createServer()
+      await new Promise<void>((resolve) => {
+        server.once('error', () => resolve())
+        server.listen(port, '127.0.0.1', () => resolve())
+      })
+      held.push(server)
+    }
+    try {
+      await expect(runtime().start(DECIDER_2B.id)).rejects.toThrow('No private port')
+    } finally {
+      await Promise.all(held.map((server) => new Promise((resolve) => server.close(resolve))))
+    }
 
-    mocks.exists.mockReturnValue(false)
-    await expect(runtime.start('no-engine')).rejects.toThrow('engine is missing')
+    fs.rmSync(path.join(bin, 'llama'), { recursive: true, force: true })
+    await expect(runtime().start(DECIDER_2B.id)).rejects.toThrow('engine is missing')
+    expect(engine.launches()).toHaveLength(0)
   })
 
   it('uses the Kev choice endpoint and normalizes its distribution', async () => {
-    const runtime = new DecisionRuntime()
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: true } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          answers: {
-            decision: {
-              choice: 'option_1',
-              probabilities: { option_0: 2, option_1: 6, option_2: 2 }
-            }
-          }
-        })
-      } as Response)
-
-    await runtime.start('offgrid/kev-4b')
-    await expect(runtime.decide('screen', 'next?', ['A', 'B', 'C'])).resolves.toEqual({
+    const { checkpoint } = installKev(KEV_4B_ID)
+    kevReply({
+      answers: {
+        decision: { choice: 'option_1', probabilities: { option_0: 2, option_1: 6, option_2: 2 } }
+      }
+    })
+    const decision = runtime()
+    await decision.start(KEV_4B_ID)
+    await expect(decision.decide('screen', 'next?', ['A', 'B', 'C'])).resolves.toEqual({
       choice: 1,
       confidence: 0.6,
       probabilities: [0.2, 0.6, 0.2]
     })
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/runtime/python',
-      ['/runtime/server.py', '--run', '/models/kev', '--port', '8460'],
-      expect.objectContaining({ cwd: '/models/kev' })
-    )
-    await runtime.shutdown()
+    const [start] = kevStarts()
+    expect(start?.args).toEqual([
+      path.join(bin, 'kev-local-server.py'),
+      '--run',
+      checkpoint,
+      '--port',
+      String(decision.activePort)
+    ])
+    expect(fs.realpathSync(start!.cwd)).toBe(fs.realpathSync(checkpoint))
   })
 
   it('runs Kev 9B on its own installed checkpoint through the same Kev endpoint', async () => {
-    const runtime = new DecisionRuntime()
-    mocks.kevArtifact.mockImplementation((modelId: string) => ({
-      checkpoint: `/models/${modelId.split('/')[1]}`,
-      base: '/models/base-9b',
-      python: '/runtime/python',
-      script: '/runtime/server.py'
-    }))
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: true } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          answers: { decision: { choice: 'option_0', probabilities: { option_0: 3, option_1: 1 } } }
-        })
-      } as Response)
-
-    await runtime.start('offgrid/kev-9b')
-    expect(mocks.kevArtifact).toHaveBeenCalledWith('offgrid/kev-9b')
-    expect(mocks.spawn).toHaveBeenCalledWith(
-      '/runtime/python',
-      ['/runtime/server.py', '--run', '/models/kev-9b', '--port', '8460'],
-      expect.objectContaining({
-        cwd: '/models/kev-9b',
-        env: expect.objectContaining({ KEV_LOCAL_BASE: '/models/base-9b' })
-      })
-    )
-    expect(vi.mocked(fetch).mock.calls[0]![0]).toBe('http://127.0.0.1:8460/v1/models')
-    await expect(runtime.decide('screen', 'next?', ['A', 'B'])).resolves.toEqual({
+    installKev(KEV_4B_ID)
+    const { checkpoint, base } = installKev(KEV_9B_ID)
+    kevReply({
+      answers: { decision: { choice: 'option_0', probabilities: { option_0: 3, option_1: 1 } } }
+    })
+    const decision = runtime()
+    await decision.start(KEV_9B_ID)
+    const [start] = kevStarts()
+    expect(start?.args[2]).toBe(checkpoint)
+    expect(start?.base).toBe(base)
+    await expect(decision.decide('screen', 'next?', ['A', 'B'])).resolves.toEqual({
       choice: 0,
       confidence: 0.75,
       probabilities: [0.75, 0.25]
     })
-    expect(vi.mocked(fetch).mock.calls[1]![0]).toBe('http://127.0.0.1:8460/v1/systemone')
-    await runtime.shutdown()
   })
 
   it('rejects invalid Kev responses and classifies startup memory failures', async () => {
-    const runtime = new DecisionRuntime()
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: true } as Response)
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ answers: { decision: { choice: 'unknown', probabilities: {} } } })
-      } as Response)
-    await runtime.start('offgrid/kev-4b')
-    await expect(runtime.decide('screen', 'next?', ['A'])).rejects.toThrow(
-      'invalid Decision response'
-    )
-    await runtime.shutdown()
+    installKev(KEV_4B_ID)
+    kevReply({ answers: { decision: { choice: 'unknown', probabilities: {} } } })
+    const kev = runtime()
+    await kev.start(KEV_4B_ID)
+    await expect(kev.decide('screen', 'next?', ['A'])).rejects.toThrow('invalid Decision response')
+    await kev.shutdown()
 
-    const failing = new DecisionRuntime()
-    const outOfMemory = (): FakeProcess => {
-      const child = new FakeProcess()
-      queueMicrotask(() => {
-        child.stderr.emit('data', 'CUDA out of memory')
-        child.exitCode = 1
-        child.emit('close', 1)
-      })
-      return child
-    }
     // The GPU engine runs out of memory, then the same engine CPU-only does too.
-    mocks.spawn.mockClear()
-    mocks.spawn.mockImplementationOnce(outOfMemory).mockImplementationOnce(outOfMemory)
-    vi.mocked(fetch).mockRejectedValue(new Error('not ready'))
-    await expect(failing.start('offgrid/decider')).rejects.toMatchObject({ code: 'out_of_memory' })
-    expect(mocks.spawn).toHaveBeenCalledTimes(2)
+    installDecider()
+    engine.outOfMemory('llama')
+    await expect(runtime().start(DECIDER_2B.id)).rejects.toMatchObject({ code: 'out_of_memory' })
+    expect(engine.launches()).toHaveLength(2)
   })
 })

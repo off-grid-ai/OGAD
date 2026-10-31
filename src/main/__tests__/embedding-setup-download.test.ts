@@ -1,4 +1,5 @@
 import { afterAll, expect, it, vi } from 'vitest'
+import { startFakeDownloadHost } from './harness/fake-download-host'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -38,12 +39,22 @@ it('reports real catalog bytes and cached install state without changing the act
 
 it('honors cancellation before it starts a network download', async () => {
   saveEmbeddingModelId('Xenova/all-MiniLM-L6-v2', 384)
-  const request = vi.spyOn(globalThis, 'fetch')
+  // The network boundary: Hugging Face is a local host that records every request it gets.
+  const host = await startFakeDownloadHost({})
+  vi.stubGlobal('fetch', host.fetchFor('https://huggingface.co'))
   const controller = new AbortController()
   controller.abort()
-  await expect(
-    downloadEmbeddingModel('Xenova/all-MiniLM-L6-v2', undefined, controller.signal)
-  ).rejects.toMatchObject({ name: 'AbortError' })
-  expect(request).not.toHaveBeenCalled()
-  request.mockRestore()
+  try {
+    await expect(
+      downloadEmbeddingModel('Xenova/all-MiniLM-L6-v2', undefined, controller.signal)
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(host.requests).toEqual([])
+
+    // The same call without a cancel does reach the host (which has no such file).
+    await expect(downloadEmbeddingModel('Xenova/all-MiniLM-L6-v2')).rejects.toThrow('HTTP 404')
+    expect(host.requests[0]?.path).toMatch(/^\/Xenova\/all-MiniLM-L6-v2\/resolve\/main\//)
+  } finally {
+    vi.unstubAllGlobals()
+    await host.close()
+  }
 })

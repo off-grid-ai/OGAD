@@ -1,11 +1,35 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 
-vi.mock('../llm', () => ({ llm: { chat: vi.fn() } }))
-vi.mock('../imagegen', () => ({ generateImage: vi.fn(), imageGenStatus: () => ({ ready: false }) }))
-vi.mock('../tts', () => ({ synthesize: vi.fn() }))
-vi.mock('../embeddings', () => ({ embeddings: { generateEmbedding: vi.fn() } }))
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+// The MCP server's own modules (chat, images, speech, embeddings) load for real in a temp profile;
+// this journey never starts their engines.
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'offgrid-mcp-remote-task-'))
+const previousDataDir = process.env.OFFGRID_DATA_DIR
+process.env.OFFGRID_DATA_DIR = profile
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => process.env.OFFGRID_DATA_DIR,
+    isPackaged: false,
+    getAppPath: () => process.cwd()
+  },
+  safeStorage: { isEncryptionAvailable: () => false },
+  BrowserWindow: { getAllWindows: () => [] },
+  utilityProcess: {
+    fork: () => {
+      throw new Error('no helper process in this journey')
+    }
+  }
+}))
+afterAll(() => {
+  if (previousDataDir === undefined) delete process.env.OFFGRID_DATA_DIR
+  else process.env.OFFGRID_DATA_DIR = previousDataDir
+  fs.rmSync(profile, { recursive: true, force: true })
+})
 
 const { buildMcpServer } = await import('../mcp-server')
 const { authorizeActionRequest, registerActiveActionCredentials } = await import('../mcp-auth')

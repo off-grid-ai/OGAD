@@ -16,14 +16,9 @@ Object.defineProperty(process, 'parentPort', {
   value: { on: host.on, postMessage: host.post },
   configurable: true
 })
+// The ONNX libraries are the boundary; our env setup and device ladder run for real.
 vi.mock('kokoro-js', () => ({ KokoroTTS: { from_pretrained: host.load } }))
-vi.mock('../embeddings-env', () => ({ configureTransformersEnv: vi.fn() }))
-vi.mock('../onnx-device', () => ({
-  loadWithOnnxFallback: async (load: (device: string) => Promise<unknown>) => ({
-    runtime: await load(host.device),
-    device: host.device
-  })
-}))
+vi.mock('@huggingface/transformers', () => ({ env: {} }))
 let profile: string
 let output: string
 
@@ -198,21 +193,32 @@ describe('voice helper response evidence', () => {
     expect(fs.existsSync(output)).toBe(false)
   })
 
-  it('retries model loading after a provider failure', async () => {
+  it('falls back to the CPU when the GPU provider fails', async () => {
     host.load.mockRejectedValueOnce(new Error('provider unavailable'))
+    const receive = await startWorker()
+    receive({ id: 4, type: 'prepare', voice: 'af_heart' })
+    await vi.waitFor(() =>
+      expect(host.post).toHaveBeenCalledWith({ id: 4, type: 'complete', device: 'cpu' })
+    )
+  })
+
+  it('retries model loading after every provider failed', async () => {
+    host.load
+      .mockRejectedValueOnce(new Error('provider unavailable'))
+      .mockRejectedValueOnce(new Error('provider unavailable'))
     const receive = await startWorker()
     receive({ id: 4, type: 'prepare', voice: 'af_heart' })
     await vi.waitFor(() =>
       expect(host.post).toHaveBeenCalledWith({
         id: 4,
         type: 'error',
-        error: 'provider unavailable'
+        error: expect.stringContaining('provider unavailable')
       })
     )
     receive({ id: 5, type: 'prepare', voice: 'af_heart' })
     await vi.waitFor(() =>
       expect(host.post).toHaveBeenCalledWith({ id: 5, type: 'complete', device: 'coreml' })
     )
-    expect(host.load).toHaveBeenCalledTimes(2)
+    expect(host.load).toHaveBeenCalledTimes(3)
   })
 })

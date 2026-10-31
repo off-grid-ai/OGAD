@@ -10,6 +10,7 @@ import os from 'os'
 import path from 'path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { HOOKS, registerHook, unregisterHook } from '../bootstrap/hookRegistry'
+import { installFakeActionsHelper } from './harness/fake-actions-helper'
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ogad-use-runtime-'))
 // process.env is shared across files in a worker: set the profile override in
@@ -30,31 +31,14 @@ vi.mock('electron', () => ({
   }
 }))
 
-// The OS boundary: reminders land in memory; lists read them back; deletes
-// remove by the id the create returned (the undo path).
-const landed: Array<{ id: string; title: string }> = []
-let created = 0
-vi.mock('../actions/native-helper', () => ({
-  runNativeAction: vi.fn(async (cmd: { command: string; args: Record<string, unknown> }) => {
-    if (cmd.command === 'reminders.create') {
-      const item = { id: `rt${++created}`, title: String(cmd.args.title) }
-      landed.push(item)
-      return { ok: true, result: { id: item.id } }
-    }
-    if (cmd.command === 'reminders.list') {
-      return { ok: true, result: { reminders: landed.map(({ title }) => ({ title })) } }
-    }
-    if (cmd.command === 'reminders.delete') {
-      const index = landed.findIndex((item) => item.id === cmd.args.id)
-      if (index === -1) {
-        return { ok: false, error: `no reminder with id ${String(cmd.args.id)}` }
-      }
-      landed.splice(index, 1)
-      return { ok: true, result: { deleted: cmd.args.id } }
-    }
-    return { ok: false, error: `unhandled ${cmd.command}` }
-  })
-}))
+// The OS boundary: the native actions helper, an executable (harness/fake-actions-helper).
+const helper = installFakeActionsHelper(tempDir)
+const landed = helper.landed
+let restoreCwd: () => void = () => {}
+beforeAll(() => {
+  restoreCwd = helper.useFrom()
+})
+afterAll(() => restoreCwd())
 
 afterAll(() => {
   if (originalUserData === undefined) {
@@ -102,7 +86,7 @@ describe('getActionsRuntime', () => {
     runtime.kick()
     const outcome = await runtime.waitForOutcome(proposed.id, 10_000)
     expect(outcome?.outcome).toBe('done')
-    expect(landed.map(({ title }) => title)).toEqual(['Send the deck'])
+    expect(landed().map(({ title }) => title)).toEqual(['Send the deck'])
     expect(fanned).toEqual([{ id: proposed.id, undoable: true }])
     offOutcome()
 
@@ -112,7 +96,7 @@ describe('getActionsRuntime', () => {
       expect(outcome.record.effectId).toBe('rt1')
       const undone = await runtime.undo(outcome.record)
       expect(undone).toEqual({ ok: true })
-      expect(landed).toEqual([])
+      expect(landed()).toEqual([])
     }
   })
 
